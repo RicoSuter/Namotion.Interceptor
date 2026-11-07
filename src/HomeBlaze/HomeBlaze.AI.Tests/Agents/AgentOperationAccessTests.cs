@@ -310,6 +310,7 @@ public class AgentOperationAccessTests
             .AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance)
             .AddSingleton<IInterceptorSubjectContext>(context)
             .AddHomeBlazeAuthorization(McpAuthorization.PathProvider)
+            .AddSingleton<IMcpClientAccess>(new TestMcpClientAccess(BuiltInRoles.EverythingName))
             .BuildServiceProvider();
         return (root, agent, services);
     }
@@ -325,8 +326,8 @@ public class AgentOperationAccessTests
     private static Dictionary<string, McpToolInfo> CreateTools(IServiceProvider services, AgentTestRoot root, bool isAgent)
     {
         var configuration = isAgent
-            ? HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly: false, McpAuthorization.GetAccessPolicy(services, [BuiltInRoles.OperatorName]))
-            : McpBuilderExtensions.CreateServerConfiguration(services, () => root, isReadOnly: false);
+            ? HomeBlazeMcpConfigurationFactory.Create(services, () => root, McpAuthorization.GetAccessPolicy(services, [BuiltInRoles.OperatorName]))
+            : McpBuilderExtensions.CreateServerConfiguration(services, () => root);
         return new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }
 }

@@ -1,13 +1,18 @@
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(ClaudeCliAgent))]
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(AnthropicAgent))]
 @implements ISubjectEditComponent
+@inherits PermissionsComponentBase
+
+@using HomeBlaze.Authorization.Abstractions
+@using HomeBlaze.Components
+@using HomeBlaze.Components.Abstractions.Access
 
 @inject IAgentToolSource ToolSource
 @inject AuthorizationService AuthorizationService
 
 @if (Agent is not null)
 {
-    <MudForm>
+    <MudForm Disabled="@IsReadOnly">
         <MudTextField T="string" Label="Name" @bind-Value="_name" @bind-Value:after="OnChanged" Immediate="true"
                       HelperText="Shown as the agent's title. Empty: the type name." />
         <MudTextField T="string" Label="Instructions" @bind-Value="_instructions" @bind-Value:after="OnChanged" Lines="6" Immediate="true"
@@ -214,6 +219,9 @@
 
     private LlmAgentBase? Agent => Subject as LlmAgentBase;
 
+    // Saving writes every setting of the agent.
+    private bool IsReadOnly => Agent is not { } agent || !Permissions.CanAdministerConfiguration(agent);
+
     // Registered only for the CLI and the Anthropic agent.
     private string ModelHelperText => Agent is AnthropicAgent
         ? "Required. A model id such as claude-sonnet-5."
@@ -221,6 +229,8 @@
 
     protected override void OnInitialized()
     {
+        base.OnInitialized();
+
         if (Agent is not { } agent)
         {
             return;
@@ -241,7 +251,7 @@
         _toolOptions = AgentToolOptions.Create(ToolSource, agent.AllowedTools, agent.SupportedBackendTools);
         _maxToolCalls = agent.MaxToolCallsPerTurn;
         // Normalized as the selector shows it, so saving without a change writes what was shown.
-        _roles = RoleSelector.Normalize(agent.Roles, AuthorizationService.GetRoleNames());
+        _roles = RoleSelector.Normalize(agent.Roles);
         if (agent is ClaudeCliAgent cliAgent)
         {
             _cliPath = cliAgent.CliPath;
@@ -258,11 +268,18 @@
         _wasValid = IsValid;
     }
 
+    /// <summary>Writes the settings of the form into the agent.</summary>
+    /// <exception cref="InvalidOperationException">The viewer may not administer the settings, which the host shows; nothing is written.</exception>
     public Task SaveAsync(CancellationToken cancellationToken)
     {
         if (Agent is not { } agent || !IsValid)
         {
             return Task.CompletedTask;
+        }
+
+        if (IsReadOnly)
+        {
+            throw new InvalidOperationException(AccessDeniedTexts.Administer);
         }
 
         agent.Name = NullIfBlank(_name);

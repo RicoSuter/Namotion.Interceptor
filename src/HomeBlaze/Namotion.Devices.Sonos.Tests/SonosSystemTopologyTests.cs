@@ -25,7 +25,7 @@ public class SonosSystemTopologyTests
         Assert.Empty(system.Players);
         Assert.Empty(system.Groups);
         Assert.Empty(system.Favorites);
-        Assert.Equal(HomeBlaze.Abstractions.ServiceStatus.Stopped, system.Status);
+        Assert.Equal(global::HomeBlaze.Abstractions.ServiceStatus.Stopped, system.Status);
     }
 
     [Fact]

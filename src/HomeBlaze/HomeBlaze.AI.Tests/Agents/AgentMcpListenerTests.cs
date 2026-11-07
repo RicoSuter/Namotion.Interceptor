@@ -4,6 +4,8 @@ using System.Text;
 using System.Text.Json;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.Authorization;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -296,6 +298,37 @@ public sealed class AgentMcpListenerTests : IAsyncLifetime
 
         // Assert
         Assert.Equal(["browse", "update_memory"], tools.Select(tool => tool.Name).Order());
+    }
+
+    [Fact]
+    public async Task WhenTheMainHostRequiresSignInEverywhere_ThenTheAgentRouteStillServesItsTokenAndRefusesWithout()
+    {
+        // Arrange
+        var registry = new AgentTurnTokenRegistry();
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddSingleton(registry);
+        builder.Services.AddSingleton<IInterceptorSubjectContext>(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry());
+        builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie();
+        // Stricter than any sign-in of a host: the fallback policy of the main host refuses every request.
+        builder.Services.AddAuthorization(options =>
+            options.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAssertion(_ => false).Build());
+        builder.Services.AddHomeBlazeAgents();
+        await using var app = builder.Build();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        await app.StartAsync();
+        using var registration = registry.Register(CreateToolSet());
+        var endpoint = app.Services.GetRequiredService<IAgentEndpointAddress>().GetAgentEndpoint()!;
+
+        // Act
+        await using var client = await ConnectAsync(endpoint, "Bearer " + registration.Token);
+        var tools = await client.ListToolsAsync();
+        using var refused = await PostAsync(endpoint.ToString(), authorization: null);
+
+        // Assert
+        Assert.Equal(["browse", "update_memory"], tools.Select(tool => tool.Name).Order());
+        Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);
     }
 
     [Theory]

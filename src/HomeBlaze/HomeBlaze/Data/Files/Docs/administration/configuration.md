@@ -57,13 +57,14 @@ Data/
 ├── Files/               devices, dashboards, pages, Plugins.json, docs
 ├── Agents/              timeline, memory, chat session, run count and CLI working directory of AI agents
 ├── DataProtection-Keys/ ASP.NET Core keys that keep antiforgery tokens valid across restarts
+├── authentication.db    users, password hashes and roles (and authentication.db.seeded next to it)
 ├── History/Sqlite/      SQLite history
 └── OpcUa/               OPC UA certificates
 ```
 
 When running from source, the data folder is `src/HomeBlaze/HomeBlaze/Data`. The container image uses `/data`; see [Installation](installation.md#data-folder).
 
-`DataProtection-Keys/` holds the secret keys that sign the browser's connection to the UI and any sign-in, so treat the folder and every backup of it like a password, or encrypt it with a certificate (see [HomeBlaze:DataProtection](#homeblazedataprotection)). To revoke the keys, for example after a backup leaked or in a copy of the data folder that runs as a second instance, stop HomeBlaze, delete the folder and start it again. Open browser tabs then need a reload.
+`DataProtection-Keys/` holds the secret keys that sign the browser's connection to the UI and any sign-in, so treat the folder and every backup of it like a password, or encrypt it with a certificate (see [HomeBlaze:DataProtection](#homeblazedataprotection)). To revoke the keys, for example after a backup leaked or in a copy of the data folder that runs as a second instance, stop HomeBlaze, delete the folder and start it again. Open browser tabs then need a reload, and everyone has to sign in again, because the session cookie is encrypted with these keys.
 
 ---
 
@@ -173,6 +174,34 @@ For plugin loading details (build-time vs. runtime, dependency resolution), see 
 
 ---
 
+## Authentication
+
+Controls the authentication database and how HomeBlaze trusts a reverse proxy. Users, roles and sign-in are described in [Authorization](authorization.md).
+
+```json
+{
+  "Authentication": {
+    "Database": "/data/authentication.db",
+    "ForwardedHeadersKnownNetworks": ["172.18.0.0/16"],
+    "ForwardedHeadersKnownProxies": [],
+    "PathBase": "/homeblaze"
+  }
+}
+```
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `Authentication:Database` | path | `authentication.db` in the data folder | The SQLite file with the users, their password hashes and the roles. It stays outside the browsable `Files` storage. It is read from `appsettings` because it must be known before anyone can sign in. Use an absolute path |
+| `Authentication:ForwardedHeadersKnownNetworks` | list of CIDR networks | empty | Networks of reverse proxies whose `X-Forwarded-For`, `-Proto` and `-Host` headers are trusted, such as `10.0.0.0/8` |
+| `Authentication:ForwardedHeadersKnownProxies` | list of addresses | empty | Addresses of reverse proxies whose forwarded headers are trusted |
+| `Authentication:PathBase` | string | not set | The base path when a reverse proxy serves HomeBlaze below a path, such as `/homeblaze` |
+
+Without a trusted network or proxy no forwarded header is applied, because any client could send one to spoof its address, scheme or host. A proxy that terminates TLS must be listed, or the session cookie is not marked secure and the sign-in dialogs show the warning about unencrypted HTTP. An address that is no valid network in CIDR notation stops the start with a message naming the setting. See [Remote Access](authorization.md#remote-access).
+
+Changing `Authentication:Database` to a file that does not exist creates a new database, which is seeded like a first start: `admin` with an empty password and none of the earlier users or roles, because the marker `authentication.db.seeded` belongs to the database file and the new file has none. Move the file instead of pointing the setting at a new one when you want to keep them. See [First Start](authorization.md#first-start) for what the marker guarantees.
+
+---
+
 ## McpServer
 
 Controls the built-in Model Context Protocol server that exposes the knowledge graph to AI agents.
@@ -180,8 +209,7 @@ Controls the built-in Model Context Protocol server that exposes the knowledge g
 ```json
 {
   "McpServer": {
-    "Enabled": false,
-    "ReadOnly": true
+    "Enabled": false
   }
 }
 ```
@@ -189,37 +217,36 @@ Controls the built-in Model Context Protocol server that exposes the knowledge g
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `McpServer:Enabled` | bool | `true` in Development, `false` otherwise | Registers the MCP server and maps the `/mcp` endpoint. The built-in agents do not need it |
-| `McpServer:ReadOnly` | bool | `true` | Restricts the tools of `/mcp` to read-only operations; `false` allows property writes and operation invocations. `set_property` never writes configuration properties either way. Built-in agents use their own `AllowedTools` instead. See [AI Agents](ai-agents.md#tools-and-permissions) |
 
-Clients of `/mcp` get the access of the built-in role `Everything` with the [system rules](authorization.md#system-rules): they reach every subject, but cannot read secrets, write configuration, run operations that require confirmation, reach agents, or read or change the `Authorization` subject and its roles. All clients share this access; a role per client is not available yet. See [Authorization](authorization.md#external-mcp-clients).
+There is no read-only setting. What clients of `/mcp` may do is decided by the roles of the built-in user `mcp`, `reader` by default, which reads but writes and runs nothing, with the [system rules](authorization.md#system-rules): they cannot read secrets, write configuration, run operations that require confirmation, reach agents, or read or change the `Authorization` subject, roles and users. All clients share these roles; a role per client is not available yet. Change the roles with the operation "Set Roles" of the user `mcp` below the `Authorization` subject. Built-in agents use their own `AllowedTools` and `Roles` instead, see [AI Agents](ai-agents.md#tools-and-permissions).
+
+The endpoint is unauthenticated until a key is created for `mcp`; then clients must send it as a bearer token. Both are described in [Anonymous and MCP](authorization.md#anonymous-and-mcp).
 
 ### Example: Development override
 
-`appsettings.Development.json` enables the MCP server with write access for local testing:
+`appsettings.Development.json` enables the MCP server for local testing:
 
 ```json
 {
   "McpServer": {
-    "Enabled": true,
-    "ReadOnly": false
+    "Enabled": true
   }
 }
 ```
 
-### Example: Production with read-only access
+### Example: Production
 
-`appsettings.json` exposes MCP in production but keeps it read-only:
+`appsettings.json` exposes MCP in production. Keep the roles of `mcp` at `reader` and create a key before anything else can reach it:
 
 ```json
 {
   "McpServer": {
-    "Enabled": true,
-    "ReadOnly": true
+    "Enabled": true
   }
 }
 ```
 
-Enabling MCP in production exposes the graph to any client that can reach the `/mcp` endpoint, with the access described above. For the design, see [Security Design](../architecture/design/security.md).
+Enabling MCP in production exposes the graph to any client that can reach the `/mcp` endpoint, with the access of the roles of `mcp`, and to anyone at all while it has no key. For the design, see [Security Design](../architecture/design/security.md).
 
 ---
 
@@ -246,7 +273,10 @@ Any setting can be overridden by an environment variable using the ASP.NET Core 
 | `HomeBlaze:SeedDirectory` | `HomeBlaze__SeedDirectory` |
 | `PluginConfigurationPath` | `PluginConfigurationPath` |
 | `McpServer:Enabled` | `McpServer__Enabled` |
-| `McpServer:ReadOnly` | `McpServer__ReadOnly` |
+| `Authentication:Database` | `Authentication__Database` |
+| `Authentication:ForwardedHeadersKnownNetworks` | `Authentication__ForwardedHeadersKnownNetworks__0` (and `__1`, ...) |
+| `Authentication:ForwardedHeadersKnownProxies` | `Authentication__ForwardedHeadersKnownProxies__0` (and `__1`, ...) |
+| `Authentication:PathBase` | `Authentication__PathBase` |
 | `ConnectionStrings:seq` | `ConnectionStrings__seq` |
 | `Logging:LogLevel:Default` | `Logging__LogLevel__Default` |
 

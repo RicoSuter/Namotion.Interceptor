@@ -1,0 +1,38 @@
+@* Signs a person in with their user name and password, posted to the sign-in endpoint. *@
+
+<MudDialog ContentClass="pb-6">
+    <DialogContent>
+        <div data-testid="sign-in-dialog">
+            <UnencryptedHttpWarning />
+            <AccountForm Action="@AccountEndpoints.SignInPath.TrimStart('/')" SubmitText="Sign in" TestId="sign-in-form">
+                <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+                <label for="sign-in-user-name">User name</label>
+                <input id="sign-in-user-name" name="userName" autocomplete="username" required />
+                <label for="sign-in-password">Password</label>
+                <input id="sign-in-password" name="password" type="password" autocomplete="current-password" />
+                <label class="account-checkbox">
+                    <input type="checkbox" name="rememberMe" value="true" />
+                    Keep me signed in
+                </label>
+            </AccountForm>
+        </div>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    /// <summary>The page to load after signing in, including the path base; the endpoint loads the root for any other.</summary>
+    [Parameter]
+    public string? ReturnUrl { get; set; }
+
+    /// <summary>
+    /// Shows the dialog, which loads <paramref name="returnUrl"/> after signing in and can be closed when
+    /// <paramref name="isClosable"/>, as when the app shows behind it, and returns once it is shown.
+    /// </summary>
+    public static Task<IDialogReference> ShowAsync(IDialogService dialogService, string? returnUrl, bool isClosable)
+    {
+        ArgumentNullException.ThrowIfNull(dialogService);
+
+        var parameters = new DialogParameters<SignInDialog> { { dialog => dialog.ReturnUrl, returnUrl } };
+        return dialogService.ShowAsync<SignInDialog>("Sign in", parameters, AccountDialogOptions.Create(isClosable));
+    }
+}

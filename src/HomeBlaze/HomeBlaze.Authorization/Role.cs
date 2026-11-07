@@ -1,42 +1,52 @@
 using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Authorization.Internal;
-using HomeBlaze.Services;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace HomeBlaze.Authorization;
 
 /// <summary>
-/// A custom role of an <see cref="Authorization"/>: rules that allow, rules that deny, and the roles it includes.
-/// Its name is its key in <see cref="Authorization.Roles"/>, see <see cref="Title"/>.
+/// A built-in or custom role of an <see cref="Authorization"/>: rules that allow, rules that deny, and the roles it
+/// includes. Its name is its key in <see cref="Authorization.Roles"/>, see <see cref="Title"/>. The rules of a custom role
+/// change only through the <see cref="IRoleStore"/>, which replaces every role; a built-in role never changes.
 /// </summary>
-[Description("Custom role with the rules it allows and denies")]
+[Description("Role with the rules it allows and denies")]
 [DisplayName("Role")]
 [SubjectIcon("Badge")]
 [ExcludeFromCreation]
 [InterceptorSubject]
-public partial class Role : IConfigurable, ITitleProvider, IIconProvider
+public partial class Role : ISubjectEditPermission, ITitleProvider, IIconProvider
 {
     /// <summary>
     /// The names of the built-in or custom roles whose rules this role includes.
     /// </summary>
-    [Configuration]
-    public partial List<string> Includes { get; set; }
+    [State]
+    public partial IReadOnlyList<string> Includes { get; internal set; }
 
     /// <summary>
     /// The rules whose matches are allowed.
     /// </summary>
-    [Configuration]
-    public partial List<PermissionRule> Allow { get; set; }
+    [State]
+    public partial IReadOnlyList<PermissionRule> Allow { get; internal set; }
 
     /// <summary>
     /// The rules whose matches are denied, whichever role allowed them.
     /// </summary>
-    [Configuration]
-    public partial List<PermissionRule> Deny { get; set; }
+    [State]
+    public partial IReadOnlyList<PermissionRule> Deny { get; internal set; }
+
+    /// <summary>Whether this is a built-in role, see <see cref="BuiltInRoles"/>, which cannot be edited, renamed or deleted.</summary>
+    [State]
+    public partial bool IsBuiltIn { get; internal set; }
+
+    /// <summary>What the role allows, for a built-in role, or null for a custom role.</summary>
+    [State]
+    public partial string? Description { get; internal set; }
 
     /// <summary>
     /// Why the role cannot be used, such as a compile error or a reserved name, or null.
@@ -65,11 +75,35 @@ public partial class Role : IConfigurable, ITitleProvider, IIconProvider
     /// <inheritdoc />
     public string IconName => "Badge";
 
+    /// <summary>Whether <see cref="RenameAsync"/> applies: not for a built-in role.</summary>
+    [Derived]
+    [PropertyAttribute("Rename", KnownAttributes.IsEnabled)]
+    public bool IsRenameEnabled => !IsBuiltIn;
+
+    /// <summary>Why <see cref="RenameAsync"/> does not apply, or null.</summary>
+    [Derived]
+    [PropertyAttribute("Rename", KnownAttributes.DisabledReason)]
+    public string? RenameDisabledReason => IsBuiltIn ? BuiltInRoleReason : null;
+
+    /// <summary>Whether <see cref="DeleteAsync"/> applies: not for a built-in role.</summary>
+    [Derived]
+    [PropertyAttribute("Delete", KnownAttributes.IsEnabled)]
+    public bool IsDeleteEnabled => !IsBuiltIn;
+
+    /// <summary>Why <see cref="DeleteAsync"/> does not apply, or null.</summary>
+    [Derived]
+    [PropertyAttribute("Delete", KnownAttributes.DisabledReason)]
+    public string? DeleteDisabledReason => IsBuiltIn ? BuiltInRoleReason : null;
+
+    internal const string BuiltInRoleReason = "Built-in roles cannot be edited, renamed or deleted.";
+
     public Role()
     {
         Includes = [];
         Allow = [];
         Deny = [];
+        IsBuiltIn = false;
+        Description = null;
         Status = null;
         Warning = null;
         UsedByAgents = 0;
@@ -98,29 +132,30 @@ public partial class Role : IConfigurable, ITitleProvider, IIconProvider
     }
 
     /// <summary>
-    /// Moves this role with its rules to the key <paramref name="name"/>, trimmed, in a new <see cref="Authorization.Roles"/>
-    /// dictionary, and writes the configuration. A name that differs only in case renames it as well; the same name
-    /// changes nothing.
+    /// Renames this role to <paramref name="name"/>, trimmed, through the <see cref="IRoleStore"/>, which keeps its rules
+    /// and renames it in the includes of the other roles, in the users and in the agents. The same name changes nothing.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// No <see cref="Authorization"/> holds the role; the name is empty, cannot name a custom role or names another role,
-    /// ignoring case; two other roles have the same name, ignoring case; or the configuration was not or could not be
-    /// written, in which case the role stays renamed.
+    /// No <see cref="Authorization"/> holds the role, the name is empty, or the store refused the rename, such as for a
+    /// name that cannot name a custom role or names another role. Also thrown with the warning when the
+    /// rename was committed but could not be saved everywhere.
     /// </exception>
-    [Operation(Title = "Rename", Description = "Gives the role another name and keeps its rules. Agents and roles that name it by its old name report it as unknown until they are given the new name. Agents and roles that already name the new name get its rules.", Icon = "DriveFileRenameOutline", RequiresConfirmation = true)]
-    public Task RenameAsync(string name, [FromServices] AuthorizationService authorizationService, [FromServices] RootManager rootManager) =>
-        RoleEdits.RenameAsync(this, name, authorizationService, rootManager);
+    [Operation(Title = "Rename", Description = "Gives the role another name and keeps its rules. The roles, users and agents that name it are given the new name as well.", Icon = "DriveFileRenameOutline", RequiresConfirmation = true, RequiresAdministration = true)]
+    public Task RenameAsync(string name, [FromServices] IRoleStore roleStore, CancellationToken cancellationToken) =>
+        RoleEdits.RenameAsync(this, name, roleStore, cancellationToken);
 
     /// <summary>
-    /// Leaves this role out of a new <see cref="Authorization.Roles"/> dictionary and writes the configuration.
+    /// Deletes this role through the <see cref="IRoleStore"/>, which refuses while a user or an agent names it or a
+    /// principal would lose its permissions.
     /// </summary>
-    /// <exception cref="InvalidOperationException">
-    /// No <see cref="Authorization"/> holds the role; two other roles have the same name, ignoring case; or the
-    /// configuration was not or could not be written, in which case the role stays deleted.
-    /// </exception>
-    [Operation(Title = "Delete", Description = "Deletes the role. Agents and roles that name it report it as unknown afterwards.", Icon = "Delete", RequiresConfirmation = true, Purpose = OperationPurpose.Delete)]
-    public Task DeleteAsync([FromServices] AuthorizationService authorizationService, [FromServices] RootManager rootManager) =>
-        RoleEdits.DeleteAsync(this, authorizationService, rootManager);
+    /// <exception cref="InvalidOperationException">No <see cref="Authorization"/> holds the role, or the store refused the delete.</exception>
+    [Operation(Title = "Delete", Description = "Deletes the role. Refused while users or agents hold it, or while other roles that are in use include it.", Icon = "Delete", RequiresConfirmation = true, RequiresAdministration = true, Purpose = OperationPurpose.Delete)]
+    public Task DeleteAsync([FromServices] IRoleStore roleStore, CancellationToken cancellationToken) =>
+        RoleEdits.DeleteAsync(this, roleStore, cancellationToken);
 
-    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    /// <summary>
+    /// The editor changes the rules of a custom role, which replaces <see cref="Authorization.Roles"/> that holds it; a
+    /// built-in role has no editor.
+    /// </summary>
+    bool ISubjectEditPermission.CanEdit(IUserPermissions permissions) => !IsBuiltIn && permissions.CanAdministerHoldingMembers(this);
 }

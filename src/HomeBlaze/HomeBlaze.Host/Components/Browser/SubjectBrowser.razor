@@ -1,4 +1,7 @@
 @using Microsoft.AspNetCore.WebUtilities
+@using HomeBlaze.Authorization.Abstractions
+@using HomeBlaze.Components.Abstractions.Access
+@using HomeBlaze.Storage.Abstractions
 @using HomeBlaze.Abstractions.Metadata
 @using Namotion.Interceptor.Registry.Attributes
 @using Namotion.Interceptor.Registry.Paths
@@ -11,6 +14,8 @@
 @inject IDialogService DialogService
 @inject PropertyRowLayoutService RowLayout
 @inject BrowserPreferences Preferences
+@inject IUserPermissions Permissions
+@inject ISnackbar Snackbar
 
 @implements IDisposable
 @implements IAsyncDisposable
@@ -131,9 +136,38 @@
         RowLayout.Load(Preferences.Get(BrowserPreferenceKeys.RowLayout));
         NavigationManager.LocationChanged += OnLocationChanged;
         RowLayout.OnChange += OnRowLayoutChanged;
+        Permissions.Changed += OnPermissionsChanged;
     }
 
     private void OnRowLayoutChanged() => InvokeAsync(StateHasChanged);
+
+    // The panes from the first one the viewer may no longer see close, as if their subjects were gone.
+    private void OnPermissionsChanged() => _ = InvokeAsync(() =>
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        for (var index = 0; index < _panes.Count; index++)
+        {
+            if (!IsShown(_panes[index], index == 0 ? null : _panes[index - 1]))
+            {
+                RemovePanesFrom(index);
+                UpdateUrl();
+                break;
+            }
+        }
+
+        StateHasChanged();
+    });
+
+    // A pane the viewer may see: its subject is shown and, below the root, the member of the parent that holds it is
+    // readable, as a path through a member the viewer may not read leads nowhere.
+    private bool IsShown(SubjectPane pane, SubjectPane? parent) =>
+        Permissions.CanShow(pane.Subject) &&
+        (parent is null || pane.PropertyName is not { } propertyName ||
+         parent.Subject.TryGetRegisteredSubject()?.TryGetProperty(propertyName) is { } property && Permissions.CanRead(property));
 
     private async Task SetRowLayoutAsync(PropertyRowLayout layout)
     {
@@ -258,7 +292,8 @@
         _panes.Clear();
         _breadcrumbs.Clear();
 
-        if (Root == null) return;
+        // A root the viewer may not see shows nothing, as if there were no root.
+        if (Root == null || !Permissions.CanShow(Root)) return;
 
         // Get registry from root's context
         _subjectRegistry = RootContext?.GetService<ISubjectRegistry>();
@@ -294,19 +329,19 @@
             var registered = currentSubject.TryGetRegisteredSubject();
             var property = registered?.TryGetProperty(propertyName);
 
-            if (property is not { CanContainSubjects: true })
+            if (property is not { CanContainSubjects: true } || !Permissions.CanRead(property))
             {
                 // Try [InlinePaths] fallback
                 var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(currentSubject.GetType());
                 if (inlinePathsPropertyName != null)
                 {
                     property = registered?.TryGetProperty(inlinePathsPropertyName);
-                    if (property is { CanContainSubjects: true })
+                    if (property is { CanContainSubjects: true } && Permissions.CanRead(property))
                     {
                         // This segment is actually a child key, not a property name
                         var childKey = propertyName;
                         var child = SubjectPathResolverExtensions.FindChildByIndex(property, childKey);
-                        if (child != null)
+                        if (child != null && Permissions.CanShow(child))
                         {
                             currentPathParts.Add(childKey);
                             currentPath = $"{currentPath}{childKey}/";
@@ -335,7 +370,7 @@
 
                 var indexStr = pathSegments[i++];
                 var child = SubjectPathResolverExtensions.FindChildByIndex(property, indexStr);
-                if (child == null)
+                if (child == null || !Permissions.CanShow(child))
                     break;
 
                 currentPathParts.Add(indexStr);
@@ -349,7 +384,7 @@
             else if (property.IsSubjectReference)
             {
                 // Direct subject property
-                if (property.GetValue() is not IInterceptorSubject child)
+                if (property.GetValue() is not IInterceptorSubject child || !Permissions.CanShow(child))
                     break;
 
                 currentPath = $"{currentPath}{propertyName}/";
@@ -371,7 +406,7 @@
     {
         // Find the index of the clicked pane
         var paneIndex = _panes.IndexOf(clickedPane);
-        if (paneIndex < 0) return;
+        if (paneIndex < 0 || !Permissions.CanShow(subject)) return;
 
         RemovePanesFrom(paneIndex + 1);
 
@@ -432,8 +467,17 @@
 
     private async Task OnPaneDelete(SubjectPane pane, MethodMetadata deleteOperation)
     {
-        if (pane.Subject.TryGetRegisteredSubject()?.TryGetProperty(deleteOperation.PropertyName)?.IsMethodEnabled() == false)
+        if (pane.Subject.TryGetRegisteredSubject()?.TryGetProperty(deleteOperation.PropertyName) is not { } member ||
+            !member.IsMethodEnabled())
+        {
             return;
+        }
+
+        if (!Permissions.CanDelete(pane.Subject, member))
+        {
+            Snackbar.Add(AccessDeniedTexts.Administer, Severity.Error);
+            return;
+        }
 
         var subjectName = SubjectDisplayExtensions.GetIdentifyingDisplayName(pane.DisplayName, pane.Index);
 
@@ -449,25 +493,36 @@
         if (confirmed != true)
             return;
 
-        try
+        // The roles may have changed while the confirmation was open; the gate checks the operation again right before it starts.
+        if (!Permissions.CanAdministerHoldingMembers(pane.Subject))
         {
-            await deleteOperation.InvokeAsync(null, ServiceProvider, CancellationToken.None);
-
-            // Close this pane and any after it
-            var paneIndex = _panes.IndexOf(pane);
-            if (paneIndex > 0)
-            {
-                RemovePanesFrom(paneIndex);
-                UpdateUrl();
-                StateHasChanged();
-            }
+            Snackbar.Add(AccessDeniedTexts.Administer, Severity.Error);
+            return;
         }
-        catch (Exception ex)
+
+        var invocation = await Permissions.TryInvokeAsync(member, null, ServiceProvider, CancellationToken.None);
+        switch (invocation.Outcome)
         {
-            await DialogService.ShowMessageBoxAsync(
-                "Delete Failed",
-                $"Failed to delete: {ex.Message}",
-                yesText: "OK");
+            case PermittedOperationOutcome.Denied:
+                Snackbar.Add(AccessDeniedTexts.Administer, Severity.Error);
+                break;
+            case PermittedOperationOutcome.Failed:
+                await DialogService.ShowMessageBoxAsync(
+                    "Delete Failed",
+                    $"Failed to delete: {invocation.Exception?.Message}",
+                    yesText: "OK");
+                break;
+            default:
+                // Close this pane and any after it
+                var paneIndex = _panes.IndexOf(pane);
+                if (paneIndex > 0)
+                {
+                    RemovePanesFrom(paneIndex);
+                    UpdateUrl();
+                    StateHasChanged();
+                }
+
+                break;
         }
     }
 
@@ -552,6 +607,7 @@
         _disposed = true;
         NavigationManager.LocationChanged -= OnLocationChanged;
         RowLayout.OnChange -= OnRowLayoutChanged;
+        Permissions.Changed -= OnPermissionsChanged;
     }
 
     public async ValueTask DisposeAsync()

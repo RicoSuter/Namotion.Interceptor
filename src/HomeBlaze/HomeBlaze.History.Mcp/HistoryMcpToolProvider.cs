@@ -87,9 +87,10 @@ public class HistoryMcpToolProvider : IMcpToolProvider
 
     /// <param name="rootSubjectProvider">Resolves the root subject when the tool runs.</param>
     /// <param name="configuration">
-    /// The configuration the tool is added to, which resolves the paths. With an
-    /// <see cref="McpServerConfiguration.AccessPolicy"/>, a path that does not resolve to a readable property is not found
-    /// and one whose property the policy does not allow <c>history</c> on is refused, both without a query.
+    /// The configuration the tool is added to, which resolves the paths. A path that does not resolve to a readable
+    /// property is not found and one whose property the <see cref="McpServerConfiguration.AccessPolicy"/> does not allow
+    /// <c>history</c> on is refused, both without a query. With <see cref="AllowAllMcpAccessPolicy"/>, every path is
+    /// queried as requested, so that the history of a property no longer in the graph stays available.
     /// </param>
     /// <param name="logger">Logs failed queries.</param>
     public HistoryMcpToolProvider(
@@ -508,7 +509,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
                 ? null
                 : _configuration.TryGetReadableProperty(rootRegistered, path);
 
-            if (_configuration.AccessPolicy is not null && GetAccessError(resolved, path) is { } accessError)
+            if (!IsUnrestricted && GetAccessError(resolved, path) is { } accessError)
             {
                 return new PathResult(path, null, null, null, new { error = accessError });
             }
@@ -581,12 +582,12 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         return new PathResult(path, valueType, unit, result, null);
     }
 
-    // With a policy, the property was resolved and checked, so its history is queried under the path it is recorded with,
-    // whichever spelling of its path the client used; the requested path when it has none. Without a policy, the
-    // requested path, so that history of a property no longer in the graph stays available.
+    // With a restricting policy, the property was resolved and checked, so its history is queried under the path it is
+    // recorded with, whichever spelling of its path the client used; the requested path when it has none. Unrestricted,
+    // the requested path, so that history of a property no longer in the graph stays available.
     private string GetQueryPath((RegisteredSubjectProperty Property, object? Index)? resolved, RegisteredSubject? rootRegistered, string path)
     {
-        if (_configuration.AccessPolicy is null ||
+        if (IsUnrestricted ||
             resolved is not { Index: null } match ||
             rootRegistered?.Subject.Context.TryGetService<ISubjectPathResolver>() is not { } resolver)
         {
@@ -596,7 +597,9 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         return match.Property.GetHistoryPath(resolver) ?? path;
     }
 
-    // Without a policy, a path that does not resolve is still queried, so the history of a property no longer in the graph stays available.
+    // Only the policy that allows every action on every member queries a path that does not resolve.
+    private bool IsUnrestricted => _configuration.AccessPolicy is AllowAllMcpAccessPolicy;
+
     private string? GetAccessError((RegisteredSubjectProperty Property, object? Index)? resolved, string path)
     {
         if (resolved is not { } match)

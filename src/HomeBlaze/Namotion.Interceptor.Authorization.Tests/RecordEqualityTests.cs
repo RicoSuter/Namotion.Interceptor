@@ -14,7 +14,7 @@ public class RecordEqualityTests
     private static AuthorizationRole CreateRole(string name = "Reader") => new()
     {
         Name = name,
-        Includes = ["Viewer"],
+        Includes = ["Permissions"],
         Allow = [CreateRule()],
         Deny = [CreateRule() with { Actions = [PermissionAction.Write] }]
     };
@@ -108,7 +108,7 @@ public class RecordEqualityTests
     }
 
     [Fact]
-    public void WhenRoleNamesDifferOnlyInCase_ThenRolesAreEqualWithTheSameHashCode()
+    public void WhenRoleNamesDifferOnlyInCase_ThenRolesAreNotEqual()
     {
         // Arrange
         var first = CreateRole("Reader");
@@ -118,8 +118,7 @@ public class RecordEqualityTests
         var equal = first.Equals(second);
 
         // Assert
-        Assert.True(equal);
-        Assert.Equal(first.GetHashCode(), second.GetHashCode());
+        Assert.False(equal);
     }
 
     [Fact]

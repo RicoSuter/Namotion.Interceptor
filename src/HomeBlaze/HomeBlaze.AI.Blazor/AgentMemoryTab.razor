@@ -1,15 +1,22 @@
 @inject ITimeZoneDisplay TimeZone
 @inject IDialogService DialogService
 
-@{ var memory = MemoryEditor.Snapshot; }
+@{
+    var memory = MemoryEditor.Snapshot;
+    var refusal = MemoryEditor.Refusal;
+}
 <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-1">
     <MudText Typo="Typo.h6">Entries</MudText>
     <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add"
-               OnClick="MemoryEditor.StartAdd" Disabled="@(!MemoryEditor.IsAvailable || MemoryEditor.IsEditing || MemoryEditor.IsSaving)" data-testid="agent-memory-add">Add entry</MudButton>
+               OnClick="MemoryEditor.StartAdd" Disabled="@(refusal is not null || !MemoryEditor.IsAvailable || MemoryEditor.IsEditing || MemoryEditor.IsSaving)" data-testid="agent-memory-add">Add entry</MudButton>
 </MudStack>
 <MudText Typo="Typo.caption" Class="d-block mud-text-secondary">
     The agent's own notes, shown to it with their update time on every run. Keys are slash paths such as alerts/freezer.
 </MudText>
+@if (refusal is not null)
+{
+    <MudText Typo="Typo.caption" Class="d-block mud-text-secondary" data-testid="agent-memory-refusal">@refusal</MudText>
+}
 @if (!MemoryEditor.IsAvailable)
 {
     <MudText Typo="Typo.caption" Class="d-block mud-text-secondary">@AgentMemoryEditor.NotLoadedText</MudText>
@@ -21,7 +28,7 @@
         @memory.Size.ToString("N0") of @AgentMemory.MaxSize.ToString("N0") bytes, @memory.Entries.Length of @AgentMemory.MaxEntries entries
     </MudText>
 </MudStack>
-@if (MemoryEditor.IsEditing)
+@if (MemoryEditor.IsEditing && refusal is null)
 {
     <MudPaper Outlined="true" Class="pa-3 mb-2">
         <MudText Typo="Typo.subtitle2" Class="mb-2">@(MemoryEditor.OriginalKey is null ? "New entry" : "Edit entry")</MudText>
@@ -79,16 +86,19 @@ else if (MemoryEditor.Error is not null)
         <MudTd DataLabel="Value"><div style="white-space: pre-wrap; overflow-wrap: anywhere;">@context.Value</div></MudTd>
         <MudTd DataLabel="Updated" Style="white-space: nowrap;">@TimeZone.Format(context.Updated)</MudTd>
         <MudTd>
-            <div class="d-flex justify-end flex-nowrap">
-                <MudTooltip Text="Edit">
-                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" aria-label="@($"Edit {context.Key}")"
-                                   OnClick="@(() => MemoryEditor.StartEdit(context))" Disabled="@(MemoryEditor.IsSaving || MemoryEditor.IsEditing)" />
-                </MudTooltip>
-                <MudTooltip Text="Delete">
-                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" aria-label="@($"Delete {context.Key}")"
-                                   OnClick="@(() => DeleteAsync(context))" Disabled="MemoryEditor.IsSaving" />
-                </MudTooltip>
-            </div>
+            @if (refusal is null)
+            {
+                <div class="d-flex justify-end flex-nowrap">
+                    <MudTooltip Text="Edit">
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" aria-label="@($"Edit {context.Key}")"
+                                       OnClick="@(() => MemoryEditor.StartEdit(context))" Disabled="@(MemoryEditor.IsSaving || MemoryEditor.IsEditing)" />
+                    </MudTooltip>
+                    <MudTooltip Text="Delete">
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" aria-label="@($"Delete {context.Key}")"
+                                       OnClick="@(() => DeleteAsync(context))" Disabled="MemoryEditor.IsSaving" />
+                    </MudTooltip>
+                </div>
+            }
         </MudTd>
     </RowTemplate>
     <NoRecordsContent>
@@ -105,6 +115,11 @@ else if (MemoryEditor.Error is not null)
 
     private async Task DeleteAsync(AgentMemoryEntry entry)
     {
+        if (MemoryEditor.Refusal is not null)
+        {
+            return;
+        }
+
         var confirmed = await DialogService.ShowMessageBoxAsync(
             "Delete memory entry",
             $"Delete the entry {entry.Key}?",

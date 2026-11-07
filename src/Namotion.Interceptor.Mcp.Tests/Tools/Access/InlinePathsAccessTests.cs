@@ -27,8 +27,7 @@ public class InlinePathsAccessTests
     private static McpServerConfiguration CreateConfiguration(IMcpAccessPolicy? policy) => new()
     {
         PathProvider = DefaultPathProvider.Instance,
-        AccessPolicy = policy,
-        IsReadOnly = false
+        AccessPolicy = policy ?? AllowAllMcpAccessPolicy.Instance
     };
 
     [Theory]

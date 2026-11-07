@@ -1,0 +1,70 @@
+@using System.Security.Claims
+@implements IDisposable
+
+@inject IDialogService DialogService
+@inject NavigationManager Navigation
+@inject CurrentUser CurrentUser
+
+@* Takes the person from the cascading authentication state, so that it renders again when they sign out on the circuit. *@
+@if (_user?.Identity is { IsAuthenticated: true } identity)
+{
+    var displayName = CurrentUser.DisplayName;
+    <MudMenu Icon="@Icons.Material.Filled.AccountCircle" Color="Color.Inherit" AriaLabel="Open the user menu"
+             title="@(displayName is null ? identity.Name : $"{displayName} ({identity.Name})")"
+             AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" data-testid="user-menu">
+        <div class="px-4 py-2">
+            <MudText Typo="Typo.subtitle2" data-testid="user-menu-name">@(displayName ?? identity.Name)</MudText>
+            @if (displayName is not null)
+            {
+                <MudText Typo="Typo.caption" data-testid="user-menu-user-name">@identity.Name</MudText>
+            }
+        </div>
+        <MudDivider/>
+        <MudMenuItem Icon="@Icons.Material.Filled.ManageAccounts" OnClick="OpenAccountAsync" data-testid="user-menu-account">
+            Account
+        </MudMenuItem>
+        <SignOutForm TestId="user-menu-sign-out" IsMenuItem="true" />
+    </MudMenu>
+}
+else
+{
+    @* Shown only where the app shows to a visitor who is not signed in, as the gate of the app shows its own dialog otherwise. *@
+    <MudIconButton Icon="@Icons.Material.Filled.Login" Color="Color.Inherit" OnClick="OpenSignInAsync" title="Sign in"
+                   data-testid="user-menu-sign-in"/>
+}
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthenticationState { get; set; }
+
+    private ClaimsPrincipal? _user;
+    private bool _isDisposed;
+
+    protected override void OnInitialized() => CurrentUser.Changed += OnCurrentUserChanged;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _user = AuthenticationState is null ? null : (await AuthenticationState).User;
+    }
+
+    public void Dispose()
+    {
+        _isDisposed = true;
+        CurrentUser.Changed -= OnCurrentUserChanged;
+    }
+
+    // Raised by the store on any thread, such as when the display name changes elsewhere, also right after this component
+    // was disposed.
+    private void OnCurrentUserChanged() =>
+        _ = InvokeAsync(() =>
+        {
+            if (!_isDisposed)
+            {
+                StateHasChanged();
+            }
+        });
+
+    private Task OpenSignInAsync() => SignInDialog.ShowAsync(DialogService, Navigation.GetPathAndQuery(), isClosable: true);
+
+    private Task OpenAccountAsync() => AccountDialog.ShowAsync(DialogService, Navigation.GetPathAndQuery());
+}

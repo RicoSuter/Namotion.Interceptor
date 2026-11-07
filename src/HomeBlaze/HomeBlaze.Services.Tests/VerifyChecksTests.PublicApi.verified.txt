@@ -1,5 +1,6 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.Components.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.Host.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.Services.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace HomeBlaze.Services.Clients
@@ -21,8 +22,8 @@ namespace HomeBlaze.Services.Clients
         public event System.Action? Changed;
         public HomeBlaze.Services.Clients.ClientConnection Connect(string? cookieToken, HomeBlaze.Services.Clients.IClientConnectionCallbacks callbacks) { }
         public void Disconnect(HomeBlaze.Services.Clients.ClientConnection connection) { }
-        public System.Threading.Tasks.Task RenameAsync(HomeBlaze.Services.Clients.ClientConnection connection, string name, System.Threading.CancellationToken cancellationToken) { }
-        public System.IDisposable SetRenameHandler(System.Func<HomeBlaze.Services.Clients.ClientConnection, string, System.Threading.CancellationToken, System.Threading.Tasks.Task> handler) { }
+        public System.IDisposable SetRenameMemberResolver(System.Func<HomeBlaze.Services.Clients.ClientConnection, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> resolver) { }
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetRenameMember(HomeBlaze.Services.Clients.ClientConnection connection) { }
         public static string CreateClientId() { }
         public static string CreateClientToken() { }
         public static string HashClientToken(string token) { }
@@ -126,15 +127,11 @@ namespace HomeBlaze.Services
         public static bool TryCreateObject(System.Type type, System.Collections.Generic.IReadOnlyDictionary<string, string?> inputs, out object? value, out string? error) { }
         public static bool TryParseJson(string? input, System.Type type, bool isNullable, out object? value, out string? error) { }
     }
-    public static class PropertyReadAccess
-    {
-        public static bool CanRead(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
-        public static System.IDisposable Enter(System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, bool>? canRead) { }
-    }
     public static class RegisteredSubjectMethodExtensions
     {
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetAllMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, HomeBlaze.Abstractions.Attributes.ExclusionTarget target, bool excludeMethodsWithPurpose = false) { }
         public static HomeBlaze.Abstractions.Metadata.MethodMetadata? GetDeleteOperation(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, HomeBlaze.Abstractions.Attributes.ExclusionTarget target) { }
+        public static string? GetMethodDisabledReason(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty methodProperty) { }
         public static bool IsMethodEnabled(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty methodProperty) { }
         public static HomeBlaze.Abstractions.Metadata.MethodMetadata? TryGetMethodMetadata(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
     }
@@ -382,8 +379,9 @@ namespace HomeBlaze.Services.Display
 {
     public static class ExpressionDisplay
     {
+        public const string MapPipe = "map";
         public const char PathSeparator = '/';
-        public static Namotion.Interceptor.Expressions.ExpressionValue ApplyPipe(string name, System.Collections.Immutable.ImmutableArray<string> arguments, Namotion.Interceptor.Expressions.ExpressionValue input, HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject scope, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
+        public static Namotion.Interceptor.Expressions.ExpressionValue ApplyPipe(string name, System.Collections.Immutable.ImmutableArray<string> arguments, Namotion.Interceptor.Expressions.ExpressionValue input, HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject scope, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions) { }
         public static string? Check(Namotion.Interceptor.Expressions.ParsedExpression expression, HomeBlaze.Services.Display.ExpressionUse use) { }
         public static string ToText(Namotion.Interceptor.Expressions.ExpressionValue result, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
     }
@@ -398,7 +396,7 @@ namespace HomeBlaze.Services.Display
     public interface IValueMap
     {
         string? GetError();
-        string? GetText(in HomeBlaze.Services.Display.ValueBinding binding, HomeBlaze.Services.SubjectPathResolver resolver, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone);
+        string? GetText(in HomeBlaze.Services.Display.ValueBinding binding, HomeBlaze.Services.SubjectPathResolver resolver, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions);
     }
     public static class RawValueFormatter
     {
@@ -428,7 +426,7 @@ namespace HomeBlaze.Services.Display
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? Property { get; }
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; }
         public object? Value { get; }
-        public static HomeBlaze.Services.Display.ValueBinding FromPath(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject from, string? path) { }
+        public static HomeBlaze.Services.Display.ValueBinding FromPath(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject from, string? path, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions) { }
         public static HomeBlaze.Services.Display.ValueBinding FromProperty(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
     }
 }
@@ -488,8 +486,8 @@ namespace HomeBlaze.Services.Metadata
                 "PropertyName",
                 "Metadata"})]
         public static System.Collections.Generic.IEnumerable<System.ValueTuple<string?, System.Collections.Immutable.ImmutableDictionary<string, System.Text.Json.JsonElement>>> GetEntries(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
-        public static System.Collections.Generic.IReadOnlyList<string> GetTags(Namotion.Interceptor.IInterceptorSubject root, System.Func<Namotion.Interceptor.IInterceptorSubject, bool>? isExcluded = null, System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, bool>? isPropertyIncluded = null) { }
-        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Services.Metadata.MetadataSearchMatch> Search(Namotion.Interceptor.IInterceptorSubject root, string? tag = null, string? key = null, string? value = null, Namotion.Interceptor.IInterceptorSubject? start = null, System.Func<Namotion.Interceptor.IInterceptorSubject, bool>? isExcluded = null) { }
+        public static System.Collections.Generic.IReadOnlyList<string> GetTags(Namotion.Interceptor.IInterceptorSubject root, System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, bool> isMetadataIncluded, System.Func<Namotion.Interceptor.IInterceptorSubject, bool>? isExcluded = null, System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, bool>? isPropertyIncluded = null) { }
+        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Services.Metadata.MetadataSearchMatch> Search(Namotion.Interceptor.IInterceptorSubject root, System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, bool> isMetadataIncluded, string? tag = null, string? key = null, string? value = null, Namotion.Interceptor.IInterceptorSubject? start = null, System.Func<Namotion.Interceptor.IInterceptorSubject, bool>? isExcluded = null) { }
     }
     public sealed class MetadataSearchMatch : System.IEquatable<HomeBlaze.Services.Metadata.MetadataSearchMatch>
     {

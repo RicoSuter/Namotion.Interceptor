@@ -12,6 +12,7 @@ public sealed class AgentMemoryEditor
     public const string NotLoadedText = "The memory can be edited once the agent has started.";
 
     private readonly Func<AgentMemory?> _getMemory;
+    private readonly Func<string?> _getRefusal;
 
     // The entry as it was when editing started, to detect a concurrent write by the agent.
     private AgentMemoryEntry? _editedEntry;
@@ -20,10 +21,19 @@ public sealed class AgentMemoryEditor
     /// Returns the agent's current memory, which is replaced when the agent starts, or null while the agent has not
     /// loaded it yet.
     /// </param>
-    public AgentMemoryEditor(Func<AgentMemory?> getMemory)
+    /// <param name="getRefusal">
+    /// Returns why the person may not change the memory, or null when they may; asked before the form opens and right
+    /// before every write. The memory steers the agent's runs, so the rule of the chat applies, see
+    /// <see cref="AgentChatAccess.GetRefusal"/>.
+    /// </param>
+    public AgentMemoryEditor(Func<AgentMemory?> getMemory, Func<string?> getRefusal)
     {
         _getMemory = getMemory;
+        _getRefusal = getRefusal;
     }
+
+    /// <summary>Why the person may not change the memory, or null when they may; the table is read-only then.</summary>
+    public string? Refusal => _getRefusal();
 
     /// <summary>The agent's current memory, empty while it is not loaded.</summary>
     public AgentMemorySnapshot Snapshot => _getMemory()?.GetSnapshot() ?? AgentMemorySnapshot.Empty;
@@ -64,18 +74,28 @@ public sealed class AgentMemoryEditor
         !string.Equals(key, OriginalKey, StringComparison.OrdinalIgnoreCase) &&
         Snapshot.TryGetEntry(key) is not null;
 
-    /// <summary>Opens an empty form for a new entry.</summary>
+    /// <summary>Opens an empty form for a new entry, unless the person may not change the memory.</summary>
     public void StartAdd()
     {
+        if (IsRefused())
+        {
+            return;
+        }
+
         _editedEntry = null;
         Key = string.Empty;
         Value = string.Empty;
         Open();
     }
 
-    /// <summary>Opens the form with an existing entry.</summary>
+    /// <summary>Opens the form with an existing entry, unless the person may not change the memory.</summary>
     public void StartEdit(AgentMemoryEntry entry)
     {
+        if (IsRefused())
+        {
+            return;
+        }
+
         _editedEntry = entry;
         Key = entry.Key;
         Value = entry.Value;
@@ -142,8 +162,25 @@ public sealed class AgentMemoryEditor
         Error = null;
     }
 
+    // Sets the refusal as the error when the person may not change the memory.
+    private bool IsRefused()
+    {
+        if (_getRefusal() is not { } refusal)
+        {
+            return false;
+        }
+
+        Error = refusal;
+        return true;
+    }
+
     private async Task<bool> TryUpdateAsync(IReadOnlyList<AgentMemoryChange> changes)
     {
+        if (IsRefused())
+        {
+            return false;
+        }
+
         if (_getMemory() is not { } memory)
         {
             Error = NotLoadedText;

@@ -2,6 +2,7 @@
 @using Microsoft.AspNetCore.Components.Routing
 @using Microsoft.JSInterop
 @using MudBlazor
+@using Namotion.Interceptor.Registry.Abstractions
 
 @inject IJSRuntime JsRuntime
 @inject IDialogService DialogService
@@ -31,6 +32,7 @@
                                       HasMinimap="false"
                                       FocusesEnd="true"
                                       ReservedNames="ReservedNames"
+                                      AdministerMember="AdministerMember"
                                       TextChanged="OnTextChanged"
                                       SaveRequested="SaveAsync"/>
             </div>
@@ -93,6 +95,10 @@
     /// <summary>Saves the text and returns why it was not saved, or null when it was.</summary>
     [Parameter]
     public Func<string, Task<string?>> Save { get; set; } = default!;
+
+    /// <summary>The member that holds the text, which the viewer must administer to create a widget with Create; null refuses.</summary>
+    [Parameter]
+    public RegisteredSubjectProperty? AdministerMember { get; set; }
 
     private MarkdownSourceEditor? _editor;
     private ElementReference _body;
@@ -320,14 +326,16 @@
         string text,
         bool isDarkMode,
         IReadOnlyCollection<string> reservedNames,
-        Func<string, Task<string?>> save)
+        Func<string, Task<string?>> save,
+        RegisteredSubjectProperty? administerMember)
     {
         var parameters = new DialogParameters<MarkdownTextDialog>
         {
             { dialog => dialog.Text, text },
             { dialog => dialog.IsDarkMode, isDarkMode },
             { dialog => dialog.ReservedNames, reservedNames },
-            { dialog => dialog.Save, save }
+            { dialog => dialog.Save, save },
+            { dialog => dialog.AdministerMember, administerMember }
         };
         // Escape and a navigation are handled by the dialog, which asks before it discards a change, and a click beside the
         // dialog does nothing.

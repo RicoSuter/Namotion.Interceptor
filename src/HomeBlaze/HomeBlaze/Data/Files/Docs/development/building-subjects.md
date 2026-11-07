@@ -510,6 +510,12 @@ public Task SetVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decima
 
 A `Percent` parameter is a fraction from 0 to 1, as described under units above: the dialog takes 0 to 100 and divides by 100, while agents pass the fraction. The description is shown to both, so it leaves the numeric range to the unit instead of stating "0 to 1".
 
+**Parameter editors:**
+
+`[OperationParameter(Editor = "...")]` names the editor the operation dialog enters the parameter with, in place of the field of its type, such as `AuthorizationParameterEditors.RoleNames`, the role picker of "Add User" and "Set Roles". An editor is a component derived from `MethodParameterEditor` and registered with `services.AddMethodParameterEditor<TEditor>(name)`; it reports the value of the parameter type through `ValueChanged`. Without an editor registered under the name, the dialog shows the field of the type. Agents never see the editor and pass the value as for its type.
+
+`[OperationParameter(InitialValueProperty = nameof(...))]` names a property of the same subject whose current value prefills the parameter when the operation is run from the user interface, such as the current roles of a user in "Set Roles" and their display name in "Set Display Name". The value is prefilled only when the person may read the property; a collection prefills an array parameter with its items. Agents are not affected.
+
 **Operations vs Configuration:**
 - Use `[Configuration]` for values that should persist and can be edited at any time
 - Use `[Operation]` for one-time actions that execute immediately
@@ -551,6 +557,7 @@ public partial class Server
 - When `IsEnabled` is `false`, the button is disabled in the UI
 - The attribute name is `IsEnabled`, without the `HomeBlaze:` prefix of the HomeBlaze metadata: it describes the operation itself, so an external source can provide it and a connector that exports attributes shows it under this name
 - The button renders again by itself when the derived property changes, because its render read it
+- A `[PropertyAttribute("Start", KnownAttributes.DisabledReason)]` string property, also `[Derived]`, says why: the disabled button shows it as its tooltip. Return null while the operation is enabled
 
 ## Categories
 
@@ -905,7 +912,11 @@ Storage contracts: `IStorageContainer`, `IStorageFile`, `IConfigurationWriter`, 
 
 ### HomeBlaze.Components.Abstractions
 
-UI component contracts: `ISubjectComponent`, `ISubjectEditComponent`, `[SubjectComponent]`, `SubjectComponentType`.
+UI component contracts: `ISubjectComponent`, `ISubjectEditComponent`, `[SubjectComponent]`, `SubjectComponentType`, `AccessDeniedTexts`, the texts of a control the user may not use, and `PermissionsComponentBase`, the base of a component that answers from the permissions of the user. It references `HomeBlaze.Authorization.Abstractions`, so a widget library gets `IUserPermissions` through it.
+
+### HomeBlaze.Authorization.Abstractions
+
+What the user may do: `IUserPermissions` and `UserPermissionsExtensions`, see [Permissions](#permissions).
 
 See [Project Structure](../architecture/project-structure.md) for the full dependency graph between these packages.
 
@@ -1246,6 +1257,39 @@ Three cases ask for a few lines:
 | The widget shows nothing on a viewed page | Render a `WidgetChip` while the page is edited inline, so that the widget has an area to click | `ValueMapWidget`, a `Responsive` whose content the screen hides |
 | Parts of the widget become blocks of their own once it is selected | Derive from `SelectionContainingWidgetBase` and render those parts only while `ContainsSelection` is true | The rows of a `ValueList`, the cases of a `ValueMap` |
 | The widget has controls that act, such as a button or a switch | Disable them while `IsEditing` is true. The host takes the pointer from the content of a widget while the page is edited, but the keyboard still reaches a control | `DoorLockWidget` |
+
+### Permissions
+
+The person who views a page may not be allowed to do everything a widget offers. `IUserPermissions` from the package `HomeBlaze.Authorization.Abstractions`, injected per circuit, answers what they may do with a registered member: `CanRead`, `CanWrite` and `CanInvoke`. `HoldsAllRoles` answers a rule that depends on roles rather than on members, such as who may chat with an agent: whether the user holds every one of the roles, counting the roles they include, and a full administrator does. It raises `Changed` when the answers may have changed, such as after a role change. Without sign-in configured, the user may do nothing and holds no role. A widget derives from `PermissionsComponentBase` from `HomeBlaze.Components.Abstractions`, which injects `Permissions` and renders the widget again on `Changed`; a widget that overrides `OnInitialized` or `Dispose(bool)` calls the base.
+
+A widget runs an operation of its subject through `TryInvokeAsync` of `UserPermissionsExtensions` from the same package, which checks `CanInvoke` right before the method starts, never by calling the method itself. Disable a control the user may not use with the tooltip `AccessDeniedTexts.Tooltip` from `HomeBlaze.Components.Abstractions`, and show a refusal titled `AccessDeniedTexts.Title` when the roles changed after the control rendered:
+
+```razor
+@inherits PermissionsComponentBase
+@inject IServiceProvider ServiceProvider
+@inject IDialogService DialogService
+
+@{
+    var canStop = MotorSubject is { } motor && Permissions.CanInvoke(motor, nameof(Motor.StopAsync));
+}
+<MudButton Disabled="@(!canStop)" title="@(canStop ? null : AccessDeniedTexts.Tooltip)" OnClick="StopAsync">Stop</MudButton>
+
+@code {
+    private async Task StopAsync()
+    {
+        var invocation = await Permissions.TryInvokeAsync(MotorSubject!, nameof(Motor.StopAsync), null, ServiceProvider, CancellationToken.None);
+        if (invocation.Outcome == PermittedOperationOutcome.Denied)
+        {
+            await DialogService.ShowMessageBoxAsync(new MessageBoxOptions
+                { Title = AccessDeniedTexts.Title, Message = AccessDeniedTexts.Invoke, YesText = "OK" });
+        }
+    }
+}
+```
+
+The parameters are those of the method that require input, in their order, so `SetSpeedAsync(int speed, CancellationToken cancellationToken)` takes `[speed]`. A widget that sets a property checks `CanWrite` for its registered member before it writes. What a method writes itself is not checked again.
+
+A query that shows values of other members to its caller, as `ReadEvaluatedContent` of a page does, takes `[FromServices] IUserPermissions` and leaves out what they do not allow to read. The caller passes its own: the circuit of a person, and for an agent or an MCP client the permissions of its access policy. Operations called through MCP get permissions that deny everything. Without a registered `IUserPermissions` the default registration denies everything, so treat a missing one as deny-all.
 
 A widget that shows nothing, with a chip while it is edited inline. `Selection` is only set while the page is edited inline, never in the Split preview:
 

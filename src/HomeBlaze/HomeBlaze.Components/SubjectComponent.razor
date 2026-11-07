@@ -5,13 +5,14 @@
 @inject SubjectComponentRegistry ComponentRegistry
 @inject IDialogService DialogService
 @inject IJSRuntime JSRuntime
+@inject IUserPermissions Permissions
 
 @* The widget below tracks its own reads, so a parent that renders again with the same parameters, as a page does for a change of an expression, renders neither this wrapper nor the widget. *@
 @inherits Namotion.Interceptor.Blazor.TrackedComponentBase
 @implements IDisposable
 @implements IHandleEvent
 
-@if (Subject != null)
+@if (Subject != null && IsShown(Subject))
 {
     var registration = ComponentRegistry.GetComponent(Subject.GetType(), Type);
     if (registration?.ComponentType != null)
@@ -318,6 +319,16 @@
         : isTextBlock ? "subject-component-wrapper text-block"
         : "subject-component-wrapper";
 
+    // A widget renders only for a subject the viewer may see, and otherwise as for no subject. A block of text is exempt: it
+    // is markup of its page, whose expressions are checked where they are evaluated, and its subject has no members.
+    private bool IsShown(IInterceptorSubject subject) =>
+        Type != SubjectComponentType.Widget || _isTextBlock || Permissions.CanShow(subject);
+
+    private void OnPermissionsChanged() => _ = InvokeAsync(StateHasChanged);
+
+    // The instance subscribed to, so that a widget that was never initialized unsubscribes from nothing.
+    private IUserPermissions? _subscribedPermissions;
+
     // Keyed weakly, because the type of a widget can come from a plugin that is unloaded again.
     private static readonly ConditionalWeakTable<Type, string> TypeDisplayNames = new();
 
@@ -383,6 +394,8 @@
         _keyDownCallback = EventCallback.Factory.Create<KeyboardEventArgs>(this, OnKeyDown);
         _selectParentCallback = EventCallback.Factory.Create(this, SelectParent);
         _editCallback = EventCallback.Factory.Create(this, OpenEditDialog);
+        _subscribedPermissions = Permissions;
+        _subscribedPermissions.Changed += OnPermissionsChanged;
         if (ParentComponent != null)
         {
             (ParentComponent._childComponents ??= []).Add(this);
@@ -612,6 +625,11 @@
     public void Dispose()
     {
         _isDisposed = true;
+        if (_subscribedPermissions is not null)
+        {
+            _subscribedPermissions.Changed -= OnPermissionsChanged;
+        }
+
         Selection?.Remove(this);
         ParentComponent?._childComponents?.Remove(this);
     }

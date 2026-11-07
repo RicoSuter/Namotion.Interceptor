@@ -9,10 +9,10 @@ internal sealed class PreviewCache
 {
     private Entry? _last;
 
-    /// <summary>Gets the result kept for this very instance of a role, compared by reference.</summary>
-    public bool TryGet(AuthorizationRole role, out AuthorizationResult result)
+    /// <summary>Gets the result kept for this very instance of a role, compared by reference, and this kind.</summary>
+    public bool TryGet(AuthorizationRole role, PrincipalKind kind, out AuthorizationResult result)
     {
-        if (Volatile.Read(ref _last) is { } last && ReferenceEquals(last.Role, role))
+        if (Volatile.Read(ref _last) is { } last && ReferenceEquals(last.Role, role) && last.Kind == kind)
         {
             result = last.Result;
             return true;
@@ -22,8 +22,8 @@ internal sealed class PreviewCache
         return false;
     }
 
-    /// <summary>Keeps the result of a role in place of the one kept before.</summary>
-    public void Set(AuthorizationRole role, AuthorizationResult result) => Volatile.Write(ref _last, new Entry(role, result));
+    /// <summary>Keeps the result of a role and kind in place of the one kept before.</summary>
+    public void Set(AuthorizationRole role, PrincipalKind kind, AuthorizationResult result) => Volatile.Write(ref _last, new Entry(role, kind, result));
 
-    private sealed record Entry(AuthorizationRole Role, AuthorizationResult Result);
+    private sealed record Entry(AuthorizationRole Role, PrincipalKind Kind, AuthorizationResult Result);
 }

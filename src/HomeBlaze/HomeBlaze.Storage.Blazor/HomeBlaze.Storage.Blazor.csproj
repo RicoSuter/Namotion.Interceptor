@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
 
     <ItemGroup>
+        <InternalsVisibleTo Include="HomeBlaze.Storage.Blazor.Tests" />
+    </ItemGroup>
+
+    <ItemGroup>
         <FrameworkReference Include="Microsoft.AspNetCore.App" />
         <ProjectReference Include="..\HomeBlaze.Storage\HomeBlaze.Storage.csproj" />
         <ProjectReference Include="..\HomeBlaze.Components\HomeBlaze.Components.csproj" />

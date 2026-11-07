@@ -1,0 +1,106 @@
+using HomeBlaze.Abstractions.Devices.Locks;
+using HomeBlaze.Services;
+using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry.Abstractions;
+using Xunit;
+
+namespace HomeBlaze.Components.Tests.Access;
+
+public class ValueReaderAccessTests
+{
+    private static readonly string TextPath = WidgetTestGraph.PathOf(nameof(AccessTestDevice.Text));
+    private static readonly string LockPath = WidgetTestGraph.PathOf(nameof(AccessTestDevice.Lock));
+
+    private readonly AccessTestDevice _device;
+    private readonly SubjectPathResolver _resolver;
+    private readonly TestUserPermissions _permissions = new();
+
+    public ValueReaderAccessTests()
+    {
+        var context = SubjectContextFactory.Create(new ServiceCollection());
+        var device = _device = new AccessTestDevice(context)
+        {
+            Text = "Value",
+            Lock = new AccessTestLock { LockState = DoorLockState.Locked }
+        };
+        _resolver = new SubjectPathResolver(() => device);
+    }
+
+    [Fact]
+    public void WhenAPropertyIsHidden_ThenItResolvesAndReadsAsAPathThatLeadsNowhere()
+    {
+        // Arrange
+        Hide(_device, nameof(AccessTestDevice.Text));
+
+        // Act
+        var property = ValueReader.ResolveProperty(_resolver, _device, TextPath, _permissions);
+        var value = ValueReader.ReadValue(_resolver, _device, TextPath, _permissions);
+        var hidden = ValueReader.Read(_resolver, _device, TextPath, null, null, _permissions);
+        var missing = ValueReader.Read(_resolver, _device, WidgetTestGraph.MissingPath, null, null, _permissions);
+
+        // Assert
+        Assert.Null(property);
+        Assert.Null(value);
+        Assert.Equal(missing, hidden);
+        Assert.True(hidden.IsMissing);
+    }
+
+    [Fact]
+    public void WhenAResolvedPropertyIsHidden_ThenReadResolvedGivesTheReadingOfNoProperty()
+    {
+        // Arrange
+        var property = Hide(_device, nameof(AccessTestDevice.Text));
+
+        // Act
+        var hidden = ValueReader.ReadResolved(_resolver, property, null, null, _permissions);
+        var none = ValueReader.ReadResolved(_resolver, null, null, null, _permissions);
+
+        // Assert
+        Assert.Equal(none, hidden);
+    }
+
+    [Fact]
+    public void WhenAPropertyOfASubjectIsHidden_ThenReadPropertyGivesTheReadingOfAPropertyTheSubjectDoesNotHave()
+    {
+        // Arrange
+        Hide(_device, nameof(AccessTestDevice.Text));
+
+        // Act
+        var hidden = ValueReader.ReadProperty(_resolver, _device, nameof(AccessTestDevice.Text), null, null, _permissions);
+        var unknown = ValueReader.ReadProperty(_resolver, _device, "Unknown", null, null, _permissions);
+
+        // Assert
+        Assert.Equal(unknown, hidden);
+    }
+
+    [Fact]
+    public void WhenAReferenceIsHidden_ThenResolveSubjectDoesNotFollowIt()
+    {
+        // Arrange
+        Hide(_device, nameof(AccessTestDevice.Lock));
+
+        // Act
+        var subject = ValueReader.ResolveSubject(_resolver, _device, LockPath, _permissions);
+
+        // Assert
+        Assert.Null(subject);
+    }
+
+    [Fact]
+    public void WhenAReferenceIsReadable_ThenResolveSubjectGivesItsSubject()
+    {
+        // Act
+        var subject = ValueReader.ResolveSubject(_resolver, _device, LockPath, _permissions);
+
+        // Assert
+        Assert.Same(_device.Lock, subject);
+    }
+
+    private RegisteredSubjectProperty Hide(IInterceptorSubject subject, string name)
+    {
+        var property = WidgetTestGraph.GetProperty(subject, name);
+        _permissions.CannotRead.Add(property);
+        return property;
+    }
+}

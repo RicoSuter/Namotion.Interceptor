@@ -5,6 +5,7 @@ using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Samples;
 using HomeBlaze.Services;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
@@ -296,7 +297,7 @@ public class MarkdownFileTests
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         // Act
-        var result = markdown.ReadEvaluatedContent();
+        var result = markdown.ReadEvaluatedContent(UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal("Missing: ", result);
@@ -312,7 +313,7 @@ public class MarkdownFileTests
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         // Act
-        var result = markdown.ReadEvaluatedContent();
+        var result = markdown.ReadEvaluatedContent(UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal("# Heading\n\nPlain body, no expressions.", result);
@@ -328,7 +329,7 @@ public class MarkdownFileTests
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         // Act
-        var result = markdown.ReadEvaluatedContent();
+        var result = markdown.ReadEvaluatedContent(UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(string.Empty, result);
@@ -345,7 +346,7 @@ public class MarkdownFileTests
             "Relative: {{ ../../Devices/motor/CurrentSpeed }}, absolute: {{ /Devices/motor/CurrentSpeed }}, missing: {{ does/not/exist }}");
 
         // Act
-        var result = includeSourcePaths is { } include ? markdown.ReadEvaluatedContent(include) : markdown.ReadEvaluatedContent();
+        var result = includeSourcePaths is { } include ? markdown.ReadEvaluatedContent(UnrestrictedPermissions.Instance, include) : markdown.ReadEvaluatedContent(UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(expected, result);
@@ -365,6 +366,7 @@ public class MarkdownFileTests
         var parameter = Assert.Single(method.Parameters, parameter => parameter.RequiresInput);
         Assert.Equal("includeSourcePaths", parameter.Name);
         Assert.True(parameter.IsNullable);
+        Assert.Contains(method.Parameters, service => service.IsFromServices && service.Type == typeof(IUserPermissions));
         Assert.Equal("Text", await method.InvokeAsync([null], serviceProvider: null, CancellationToken.None));
     }
 
@@ -379,7 +381,7 @@ public class MarkdownFileTests
             new EmbeddedSecretDevice { Password = "s3cr3t", Host = "visible" });
 
         // Act
-        var result = markdown.ReadEvaluatedContent(includeSourcePaths);
+        var result = markdown.ReadEvaluatedContent(UnrestrictedPermissions.Instance, includeSourcePaths);
 
         // Assert
         Assert.Equal(expected, result);
@@ -447,7 +449,7 @@ public class MarkdownFileTests
 
         // Act
         var raw = markdown.ReadRawContent();
-        var evaluated = markdown.ReadEvaluatedContent();
+        var evaluated = markdown.ReadEvaluatedContent(UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.IsType<EmbeddedSecretDevice>(markdown.Children["gateway"]);
@@ -579,12 +581,12 @@ public class MarkdownFileTests
         var scope = (IPathScope)markdown;
 
         // Act
-        var evaluated = markdown.ReadEvaluatedContent();
-        var withSourcePaths = markdown.ReadEvaluatedContent(includeSourcePaths: true);
+        var evaluated = markdown.ReadEvaluatedContent(UnrestrictedPermissions.Instance);
+        var withSourcePaths = markdown.ReadEvaluatedContent(UnrestrictedPermissions.Instance, includeSourcePaths: true);
         var expressions = markdown.Children.Values.OfType<RenderExpression>().ToList();
         var tile = Assert.IsType<HomeBlaze.Components.ValueTile>(scope.TryGetNamedSubject("tile"));
         var indicator = Assert.IsType<HomeBlaze.Components.Indicator>(scope.TryGetNamedSubject("indicator"));
-        var hostReading = HomeBlaze.Components.ValueReader.Read(resolver, tile, "../../Devices/motor/Host", null, null);
+        var hostReading = HomeBlaze.Components.ValueReader.Read(resolver, tile, "../../Devices/motor/Host", null, null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.StartsWith("Raw: , display: , public: visible.", evaluated);
@@ -592,10 +594,10 @@ public class MarkdownFileTests
         Assert.All(expressions.Where(expression => expression.Text == path), expression =>
         {
             Assert.Null(expression.Value);
-            Assert.Equal(string.Empty, expression.GetText(timeZone: null));
+            Assert.Equal(string.Empty, expression.GetText(timeZone: null, UnrestrictedPermissions.Instance));
         });
-        Assert.True(HomeBlaze.Components.ValueReader.Read(resolver, tile, tile.Path, null, null).IsMissing);
-        Assert.Null(HomeBlaze.Components.ValueReader.ReadValue(resolver, indicator, indicator.Path));
+        Assert.True(HomeBlaze.Components.ValueReader.Read(resolver, tile, tile.Path, null, null, UnrestrictedPermissions.Instance).IsMissing);
+        Assert.Null(HomeBlaze.Components.ValueReader.ReadValue(resolver, indicator, indicator.Path, UnrestrictedPermissions.Instance));
         Assert.Equal("visible", hostReading.Value);
         Assert.DoesNotContain("s3cr3t", evaluated);
     }
@@ -610,7 +612,7 @@ public class MarkdownFileTests
         var markdown = await CreatePageInGraphAsync(content);
 
         // Act
-        var evaluated = markdown.ReadEvaluatedContent();
+        var evaluated = markdown.ReadEvaluatedContent(UnrestrictedPermissions.Instance);
         var expressions = markdown.Children.Values.OfType<RenderExpression>().ToDictionary(expression => expression.Text);
 
         // Assert
@@ -695,7 +697,7 @@ public class MarkdownFileTests
             first => Assert.True(first.EndsWithBlock),
             error => Assert.Contains("markdown-block-error", error.Html),
             after => Assert.True(after.StartsWithBlock));
-        var markup = MarkdownMarkup.GetRenderSegments(markdown.Children.Values, timeZone: null).Select(segment => segment.Html).ToArray();
+        var markup = MarkdownMarkup.GetRenderSegments(markdown.Children.Values, timeZone: null, UnrestrictedPermissions.Instance).Select(segment => segment.Html).ToArray();
         Assert.Equal(3, markup.Length);
         Assert.Contains("markdown-block-error", markup[1]);
     }

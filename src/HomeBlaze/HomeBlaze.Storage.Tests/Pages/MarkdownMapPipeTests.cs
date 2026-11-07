@@ -1,3 +1,4 @@
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Xunit;
@@ -53,7 +54,7 @@ public class MarkdownMapPipeTests
         var page = await AddPageAsync(text);
 
         // Act
-        var result = GetExpression(page).GetText(null);
+        var result = GetExpression(page).GetText(null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(expected, result);
@@ -68,7 +69,7 @@ public class MarkdownMapPipeTests
         var page = await AddPageAsync(text);
 
         // Act
-        var result = GetExpression(page).GetText(null);
+        var result = GetExpression(page).GetText(null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(expected, result);
@@ -94,7 +95,7 @@ public class MarkdownMapPipeTests
         var page = await AddPageAsync("Is {{ meter/IsOn | map:onoff }}");
 
         // Act
-        var evaluated = page.ReadEvaluatedContent();
+        var evaluated = page.ReadEvaluatedContent(UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.EndsWith("Is an", evaluated!.TrimEnd());

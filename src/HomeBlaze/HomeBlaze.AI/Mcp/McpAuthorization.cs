@@ -9,9 +9,6 @@ namespace HomeBlaze.AI.Mcp;
 /// </summary>
 internal static class McpAuthorization
 {
-    /// <summary>The role names of a client that may do everything the system rules allow.</summary>
-    public static IReadOnlyCollection<string> EverythingRoleNames { get; } = [BuiltInRoles.EverythingName];
-
     /// <summary>
     /// The path provider the authorization matches rule paths with: one like that of the tools, so that a rule path
     /// matches the paths the tools build.

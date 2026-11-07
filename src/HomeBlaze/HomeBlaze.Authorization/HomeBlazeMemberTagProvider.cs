@@ -35,7 +35,8 @@ public sealed class HomeBlazeMemberTagProvider : IMemberTagProvider
         RequiresConfirmation = 1 << 5,
         Subjects = 1 << 6,
         Attribute = 1 << 7,
-        Metadata = 1 << 8
+        Metadata = 1 << 8,
+        Administration = 1 << 9
     }
 
     // The tags of each member with the number of its attributes when they were computed: markers are attributes
@@ -108,7 +109,8 @@ public sealed class HomeBlazeMemberTagProvider : IMemberTagProvider
             return Markers.Query;
         }
 
-        return method.RequiresConfirmation ? Markers.Operation | Markers.RequiresConfirmation : Markers.Operation;
+        var markers = method.RequiresConfirmation ? Markers.Operation | Markers.RequiresConfirmation : Markers.Operation;
+        return method.RequiresAdministration ? markers | Markers.Administration : markers;
     }
 
     private static string[] CreateTags(int index)

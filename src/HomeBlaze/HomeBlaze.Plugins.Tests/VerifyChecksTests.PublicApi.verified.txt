@@ -64,7 +64,7 @@ namespace HomeBlaze.Plugins
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Purpose=HomeBlaze.Abstractions.Attributes.OperationPurpose.Delete, RequiresConfirmation=true, Title="Remove Plugin")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Purpose=HomeBlaze.Abstractions.Attributes.OperationPurpose.Delete, RequiresAdministration=true, RequiresConfirmation=true, Title="Remove Plugin")]
         public void RemovePlugin() { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }
@@ -122,7 +122,7 @@ namespace HomeBlaze.Plugins
         public string? Title { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
-        [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true, Title="Add Plugin")]
+        [HomeBlaze.Abstractions.Attributes.Operation(RequiresAdministration=true, RequiresConfirmation=true, Title="Add Plugin")]
         public void AddPlugin(string packageName, string version) { }
         public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }

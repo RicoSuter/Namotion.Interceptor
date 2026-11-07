@@ -5,6 +5,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.History.Abstractions;
 using HomeBlaze.Services;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services.Display;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -74,23 +75,26 @@ internal static partial class HistoryChartSeriesResolver
             : new[] { aggregation }));
 
     /// <summary>
-    /// Resolves the path of every series relative to the series.
+    /// Resolves the path of every series relative to the series. A property the viewer may not read, or whose history it may
+    /// not read, is missing, as a path that leads nowhere is.
     /// </summary>
     /// <param name="resolver">The path resolver.</param>
     /// <param name="series">The series of the chart.</param>
     /// <param name="configurations">The arguments of each series, read with <see cref="HistoryChartSeriesConfiguration.Read"/>.</param>
     /// <param name="chartAggregation">The aggregation of the chart as written.</param>
+    /// <param name="permissions">The permissions of the viewer of the chart.</param>
     public static IReadOnlyList<HistoryChartSeriesInfo> Resolve(
         SubjectPathResolver resolver,
         IReadOnlyList<HistoryChartSeries> series,
         IReadOnlyList<HistoryChartSeriesConfiguration> configurations,
-        string? chartAggregation)
+        string? chartAggregation,
+        IUserPermissions permissions)
     {
         var result = new HistoryChartSeriesInfo[series.Count];
         for (var index = 0; index < result.Length; index++)
         {
             var (path, label, color, aggregation, negate) = configurations[index];
-            var property = ResolveProperty(resolver, series[index], path);
+            var property = ResolveProperty(resolver, series[index], path, permissions);
             var metadata = property?.GetStateMetadata();
             var kind = property is null
                 ? HistoryChartSeriesKind.Missing
@@ -376,7 +380,7 @@ internal static partial class HistoryChartSeriesResolver
         isCount ? "count" : StateUnitExtensions.GetUnitSuffix(unit) ?? "no unit";
 
     // The path is written by the author of a page, and a malformed one must not take the page down.
-    private static RegisteredSubjectProperty? ResolveProperty(SubjectPathResolver resolver, HistoryChartSeries series, string? path)
+    private static RegisteredSubjectProperty? ResolveProperty(SubjectPathResolver resolver, HistoryChartSeries series, string? path, IUserPermissions permissions)
     {
         if (string.IsNullOrEmpty(path))
         {
@@ -385,7 +389,8 @@ internal static partial class HistoryChartSeriesResolver
 
         try
         {
-            return resolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, series);
+            var property = resolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, series);
+            return property is not null && permissions.CanRead(property) && permissions.CanReadHistory(property) ? property : null;
         }
         catch
         {

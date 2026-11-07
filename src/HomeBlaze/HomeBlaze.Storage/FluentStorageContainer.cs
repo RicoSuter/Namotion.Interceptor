@@ -874,8 +874,12 @@ public partial class FluentStorageContainer :
     public MetadataSearchMatch[] SearchMetadata(string? tag, string? key, string? value, string? path)
     {
         var start = path is null ? this : ResolveMetadataPath(this, path);
-        return start is null ? [] : [.. MetadataSearch.Search(this, tag, key, value, start)];
+        return start is null ? [] : [.. MetadataSearch.Search(this, IncludeAllMetadata, tag, key, value, start)];
     }
+
+    // Every match is returned: an agent or client of the server gets the matches only through AgentMetadataAccess, which
+    // filters them for its roles, and the UI does not offer this query.
+    private static bool IncludeAllMetadata(RegisteredSubjectProperty member) => true;
 
     /// <summary>Gets the names of the children of this storage in the order in which they are shown, for agents.</summary>
     [Query(Title = "Get Order", Description = StorageMetadataMethods.GetOrderDescription, Position = 4)]
@@ -895,7 +899,7 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// Opens the create subject dialog to add a new subject to this storage.
     /// </summary>
-    [Operation(Title = "Create", Icon = "Add", Position = 1)]
+    [Operation(Title = "Create", Icon = "Add", Position = 1, RequiresAdministration = true)]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
         => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
 
@@ -906,7 +910,7 @@ public partial class FluentStorageContainer :
     /// content is larger than <see cref="MarkdownFile.MaxContentSize"/> bytes or has blocks or other
     /// <see cref="MarkdownFile.ActiveContent"/>.</exception>
     /// <exception cref="InvalidOperationException">The storage is not connected.</exception>
-    [Operation(Title = "Create Markdown File", Description = "Creates a new markdown file with the given name (ending in .md) and content in this folder.", Icon = "NoteAdd", Position = 2)]
+    [Operation(Title = "Create Markdown File", Description = "Creates a new markdown file with the given name (ending in .md) and content in this folder.", Icon = "NoteAdd", Position = 2, RequiresAdministration = true)]
     public Task CreateMarkdownFileAsync(string name, string content, CancellationToken cancellationToken)
         => CreateMarkdownFileAsync(folderPath: string.Empty, name, content, cancellationToken);
 
@@ -1098,7 +1102,7 @@ public partial class FluentStorageContainer :
 
     /// <inheritdoc />
     /// <remarks>
-    /// Adds <c>Delete</c>, which requires confirmation and deletes through <see cref="DeleteSubjectAsync"/>, to each
+    /// Adds <c>Delete</c>, which requires confirmation and administration and deletes through <see cref="DeleteSubjectAsync"/>, to each
     /// subject that this storage holds in a file and to each of its folders, unless it has a delete operation or a property
     /// of that name already. The operation of a folder is enabled only while the folder is empty.
     /// A subject that keeps its <c>Delete</c> when it moves to another storage deletes through the storage that added it.
@@ -1125,6 +1129,7 @@ public partial class FluentStorageContainer :
                 : "Deletes the file of this subject from the storage.",
             Icon = "Delete",
             RequiresConfirmation = true,
+            RequiresAdministration = true,
             Parameters = DeleteParameters,
         };
 

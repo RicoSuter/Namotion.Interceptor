@@ -10,6 +10,9 @@ namespace HomeBlaze.Services.Tests.Metadata;
 
 public class MetadataSearchTests
 {
+    // The tests of the search itself include every metadata; a caller passes the access of its viewer.
+    private static bool IncludeAll(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member) => true;
+
     private static MetadataSearchTestFolder CreateTree()
     {
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
@@ -41,7 +44,7 @@ public class MetadataSearchTests
         var root = CreateTree();
 
         // Act
-        var matches = MetadataSearch.Search(root, tag, key, value);
+        var matches = MetadataSearch.Search(root, IncludeAll, tag, key, value);
 
         // Assert
         Assert.Equal(expectedMatches, matches.Select(match => $"{match.Path}|{match.Property}"));
@@ -55,7 +58,7 @@ public class MetadataSearchTests
         var device = root.Children["Pump"];
 
         // Act
-        var matches = MetadataSearch.Search(root, key: "tags", start: device);
+        var matches = MetadataSearch.Search(root, IncludeAll, key: "tags", start: device);
 
         // Assert
         Assert.Equal(["Pump|", "Pump|Channels", "Pump/Channels[0]|"], matches.Select(match => $"{match.Path}|{match.Property}"));
@@ -68,7 +71,7 @@ public class MetadataSearchTests
         var root = CreateTree();
 
         // Act
-        var matches = MetadataSearch.Search(root, key: "tags");
+        var matches = MetadataSearch.Search(root, IncludeAll, key: "tags");
 
         // Assert
         Assert.Equal(
@@ -83,7 +86,7 @@ public class MetadataSearchTests
         var root = CreateTree();
 
         // Act
-        var tags = MetadataSearch.GetTags(root);
+        var tags = MetadataSearch.GetTags(root, IncludeAll);
 
         // Assert
         Assert.Equal(["channels-only", "floor-1", "floor-2", "Pumps", "Root"], tags);
@@ -98,12 +101,29 @@ public class MetadataSearchTests
         bool IsExcluded(IInterceptorSubject subject) => ReferenceEquals(subject, device);
 
         // Act
-        var matches = MetadataSearch.Search(root, key: "tags", isExcluded: IsExcluded);
-        var tags = MetadataSearch.GetTags(root, IsExcluded);
+        var matches = MetadataSearch.Search(root, IncludeAll, key: "tags", isExcluded: IsExcluded);
+        var tags = MetadataSearch.GetTags(root, IncludeAll, IsExcluded);
 
         // Assert
         Assert.Equal([new MetadataSearchMatch("", null)], matches);
         Assert.Equal(["Root"], tags);
+    }
+
+    [Fact]
+    public void WhenTheMetadataOfASubjectIsNotIncluded_ThenItIsNeitherFoundNorAreItsTagsListed()
+    {
+        // Arrange
+        var root = CreateTree();
+        var device = root.Children["Pump"].TryGetRegisteredSubject()!;
+        bool IsIncluded(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member) => member.Parent != device;
+
+        // Act
+        var matches = MetadataSearch.Search(root, IsIncluded, key: "tags");
+        var tags = MetadataSearch.GetTags(root, IsIncluded);
+
+        // Assert
+        Assert.Equal(["|", "Pump/Channels[0]|"], matches.Select(match => $"{match.Path}|{match.Property}"));
+        Assert.Equal(["floor-1", "Root"], tags);
     }
 
     [Fact]
@@ -113,7 +133,7 @@ public class MetadataSearchTests
         var root = CreateTree();
 
         // Act
-        var tags = MetadataSearch.GetTags(root, isPropertyIncluded: property => property.Name != nameof(MetadataSearchTestDevice.Channels));
+        var tags = MetadataSearch.GetTags(root, IncludeAll, isPropertyIncluded: property => property.Name != nameof(MetadataSearchTestDevice.Channels));
 
         // Assert
         Assert.Equal(["floor-1", "floor-2", "Pumps", "Root"], tags);
@@ -128,7 +148,7 @@ public class MetadataSearchTests
         TestMetadata.Set(root, """{ "tags": ["", " ", "pump"] }""");
 
         // Act
-        var tags = MetadataSearch.GetTags(root);
+        var tags = MetadataSearch.GetTags(root, IncludeAll);
 
         // Assert
         Assert.Equal(["pump"], tags);

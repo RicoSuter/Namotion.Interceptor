@@ -2,7 +2,11 @@ using HomeBlaze.AI;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Agents.ClaudeCli;
 using HomeBlaze.AI.Mcp;
+using HomeBlaze.Authentication;
+using HomeBlaze.Authentication.Blazor;
+using HomeBlaze.Authentication.Blazor.Components;
 using HomeBlaze.Components;
+using HomeBlaze.Components.Operations;
 using HomeBlaze.History.Blazor;
 using HomeBlaze.History.InMemory.Blazor;
 using HomeBlaze.History.Mcp;
@@ -57,6 +61,15 @@ var seedDirectory = builder.Configuration[HomeBlazePaths.SeedDirectoryKey];
 var seededFileCount = DataDirectorySeeder.SeedIfMissing(rootConfigurationPath, seedDirectory);
 
 builder.Services.AddHomeBlazeDataProtection(builder.Configuration);
+builder.Services.AddHomeBlazeAuthentication(builder.Configuration);
+builder.Services.AddHomeBlazeWebAuthentication();
+builder.Services.AddMethodParameterEditor<HomeBlaze.Authorization.Blazor.RoleNamesParameterEditor>(
+    HomeBlaze.Authorization.AuthorizationParameterEditors.RoleNames);
+builder.Services.Configure<HomeBlazeHostOptions>(options =>
+{
+    options.AppBarEndComponents.Add(typeof(UserMenu));
+    options.BannerComponents.Add(typeof(AuthenticationBanners));
+});
 
 var pluginConfigPath = HomeBlazePaths.GetPluginConfigurationPath(builder.Configuration);
 
@@ -78,7 +91,7 @@ if (mcpEnabled)
 {
     builder.Services.AddMcpServer()
         .WithHttpTransport(options => options.Stateless = true)
-        .WithHomeBlazeMcpTools(isReadOnly: builder.Configuration.GetValue("McpServer:ReadOnly", true));
+        .WithHomeBlazeMcpTools();
 }
 
 // Add services to the container.
@@ -94,6 +107,13 @@ var app = builder.Build();
 if (seededFileCount > 0)
 {
     app.Logger.LogInformation("Seeded the data directory with {Count} default files.", seededFileCount);
+}
+
+// Resets the administrator and exits without starting the host, so that it can run while no one can sign in.
+if (args.Contains("--reset-admin", StringComparer.OrdinalIgnoreCase))
+{
+    Environment.ExitCode = await app.Services.ResetAdminAsync() ? 0 : 1;
+    return;
 }
 
 // Replaced on every start, unlike the seeded files, so the documentation always matches the running version.
@@ -157,7 +177,9 @@ typeProvider
     .AddAssembly(typeof(ClaudeCliAgent).Assembly)                                           // HomeBlaze.AI
     .AddAssembly(typeof(HomeBlaze.AI.Blazor.AgentPage).Assembly)                            // HomeBlaze.AI.Blazor
     .AddAssembly(typeof(HomeBlaze.Authorization.Role).Assembly)                             // HomeBlaze.Authorization
-    .AddAssembly(typeof(HomeBlaze.Authorization.Blazor.RoleSelector).Assembly);             // HomeBlaze.Authorization.Blazor
+    .AddAssembly(typeof(HomeBlaze.Authorization.Blazor.RoleSelector).Assembly)              // HomeBlaze.Authorization.Blazor
+    .AddAssembly(typeof(UserStore).Assembly)                                                // HomeBlaze.Authentication
+    .AddAssembly(typeof(AuthenticationWebExtensions).Assembly);                             // HomeBlaze.Authentication.Blazor
 
 // Register HomeBlaze.Plugins subject types
 typeProvider.AddAssembly(typeof(PluginManager).Assembly);
@@ -177,6 +199,8 @@ if (pluginResult != null)
 }
 
 // Configure the HTTP request pipeline.
+app.UseHomeBlazeForwardedHeaders();
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
@@ -184,17 +208,23 @@ if (!app.Environment.IsDevelopment())
     app.UseHttpsRedirection();
 }
 
+app.UseHomeBlazeWebAuthentication();
 app.UseAntiforgery();
 
-// Map the external MCP server endpoint if enabled
+// Map the external MCP server endpoint if enabled. It is not signed in with the session cookie: the key of the MCP
+// user, when it has one, guards it, and the policy of that user's roles decides what its tools may do.
 if (mcpEnabled)
 {
-    app.MapMcp("/mcp");
+    app.UseHomeBlazeMcpClientKey("/mcp");
+    app.MapMcp("/mcp").AllowAnonymous();
 }
 
 app.MapDefaultEndpoints();
-app.MapStaticAssets();
+app.MapStaticAssets().AllowAnonymous();
+app.MapHomeBlazeAccountEndpoints();
 app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
+    .AddInteractiveServerRenderMode()
+    .AddAdditionalAssemblies(typeof(AuthenticationWebExtensions).Assembly)
+    .WithHomeBlazeAccountGate();
 
 app.Run();

@@ -21,7 +21,7 @@ A **role** has a name, the names of roles it includes, `Allow` rules and `Deny` 
 
 An **action** is a name. `PermissionAction.Read` and `PermissionAction.Write` are built in; an application defines others, such as `execute` or `history`, and passes every action a rule may name as the known actions of `AuthorizationDefinition.Create`. A rule naming an unknown action fails compilation. At most 64 actions are supported, `read` and `write` included.
 
-Action names, role names and tags compare ignoring case. Type names, member globs and path patterns compare exactly.
+Action names and tags compare ignoring case. Role names, type names, member globs and path patterns compare exactly.
 
 ## How allow and deny combine
 
@@ -140,16 +140,16 @@ The tag provider may be left out when no rule selects tags.
 
 `IsAllowed` and `Explain(member, action)` throw `ArgumentException` for an action that was not among the known actions of the definition.
 
-`AuthorizationDefinition.Create` throws `AuthorizationException` for what concerns every principal, and `Compile` for what concerns the roles of one principal; the message names the role wherever there is one:
+`AuthorizationDefinition.Create` throws `AuthorizationException` for what concerns every principal, and `Compile` for what concerns the roles of one principal; the message names the role wherever there is one, and "the system rules" for a system deny rule:
 
-- `Create`, for the names of all roles: a role that is null, has no name, has a name with leading or trailing whitespace or a control or format character, has a name defined more than once, or uses the reserved name `System` (`AuthorizationPolicy.SystemRoleName`).
+- `Create`, for the names of all roles: a role that is null, has no name, has a name with leading or trailing whitespace or a control or format character, or has a name defined more than once.
 - `Create`, for the known actions: one without a name, or more than 64 in total.
 - `Create`, for the system deny rules, and `Compile`, for the rules of the principal's roles and every role they include: a rule that is null, has no actions, names an unknown action, selects tags while no tag provider is given, or has a selector value that is empty, has leading or trailing whitespace or contains a control or format character, or a path pattern that is malformed, starts with `/` or `\` that is not the provider's separator, has an empty segment, has a segment with leading or trailing whitespace, or matches no member because it is the separator alone or its last segment has an index.
 - `Compile`, for the principal's role names and the includes of their roles: an unknown or empty name or one with leading or trailing whitespace or a control or format character (an include is reported with the including role), a cycle of includes, or includes nested more than 64 levels deep.
 
 Give a principal `AuthorizationPolicy.DenyAll` when the definition cannot be created or its policy cannot be compiled, which denies every action, known or not; a policy must never partially apply. A role with an invalid rule or include fails only the principals that hold or include it; the others compile from the same definition. `policy.Roles` lists the principal's roles and every role they include, included roles first.
 
-`Explain(member, action)` returns a `PermissionDecision` naming the first allowing and the first denying role and rule, in the order of `Roles` with the system deny rules last, a system rule as the role `System`. `ExplainVisibility(subject)` returns a `VisibilityDecision`: whether the subject is visible, whether it has a readable member and, when it is hidden although it has one, the unreadable subject-holding property on the way in `DeniedProperty`. `DeniedProperty` is null when the subject is visible and also when the walk meets no unreadable link, as for subjects that only hold each other in a cycle without a root. Both are for user interfaces and tests, not hot paths. They return whole roles and rules and the live subject-holding property, so show them only to principals who may see the policy and the graph.
+`Explain(member, action)` returns a `PermissionDecision` naming the first allowing and the first denying role and rule, in the order of `Roles` with the system deny rules last. When a system deny rule denies first, `IsDeniedBySystem` is true, `DeniedBy` is null and `DeniedByRule` is that rule. `ExplainVisibility(subject)` returns a `VisibilityDecision`: whether the subject is visible, whether it has a readable member and, when it is hidden although it has one, the unreadable subject-holding property on the way in `DeniedProperty`. `DeniedProperty` is null when the subject is visible and also when the walk meets no unreadable link, as for subjects that only hold each other in a cycle without a root. Both are for user interfaces and tests, not hot paths. They return whole roles and rules and the live subject-holding property, so show them only to principals who may see the policy and the graph.
 
 ## Performance and threading
 

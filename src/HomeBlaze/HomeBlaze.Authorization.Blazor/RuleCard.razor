@@ -1,5 +1,4 @@
 @* Edits one rule of a role: a chip field per selector, a checkbox per action, and a button to remove the rule. *@
-@using HomeBlaze.Abstractions
 
 @inject AuthorizationService AuthorizationService
 @inject IDialogService DialogService
@@ -63,11 +62,9 @@
     {
         <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-1" data-testid="rule-execute-without-read-hint">@ExecuteWithoutRead.DescribeRule(executeExample)</MudAlert>
     }
-    @if (IsDeny && GetSingleMemberPaths() is { Count: > 0 } singleMemberPaths)
+    @if (IsDeny && GetDenyPathWarning() is { } denyPathWarning)
     {
-        <MudAlert Severity="Severity.Info" Dense="true" Class="mt-1" data-testid="rule-single-member-hint">
-            @DescribeSingleMemberPaths(singleMemberPaths)
-        </MudAlert>
+        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-1" data-testid="rule-single-member-hint">@denyPathWarning</MudAlert>
     }
 </MudPaper>
 
@@ -213,26 +210,16 @@
         return false;
     }
 
-    // The paths of a deny rule that match one member and leave what is below it allowed: valid, without a wildcard and
-    // naming a member that holds subjects. An entry is left to the path warning, and a value has nothing below it.
-    private List<string> GetSingleMemberPaths()
+    // The warnings of the paths of a deny rule that match one member holding subjects and leave what is below it
+    // allowed, or null.
+    private string? GetDenyPathWarning()
     {
-        var root = PathResolver.ResolveSubject("/", PathStyle.Canonical);
-        return _rule.Paths
-            .Where(pattern => !pattern.Contains('*') &&
-                AuthorizationService.ValidatePathPattern(pattern) is null &&
-                RulePaths.NamesMemberHoldingSubjects(pattern, root, AuthorizationService.PathProvider))
+        var warnings = _rule.Paths
             .Distinct(StringComparer.Ordinal)
+            .Select(AuthorizationService.GetDenyPatternWarning)
+            .OfType<string>()
             .ToList();
-    }
-
-    private string DescribeSingleMemberPaths(List<string> paths)
-    {
-        var branch = $"{AuthorizationService.PathProvider.PathSeparator}**";
-        var list = string.Join(", ", paths.Select(path => $"'{path}'"));
-        return paths.Count == 1
-            ? $"{list} matches only that one member, not what is below it; add {branch} to deny everything below it as well."
-            : $"{list} match only those members, not what is below them; add {branch} to deny everything below them as well.";
+        return warnings.Count > 0 ? string.Join(' ', warnings) : null;
     }
 
     // The rule is kept here as changed, as the parameter is set again only once the parent rendered, which a second

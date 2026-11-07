@@ -6,9 +6,13 @@
 @using System.Text.Json.Nodes
 @using HomeBlaze.Components.Inputs
 @using HomeBlaze.Storage.Abstractions.Metadata
+@using HomeBlaze.Authorization.Abstractions
+@using HomeBlaze.Components.Abstractions.Access
+@using HomeBlaze.Host.Access
 
 @inject ISnackbar Snackbar
 @inject RootManager RootManager
+@inject IUserPermissions Permissions
 
 <MudDialog data-testid="metadata-edit-dialog">
     <DialogContent>
@@ -108,7 +112,11 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel" Disabled="@_isSaving">Cancel</MudButton>
-        <MudButton Color="Color.Primary" OnClick="SaveAsync" Disabled="@_isSaving" data-testid="metadata-save">Save</MudButton>
+        @{
+            var canSave = Permissions.CanWriteMetadata(Owner, PropertyName);
+        }
+        <MudButton Color="Color.Primary" OnClick="SaveAsync" Disabled="@(_isSaving || !canSave)"
+                   title="@(canSave ? null : AccessDeniedTexts.Tooltip)" data-testid="metadata-save">Save</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -146,9 +154,10 @@
 
     protected override void OnInitialized()
     {
+        // A viewer who may write the metadata but not read it starts from empty fields; a save writes only what it changed.
         var metadata = PropertyName is null
-            ? Owner.GetMetadata()
-            : Owner.TryGetRegisteredSubject()?.TryGetProperty(PropertyName)?.GetMetadata();
+            ? Permissions.GetReadableMetadata(Owner)
+            : Owner.TryGetRegisteredSubject()?.TryGetProperty(PropertyName) is { } property ? Permissions.GetReadableMetadata(property) : null;
 
         _notes = metadata.GetString(MetadataKeys.Notes);
         foreach (var link in metadata.GetLinks())
@@ -158,9 +167,13 @@
 
         _tags.AddRange(metadata.GetTags());
 
-        // Once per dialog, as finding them walks the whole tree; only those that the tag filter lists.
+        // Once per dialog, as finding them walks the whole tree; only those that the tag filter lists to the viewer.
         _tagsInUse = RootManager.Root is { } root
-            ? MetadataSearch.GetTags(root, static subject => subject.IsExcludedFrom(ExclusionTarget.UserInterface), static property => property.IsShownAsValue())
+            ? MetadataSearch.GetTags(
+                root,
+                member => Permissions.CanShow(member.Parent) && Permissions.CanRead(member),
+                static subject => subject.IsExcludedFrom(ExclusionTarget.UserInterface),
+                property => property.IsShownAsValue() && Permissions.CanRead(property))
             : [];
         if (PropertyName is null)
         {
@@ -293,6 +306,13 @@
         if (values.Count == 0)
         {
             MudDialog?.Close(DialogResult.Ok(true));
+            return;
+        }
+
+        // Metadata is no configuration, so writing it is enough, as it is for agents.
+        if (!Permissions.CanWriteMetadata(Owner, PropertyName))
+        {
+            Snackbar.Add(AccessDeniedTexts.Write, Severity.Error);
             return;
         }
 

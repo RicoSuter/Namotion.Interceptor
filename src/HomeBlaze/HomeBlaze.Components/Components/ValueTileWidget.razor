@@ -1,6 +1,7 @@
 @using Microsoft.Extensions.DependencyInjection
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(ValueTile))]
 @implements ISubjectComponent
+@inherits PermissionsComponentBase
 @inject SubjectPathResolver PathResolver
 @inject ITimeZoneDisplay TimeZone
 @inject IServiceProvider ServiceProvider
@@ -13,9 +14,9 @@
 {
     // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var path = tile.Path;
-    var reading = ValueReader.Read(PathResolver, tile, path, tile.Map, TimeZone);
-    var labelText = _label.Render(tile.Label, PathResolver, tile, reading.Binding, TimeZone, out var labelError);
-    var subtitle = _subtitle.Render(tile.Subtitle, PathResolver, tile, reading.Binding, TimeZone, out var subtitleError);
+    var reading = ValueReader.Read(PathResolver, tile, path, tile.Map, TimeZone, Permissions);
+    var labelText = _label.Render(tile.Label, PathResolver, tile, reading.Binding, TimeZone, Permissions, out var labelError);
+    var subtitle = _subtitle.Render(tile.Subtitle, PathResolver, tile, reading.Binding, TimeZone, Permissions, out var subtitleError);
     if ((reading.MapError ?? labelError ?? subtitleError) is { } error)
     {
         <WidgetArgumentError Message="@error" />
@@ -30,7 +31,7 @@
             // The value is the large line and the label the small one below it, so that a row of tiles reads as numbers.
             // The subtitle is a third, smaller line below the label and leaves the text of a matched case as the value.
             // The tile is a button only while it can show the history of the property.
-            var canShowHistory = _viewer.CanShow(reading.Property, IsEditing);
+            var canShowHistory = _historyViewer.CanShow(reading.Property, IsEditing);
             <TileView TestId="value-tile"
                       Label="@reading.Text"
                       Subtitle="@label"
@@ -66,7 +67,7 @@
 @code {
     private readonly WidgetText _label = new(nameof(ValueTile.Label), ExpressionUse.WidgetText);
     private readonly WidgetText _subtitle = new(nameof(ValueTile.Subtitle), ExpressionUse.WidgetText);
-    private IPropertyHistoryViewer? _viewer;
+    private IPropertyHistoryViewer? _historyViewer;
     private EventCallback<MouseEventArgs> _showHistoryCallback;
 
     [Parameter]
@@ -77,7 +78,8 @@
 
     protected override void OnInitialized()
     {
-        _viewer = ServiceProvider.GetService<IPropertyHistoryViewer>();
+        base.OnInitialized();
+        _historyViewer = ServiceProvider.GetService<IPropertyHistoryViewer>();
         // Created once: binding the method group directly in the markup would allocate a new delegate on every render.
         _showHistoryCallback = EventCallback.Factory.Create<MouseEventArgs>(this, ShowHistoryAsync);
     }
@@ -90,8 +92,8 @@
         }
 
         var path = tile.Path;
-        var property = ValueReader.ResolveProperty(PathResolver, tile, path);
-        var label = _label.Render(tile.Label, PathResolver, tile, path, TimeZone, out _);
-        return _viewer.TryShowAsync(property, IsEditing, ValueReader.GetLabel(property, label, path));
+        var property = ValueReader.ResolveProperty(PathResolver, tile, path, Permissions);
+        var label = _label.Render(tile.Label, PathResolver, tile, path, TimeZone, Permissions, out _);
+        return _historyViewer.TryShowAsync(property, IsEditing, ValueReader.GetLabel(property, label, path));
     }
 }

@@ -2,14 +2,12 @@ using System.Reactive.Concurrency;
 using HomeBlaze.Authorization.Internal;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
-using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Authorization;
 
@@ -21,14 +19,13 @@ namespace HomeBlaze.Authorization;
 /// </summary>
 /// <remarks>
 /// Thread-safe. A policy, once returned, never changes: a change of an <see cref="Authorization"/> or a <see cref="Role"/>
-/// gives the next call a newly compiled one, unless an update is open, see <see cref="BeginUpdate"/>. Statuses are updated
+/// gives the next call a newly compiled one. Statuses are updated
 /// in the background after such a change.
 /// </remarks>
 public sealed class AuthorizationService : IDisposable
 {
     /// <summary>The status of every <see cref="Authorization"/> and of their roles while several exist.</summary>
-    internal const string SeveralAuthorizationsStatus =
-        "Only one Authorization subject is allowed; remove the others. Custom roles are unavailable until then.";
+    internal const string SeveralAuthorizationsStatus = AuthorizationSnapshot.SeveralAuthorizationsStatus;
 
     private readonly ISubjectRegistry _registry;
     private readonly PathProviderBase _pathProvider;
@@ -45,13 +42,13 @@ public sealed class AuthorizationService : IDisposable
     // Incremented after a new snapshot is published and after a principal changed, see WriteStatuses.
     private long _statusVersion;
 
+    private readonly GraphObserver _graphObserver;
+
     private AuthorizationSnapshot? _snapshot;
 
     // The version of the last snapshot that read the roles, 0 before the first; guarded by _rebuildLock.
     private long _builtVersion;
 
-    // The number of open updates, see BeginUpdate; changed under _rebuildLock.
-    private int _updateCount;
     private int _isRefreshScheduled;
     private volatile bool _isDisposed;
 
@@ -82,7 +79,8 @@ public sealed class AuthorizationService : IDisposable
 
         _pathPatterns = new PathPatterns(_registry, pathProvider);
         context.AddService(_pathPatterns);
-        context.AddService(new GraphObserver(this));
+        _graphObserver = new GraphObserver(Invalidate);
+        context.AddService(_graphObserver);
         _subscription = context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(OnPropertyChanged);
@@ -91,8 +89,17 @@ public sealed class AuthorizationService : IDisposable
     }
 
     /// <summary>
+    /// Changes after every change of the graph that can change whether a subject is shown, see
+    /// <see cref="AuthorizationPolicy.IsVisible(RegisteredSubject)"/>: a subject attached or detached, a reference to a
+    /// subject added or removed, a kept subject moved to another key or position, a property or attribute added at run
+    /// time, and a value of metadata, which decides whether the paths spell an attribute of metadata. A decision about
+    /// subjects made after reading it stays valid while it is unchanged; read it before the graph.
+    /// </summary>
+    public long GraphVersion => _graphObserver.GraphVersion;
+
+    /// <summary>
     /// Raised on the thread pool after the roles were compiled again because an <see cref="Authorization"/> or a
-    /// <see cref="Role"/> changed, so that <see cref="GetPolicy"/> may now give other results for the same names, for
+    /// <see cref="Role"/> changed, so that <see cref="GetPolicy(IReadOnlyCollection{string})"/> may now give other results for the same names, for
     /// example to report that a role became known or unknown. Handlers must not throw; an exception is logged and skips the
     /// handlers after it.
     /// </summary>
@@ -100,8 +107,8 @@ public sealed class AuthorizationService : IDisposable
 
     /// <summary>
     /// Gets the policy of a principal holding <paramref name="roleNames"/>, compiled with the built-in roles, the custom
-    /// roles of the single <see cref="Authorization"/> subject, the system rules and the known actions. Results are cached
-    /// per distinct set of names, ignoring case and order, until an <see cref="Authorization"/> or a <see cref="Role"/>
+    /// roles of the single <see cref="Authorization"/> subject, the system rules of agents and MCP clients (<see cref="PrincipalKind.NonHuman"/>) and the known actions. Results are cached
+    /// per distinct set of names, ignoring order, until an <see cref="Authorization"/> or a <see cref="Role"/>
     /// changes.
     /// </summary>
     /// <returns>
@@ -109,16 +116,23 @@ public sealed class AuthorizationService : IDisposable
     /// empty or unknown, a role does not compile, a named custom role cannot be used because of its name, or a custom role is
     /// named while several <see cref="Authorization"/> subjects exist.
     /// </returns>
-    public AuthorizationResult GetPolicy(IReadOnlyCollection<string> roleNames)
+    public AuthorizationResult GetPolicy(IReadOnlyCollection<string> roleNames) => GetPolicy(roleNames, PrincipalKind.NonHuman);
+
+    /// <summary>
+    /// Gets the policy of a principal of <paramref name="kind"/> holding <paramref name="roleNames"/>, compiled with the
+    /// system rules of that kind, see <see cref="SystemRules.For"/>; otherwise as <see cref="GetPolicy(IReadOnlyCollection{string})"/>.
+    /// </summary>
+    public AuthorizationResult GetPolicy(IReadOnlyCollection<string> roleNames, PrincipalKind kind)
     {
         ArgumentNullException.ThrowIfNull(roleNames);
 
-        return GetSnapshot().GetPolicy(roleNames);
+        return GetSnapshot().GetPolicy(roleNames, kind);
     }
 
     /// <summary>
-    /// Gets the policy of a principal holding only <paramref name="editedRole"/>, compiled like <see cref="GetPolicy"/> with
-    /// <paramref name="editedRole"/> in place of the saved custom role of the same name, ignoring case, or added when none
+    /// Gets the policy of a principal holding only <paramref name="editedRole"/>, compiled like <see cref="GetPolicy(IReadOnlyCollection{string})"/>, with the system rules of
+    /// agents and MCP clients (<see cref="PrincipalKind.NonHuman"/>), and with
+    /// <paramref name="editedRole"/> in place of the saved custom role of the same name, or added when none
     /// is saved. Neither policies nor statuses change. Only the last previewed instance is kept: previewing it again
     /// gives the same result without compiling it again, as long as the roles did not change and no other instance was
     /// previewed since.
@@ -127,11 +141,14 @@ public sealed class AuthorizationService : IDisposable
     /// The policy and no error, or <see cref="AuthorizationPolicy.DenyAll"/> and the status the role would have once saved:
     /// why its name cannot be used, why custom roles are unavailable, or why it does not compile.
     /// </returns>
-    public AuthorizationResult PreviewPolicy(AuthorizationRole editedRole)
+    public AuthorizationResult PreviewPolicy(AuthorizationRole editedRole) => PreviewPolicy(editedRole, PrincipalKind.NonHuman);
+
+    /// <summary>As <see cref="PreviewPolicy(AuthorizationRole)"/>, with the system rules of <paramref name="kind"/>.</summary>
+    public AuthorizationResult PreviewPolicy(AuthorizationRole editedRole, PrincipalKind kind)
     {
         ArgumentNullException.ThrowIfNull(editedRole);
 
-        return GetSnapshot().Preview(editedRole);
+        return GetSnapshot().Preview(editedRole, kind);
     }
 
     /// <summary>
@@ -157,34 +174,56 @@ public sealed class AuthorizationService : IDisposable
     }
 
     /// <summary>
+    /// Gets why a valid path pattern of a deny rule, without a wildcard, likely denies less than it says, or null: it names
+    /// a property that holds subjects, such as a reference to a device, so it denies that property alone, and the members
+    /// of the subjects below it keep their access when reached by their own paths. It reads the current graph, so the
+    /// answer changes when the graph does.
+    /// </summary>
+    public string? GetDenyPatternWarning(string pattern)
+    {
+        ArgumentNullException.ThrowIfNull(pattern);
+
+        return pattern.Contains('*') || ValidatePathPattern(pattern) is not null ? null : _pathPatterns.GetDenyWarning(pattern);
+    }
+
+    /// <summary>
+    /// Gets whether a deny rule matches at least one member of the known subjects for an action that applies to it, as
+    /// <see cref="DenyRuleMatcher"/> tells, or null when the rule does not compile. A rule that matches nothing denies
+    /// nothing. The answer is cached per rule, compared by value, until the graph changes.
+    /// </summary>
+    public bool? DenyRuleMatchesAnyMember(PermissionRule rule)
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+
+        return _pathPatterns.DenyRuleMatchesAnyMember(rule);
+    }
+
+    /// <summary>
     /// The provider that path patterns in rules are parsed with and matched against, so that a user interface can show
     /// the paths of members as rules match them.
     /// </summary>
     public PathProviderBase PathProvider => _pathProvider;
 
     /// <summary>
-    /// Gets why <paramref name="name"/> cannot name a custom role, or null: it is blank, is the name of a built-in role or
-    /// of the system rules, ignoring case, contains <c>/</c>, <c>[</c> or <c>]</c>, which would break the path of the role,
-    /// or contains an invisible character, one of the Unicode categories Format or Control, such as a zero-width space,
-    /// other than the zero-width non-joiner and joiner. Uniqueness among the custom roles is not checked.
+    /// Gets why <paramref name="name"/> cannot name a custom role, or null: it breaks the <see cref="NameRules"/> or is the
+    /// name of a built-in role. Uniqueness among the custom roles is not checked.
     /// </summary>
     public static string? GetRoleNameError(string name)
     {
         ArgumentNullException.ThrowIfNull(name);
 
-        return RoleNameRules.GetError(name);
+        return AuthorizationSnapshot.GetNameError(name, count: 1);
     }
 
     /// <summary>
     /// Gets the names of the built-in roles, followed by those of the custom roles that names resolve to, ordered by name.
-    /// A custom role whose rules do not compile is listed; its <see cref="Role.Status"/> and <see cref="GetPolicy"/> report the error.
+    /// A custom role whose rules do not compile is listed; its <see cref="Role.Status"/> and <see cref="GetPolicy(IReadOnlyCollection{string})"/> report the error.
     /// The same instance is returned until the roles are compiled again, so that a caller can tell whether they were.
     /// </summary>
     public IReadOnlyList<string> GetRoleNames() => GetSnapshot().RoleNames;
 
     /// <summary>
-    /// Gets the custom roles that exist but cannot be used, by name ignoring case, with the reason: a name that is blank,
-    /// used by more than one role, reserved for the system rules or contains a path or invisible character, see
+    /// Gets the custom roles that exist but cannot be used, by name, with the reason: a name that breaks the <see cref="NameRules"/> or is used by more than one role, see
     /// <see cref="GetRoleNameError"/>, or any custom role while several <see cref="Authorization"/>
     /// subjects exist. A custom role named like a built-in role is not listed, as the name means the built-in role.
     /// </summary>
@@ -192,7 +231,7 @@ public sealed class AuthorizationService : IDisposable
 
     /// <summary>
     /// Records the role names of a principal, such as an agent, for <see cref="Role.UsedByAgents"/>, which counts the
-    /// principals naming a role, ignoring case. The principal is compared by reference; <c>null</c> names remove it.
+    /// principals naming a role. The principal is compared by reference; <c>null</c> names remove it.
     /// </summary>
     public void SetPrincipalRoles(object principal, IReadOnlyCollection<string>? roleNames)
     {
@@ -205,21 +244,10 @@ public sealed class AuthorizationService : IDisposable
     }
 
     /// <summary>
-    /// Starts an update of several roles or of the <see cref="Authorization"/> that takes effect as a whole. Until the
-    /// returned scope and every other open one are disposed, <see cref="GetPolicy"/>, <see cref="PreviewPolicy"/>,
-    /// <see cref="GetRoleNames"/> and <see cref="GetUnavailableRoles"/> keep giving the results compiled before the update,
-    /// so that none sees a part of it. Disposing the last scope compiles the roles again in the background.
+    /// Gets the role names of every principal recorded with <see cref="SetPrincipalRoles"/>, labeled with the
+    /// principal's title, or else its type name.
     /// </summary>
-    public IDisposable BeginUpdate()
-    {
-        lock (_rebuildLock)
-        {
-            // Taking the lock also waits for a rebuild that reads the roles, which then sees none of the update.
-            _updateCount++;
-        }
-
-        return new UpdateScope(this);
-    }
+    public IReadOnlyList<PrincipalRoleSet> GetPrincipalRoleSets() => _principals.GetRoleSets();
 
     /// <summary>
     /// Stops observing property changes. Policies already returned stay valid.
@@ -232,12 +260,15 @@ public sealed class AuthorizationService : IDisposable
 
     private void OnPropertyChanged(SubjectPropertyChange change)
     {
-        // The statuses this service writes are left out, so that writing them does not start another rebuild.
+        _graphObserver.OnPropertyChanged(change);
         var name = change.Property.Name;
+
+        // The statuses this service writes are left out, so that writing them does not start another rebuild, and so are
+        // the users, which no policy reads.
         var isRoleChange = change.Property.Subject switch
         {
             Role => name is not (nameof(Role.Status) or nameof(Role.Warning) or nameof(Role.UsedByAgents)),
-            Authorization => name is not nameof(Authorization.Status),
+            Authorization => name is not (nameof(Authorization.Status) or nameof(Authorization.Users)),
             _ => false
         };
 
@@ -266,20 +297,6 @@ public sealed class AuthorizationService : IDisposable
         }
     }
 
-    private void EndUpdate()
-    {
-        bool isLastUpdate;
-        lock (_rebuildLock)
-        {
-            isLastUpdate = --_updateCount == 0;
-        }
-
-        if (isLastUpdate)
-        {
-            ScheduleRefresh();
-        }
-    }
-
     private void Refresh()
     {
         // Cleared first, so that a change during the rebuild schedules another one.
@@ -294,11 +311,11 @@ public sealed class AuthorizationService : IDisposable
         }
     }
 
-    private AuthorizationSnapshot GetSnapshot()
+    internal AuthorizationSnapshot GetSnapshot()
     {
         var version = Volatile.Read(ref _version);
         var snapshot = Volatile.Read(ref _snapshot);
-        if (snapshot is not null && (snapshot.Version == version || Volatile.Read(ref _updateCount) > 0))
+        if (snapshot is not null && snapshot.Version == version)
         {
             return snapshot;
         }
@@ -307,7 +324,7 @@ public sealed class AuthorizationService : IDisposable
         {
             version = Volatile.Read(ref _version);
             snapshot = _snapshot;
-            if (snapshot is not null && (snapshot.Version == version || _updateCount > 0))
+            if (snapshot is not null && snapshot.Version == version)
             {
                 return snapshot;
             }
@@ -398,31 +415,5 @@ public sealed class AuthorizationService : IDisposable
             }
         }
         while (statusVersion != Volatile.Read(ref _statusVersion));
-    }
-
-    private sealed class UpdateScope(AuthorizationService service) : IDisposable
-    {
-        private int _isDisposed;
-
-        public void Dispose()
-        {
-            if (Interlocked.Exchange(ref _isDisposed, 1) == 0)
-            {
-                service.EndUpdate();
-            }
-        }
-    }
-
-    // After the registry, so that a rebuild started by a change finds the subject among the known subjects, or no longer.
-    [RunsAfter(typeof(SubjectRegistry))]
-    private sealed class GraphObserver(AuthorizationService service) : ILifecycleHandler
-    {
-        public void HandleLifecycleChange(SubjectLifecycleChange change)
-        {
-            if (change.Subject is Authorization or Role)
-            {
-                service.Invalidate();
-            }
-        }
     }
 }

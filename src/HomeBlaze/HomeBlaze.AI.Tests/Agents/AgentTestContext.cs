@@ -95,14 +95,13 @@ internal sealed class TestAgentToolSource : IAgentToolSource
     /// <summary>The access policy of the last tools created.</summary>
     public IMcpAccessPolicy? LastAccessPolicy { get; private set; }
 
-    public IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly, IMcpAccessPolicy accessPolicy)
+    public IReadOnlyList<McpToolInfo> CreateTools(IMcpAccessPolicy accessPolicy)
     {
         LastAccessPolicy = accessPolicy;
         var configuration = new McpServerConfiguration
         {
             PathProvider = new StateAttributePathProvider(),
             PathPrefix = "/",
-            IsReadOnly = isReadOnly,
             AccessPolicy = accessPolicy
         };
         return new McpToolFactory(_root, configuration).CreateTools();

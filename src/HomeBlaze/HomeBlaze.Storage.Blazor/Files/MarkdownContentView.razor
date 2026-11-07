@@ -1,11 +1,13 @@
 @using HomeBlaze.Components
+@using HomeBlaze.Components.Abstractions
 @using HomeBlaze.Components.Abstractions.Attributes
 @using HomeBlaze.Components.Abstractions.TimeZones
 @using HomeBlaze.Components.Components
+@using HomeBlaze.Authorization.Abstractions
 @using HomeBlaze.Storage.Internal
 @using Namotion.Interceptor
 @inject ITimeZoneDisplay TimeZone
-@implements IDisposable
+@inherits PermissionsComponentBase
 
 @{
     var showsInsertLines = ShowsInsertLines();
@@ -117,7 +119,7 @@ else
     // Runs on every render and keeps nothing: the values of expressions are read here so that the render records them, and
     // a reload replaces the dictionary and its subjects.
     private List<MarkdownRenderSegment> GetRenderSegments(bool groupsText) =>
-        Children is null ? [] : MarkdownMarkup.GetRenderSegments(Children.Values, TimeZone, groupsText);
+        Children is null ? [] : MarkdownMarkup.GetRenderSegments(Children.Values, TimeZone, Permissions, groupsText);
 
     private Dictionary<string, object?> GetTextParameters(HtmlSegment segment, string html)
     {
@@ -231,5 +233,13 @@ else
         }
     }
 
-    public void Dispose() => Unsubscribe();
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Unsubscribe();
+        }
+
+        base.Dispose(disposing);
+    }
 }

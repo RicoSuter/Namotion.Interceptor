@@ -18,11 +18,10 @@ public class WriteAccessTests
         return room;
     }
 
-    private static McpServerConfiguration CreateConfiguration(IMcpAccessPolicy? policy, bool isReadOnly = false) => new()
+    private static McpServerConfiguration CreateConfiguration(IMcpAccessPolicy policy) => new()
     {
         PathProvider = DefaultPathProvider.Instance,
-        AccessPolicy = policy,
-        IsReadOnly = isReadOnly
+        AccessPolicy = policy
     };
 
     [Fact]
@@ -81,36 +80,94 @@ public class WriteAccessTests
     }
 
     [Fact]
-    public async Task WhenTheServerIsReadOnly_ThenTheReadOnlyErrorComesBeforeThePolicy()
+    public async Task WhenNoPolicyIsSet_ThenSetPropertyRefusesWithThePolicyMessageAndTheValueIsUnchanged()
     {
         // Arrange
         var room = CreateRoom();
-        var configuration = CreateConfiguration(TestAccessPolicy.DenyWrite(nameof(TestRoom.Temperature)), isReadOnly: true);
+        var configuration = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
 
         // Act
         var result = await McpToolCaller.CallAsync(room, configuration, "set_property", new { path = "Temperature", value = 25.0 });
 
         // Assert
-        Assert.Equal("Server is in read-only mode.", result.GetProperty("error").GetString());
+        Assert.Equal("Property is not writable: Temperature. The access policy does not allow it.", result.GetProperty("error").GetString());
+        Assert.Equal(21.5m, room.Temperature);
     }
 
     [Fact]
-    public void WhenNoPolicyIsSet_ThenIsAllowedIsTrueForEveryAction()
+    public async Task WhenNoPolicyIsSet_ThenTheToolsReadButReportNothingAsWritable()
     {
         // Arrange
         var room = CreateRoom();
-        var configuration = CreateConfiguration(policy: null);
+        var configuration = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
+
+        // Act
+        var property = await McpToolCaller.CallAsync(room, configuration, "get_property", new { path = "Device.IsOn" });
+        var browse = await McpToolCaller.CallAsync(room, configuration, "browse",
+            new { format = "json", path = "Device", depth = 0, includeProperties = true });
+
+        // Assert
+        Assert.True(property.GetProperty("value").GetBoolean());
+        Assert.False(property.TryGetProperty("isWritable", out _));
+        var properties = browse.GetProperty("result").GetProperty("properties");
+        Assert.Equal("Light", properties.GetProperty("DeviceName").GetProperty("value").GetString());
+        Assert.False(properties.GetProperty("DeviceName").TryGetProperty("isWritable", out _));
+        Assert.False(properties.GetProperty("IsOn").TryGetProperty("isWritable", out _));
+    }
+
+    [Fact]
+    public void WhenNoPolicyIsSet_ThenTheReadOnlyPolicyAllowsOnlyRead()
+    {
+        // Arrange
+        var room = CreateRoom();
+        var configuration = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
         var property = room.TryGetRegisteredSubject()!.TryGetProperty(nameof(TestRoom.Temperature))!;
 
         // Act
         var canRead = configuration.IsAllowed(property, McpAccessActions.Read);
         var canWrite = configuration.IsAllowed(property, McpAccessActions.Write);
-        var canDoAnything = configuration.IsAllowed(property, "execute");
+        var canExecute = configuration.IsAllowed(property, "execute");
+        var canReadHistory = configuration.IsAllowed(property, "history");
+        var canReadInOtherCase = configuration.IsAllowed(property, "READ");
 
         // Assert
+        Assert.Same(ReadOnlyMcpAccessPolicy.Instance, configuration.AccessPolicy);
         Assert.True(canRead);
+        Assert.False(canWrite);
+        Assert.False(canExecute);
+        Assert.False(canReadHistory);
+        Assert.False(canReadInOtherCase);
+    }
+
+    [Fact]
+    public async Task WhenThePolicyAllowsAll_ThenEveryActionIsAllowedAndSetPropertyWrites()
+    {
+        // Arrange
+        var room = CreateRoom();
+        var configuration = CreateConfiguration(AllowAllMcpAccessPolicy.Instance);
+        var property = room.TryGetRegisteredSubject()!.TryGetProperty(nameof(TestRoom.Temperature))!;
+
+        // Act
+        var canWrite = configuration.IsAllowed(property, McpAccessActions.Write);
+        var canExecute = configuration.IsAllowed(property, "execute");
+        var result = await McpToolCaller.CallAsync(room, configuration, "set_property", new { path = "Temperature", value = 25.0 });
+
+        // Assert
         Assert.True(canWrite);
-        Assert.True(canDoAnything);
+        Assert.True(canExecute);
+        Assert.True(result.GetProperty("success").GetBoolean());
+        Assert.Equal(25.0m, room.Temperature);
+    }
+
+    [Fact]
+    public void WhenThePolicyIsSetToNull_ThenTheConfigurationThrows()
+    {
+        // Act & Assert
+        Assert.Throws<ArgumentNullException>(() => new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance,
+            AccessPolicy = null!
+        });
     }
 
     [Theory]

@@ -1,4 +1,5 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Components.Abstractions.Attributes;
 using HomeBlaze.Host.Services.Display;
 using HomeBlaze.Services;
@@ -24,8 +25,8 @@ public sealed record ResolvedMetadataLink(string Title, string? Href, bool IsExt
 /// <summary>
 /// Resolves the links of metadata: a web address opens in a new tab, a mailto address in place, a path to a page opens the page, a path to a
 /// subject opens it in the browser, and a path to a property opens its subject in the browser with the row of the
-/// property highlighted. A path that leads to nothing, and an address that <see cref="MetadataLink.IsAllowedAddress"/>
-/// rejects, is a broken link.
+/// property highlighted. A path that leads to nothing, a path to a subject the viewer may not see or to a property it may
+/// not read, and an address that <see cref="MetadataLink.IsAllowedAddress"/> rejects, is a broken link.
 /// </summary>
 public sealed class MetadataLinkResolver
 {
@@ -41,9 +42,14 @@ public sealed class MetadataLinkResolver
         _componentRegistry = componentRegistry;
     }
 
-    /// <summary>Resolves the link. Without a title, a path link shows the title of its target and a web link its address.</summary>
-    public ResolvedMetadataLink Resolve(MetadataLink link)
+    /// <summary>
+    /// Resolves the link for a viewer. Without a title, a path link shows the title of its target and a web link its
+    /// address; a path to a target the viewer may not see shows the path, as a path that leads to nothing does.
+    /// </summary>
+    public ResolvedMetadataLink Resolve(MetadataLink link, IUserPermissions permissions)
     {
+        ArgumentNullException.ThrowIfNull(permissions);
+
         // A file edited by hand can hold any address, such as javascript:, which must never be opened.
         if (link.Url is { } url)
         {
@@ -54,7 +60,7 @@ public sealed class MetadataLinkResolver
         var path = link.Path ?? string.Empty;
         if (_pathResolver.ResolveSubject(path, PathStyle.Canonical) is { } subject)
         {
-            return Resolve(subject, null, link.Title);
+            return permissions.CanShow(subject) ? Resolve(subject, null, link.Title) : CreateBroken(link, path);
         }
 
         var separator = path.LastIndexOf('/');
@@ -62,17 +68,20 @@ public sealed class MetadataLinkResolver
             _pathResolver.ResolveSubject(separator == 0 ? "/" : path[..separator], PathStyle.Canonical) is { } owner &&
             owner.TryGetRegisteredSubject()?.TryGetProperty(path[(separator + 1)..]) is { } property)
         {
-            return Resolve(owner, property.Name, link.Title);
+            return permissions.CanShow(owner) && permissions.CanRead(property) ? Resolve(owner, property.Name, link.Title) : CreateBroken(link, path);
         }
 
-        return new ResolvedMetadataLink(link.Title ?? path, null, IsExternal: false);
+        return CreateBroken(link, path);
     }
 
+    private static ResolvedMetadataLink CreateBroken(MetadataLink link, string path) =>
+        new(link.Title ?? path, null, IsExternal: false);
+
     /// <summary>
-    /// Resolves a link to the subject, or to its property when <paramref name="propertyName"/> is given. Without a
-    /// title, the link shows the title of the subject, followed by the name of the property. Broken for a subject
-    /// without a path in the tree and for a property that the browser does not show as a value, see
-    /// <see cref="SubjectDisplayExtensions.IsShownAsValue"/>.
+    /// Resolves a link to the subject, or to its property when <paramref name="propertyName"/> is given, which the caller
+    /// checked for the viewer. Without a title, the link shows the title of the subject, followed by the name of the
+    /// property. Broken for a subject without a path in the tree and for a property that the browser does not show as a
+    /// value, see <see cref="SubjectDisplayExtensions.IsShownAsValue"/>.
     /// </summary>
     public ResolvedMetadataLink Resolve(IInterceptorSubject subject, string? propertyName, string? title = null)
     {

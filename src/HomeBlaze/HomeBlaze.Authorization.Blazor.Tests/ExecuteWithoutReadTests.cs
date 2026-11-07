@@ -5,7 +5,7 @@ namespace HomeBlaze.Authorization.Blazor.Tests;
 
 public sealed class ExecuteWithoutReadTests : IDisposable
 {
-    private readonly TestAuthorizationGraph _graph = TestAuthorizationGraph.Create("Kitchen", "Garden");
+    private readonly TestAuthorizationGraph _graph = TestAuthorizationGraph.Create("kitchen", "garden");
 
     public void Dispose() => _graph.Dispose();
 
@@ -18,7 +18,7 @@ public sealed class ExecuteWithoutReadTests : IDisposable
         // Arrange
         var role = new AuthorizationRole
         {
-            Name = "Kitchen",
+            Name = "kitchen",
             Includes = [builtInRole],
             Allow = [new PermissionRule { Actions = [PermissionAction.Read, PermissionAction.Write] }]
         };
@@ -34,7 +34,7 @@ public sealed class ExecuteWithoutReadTests : IDisposable
     public void WhenTheRoleAllowsExecute_ThenTheGraphIsWalked()
     {
         // Arrange
-        var role = new AuthorizationRole { Name = "Kitchen", Allow = [new PermissionRule { Actions = [AuthorizationActions.Execute] }] };
+        var role = new AuthorizationRole { Name = "kitchen", Allow = [new PermissionRule { Actions = [AuthorizationActions.Execute] }] };
 
         // Act
         var mayApply = ExecuteWithoutRead.MayApply(_graph.Service.PreviewPolicy(role).Policy);
@@ -47,8 +47,8 @@ public sealed class ExecuteWithoutReadTests : IDisposable
     public void WhenAnIncludedCustomRoleAllowsExecute_ThenTheGraphIsWalked()
     {
         // Arrange
-        _graph.GetRole("Garden").Allow = [new PermissionRule { Actions = [AuthorizationActions.Execute] }];
-        var role = new AuthorizationRole { Name = "Kitchen", Includes = ["Garden"] };
+        _graph.SetRole("garden", allow: [new PermissionRule { Actions = [AuthorizationActions.Execute] }]);
+        var role = new AuthorizationRole { Name = "kitchen", Includes = ["garden"] };
 
         // Act
         var mayApply = ExecuteWithoutRead.MayApply(_graph.Service.PreviewPolicy(role).Policy);
@@ -63,7 +63,7 @@ public sealed class ExecuteWithoutReadTests : IDisposable
         // Arrange
         var role = new AuthorizationRole
         {
-            Name = "Kitchen",
+            Name = "kitchen",
             Includes = [BuiltInRoles.OperatorName],
             Deny = [new PermissionRule { Paths = ["/Devices/Child/**"], Actions = [PermissionAction.Read] }]
         };

@@ -1,417 +1,295 @@
-using System.Reactive.Concurrency;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Authorization.Tests.Subjects;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services;
-using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking;
 using Xunit;
 
 namespace HomeBlaze.Authorization.Tests;
 
-public sealed class RoleOperationsTests : IDisposable
+public sealed class RoleOperationsTests
 {
-    private const string DetachedMessage = "The role is not part of an Authorization subject. It may have been deleted, or its file reloaded.";
+    private const string DetachedMessage = "The role is not part of an Authorization subject. It may have been deleted.";
+    private const string BuiltInRoleReason = "Built-in roles cannot be edited, renamed or deleted.";
     private const string DetachedAuthorizationMessage = "The Authorization subject is not part of the graph. It may have been deleted.";
 
-    private readonly IInterceptorSubjectContext _context = TestContext.Create();
-    private readonly ServiceProvider _serializerServices = new ServiceCollection().BuildServiceProvider();
-    private readonly RootManager _rootManager;
-    private readonly AuthorizationService _service;
-    private readonly RecordingConfigurationWriter _writer;
     private readonly Authorization _authorization;
+    private readonly RecordingRoleStore _roleStore;
 
     public RoleOperationsTests()
     {
-        var typeProvider = new TypeProvider();
-        _rootManager = new RootManager(
-            new SubjectTypeRegistry(typeProvider),
-            new ConfigurableSubjectSerializer(typeProvider, _serializerServices),
-            _context,
-            new SubjectPathResolver(() => null));
-        _service = new AuthorizationService(_context, new DefaultPathProvider('/'));
-        _authorization = new Authorization
+        _authorization = new Authorization();
+        _ = new TestRoot(TestContext.Create())
         {
-            Roles = new Dictionary<string, Role>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["Kitchen"] = new Role(),
-                ["Garden"] = new Role()
-            }
+            Children = new Dictionary<string, IInterceptorSubject> { ["Authorization"] = _authorization }
         };
-        _writer = new RecordingConfigurationWriter(_context)
-        {
-            Children = new Dictionary<string, IInterceptorSubject>
-            {
-                ["Authorization"] = _authorization,
-                ["Device"] = new TagTestSubject()
-            }
-        };
-    }
-
-    public void Dispose()
-    {
-        _service.Dispose();
-        _rootManager.Dispose();
-        _serializerServices.Dispose();
+        _authorization.ReplaceRoles([new AuthorizationRole { Name = "kitchen" }, new AuthorizationRole { Name = "garden" }]);
+        _roleStore = new RecordingRoleStore(_authorization);
     }
 
     [Fact]
-    public async Task WhenARoleIsAdded_ThenANewDictionaryHoldsTheExistingRolesAndANewEmptyOneAndTheConfigurationIsWrittenOnce()
+    public void WhenRolesAreReplaced_ThenTheBuiltInRolesComeFirstWithTheirRulesAndDescriptions()
     {
-        // Arrange
-        var previousRoles = _authorization.Roles;
-        var kitchen = _authorization.Roles["Kitchen"];
-
         // Act
-        await _authorization.AddRoleAsync(" Pantry ", _service, _rootManager);
+        _authorization.ReplaceRoles([new AuthorizationRole { Name = "kitchen" }, new AuthorizationRole { Name = "garden" }]);
 
         // Assert
-        Assert.NotSame(previousRoles, _authorization.Roles);
-        Assert.Equal(["Kitchen", "Garden", "Pantry"], _authorization.Roles.Keys);
-        Assert.Same(kitchen, _authorization.Roles["kitchen"]);
-        Assert.Empty(_authorization.Roles["Pantry"].Allow);
-        var write = Assert.Single(_writer.Writes);
-        Assert.Same(_authorization, write.Subject);
-        Assert.Equal(["Kitchen", "Garden", "Pantry"], write.RoleNames);
-    }
-
-    [Theory]
-    [InlineData("garden", "A role with this name exists already.")]
-    [InlineData("reader", "The name 'reader' is reserved for a built-in role.")]
-    [InlineData("SYSTEM", "The name 'SYSTEM' is reserved for the system rules.")]
-    [InlineData("  ", "Enter a name.")]
-    [InlineData("Kitchen/Lights", "The name 'Kitchen/Lights' cannot contain '/', '[' or ']', because it is part of the role's path.")]
-    [InlineData("Lights[0]", "The name 'Lights[0]' cannot contain '/', '[' or ']', because it is part of the role's path.")]
-    [InlineData("Pantry\u200B", "The name 'Pantry\u200B' cannot contain invisible characters, such as a zero-width space or a control character.")]
-    public async Task WhenTheNameIsInvalid_ThenAddingThrowsItsErrorAndChangesAndWritesNothing(string name, string error)
-    {
-        // Arrange
-        var previousRoles = _authorization.Roles;
-
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _authorization.AddRoleAsync(name, _service, _rootManager));
-        Assert.Equal(error, exception.Message);
-        Assert.Same(previousRoles, _authorization.Roles);
-        Assert.Empty(_writer.Writes);
-    }
-
-    [Fact]
-    public async Task WhenTheWriterWritesNothing_ThenAddingThrowsAndTheRoleStaysAdded()
-    {
-        // Arrange
-        _writer.IsWriting = false;
-
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _authorization.AddRoleAsync("Pantry", _service, _rootManager));
-        Assert.Equal("The role 'Pantry' was added, but the configuration was not saved and will be lost on restart.", exception.Message);
-        Assert.True(_authorization.Roles.ContainsKey("Pantry"));
-    }
-
-    [Fact]
-    public async Task WhenTheWriteFails_ThenAddingThrowsWithItsErrorAndTheRoleStaysAdded()
-    {
-        // Arrange
-        var writeException = new IOException("The disk is full.");
-        _writer.WriteException = writeException;
-
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _authorization.AddRoleAsync("Pantry", _service, _rootManager));
         Assert.Equal(
-            "The role 'Pantry' was added, but the configuration could not be saved (The disk is full.) and will be lost on restart.",
-            exception.Message);
-        Assert.Same(writeException, exception.InnerException);
-        Assert.True(_authorization.Roles.ContainsKey("Pantry"));
+            [BuiltInRoles.ReaderName, BuiltInRoles.OperatorName, BuiltInRoles.EverythingName, "kitchen", "garden"],
+            _authorization.Roles.Keys);
+        foreach (var builtInRole in BuiltInRoles.All)
+        {
+            var role = _authorization.Roles[builtInRole.Name];
+            Assert.True(role.IsBuiltIn);
+            Assert.Equal(BuiltInRoles.GetDescription(builtInRole.Name), role.Description);
+            Assert.Equal(builtInRole.Includes, role.Includes);
+            Assert.Equal(builtInRole.Allow, role.Allow);
+            Assert.Equal(builtInRole.Deny, role.Deny);
+            Assert.False(role.IsRenameEnabled);
+            Assert.False(role.IsDeleteEnabled);
+            Assert.Equal(BuiltInRoleReason, role.RenameDisabledReason);
+            Assert.Equal(BuiltInRoleReason, role.DeleteDisabledReason);
+        }
+
+        var kitchen = _authorization.Roles["kitchen"];
+        Assert.False(kitchen.IsBuiltIn);
+        Assert.Null(kitchen.Description);
+        Assert.True(kitchen.IsRenameEnabled);
+        Assert.True(kitchen.IsDeleteEnabled);
+        Assert.Null(kitchen.RenameDisabledReason);
+        Assert.Null(kitchen.DeleteDisabledReason);
     }
 
     [Fact]
-    public async Task WhenTheAuthorizationIsNotInTheGraph_ThenAddingThrowsAndChangesAndWritesNothing()
+    public void WhenACustomRoleHasTheNameOfABuiltInRole_ThenTheBuiltInEntryStays()
+    {
+        // Act
+        _authorization.ReplaceRoles([new AuthorizationRole { Name = BuiltInRoles.ReaderName, Allow = [new PermissionRule { Actions = [PermissionAction.Write] }] }]);
+
+        // Assert
+        var reader = _authorization.Roles[BuiltInRoles.ReaderName];
+        Assert.True(reader.IsBuiltIn);
+        Assert.Equal(BuiltInRoles.Reader.Allow, reader.Allow);
+        Assert.Equal(BuiltInRoles.All.Select(role => role.Name), _authorization.Roles.Keys);
+    }
+
+    [Fact]
+    public void WhenAnAuthorizationIsCreated_ThenItListsOnlyTheBuiltInRoles()
+    {
+        // Act
+        var authorization = new Authorization();
+
+        // Assert
+        Assert.Equal(BuiltInRoles.All.Select(role => role.Name), authorization.Roles.Keys);
+    }
+
+    [Fact]
+    public async Task WhenABuiltInRoleIsRenamedOrDeleted_ThenBothThrowWithoutAskingTheStore()
     {
         // Arrange
-        var previousRoles = _authorization.Roles;
-        _writer.Children = new Dictionary<string, IInterceptorSubject> { ["Device"] = _writer.Children["Device"] };
+        var reader = _authorization.Roles[BuiltInRoles.ReaderName];
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _authorization.AddRoleAsync("Pantry", _service, _rootManager));
+        var rename = await Assert.ThrowsAsync<InvalidOperationException>(() => reader.RenameAsync("readers", _roleStore, CancellationToken.None));
+        var delete = await Assert.ThrowsAsync<InvalidOperationException>(() => reader.DeleteAsync(_roleStore, CancellationToken.None));
+        Assert.Equal(BuiltInRoleReason, rename.Message);
+        Assert.Equal(BuiltInRoleReason, delete.Message);
+        Assert.Empty(_roleStore.Renames);
+        Assert.Empty(_roleStore.Deletes);
+    }
+
+    [Fact]
+    public void WhenTheRoleIsBuiltIn_ThenNoViewerMayOpenItsEditor()
+    {
+        // Arrange
+        ISubjectEditPermission reader = _authorization.Roles[BuiltInRoles.ReaderName];
+        ISubjectEditPermission kitchen = _authorization.Roles["kitchen"];
+
+        // Act & Assert
+        Assert.False(reader.CanEdit(UnrestrictedPermissions.Instance));
+        Assert.True(kitchen.CanEdit(UnrestrictedPermissions.Instance));
+    }
+
+    [Fact]
+    public async Task WhenARoleIsAdded_ThenTheStoreSavesItTrimmedWithoutRulesAndTheRoleIsShown()
+    {
+        // Act
+        await _authorization.AddRoleAsync(" pantry ", _roleStore, CancellationToken.None);
+
+        // Assert
+        var (originalName, role, stamp) = Assert.Single(_roleStore.Saves);
+        Assert.Null(originalName);
+        Assert.Null(stamp);
+        Assert.Equal("pantry", role.Name);
+        Assert.Empty(role.Includes);
+        Assert.Empty(role.Allow);
+        Assert.Empty(role.Deny);
+        Assert.True(_authorization.Roles.ContainsKey("pantry"));
+    }
+
+    [Fact]
+    public async Task WhenTheNameIsBlank_ThenAddingThrowsWithoutAskingTheStore()
+    {
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => _authorization.AddRoleAsync("  ", _roleStore, CancellationToken.None));
+        Assert.Equal("Enter a name.", exception.Message);
+        Assert.Empty(_roleStore.Saves);
+    }
+
+    [Fact]
+    public async Task WhenTheStoreRefusesTheRole_ThenAddingThrowsItsErrorAndTheRolesStayAsTheyWere()
+    {
+        // Arrange
+        _roleStore.Refusal = "A role named 'garden' already exists.";
+        var roles = _authorization.Roles;
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => _authorization.AddRoleAsync("garden", _roleStore, CancellationToken.None));
+        Assert.Equal("A role named 'garden' already exists.", exception.Message);
+        Assert.Same(roles, _authorization.Roles);
+    }
+
+    [Fact]
+    public async Task WhenTheAuthorizationIsNotInTheGraph_ThenAddingThrowsWithoutAskingTheStore()
+    {
+        // Arrange
+        var detached = new Authorization();
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => detached.AddRoleAsync("pantry", _roleStore, CancellationToken.None));
         Assert.Equal(DetachedAuthorizationMessage, exception.Message);
-        Assert.Same(previousRoles, _authorization.Roles);
-        Assert.Empty(_writer.Writes);
+        Assert.Empty(_roleStore.Saves);
     }
 
     [Fact]
-    public async Task WhenARoleIsAdded_ThenTheRolesAreAssignedUnderTheEditLock()
+    public async Task WhenARoleIsRenamed_ThenTheStoreRenamesItByItsHeldNameToTheTrimmedName()
     {
         // Arrange
-        var isLockHeldPerAssignment = new List<bool>();
-        using var subscription = RecordLockPerRolesAssignment(isLockHeldPerAssignment);
+        var kitchen = _authorization.Roles["kitchen"];
 
         // Act
-        await _authorization.AddRoleAsync("Pantry", _service, _rootManager);
+        await kitchen.RenameAsync(" pantry ", _roleStore, CancellationToken.None);
 
         // Assert
-        Assert.Equal([true], isLockHeldPerAssignment);
+        Assert.Equal([("kitchen", "pantry")], _roleStore.Renames);
+        Assert.True(_authorization.Roles.ContainsKey("pantry"));
+        Assert.False(_authorization.Roles.ContainsKey("kitchen"));
     }
 
     [Fact]
-    public async Task WhenTwoRolesHaveTheSameNameIgnoringCase_ThenAddingThrowsAndChangesNothing()
+    public async Task WhenTheNameIsUnchanged_ThenRenamingAsksNothingOfTheStore()
     {
         // Arrange
-        _authorization.Roles = new Dictionary<string, Role>(StringComparer.Ordinal) { ["Kitchen"] = new Role(), ["KITCHEN"] = new Role() };
-        var previousRoles = _authorization.Roles;
+        var kitchen = _authorization.Roles["kitchen"];
+
+        // Act
+        await kitchen.RenameAsync("kitchen", _roleStore, CancellationToken.None);
+
+        // Assert
+        Assert.Empty(_roleStore.Renames);
+    }
+
+    [Fact]
+    public async Task WhenTheStoreRefusesTheRename_ThenRenamingThrowsItsError()
+    {
+        // Arrange
+        _roleStore.Refusal = "The name 'reader' is reserved for a built-in role.";
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _authorization.AddRoleAsync("Pantry", _service, _rootManager));
-        Assert.Equal("Several roles are named 'KITCHEN', ignoring case. Rename or delete one of them first.", exception.Message);
-        Assert.Same(previousRoles, _authorization.Roles);
-        Assert.Empty(_writer.Writes);
+            () => _authorization.Roles["kitchen"].RenameAsync("reader", _roleStore, CancellationToken.None));
+        Assert.Equal("The name 'reader' is reserved for a built-in role.", exception.Message);
     }
 
     [Fact]
-    public async Task WhenOneOfTwoRolesWithTheSameNameIgnoringCaseIsDeleted_ThenTheOtherStays()
+    public async Task WhenTheRenameIsCommittedWithAWarning_ThenRenamingThrowsTheWarning()
     {
         // Arrange
-        var upper = new Role();
-        _authorization.Roles = new Dictionary<string, Role>(StringComparer.Ordinal) { ["Kitchen"] = new Role(), ["KITCHEN"] = upper };
-        var lower = _authorization.Roles["Kitchen"];
-
-        // Act
-        await lower.DeleteAsync(_service, _rootManager);
-
-        // Assert
-        Assert.Equal(["KITCHEN"], _authorization.Roles.Keys);
-        Assert.Same(upper, _authorization.Roles["kitchen"]);
-    }
-
-    [Fact]
-    public async Task WhenARoleIsRenamed_ThenTheSameRoleWithItsRulesIsHeldUnderTheNewNameAndTheConfigurationIsWrittenOnce()
-    {
-        // Arrange
-        var kitchen = _authorization.Roles["Kitchen"];
-        var rule = new PermissionRule { Paths = ["/Device/**"], Actions = [PermissionAction.Read] };
-        kitchen.Allow = [rule];
-
-        // Act
-        await kitchen.RenameAsync("Pantry", _service, _rootManager);
-
-        // Assert
-        Assert.Equal(["Garden", "Pantry"], _authorization.Roles.Keys);
-        Assert.Same(kitchen, _authorization.Roles["Pantry"]);
-        Assert.Equal([rule], kitchen.Allow);
-        Assert.Equal(["Pantry"], kitchen.TryGetRegisteredSubject()!.Parents.Select(parent => parent.Index));
-        Assert.Equal(["Garden", "Pantry"], Assert.Single(_writer.Writes).RoleNames);
-    }
-
-    [Fact]
-    public async Task WhenARoleIsRenamedOnlyInCase_ThenItKeepsItsInstanceAndItsAgentsKeepTheirPolicy()
-    {
-        // Arrange
-        var kitchen = _authorization.Roles["Kitchen"];
-        kitchen.Allow = [new PermissionRule { Members = [nameof(TagTestSubject.Plain)], Actions = [PermissionAction.Read] }];
-        var plain = PlainMember();
-        Assert.True(_service.GetPolicy(["Kitchen"]).Policy.CanRead(plain));
-
-        // Act
-        await kitchen.RenameAsync("KITCHEN", _service, _rootManager);
-
-        // Assert
-        Assert.Equal(["Garden", "KITCHEN"], _authorization.Roles.Keys);
-        Assert.Same(kitchen, _authorization.Roles["KITCHEN"]);
-        Assert.Equal(["KITCHEN"], kitchen.TryGetRegisteredSubject()!.Parents.Select(parent => parent.Index));
-        var result = _service.GetPolicy(["Kitchen"]);
-        Assert.Null(result.Error);
-        Assert.True(result.Policy.CanRead(plain));
-    }
-
-    [Theory]
-    [InlineData("garden", "A role with this name exists already.")]
-    [InlineData("reader", "The name 'reader' is reserved for a built-in role.")]
-    [InlineData("  ", "Enter a name.")]
-    [InlineData("Kitchen/Lights", "The name 'Kitchen/Lights' cannot contain '/', '[' or ']', because it is part of the role's path.")]
-    [InlineData("\uFEFFPantry", "The name '\uFEFFPantry' cannot contain invisible characters, such as a zero-width space or a control character.")]
-    public async Task WhenTheNewNameIsInvalid_ThenRenamingThrowsItsErrorAndChangesAndWritesNothing(string name, string error)
-    {
-        // Arrange
-        var previousRoles = _authorization.Roles;
+        _roleStore.Warning = "The role was renamed to 'pantry' and the principals use the new name, but it could not be saved everywhere.";
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _authorization.Roles["Kitchen"].RenameAsync(name, _service, _rootManager));
-        Assert.Equal(error, exception.Message);
-        Assert.Same(previousRoles, _authorization.Roles);
-        Assert.Empty(_writer.Writes);
+            () => _authorization.Roles["kitchen"].RenameAsync("pantry", _roleStore, CancellationToken.None));
+        Assert.Equal(_roleStore.Warning, exception.Message);
+        Assert.True(_authorization.Roles.ContainsKey("pantry"));
     }
 
     [Fact]
-    public async Task WhenTheNameIsUnchanged_ThenRenamingAssignsAndWritesNothing()
+    public async Task WhenTheRoleWasReplacedSinceItWasShown_ThenRenamingAndDeletingItThrowWithoutAskingTheStore()
     {
-        // Arrange
-        var previousRoles = _authorization.Roles;
-
-        // Act
-        await _authorization.Roles["Kitchen"].RenameAsync(" Kitchen ", _service, _rootManager);
-
-        // Assert
-        Assert.Same(previousRoles, _authorization.Roles);
-        Assert.Empty(_writer.Writes);
-    }
-
-    [Fact]
-    public async Task WhenTheNameIsUnchangedAndAnotherRoleHasItInAnotherCase_ThenRenamingAssignsAndWritesNothing()
-    {
-        // Arrange
-        _authorization.Roles = new Dictionary<string, Role>(StringComparer.Ordinal) { ["Kitchen"] = new Role(), ["KITCHEN"] = new Role() };
-        var previousRoles = _authorization.Roles;
-
-        // Act
-        await _authorization.Roles["Kitchen"].RenameAsync("Kitchen", _service, _rootManager);
-
-        // Assert
-        Assert.Same(previousRoles, _authorization.Roles);
-        Assert.Empty(_writer.Writes);
-    }
-
-    [Fact]
-    public async Task WhenTheWriterWritesNothing_ThenRenamingThrowsAndTheRoleStaysRenamed()
-    {
-        // Arrange
-        var kitchen = _authorization.Roles["Kitchen"];
-        _writer.IsWriting = false;
+        // Arrange: the store replaces every role on each change.
+        var kitchen = _authorization.Roles["kitchen"];
+        await _authorization.AddRoleAsync("pantry", _roleStore, CancellationToken.None);
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => kitchen.RenameAsync("Pantry", _service, _rootManager));
-        Assert.Equal("The role was renamed to 'Pantry', but the configuration was not saved and will be lost on restart.", exception.Message);
-        Assert.Same(kitchen, _authorization.Roles["Pantry"]);
+        var rename = await Assert.ThrowsAsync<InvalidOperationException>(() => kitchen.RenameAsync("cellar", _roleStore, CancellationToken.None));
+        var delete = await Assert.ThrowsAsync<InvalidOperationException>(() => kitchen.DeleteAsync(_roleStore, CancellationToken.None));
+        Assert.Equal(DetachedMessage, rename.Message);
+        Assert.Equal(DetachedMessage, delete.Message);
+        Assert.Empty(_roleStore.Renames);
+        Assert.Empty(_roleStore.Deletes);
     }
 
     [Fact]
-    public async Task WhenTheWriteFails_ThenRenamingThrowsWithItsErrorAndTheRoleStaysRenamed()
+    public async Task WhenTheRoleIsReplacedWhileItsStampIsRead_ThenDeletingItThrowsWithoutAskingTheStore()
     {
-        // Arrange
-        var kitchen = _authorization.Roles["Kitchen"];
-        var writeException = new IOException("The disk is full.");
-        _writer.WriteException = writeException;
+        // Arrange: the stamp then belongs to rules this subject does not have.
+        var kitchen = _authorization.Roles["kitchen"];
+        _roleStore.StampReading = () => _authorization.ReplaceRoles(
+            [.. _authorization.Roles.Where(entry => !entry.Value.IsBuiltIn).Select(entry => new AuthorizationRole { Name = entry.Key })]);
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => kitchen.RenameAsync("Pantry", _service, _rootManager));
-        Assert.Equal(
-            "The role was renamed to 'Pantry', but the configuration could not be saved (The disk is full.) and will be lost on restart.",
-            exception.Message);
-        Assert.Same(writeException, exception.InnerException);
-        Assert.Same(kitchen, _authorization.Roles["Pantry"]);
-    }
-
-    [Fact]
-    public async Task WhenARoleIsRenamed_ThenBothAssignmentsOfTheRolesAreMadeUnderTheEditLock()
-    {
-        // Arrange
-        var isLockHeldPerAssignment = new List<bool>();
-        using var subscription = RecordLockPerRolesAssignment(isLockHeldPerAssignment);
-
-        // Act
-        await _authorization.Roles["Kitchen"].RenameAsync("Pantry", _service, _rootManager);
-
-        // Assert
-        Assert.Equal([true, true], isLockHeldPerAssignment);
-    }
-
-    [Fact]
-    public async Task WhenTheRoleWasDeleted_ThenRenamingAndDeletingItThrowAndChangeNothing()
-    {
-        // Arrange
-        var kitchen = _authorization.Roles["Kitchen"];
-        _authorization.Roles = new Dictionary<string, Role>(StringComparer.OrdinalIgnoreCase) { ["Garden"] = _authorization.Roles["Garden"] };
-
-        // Act & Assert
-        var renameException = await Assert.ThrowsAsync<InvalidOperationException>(() => kitchen.RenameAsync("Pantry", _service, _rootManager));
-        var deleteException = await Assert.ThrowsAsync<InvalidOperationException>(() => kitchen.DeleteAsync(_service, _rootManager));
-        Assert.Equal(DetachedMessage, renameException.Message);
-        Assert.Equal(DetachedMessage, deleteException.Message);
-        Assert.Equal(["Garden"], _authorization.Roles.Keys);
-        Assert.Empty(_writer.Writes);
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => kitchen.DeleteAsync(_roleStore, CancellationToken.None));
+        Assert.Equal(DetachedMessage, exception.Message);
+        Assert.Empty(_roleStore.Deletes);
     }
 
     [Fact]
     public async Task WhenTheRoleIsHeldByNoAuthorization_ThenRenamingThrows()
     {
         // Arrange
-        var role = new Role(_context);
+        var role = new Role(TestContext.Create());
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => role.RenameAsync("Pantry", _service, _rootManager));
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => role.RenameAsync("pantry", _roleStore, CancellationToken.None));
         Assert.Equal(DetachedMessage, exception.Message);
     }
 
     [Fact]
-    public async Task WhenARoleIsDeleted_ThenItIsLeftOutOfANewDictionaryAndTheConfigurationIsWrittenOnce()
+    public async Task WhenARoleIsDeleted_ThenTheStoreDeletesItWithItsStamp()
     {
         // Arrange
-        var previousRoles = _authorization.Roles;
+        var kitchen = _authorization.Roles["kitchen"];
 
         // Act
-        await _authorization.Roles["Garden"].DeleteAsync(_service, _rootManager);
+        await kitchen.DeleteAsync(_roleStore, CancellationToken.None);
 
         // Assert
-        Assert.NotSame(previousRoles, _authorization.Roles);
-        Assert.Equal(["Kitchen"], _authorization.Roles.Keys);
-        Assert.Equal(["Kitchen"], Assert.Single(_writer.Writes).RoleNames);
+        Assert.Equal([("kitchen", RecordingRoleStore.GetStamp("kitchen"))], _roleStore.Deletes);
+        Assert.False(_authorization.Roles.ContainsKey("kitchen"));
     }
 
     [Fact]
-    public async Task WhenTheWriterWritesNothing_ThenDeletingThrowsAndTheRoleStaysDeleted()
+    public async Task WhenTheStoreRefusesTheDelete_ThenDeletingThrowsItsErrorAndTheRoleStays()
     {
         // Arrange
-        _writer.IsWriting = false;
+        _roleStore.Refusal = "The role 'kitchen' is used by users or agents; remove it from them first.";
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _authorization.Roles["Garden"].DeleteAsync(_service, _rootManager));
-        Assert.Equal("The role 'Garden' was deleted, but the configuration was not saved and will be lost on restart.", exception.Message);
-        Assert.Equal(["Kitchen"], _authorization.Roles.Keys);
+            () => _authorization.Roles["kitchen"].DeleteAsync(_roleStore, CancellationToken.None));
+        Assert.Equal(_roleStore.Refusal, exception.Message);
+        Assert.True(_authorization.Roles.ContainsKey("kitchen"));
     }
 
     [Fact]
-    public async Task WhenTheWriteFails_ThenDeletingThrowsWithItsErrorAndTheRoleStaysDeleted()
-    {
-        // Arrange
-        var writeException = new IOException("The disk is full.");
-        _writer.WriteException = writeException;
-
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _authorization.Roles["Garden"].DeleteAsync(_service, _rootManager));
-        Assert.Equal(
-            "The role 'Garden' was deleted, but the configuration could not be saved (The disk is full.) and will be lost on restart.",
-            exception.Message);
-        Assert.Same(writeException, exception.InnerException);
-        Assert.Equal(["Kitchen"], _authorization.Roles.Keys);
-    }
-
-    [Fact]
-    public async Task WhenARoleThatAgentsNameIsDeleted_ThenTheirPolicyReportsItAsUnknown()
-    {
-        // Act
-        await _authorization.Roles["Garden"].DeleteAsync(_service, _rootManager);
-
-        // Assert
-        var result = _service.GetPolicy(["Garden"]);
-        Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
-        Assert.Contains("'Garden'", result.Error);
-    }
-
-    [Fact]
-    public void WhenTheOperationsAreRegistered_ThenTheyAreNamedWithoutAsyncAndRenameAndDeleteRequireConfirmation()
+    public void WhenTheOperationsAreRegistered_ThenTheyRequireAdministrationAndRenameAndDeleteRequireConfirmation()
     {
         // Arrange
         var authorization = _authorization.TryGetRegisteredSubject()!;
-        var kitchen = _authorization.Roles["Kitchen"].TryGetRegisteredSubject()!;
+        var kitchen = _authorization.Roles["kitchen"].TryGetRegisteredSubject()!;
 
         // Act
         var addRole = authorization.TryGetProperty("AddRole")?.TryGetMethodMetadata();
@@ -419,9 +297,12 @@ public sealed class RoleOperationsTests : IDisposable
         var delete = kitchen.TryGetProperty("Delete")?.TryGetMethodMetadata();
 
         // Assert
-        Assert.False(addRole!.RequiresConfirmation);
-        Assert.True(rename!.RequiresConfirmation);
-        Assert.True(delete!.RequiresConfirmation);
+        Assert.True(addRole!.RequiresAdministration);
+        Assert.True(rename!.RequiresAdministration);
+        Assert.True(delete!.RequiresAdministration);
+        Assert.False(addRole.RequiresConfirmation);
+        Assert.True(rename.RequiresConfirmation);
+        Assert.True(delete.RequiresConfirmation);
         Assert.Equal("Add Role", addRole.Title);
         Assert.Equal("Add", addRole.Icon);
         Assert.Equal("Rename", rename.Title);
@@ -434,7 +315,7 @@ public sealed class RoleOperationsTests : IDisposable
     public void WhenTheDeleteOperationOfARoleIsLookedUp_ThenItIsTheRolesDeleteOperation()
     {
         // Arrange
-        var kitchen = _authorization.Roles["Kitchen"].TryGetRegisteredSubject()!;
+        var kitchen = _authorization.Roles["kitchen"].TryGetRegisteredSubject()!;
 
         // Act
         var deleteOperation = kitchen.GetDeleteOperation(ExclusionTarget.UserInterface);
@@ -447,18 +328,72 @@ public sealed class RoleOperationsTests : IDisposable
         Assert.DoesNotContain(kitchen.GetAllMethods(ExclusionTarget.UserInterface, excludeMethodsWithPurpose: true), method => method.PropertyName == "Delete");
     }
 
-    private RegisteredSubjectProperty PlainMember() =>
-        _writer.Children["Device"].TryGetRegisteredSubject()!.TryGetProperty(nameof(TagTestSubject.Plain))!;
+    // Records the changes and, unless told to refuse, applies them to the Authorization as the role store does: every
+    // role gets a new subject.
+    private sealed class RecordingRoleStore(Authorization authorization) : IRoleStore
+    {
+        public List<(string? OriginalName, AuthorizationRole Role, string? Stamp)> Saves { get; } = [];
 
-    // Records, per assignment of Authorization.Roles, whether the edit lock is held by the assigning thread.
-    private IDisposable RecordLockPerRolesAssignment(List<bool> isLockHeldPerAssignment) =>
-        _context
-            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
-            .Subscribe(change =>
+        public List<(string OldName, string NewName)> Renames { get; } = [];
+
+        public List<(string Name, string? Stamp)> Deletes { get; } = [];
+
+        public string? Refusal { get; set; }
+
+        public string? Warning { get; set; }
+
+        public static string GetStamp(string name) => $"stamp-{name.ToUpperInvariant()}";
+
+        public Task<RoleChangeResult> SaveRoleAsync(string? originalName, AuthorizationRole role, string? concurrencyStamp, CancellationToken cancellationToken)
+        {
+            Saves.Add((originalName, role, concurrencyStamp));
+            return Task.FromResult(Apply(roles => roles.Add(role)));
+        }
+
+        public Task<RoleChangeResult> RenameRoleAsync(string oldName, string newName, CancellationToken cancellationToken)
+        {
+            Renames.Add((oldName, newName));
+            return Task.FromResult(Apply(roles =>
             {
-                if (change.Property.Name == nameof(Authorization.Roles))
+                var index = roles.FindIndex(role => string.Equals(role.Name, oldName, StringComparison.OrdinalIgnoreCase));
+                roles[index] = roles[index] with { Name = newName };
+            }));
+        }
+
+        public Task<RoleChangeResult> DeleteRoleAsync(string name, string? concurrencyStamp, CancellationToken cancellationToken)
+        {
+            Deletes.Add((name, concurrencyStamp));
+            return Task.FromResult(Apply(roles => roles.RemoveAll(role => string.Equals(role.Name, name, StringComparison.OrdinalIgnoreCase))));
+        }
+
+        /// <summary>Runs right before <see cref="GetConcurrencyStamp"/> answers.</summary>
+        public Action? StampReading { get; set; }
+
+        public string? GetConcurrencyStamp(string name)
+        {
+            StampReading?.Invoke();
+            return authorization.Roles.ContainsKey(name) ? GetStamp(name) : null;
+        }
+
+        private RoleChangeResult Apply(Action<List<AuthorizationRole>> change)
+        {
+            if (Refusal is { } refusal)
+            {
+                return new RoleChangeResult(false, refusal);
+            }
+
+            var roles = authorization.Roles
+                .Select(entry => new AuthorizationRole
                 {
-                    isLockHeldPerAssignment.Add(AuthorizationEditLock.Instance.IsHeldByCurrentThread);
-                }
-            });
+                    Name = entry.Key,
+                    Includes = [.. entry.Value.Includes],
+                    Allow = [.. entry.Value.Allow],
+                    Deny = [.. entry.Value.Deny]
+                })
+                .ToList();
+            change(roles);
+            authorization.ReplaceRoles(roles);
+            return new RoleChangeResult(true, null, Warning);
+        }
+    }
 }

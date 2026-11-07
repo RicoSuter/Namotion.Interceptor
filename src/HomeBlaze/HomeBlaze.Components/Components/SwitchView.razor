@@ -3,7 +3,7 @@
 @using HomeBlaze.Components.Controls
 @using HomeBlaze.Components.Operations
 @using HomeBlaze.Services.Display
-@implements IDisposable
+@inherits PermissionsComponentBase
 @inject PropertyWriter Writer
 @inject IDialogService DialogService
 @inject IServiceProvider ServiceProvider
@@ -19,8 +19,9 @@
     var shown = _pending is { } target ? target : value;
     var binding = new ValueBinding(property, shown, property?.Subject);
     // A path that leads nowhere tries no case, as in ValueReader.Read, so that a default case does not hide a mistake in the path.
-    var matched = binding.IsEmpty ? null : ValueMap?.FindCase(binding, PathResolver);
+    var matched = binding.IsEmpty ? null : ValueMap?.FindCase(binding, PathResolver, Permissions);
     var canToggle = false;
+    var isDenied = false;
     if (property is not null && (property.Type == typeof(bool) || property.Type == typeof(bool?)))
     {
         if (UsesOperations)
@@ -28,14 +29,17 @@
             // A toggle can only go to the other state, so only the operation for that state counts.
             var operation = isOn ? OffProperty : OnProperty;
             canToggle = operation is not null && operation.GetValue() is MethodMetadata && operation.IsMethodEnabled();
+            isDenied = canToggle && !Permissions.CanInvoke(operation!);
         }
         else
         {
             canToggle = PropertyWriter.IsWritable(property, value);
+            isDenied = canToggle && !PropertyWriter.MayWrite(Permissions, property);
         }
     }
 
-    var isDisabled = IsEditing || _pending is not null || !canToggle;
+    var isDisabled = IsEditing || _pending is not null || !canToggle || isDenied;
+    var deniedTooltip = isDenied ? AccessDeniedTexts.Tooltip : null;
     var label = ValueReader.GetLabel(property, Label, Path);
 }
 
@@ -47,7 +51,7 @@
     // An empty subtitle hides the line, while a missing one leaves it to the text of the value.
     var subtitle = Subtitle is not null
         ? Subtitle
-        : ValueMap is not null && property is not null && shown is not null ? ValueReader.GetText(binding, matched, PathResolver, TimeZone) : null;
+        : ValueMap is not null && property is not null && shown is not null ? ValueReader.GetText(binding, matched, PathResolver, TimeZone, Permissions) : null;
     var icon = shown is null
         ? Icons.Material.Filled.QuestionMark
         : MudBlazorIconResolver.ResolveOrNull(string.IsNullOrEmpty(matched?.Icon) ? Icon : matched.Icon);
@@ -67,6 +71,7 @@
               Icon="@icon"
               Color="@fill"
               TextColor="@(matched?.GetTextColor() ?? ValueColor.Default)"
+              Tooltip="@deniedTooltip"
               Disabled="@isDisabled"
               IsBusy="@(_pending is not null)"
               Badge="@Badge"
@@ -76,7 +81,7 @@ else
 {
     // A matched case without a color of its own leaves the toggle switch in the primary color.
     var color = matched?.GetColor() is { IsDefault: false } caseColor ? caseColor : (ValueColor)Color.Primary;
-    <div class="switch-widget" data-testid="switch">
+    <div class="switch-widget" data-testid="switch" title="@deniedTooltip">
         <MudSwitch T="bool"
                    @key="_resetKey"
                    Value="@(_pending ?? isOn)"
@@ -162,6 +167,7 @@ else
 
     protected override void OnInitialized()
     {
+        base.OnInitialized();
         // Created once: binding the method group directly in the markup would allocate a new delegate on every render.
         _toggleCallback = EventCallback.Factory.Create<bool>(this, ToggleAsync);
         _tileClickCallback = EventCallback.Factory.Create<MouseEventArgs>(this, ToggleFromTileAsync);
@@ -184,9 +190,9 @@ else
             {
                 Writer.TryWrite(property, requested);
             }
-            else if ((requested ? OnProperty : OffProperty)?.GetValue() is MethodMetadata method)
+            else if ((requested ? OnProperty : OffProperty) is { } operation && operation.GetValue() is MethodMetadata)
             {
-                await OperationInvoker.InvokeAsync(DialogService, ServiceProvider, method, _lifetime.Token);
+                await OperationInvoker.InvokeAsync(DialogService, ServiceProvider, Permissions, operation, _lifetime.Token);
             }
         }
         finally
@@ -201,9 +207,14 @@ else
         }
     }
 
-    public void Dispose()
+    protected override void Dispose(bool disposing)
     {
-        _lifetime.Cancel();
-        _lifetime.Dispose();
+        if (disposing)
+        {
+            _lifetime.Cancel();
+            _lifetime.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 }

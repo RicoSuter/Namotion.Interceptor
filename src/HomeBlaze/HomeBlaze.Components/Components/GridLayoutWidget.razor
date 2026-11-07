@@ -3,6 +3,7 @@
 
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(GridLayout))]
 @implements ISubjectComponent
+@inherits PermissionsComponentBase
 
 @inject IDialogService DialogService
 @inject SubjectFactory SubjectFactory
@@ -42,13 +43,14 @@
             {
                 <LayoutItemActions EditTitle="Edit Cell"
                                    OnEdit="() => EditCell(cell)"
+                                   CanDelete="@CanChangeCells"
                                    OnDelete="() => DeleteCell(cell)" />
             }
         </div>
     }
 
     @* Render empty cells for adding in edit mode *@
-    @if (IsEditing)
+    @if (IsEditing && CanChangeCells)
     {
         @foreach (var (row, col) in GetEmptyCellPositions())
         {
@@ -141,6 +143,9 @@ else
 
     private GridCell[] Cells => Grid?.Cells ?? [];
 
+    // Adding and deleting a cell replace the cells of the grid.
+    private bool CanChangeCells => Grid is { } grid && Permissions.CanAdminister(grid, nameof(GridLayout.Cells));
+
     private string GetCellStyle(GridCell cell)
     {
         var row = cell.Row.HasValue ? $"grid-row: {cell.Row.Value + 1} / span {cell.RowSpan}" : null;
@@ -188,18 +193,31 @@ else
 
     private async Task AddCellAt(int row, int column)
     {
+        // The subject goes into the layout that the gate checked, also when the parameter changes while the dialog is open.
+        if (Grid is not { } grid)
+        {
+            return;
+        }
+
         await SubjectSetupDialog.ShowAsync(DialogService, new SubjectSetupOptions
         {
+            AdministerMember = grid.TryGetRegisteredSubject()?.TryGetProperty(nameof(GridLayout.Cells)),
+            RevertBeforeSave = subject =>
+            {
+                if (grid.Cells.FirstOrDefault(item => ReferenceEquals(item.Child, subject)) is { } item)
+                {
+                    grid.Cells = grid.Cells.Where(existing => existing != item).ToArray();
+                    item.Child = null;
+                }
+            },
             BeforeSave = subject =>
             {
-                if (Grid == null) return;
-
                 var cell = SubjectFactory.CreateSubject<GridCell>();
                 cell.Row = row;
                 cell.Column = column;
                 cell.Child = subject;
 
-                Grid.Cells = [.. Cells, cell];
+                grid.Cells = [.. grid.Cells, cell];
             }
         });
     }
@@ -214,13 +232,24 @@ else
     {
         if (Grid == null) return;
 
+        if (!CanChangeCells)
+        {
+            Snackbar.Add(AccessDeniedTexts.Administer, Severity.Error);
+            return;
+        }
+
         var confirmed = await DialogService.ShowMessageBoxAsync(
             "Delete Cell",
             "Are you sure you want to delete this cell?",
             yesText: "Delete",
             cancelText: "Cancel");
 
-        if (confirmed == true)
+        // The roles may have changed while the confirmation was open.
+        if (confirmed == true && !CanChangeCells)
+        {
+            Snackbar.Add(AccessDeniedTexts.Administer, Severity.Error);
+        }
+        else if (confirmed == true)
         {
             Grid.Cells = Cells.Where(existing => existing != cell).ToArray();
 

@@ -333,7 +333,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
         {
             _developerModeService.OnChange += RefreshDeveloperMode;
             _clientConnectionService.Changed += OnClientConnectionsChanged;
-            renameRegistration = _clientConnectionService.SetRenameHandler(RenameConnectionAsync);
+            renameRegistration = _clientConnectionService.SetRenameMemberResolver(GetRenameMember);
 
             // Read after subscribing, so a change in between is not missed.
             RefreshDeveloperMode();

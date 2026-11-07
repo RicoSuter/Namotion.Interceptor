@@ -3,10 +3,10 @@ namespace Namotion.Interceptor.Authorization.Internal;
 /// <summary>Resolves role names to the roles they name and every role those include, each once, included roles first.</summary>
 internal static class RoleClosure
 {
-    /// <summary>Indexes the roles by name ignoring case, after checking that every role has a valid, unique and unreserved name.</summary>
+    /// <summary>Indexes the roles by name ordinally, after checking that every role has a valid and unique name.</summary>
     public static Dictionary<string, AuthorizationRole> Index(IReadOnlyCollection<AuthorizationRole> roles)
     {
-        var rolesByName = new Dictionary<string, AuthorizationRole>(StringComparer.OrdinalIgnoreCase);
+        var rolesByName = new Dictionary<string, AuthorizationRole>(StringComparer.Ordinal);
         foreach (var role in roles)
         {
             if (role is null)
@@ -24,11 +24,6 @@ internal static class RoleClosure
                 throw new AuthorizationException($"Role name '{role.Name}' has leading or trailing whitespace or an invisible character.");
             }
 
-            if (string.Equals(role.Name, AuthorizationPolicy.SystemRoleName, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new AuthorizationException($"Role name '{AuthorizationPolicy.SystemRoleName}' is reserved.");
-            }
-
             if (!rolesByName.TryAdd(role.Name, role))
             {
                 throw new AuthorizationException($"Role '{role.Name}' is defined more than once.");
@@ -41,7 +36,7 @@ internal static class RoleClosure
     public static List<AuthorizationRole> Resolve(IReadOnlyDictionary<string, AuthorizationRole> rolesByName, IReadOnlyCollection<string> roleNames)
     {
         var result = new List<AuthorizationRole>();
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var visited = new HashSet<string>(StringComparer.Ordinal);
         var path = new List<string>();
         foreach (var name in roleNames)
         {
@@ -86,7 +81,7 @@ internal static class RoleClosure
     {
         var role = Lookup(name, rolesByName, path);
 
-        var cycleStart = path.FindIndex(entry => string.Equals(entry, role.Name, StringComparison.OrdinalIgnoreCase));
+        var cycleStart = path.FindIndex(entry => string.Equals(entry, role.Name, StringComparison.Ordinal));
         if (cycleStart >= 0)
         {
             var cycle = string.Join(" > ", path.Skip(cycleStart).Append(role.Name));

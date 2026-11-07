@@ -156,7 +156,7 @@ public class BrowseToolTests
     }
 
     [Fact]
-    public async Task WhenNotReadOnly_ThenPropertyValuesIncludeTypeAndIsWritable()
+    public async Task WhenThePolicyAllowsAll_ThenPropertyValuesIncludeTypeAndIsWritable()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -168,7 +168,7 @@ public class BrowseToolTests
         var config = new McpServerConfiguration
         {
             PathProvider = DefaultPathProvider.Instance,
-            IsReadOnly = false
+            AccessPolicy = AllowAllMcpAccessPolicy.Instance
         };
         var factory = new McpToolFactory(room, config);
         var browseTool = factory.CreateTools().First(t => t.Name == "browse");
@@ -186,7 +186,7 @@ public class BrowseToolTests
     }
 
     [Fact]
-    public async Task WhenReadOnly_ThenIsWritableIsOmitted()
+    public async Task WhenNoPolicyIsSet_ThenIsWritableIsOmitted()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -197,8 +197,7 @@ public class BrowseToolTests
 
         var config = new McpServerConfiguration
         {
-            PathProvider = DefaultPathProvider.Instance,
-            IsReadOnly = true
+            PathProvider = DefaultPathProvider.Instance
         };
         var factory = new McpToolFactory(room, config);
         var browseTool = factory.CreateTools().First(t => t.Name == "browse");

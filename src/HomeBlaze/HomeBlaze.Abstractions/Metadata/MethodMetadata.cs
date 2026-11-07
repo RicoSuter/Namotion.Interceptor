@@ -82,6 +82,12 @@ public class MethodMetadata
     public bool RequiresConfirmation { get; init; }
 
     /// <summary>
+    /// Whether the method requires the <c>administer</c> action instead of <c>execute</c>; see
+    /// <see cref="Attributes.OperationAttribute.RequiresAdministration"/>.
+    /// </summary>
+    public bool RequiresAdministration { get; init; }
+
+    /// <summary>
     /// What the operation is for, see <see cref="OperationPurpose"/>; <see cref="OperationPurpose.None"/> for a query and
     /// for an operation with a parameter that requires input.
     /// </summary>
@@ -102,6 +108,13 @@ public class MethodMetadata
     /// For <c>Task&lt;T&gt;</c> return types this is <c>T</c>.
     /// </summary>
     public Type? ResultType { get; init; }
+
+    /// <summary>
+    /// Gets the name of the registry property a method is registered under: its name without an <c>Async</c> suffix.
+    /// </summary>
+    /// <param name="methodName">The name of the C# method, such as <c>nameof(Device.TurnOnAsync)</c>.</param>
+    public static string GetPropertyName(string methodName) =>
+        methodName.EndsWith("Async", StringComparison.Ordinal) ? methodName[..^5] : methodName;
 
     /// <summary>
     /// Gets whether the method is excluded from any of the given targets.

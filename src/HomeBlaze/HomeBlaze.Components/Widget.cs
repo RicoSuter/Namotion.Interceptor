@@ -2,6 +2,7 @@ using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
+using HomeBlaze.Authorization.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Parent;
@@ -39,8 +40,11 @@ public partial class Widget : ITitleProvider, IConfigurable
     /// <summary>
     /// The resolved subject from the path. Null if path is invalid or subject not found.
     /// </summary>
+    /// <remarks>
+    /// Checks no viewer. A component shows the subject that <see cref="ResolveSubject"/> resolves for its viewer.
+    /// </remarks>
     [Derived]
-    public IInterceptorSubject? ResolvedSubject => ResolveSubject(Path);
+    public IInterceptorSubject? ResolvedSubject => ResolveSubjectUnchecked(Path);
 
     public Widget(SubjectPathResolver pathResolver)
     {
@@ -54,25 +58,17 @@ public partial class Widget : ITitleProvider, IConfigurable
     }
 
     /// <summary>
-    /// Resolves the subject that <see cref="ResolvedSubject"/> would be for the given path, or null.
+    /// Resolves the subject that <see cref="ResolvedSubject"/> would be for the given path, or null, also when the path
+    /// ends at a reference the viewer may not read, which then renders as a path that leads nowhere.
     /// </summary>
     /// <remarks>
     /// While the widget is not in the graph, only an absolute path resolves.
     /// </remarks>
-    public IInterceptorSubject? ResolveSubject(string path)
-    {
-        if (string.IsNullOrEmpty(path))
-            return null;
+    public IInterceptorSubject? ResolveSubject(string path, IUserPermissions permissions) =>
+        string.IsNullOrEmpty(path) ? null : ValueReader.ResolveSubject(_pathResolver, this, path, permissions);
 
-        try
-        {
-            return _pathResolver.ResolveScopedSubject(path, PathStyle.Canonical, this);
-        }
-        catch
-        {
-            return null;
-        }
-    }
+    private IInterceptorSubject? ResolveSubjectUnchecked(string path) =>
+        string.IsNullOrEmpty(path) ? null : ValueReader.ResolveSubjectUnchecked(_pathResolver, this, path);
 
     /// <summary>
     /// Whether a subject is this widget or contains it at any depth. Showing such a subject inside the

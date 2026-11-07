@@ -1,6 +1,5 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(SonosPlayer))]
-@implements ISubjectComponent
-@inject ISnackbar Snackbar
+@inherits SonosWidgetBase
 
 <MudPaper Class="pa-4">
     <MudStack Spacing="2">
@@ -45,49 +44,61 @@
             </MudStack>
         </MudStack>
 
-        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
-            <MudIconButton Icon="@Icons.Material.Filled.SkipPrevious" Disabled="@(Player?.Previous_IsEnabled != true)"
-                           OnClick="@(() => RunAsync(player => player.PreviousAsync(CancellationToken.None)))" />
-            <MudIconButton Icon="@(Player?.IsPlaying == true ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)"
-                           Disabled="@(Player?.TogglePlayback_IsEnabled != true)"
-                           OnClick="@(() => RunAsync(player => player.TogglePlaybackAsync(CancellationToken.None)))" />
-            <MudIconButton Icon="@Icons.Material.Filled.SkipNext" Disabled="@(Player?.Next_IsEnabled != true)"
-                           OnClick="@(() => RunAsync(player => player.NextAsync(CancellationToken.None)))" />
-            <MudIconButton Icon="@(Player?.IsMuted == true ? Icons.Material.Filled.VolumeOff : Icons.Material.Filled.VolumeUp)"
-                           Disabled="@(!(Player?.IsMuted == true ? Player.Unmute_IsEnabled : Player?.Mute_IsEnabled == true))"
-                           OnClick="@(() => RunAsync(player => player.IsMuted == true ? player.UnmuteAsync(CancellationToken.None) : player.MuteAsync(CancellationToken.None)))" />
-            <MudSlider T="int" Min="0" Max="100" Immediate="false" Class="flex-grow-1"
-                       Disabled="@(Player?.SetVolume_IsEnabled != true)"
-                       Value="@((int)((Player?.Volume ?? 0m) * 100m))"
-                       ValueChanged="@(value => RunAsync(player => player.SetVolumeAsync(value / 100m, CancellationToken.None)))" />
-        </MudStack>
-
-        @if (Player?.HomeTheater is { } homeTheater)
+        @if (Player is { } player)
         {
-            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Wrap="Wrap.Wrap">
-                <MudSwitch T="bool" Label="Night mode" Color="Color.Primary" Size="Size.Small"
-                           Disabled="@(!homeTheater.SetNightMode_IsEnabled)"
-                           Value="@(homeTheater.NightMode == true)"
-                           ValueChanged="@(value => RunAsync(_ => homeTheater.SetNightModeAsync(value, CancellationToken.None)))" />
-                <MudSwitch T="bool" Label="Speech enhancement" Color="Color.Primary" Size="Size.Small"
-                           Disabled="@(!homeTheater.SetSpeechEnhancement_IsEnabled)"
-                           Value="@(homeTheater.SpeechEnhancement == true)"
-                           ValueChanged="@(value => RunAsync(_ => homeTheater.SetSpeechEnhancementAsync(value, CancellationToken.None)))" />
+            var muteMethod = player.IsMuted == true ? nameof(SonosPlayer.UnmuteAsync) : nameof(SonosPlayer.MuteAsync);
+            var canPrevious = CanRun(player, nameof(SonosPlayer.PreviousAsync));
+            var canTogglePlayback = CanRun(player, nameof(SonosPlayer.TogglePlaybackAsync));
+            var canNext = CanRun(player, nameof(SonosPlayer.NextAsync));
+            var canMute = CanRun(player, muteMethod);
+            var canSetVolume = CanRun(player, nameof(SonosPlayer.SetVolumeAsync));
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudIconButton Icon="@Icons.Material.Filled.SkipPrevious" Disabled="@(!player.Previous_IsEnabled || !canPrevious)"
+                               title="@(canPrevious ? null : AccessDeniedTexts.Tooltip)" data-testid="sonos-previous"
+                               OnClick="@(() => RunAsync(player, nameof(SonosPlayer.PreviousAsync)))" />
+                <MudIconButton Icon="@(player.IsPlaying == true ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)"
+                               Disabled="@(!player.TogglePlayback_IsEnabled || !canTogglePlayback)"
+                               title="@(canTogglePlayback ? null : AccessDeniedTexts.Tooltip)" data-testid="sonos-toggle-playback"
+                               OnClick="@(() => RunAsync(player, nameof(SonosPlayer.TogglePlaybackAsync)))" />
+                <MudIconButton Icon="@Icons.Material.Filled.SkipNext" Disabled="@(!player.Next_IsEnabled || !canNext)"
+                               title="@(canNext ? null : AccessDeniedTexts.Tooltip)" data-testid="sonos-next"
+                               OnClick="@(() => RunAsync(player, nameof(SonosPlayer.NextAsync)))" />
+                <MudIconButton Icon="@(player.IsMuted == true ? Icons.Material.Filled.VolumeOff : Icons.Material.Filled.VolumeUp)"
+                               Disabled="@(!(player.IsMuted == true ? player.Unmute_IsEnabled : player.Mute_IsEnabled) || !canMute)"
+                               title="@(canMute ? null : AccessDeniedTexts.Tooltip)" data-testid="sonos-mute"
+                               OnClick="@(() => RunAsync(player, muteMethod))" />
+                <MudSlider T="int" Min="0" Max="100" Immediate="false" Class="flex-grow-1"
+                           Disabled="@(!player.SetVolume_IsEnabled || !canSetVolume)"
+                           title="@(canSetVolume ? null : AccessDeniedTexts.Tooltip)" data-testid="sonos-volume"
+                           Value="@((int)((player.Volume ?? 0m) * 100m))"
+                           ValueChanged="@(value => RunAsync(player, nameof(SonosPlayer.SetVolumeAsync), value / 100m))" />
             </MudStack>
+
+            @if (player.HomeTheater is { } homeTheater)
+            {
+                var canSetNightMode = CanRun(homeTheater, nameof(SonosHomeTheater.SetNightModeAsync));
+                var canSetSpeechEnhancement = CanRun(homeTheater, nameof(SonosHomeTheater.SetSpeechEnhancementAsync));
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Wrap="Wrap.Wrap">
+                    <MudSwitch T="bool" Label="Night mode" Color="Color.Primary" Size="Size.Small"
+                               Disabled="@(!homeTheater.SetNightMode_IsEnabled || !canSetNightMode)"
+                               title="@(canSetNightMode ? null : AccessDeniedTexts.Tooltip)" data-testid="sonos-night-mode"
+                               Value="@(homeTheater.NightMode == true)"
+                               ValueChanged="@(value => RunAsync(homeTheater, nameof(SonosHomeTheater.SetNightModeAsync), value))" />
+                    <MudSwitch T="bool" Label="Speech enhancement" Color="Color.Primary" Size="Size.Small"
+                               Disabled="@(!homeTheater.SetSpeechEnhancement_IsEnabled || !canSetSpeechEnhancement)"
+                               title="@(canSetSpeechEnhancement ? null : AccessDeniedTexts.Tooltip)" data-testid="sonos-speech-enhancement"
+                               Value="@(homeTheater.SpeechEnhancement == true)"
+                               ValueChanged="@(value => RunAsync(homeTheater, nameof(SonosHomeTheater.SetSpeechEnhancementAsync), value))" />
+                </MudStack>
+            }
         }
     </MudStack>
 </MudPaper>
 
 @code {
-    [Parameter]
-    public IInterceptorSubject? Subject { get; set; }
-
     private SonosPlayer? Player => Subject as SonosPlayer;
 
     // Some browsers block the speaker's plain HTTP art on an HTTPS page, and a browser outside the speakers' network
     // cannot reach it. The placeholder then stays until the art URI changes, so a failing image is not reloaded.
     private string? _failedImageUri;
-
-    private Task RunAsync(Func<SonosPlayer, Task> command) =>
-        Player is { } player ? SonosCommands.RunAsync(Snackbar, () => command(player)) : Task.CompletedTask;
 }

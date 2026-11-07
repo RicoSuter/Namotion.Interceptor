@@ -194,7 +194,7 @@ public class AgentToolOptionsTests
 
     private sealed class ThrowingToolSource : IAgentToolSource
     {
-        public IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly, IMcpAccessPolicy accessPolicy) =>
+        public IReadOnlyList<McpToolInfo> CreateTools(IMcpAccessPolicy accessPolicy) =>
             throw new InvalidOperationException("The root subject is still loading, try again shortly.");
     }
 }

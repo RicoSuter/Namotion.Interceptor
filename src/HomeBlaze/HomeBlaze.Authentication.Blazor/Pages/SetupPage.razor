@@ -1,0 +1,23 @@
+@* The address of the setup links. A visitor whom the AccountGate stops gets the setup dialog from it; anybody else from
+   this page, in front of the app. *@
+@page "/account/setup"
+
+@inject IDialogService DialogService
+
+<PageTitle>Set up your account</PageTitle>
+
+@code {
+    [SupplyParameterFromQuery(Name = "user")]
+    private string? UserName { get; set; }
+
+    [SupplyParameterFromQuery(Name = "code")]
+    private string? Code { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await SetupDialog.ShowAsync(DialogService, UserName, Code, isClosable: true);
+        }
+    }
+}

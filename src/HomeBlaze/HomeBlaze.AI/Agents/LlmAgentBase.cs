@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
@@ -17,7 +18,7 @@ namespace HomeBlaze.AI.Agents;
 /// </summary>
 [InterceptorSubject]
 [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "The agent base coordinates configuration, triggers, the turn gate, prompts, memory, timeline and tool scoping around one lifecycle and state lock; logic that needs no agent state lives in helper types, so splitting the class would spread that shared state.")]
-public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, IMonitoredService, ITitleProvider, IIconProvider
+public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, IMonitoredService, ITitleProvider, IIconProvider, IRoleScopedSubject
 {
     /// <summary>The text of the error entry recorded for a chat message that was cancelled before a reply.</summary>
     public const string CancelledText = "Cancelled before a reply.";
@@ -34,6 +35,9 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
     /// <summary>The status message while a chat message waits for a background run or the previous chat turn to end.</summary>
     public const string WaitingStatusMessage = "Waiting for the previous turn to finish";
+
+    /// <summary>The member of <see cref="NewConversationAsync"/>, which operations are registered under without the Async suffix.</summary>
+    public const string NewConversationMemberName = "NewConversation";
 
     /// <summary>The message of the exception thrown when a chat message is sent while the agent is not running.</summary>
     public const string NotRunningText = "The agent is not running.";
@@ -80,6 +84,9 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     // overtakes the removal at the end of a run, or the reverse.
     private readonly Lock _principalLock = new();
     private bool _isPrincipalReported;
+
+    // Computed once per Roles list, which is replaced as a whole and never changed in place.
+    private volatile ScopeRolesOfRoles? _scopeRoles;
 
     /// <summary>
     /// Initializes the agent; <paramref name="supportedBackendTools"/> are the backend tools its type can run, none
@@ -159,6 +166,10 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     [State(IsDiscrete = true, Position = 3)]
     public partial bool IsBusy { get; internal set; }
 
+    /// <summary>
+    /// The result of the newest noteworthy background run. Like the conversation, it is shared only with the people who
+    /// may act through the roles of the agent, see <see cref="IRoleScopedSubject"/>.
+    /// </summary>
     [State("Last Analysis", Position = 4)]
     public partial string? LastAnalysis { get; internal set; }
 
@@ -203,6 +214,42 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     /// The backend tools this agent type can run, which are enabled by adding their names to <see cref="AllowedTools"/>.
     /// </summary>
     public IReadOnlyList<AgentBackendTool> SupportedBackendTools { get; }
+
+    /// <inheritdoc />
+    IReadOnlyCollection<string> IRoleScopedSubject.ScopeRoles
+    {
+        get
+        {
+            var roles = Roles;
+            var scope = _scopeRoles;
+            if (scope is null || !ReferenceEquals(scope.Roles, roles))
+            {
+                scope = new ScopeRolesOfRoles(
+                    roles, [.. (roles ?? []).Where(role => !string.IsNullOrWhiteSpace(role)).Distinct(StringComparer.Ordinal)]);
+                _scopeRoles = scope;
+            }
+
+            return scope.ScopeRoles;
+        }
+    }
+
+    /// <inheritdoc />
+    bool IRoleScopedSubject.IsRoleScoped(string memberName)
+    {
+        // The members that show what the background runs and the shared conversation produced, and the operations that start them.
+        switch (memberName)
+        {
+            case nameof(LastAnalysis):
+            case nameof(Timeline):
+            case nameof(Memory):
+            case nameof(StreamingText):
+            case NewConversationMemberName:
+            case nameof(RunNow):
+                return true;
+            default:
+                return false;
+        }
+    }
 
     /// <summary>The timeline of background runs and chat.</summary>
     public AgentTimeline Timeline { get; private set; }
@@ -263,14 +310,15 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
         // Outside the state lock: the authorization service may compile and write the statuses of roles.
-        var (computation, rolesResult) = GetRolesPolicy(Roles);
+        var roles = Roles;
+        var (computation, rolesResult) = GetRolesPolicy(roles);
         var rolesError = GetRolesError(rolesResult);
         lock (_stateLock)
         {
             _configurationVersion++;
             Volatile.Write(ref _normalizedWatchPaths, AgentWatchPaths.Normalize(WatchPaths));
             var previousRolesError = _rolesError;
-            StoreRolesErrorIfNewer(computation, rolesError);
+            StoreRolesErrorIfNewer(computation, roles, rolesError);
             if (_scheduler is not { } scheduler)
             {
                 return Task.CompletedTask;
@@ -481,7 +529,8 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             maxQueueDepth: null,
             logger: _logger);
 
-        var (computation, rolesResult) = GetRolesPolicy(Roles);
+        var roles = Roles;
+        var (computation, rolesResult) = GetRolesPolicy(roles);
         var rolesError = GetRolesError(rolesResult);
 
         // Published before the configuration is read, under the lock ApplyConfigurationAsync takes, so a
@@ -492,7 +541,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             stoppingToken.ThrowIfCancellationRequested();
             _scheduler = scheduler;
             _lifetime = lifetime;
-            StoreRolesErrorIfNewer(computation, rolesError);
+            StoreRolesErrorIfNewer(computation, roles, rolesError);
             Volatile.Write(ref _normalizedWatchPaths, AgentWatchPaths.Normalize(WatchPaths));
             TryApplyIntervals(scheduler);
             SetIdle();
@@ -644,10 +693,12 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         return (computation, _services.AuthorizationService.GetPolicy(roles));
     }
 
-    // The caller holds _stateLock. Keeps the error of a newer computation.
-    private void StoreRolesErrorIfNewer(long computation, string? rolesError)
+    // The caller holds _stateLock. Keeps the error of a newer computation, and only of the roles the agent still has: a
+    // computation can read the roles before a rename replaces them and take its number after the computation of the new
+    // roles. Roles is replaced as a whole, never changed in place, so a replaced list is told by reference.
+    private void StoreRolesErrorIfNewer(long computation, List<string> roles, string? rolesError)
     {
-        if (computation > _storedRolesErrorComputation)
+        if (computation > _storedRolesErrorComputation && ReferenceEquals(roles, Roles))
         {
             _storedRolesErrorComputation = computation;
             _rolesError = rolesError;
@@ -659,12 +710,13 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     {
         try
         {
-            var (computation, result) = GetRolesPolicy(Roles);
+            var roles = Roles;
+            var (computation, result) = GetRolesPolicy(roles);
             var rolesError = GetRolesError(result);
             lock (_stateLock)
             {
                 var previousRolesError = _rolesError;
-                StoreRolesErrorIfNewer(computation, rolesError);
+                StoreRolesErrorIfNewer(computation, roles, rolesError);
                 if (_scheduler is null || string.Equals(previousRolesError, _rolesError, StringComparison.Ordinal))
                 {
                     return;
@@ -816,6 +868,14 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         {
             _logger.LogWarning(exception, "A state subscriber of agent {Agent} failed.", Title);
         }
+    }
+
+    private sealed class ScopeRolesOfRoles(List<string>? roles, ImmutableArray<string> scopeRoles)
+    {
+        public List<string>? Roles { get; } = roles;
+
+        // Boxed once, so that the permissions recognize an immutable set and remember what they decided for it.
+        public IReadOnlyCollection<string> ScopeRoles { get; } = scopeRoles;
     }
 }
 

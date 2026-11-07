@@ -6,6 +6,7 @@
 @inject RootManager RootManager
 @inject ISnackbar Snackbar
 @inject IJSRuntime JsRuntime
+@inject IUserPermissions Permissions
 
 @implements IDisposable
 
@@ -69,7 +70,8 @@
             <span @onpointerenter="_refreshEditPanelIsValid" style="display: inline-block;">
                 <MudButton Color="Color.Primary"
                            Variant="Variant.Filled"
-                           Disabled="@(!CanCreate)"
+                           Disabled="@(!CanCreate || !IsCreateAllowed)"
+                           title="@(IsCreateAllowed ? null : AccessDeniedTexts.Tooltip)"
                            OnClick="Create"
                            data-testid="create-button">Create</MudButton>
             </span>
@@ -134,6 +136,12 @@
     private Func<Task> _refreshEditPanelIsValid = () => Task.CompletedTask;
 
     private bool CanCreate => _createdSubject is not null && _nameError is null && _isEditPanelValid && !_isCreating;
+
+    // Without a member there is nothing that says where the subject goes, so Create is refused.
+    private bool IsCreateAllowed =>
+        Options is not { InvokeMember: null, AdministerMember: null } &&
+        (Options.InvokeMember is not { } invokeMember || Permissions.CanInvoke(invokeMember)) &&
+        (Options.AdministerMember is not { } administerMember || Permissions.CanAdminister(administerMember));
 
     protected override void OnInitialized()
     {
@@ -260,6 +268,12 @@
 
     private async Task Create()
     {
+        if (!IsCreateAllowed)
+        {
+            Snackbar.Add(AccessDeniedTexts.Administer, Severity.Error);
+            return;
+        }
+
         // Read once, before the first await: whatever changes these fields while the create is in flight
         // must not swap the subject that is attached and returned.
         var createdSubject = _createdSubject;
@@ -289,6 +303,13 @@
             // Persisting finds its writer through the parents BeforeSave establishes.
             if (Options.BeforeSave is { } beforeSave)
             {
+                // Checked again right before the subject is attached: the roles may have changed while the edits were applied.
+                if (!IsCreateAllowed)
+                {
+                    Snackbar.Add(AccessDeniedTexts.Administer, Severity.Error);
+                    return;
+                }
+
                 try
                 {
                     beforeSave(createdSubject);
@@ -300,7 +321,16 @@
                     _isCreatedSubjectHandedOver = createdSubject.GetParents().Length > 0;
                 }
 
-                await editPanel.PersistAsync(CancellationToken.None);
+                if (!await editPanel.TryPersistAsync(CancellationToken.None))
+                {
+                    // The panel reported the refusal. An attached subject that is not saved would be lost on the next reload.
+                    Options.RevertBeforeSave?.Invoke(createdSubject);
+                    _isCreatedSubjectHandedOver = createdSubject.GetParents().Length > 0;
+                    Snackbar.Add(_isCreatedSubjectHandedOver
+                        ? "The subject was attached but could not be saved, and could not be detached again."
+                        : "The subject was not created.", Severity.Error);
+                    return;
+                }
             }
             else
             {

@@ -124,7 +124,7 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// <summary>
     /// Opens the create subject dialog to add a new subject to this folder.
     /// </summary>
-    [Operation(Title = "Create", Icon = "Add", Position = 1)]
+    [Operation(Title = "Create", Icon = "Add", Position = 1, RequiresAdministration = true)]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
         => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
 
@@ -147,7 +147,7 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// </summary>
     /// <inheritdoc cref="FluentStorageContainer.CreateMarkdownFileAsync(string, string, CancellationToken)" path="/exception"/>
     /// <exception cref="ArgumentException">The storage of this folder is not a <see cref="FluentStorageContainer"/>.</exception>
-    [Operation(Title = "Create Markdown File", Description = "Creates a new markdown file with the given name (ending in .md) and content in this folder.", Icon = "NoteAdd", Position = 2)]
+    [Operation(Title = "Create Markdown File", Description = "Creates a new markdown file with the given name (ending in .md) and content in this folder.", Icon = "NoteAdd", Position = 2, RequiresAdministration = true)]
     public Task CreateMarkdownFileAsync(string name, string content, CancellationToken cancellationToken)
         => Storage is FluentStorageContainer storage
             ? storage.CreateMarkdownFileAsync(RelativePath, name, content, cancellationToken)

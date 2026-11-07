@@ -12,8 +12,7 @@ namespace HomeBlaze.AI.Mcp;
 /// <summary>
 /// Provides edit_markdown, write_markdown and create_markdown, which call the operations ReplaceText and ReplaceContent of
 /// a Markdown file and CreateMarkdownFile of a storage folder through the same path as invoke_operation, so its
-/// argument checks, operation filter and confirmation rule apply. The tools are only offered when the configuration is
-/// not read-only.
+/// argument checks, operation filter and confirmation rule apply.
 /// </summary>
 public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
 {
@@ -94,24 +93,16 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
 
     private static readonly MarkdownTool[] Tools = [EditMarkdownTool, WriteMarkdownTool, CreateMarkdownTool];
 
-    private readonly bool _isReadOnly;
     private readonly McpMethodInvoker _invoker;
 
     /// <param name="invoker">Resolves the subjects and invokes their operations, with the operation filter of invoke_operation.</param>
-    /// <param name="isReadOnly">Whether the tools are left out.</param>
-    internal HomeBlazeMarkdownToolProvider(McpMethodInvoker invoker, bool isReadOnly)
+    internal HomeBlazeMarkdownToolProvider(McpMethodInvoker invoker)
     {
-        _isReadOnly = isReadOnly;
         _invoker = invoker;
     }
 
     public IEnumerable<McpToolInfo> GetTools()
     {
-        if (_isReadOnly)
-        {
-            yield break;
-        }
-
         foreach (var tool in Tools)
         {
             yield return new McpToolInfo

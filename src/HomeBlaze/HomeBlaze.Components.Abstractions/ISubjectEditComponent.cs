@@ -37,6 +37,13 @@ public interface ISubjectEditComponent : ISubjectComponent
     Task SaveAsync(CancellationToken cancellationToken);
 
     /// <summary>
+    /// Gets whether <see cref="SaveAsync"/> stores the changes of an existing subject itself, such as through a store of
+    /// its own, so that the host does not persist the configuration that contains the subject afterwards. False by
+    /// default. The host still checks that the viewer may administer the configuration of the subject before it saves.
+    /// </summary>
+    bool PersistsItself => false;
+
+    /// <summary>
     /// Gets the preferred dialog size for this edit component.
     /// </summary>
     string PreferredDialogSize => "Small";

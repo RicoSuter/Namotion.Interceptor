@@ -1,0 +1,439 @@
+using System.Net;
+using System.Net.Http.Headers;
+using HomeBlaze.Authorization;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Xunit;
+
+namespace HomeBlaze.Authentication.Blazor.Tests;
+
+public class AuthenticationPipelineTests
+{
+    [Fact]
+    public async Task WhenAnUnauthenticatedVisitorRequestsAProtectedEndpoint_ThenTheyAreRedirectedToTheAppWithTheReturnUrl()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        var client = host.CreateClient();
+
+        // Act
+        var response = await client.GetAsync("/protected?tab=1");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal("/?ReturnUrl=%2Fprotected%3Ftab%3D1", response.Headers.Location!.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task WhenAnUnauthenticatedRequestAcceptsJson_ThenItGets401InsteadOfARedirect()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        var client = host.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Get, "/protected");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        // Act
+        var response = await client.SendAsync(request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Null(response.Headers.Location);
+    }
+
+    [Fact]
+    public async Task WhenAVisitorWithoutRolesRequestsAPageOfTheApp_ThenTheGateOfTheAppDecidesInsteadOfTheFallbackPolicy()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        var client = host.CreateClient();
+
+        // Act
+        var page = await client.GetAsync(BannersTestPage.Path);
+        var protectedEndpoint = await client.GetAsync("/protected");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, page.StatusCode);
+        Assert.Equal(HttpStatusCode.Redirect, protectedEndpoint.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("POST", AuthenticationTestHost.HubPath + "/negotiate?negotiateVersion=1")]
+    [InlineData("GET", AuthenticationTestHost.HubPath + "/initializers")]
+    public async Task WhenAVisitorWithoutRolesOpensTheBlazorHub_ThenItIsReachable(string method, string path)
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        var client = host.CreateClient();
+
+        // Act
+        var response = await client.SendAsync(new HttpRequestMessage(new HttpMethod(method), path));
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenMoreThanTheLimitOfRequestsThatAreNotSignedInStartTheApp_ThenTheyAreRateLimited()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        using var browser = host.CreateBrowser();
+        for (var request = 0; request < UiStartRateLimit.PermitLimit; request++)
+        {
+            Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync(BannersTestPage.Path)).StatusCode);
+        }
+
+        // Act
+        var page = await browser.GetAsync(BannersTestPage.Path);
+        var hub = await browser.PostAsync(AuthenticationTestHost.HubPath + "/negotiate?negotiateVersion=1", new Dictionary<string, string>());
+        var health = await browser.GetAsync("/health");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.TooManyRequests, page.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, hub.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, health.StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenASignedInPersonStartsTheAppOftenFromOneAddress_ThenTheyAreNotRateLimited()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        using var signedOut = host.CreateBrowser();
+        for (var request = 0; request < UiStartRateLimit.PermitLimit; request++)
+        {
+            Assert.Equal(HttpStatusCode.OK, (await signedOut.GetAsync(BannersTestPage.Path)).StatusCode);
+        }
+
+        using var browser = host.CreateBrowser();
+        await host.SignInAsync(browser, AdminSeeding.AdminUserName);
+
+        // Act
+        var responses = new List<HttpStatusCode>();
+        for (var request = 0; request <= UiStartRateLimit.PermitLimit; request++)
+        {
+            responses.Add((await browser.GetAsync(BannersTestPage.Path)).StatusCode);
+        }
+
+        // Assert
+        Assert.All(responses, status => Assert.Equal(HttpStatusCode.OK, status));
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await signedOut.GetAsync(BannersTestPage.Path)).StatusCode);
+    }
+
+    [Theory]
+    [InlineData("GET", "/protected", HttpStatusCode.Forbidden)]
+    [InlineData("POST", AuthenticationTestHost.McpPath, HttpStatusCode.Forbidden)]
+    [InlineData("POST", AccountEndpoints.SignInPath, HttpStatusCode.Forbidden)]
+    [InlineData("GET", BannersTestPage.Path, HttpStatusCode.OK)]
+    [InlineData("POST", AuthenticationTestHost.HubPath + "/negotiate?negotiateVersion=1", HttpStatusCode.OK)]
+    [InlineData("POST", AccountEndpoints.PasswordPath, HttpStatusCode.BadRequest)]
+    [InlineData("POST", AccountEndpoints.LogoutPath, HttpStatusCode.BadRequest)]
+    public async Task WhenAPersonMustChangeTheirPassword_ThenOnlyTheAppAndTheAccountEndpointsAnswer(string method, string path, HttpStatusCode expected)
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        using var browser = host.CreateBrowser();
+        await AccountTestForms.SignInAsync(browser, AdminSeeding.AdminUserName, string.Empty);
+
+        // Act
+        var response = method == "GET" ? await browser.GetAsync(path) : await browser.PostAsync(path, new Dictionary<string, string>());
+
+        // Assert
+        Assert.Equal(expected, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenAnonymousHasRoles_ThenAnUnauthenticatedVisitorIsAllowed()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync(anonymousRoles: [BuiltInRoles.ReaderName]);
+        var client = host.CreateClient();
+
+        // Act
+        var response = await client.GetAsync("/protected");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("/health")]
+    [InlineData("/alive")]
+    public async Task WhenAHealthEndpointIsRequested_ThenNoSignInIsNeeded(string path)
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        var client = host.CreateClient();
+
+        // Act
+        var response = await client.GetAsync(path);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("/health")]
+    [InlineData("/alive")]
+    public async Task WhenTheDatabaseIsUnavailable_ThenTheHealthEndpointsStillAnswer(string path)
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync(databaseUnavailable: true);
+        var client = host.CreateClient();
+
+        // Act
+        var response = await client.GetAsync(path);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenTheBlazorHubIsOpenedFromAnotherOrigin_ThenItIsForbidden()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync(anonymousRoles: [BuiltInRoles.ReaderName]);
+        var client = host.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, "/_blazor/negotiate?negotiateVersion=1");
+        request.Headers.Add("Origin", "http://localhost:9999");
+
+        // Act
+        var response = await client.SendAsync(request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenTheBlazorHubIsOpenedFromTheSameOrigin_ThenTheRequestReachesTheHub()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync(anonymousRoles: [BuiltInRoles.ReaderName]);
+        var client = host.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, "/_blazor/negotiate?negotiateVersion=1");
+        request.Headers.Add("Origin", "http://localhost");
+
+        // Act
+        var response = await client.SendAsync(request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("http://localhost:9999")]
+    [InlineData("https://localhost")]
+    [InlineData("http://evil.example")]
+    [InlineData("null")]
+    public async Task WhenASignedInPersonOpensTheBlazorHubFromAnotherOrigin_ThenItIsForbidden(string origin)
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        var cookie = await host.SignInAsAdminAsync();
+        var client = host.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, "/_blazor/negotiate?negotiateVersion=1");
+        request.Headers.Add("Cookie", cookie);
+        request.Headers.Add("Origin", origin);
+
+        // Act
+        var response = await client.SendAsync(request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenASignedInPersonOpensTheBlazorHubFromTheSameOrigin_ThenTheRequestReachesTheHub()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        var cookie = await host.SignInAsAdminAsync();
+        var client = host.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, "/_blazor/negotiate?negotiateVersion=1");
+        request.Headers.Add("Cookie", cookie);
+        request.Headers.Add("Origin", "http://localhost");
+
+        // Act
+        var response = await client.SendAsync(request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenTheDatabaseIsUnavailable_ThenEveryPageShowsAuthenticationUnavailable(bool cannotBeOpened)
+    {
+        // Arrange
+        // A file in place of the folder of the database makes it impossible to create.
+        var blockingFile = Path.GetTempFileName();
+        try
+        {
+            await using var host = await AuthenticationTestHost.StartAsync(
+                databaseUnavailable: !cannotBeOpened,
+                settings: cannotBeOpened ? new Dictionary<string, string> { [nameof(AuthenticationOptions.Database)] = Path.Combine(blockingFile, "authentication.db") } : null);
+            var client = host.CreateClient();
+
+            // Act
+            var protectedResponse = await client.GetAsync("/protected");
+            var appResponse = await client.GetAsync(BannersTestPage.Path);
+
+            // Assert
+            Assert.False(host.Database.IsAvailable);
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, protectedResponse.StatusCode);
+            Assert.True(protectedResponse.Headers.CacheControl?.NoStore);
+            var page = await protectedResponse.Content.ReadAsStringAsync();
+            Assert.Contains("authentication unavailable", page, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, appResponse.StatusCode);
+            if (cannotBeOpened)
+            {
+                // The reason names no details of the error, such as the path, as visitors who are not signed in see it.
+                Assert.Contains("The authentication database cannot be opened or migrated.", page);
+                Assert.DoesNotContain(Path.GetFileName(blockingFile), page);
+            }
+            else
+            {
+                Assert.Contains("--reset-admin", page);
+            }
+        }
+        finally
+        {
+            File.Delete(blockingFile);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheCookieIsConfigured_ThenItIsHttpOnlyLaxAndSecureAsTheRequest()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+
+        // Act
+        var options = host.Services.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>().Get(IdentityConstants.ApplicationScheme);
+
+        // Assert
+        Assert.True(options.Cookie.HttpOnly);
+        Assert.Equal(SameSiteMode.Lax, options.Cookie.SameSite);
+        Assert.Equal(CookieSecurePolicy.SameAsRequest, options.Cookie.SecurePolicy);
+        Assert.Equal(TimeSpan.FromDays(14), options.ExpireTimeSpan);
+        Assert.True(options.SlidingExpiration);
+        Assert.Equal("/", options.LoginPath);
+        Assert.Equal("/", options.AccessDeniedPath);
+    }
+
+    [Fact]
+    public async Task WhenTheMcpUserHasNoKey_ThenTheMcpEndpointNeedsNone()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        var client = host.CreateClient();
+
+        // Act
+        var response = await client.PostAsync(AuthenticationTestHost.McpPath, content: null);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("wrong-key")]
+    public async Task WhenTheMcpUserHasAKey_ThenARequestWithoutItIsRefused(string? presentedKey)
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        var created = await host.AdministrationAsAdmin.CreateMcpKeyAsync(CancellationToken.None);
+        Assert.True(created.Succeeded, created.Error);
+        var client = host.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, AuthenticationTestHost.McpPath);
+        if (presentedKey is not null)
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", presentedKey);
+        }
+
+        // Act
+        var response = await client.SendAsync(request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("Bearer", Assert.Single(response.Headers.WwwAuthenticate).Scheme);
+    }
+
+    [Fact]
+    public async Task WhenTheMcpUserHasAKey_ThenARequestWithItPasses()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        var created = await host.AdministrationAsAdmin.CreateMcpKeyAsync(CancellationToken.None);
+        Assert.True(created.Succeeded, created.Error);
+        var client = host.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, AuthenticationTestHost.McpPath);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", created.McpKey);
+
+        // Act
+        var response = await client.SendAsync(request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("http://localhost:9999")]
+    [InlineData("https://localhost")]
+    [InlineData("http://evil.example")]
+    [InlineData("null")]
+    public async Task WhenTheMcpEndpointIsCalledFromAnotherOrigin_ThenItIsForbidden(string origin)
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        var client = host.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, AuthenticationTestHost.McpPath);
+        request.Headers.Add("Origin", origin);
+
+        // Act
+        var response = await client.SendAsync(request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenTheMcpEndpointIsCalledFromAnotherOriginWithTheKey_ThenItIsForbidden()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        var created = await host.AdministrationAsAdmin.CreateMcpKeyAsync(CancellationToken.None);
+        Assert.True(created.Succeeded, created.Error);
+        var client = host.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, AuthenticationTestHost.McpPath);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", created.McpKey);
+        request.Headers.Add("Origin", "http://evil.example");
+
+        // Act
+        var response = await client.SendAsync(request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenTheMcpEndpointIsCalledFromTheSameOrigin_ThenItPasses()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        var client = host.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, AuthenticationTestHost.McpPath);
+        request.Headers.Add("Origin", "http://localhost");
+
+        // Act
+        var response = await client.SendAsync(request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+}

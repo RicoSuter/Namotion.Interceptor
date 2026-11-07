@@ -137,8 +137,7 @@ internal static class AgentMetadataAccess
             return false;
         }
 
-        return configuration.AccessPolicy is null ||
-            IsMetadataReadable(configuration, storage, target, match.Path, match.Property);
+        return IsMetadataReadable(configuration, storage, target, match.Path, match.Property);
     }
 
     /// <summary>

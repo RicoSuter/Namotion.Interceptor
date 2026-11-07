@@ -14,9 +14,6 @@ namespace Namotion.Interceptor.Authorization;
 /// </summary>
 public sealed class AuthorizationPolicy
 {
-    /// <summary>Gets the name of the role that <see cref="Explain(RegisteredSubjectProperty, PermissionAction)"/> reports for a system deny rule; no role may use it.</summary>
-    public static string SystemRoleName { get; } = "System";
-
     private static readonly TypeNameCache TypeNames = new();
 
     private readonly CompiledRule[] _allow;
@@ -83,7 +80,8 @@ public sealed class AuthorizationPolicy
         var allowed = FindMatch(_allow, bit, isDeny: false, ref context);
         var denied = FindMatch(_deny, bit, isDeny: true, ref context);
         context.ReturnRentedState();
-        return new PermissionDecision(allowed is not null && denied is null, allowed?.Role, allowed?.Rule, denied?.Role, denied?.Rule);
+        return new PermissionDecision(
+            allowed is not null && denied is null, allowed?.Role, allowed?.Rule, denied?.Role, denied?.Rule, isDeniedBySystem: denied is { Role: null });
     }
 
     /// <summary>Answers <see cref="IsVisible(RegisteredSubject)"/> and, when the subject is hidden, says why.</summary>

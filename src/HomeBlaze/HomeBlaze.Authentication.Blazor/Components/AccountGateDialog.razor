@@ -1,0 +1,52 @@
+@* Shows the dialog of an outcome of the AccountGate that cannot be closed, once the circuit renders, and closes it when the
+   gate shows something else. Renders nothing itself. *@
+@implements IDisposable
+
+@inject IDialogService DialogService
+
+@code {
+    private IDialogReference? _dialog;
+    private bool _isDisposed;
+
+    [Parameter, EditorRequired]
+    public AccountGateOutcome Outcome { get; set; }
+
+    [Parameter]
+    public string? ReturnUrl { get; set; }
+
+    [Parameter]
+    public string? SetupUserName { get; set; }
+
+    [Parameter]
+    public string? SetupCode { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        var dialog = Outcome switch
+        {
+            AccountGateOutcome.SignIn => await SignInDialog.ShowAsync(DialogService, ReturnUrl, isClosable: false),
+            AccountGateOutcome.Setup => await SetupDialog.ShowAsync(DialogService, SetupUserName, SetupCode, isClosable: false),
+            AccountGateOutcome.SetPassword => await SetPasswordDialog.ShowAsync(DialogService, ReturnUrl),
+            _ => null
+        };
+
+        if (_isDisposed)
+        {
+            dialog?.Close();
+            return;
+        }
+
+        _dialog = dialog;
+    }
+
+    public void Dispose()
+    {
+        _isDisposed = true;
+        _dialog?.Close();
+    }
+}
