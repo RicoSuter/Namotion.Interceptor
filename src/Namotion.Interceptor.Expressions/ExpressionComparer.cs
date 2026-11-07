@@ -124,6 +124,8 @@ internal static class ExpressionComparer
     private static bool IsNaN(object value) =>
         (value is double number && double.IsNaN(number)) || (value is float single && float.IsNaN(single));
 
+    /// <summary>Gets the instant of a <see cref="DateTimeOffset"/> or <see cref="DateTime"/>.</summary>
+    /// <returns>False for another value, or a local time whose UTC is out of the range of <see cref="DateTime"/>.</returns>
     internal static bool TryGetInstant(object value, out DateTimeOffset instant)
     {
         switch (value)
@@ -132,8 +134,7 @@ internal static class ExpressionComparer
                 instant = dateTimeOffset;
                 return true;
             case DateTime dateTime:
-                instant = ToInstant(dateTime);
-                return true;
+                return TryConvertToInstant(dateTime, out instant);
             default:
                 instant = default;
                 return false;
@@ -141,8 +142,17 @@ internal static class ExpressionComparer
     }
 
     // A DateTime without a kind is read as UTC, matching how a text without an offset is read.
-    private static DateTimeOffset ToInstant(DateTime dateTime) =>
-        dateTime.Kind == DateTimeKind.Unspecified
-            ? new DateTimeOffset(dateTime, TimeSpan.Zero)
-            : new DateTimeOffset(dateTime);
+    private static bool TryConvertToInstant(DateTime dateTime, out DateTimeOffset instant)
+    {
+        var offset = dateTime.Kind == DateTimeKind.Local ? TimeZoneInfo.Local.GetUtcOffset(dateTime) : TimeSpan.Zero;
+        var utcTicks = dateTime.Ticks - offset.Ticks;
+        if (utcTicks < DateTime.MinValue.Ticks || utcTicks > DateTime.MaxValue.Ticks)
+        {
+            instant = default;
+            return false;
+        }
+
+        instant = new DateTimeOffset(dateTime.Ticks, offset);
+        return true;
+    }
 }

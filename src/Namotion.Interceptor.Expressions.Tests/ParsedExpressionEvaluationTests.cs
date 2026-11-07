@@ -532,6 +532,35 @@ public class ParsedExpressionEvaluationTests
         Assert.Equal(expected, result);
     }
 
+    // Which edge leaves the range depends on the offset of the local time zone; in UTC both stay in it.
+    [Theory]
+    [InlineData("Clock/Edge < Clock/Offset")]
+    [InlineData("Clock/Offset > Clock/Edge")]
+    [InlineData("Clock/Edge == Clock/Utc")]
+    [InlineData("Clock/Edge < '2026-01-01'")]
+    public void WhenLocalDateTimeHasNoInstantInRange_ThenTheComparisonIsUnknown(string text)
+    {
+        foreach (var edge in new[] { DateTime.MinValue, DateTime.MaxValue })
+        {
+            // Arrange
+            var local = DateTime.SpecifyKind(edge, DateTimeKind.Local);
+            var offset = TimeZoneInfo.Local.GetUtcOffset(local);
+            var isOutOfRange = edge == DateTime.MinValue ? offset > TimeSpan.Zero : offset < TimeSpan.Zero;
+            var values = new Dictionary<string, object?>
+            {
+                ["Clock/Edge"] = local,
+                ["Clock/Offset"] = new DateTimeOffset(2026, 11, 6, 14, 0, 0, TimeSpan.Zero),
+                ["Clock/Utc"] = new DateTime(2026, 11, 6, 13, 0, 0, DateTimeKind.Utc)
+            };
+
+            // Act
+            var result = EvaluateCondition(text, values);
+
+            // Assert
+            Assert.Equal(isOutOfRange, result is null);
+        }
+    }
+
     [Fact]
     public void WhenDurationOverflows_ThenTheComparisonIsUnknown()
     {
