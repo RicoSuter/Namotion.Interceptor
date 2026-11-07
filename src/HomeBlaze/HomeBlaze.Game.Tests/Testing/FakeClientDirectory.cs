@@ -32,6 +32,14 @@ internal sealed class FakeClientDirectory : IGameClientDirectory
         }
     }
 
+    public bool IsNamed(string id)
+    {
+        lock (_lock)
+        {
+            return _clients?.Any(client => client.Id == id && client.IsNamed) == true;
+        }
+    }
+
     public Task SendNotificationAsync(string clientId, Notification notification, CancellationToken cancellationToken)
     {
         lock (_lock)
@@ -42,10 +50,16 @@ internal sealed class FakeClientDirectory : IGameClientDirectory
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// How many times a client was renamed.
+    /// </summary>
+    public int RenameCount { get; private set; }
+
     public Task RenameAsync(string clientId, string name, CancellationToken cancellationToken)
     {
         lock (_lock)
         {
+            RenameCount++;
             var clients = _clients;
             var index = clients?.FindIndex(client => client.Id == clientId) ?? -1;
             if (clients is null || index < 0)

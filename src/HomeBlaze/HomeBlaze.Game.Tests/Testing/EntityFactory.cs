@@ -8,11 +8,12 @@ namespace HomeBlaze.Game.Tests.Testing;
 internal static class EntityFactory
 {
     /// <summary>
-    /// Creates a connected player of the client at the position.
+    /// Creates a connected player of the client at the position, with the appearance read from its subject.
     /// </summary>
     public static PlayerEntity Player(string clientId, int x, int y)
     {
         var player = new PlayerEntity(new GamePlayer(), clientId) { Area = new GameArea(x, y, GamePlayer.Size, GamePlayer.Size) };
+        player.ReadAppearance();
         player.SetConnected(true);
         return player;
     }

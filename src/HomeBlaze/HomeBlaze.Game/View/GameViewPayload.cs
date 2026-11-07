@@ -16,9 +16,13 @@ internal sealed record GameViewPayload(
     int Facing,
     string Title,
     string Color,
+    string Character,
     bool IsMovementBlocking,
     bool IsMicrophoneOn,
     bool IsAudioOn,
+    string? Animation,
+    int AnimationMode,
+    int AnimationSequence,
     IReadOnlyList<GameViewPart> Parts)
 {
     public const string PlayerKind = "player";

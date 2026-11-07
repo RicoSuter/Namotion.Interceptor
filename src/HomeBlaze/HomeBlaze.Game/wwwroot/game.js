@@ -1,5 +1,6 @@
 import { createEntities } from './game-entities.js';
 import { createInput } from './game-input.js';
+import { createRenderer } from './game-render.js';
 
 // The pages of a tab share this module, so each one owns its view by the id it passes.
 const views = new Map();
@@ -54,6 +55,15 @@ async function ensureBabylon(baseUrl) {
     await babylonLoading;
 }
 
+// A stored choice that does not parse is Auto.
+function parseGraphics(json) {
+    try {
+        return json ? JSON.parse(json) : null;
+    } catch {
+        return null;
+    }
+}
+
 function hasWebGl() {
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('webgl2') || canvas.getContext('webgl');
@@ -62,7 +72,11 @@ function hasWebGl() {
     return Boolean(context);
 }
 
-/** Starts the view with the id in options.viewId; a dispose of that id while starting releases it and returns not started without error. */
+/**
+ * Starts the view with the id in options.viewId at the graphics choice in options.graphics, a JSON string as
+ * expandGraphics in game-render.js takes it, or null for Auto. A dispose of that id while starting releases it and
+ * returns not started without error.
+ */
 export async function start(canvas, dotNet, options) {
     const viewId = options.viewId;
     dispose(viewId);
@@ -113,6 +127,19 @@ export function applyUpdate(viewId, update) {
     views.get(viewId)?.view?.applyUpdate(update);
 }
 
+/**
+ * Applies the graphics choice, as expandGraphics in game-render.js takes it, merging custom settings into those in effect;
+ * returns the graphics in effect, { preset, level, ...settings }, or null without a started view.
+ */
+export function setGraphics(viewId, choice) {
+    return views.get(viewId)?.view?.setGraphics(choice) ?? null;
+}
+
+/** The graphics in effect, { preset, level, ...settings }, or null without a started view. */
+export function getGraphics(viewId) {
+    return views.get(viewId)?.view?.renderer.getGraphics() ?? null;
+}
+
 export function dispose(viewId) {
     const handle = views.get(viewId);
     if (handle) {
@@ -129,21 +156,50 @@ class GameView {
         this.options = options;
         this.lastFrame = performance.now();
         this.fpsElement = canvas.parentElement?.querySelector('[data-game-fps]') ?? null;
-        this.lastFpsUpdate = 0;
+        this.lastFpsUpdate = performance.now();
+        this.framesSinceFpsUpdate = 0;
         this.shownFps = -1;
+        // Engine.runRenderLoop runs this on every animation frame; the renderer's frame cap decides which ones render.
+        this.loop = () => {
+            const now = performance.now();
+            if (this.renderer.shouldRender(now, this.isFocused)) {
+                this.render(now);
+            }
+        };
+        this.isFocused = document.hasFocus();
+        this.onFocus = () => {
+            this.isFocused = true;
+        };
+        this.onBlur = () => {
+            this.isFocused = false;
+        };
+        // Stops rendering in a hidden tab, where the browser also stops the animation frames, and starts again when it
+        // shows. View updates keep being applied meanwhile, since they come from the page, not from the frames.
+        this.onVisibilityChange = () => {
+            if (document.hidden) {
+                this.engine.stopRenderLoop();
+                this.canvas.dataset.gameRendering = 'paused';
+            } else {
+                const now = performance.now();
+                this.lastFrame = now;
+                this.lastFpsUpdate = now;
+                this.framesSinceFpsUpdate = 0;
+                this.renderer.resume();
+                this.engine.runRenderLoop(this.loop);
+                this.canvas.dataset.gameRendering = 'running';
+            }
+        };
     }
 
     async initialize() {
         const BABYLON = window.BABYLON;
-        this.engine = new BABYLON.Engine(this.canvas, true, { stencil: true, loseContextOnDispose: true }, true);
+        // The renderer sets the resolution from the device pixel ratio and the graphics settings.
+        this.engine = new BABYLON.Engine(this.canvas, true, { stencil: true, loseContextOnDispose: true }, false);
         this.cameraTarget = new BABYLON.Vector3();
         this.desiredCameraTarget = new BABYLON.Vector3();
         this.hasCameraTarget = false;
         this.scene = new BABYLON.Scene(this.engine);
-        const sky = new BABYLON.Color3(0.78, 0.86, 0.93);
-        this.scene.clearColor = new BABYLON.Color4(sky.r, sky.g, sky.b, 1);
         this.scene.fogMode = BABYLON.Scene.FOGMODE_LINEAR;
-        this.scene.fogColor = sky;
         this.scene.fogStart = 110;
         this.scene.fogEnd = 230;
 
@@ -154,19 +210,34 @@ class GameView {
         this.camera.maxZ = 500;
         this.camera.setTarget(BABYLON.Vector3.Zero());
 
-        const skyLight = new BABYLON.HemisphericLight('sky', new BABYLON.Vector3(0.2, 1, -0.3), this.scene);
-        skyLight.intensity = 0.65;
-        skyLight.groundColor = new BABYLON.Color3(0.35, 0.4, 0.3);
-        const sun = new BABYLON.DirectionalLight('sun', new BABYLON.Vector3(-0.5, -1, 0.7), this.scene);
-        sun.intensity = 0.75;
+        this.renderer = createRenderer(this.scene, this.camera, parseGraphics(this.options.graphics));
 
         // The canvas carries the part and model counts for tests and diagnosis.
-        this.entities = await createEntities(this.scene, { ...this.options, statsElement: this.canvas });
+        this.entities = await createEntities(this.scene, { ...this.options, renderer: this.renderer, statsElement: this.canvas });
+        this.applyEntityGraphics(this.renderer.getGraphics());
         this.input = createInput(this.dotNet, this.options, this.entities);
 
-        this.engine.runRenderLoop(() => this.render());
-        this.resizeObserver = new ResizeObserver(() => this.engine.resize());
+        window.addEventListener('focus', this.onFocus);
+        window.addEventListener('blur', this.onBlur);
+        document.addEventListener('visibilitychange', this.onVisibilityChange);
+        this.onVisibilityChange();
+        this.resizeObserver = new ResizeObserver(() => {
+            this.engine.resize();
+            this.renderer.applyResolution();
+        });
         this.resizeObserver.observe(this.canvas);
+    }
+
+    setGraphics(choice) {
+        const graphics = this.renderer.setGraphics(choice);
+        this.applyEntityGraphics(graphics);
+        return graphics;
+    }
+
+    // The entities draw the wind and the fade, the renderer everything else.
+    applyEntityGraphics(graphics) {
+        this.entities.setWind(graphics.wind);
+        this.entities.setFade(graphics.fade);
     }
 
     applyUpdate(update) {
@@ -192,9 +263,8 @@ class GameView {
         }
     }
 
-    render() {
+    render(now) {
         const BABYLON = window.BABYLON;
-        const now = performance.now();
         const elapsedSeconds = Math.min(0.1, (now - this.lastFrame) / 1000);
         this.lastFrame = now;
 
@@ -211,19 +281,23 @@ class GameView {
             this.camera.position.copyFromFloats(this.cameraTarget.x, this.cameraTarget.y + CAMERA_HEIGHT, this.cameraTarget.z - CAMERA_DISTANCE);
             this.camera.setTarget(this.cameraTarget);
             this.entities.afterCameraMoved(this.camera, now);
+            this.renderer.follow(this.cameraTarget);
         }
 
         this.scene.render();
         this.showFps(now);
     }
 
+    // Counts the rendered frames, since the engine's own rate also counts the animation frames the cap skips.
     showFps(now) {
+        this.framesSinceFpsUpdate++;
         if (!this.fpsElement || now - this.lastFpsUpdate < FPS_INTERVAL) {
             return;
         }
 
+        const fps = Math.round(this.framesSinceFpsUpdate * 1000 / (now - this.lastFpsUpdate));
         this.lastFpsUpdate = now;
-        const fps = Math.round(this.engine.getFps());
+        this.framesSinceFpsUpdate = 0;
         if (fps !== this.shownFps) {
             this.shownFps = fps;
             this.fpsElement.textContent = `${fps} FPS`;
@@ -231,9 +305,13 @@ class GameView {
     }
 
     dispose() {
+        window.removeEventListener('focus', this.onFocus);
+        window.removeEventListener('blur', this.onBlur);
+        document.removeEventListener('visibilitychange', this.onVisibilityChange);
         this.input?.dispose();
         this.resizeObserver?.disconnect();
         this.engine?.stopRenderLoop();
+        this.renderer?.dispose();
         this.entities?.dispose();
         this.scene?.dispose();
         this.engine?.dispose();

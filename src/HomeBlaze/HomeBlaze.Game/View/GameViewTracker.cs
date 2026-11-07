@@ -473,8 +473,7 @@ internal sealed class GameViewTracker
     private string NextId() => $"o{++_nextId}";
 
     /// <summary>
-    /// What the page was sent of an entity, as far as it decides whether to send it again; the color of a player follows
-    /// from its client, which never changes.
+    /// What the page was sent of an entity, as far as it decides whether to send it again.
     /// </summary>
     private struct KnownEntity
     {
@@ -500,9 +499,17 @@ internal sealed class GameViewTracker
 
         public bool IsAudioOn { get; private set; }
 
+        public string? Character { get; private set; }
+
+        public string? Color { get; private set; }
+
+        public string? Animation { get; private set; }
+
+        public (int Mode, int Sequence) AnimationRun { get; private set; }
+
         // A cached visual is the same instance, so the reference check spares the value comparison; neither allocates.
         public readonly bool IsSameAs(GameEntity entity, bool isSelf) =>
-            HasSamePlacement(entity) && HasSameState(entity, isSelf) && HasSameVoice(entity) &&
+            HasSamePlacement(entity) && HasSameState(entity, isSelf) && HasSamePlayerState(entity) &&
             Equals(Visual, GameViewPayloads.GetVisual(entity));
 
         public void TakeOver(GameEntity entity, bool isSelf)
@@ -516,6 +523,10 @@ internal sealed class GameViewTracker
             IsSelf = isSelf;
             IsMicrophoneOn = GameViewPayloads.IsMicrophoneOn(entity);
             IsAudioOn = GameViewPayloads.IsAudioOn(entity);
+            Character = GameViewPayloads.GetCharacter(entity);
+            Color = GameViewPayloads.GetColor(entity);
+            Animation = GameViewPayloads.GetAnimation(entity);
+            AnimationRun = GameViewPayloads.GetAnimationRun(entity);
         }
 
         private readonly bool HasSamePlacement(GameEntity entity) =>
@@ -523,6 +534,14 @@ internal sealed class GameViewTracker
 
         private readonly bool HasSameState(GameEntity entity, bool isSelf) =>
             IsSelf == isSelf && IsMovementBlocking == entity.IsMovementBlocking && Title == entity.Title;
+
+        private readonly bool HasSamePlayerState(GameEntity entity) => HasSameAppearance(entity) && HasSameVoice(entity) && HasSameAnimation(entity);
+
+        private readonly bool HasSameAppearance(GameEntity entity) =>
+            Character == GameViewPayloads.GetCharacter(entity) && Color == GameViewPayloads.GetColor(entity);
+
+        private readonly bool HasSameAnimation(GameEntity entity) =>
+            Animation == GameViewPayloads.GetAnimation(entity) && AnimationRun == GameViewPayloads.GetAnimationRun(entity);
 
         private readonly bool HasSameVoice(GameEntity entity) =>
             IsMicrophoneOn == GameViewPayloads.IsMicrophoneOn(entity) && IsAudioOn == GameViewPayloads.IsAudioOn(entity);

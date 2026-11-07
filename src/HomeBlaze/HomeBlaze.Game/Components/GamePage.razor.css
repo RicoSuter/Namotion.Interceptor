@@ -211,6 +211,10 @@
     margin-bottom: 0;
 }
 
+.game-panel .game-voice h5 {
+    text-align: right;
+}
+
 .game-voice-buttons {
     display: flex;
     gap: 4px;
@@ -231,9 +235,9 @@
     color: var(--mud-palette-text-secondary);
 }
 
-.game-nearby ::deep .game-nearby-rename {
-    padding: 2px;
-    color: inherit;
+.game-nearby-edit {
+    display: inline-flex;
+    margin-left: auto;
 }
 
 .game-nearby-dimmed {

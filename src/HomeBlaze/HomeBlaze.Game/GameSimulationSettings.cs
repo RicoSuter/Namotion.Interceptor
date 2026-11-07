@@ -17,6 +17,11 @@ internal static class GameSimulationSettings
     public static readonly TimeSpan PublishInterval = TimeSpan.FromMilliseconds(250);
 
     /// <summary>
+    /// The longest a once animation shows on the server; the browser plays it to its end either way.
+    /// </summary>
+    public static readonly TimeSpan AnimationLimit = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// The shortest time between two saves of a changed world.
     /// </summary>
     public static readonly TimeSpan SaveInterval = TimeSpan.FromSeconds(10);

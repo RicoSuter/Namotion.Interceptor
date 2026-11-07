@@ -36,6 +36,7 @@ public class GameWriteInterceptorTests
     [InlineData(nameof(GamePlayer.IsConnected), false)]
     [InlineData(nameof(GamePlayer.IsMicrophoneOn), true)]
     [InlineData(nameof(GamePlayer.IsAudioOn), true)]
+    [InlineData(nameof(GamePlayer.Animation), "Clapping")]
     public void WhenAStateOfAPlayerIsWrittenThroughTheRegistry_ThenTheWriteIsRefused(string name, object value)
     {
         // Arrange

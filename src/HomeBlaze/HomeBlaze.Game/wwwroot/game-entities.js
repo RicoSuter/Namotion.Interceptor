@@ -17,12 +17,15 @@ const FADE_HOLD_MS = 300;
 const HEAD_HEIGHT = 0.8;
 // Keeps a player walking for this part of a step after its move ended, so the next step does not flicker to idle.
 const IDLE_DELAY_STEPS = 0.75;
-// Lets the feet of the walk cycle keep pace with one tile per step interval, about 1.4 m/s.
-const WALKING_SPEED_RATIO = 1.05;
-// The names in the model file; the shirt takes the player's color.
-const IDLE_ANIMATION = 'Idle_Neutral';
+// Lets the planted foot of the 1.04 s walk cycle, which covers about 5.3 tiles scaled to a player's height of 7 tiles,
+// keep pace with one tile per step interval, about 1.4 m/s.
+const WALKING_SPEED_RATIO = 1.1;
+// The names in the people models; the shirt takes the player's color. A person whose visible top is another material
+// names it here.
+const IDLE_ANIMATION = 'Idle';
 const WALKING_ANIMATION = 'Walk';
-const SHIRT_MATERIAL = 'LightBrown';
+const SHIRT_MATERIAL = 'Shirt';
+const SHIRT_MATERIALS = { 'female-alternative': 'Jacket' };
 // A part glides this long to a new offset or rotation, such as a door leaf that swings open.
 const GLIDE_MS = 300;
 const RADIANS_PER_DEGREE = Math.PI / 180;
@@ -43,21 +46,33 @@ const WIND_SHADER = `
     float gameWindHeight = max(worldPos.y - finalWorld[3].y, 0.0);
     float gameWindPhase = finalWorld[3].x * 0.13 + finalWorld[3].z * 0.07;
     float gameWindSway = sin(gameWindSwayPhase + gameWindPhase) * 0.7 + sin(gameWindGustPhase + gameWindPhase * 0.5) * 0.3;
-    float gameWindBend = gameWindHeight * gameWindHeight * ${toGlsl(WIND_STRENGTH)} * gameWindSway;
+    float gameWindBend = gameWindHeight * gameWindHeight * gameWindStrength * gameWindSway;
     worldPos.x += gameWindBend;
     worldPos.z += gameWindBend * 0.4;
 #endif
 `;
 
-// The phases of the sway and the gust in radians, which the wind shader reads; the views of a tab share them. They wrap
-// on the CPU, because a 32-bit float of the raw clock loses precision after hours.
+const WIND_UNIFORM_NAMES = ['gameWindSwayPhase', 'gameWindGustPhase', 'gameWindStrength'];
+const WIND_UNIFORMS = '#ifdef GAME_WIND\nuniform float gameWindSwayPhase;\nuniform float gameWindGustPhase;\nuniform float gameWindStrength;\n#endif\n';
+const WIND_DEFINE = '#define GAME_WIND';
+// Where the wind goes into the vertex shader of the geometry buffer, which draws the outlines and the corner shading:
+// its declarations, the world position and the clip position, which that shader computes without the world position.
+const VERTEX_DEFINITIONS = '#define CUSTOM_VERTEX_DEFINITIONS';
+const GEOMETRY_WORLD_POSITION = 'vec4 worldPos=vec4(finalWorld*vec4(positionUpdated,1.0));';
+const GEOMETRY_CLIP_POSITION = 'gl_Position=viewProjection*finalWorld*vec4(positionUpdated,1.0);';
+// Where the wind goes into the vertex shader of the shadow map: its declarations and the world position, from which that
+// shader computes the clip position.
+const SHADOW_WORLD_POSITION = 'vec4 worldPos=finalWorld*vec4(positionUpdated,1.0);';
+
+// The phases of the sway and the gust in radians and the strength, which the wind shader reads; the views of a tab share
+// them. The phases wrap on the CPU, because a 32-bit float of the raw clock loses precision after hours. A strength of 0
+// turns the wind off without compiling a shader.
 let windSwayPhase = 0;
 let windGustPhase = 0;
+let windStrength = WIND_STRENGTH;
 let WindPlugin = null;
-
-function toGlsl(value) {
-    return value.toFixed(6);
-}
+// Per shader name, whether its source took the wind; patched once, on the first wind effect of the shader.
+const patchedShaders = new Map();
 
 // Defined on first use, because Babylon is loaded after this module.
 function getWindPlugin() {
@@ -81,14 +96,16 @@ function getWindPlugin() {
                 ubo: [
                     { name: 'gameWindSwayPhase', size: 1, type: 'float' },
                     { name: 'gameWindGustPhase', size: 1, type: 'float' },
+                    { name: 'gameWindStrength', size: 1, type: 'float' },
                 ],
-                vertex: '#ifdef GAME_WIND\nuniform float gameWindSwayPhase;\nuniform float gameWindGustPhase;\n#endif\n',
+                vertex: WIND_UNIFORMS,
             };
         }
 
         bindForSubMesh(uniformBuffer) {
             uniformBuffer.updateFloat('gameWindSwayPhase', windSwayPhase);
             uniformBuffer.updateFloat('gameWindGustPhase', windGustPhase);
+            uniformBuffer.updateFloat('gameWindStrength', windStrength);
         }
 
         getCustomCode(shaderType) {
@@ -96,6 +113,122 @@ function getWindPlugin() {
         }
     };
     return WindPlugin;
+}
+
+// Adds the wind behind the GAME_WIND define to the shader source of the name, replacing each place by its replacement;
+// returns whether the source had every place exactly once, which a Babylon update may change, and warns once if not.
+function patchShader(name, replacements, warning) {
+    let isPatched = patchedShaders.get(name);
+    if (isPatched !== undefined) {
+        return isPatched;
+    }
+
+    const store = window.BABYLON.Effect.ShadersStore;
+    const source = store[name];
+    isPatched = Boolean(source) && replacements.every(([place]) => source.split(place).length === 2);
+    if (isPatched) {
+        store[name] = replacements.reduce((patched, [place, replacement]) => patched.replace(place, replacement), source);
+    } else {
+        console.warn(warning);
+    }
+
+    patchedShaders.set(name, isPatched);
+    return isPatched;
+}
+
+function patchGeometryShader() {
+    return patchShader('geometryVertexShader', [
+        [VERTEX_DEFINITIONS, WIND_UNIFORMS + VERTEX_DEFINITIONS],
+        [GEOMETRY_WORLD_POSITION, GEOMETRY_WORLD_POSITION + WIND_SHADER],
+        [GEOMETRY_CLIP_POSITION, `#ifdef GAME_WIND\ngl_Position=viewProjection*worldPos;\n#else\n${GEOMETRY_CLIP_POSITION}\n#endif\n`],
+    ], 'The geometry buffer shader of this Babylon version has no place for the wind, so outlines do not sway.');
+}
+
+function patchShadowShader() {
+    return patchShader('shadowMapVertexShader', [
+        [VERTEX_DEFINITIONS, WIND_UNIFORMS + VERTEX_DEFINITIONS],
+        [SHADOW_WORLD_POSITION, SHADOW_WORLD_POSITION + WIND_SHADER],
+    ], 'The shadow map shader of this Babylon version has no place for the wind, so shadows do not sway.');
+}
+
+// The geometry buffer draws with a shader of its own, which the wind plugin does not reach, so the outline and the corner
+// shading of a swaying tree would stay where it stands still. While the buffer prepares a submesh of a wind material, the
+// effect it creates gets the GAME_WIND define and the phases. The define is not in the defines the buffer compares, so a
+// submesh keeps its first geometry effect: a mesh must never switch between a wind and a non-wind material.
+function addWindToGeometryBuffer(geometry, engine) {
+    let isPreparingWind = false;
+    const isReady = geometry.isReady;
+    geometry.isReady = function (subMesh, useInstances) {
+        isPreparingWind = Boolean(subMesh.getMaterial()?.gameWind);
+        try {
+            return isReady.call(this, subMesh, useInstances);
+        } finally {
+            isPreparingWind = false;
+        }
+    };
+
+    const createEffect = engine.createEffect;
+    engine.createEffect = function (baseName, options, ...rest) {
+        if (!isPreparingWind || baseName !== 'geometry' || typeof options?.defines !== 'string' || !patchGeometryShader()) {
+            return createEffect.call(this, baseName, options, ...rest);
+        }
+
+        const windOptions = {
+            ...options,
+            defines: `${options.defines}\n${WIND_DEFINE}`,
+            uniformsNames: [...options.uniformsNames, ...WIND_UNIFORM_NAMES],
+        };
+        // The engine returns its cached effect for the same defines, so each effect gets the phases bound once.
+        const effect = createEffect.call(this, baseName, windOptions, ...rest);
+        if (!effect.gameWind) {
+            effect.gameWind = true;
+            effect.onBindObservable.add(bindWind);
+        }
+
+        return effect;
+    };
+}
+
+// The shadow map draws with Babylon's shadow shader, which the wind plugin does not reach either, so a swaying tree would
+// cast the shadow of a tree at rest. A submesh of a wind material gets the GAME_WIND define among the defines the
+// generator compares, so all wind submeshes share one effect, and a mesh that switches between its wind material and the
+// fade copy of it compiles nothing. The phases are bound before each submesh draws.
+function addWindToShadows(shadowGenerator) {
+    const addCustomDefines = shadowGenerator._isReadyCustomDefines;
+    if (typeof addCustomDefines !== 'function') {
+        console.warn('The shadow generator of this Babylon version takes no custom defines, so shadows do not sway.');
+        return;
+    }
+
+    shadowGenerator.customShaderOptions = { shaderName: 'shadowMap', uniforms: WIND_UNIFORM_NAMES };
+    shadowGenerator._isReadyCustomDefines = function (defines, subMesh, useInstances) {
+        addCustomDefines.call(this, defines, subMesh, useInstances);
+        if (subMesh.getMaterial()?.gameWind && patchShadowShader()) {
+            defines.push(WIND_DEFINE);
+        }
+    };
+    // The generator announces the mesh before the effect of each submesh, so a wind mesh that draws without the wind shows,
+    // as when a Babylon update stops calling the defines hook.
+    let renderingMesh = null;
+    let hasWarnedMissingWind = false;
+    shadowGenerator.onBeforeShadowMapRenderMeshObservable.add(mesh => {
+        renderingMesh = mesh;
+    });
+    shadowGenerator.onBeforeShadowMapRenderObservable.add(effect => {
+        effect.gameWindShadow ??= effect.defines.includes(WIND_DEFINE);
+        if (effect.gameWindShadow) {
+            bindWind(effect);
+        } else if (!hasWarnedMissingWind && renderingMesh?.material?.gameWind && patchedShaders.get('shadowMapVertexShader') !== false) {
+            hasWarnedMissingWind = true;
+            console.warn('The shadow map draws a wind mesh without the wind, so shadows do not sway.');
+        }
+    });
+}
+
+function bindWind(effect) {
+    effect.setFloat('gameWindSwayPhase', windSwayPhase);
+    effect.setFloat('gameWindGustPhase', windGustPhase);
+    effect.setFloat('gameWindStrength', windStrength);
 }
 
 export async function createEntities(scene, options) {
@@ -108,10 +241,12 @@ export async function createEntities(scene, options) {
     const models = new Map();
     const windMaterials = new Map();
     const fadeMaterials = new Map();
+    // One container per person, loaded on first use and kept for the view's lifetime.
+    const people = new Map();
     // The model URL and animation name of each missing animation that was logged, so it is logged once.
     const missingAnimations = new Set();
     // Written to the canvas for tests and diagnosis.
-    const stats = { parts: 0, models: 0, failures: 0, faded: 0, animationsOnce: 0 };
+    const stats = { parts: 0, models: 0, failures: 0, faded: 0, animationsOnce: 0, emotes: 0 };
     // Reused by every frame, so the render loop does not allocate.
     const selfPosition = { x: 0, z: 0 };
     const segment = { enter: 0, exit: 1 };
@@ -123,44 +258,30 @@ export async function createEntities(scene, options) {
     let isViewDisposed = false;
     let lastFadeFrame = 0;
     let lastSightlineCheck = -Infinity;
+    let isFadeEnabled = true;
+    // Whether every object is fully visible while the fade is off, so the frames skip the objects.
+    let isFadeSettled = false;
     // Counts the renders; a mesh's world matrix and bounds are computed when the scene renders.
     let frame = 0;
     const sightline = new BABYLON.Ray(new BABYLON.Vector3(), new BABYLON.Vector3(0, 0, 1), 1);
+    addWindToGeometryBuffer(options.renderer.geometryBuffer, scene.getEngine());
+    addWindToShadows(options.renderer.shadowGenerator);
 
     const ground = BABYLON.MeshBuilder.CreateGround('ground', { width: 600, height: 600 }, scene);
-    ground.material = await createGroundMaterial();
+    ground.material = createGroundMaterial();
     ground.isPickable = false;
+    options.renderer.addGround(ground);
 
     const targetMaterial = new BABYLON.StandardMaterial('target', scene);
     targetMaterial.emissiveColor = new BABYLON.Color3(1, 0.88, 0.4);
     targetMaterial.disableLighting = true;
     targetMaterial.alpha = 0.4;
 
-    const blobMaterial = new BABYLON.StandardMaterial('blob', scene);
-    blobMaterial.diffuseColor = BABYLON.Color3.Black();
-    blobMaterial.specularColor = BABYLON.Color3.Black();
-    blobMaterial.alpha = 0.28;
-
-    // Not added to the scene; every player instantiates its own copy.
-    const character = await BABYLON.LoadAssetContainerAsync(`${options.baseUrl}models/Casual_2.glb`, scene);
     updateStats();
 
-    async function createGroundMaterial() {
-        // The border of each repeat draws the meter grid; half of the stroke lies outside, so each edge shows half of it.
-        // It stays wide enough to survive the smaller mipmaps that the usual camera distance samples.
-        const image = new Image();
-        image.src = `${options.baseUrl}textures/grass.jpg`;
-        await image.decode();
-        const texture = new BABYLON.DynamicTexture('grass', 512, scene, true);
-        const context = texture.getContext();
-        context.drawImage(image, 0, 0, 512, 512);
-        context.strokeStyle = 'rgba(0, 0, 0, 0.16)';
-        context.lineWidth = 8;
-        context.strokeRect(0, 0, 512, 512);
-        texture.update();
-        // Dynamic textures clamp by default.
-        texture.wrapU = BABYLON.Texture.WRAP_ADDRESSMODE;
-        texture.wrapV = BABYLON.Texture.WRAP_ADDRESSMODE;
+    function createGroundMaterial() {
+        // The border of each repeat in the texture draws the meter grid.
+        const texture = new BABYLON.Texture(`${options.baseUrl}textures/grass.png`, scene);
         texture.anisotropicFilteringLevel = 8;
         texture.uScale = 600 / METER;
         texture.vScale = 600 / METER;
@@ -178,6 +299,7 @@ export async function createEntities(scene, options) {
             element.dataset.gameModelFailures = String(stats.failures);
             element.dataset.gameFaded = String(stats.faded);
             element.dataset.gameAnimationsOnce = String(stats.animationsOnce);
+            element.dataset.gameEmotes = String(stats.emotes);
         }
     }
 
@@ -247,17 +369,35 @@ export async function createEntities(scene, options) {
         return loading;
     }
 
+    function loadPerson(name) {
+        let loading = people.get(name);
+        if (!loading) {
+            // Logged once per person, because the failed load stays cached.
+            loading = BABYLON.LoadAssetContainerAsync(`${options.baseUrl}models/people/${name}.glb`, scene).catch(error => {
+                console.warn(`The person ${name} could not be loaded: ${error?.message ?? error}`);
+                return null;
+            });
+            people.set(name, loading);
+        }
+
+        return loading;
+    }
+
     function getWindMaterial(material) {
         let windMaterial = windMaterials.get(material);
         if (!windMaterial) {
             windMaterial = material.clone(`${material.name}-wind`);
-            const Plugin = getWindPlugin();
-            windMaterial.gameWind = new Plugin(windMaterial);
+            addWind(windMaterial);
             windMaterial.gameWindSource = material;
             windMaterials.set(material, windMaterial);
         }
 
         return windMaterial;
+    }
+
+    function addWind(material) {
+        const Plugin = getWindPlugin();
+        material.gameWind = new Plugin(material);
     }
 
     // A glTF material has a fixed transparency mode, with which Babylon ignores the mesh visibility for blending, so a faded
@@ -269,8 +409,7 @@ export async function createEntities(scene, options) {
             const source = material.gameWindSource ?? material;
             fadeMaterial = source.clone(`${material.name}-fade`);
             if (material.gameWindSource) {
-                const Plugin = getWindPlugin();
-                fadeMaterial.gameWind = new Plugin(fadeMaterial);
+                addWind(fadeMaterial);
             }
 
             fadeMaterial.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
@@ -281,13 +420,15 @@ export async function createEntities(scene, options) {
         return fadeMaterial;
     }
 
-    // The shared materials stay untouched, so fading one object never changes another.
+    // The shared materials stay untouched, so fading one object never changes another. A see-through mesh has no outline.
     function showMesh(mesh, visibility) {
         mesh.visibility = visibility;
         const material = visibility < 1 && mesh.gameMaterial ? getFadeMaterial(mesh.gameMaterial) : mesh.gameMaterial;
         if (mesh.material !== material) {
             mesh.material = material;
         }
+
+        options.renderer.setOutlined(mesh, visibility === 1);
     }
 
     function addMeshes(entity, meshes) {
@@ -295,6 +436,7 @@ export async function createEntities(scene, options) {
         for (const mesh of meshes) {
             mesh.isPickable = false;
             mesh.gameMaterial = mesh.material;
+            options.renderer.addMesh(mesh);
             showMesh(mesh, entity.visibility);
             entity.meshes.push(mesh);
         }
@@ -376,8 +518,7 @@ export async function createEntities(scene, options) {
     }
 
     // Plays the part's animation from the start: looping, or once, after which it holds its last frame, because a group that
-    // does not loop leaves its targets at the end. The previous group is reset before it stops, because stopping leaves
-    // its targets where they are, and a bone the next group does not animate, such as a leg of a walk, would stay frozen.
+    // does not loop leaves its targets at the end. The previous group is reset before it stops, for the reason at stopGroup.
     function playAnimation(node) {
         node.animationGroup?.reset();
         node.animationGroup?.stop();
@@ -458,23 +599,56 @@ export async function createEntities(scene, options) {
         return material;
     }
 
+    // The label shows at once; the person follows when its model is loaded.
     function createPlayer(entity) {
         const view = entity.view;
         const holder = new BABYLON.TransformNode(view.id, scene);
+        // Every player owns its label material and the materials cloned for its person.
+        entity.materials.push(createLabel(view, holder));
+        entity.root = holder;
+        entity.animations = { idle: null, walking: null, isWalking: false, emote: null, emoteSequence: null };
+        addPerson(entity).catch(error => console.warn(`The person ${view.character} could not be shown: ${error?.message ?? error}`));
+    }
+
+    async function addPerson(entity) {
+        const container = await loadPerson(entity.view.character);
+        if (entity.isDisposed || isViewDisposed) {
+            return;
+        }
+
+        if (container) {
+            try {
+                showPerson(entity, container);
+            } catch (error) {
+                console.warn(`The person ${entity.view.character} could not be shown: ${error?.message ?? error}`);
+                discardPerson(entity);
+                showPersonFallback(entity);
+            }
+        } else {
+            showPersonFallback(entity);
+        }
+
+        updateStats();
+    }
+
+    function showPerson(entity, container) {
+        const view = entity.view;
         const prefix = `${view.id}-`;
-        const instance = character.instantiateModelsToScene(name => prefix + name, true);
-        // The root keeps the loader's handedness conversion, which leaves the character looking north (+z).
+        const instance = container.instantiateModelsToScene(name => prefix + name, true);
+        entity.instance = instance;
+        // The root keeps the loader's handedness conversion, which leaves the person looking north (+z); its bounds are
+        // measured before it gets a parent or a scale.
         const model = instance.rootNodes[0];
-        model.parent = holder;
         const { min, max } = model.getHierarchyBoundingVectors(true);
         const scale = view.height / (max.y - min.y);
         model.scaling.scaleInPlace(scale);
         model.position.y = -min.y * scale;
+        model.parent = entity.root;
 
         const meshes = model.getChildMeshes(false);
-        // Every player owns the materials cloned for it; the blob material is shared.
         const materials = [...new Set(meshes.map(mesh => mesh.material).filter(Boolean))];
-        const shirt = materials.find(material => material.name === prefix + SHIRT_MATERIAL);
+        const shirtName = prefix + (SHIRT_MATERIALS[view.character] ?? SHIRT_MATERIAL);
+        const shirt = materials.find(material => material.name === shirtName);
         if (shirt) {
             const color = BABYLON.Color3.FromHexString(view.color);
             if ('albedoColor' in shirt) {
@@ -486,36 +660,142 @@ export async function createEntities(scene, options) {
 
         for (const mesh of meshes) {
             mesh.isPickable = false;
+            options.renderer.addMesh(mesh);
         }
 
-        const blob = BABYLON.MeshBuilder.CreateDisc(`${view.id}-blob`, { radius: view.width * 0.55, tessellation: 24 }, scene);
-        blob.material = blobMaterial;
-        blob.rotation.x = Math.PI / 2;
-        blob.position.y = 0.02;
-        blob.parent = holder;
-        blob.isPickable = false;
-
-        materials.push(createLabel(view, holder));
-
         const find = name => instance.animationGroups.find(group => group.name === prefix + name);
-        const idle = find(IDLE_ANIMATION);
-        const walking = find(WALKING_ANIMATION);
         for (const group of instance.animationGroups) {
             group.stop();
         }
 
-        idle?.start(true);
-        entity.root = holder;
-        entity.animations = { idle, walking, isWalking: false };
-        entity.instance = instance;
+        const animations = entity.animations;
+        animations.idle = find(IDLE_ANIMATION);
+        animations.walking = find(WALKING_ANIMATION);
+        if (animations.isWalking) {
+            animations.walking?.start(true, WALKING_SPEED_RATIO);
+        } else {
+            animations.idle?.start(true);
+        }
+
         entity.meshes = meshes;
-        entity.materials = materials;
+        applyAnimation(entity, entity.view);
+        entity.materials.push(...materials);
+    }
+
+    // Releases what a failed showPerson created; its cloned materials are not in the entity's list yet.
+    function discardPerson(entity) {
+        const instance = entity.instance;
+        if (instance) {
+            const meshes = instance.rootNodes.flatMap(node => node.getChildMeshes(false));
+            disposeInstance(instance, meshes);
+            for (const node of instance.rootNodes) {
+                node.dispose(false, true);
+            }
+        }
+
+        entity.instance = null;
+        entity.meshes = [];
+        const animations = entity.animations;
+        animations.idle = null;
+        animations.walking = null;
+        animations.emote = null;
+    }
+
+    function showPersonFallback(entity) {
+        const view = entity.view;
+        const box = createBox(`${view.id}-fallback`, { w: view.width, h: view.height, d: view.depth, c: FALLBACK_COLOR });
+        box.parent = entity.root;
+        box.position.y = view.height / 2;
+        box.isPickable = false;
+        options.renderer.addMesh(box);
+        entity.meshes = [box];
+        entity.isFallback = true;
+        stats.failures++;
+    }
+
+    // Plays the animation the server reports: once animations play to their end and return to idle, loop animations hold
+    // until the server clears them, and a step ends either. Each run has its own sequence, so a run is started at most once
+    // and the same animation twice in a row plays twice.
+    function applyAnimation(entity, view) {
+        const animations = entity.animations;
+        if (!animations || !entity.instance) {
+            return;
+        }
+
+        if (!view.animation) {
+            animations.emoteSequence = view.animationSequence;
+            stopEmote(animations);
+            return;
+        }
+
+        if (animations.emoteSequence === view.animationSequence) {
+            return;
+        }
+
+        animations.emoteSequence = view.animationSequence;
+        const group = entity.instance.animationGroups.find(candidate => candidate.name === `${view.id}-${view.animation}`);
+        if (!group) {
+            warnMissingAnimation(`${options.baseUrl}models/people/${view.character}.glb`, view.animation);
+            return;
+        }
+
+        clearEmote(animations);
+        stopGroup(animations.idle);
+        stopGroup(animations.walking);
+        // The emote takes over a walk that is still showing, so that the next step stops it and walks again.
+        animations.isWalking = false;
+        const isOnce = view.animationMode === ONCE_ANIMATION_MODE;
+        group.start(!isOnce);
+        animations.emote = group;
+        stats.emotes++;
+        updateStats();
+        if (isOnce) {
+            group.onAnimationGroupEndObservable.addOnce(() => {
+                if (animations.emote === group && !entity.isDisposed) {
+                    animations.emote = null;
+                    resumeMovement(animations);
+                }
+            });
+        }
+    }
+
+    function stopEmote(animations) {
+        if (animations.emote) {
+            clearEmote(animations);
+            resumeMovement(animations);
+        }
+    }
+
+    // Cleared before the group stops, because stopping a group that plays once runs its end handler, which resumes the
+    // movement only while it is still the emote.
+    function clearEmote(animations) {
+        const emote = animations.emote;
+        animations.emote = null;
+        stopGroup(emote);
+    }
+
+    function resumeMovement(animations) {
+        if (animations.isWalking) {
+            animations.walking?.start(true, WALKING_SPEED_RATIO);
+        } else {
+            animations.idle?.start(true);
+        }
+    }
+
+    // Reset before it stops, because stopping leaves the bones where they are, such as the lowered pelvis of a sitting
+    // person, and the next group may not move all of them. Only a playing group is reset: resetting a stopped one plays
+    // its first frame.
+    function stopGroup(group) {
+        if (group?.isStarted) {
+            group.reset();
+            group.stop();
+        }
     }
 
     function createEntity(view) {
         const entity = {
             view, root: null, tween: null, idleAt: 0, isFaded: false, lastHitAt: -Infinity, visibility: 1, changedAtFrame: 0,
-            isDisposed: false,
+            isDisposed: false, isFallback: false,
             meshes: [], materials: [], partNodes: [], animations: null, instance: null,
         };
         if (view.kind === 'player') {
@@ -563,6 +843,10 @@ export async function createEntities(scene, options) {
             disposeInstance(entity.instance, entity.meshes);
         }
 
+        if (entity.isFallback) {
+            stats.failures--;
+        }
+
         for (const material of entity.materials) {
             material.dispose(true, true);
         }
@@ -605,10 +889,12 @@ export async function createEntities(scene, options) {
 
         animations.isWalking = isWalking;
         if (isWalking) {
-            animations.idle?.stop();
+            // A step ends a running emote; the server clears it on the same step.
+            clearEmote(animations);
+            stopGroup(animations.idle);
             animations.walking?.start(true, WALKING_SPEED_RATIO);
-        } else {
-            animations.walking?.stop();
+        } else if (!animations.emote) {
+            stopGroup(animations.walking);
             animations.idle?.start(true);
         }
     }
@@ -670,7 +956,8 @@ export async function createEntities(scene, options) {
         }
 
         return previous.width !== view.width || previous.depth !== view.depth || previous.height !== view.height
-            || previous.color !== view.color || previous.title !== view.title || previous.isSelf !== view.isSelf;
+            || previous.color !== view.color || previous.character !== view.character || previous.title !== view.title
+            || previous.isSelf !== view.isSelf;
     }
 
     function updateParts(entity, parts) {
@@ -825,6 +1112,7 @@ export async function createEntities(scene, options) {
                 const shown = view.isSelf && previous?.isSelf ? { ...view, x: previous.x, y: previous.y, facing: previous.facing } : view;
                 entity = createEntity(shown);
                 entities.set(view.id, entity);
+                // The person loads asynchronously and plays the latest view's animation once it is shown.
                 place(entity, shown.x, shown.y);
                 setFacing(entity, shown.facing);
                 return isSelfLost;
@@ -846,6 +1134,7 @@ export async function createEntities(scene, options) {
                 setFacing(entity, view.facing);
             }
 
+            applyAnimation(entity, view);
             return isSelfLost;
         },
 
@@ -868,8 +1157,7 @@ export async function createEntities(scene, options) {
         /** Releases what the scene does not own; call before disposing the scene. */
         dispose() {
             isViewDisposed = true;
-            character.dispose();
-            for (const loading of models.values()) {
+            for (const loading of [...models.values(), ...people.values()]) {
                 loading.then(container => container?.dispose());
             }
         },
@@ -930,8 +1218,11 @@ export async function createEntities(scene, options) {
         animate(now) {
             frame++;
             const seconds = now / 1000;
-            windSwayPhase = (seconds * WIND_SPEED) % TWO_PI;
-            windGustPhase = (seconds * GUST_SPEED) % TWO_PI;
+            if (windStrength > 0) {
+                windSwayPhase = (seconds * WIND_SPEED) % TWO_PI;
+                windGustPhase = (seconds * GUST_SPEED) % TWO_PI;
+            }
+
             for (const entity of entities.values()) {
                 for (const node of entity.partNodes) {
                     if (node.glide) {
@@ -975,15 +1266,43 @@ export async function createEntities(scene, options) {
 
             const elapsed = Math.min(FADE_MS, Math.max(0, now - lastFadeFrame));
             lastFadeFrame = now;
-            if (now - lastSightlineCheck >= SIGHTLINE_CHECK_MS) {
+            if (!isFadeEnabled && isFadeSettled) {
+                return;
+            }
+
+            if (isFadeEnabled && now - lastSightlineCheck >= SIGHTLINE_CHECK_MS) {
                 lastSightlineCheck = now;
                 checkSightline(camera.position, self, now);
             }
 
+            let isSettled = true;
             for (const entity of entities.values()) {
                 if (entity.view.kind !== 'player') {
                     setFaded(entity, now - entity.lastHitAt < FADE_HOLD_MS);
                     glideVisibility(entity, elapsed);
+                    isSettled &&= entity.visibility === 1;
+                }
+            }
+
+            isFadeSettled = isSettled;
+        },
+
+        /** Lets trees and other wind parts sway, or stands them still, in every view of the tab, which share the wind. */
+        setWind(isEnabled) {
+            windStrength = isEnabled ? WIND_STRENGTH : 0;
+        },
+
+        /** Fades the objects between the camera and the own player, or stops testing the sightline and shows them all. */
+        setFade(isEnabled) {
+            if (isFadeEnabled === isEnabled) {
+                return;
+            }
+
+            isFadeEnabled = isEnabled;
+            isFadeSettled = false;
+            if (!isEnabled) {
+                for (const entity of entities.values()) {
+                    entity.lastHitAt = -Infinity;
                 }
             }
         },

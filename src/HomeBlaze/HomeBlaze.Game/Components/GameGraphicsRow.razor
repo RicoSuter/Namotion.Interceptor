@@ -1,0 +1,25 @@
+@* One setting of the graphics dialog: its title and cost on the left, its control on the right. *@
+<div class="game-graphics-row">
+    <div class="game-graphics-text">
+        <div>@Title</div>
+        <div class="game-graphics-caption">@Caption</div>
+    </div>
+    <div class="game-graphics-control">@ChildContent</div>
+</div>
+
+@code {
+    /// <summary>
+    /// The name of the setting.
+    /// </summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+
+    /// <summary>
+    /// What the setting costs.
+    /// </summary>
+    [Parameter, EditorRequired] public string Caption { get; set; } = "";
+
+    /// <summary>
+    /// The control that changes the setting.
+    /// </summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

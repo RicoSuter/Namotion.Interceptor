@@ -83,6 +83,11 @@
         {
             <MudAlert Severity="Severity.Warning" Dense="true" Class="game-voice-message" data-testid="game-voice-message">@voiceMessage</MudAlert>
         }
+        <section>
+            <CascadingValue Value="_view">
+                <GameGraphicsButton Disabled="@(!_isStarted)" />
+            </CascadingValue>
+        </section>
         @* The operations of the game and its tools come first, so they keep their place while targets come and go. *@
         <section>
             <h5>Actions</h5>
@@ -124,23 +129,27 @@
                     <span class="game-nearby-title">@(player.IsSelf ? $"{player.Title} (you)" : player.Title)</span>
                     @if (player.IsSelf)
                     {
-                        <span class="game-nearby-icon" title="@RenameTitle">
-                            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Class="game-nearby-rename"
-                                           Disabled="@_isRenaming" aria-label="@RenameTitle"
-                                           data-testid="game-rename" OnClick="RenameAsync" />
+                        @* The voice buttons show the own toggles, so the own entry has the edit button instead of their icons. *@
+                        <span class="game-nearby-edit" title="@EditTitle">
+                            <MudIconButton Icon="@Icons.Material.Filled.Edit" Variant="Variant.Filled" Size="Size.Small"
+                                           Disabled="@_isEditing" aria-label="@EditTitle"
+                                           data-testid="game-edit" OnClick="EditAsync" />
                         </span>
                     }
-                    @if (!player.IsMicrophoneOn)
+                    else
                     {
-                        <span class="game-nearby-icon" title="Microphone off" data-testid="game-nearby-microphone-off">
-                            <MudIcon Icon="@Icons.Material.Filled.MicOff" Size="Size.Small" />
-                        </span>
-                    }
-                    @if (!player.IsAudioOn)
-                    {
-                        <span class="game-nearby-icon" title="Speaker off" data-testid="game-nearby-audio-off">
-                            <MudIcon Icon="@Icons.Material.Filled.VolumeOff" Size="Size.Small" />
-                        </span>
+                        @if (!player.IsMicrophoneOn)
+                        {
+                            <span class="game-nearby-icon" title="Microphone off" data-testid="game-nearby-microphone-off">
+                                <MudIcon Icon="@Icons.Material.Filled.MicOff" Size="Size.Small" />
+                            </span>
+                        }
+                        @if (!player.IsAudioOn)
+                        {
+                            <span class="game-nearby-icon" title="Speaker off" data-testid="game-nearby-audio-off">
+                                <MudIcon Icon="@Icons.Material.Filled.VolumeOff" Size="Size.Small" />
+                            </span>
+                        }
                     }
                 </div>
             }

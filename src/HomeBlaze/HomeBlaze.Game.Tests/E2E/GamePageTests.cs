@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Game.Tests.Testing;
+using HomeBlaze.Game.Tools;
 using HomeBlaze.Game.Voice;
 using HomeBlaze.Installation;
 using Microsoft.Playwright;
@@ -58,7 +59,7 @@ public class GamePageTests
         var name = $"E2E player {Guid.NewGuid():N}";
 
         // Act
-        await page.GetByRole(AriaRole.Button, new() { Name = "Change my name" }).ClickAsync(new() { Timeout = Timeout });
+        await page.GetByRole(AriaRole.Button, new() { Name = "Edit me" }).ClickAsync(new() { Timeout = Timeout });
         var input = page.GetByTestId("game-name-input");
         await input.FillAsync(name, new() { Timeout = Timeout });
         await input.PressAsync("Enter");
@@ -67,6 +68,303 @@ public class GamePageTests
         await Expect(page.GetByTestId("game-nearby-player").Filter(new() { HasText = name + SelfSuffix })).ToHaveCountAsync(1, new() { Timeout = Timeout });
         await Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0, new() { Timeout = Timeout });
         Assert.Equal(name, player.ClientTitle);
+    }
+
+    [Fact]
+    public async Task WhenThePlayerPicksAPersonInTheEditDialog_ThenThePlayerLooksLikeIt()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, player) = await world.JoinAsync();
+
+        // Act
+        await page.GetByRole(AriaRole.Button, new() { Name = "Edit me" }).ClickAsync(new() { Timeout = Timeout });
+        await page.GetByTestId("game-person-female-tank-top").ClickAsync(new() { Timeout = Timeout });
+        await page.GetByTestId("game-player-save").ClickAsync();
+
+        // Assert
+        await Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await AsyncTestHelpers.WaitUntilAsync(() => player.Character == "female-tank-top" && player.Color is not null,
+            message: "The player did not take the picked person");
+        Assert.Matches("^#[0-9a-f]{6}$", player.Color);
+    }
+
+    [Fact]
+    public async Task WhenAPlayerEditsItsPersonAndColor_ThenTheyStayAfterAReload()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, player) = await world.JoinAsync();
+        var name = $"E2E player {Guid.NewGuid():N}";
+        await page.GetByRole(AriaRole.Button, new() { Name = "Edit me" }).ClickAsync(new() { Timeout = Timeout });
+        // Only a named client is recognized again after a reload; an anonymous one starts over as a new player.
+        await page.GetByTestId("game-name-input").FillAsync(name, new() { Timeout = Timeout });
+        await page.GetByTestId("game-person-female-tank-top").ClickAsync(new() { Timeout = Timeout });
+        var colorInput = page.GetByRole(AriaRole.Textbox, new() { Name = "Shirt color" });
+        var initialColor = await colorInput.InputValueAsync(new() { Timeout = Timeout });
+        var color = await PickOtherPaletteColorAsync(page, colorInput, initialColor);
+        await page.GetByTestId("game-player-save").ClickAsync();
+        await Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await AsyncTestHelpers.WaitUntilAsync(() => player.Character == "female-tank-top" && player.Color == color,
+            message: "The player did not take the picked person and color");
+
+        // Act
+        await page.ReloadAsync();
+        await Expect(page.GetByTestId("game-nearby-player").Filter(new() { HasText = name + SelfSuffix })).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        await page.GetByRole(AriaRole.Button, new() { Name = "Edit me" }).ClickAsync(new() { Timeout = Timeout });
+
+        // Assert
+        await Expect(page.GetByTestId("game-person-female-tank-top")).ToHaveClassAsync(new Regex("selected"), new() { Timeout = Timeout });
+        await Expect(page.GetByRole(AriaRole.Textbox, new() { Name = "Shirt color" })).ToHaveValueAsync(new Regex($"^{color}$", RegexOptions.IgnoreCase), new() { Timeout = Timeout });
+        Assert.Equal(color, player.Color);
+    }
+
+    [Fact]
+    public async Task WhenAPlayerClapsThroughTheEmoteTool_ThenAnotherPageShowsTheAnimation()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        world.Game.Tools = new Dictionary<string, GameTool> { ["emote-tool"] = new EmoteTool() };
+        var (clapper, clapperPlayer) = await world.JoinAsync();
+        var (watcher, watcherPlayer) = await world.JoinAsync();
+        var watcherCanvas = watcher.GetByTestId("game-canvas");
+        // The watcher loaded the clapper's person once a person idles where the clapper stands relative to the watcher,
+        // whose position the camera follows from 30 tiles south.
+        await watcher.WaitForFunctionAsync(
+            """
+            ([offsetX, offsetZ]) => {
+                const scene = BABYLON.EngineStore.LastCreatedEngine.scenes[0];
+                const camera = scene.activeCamera;
+                const x = camera.position.x + offsetX;
+                const z = camera.position.z + 30 + offsetZ;
+                return scene.transformNodes.some(node => Math.abs(node.position.x - x) < 0.5 && Math.abs(node.position.z - z) < 0.5
+                    && scene.animationGroups.some(group => group.name === `${node.name}-Idle` && group.isPlaying));
+            }
+            """,
+            new[] { clapperPlayer.X - watcherPlayer.X, clapperPlayer.Y - watcherPlayer.Y },
+            new() { Timeout = Timeout });
+
+        // Act
+        await clapper.GetByTestId("game-action").Filter(new() { HasText = "Clap" }).ClickAsync(new() { Timeout = Timeout });
+
+        // Assert
+        await Expect(watcherCanvas).ToHaveAttributeAsync("data-game-emotes", new Regex("^[1-9]"), new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenAPresetIsPickedInTheGraphicsDialog_ThenItChangesTheRenderingKeepsTheArrowKeysAndIsKeptAcrossAReload()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        // At two device pixels per CSS pixel, each preset renders at its own resolution.
+        var (page, player) = await world.JoinAsync(new() { DeviceScaleFactor = 2 });
+        var (x, y) = (player.X, player.Y);
+        var canvas = page.GetByTestId("game-canvas");
+
+        // Act
+        await page.GetByTestId("game-graphics").ClickAsync(new() { Timeout = Timeout });
+        await PickGraphicsAsync(page, "game-graphics-preset", "High");
+        await Expect(canvas).ToHaveAttributeAsync("data-game-ambient-occlusion", "1", new() { Timeout = Timeout });
+        await WaitForPixelRatioAsync(page, 2);
+        await PickGraphicsAsync(page, "game-graphics-preset", "Low");
+        await Expect(canvas).ToHaveAttributeAsync("data-game-ambient-occlusion", "0", new() { Timeout = Timeout });
+        await WaitForPixelRatioAsync(page, 1);
+        await page.GetByTestId("game-graphics-close").ClickAsync();
+        await Expect(page.GetByTestId("game-graphics-dialog")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        // The closed dialog gives the arrow keys back to walking.
+        await page.Keyboard.PressAsync("ArrowRight");
+        await Expect(page.GetByTestId("game-position")).ToHaveTextAsync(FormatPosition(x + 1, y, "E"), new() { Timeout = Timeout });
+        var cookies = await page.Context.CookiesAsync();
+        await page.ReloadAsync();
+
+        // Assert
+        var cookie = Assert.Single(cookies, cookie => cookie.Name == "homeblaze.game-graphics");
+        Assert.Equal("""{"preset":"low"}""", Uri.UnescapeDataString(cookie.Value));
+        await Expect(canvas).ToHaveAttributeAsync("data-game-preset", "low", new() { Timeout = Timeout });
+        await WaitForPixelRatioAsync(page, 1);
+        await page.GetByTestId("game-graphics").ClickAsync(new() { Timeout = Timeout });
+        await Expect(GetGraphicsItem(page, "game-graphics-preset", "Low")).ToHaveAttributeAsync("aria-checked", "true", new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenShadowsAreTurnedOffInTheGraphicsDialog_ThenTheShadowMapStopsRenderingAndThePresetIsCustom()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, _) = await world.JoinAsync();
+        var canvas = page.GetByTestId("game-canvas");
+        await page.GetByTestId("game-graphics").ClickAsync(new() { Timeout = Timeout });
+        await PickGraphicsAsync(page, "game-graphics-preset", "Medium");
+        await Expect(canvas).ToHaveAttributeAsync("data-game-shadows", "soft", new() { Timeout = Timeout });
+
+        // Act
+        await PickGraphicsAsync(page, "game-graphics-shadows", "Off");
+        await Expect(canvas).ToHaveAttributeAsync("data-game-shadows", "off", new() { Timeout = Timeout });
+        var shadowMapRenders = await CountRendersAsync(page, "scene.lights.find(light => light.name === 'sun').getShadowGenerator().getShadowMap()");
+
+        // Assert
+        Assert.Equal(0, shadowMapRenders);
+        await Expect(canvas).ToHaveAttributeAsync("data-game-preset", "custom", new() { Timeout = Timeout });
+        await Expect(GetGraphicsItem(page, "game-graphics-preset", "Custom")).ToHaveAttributeAsync("aria-checked", "true", new() { Timeout = Timeout });
+        await page.GetByTestId("game-graphics-reset").ClickAsync();
+        await Expect(canvas).ToHaveAttributeAsync("data-game-shadows", "soft", new() { Timeout = Timeout });
+        await Expect(GetGraphicsItem(page, "game-graphics-preset", "Medium")).ToHaveAttributeAsync("aria-checked", "true", new() { Timeout = Timeout });
+        Assert.True(await CountRendersAsync(page, "scene.lights.find(light => light.name === 'sun').getShadowGenerator().getShadowMap()") > 0);
+    }
+
+    [Fact]
+    public async Task WhenOutlinesAndCornerShadingAreTurnedOffInTheGraphicsDialog_ThenTheGeometryBufferStopsRendering()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, _) = await world.JoinAsync();
+        var canvas = page.GetByTestId("game-canvas");
+        await page.GetByTestId("game-graphics").ClickAsync(new() { Timeout = Timeout });
+        await PickGraphicsAsync(page, "game-graphics-preset", "Medium");
+        const string GeometryBuffer = "scene.geometryBufferRenderer.getGBuffer()";
+        var rendersWithOutlines = await CountRendersAsync(page, GeometryBuffer);
+
+        // Act
+        await page.GetByTestId("game-graphics-outlines").ClickAsync();
+        await Expect(canvas).ToHaveAttributeAsync("data-game-outlines", "false", new() { Timeout = Timeout });
+        var rendersForCornerShading = await CountRendersAsync(page, GeometryBuffer);
+        await PickGraphicsAsync(page, "game-graphics-ambient-occlusion", "Off");
+        await Expect(canvas).ToHaveAttributeAsync("data-game-ambient-occlusion", "0", new() { Timeout = Timeout });
+        var rendersWithoutBoth = await CountRendersAsync(page, GeometryBuffer);
+
+        // Assert
+        Assert.True(rendersWithOutlines > 0);
+        Assert.True(rendersForCornerShading > 0);
+        Assert.Equal(0, rendersWithoutBoth);
+    }
+
+    [Fact]
+    public async Task WhenOutlinesAreTurnedOffInTheGraphicsDialog_ThenTheirPassLeavesTheChainAndTheSceneStaysMultisampled()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, _) = await world.JoinAsync();
+        var canvas = page.GetByTestId("game-canvas");
+        await page.GetByTestId("game-graphics").ClickAsync(new() { Timeout = Timeout });
+        await PickGraphicsAsync(page, "game-graphics-preset", "Medium");
+        await Expect(canvas).ToHaveAttributeAsync("data-game-preset", "medium", new() { Timeout = Timeout });
+        var chainWithOutlines = await ReadPassChainAsync(page);
+
+        // Act
+        await page.GetByTestId("game-graphics-outlines").ClickAsync();
+        await Expect(canvas).ToHaveAttributeAsync("data-game-outlines", "false", new() { Timeout = Timeout });
+        var chainWithoutOutlines = await ReadPassChainAsync(page);
+
+        // Assert
+        Assert.StartsWith("outline:4,", chainWithOutlines);
+        Assert.DoesNotContain("outline", chainWithoutOutlines);
+        // The pass that now receives the scene multisamples it, and no other pass does.
+        Assert.Matches("^[^,:]+:4(,[^,:]+:1)*$", chainWithoutOutlines);
+    }
+
+    [Fact]
+    public async Task WhenTheSightlineFadeIsTurnedOff_ThenAnObjectInFrontOfThePlayerShowsAgainAndStaysVisible()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, player) = await world.JoinAsync();
+        var canvas = page.GetByTestId("game-canvas");
+        // A 10 tile high wall 3 tiles south of the player, between it and the camera.
+        world.Game.SetObjects(new Dictionary<string, GameObject> { ["wall"] = new Wall { X = player.X - 1, Y = player.Y - 3 } });
+        await Expect(canvas).ToHaveAttributeAsync("data-game-faded", "1", new() { Timeout = Timeout });
+
+        // Act
+        await page.GetByTestId("game-graphics").ClickAsync(new() { Timeout = Timeout });
+        await page.GetByTestId("game-graphics-fade").ClickAsync();
+        await Expect(canvas).ToHaveAttributeAsync("data-game-fade", "false", new() { Timeout = Timeout });
+        await Expect(canvas).ToHaveAttributeAsync("data-game-faded", "0", new() { Timeout = Timeout });
+        // Long enough for many sightline tests at their interval of 100 ms.
+        var fadedAfterFrames = await page.EvaluateAsync<string?>(
+            """
+            async () => {
+                for (let index = 0; index < 30; index++) {
+                    await new Promise(resolve => requestAnimationFrame(resolve));
+                }
+
+                return document.querySelector('[data-testid="game-canvas"]').dataset.gameFaded;
+            }
+            """);
+
+        // Assert
+        Assert.Equal("0", fadedAfterFrames);
+    }
+
+    [Fact]
+    public async Task WhenGraphicsChoicesAreExpanded_ThenCustomSettingsMergeFallBackAndMatchPresets()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, _) = await world.JoinAsync();
+
+        // Act
+        // Each result as preset, level, shadows, resolution and sharpen.
+        var results = await page.EvaluateAsync<string[]>(
+            """
+            async () => {
+                const { expandGraphics, GRAPHICS_PRESETS } = await import('/_content/HomeBlaze.Game/game-render.js');
+                const describe = ({ preset, level, settings }) => [preset, level, settings.shadows, settings.resolution, settings.sharpen].join(' ');
+                return [
+                    expandGraphics({ preset: 'custom', shadows: 'off' }, GRAPHICS_PRESETS.low, 'medium'),
+                    expandGraphics({ preset: 'custom', sharpen: 'yes', resolution: 3 }, GRAPHICS_PRESETS.low, 'medium'),
+                    expandGraphics({ preset: 'custom', shadows: 'off' }, null, 'medium'),
+                    expandGraphics({ preset: 'high', shadows: 'off' }, GRAPHICS_PRESETS.low, 'medium'),
+                    expandGraphics({ preset: 'unknown' }, GRAPHICS_PRESETS.high, 'low'),
+                    expandGraphics(null, null, 'medium'),
+                ].map(describe);
+            }
+            """);
+
+        // Assert
+        Assert.Equal(
+        [
+            "custom custom off 1 true",
+            "low low hard 1 true",
+            "custom custom off 1.5 true",
+            "high high soft 2 true",
+            "auto low hard 1 true",
+            "auto medium soft 1.5 true",
+        ], results);
+    }
+
+    [Fact]
+    public async Task WhenTheTabIsHidden_ThenRenderingPausesUntilItShowsAgain()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, _) = await world.JoinAsync();
+        var canvas = page.GetByTestId("game-canvas");
+        await Expect(canvas).ToHaveAttributeAsync("data-game-rendering", "running", new() { Timeout = Timeout });
+        await WaitForRenderAsync(page);
+
+        // Act
+        await SetHiddenAsync(page, true);
+        var pausedRendering = await canvas.GetAttributeAsync("data-game-rendering");
+        // The render loop runs on the animation frames, which keep coming in a page that only reports itself hidden, so
+        // a running loop would render within these.
+        var rendersWhileHidden = await page.EvaluateAsync<int>(
+            """
+            async () => {
+                const scene = BABYLON.EngineStore.LastCreatedEngine.scenes[0];
+                const before = scene.getRenderId();
+                for (let index = 0; index < 30; index++) {
+                    await new Promise(resolve => requestAnimationFrame(resolve));
+                }
+
+                return scene.getRenderId() - before;
+            }
+            """);
+        await SetHiddenAsync(page, false);
+
+        // Assert
+        Assert.Equal("paused", pausedRendering);
+        Assert.Equal(0, rendersWhileHidden);
+        await Expect(canvas).ToHaveAttributeAsync("data-game-rendering", "running", new() { Timeout = Timeout });
+        await WaitForRenderAsync(page);
     }
 
     [Fact]
@@ -513,6 +811,90 @@ public class GamePageTests
     }
 
     private static string FormatPosition(int x, int y, string facing) => $"X {x} · Y {y} · facing {facing}";
+
+    private static ILocator GetGraphicsItem(IPage page, string groupTestId, string label) =>
+        page.GetByTestId(groupTestId).GetByRole(AriaRole.Checkbox, new() { Name = label, Exact = true });
+
+    private static Task PickGraphicsAsync(IPage page, string groupTestId, string label) =>
+        GetGraphicsItem(page, groupTestId, label).ClickAsync(new() { Timeout = Timeout });
+
+    // The camera's post-processes in order, each as its name and samples, separated by commas.
+    private static Task<string> ReadPassChainAsync(IPage page) =>
+        page.EvaluateAsync<string>(
+            """
+            () => BABYLON.EngineStore.LastCreatedEngine.scenes[0].activeCamera._postProcesses
+                .filter(Boolean)
+                .map(pass => `${pass.name}:${pass.samples}`)
+                .join(',')
+            """);
+
+    // Counts how often the render target of the expression, which reads the game's scene as scene, renders within 30
+    // animation frames.
+    private static Task<int> CountRendersAsync(IPage page, string renderTarget) =>
+        page.EvaluateAsync<int>(
+            $$"""
+            async () => {
+                const scene = BABYLON.EngineStore.LastCreatedEngine.scenes[0];
+                const target = {{renderTarget}};
+                let renders = 0;
+                const observer = target.onBeforeRenderObservable.add(() => renders++);
+                for (let index = 0; index < 30; index++) {
+                    await new Promise(resolve => requestAnimationFrame(resolve));
+                }
+
+                target.onBeforeRenderObservable.remove(observer);
+                return renders;
+            }
+            """);
+
+    // Opens the shirt color picker and picks the first palette color that differs from the current one; returns it.
+    private static async Task<string> PickOtherPaletteColorAsync(IPage page, ILocator colorInput, string currentColor)
+    {
+        await colorInput.ClickAsync(new() { Timeout = Timeout });
+        var swatches = page.Locator(".mud-picker-color-view-collection .mud-picker-color-dot");
+        await Expect(swatches.First).ToBeVisibleAsync(new() { Timeout = Timeout });
+        var count = await swatches.CountAsync();
+        for (var index = 0; index < count; index++)
+        {
+            await swatches.Nth(index).ClickAsync();
+            var color = (await colorInput.InputValueAsync()).ToLowerInvariant();
+            if (!string.Equals(color, currentColor, StringComparison.OrdinalIgnoreCase))
+            {
+                await page.Keyboard.PressAsync("Escape");
+                return color;
+            }
+        }
+
+        throw new InvalidOperationException("The palette has no other color.");
+    }
+
+    // The device pixels the canvas renders per CSS pixel, which the graphics settings set.
+    private static Task WaitForPixelRatioAsync(IPage page, double ratio) =>
+        page.WaitForFunctionAsync(
+            "ratio => { const canvas = document.querySelector('[data-testid=\"game-canvas\"]'); return Math.abs(canvas.width / canvas.clientWidth - ratio) < 0.05; }",
+            ratio,
+            new() { Timeout = Timeout });
+
+    // Waits until the scene rendered again, which Babylon counts in its render id.
+    private static async Task WaitForRenderAsync(IPage page)
+    {
+        const string RenderId = "() => BABYLON.EngineStore.LastCreatedEngine.scenes[0].getRenderId()";
+        var renderId = await page.EvaluateAsync<int>(RenderId);
+        await page.WaitForFunctionAsync($"renderId => ({RenderId})() > renderId", renderId, new() { Timeout = Timeout });
+    }
+
+    // Playwright cannot hide a page, so this stands in for the browser: the document reports the state and raises the
+    // event a tab switch raises.
+    private static Task SetHiddenAsync(IPage page, bool isHidden) =>
+        page.EvaluateAsync(
+            """
+            isHidden => {
+                Object.defineProperty(document, 'hidden', { configurable: true, get: () => isHidden });
+                Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => isHidden ? 'hidden' : 'visible' });
+                document.dispatchEvent(new Event('visibilitychange'));
+            }
+            """,
+            isHidden);
 
     private static BrowserNewContextOptions CreateMicrophoneContext() => new() { Permissions = ["microphone"] };
 
