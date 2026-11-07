@@ -26,7 +26,8 @@ internal static class StorageFileRequestHandler
         (routeValue as string)?.TrimStart('/') ?? string.Empty;
 
     /// <summary>
-    /// Writes the content of the subject when it is a <see cref="GenericFile"/>, and 404 for any other subject or none.
+    /// Writes the content of the subject when it is a <see cref="GenericFile"/>, and 404 for any other subject or none or a
+    /// file that is gone, and 503 when the storage is not connected or cannot deliver the content now.
     /// </summary>
     public static async Task HandleAsync(HttpContext context, IInterceptorSubject? subject)
     {
@@ -60,9 +61,20 @@ internal static class StorageFileRequestHandler
         {
             content = await file.ReadAsync(context.RequestAborted);
         }
-        catch (FileNotFoundException)
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
             content = null;
+        }
+        catch (Exception exception) when (exception is TimeoutException or IOException or UnauthorizedAccessException)
+        {
+            response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            return;
+        }
+        // A storage reports an ended connection as an invalid operation; any other cause is a bug that must surface.
+        catch (InvalidOperationException) when (file.Storage.Status != StorageStatus.Connected)
+        {
+            response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            return;
         }
 
         // The file was deleted after its path was resolved.

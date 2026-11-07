@@ -232,4 +232,71 @@ public class StorageFileRequestHandlerTests
         // Assert
         Assert.Equal(StatusCodes.Status404NotFound, context.Response.StatusCode);
     }
+
+    [Theory]
+    [InlineData(typeof(TimeoutException))]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(UnauthorizedAccessException))]
+    public async Task WhenReadFailsInTheStorage_ThenItIsUnavailableWithoutCacheHeaders(Type exceptionType)
+    {
+        // Arrange
+        var storage = new FakeStorageContainer(PngContent) { ReadException = (Exception)Activator.CreateInstance(exceptionType)! };
+        var file = CreateFile(storage, "plan.png", PngContent.Length);
+        var context = CreateContext();
+
+        // Act
+        await StorageFileRequestHandler.HandleAsync(context, file);
+
+        // Assert
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, context.Response.StatusCode);
+        Assert.False(context.Response.Headers.ContainsKey("ETag"));
+    }
+
+    [Fact]
+    public async Task WhenFolderIsGoneAtRead_ThenItIsNotFound()
+    {
+        // Arrange
+        var storage = new FakeStorageContainer(PngContent) { ReadException = new DirectoryNotFoundException() };
+        var file = CreateFile(storage, "plan.png", PngContent.Length);
+        var context = CreateContext();
+
+        // Act
+        await StorageFileRequestHandler.HandleAsync(context, file);
+
+        // Assert
+        Assert.Equal(StatusCodes.Status404NotFound, context.Response.StatusCode);
+        Assert.False(context.Response.Headers.ContainsKey("ETag"));
+    }
+
+    [Fact]
+    public async Task WhenReadThrowsInvalidOperationWhileStorageIsConnected_ThenItPropagates()
+    {
+        // Arrange
+        var storage = new FakeStorageContainer(PngContent) { ReadException = new InvalidOperationException() };
+        var file = CreateFile(storage, "plan.png", PngContent.Length);
+        var context = CreateContext();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() => StorageFileRequestHandler.HandleAsync(context, file));
+    }
+
+    [Fact]
+    public async Task WhenStorageDisconnectsDuringRead_ThenItIsUnavailableWithoutCacheHeaders()
+    {
+        // Arrange
+        var storage = new FakeStorageContainer(PngContent)
+        {
+            ReadException = new InvalidOperationException(),
+            StatusWhenReadStarts = StorageStatus.Disconnected
+        };
+        var file = CreateFile(storage, "plan.png", PngContent.Length);
+        var context = CreateContext();
+
+        // Act
+        await StorageFileRequestHandler.HandleAsync(context, file);
+
+        // Assert
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, context.Response.StatusCode);
+        Assert.False(context.Response.Headers.ContainsKey("ETag"));
+    }
 }

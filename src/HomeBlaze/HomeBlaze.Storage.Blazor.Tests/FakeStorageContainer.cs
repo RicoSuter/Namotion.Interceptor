@@ -6,7 +6,10 @@ namespace HomeBlaze.Storage.Blazor.Tests;
 /// <summary>A storage that holds the content of one file and counts its reads.</summary>
 internal sealed class FakeStorageContainer(byte[]? content) : IStorageContainer
 {
-    public StorageStatus Status { get; init; } = StorageStatus.Connected;
+    public StorageStatus Status { get; set; } = StorageStatus.Connected;
+
+    /// <summary>The status the storage switches to when a read starts, as when its connection ends during the read.</summary>
+    public StorageStatus? StatusWhenReadStarts { get; init; }
 
     /// <summary>Thrown by a read instead of returning the content.</summary>
     public Exception? ReadException { get; init; }
@@ -18,6 +21,11 @@ internal sealed class FakeStorageContainer(byte[]? content) : IStorageContainer
     public Task<Stream> ReadBlobAsync(string path, CancellationToken cancellationToken)
     {
         ReadCount++;
+        if (StatusWhenReadStarts is { } statusWhenReadStarts)
+        {
+            Status = statusWhenReadStarts;
+        }
+
         if (ReadException is not null)
         {
             return Task.FromException<Stream>(ReadException);
