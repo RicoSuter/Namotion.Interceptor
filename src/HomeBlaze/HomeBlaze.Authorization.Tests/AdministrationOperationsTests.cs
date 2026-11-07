@@ -38,4 +38,20 @@ public class AdministrationOperationsTests
         // Assert
         Assert.True(attribute.RequiresAdministration);
     }
+
+    [Theory]
+    [InlineData("ReplaceContentAsync")]
+    [InlineData("ReplaceTextAsync")]
+    public void WhenAnOperationRewritesTheTextOfAPage_ThenNoUserInterfaceRunsIt(string methodName)
+    {
+        // Arrange
+        var method = typeof(HomeBlaze.Storage.Files.MarkdownFile).GetMethod(methodName)!;
+
+        // Act
+        var targets = method.GetCustomAttribute<ExcludeFromAttribute>()?.Targets ?? ExclusionTarget.None;
+
+        // Assert
+        Assert.True(targets.HasFlag(ExclusionTarget.UserInterface));
+        Assert.False(targets.HasFlag(ExclusionTarget.Agents));
+    }
 }

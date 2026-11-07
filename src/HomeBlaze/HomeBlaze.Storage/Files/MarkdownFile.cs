@@ -273,6 +273,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage, such as the
     /// load of a file, or from within a write of this page.</exception>
     [Operation(Title = "Replace Content", Description = "Replaces the whole markdown source of this file.", Icon = "EditNote")]
+    // For agents only: a person changes the text in the page editor, which requires a full administrator.
+    [ExcludeFrom(ExclusionTarget.UserInterface)]
     public async Task ReplaceContentAsync(string content, CancellationToken cancellationToken)
     {
         EnsureNotWithinWrite();
@@ -302,6 +304,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage, such as the
     /// load of a file, or from within a write of this page.</exception>
     [Operation(Title = "Replace Text", Description = "Replaces one exact, unique passage of the markdown source.", Icon = "FindReplace")]
+    // For agents only, as ReplaceContentAsync.
+    [ExcludeFrom(ExclusionTarget.UserInterface)]
     public async Task ReplaceTextAsync(string oldText, string newText, CancellationToken cancellationToken)
     {
         EnsureNotWithinWrite();
