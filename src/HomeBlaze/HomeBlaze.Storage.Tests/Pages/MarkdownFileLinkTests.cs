@@ -84,4 +84,22 @@ public class MarkdownFileLinkTests
         // Assert
         Assert.Contains(expected, html);
     }
+
+    [Theory]
+    [InlineData("Docs/C# notes/page.md", "![Plan](plan.png)", "src=\"/files/Docs/C%23%20notes/plan.png\"")]
+    [InlineData("Docs/C# notes/page.md", "![Plan](my%20plan.png)", "src=\"/files/Docs/C%23%20notes/my%20plan.png\"")]
+    [InlineData("Docs/100% done/page.md", "[Manual](manual.pdf)", "href=\"/files/Docs/100%25%20done/manual.pdf\"")]
+    [InlineData("Docs/What?/page.md", "[Sub](sub/)", "href=\"/browser/Docs/What%3F/sub\"")]
+    [InlineData("Docs/C# notes/sub/page.md", "[Up](..)", "href=\"/browser/Docs/C%23%20notes\"")]
+    [InlineData("Docs/\u00dcber/page.md", "[Other](other.md)", "href=\"/pages/Docs/%C3%9Cber/other.md\"")]
+    [InlineData("Docs/C# notes/page.md", "[Section](#a)", "href=\"/pages/Docs/C%23%20notes/page.md#a\"")]
+    [InlineData("Docs/C# notes/page.md", "[Edit](?view=edit)", "href=\"/pages/Docs/C%23%20notes/page.md?view=edit\"")]
+    public async Task WhenPageIsInAFolderWithSpecialCharacters_ThenItsLinksAreRequestedIntact(string pagePath, string source, string expected)
+    {
+        // Act
+        var html = await RenderAsync(pagePath, source);
+
+        // Assert
+        Assert.Contains(expected, html);
+    }
 }

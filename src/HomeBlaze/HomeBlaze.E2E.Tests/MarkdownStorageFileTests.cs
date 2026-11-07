@@ -14,6 +14,7 @@ public class MarkdownStorageFileTests
     private const string PageRoute = "pages/Demo/StorageFiles.md";
     private const string PictureRoute = "files/Demo/images/sample.png";
     private const string TextRoute = "files/Demo/images/sample.txt";
+    private const string SpecialPictureRoute = "files/Demo/images/sample%20%232%20%C3%BC.png";
 
     private readonly PlaywrightFixture _fixture;
 
@@ -48,6 +49,26 @@ public class MarkdownStorageFileTests
         // Assert
         Assert.Equal("/" + PictureRoute, await picture.GetAttributeAsync("src"));
         Assert.Equal(new[] { 4, 2 }, size);
+    }
+
+    [Fact]
+    public async Task WhenPictureNameHasASpaceAHashAndANonAsciiLetter_ThenItIsLoadedFromTheStorage()
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        var picture = page.GetByAltText("Special picture");
+
+        // Act
+        await page.WaitForFunctionAsync(
+            "() => { const image = document.querySelector('img[alt=\"Special picture\"]'); return image.complete && image.naturalWidth > 0; }",
+            null,
+            new() { Timeout = Timeout });
+        var response = await page.APIRequest.GetAsync($"{_fixture.ServerAddress}{SpecialPictureRoute}");
+
+        // Assert
+        Assert.Equal("/" + SpecialPictureRoute, await picture.GetAttributeAsync("src"));
+        Assert.Equal(200, response.Status);
+        Assert.Equal("image/png", response.Headers["content-type"]);
     }
 
     [Fact]

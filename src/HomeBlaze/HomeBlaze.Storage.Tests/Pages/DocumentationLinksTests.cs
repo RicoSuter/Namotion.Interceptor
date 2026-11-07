@@ -107,13 +107,13 @@ public class DocumentationLinksTests
                 // A folder opens in the subject browser and any other file is served under the file route: the path ends at a query or a fragment.
                 var pathEnd = url.IndexOfAny(['?', '#']);
                 var targetPath = pathEnd < 0 ? url : url[..pathEnd];
-                var fullPath = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(file)!, targetPath));
+                var fullPath = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(file)!, Uri.UnescapeDataString(targetPath)));
                 return targetPath.EndsWith('/')
                     ? Directory.Exists(fullPath) ? null : "leads to a folder that does not exist"
                     : File.Exists(fullPath) ? null : "leads to a file that does not exist";
             }
 
-            target = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(file)!, pagePath));
+            target = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(file)!, Uri.UnescapeDataString(pagePath)));
             if (!File.Exists(target))
             {
                 return "leads to a page that does not exist";

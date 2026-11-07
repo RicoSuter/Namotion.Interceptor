@@ -27,6 +27,8 @@ public sealed partial class MarkdownContentParser
     private const string PagesRoutePrefix = "/pages";
     private const string BrowserRoutePrefix = "/browser";
 
+    private static readonly SearchValues<char> CharactersToEscapeForLink = SearchValues.Create("%#?");
+
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly SubjectPathResolver _pathResolver;
     private readonly TypeProvider _typeProvider;
@@ -148,15 +150,18 @@ public sealed partial class MarkdownContentParser
         };
 
     /// <summary>
-    /// Gets a file name as a link has to write it: with the characters escaped that end the path of a URL
-    /// or start an escape. Spaces and other characters are escaped when the link is rendered, as for a
-    /// link that is written on the page.
+    /// Gets a name or a path of names as a link has to write it: with the characters escaped that end the path of a URL
+    /// or start an escape. Spaces and other characters are escaped when the link is rendered, as for a link that is
+    /// written on the page.
     /// </summary>
-    private static string EscapeFileNameForLink(string fileName) =>
-        fileName.Replace("%", "%25").Replace("#", "%23").Replace("?", "%3F");
+    private static string EscapeForLink(string path) =>
+        path.AsSpan().IndexOfAny(CharactersToEscapeForLink) < 0
+            ? path
+            : path.Replace("%", "%25").Replace("#", "%23").Replace("?", "%3F");
 
     /// <summary>
-    /// Computes the base path used to resolve relative links in markdown.
+    /// Computes the base path used to resolve relative links in markdown, with its names escaped by
+    /// <see cref="EscapeForLink"/>: they come from the file system, while the relative part of a link is written as a URL.
     /// A markdown file is parsed before it is placed in the tree, so its own graph path is not available yet.
     /// The graph path of its storage container is, and is combined with the directory of the file within the
     /// storage.
@@ -168,14 +173,14 @@ public sealed partial class MarkdownContentParser
         if (parent.Storage is not IInterceptorSubject storageSubject
             || _pathResolver.GetPath(storageSubject, PathStyle.Route) is not { } storageGraphPath)
         {
-            return fileDirectory;
+            return EscapeForLink(fileDirectory);
         }
 
         var trimmedStorage = storageGraphPath.TrimEnd('/');
         var trimmedDirectory = fileDirectory.Trim('/');
-        return string.IsNullOrEmpty(trimmedDirectory)
+        return EscapeForLink(string.IsNullOrEmpty(trimmedDirectory)
             ? trimmedStorage
-            : $"{trimmedStorage}/{trimmedDirectory}";
+            : $"{trimmedStorage}/{trimmedDirectory}");
     }
 
     /// <summary>
@@ -190,7 +195,7 @@ public sealed partial class MarkdownContentParser
             return link;
         }
 
-        var pageName = kind == LinkKind.Page && pathEnd == 0 ? EscapeFileNameForLink(Path.GetFileName(page.FullPath)) : string.Empty;
+        var pageName = kind == LinkKind.Page && pathEnd == 0 ? EscapeForLink(Path.GetFileName(page.FullPath)) : string.Empty;
         return RewriteLink(link, kind, pathEnd, GetLinkBasePath(page), pageName);
     }
 
@@ -350,7 +355,7 @@ public sealed partial class MarkdownContentParser
 
         var page = MarkdownPageParser.Parse(content);
         var basePath = GetLinkBasePath(parent);
-        var pageName = EscapeFileNameForLink(Path.GetFileName(parent.FullPath));
+        var pageName = EscapeForLink(Path.GetFileName(parent.FullPath));
         var segments = MarkdownSegmentBuilder.Build(
             page, url => RewriteLink(url, basePath, pageName), markTextBlocks: true, opensInNewTab: OpensInNewTab);
 
