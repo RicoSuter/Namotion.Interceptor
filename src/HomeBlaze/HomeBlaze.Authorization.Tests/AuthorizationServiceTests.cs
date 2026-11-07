@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using HomeBlaze.Authorization.Tests.Subjects;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Authorization;
@@ -626,6 +627,35 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.True(result.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
         await StatusAssert.EqualAsync(null, () => role.Status);
         await StatusAssert.EqualAsync(null, () => role.Warning);
+    }
+
+    [Fact]
+    public async Task WhenTheServiceIsDisposed_ThenItsContextNoLongerHoldsIt()
+    {
+        // Arrange
+        var context = TestContext.Create();
+
+        // Act
+        var service = CreateAndDisposeService(context);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                return !service.IsAlive;
+            },
+            message: "The disposed service is still reachable.");
+        GC.KeepAlive(context);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference CreateAndDisposeService(IInterceptorSubjectContext context)
+    {
+        var service = new AuthorizationService(context, new DefaultPathProvider('/'));
+        service.Dispose();
+        return new WeakReference(service);
     }
 
     private Authorization AddAuthorization(params (string Name, Role Role)[] roles)

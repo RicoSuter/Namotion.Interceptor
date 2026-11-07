@@ -35,6 +35,7 @@ public sealed class AuthorizationService : IDisposable
     private readonly PathProviderBase _pathProvider;
     private readonly ILogger<AuthorizationService>? _logger;
     private readonly IDisposable _subscription;
+    private readonly GraphObserver _graphObserver;
     private readonly ConcurrentDictionary<object, ImmutableArray<string>> _principals = new(ReferenceEqualityComparer.Instance);
     private readonly Lock _rebuildLock = new();
 
@@ -76,7 +77,8 @@ public sealed class AuthorizationService : IDisposable
         _pathProvider = pathProvider;
         _logger = logger;
 
-        context.AddService(new GraphObserver(this));
+        _graphObserver = new GraphObserver(this);
+        context.AddService(_graphObserver);
         _subscription = context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(OnPropertyChanged);
@@ -147,12 +149,13 @@ public sealed class AuthorizationService : IDisposable
     }
 
     /// <summary>
-    /// Stops observing property changes. Policies already returned stay valid.
+    /// Stops observing the graph. Policies already returned stay valid.
     /// </summary>
     public void Dispose()
     {
         _isDisposed = true;
         _subscription.Dispose();
+        _graphObserver.Detach();
     }
 
     private void OnPropertyChanged(SubjectPropertyChange change)
@@ -188,6 +191,11 @@ public sealed class AuthorizationService : IDisposable
 
     private void Refresh()
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
         // Cleared first, so that a change during the rebuild schedules another one.
         Volatile.Write(ref _isRefreshScheduled, 0);
         try
@@ -326,14 +334,19 @@ public sealed class AuthorizationService : IDisposable
     }
 
     // After the registry, so that a rebuild started by a change finds the subject among the known subjects, or no longer.
+    // The context has no way to remove a service, so Detach lets go of a disposed service while the observer stays.
     [RunsAfter(typeof(SubjectRegistry))]
     private sealed class GraphObserver(AuthorizationService service) : ILifecycleHandler
     {
+        private AuthorizationService? _service = service;
+
+        public void Detach() => Volatile.Write(ref _service, null);
+
         public void HandleLifecycleChange(SubjectLifecycleChange change)
         {
             if (change.Subject is Authorization or Role)
             {
-                service.Invalidate();
+                Volatile.Read(ref _service)?.Invalidate();
             }
         }
     }
