@@ -19,7 +19,6 @@
     private string? _condition;
     private TimeSpan? _cooldown;
     private string? _writtenGuard;
-    private bool _isInitialized;
 
     [Parameter, EditorRequired] public RuleDraft Rule { get; set; } = null!;
 
@@ -36,12 +35,11 @@
     // so they are read from the guard only when it was changed by someone else.
     protected override void OnParametersSet()
     {
-        if (_isInitialized && Rule.Guard == _writtenGuard)
+        if (Rule.Guard == _writtenGuard)
         {
             return;
         }
 
-        _isInitialized = true;
         _writtenGuard = Rule.Guard;
         (_condition, _cooldown) = GuardCooldown.Split(Rule.Guard);
     }

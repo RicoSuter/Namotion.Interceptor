@@ -11,7 +11,6 @@
     private string? _text;
     private string? _error;
     private TimeSpan? _shownValue;
-    private bool _isInitialized;
 
     [CascadingParameter] private PendingRows? PendingRows { get; set; }
 
@@ -36,12 +35,11 @@
     // The text stays as typed while it does not parse, and is replaced only when the value changes elsewhere.
     protected override void OnParametersSet()
     {
-        if (_isInitialized && Value == _shownValue)
+        if (Value == _shownValue)
         {
             return;
         }
 
-        _isInitialized = true;
         _shownValue = Value;
         _text = Value is { } value ? AutomationDuration.Format(value) : null;
     }

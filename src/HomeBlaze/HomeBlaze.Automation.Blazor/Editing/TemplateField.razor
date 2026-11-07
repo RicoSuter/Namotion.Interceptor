@@ -19,7 +19,6 @@
     private string? _written;
     private string? _error;
     private string? _rendered;
-    private bool _isInitialized;
     private string? _evaluatedText;
     private RuleExpressions? _evaluatedExpressions;
     private bool _hasTemplate;
@@ -42,9 +41,8 @@
     // only when the parent holds something other than what this field last wrote.
     protected override void OnParametersSet()
     {
-        if (!_isInitialized || Value != _written)
+        if (Value != _written)
         {
-            _isInitialized = true;
             _text = Value;
             _written = Value;
         }
