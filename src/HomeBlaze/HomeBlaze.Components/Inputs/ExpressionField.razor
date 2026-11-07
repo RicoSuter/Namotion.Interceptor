@@ -149,7 +149,8 @@
     }
 
     // The previews read the current values once per interval, outside of a render, so that a value that changes often
-    // neither renders the field on every change nor makes a render evaluate the expression.
+    // neither renders the field on every change nor makes a render evaluate the expression. The timer is created without the
+    // execution context of the render, so that a tick records no reads into a read tracking scope of that render.
     private void StartPreviewTimer()
     {
         if (Preview is null || _previewTimer is not null)
@@ -157,7 +158,10 @@
             return;
         }
 
-        _previewTimer = TimeProvider.CreateTimer(_ => _ = InvokeAsync(RefreshValues), null, PreviewInterval, PreviewInterval);
+        using (ExecutionContext.SuppressFlow())
+        {
+            _previewTimer = TimeProvider.CreateTimer(_ => _ = InvokeAsync(RefreshValues), null, PreviewInterval, PreviewInterval);
+        }
     }
 
     private void RefreshValues()
