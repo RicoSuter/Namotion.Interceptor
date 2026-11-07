@@ -88,7 +88,7 @@ classDiagram
 - **Rules** process each input in the order of the Rules tab, and several rules can run for one input, each at most once. Each rule has a key such as `k3f9` that never changes, so that its path, such as `/Automations/Storm/Rules[k3f9]/LastTriggeredAt`, stays the same when the rule is renamed or moved in the list.
 - **States** are optional names, such as `Idle` and `Running`. A rule can be **Active in state**: it observes its triggers only while the automation is in that state, and it starts again with fresh holds each time the automation enters it. A rule without a state is active in every state, also in an automation without states.
 - **The initial state** is the state of a new automation and the state that **Reset state** on the page enters. Reset state enters the initial state, clears the last trigger times and then starts every rule that is active in the initial state over, as if it had just entered its state, also when the state did not change: holds start fresh, **Run if already true** fires again when the condition is still true, **Wait for a change** takes a new baseline, and event triggers subscribe again without replaying earlier events.
-- **A state changes** only through a **Change state** action of a rule of the same automation. Once a rule changed the state, it finishes its own actions and the rules after it skip that input; a skipped request is [no run](#only-if-and-cooldown), and the rule status names it, such as `Waiting since 2026-11-06 12:01:00: the state changed to Hot for the same input`. A property condition skipped this way keeps waiting and runs in a later input if its rule is still active then; a rule that the new state deactivates does not run. Each event is an input of its own, so a state change never skips another rule of the same event: a later rule without a state still runs for it, while a rule **Active in state** of the state that was left does not receive it. The state change event is published once the input is processed and the rules of the new state are active, so they receive it and the rules of the state that was left do not. What should happen when a state is entered is an ordinary rule with an event trigger on the state changes of the automation, which can be **Active in state** of the entered state, see [Events](#events).
+- **A state changes** only through a **Change state** action of a rule of the same automation. Once a rule changed the state, it finishes its own actions and the rules after it skip that input; a skipped request is [no run](#only-if-and-cooldown), and the rule status names it, such as `Waiting since 2026-11-06 12:01:00: the state changed to Hot for the same input`. A property condition skipped this way keeps waiting and runs in a later input if its rule is still active then; a rule that the new state deactivates does not run. Each event is an input of its own, so a state change never skips another rule of the same event: a later rule without a state still runs for it, while a rule **Active in state** of the state that was left runs for it only if it handled the event before the state changed, as a rule before the changing rule does. The state change event is published once the input is processed and the rules of the new state are active, so they receive it and the rules of the state that was left do not. What should happen when a state is entered is an ordinary rule with an event trigger on the state changes of the automation, which can be **Active in state** of the entered state, see [Events](#events).
 
 ---
 
@@ -131,7 +131,7 @@ Events are never replayed: an event from before the rule became active, or one t
 
 **Only if** is one condition, checked against the current values when a trigger requests a run. It answers "only if" where triggers answer "when": it never starts a run on its own. A rule without it runs on every trigger.
 
-A property condition that Only if rejects waits: the rule status reads `On: Waiting since 2026-11-06 12:01:00: Only if is false`, and the rule runs once Only if is true while the condition is still true, when a value that Only if reads changes, when its cooldown ends, or when a saved change relaxes or removes Only if. The wait ends without a run when the condition becomes false or unknown, or when the rule becomes inactive. The automation observes the values that Only if reads only while a trigger of the rule waits. An event that Only if rejects is gone, and the rule status ends with why, such as `On: Armed; not run: Only if is false`. A request that does not run is no run: it is not counted, not listed and not saved.
+A property condition that Only if rejects waits: the rule status reads `On: Waiting since 2026-11-06 12:01:00: Only if is false`, and the rule runs once Only if is true while the condition is still true, when a value that Only if reads changes, when the clock makes it true, such as its cooldown ending or a time window opening, or when a saved change relaxes or removes Only if. The wait ends without a run when the condition becomes false or unknown, or when the rule becomes inactive. The automation observes the values that Only if reads only while a trigger of the rule waits. An event that Only if rejects is gone, and the rule status ends with why, such as `On: Armed; not run: Only if is false`. A request that does not run is no run: it is not counted, not listed and not saved.
 
 **At most once every** is a cooldown, such as `30m`. The editor writes it into the condition as `./LastTriggeredAt == null or now - ./LastTriggeredAt > 30m`, joined to the rest with `and`, and shows it as a duration again as long as the condition keeps exactly that form. `LastTriggeredAt` is set when the first action of a run starts, also when the actions then fail, so that a failing device is not retried before the cooldown ends. Requests that Only if rejects, dry runs and Test now do not set it, so a cooldown never applies in dry run. A dry run still checks Only if first.
 
@@ -252,7 +252,7 @@ Values typed into a simple row follow these rules. A value that is one token, su
 
 ## Status and errors
 
-`Status` of an automation is `Starting`, `Running`, `Error` or `Stopped`, and `StatusMessage` holds the latest failure, such as a failed action or an invalid configuration, which keeps the previous configuration running. A later run that executes actions and completes all of them clears the error; a request that did not run does not. A disabled automation keeps its state and its last error. The times in a rule status are in the time zone of the host, while the page shows its own times in your time zone.
+`Status` of an automation is `Starting`, `Running`, `Error` or `Stopped`, and `StatusMessage` holds the latest failure, such as a failed action or an invalid configuration, which keeps the previous configuration running. A later run that executes actions and completes all of them clears the error, except the errors about the checkpoint, see [Operational details](#operational-details); a request that did not run does not. A disabled automation keeps its state and its last error. The times in a rule status are in the time zone of the host, while the page shows its own times in your time zone.
 
 The status of a rule starts with its mode, `On`, `DryRun` or `Off` (a rule that is off shows only `Off`), and the examples below show an `On` rule:
 
@@ -277,7 +277,7 @@ The status of a rule starts with its mode, `On`, `DryRun` or `Off` (a rule that 
 
 ## Why didn't my rule run?
 
-1. **Read the status of the rule** on the page of the automation. `Off`, `Inactive ...` and `Not applied ...` say that the rule does not observe its triggers, `Unknown since ...` names the values that are missing, `Holding since ...` that a hold has not elapsed, `Waiting since ...` that Only if or a state change held the run back, `Triggered, waiting to rearm` and `Already true, waiting until false` that the condition was true already and must change first, and `; not run: ...` why the last request did not run. A rule in Dry run lists its runs but executes nothing.
+1. **Read the status of the rule** on the page of the automation. `Off` and `Inactive ...` say that the rule does not observe its triggers, `Not applied ...` that the saved change is not in effect yet (an invalid one leaves the previous configuration running), `Unknown since ...` names the values that are missing, `Holding since ...` that a hold has not elapsed, `Waiting since ...` that Only if or a state change held the run back, `Triggered, waiting to rearm` and `Already true, waiting until false` that the condition was true already and must change first, and `; not run: ...` why the last request did not run. A rule in Dry run lists its runs but executes nothing.
 2. **Click Test now** on the rule. It shows the result of each trigger and of Only if with the current values, and the arguments the actions would get, so a condition that is false or unknown and a wrong path show up there.
 3. **Read the status of the automation and the log.** A failed or refused action, a stopped feedback chain and an invalid configuration are in `StatusMessage` and in the log, with the full error.
 
@@ -293,7 +293,7 @@ The state belongs to the path of the automation: moving it to another folder or 
 
 ## Examples
 
-The paths are illustrative. Each JSON example is the configuration file of the automation, which the editor shows in its tabs, and the shorter examples list the rules as the editor shows them. A hold (`for`) is written as a duration of expressions, such as `20s`, `10m` or `1h30m`, and the form `00:10:00` is still read.
+The paths are illustrative. Each JSON example is the configuration file of the automation, which the editor shows in its tabs, and the shorter examples list the rules as the editor shows them. A hold (`for`) is written as a duration of expressions, such as `20s`, `10m` or `1h30m`, and the form `00:10:00` is read as well.
 
 ### Washing machine finished
 
@@ -482,7 +482,7 @@ Rule  Finished   Active in state: Running
 
 ### One-button toggle
 
-One button switches a lamp on and off with two states. Each press reaches only the rule of the current state, and the state it enters takes effect for the next press, so one press never runs both rules.
+One button switches a lamp on and off with two states. Each press reaches only the rule of the current state, and the state it enters takes effect for the next press, so one press never runs both rules. A press while the previous one is still running its actions is ignored.
 
 ```text
 States  Off, On
@@ -500,7 +500,7 @@ Rule  Switch off   Active in state: On
 
 ### Light off without motion
 
-The hold restarts with every motion, so the light goes off five minutes after the last motion, and once more after a restart without motion.
+The hold restarts with every motion, so the light goes off five minutes after the sensor stops reporting motion, and once more five minutes after a restart once the sensor reports no motion.
 
 ```text
 Rule  Light off
@@ -516,7 +516,7 @@ The first condition covers an integration that empties its values when a sensor 
 Rule  WS90 silent
   When  /Weather/WS90/Temperature == null                                                   For at least 15m
   When  (/Weather/WS90/LastUpdated == null or now - /Weather/WS90/LastUpdated > 15m)        For at least 15m
-  Then  Call /Notifications/Family/SendNotification  Message: WS90 has not reported for 15 minutes
+  Then  Call /Notifications/Family/SendNotification  Message: WS90 has not reported for at least 15 minutes
 ```
 
 ---
