@@ -386,6 +386,104 @@ public class ParsedExpressionParseTests
         Assert.Equal(expectedPaths, expression.Paths.ToArray());
     }
 
+    private static readonly ImmutableArray<string> ClockAndEventVariables = ["subject", "now", "time", "event"];
+
+    [Theory]
+    [InlineData("now/Ticks > 1")]
+    [InlineData("event/State == 1")]
+    [InlineData("time")]
+    public void WhenNameIsNotADeclaredVariable_ThenThePathIsResolvedAsAPath(string text)
+    {
+        // Act
+        var expression = Parse(text);
+        var context = new RecordingContext();
+        expression.Evaluate(ref context);
+
+        // Assert
+        Assert.Null(context.Variable);
+        Assert.False(expression.TryGetVariable(expression.Paths[0], out _, out _));
+        Assert.Equal(["value", "subject"], expression.Variables.ToArray());
+    }
+
+    [Theory]
+    [InlineData("now/Ticks > 1", "now", "Ticks")]
+    [InlineData("event/State == 1", "event", "State")]
+    [InlineData("time", "time", null)]
+    [InlineData("subject[0]/Power", "subject", "[0]/Power")]
+    public void WhenNameIsADeclaredVariable_ThenThePathIsResolvedAsThatVariable(string text, string expectedVariable, string? expectedMemberPath)
+    {
+        // Act
+        Assert.True(ParsedExpression.TryParse(text, '/', ClockAndEventVariables, out var expression, out var error), error);
+        var context = new RecordingContext();
+        expression.Evaluate(ref context);
+        var isVariable = expression.TryGetVariable(expression.Paths[0], out var variable, out var memberPath);
+
+        // Assert
+        Assert.Equal(expectedVariable, context.Variable);
+        Assert.Equal(expectedMemberPath, context.MemberPath);
+        Assert.True(isVariable);
+        Assert.Equal(expectedVariable, variable);
+        Assert.Equal(expectedMemberPath, memberPath);
+        Assert.Equal(ClockAndEventVariables, expression.Variables);
+    }
+
+    [Theory]
+    [InlineData("Since < now", false, new[] { "Since" })]
+    [InlineData("Since < now", true, new[] { "Since", "now" })]
+    [InlineData("State == event", false, new[] { "State" })]
+    [InlineData("State == event", true, new[] { "State", "event" })]
+    [InlineData("Mode == value", false, new[] { "Mode", "value" })]
+    [InlineData("Mode == value", true, new[] { "Mode" })]
+    public void WhenBareWordFollowsAComparison_ThenItIsAPathOnlyWhenItIsADeclaredVariable(string text, bool declaresClockAndEvent, string[] expectedPaths)
+    {
+        // Act
+        var isParsed = declaresClockAndEvent
+            ? ParsedExpression.TryParse(text, '/', ClockAndEventVariables, out var expression, out var error)
+            : ParsedExpression.TryParse(text, '/', out expression, out error);
+
+        // Assert
+        Assert.True(isParsed, error);
+        Assert.Equal(expectedPaths, expression!.Paths.ToArray());
+    }
+
+    [Fact]
+    public void WhenTemplateDeclaresVariables_ThenItsExpressionsHaveThem()
+    {
+        // Act
+        Assert.True(TextTemplate.TryParse("At {{ now }} for {{ event/State }}", '/', ClockAndEventVariables, out var template, out var error), error);
+
+        // Assert
+        Assert.All(template.Expressions, expression => Assert.Equal(ClockAndEventVariables, expression.Variables));
+        Assert.True(template.Expressions[1].TryGetVariable("event/State", out var variable, out var memberPath));
+        Assert.Equal("event", variable);
+        Assert.Equal("State", memberPath);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("1st")]
+    [InlineData("_now")]
+    [InlineData("now/x")]
+    [InlineData("time zone")]
+    [InlineData("and")]
+    [InlineData("NULL")]
+    public void WhenVariableIsNoWord_ThenParsingThrows(string variable)
+    {
+        // Act & Assert
+        var parseException = Assert.Throws<ArgumentException>(() => ParsedExpression.TryParse("a", '/', [variable], out _, out _));
+        Assert.Equal("variables", parseException.ParamName);
+        var templateException = Assert.Throws<ArgumentException>(() => TextTemplate.TryParse("a {{ b }}", '/', [variable], out _, out _));
+        Assert.Equal("variables", templateException.ParamName);
+    }
+
+    [Fact]
+    public void WhenVariablesAreNotInitialized_ThenParsingThrows()
+    {
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => ParsedExpression.TryParse("a", '/', default(ImmutableArray<string>), out _, out _));
+        Assert.Equal("variables", exception.ParamName);
+    }
+
     private struct RecordingContext : IExpressionContext
     {
         public string? Variable;

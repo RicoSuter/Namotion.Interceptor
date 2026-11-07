@@ -12,6 +12,7 @@ public class AutomationExpressionCheckTests
     [InlineData("event/Gesture == Release", true, null)]
     [InlineData("subject/Name == WS90", true, null)]
     [InlineData("value > 1", true, "'value' is not available in automations")]
+    [InlineData("/Demo/Mode == value", true, "'value' is not available in automations")]
     [InlineData("event/Gesture == Release", false, "'event' " + EventOnly)]
     [InlineData("subject/Name == WS90", false, "'subject' " + EventOnly)]
     [InlineData("now/Ticks > 1", false, "'now' has no members")]
@@ -50,6 +51,7 @@ public class AutomationExpressionCheckTests
     [Theory]
     [InlineData("now - /Weather/LastUpdated > 15m", true)]
     [InlineData("time >= 8h30m", true)]
+    [InlineData("./LastTriggeredAt < now", true)]
     [InlineData("/Weather/Gust > 8", false)]
     public void WhenAnExpressionReadsTheClock_ThenItUsesTime(string text, bool expected)
     {
