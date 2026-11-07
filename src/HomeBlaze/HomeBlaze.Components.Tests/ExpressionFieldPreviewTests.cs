@@ -45,10 +45,9 @@ public class ExpressionFieldPreviewTests
         var (validations, previews) = (host.Validations, host.Previews);
 
         // Act
-        var isEvaluated = preview.Update("/Weather/Gust > 8", Rows("/Weather/Gust > 8"), '/', Variables, host.Validate, host.Preview);
+        preview.Update("/Weather/Gust > 8", Rows("/Weather/Gust > 8"), '/', Variables, host.Validate, host.Preview);
 
         // Assert
-        Assert.False(isEvaluated);
         Assert.Equal((validations, previews), (host.Validations, host.Previews));
         Assert.Equal("true", preview.ResultText);
         Assert.Equal(["now 9, true"], preview.RowTexts.ToArray());
@@ -61,12 +60,13 @@ public class ExpressionFieldPreviewTests
         var host = new Host();
         var preview = new ExpressionFieldPreview();
         preview.Update("/Weather/Gust > 8", Rows("/Weather/Gust > 8"), '/', Variables, host.Validate, host.Preview);
+        var validations = host.Validations;
 
         // Act
-        var isEvaluated = preview.Update("(/Weather/Gust > 8", [], '/', Variables, host.Validate, host.Preview);
+        preview.Update("(/Weather/Gust > 8", [], '/', Variables, host.Validate, host.Preview);
 
         // Assert
-        Assert.True(isEvaluated);
+        Assert.Equal(validations + 1, host.Validations);
         Assert.Equal("expected ')'", preview.Error);
         Assert.Null(preview.ResultText);
         Assert.Empty(preview.RowTexts);

@@ -311,7 +311,7 @@ public class AutomationDraftTests
         rule.Triggers[0].Value = new PropertyTrigger { Expression = "/Laundry/Plug/Power > 500", Rearm = " " };
 
         // Act
-        var saved = rule.ToRule();
+        var saved = rule.ToRule(_ => null);
 
         // Assert
         Assert.Null(Assert.IsType<PropertyTrigger>(Assert.Single(saved.Triggers)).Rearm);

@@ -155,7 +155,7 @@ public class ExpressionFieldModelTests
     public void WhenAValueIsTypedThatIsOneToken_ThenItIsWrittenAsItIs(string typed)
     {
         // Arrange
-        var model = new ExpressionFieldModel("/a/B == 1", '/', Variables);
+        var model = new ExpressionFieldModel("/a/B == 1") { Variables = Variables };
 
         // Act
         model.SetRow(0, new ExpressionRow(string.Empty, "/a/B", "==", typed));

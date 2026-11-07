@@ -13,7 +13,7 @@ namespace HomeBlaze.Automation.Blazor.Diagram;
 /// <param name="ActionCount">The number of its actions.</param>
 public sealed record StateDiagramRule(string Key, string Name, string? InState, string? TargetState, int ActionCount)
 {
-    public static StateDiagramRule Create(string key, string name, string? inState, IEnumerable<AutomationAction?>? actions)
+    private static StateDiagramRule Create(string key, string name, string? inState, IEnumerable<AutomationAction?>? actions)
     {
         var list = (actions ?? []).OfType<AutomationAction>().ToList();
         var targets = list.OfType<ChangeStateAction>().Select(action => action.TargetState).ToList();

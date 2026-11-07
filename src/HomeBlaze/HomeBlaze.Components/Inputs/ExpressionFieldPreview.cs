@@ -26,8 +26,8 @@ internal sealed class ExpressionFieldPreview
     /// <summary>The current value of each row and its result, empty for a row without a path or without a preview.</summary>
     public IReadOnlyList<string> RowTexts { get; private set; } = [];
 
-    /// <summary>Evaluates the texts when anything they depend on changed, and returns whether it did.</summary>
-    public bool Update(
+    /// <summary>Evaluates the texts when anything they depend on changed.</summary>
+    public void Update(
         string text,
         IReadOnlyList<ExpressionRow> rows,
         char pathSeparator,
@@ -38,7 +38,7 @@ internal sealed class ExpressionFieldPreview
         if (_text == text && _pathSeparator == pathSeparator && _variables == variables && Equals(_validate, validate) &&
             Equals(_preview, preview) && _rows.SequenceEqual(rows))
         {
-            return false;
+            return;
         }
 
         _text = text;
@@ -49,7 +49,6 @@ internal sealed class ExpressionFieldPreview
         _preview = preview;
         Error = string.IsNullOrWhiteSpace(text) ? null : validate?.Invoke(text);
         Evaluate();
-        return true;
     }
 
     /// <summary>Reads the current values again and returns whether a text changed.</summary>

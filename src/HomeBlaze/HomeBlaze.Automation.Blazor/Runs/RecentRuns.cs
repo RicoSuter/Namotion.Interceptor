@@ -12,9 +12,7 @@ namespace HomeBlaze.Automation.Blazor.Runs;
 /// </summary>
 internal static class RecentRuns
 {
-    public const int MaxRuns = 20;
-    public const string HistoryCaption = "From history: the runs of the last seven days.";
-    public const string LastRunsCaption = "Without a history store: the last run of each rule.";
+    private const int MaxRuns = 20;
 
     private static readonly TimeSpan Window = TimeSpan.FromDays(7);
 
@@ -74,5 +72,7 @@ internal static class RecentRuns
 /// </summary>
 internal sealed record RecentRunsResult(bool HasHistory, IReadOnlyList<RunEntry> Runs, string? Error, bool IsBehind)
 {
-    public string Caption => HasHistory ? RecentRuns.HistoryCaption : RecentRuns.LastRunsCaption;
+    public string Caption => HasHistory
+        ? "From history: the runs of the last seven days."
+        : "Without a history store: the last run of each rule.";
 }

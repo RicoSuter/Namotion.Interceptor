@@ -74,11 +74,11 @@ public sealed class RuleDraft
     public void MoveAction(DraftItem<AutomationAction> action, int offset) => DraftLists.Move(Actions, action, offset);
 
     /// <summary>
-    /// The rule as it is saved: a blank name, guard, rearm or filter is none. With the lookup of an operation by its path, an
-    /// operation action whose operation was changed keeps only the arguments that its operation takes, which the binder
-    /// requires, and all of them when the path leads to no operation. Any other action is saved as it was loaded.
+    /// The rule as it is saved: a blank name, guard, rearm or filter is none. An operation action whose operation was changed
+    /// keeps only the arguments that its operation, looked up by its path, takes, which the binder requires, and all of them
+    /// when the path leads to no operation. Any other action is saved as it was loaded.
     /// </summary>
-    public AutomationRule ToRule(Func<string, MethodMetadata?>? getMethod = null) => new()
+    public AutomationRule ToRule(Func<string, MethodMetadata?> getMethod) => new()
     {
         Name = string.IsNullOrWhiteSpace(Name) ? null : Name.Trim(),
         Mode = Mode,
@@ -115,8 +115,8 @@ public sealed class RuleDraft
         _ => trigger
     };
 
-    private static AutomationAction Prune(AutomationAction action, Func<string, MethodMetadata?>? getMethod) =>
-        action is InvokeOperationAction invoke && getMethod is not null
+    private static AutomationAction Prune(AutomationAction action, Func<string, MethodMetadata?> getMethod) =>
+        action is InvokeOperationAction invoke
             ? invoke with { Arguments = ArgumentFields.KeepKnown(getMethod(invoke.OperationPath), invoke.Arguments) }
             : action;
 
