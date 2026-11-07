@@ -18,8 +18,9 @@ public class AutomationTriggersTests
         graph.Add("Weather", new TestSensor());
         var registry = graph.Context.GetService<ISubjectRegistry>();
         var publishes = 0;
+        var routes = new GraphRoutes(graph.Resolver, null, () => registry.StructureVersion, null);
         var triggers = new AutomationTriggers(
-            graph.Resolver, new FakeTimeProvider(AutomationTestHost.Start), new AutomationInputQueue(), NullLogger.Instance, () => "Storm", _ => publishes++, () => registry.StructureVersion);
+            routes, new FakeTimeProvider(AutomationTestHost.Start), new AutomationInputQueue(), NullLogger.Instance, () => "Storm", _ => publishes++);
         var rule = Compile("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")));
         rule.IsActivated = true;
         triggers.Activate([rule], [rule]);

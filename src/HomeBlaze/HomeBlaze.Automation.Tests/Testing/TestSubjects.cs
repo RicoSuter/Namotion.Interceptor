@@ -75,3 +75,51 @@ public sealed record TestPressEvent : DeviceEvent
 {
     public required string Gesture { get; init; }
 }
+
+/// <summary>A room whose devices are held by key, by position, by reference and as an event source.</summary>
+[InterceptorSubject]
+public partial class TestRoom
+{
+    public TestRoom()
+    {
+        Devices = new Dictionary<string, TestSensor>();
+        Items = [];
+    }
+
+    [State]
+    public partial int Level { get; set; }
+
+    public partial Dictionary<string, TestSensor> Devices { get; set; }
+
+    public partial List<TestSensor> Items { get; set; }
+
+    public partial TestSensor? Sensor { get; set; }
+
+    public partial TestButton? Button { get; set; }
+}
+
+/// <summary>A folder whose children are addressed by their key alone, as storage folders are.</summary>
+[InterceptorSubject]
+public partial class TestFolder
+{
+    public TestFolder()
+    {
+        Children = new Dictionary<string, IInterceptorSubject>();
+    }
+
+    [State]
+    public partial int Level { get; set; }
+
+    [InlinePaths]
+    public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
+
+    public void Add(string name, IInterceptorSubject subject) =>
+        Children = new Dictionary<string, IInterceptorSubject>(Children) { [name] = subject };
+
+    public void Remove(string name)
+    {
+        var children = new Dictionary<string, IInterceptorSubject>(Children);
+        children.Remove(name);
+        Children = children;
+    }
+}

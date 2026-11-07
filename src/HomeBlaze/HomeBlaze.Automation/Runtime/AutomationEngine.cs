@@ -15,6 +15,7 @@ internal sealed class AutomationEngine : IRuleRunHost
     private readonly Automation _automation;
     private readonly AutomationStateKeeper _keeper;
     private readonly AutomationTriggers _triggers;
+    private readonly GraphRoutes _routes;
     private readonly RunDispatcher _dispatcher;
     private readonly StateTransitions _states;
     private readonly AutomationStatusReporter _status;
@@ -34,13 +35,14 @@ internal sealed class AutomationEngine : IRuleRunHost
     // Created once, since the worker publishes the rule statuses after every input.
     private readonly Action _publishRuleStatuses;
 
-    /// <summary>Creates the engine, whose property triggers publish their watched set to <paramref name="changes"/>.</summary>
+    /// <summary>Creates the engine, whose triggers publish their watched set and graph route to <paramref name="changes"/>.</summary>
     public AutomationEngine(Automation automation, AutomationInputQueue queue, AutomationStateKeeper keeper, ILogger logger, AutomationChangeReceiver changes)
     {
         _automation = automation;
         _keeper = keeper;
         _logger = logger;
-        _triggers = AutomationTriggers.For(automation, queue, logger, () => Name, changes.PublishWatched);
+        _routes = GraphRoutes.For(automation, changes);
+        _triggers = new AutomationTriggers(_routes, automation.TimeProvider, queue, logger, () => Name, changes.PublishWatched);
         _dispatcher = new RunDispatcher(this, automation, keeper, logger);
         _states = new StateTransitions(automation, keeper, automation.TimeProvider, logger);
         _status = new AutomationStatusReporter(automation, logger);
@@ -48,6 +50,11 @@ internal sealed class AutomationEngine : IRuleRunHost
     }
 
     public string Name => _automation.Title ?? "Automation";
+
+    // White-box test hooks: the applied rules and the graph routes of their paths.
+    internal IReadOnlyList<CompiledRule> Rules => _snapshot.Rules;
+
+    internal GraphRoutes Routes => _routes;
 
     IInterceptorSubject IRuleRunHost.Automation => _automation;
 
@@ -156,6 +163,12 @@ internal sealed class AutomationEngine : IRuleRunHost
     }
 
     private static DateTimeOffset? Earliest(DateTimeOffset? first, DateTimeOffset? second) => first is null || second < first ? second : first;
+
+    /// <summary>Records the graph route of the checkpoint path, before the worker reads the path.</summary>
+    public void RecordLocation() => _routes.RecordLocation(_automation);
+
+    /// <summary>Publishes the graph route of the rules and of the checkpoint path, see <see cref="GraphRoutes.Publish"/>.</summary>
+    public void PublishRoutes(int chainDepth) => _routes.Publish(_snapshot.Rules, chainDepth);
 
     /// <summary>
     /// Runs the requests of an input of the triggers: a property change, a tick, which also writes the runs that are due,

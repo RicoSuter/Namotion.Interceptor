@@ -1,8 +1,6 @@
 using System.Collections.Frozen;
-using HomeBlaze.Services;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Automation.Runtime;
 
@@ -16,36 +14,26 @@ internal sealed class AutomationTriggers
     private readonly AutomationInputQueue _queue;
     private readonly PropertyTriggerEngine _propertyTriggers;
     private readonly EventTriggerEngine _eventTriggers;
-    private readonly Func<long> _getStructureVersion;
+    private readonly GraphRoutes _routes;
     private long _boundStructureVersion = -1;
 
-    /// <summary>Creates the triggers of the automation, with the structure version of the registry of its context.</summary>
-    public static AutomationTriggers For(
-        Automation automation, AutomationInputQueue queue, ILogger logger, Func<string> getAutomationName, Action<FrozenSet<PropertyReference>> publishWatched)
-    {
-        var registry = ((IInterceptorSubject)automation).Context.TryGetService<ISubjectRegistry>();
-        return new AutomationTriggers(
-            automation.PathResolver, automation.TimeProvider, queue, logger, getAutomationName, publishWatched, () => registry?.StructureVersion ?? -1);
-    }
-
     /// <summary>
-    /// Creates the triggers, whose property triggers publish their watched set to <paramref name="publishWatched"/> and
-    /// whose paths are resolved again on a graph change only when <paramref name="getStructureVersion"/>, the structure
-    /// version of the registry, changed since.
+    /// Creates the triggers, which resolve their paths with <paramref name="routes"/> and resolve them again on a graph
+    /// change only when the structure version of the registry changed since, and whose property triggers publish their
+    /// watched set to <paramref name="publishWatched"/>.
     /// </summary>
     public AutomationTriggers(
-        SubjectPathResolver resolver,
+        GraphRoutes routes,
         TimeProvider timeProvider,
         AutomationInputQueue queue,
         ILogger logger,
         Func<string> getAutomationName,
-        Action<FrozenSet<PropertyReference>> publishWatched,
-        Func<long> getStructureVersion)
+        Action<FrozenSet<PropertyReference>> publishWatched)
     {
         _queue = queue;
-        _getStructureVersion = getStructureVersion;
-        _propertyTriggers = new PropertyTriggerEngine(resolver, timeProvider, logger, getAutomationName, publishWatched);
-        _eventTriggers = new EventTriggerEngine(resolver, timeProvider, queue);
+        _routes = routes;
+        _propertyTriggers = new PropertyTriggerEngine(routes, timeProvider, logger, getAutomationName, publishWatched);
+        _eventTriggers = new EventTriggerEngine(routes, timeProvider, queue);
     }
 
     /// <summary>
@@ -155,6 +143,41 @@ internal sealed class AutomationTriggers
         _eventTriggers.Rebind(rules);
     }
 
+    /// <summary>
+    /// Adds the graph routes of the paths resolved ahead of time to the union of <paramref name="routes"/>: those of the
+    /// active property triggers, of Only if of rules with a pending trigger and of the event triggers of activated rules.
+    /// </summary>
+    public static void AddRoutes(IReadOnlyList<CompiledRule> rules, GraphRoutes routes)
+    {
+        foreach (var rule in rules)
+        {
+            if (!rule.IsActivated)
+            {
+                continue;
+            }
+
+            var hasPending = false;
+            foreach (var trigger in rule.PropertyTriggers)
+            {
+                if (trigger.State.Phase != TriggerPhase.Inactive)
+                {
+                    routes.Add(trigger.Route);
+                    hasPending |= trigger.State.Phase == TriggerPhase.Pending;
+                }
+            }
+
+            if (hasPending)
+            {
+                routes.Add(rule.OnlyIfRoute);
+            }
+
+            foreach (var trigger in rule.EventTriggers)
+            {
+                routes.Add(trigger.SourceRoute);
+            }
+        }
+    }
+
     /// <summary>Turns an input of the worker into the run requests of the triggers, in rule order; none for any other input.</summary>
     public IReadOnlyList<RunRequest> GetRequests(AutomationInput input, IReadOnlyList<CompiledRule> rules) => input switch
     {
@@ -168,14 +191,13 @@ internal sealed class AutomationTriggers
     };
 
     /// <summary>
-    /// Resolves the paths again after a change of a property that holds subjects, unless the structure of the graph is
-    /// the same as at the last time, such as for a write of the same children, and evaluates the triggers whose
-    /// properties changed.
+    /// Resolves the paths again after a graph change, unless the structure of the graph is the same as at the last time,
+    /// such as for a write of the same children, and evaluates the triggers whose properties changed.
     /// </summary>
     public IReadOnlyList<RunRequest> OnGraphChanged(IReadOnlyList<CompiledRule> rules)
     {
         // Read before the paths are resolved; an odd version is a change in progress, after which they resolve again.
-        var version = _getStructureVersion();
+        var version = _routes.StructureVersion;
         if (version >= 0 && version == _boundStructureVersion)
         {
             _propertyTriggers.ForgetRebound();

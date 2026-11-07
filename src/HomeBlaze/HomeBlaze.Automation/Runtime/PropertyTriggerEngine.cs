@@ -1,15 +1,15 @@
 using System.Collections.Frozen;
+using System.Runtime.InteropServices;
 using HomeBlaze.Automation.Expressions;
-using HomeBlaze.Services;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// The property triggers of active rules: resolves the properties they read and publishes them as the watched set to
-/// <paramref name="publishWatched"/>, evaluates them against the observed values on changes, graph changes and ticks,
-/// and returns the run requests of the triggers that fire. A tick evaluates only the triggers that are due: a hold that
+/// The property triggers of active rules: resolves the properties they read with their graph routes and publishes them as
+/// the watched set to <paramref name="publishWatched"/>, evaluates them against the observed values on changes, graph
+/// changes and ticks, and returns the run requests of the triggers that fire. A tick evaluates only the triggers that are due: a hold that
 /// ends, or a trigger whose expressions can change with the clock at the instant <see cref="ExpressionClock"/> derives,
 /// every second only for a read of the clock that it cannot derive; <see cref="GetNextDueAt"/> tells when the next one
 /// is due. A trigger whose run did not run stays pending, and its rule requests the run again only when its Only if can
@@ -18,7 +18,7 @@ namespace HomeBlaze.Automation.Runtime;
 /// without Only if. Rules without a pending trigger cost nothing for this. Used by the worker only.
 /// </summary>
 internal sealed class PropertyTriggerEngine(
-    SubjectPathResolver resolver,
+    GraphRoutes routes,
     TimeProvider timeProvider,
     ILogger logger,
     Func<string> getAutomationName,
@@ -26,6 +26,9 @@ internal sealed class PropertyTriggerEngine(
 {
     private readonly ObservedValues _values = new();
     private readonly List<CompiledPropertyTrigger> _pending = [];
+
+    // Reused by every resolution, so that one whose result stayed the same allocates nothing.
+    private readonly List<PropertyReference> _resolved = [];
 
     // The latest instant from which an instant when a trigger or Only if is due was derived; a later tick before it means
     // that the clock was set back.
@@ -283,10 +286,12 @@ internal sealed class PropertyTriggerEngine(
         {
             trigger.State.Deactivate();
             trigger.Dependencies = [];
+            trigger.Route = GraphRoute.Empty;
             trigger.NextCheckAt = null;
         }
 
         rule.OnlyIfDependencies = [];
+        rule.OnlyIfRoute = GraphRoute.Empty;
     }
 
     // A change queued while its property was watched may arrive after it no longer is; kept, it would hide the current
@@ -383,7 +388,7 @@ internal sealed class PropertyTriggerEngine(
     private static DateTimeOffset CheckForSetBackClock(DateTimeOffset now) => now + WakeTimer.MaxWakeInterval;
 
     private object? ReadObserved(string path, AutomationRule rule) =>
-        AutomationPaths.ResolveProperty(resolver, path, rule) is { } property ? _values.GetValue(property) : null;
+        AutomationPaths.ResolveProperty(routes.Resolver, path, rule) is { } property ? _values.GetValue(property) : null;
 
     // Adds the requests of the pending triggers that match and have none yet, in rule order.
     private IReadOnlyList<RunRequest> AddPendingRequests(
@@ -419,8 +424,10 @@ internal sealed class PropertyTriggerEngine(
     private bool ResolveOnlyIfDependencies(CompiledRule rule)
     {
         var previous = rule.OnlyIfDependencies;
-        rule.OnlyIfDependencies = Resolve(rule.OnlyIfPropertyPaths, rule.Rule);
-        return !rule.OnlyIfDependencies.AsSpan().SequenceEqual(previous);
+        var route = rule.OnlyIfRoute;
+        rule.OnlyIfDependencies = Resolve(rule.OnlyIfPropertyPaths, rule.Rule, previous, ref route);
+        rule.OnlyIfRoute = route;
+        return !ReferenceEquals(rule.OnlyIfDependencies, previous);
     }
 
     // Derives when Only if can change with the clock alone, from the instants its comparisons read now.
@@ -436,7 +443,7 @@ internal sealed class PropertyTriggerEngine(
 
         if (clock.IsEverySecond ||
             !clock.TryGetNextChange(
-                path => AutomationPaths.ResolveProperty(resolver, path, rule.Rule)?.GetValue(), now, timeProvider.LocalTimeZone, out var nextChange, out var hasChanged))
+                path => AutomationPaths.ResolveProperty(routes.Resolver, path, rule.Rule)?.GetValue(), now, timeProvider.LocalTimeZone, out var nextChange, out var hasChanged))
         {
             rule.RechecksOnlyIfEverySecond = true;
             return;
@@ -447,7 +454,7 @@ internal sealed class PropertyTriggerEngine(
 
     private TriggerObservation Observe(CompiledPropertyTrigger trigger, DateTimeOffset now)
     {
-        var evaluation = new AutomationEvaluation(resolver, trigger.Rule.Rule, now, timeProvider.LocalTimeZone, capturedEvent: null, _values);
+        var evaluation = new AutomationEvaluation(routes.Resolver, trigger.Rule.Rule, now, timeProvider.LocalTimeZone, capturedEvent: null, _values);
         var value = evaluation.EvaluateCondition(trigger.Expression);
         IReadOnlyList<string> missingPaths = value is null ? [.. evaluation.MissingPaths] : [];
         if (trigger.Rearm is not { } rearmExpression || !ReadsRearm(trigger.State.Phase, value))
@@ -472,22 +479,28 @@ internal sealed class PropertyTriggerEngine(
     private bool ResolveDependencies(CompiledPropertyTrigger trigger)
     {
         var previous = trigger.Dependencies;
-        trigger.Dependencies = Resolve(trigger.PropertyPaths, trigger.Rule.Rule);
-        return !trigger.Dependencies.AsSpan().SequenceEqual(previous);
+        var route = trigger.Route;
+        trigger.Dependencies = Resolve(trigger.PropertyPaths, trigger.Rule.Rule, previous, ref route);
+        trigger.Route = route;
+        return !ReferenceEquals(trigger.Dependencies, previous);
     }
 
-    private PropertyReference[] Resolve(IReadOnlyList<string> paths, AutomationRule rule)
+    // Returns previous itself when the properties are the same, and the graph route of the paths in route, which stays the
+    // same instance when it is equal.
+    private PropertyReference[] Resolve(IReadOnlyList<string> paths, AutomationRule rule, PropertyReference[] previous, ref GraphRoute route)
     {
-        var resolved = new List<PropertyReference>(paths.Count);
-        foreach (var path in paths)
+        var builder = routes.BeginRoute();
+        _resolved.Clear();
+        for (var index = 0; index < paths.Count; index++)
         {
-            if (AutomationPaths.ResolveProperty(resolver, path, rule) is { } property)
+            if (routes.ResolveProperty(paths[index], rule, builder) is { } property)
             {
-                resolved.Add(property.Reference);
+                _resolved.Add(property.Reference);
             }
         }
 
-        return [.. resolved];
+        route = builder.ToRoute(route);
+        return CollectionsMarshal.AsSpan(_resolved).SequenceEqual(previous) ? previous : [.. _resolved];
     }
 
     private void PublishWatched(IReadOnlyList<CompiledRule> rules, IEnumerable<CompiledPropertyTrigger> activating)
