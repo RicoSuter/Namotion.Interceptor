@@ -18,7 +18,7 @@ Authorization is role-based, with roles as data. The generic engine is the libra
 |------|----------------|
 | Actions | `read`, `write` (built into the library), `execute` and `history` (`AuthorizationActions`) |
 | Tags | `HomeBlazeMemberTagProvider` tags members from the existing markers: `state`, `configuration`, `secret`, `query`, `operation`, `requires-confirmation`, `subjects`, `attribute`, `metadata`. No subject type needs an attribute of its own. The tags of a member are cached until an attribute is added to it, and only a property of type `MethodMetadata` is read |
-| Built-in roles | `Reader` (read and history on every member, execute on queries), `Operator` (`Reader`, write on every member, execute on operations) and `Everything` in code (`BuiltInRoles`), always present, not editable, names reserved. They are broad, so that `Operator` with the system rules is exactly what agents could do before; restriction is the job of custom roles |
+| Built-in roles | `Reader` (read and history on every member, execute on queries), `Operator` (`Reader`, write on every member, execute on operations) and `Everything` in code (`BuiltInRoles`), always present, not editable, names reserved. They are broad: `Operator` allows every write and operation the system rules leave, so `AllowedTools` decides what an agent does; restriction is the job of custom roles |
 | Custom roles | The `Roles` dictionary of the single `Authorization` subject, a `[Configuration, InlinePaths]` dictionary of `Role` subjects with `Includes`, `Allow` and `Deny`, stored in a JSON file such as `Files/Authorization.json` |
 | System rules | `SystemRules`, compiled into every policy as the library's system deny rules |
 | Policies | `AuthorizationService.GetPolicy(roleNames)` |
@@ -34,7 +34,7 @@ deny  types: LlmAgentBase              read, write, execute, history
 deny  types: Authorization, Role       read, write, execute, history
 ```
 
-They apply to every non-human client, agents and `/mcp` alike, and no role lifts them, because a deny always wins. They replace the hand-written checks of the tools: "agents cannot run operations of agents", "agents cannot change the metadata of agents" and the configuration write policy. `LlmAgentBase` is named by its full type name, since `HomeBlaze.Authorization` does not reference `HomeBlaze.AI`. `McpMethodInvoker` keeps its own refusal of an operation that requires confirmation, checked before the policy, so the client is told the actual reason. `[ExcludeFrom]` stays separate: it decides what is offered, not who may reach it.
+They apply to every non-human client, agents and `/mcp` alike, and no role lifts them, because a deny always wins. `LlmAgentBase` is named by its full type name, since `HomeBlaze.Authorization` does not reference `HomeBlaze.AI`. `McpMethodInvoker` has its own refusal of an operation that requires confirmation, checked before the policy, so the client is told the actual reason. `[ExcludeFrom]` stays separate: it decides what is offered, not who may reach it.
 
 ### Policies
 
@@ -51,7 +51,7 @@ They apply to every non-human client, agents and `/mcp` alike, and no role lifts
 
 | Principal | Policy |
 |-----------|--------|
-| Built-in agent | Its `Roles`, default `["Operator"]`, which allows what agents could do before roles existed, so `AllowedTools` stays the gate on upgrade. A chat turn and a background run take the policy once, next to the `AllowedTools` snapshot. Roles that yield `DenyAll`, also an empty list, show "Invalid roles: ..." in the agent's status, and the turn runs with tools that deny everything |
+| Built-in agent | Its `Roles`, default `["Operator"]`, which allows every write and operation the system rules leave, so `AllowedTools` is the gate of an agent with the default. A chat turn and a background run take the policy once, next to the `AllowedTools` snapshot. Roles that yield `DenyAll`, also an empty list, show "Invalid roles: ..." in the agent's status, and the turn runs with tools that deny everything |
 | Watch paths of an agent | The agent's `Roles`, read when a background run starts, so the background message holds only what the agent's tools may read |
 | External `/mcp` | `Everything` with the system rules, and `McpServer:ReadOnly` |
 | People in the browser | No policy yet |
@@ -86,6 +86,7 @@ Denied `execute` and `history` are logged at debug level with the agent and the 
 - The raw source of a page (`ReadRawContent`, and `ReadEvaluatedContent` outside its expressions) includes the non-secret configuration values of its blocks, whatever the roles allow on their subjects.
 - With a policy, the history of a path that does not resolve is not available.
 - A subject whose only members other than attributes are secrets is empty for every policy and hidden from every agent and `/mcp` client.
+- A started OPC UA server (`HomeBlaze.OpcUa`) is an anonymous read-write gateway over what it exposes and ignores roles. Starting it is an `execute` of **Start**, which requires confirmation, so agents and `/mcp` clients cannot start it.
 
 ## Inter-Node Authentication [Planned]
 
@@ -102,7 +103,7 @@ Planned. Today every `/mcp` client shares the `Everything` policy. With a client
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Authorization model | Roles as data, rules selecting by path, type, member and tag, compiled per principal | Operators define roles without code; subject types need no attributes, as tags come from existing markers |
-| Built-in roles | `Reader`, `Operator`, `Everything` in code | Always available, so an installation without `Authorization.json` works, and `Operator` keeps the agents' behavior on upgrade |
+| Built-in roles | `Reader`, `Operator`, `Everything` in code | Always available, so an installation without `Authorization.json` works, and `Operator` leaves the choice of tools to `AllowedTools` |
 | System rules | Fixed deny rules for every non-human client | Secrets, configuration, confirmation, agents and the roles themselves must never depend on a role being written correctly |
 | Two gates for agents | `AllowedTools` decides the tools, roles what they reach | Tools stay a coarse, visible switch; roles add the fine-grained scope |
 | Several `Authorization` subjects | None is used | Merging two role sets silently could grant more than either intends |

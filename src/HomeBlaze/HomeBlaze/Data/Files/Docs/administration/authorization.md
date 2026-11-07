@@ -19,7 +19,6 @@ On this page:
 - [Agents](#agents): the `Roles` setting and the "Invalid roles" status
 - [External MCP Clients](#external-mcp-clients), [Watch Paths](#watch-paths) and [Page Expressions](#page-expressions)
 - [Known Limits](#known-limits)
-- [Changes Against the Previous Version](#changes-against-the-previous-version)
 
 ---
 
@@ -49,7 +48,7 @@ The built-in roles are defined in code, always available and cannot be changed. 
 The [system rules](#system-rules) apply to all three, so even `Everything` never reads a secret, writes configuration, runs an operation that requires confirmation or reaches an agent.
 
 - **`Reader`** reads every member, also one without a marker, such as a derived title, a property without `[State]` or `[Configuration]` and non-secret configuration. The tools list only state, but such a value reaches a client through page expressions. Read on operations lets `list_methods` list them without allowing them to run.
-- **`Operator`** allows exactly what an agent could do before roles existed with every tool allowed, which makes it the default of an agent: the system rules keep secrets, configuration writes, operations that require confirmation and agents out of reach, as the hand-written limits did before.
+- **`Operator`** allows every write and every operation that the system rules leave, which makes it the default of an agent: `AllowedTools` decides which tools the agent has, and the system rules keep secrets, configuration writes, operations that require confirmation and agents out of reach.
 - The built-in roles are broad on purpose; restrict an agent with a custom role.
 - **`Everything`** is the role of `/mcp`.
 
@@ -200,6 +199,7 @@ They cannot be changed, because each closes a way for a client to gain more than
 
 - **Confirmation first**: an operation that requires confirmation is refused with "'Name' requires confirmation by a person and cannot be called through MCP; run it from the HomeBlaze UI.", which names the actual reason. `list_methods` marks such methods with `requiresConfirmation`.
 - **Effects of operations**: the rules decide about members, not about what an operation does. An operation may still change configuration as part of its work, such as **Set Speed** of the sample motor setting `TargetSpeed`, so grant `execute` on operations as carefully as `invoke_operation`.
+- **OPC UA server**: a started OPC UA server is an anonymous read-write gateway over the graph that ignores roles: every OPC UA client that reaches its port reads and writes what the server exposes below its `Path`, whatever the roles of an agent or `/mcp` client hide. Starting it is an `execute` of its operation **Start**, which requires confirmation, so only a person starts it from the HomeBlaze UI. Whoever starts it decides about this access for every OPC UA client.
 
 ---
 
@@ -226,7 +226,7 @@ Each agent has the setting `Roles`, a list of role names:
 }
 ```
 
-- **Default**: `["Operator"]`, for a new agent and for a file without the setting, so an agent created before roles existed keeps what it could do and `AllowedTools` stays its gate. Restrict an agent with `Reader` or a custom role.
+- **Default**: `["Operator"]`, for a new agent and for a file without the setting, so `AllowedTools` is the gate of such an agent. Restrict an agent with `Reader` or a custom role.
 - **Edit form**: the Roles section offers the built-in roles and the custom roles. A name that is no role, such as a removed custom role, shows as an error chip that can be removed, and so does a custom role that exists but cannot be used, such as one whose name another role has as well, with the reason as its tooltip. At least one role is required, as an agent without roles is denied everything.
 - **Settings tab**: lists the roles, and the reason when the agent is denied everything.
 - **When it applies**: each chat turn and background run takes the policy of the roles when it starts, so a change of the roles or of `Authorization.json` applies to the next turn.
@@ -261,7 +261,7 @@ The state a background run receives from the agent's `WatchPaths` is read with t
 
 When an agent or an `/mcp` client reads a page through the tools, a page expression renders only a property that is readable for the tools at its path: the property, every property on its path and every subject on the way readable. Anything else renders empty, as a secret does, and `ReadEvaluatedContent` with `includeSourcePaths` leaves out its path. So an expression below a branch the roles hide, such as `{{ /Devices/Cameras/Door/IsOpen }}` for a role that denies `read` on `Cameras`, renders empty although `IsOpen` itself is readable. Unlike the tools, an expression may read a member the tools do not list, such as a derived title, when its roles allow it. A value map that an expression applies with `map:` must be readable as well: one the roles hide gives "Cannot resolve map: name", as a missing one does.
 
-For an agent the policy comes from its roles; for `/mcp` clients it is `Everything` with the system rules, so an expression over the state of an agent renders empty for them. The check applies to queries, such as `ReadEvaluatedContent`, which evaluate pages. An operation runs without it, so the change handlers, renders and background work it starts are not restricted by the caller's roles. People see pages as before.
+For an agent the policy comes from its roles; for `/mcp` clients it is `Everything` with the system rules, so an expression over the state of an agent renders empty for them. The check applies to queries, such as `ReadEvaluatedContent`, which evaluate pages. An operation runs without it, so the change handlers, renders and background work it starts are not restricted by the caller's roles. Pages that people open in the browser are not checked.
 
 ---
 
@@ -273,20 +273,6 @@ For an agent the policy comes from its roles; for `/mcp` clients it is `Everythi
 - **Subjects with only secrets**: a subject whose only members other than attributes are secrets has no readable member, so it is hidden from every agent and `/mcp` client, as is a subject the roles deny every member of.
 - **Page addresses**: `browse` and `search` give a subject with a page its address as `$url`, which is built with the shallowest path of the subject. When a member or subject on that path is hidden, `$url` is left out, so it names nothing hidden, even when the subject is readable for the tools at another path, such as a subject that is also held below a hidden branch.
 - **Roles changed while they are read**: when an edit or a reload changes the roles while they are compiled, they are read once more; when that fails as well, custom roles are unavailable for that one call, and the next call reads them again.
-
----
-
-## Changes Against the Previous Version
-
-- **Agents are hidden** from agents and from `/mcp` clients: `browse` and `search` leave them out, `get_property` reports "Path not found", and the method tools report "Subject not found." instead of "Agents cannot run operations of agents.". Before, both could read the state of agents, and `/mcp` clients could run their operations, such as Run now.
-- **Metadata and notes of agents**: `SetMetadata` for an agent or a subject inside one reports "No subject at '...' in this storage." instead of "Agents cannot change the metadata of agents.", and `SearchMetadata` and `search_markdown` leave them out for `/mcp` clients as well.
-- **Metadata of what the tools do not list**: `/mcp` clients get the same `SetMetadata` refusals as agents, see [External MCP Clients](#external-mcp-clients). Before, they could set this metadata, and their arguments were not checked first.
-- **The `Authorization` subject and its roles** are not reachable through MCP.
-- **History**: agents and `/mcp` clients no longer get the history of a path that does not resolve.
-- **Page expressions** of an agent or an `/mcp` client over a property its policy does not allow to read, or below a branch it hides, render empty, such as the state of an agent for `/mcp` clients.
-- **Order of folders**: `GetOrder` leaves out children the policy hides, such as agents, and `SetOrder` needs `write` on the metadata of the folder.
-- **Watch paths** no longer include the state of agents.
-- **Unchanged**: a refused configuration write still reads "Property is not writable: /path. The access policy does not allow it.", and an agent with the default role `Operator` can do what it could before.
 
 ---
 
