@@ -50,20 +50,44 @@ internal sealed class AutomationStatusReporter(Automation automation, ILogger lo
         }
     }
 
-    /// <summary>Shows the dropped inputs as an error, both kinds when both occurred.</summary>
-    public void ReportFaults(DroppedInputs dropped)
+    /// <summary>How often dropped inputs are logged at most; the log sums the drops since the last one.</summary>
+    public static readonly TimeSpan FaultLogInterval = TimeSpan.FromMinutes(1);
+
+    private QueueFaults _unloggedFaults;
+    private DateTimeOffset? _faultsLoggedAt;
+
+    /// <summary>
+    /// Shows the dropped inputs as an error, both kinds when both occurred, and logs them at most once per
+    /// <see cref="FaultLogInterval"/> with the drops since the last log, so that an overload does not flood the log.
+    /// </summary>
+    public void ReportFaults(QueueFaults faults, DateTimeOffset now)
     {
-        var faults = dropped.Faults;
+        if (Describe(faults) is not { } message)
+        {
+            return;
+        }
+
+        SetError(message);
+        _unloggedFaults = new QueueFaults(_unloggedFaults.Overloaded + faults.Overloaded, _unloggedFaults.FeedbackChains + faults.FeedbackChains);
+        if (_faultsLoggedAt is { } loggedAt && now - loggedAt < FaultLogInterval)
+        {
+            return;
+        }
+
+        logger.LogError("The automation {Automation} failed: {Message}", automation.Title, Describe(_unloggedFaults));
+        _unloggedFaults = default;
+        _faultsLoggedAt = now;
+    }
+
+    private static string? Describe(QueueFaults faults)
+    {
         var overloaded = faults.Overloaded > 0
             ? $"The input queue overflowed: {faults.Overloaded} inputs were dropped and the rules were evaluated again."
             : null;
         var feedback = faults.FeedbackChains > 0
             ? $"A feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped: {faults.FeedbackChains} inputs were dropped."
             : null;
-        if (overloaded is not null || feedback is not null)
-        {
-            Fail(string.Join(" ", new[] { overloaded, feedback }.OfType<string>()));
-        }
+        return overloaded is null && feedback is null ? null : string.Join(" ", new[] { overloaded, feedback }.OfType<string>());
     }
 
     /// <summary>

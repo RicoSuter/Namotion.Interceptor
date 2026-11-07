@@ -181,6 +181,44 @@ public class AutomationInputQueueTests
         Assert.False(queue.HasWork);
     }
 
+    [Fact]
+    public async Task WhenWritersStayFasterThanTheWorker_ThenAtMostOneResynchronizationIsQueuedAndItTakesEveryDrop()
+    {
+        // Arrange
+        var queue = new AutomationInputQueue();
+        for (var index = 0; index < AutomationInputQueue.Capacity; index++)
+        {
+            queue.TryEnqueue(TickInput.Instance);
+        }
+
+        // Act
+        var resynchronizations = 0;
+        var accepted = 0;
+        var dropsTaken = 0;
+        for (var read = 0; read < 10 * AutomationInputQueue.Capacity; read++)
+        {
+            accepted += queue.TryEnqueue(new GraphChangedInput(0)) ? 1 : 0;
+            accepted += queue.TryEnqueue(new GraphChangedInput(0)) ? 1 : 0;
+            if (await queue.ReadAsync(CancellationToken.None) is ResynchronizeInput resynchronize)
+            {
+                resynchronizations++;
+                dropsTaken += queue.TakeDroppedInputs(resynchronize).Faults.Overloaded;
+            }
+        }
+
+        while (queue.HasWork)
+        {
+            if (await queue.ReadAsync(CancellationToken.None) is ResynchronizeInput resynchronize)
+            {
+                dropsTaken += queue.TakeDroppedInputs(resynchronize).Faults.Overloaded;
+            }
+        }
+
+        // Assert
+        Assert.InRange(resynchronizations, 1, 10);
+        Assert.Equal(2 * 10 * AutomationInputQueue.Capacity, accepted + dropsTaken);
+    }
+
     private static async Task<(List<AutomationInput> Accepted, ResynchronizeInput Resynchronize)> ReadUntilResynchronizationAsync(AutomationInputQueue queue)
     {
         var accepted = new List<AutomationInput>();

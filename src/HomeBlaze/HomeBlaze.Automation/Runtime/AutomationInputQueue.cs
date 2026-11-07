@@ -5,7 +5,7 @@ namespace HomeBlaze.Automation.Runtime;
 /// <summary>
 /// The bounded input queue of one automation. Writers never wait. An input that does not fit, or that continues a
 /// feedback chain beyond <see cref="MaxChainDepth"/>, is dropped and counted, and the worker reports the count and makes
-/// up for what it can in queue order; external events are never dropped silently. The chain depth flows with the
+/// up for what it can with one queued resynchronization; external events are never dropped silently. The chain depth flows with the
 /// asynchronous flow of a run while the run is active, so the property writes, operations and events of a run cause
 /// inputs one deeper than the input of the run. Work that outlives the run, and changes applied later on another flow
 /// (for example a device confirming a write from its own thread), start a new chain.
@@ -50,7 +50,9 @@ internal sealed class AutomationInputQueue
 
     /// <summary>
     /// Enqueues the input, or drops and counts it. A drop also queues a <see cref="ResynchronizeInput"/> behind every
-    /// input accepted so far, unless the last one queued has no input behind it yet; that one then takes the drop.
+    /// input accepted so far, unless one is queued and not taken yet; that one then takes the drop, so that an overload
+    /// queues one at a time. It may then make up for a drop before inputs accepted earlier, which is safe since the
+    /// newer revision of a change wins.
     /// </summary>
     public bool TryEnqueue(AutomationInput input)
     {
@@ -65,13 +67,6 @@ internal sealed class AutomationInputQueue
             Interlocked.Decrement(ref _count);
             Drop(input, ref _overloaded);
             return false;
-        }
-
-        // An input behind the open resynchronization makes the next drop queue a new one behind it, so that the drop is
-        // made up for after this input.
-        if (Volatile.Read(ref _openBatch) is not null)
-        {
-            Volatile.Write(ref _openBatch, null);
         }
 
         if (_channel.Writer.TryWrite(input))

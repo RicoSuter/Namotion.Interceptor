@@ -223,7 +223,7 @@ internal sealed class AutomationEngine : IRuleRunHost
     /// </summary>
     public async Task ResynchronizeAsync(DroppedInputs dropped, CancellationToken cancellationToken)
     {
-        _status.ReportFaults(dropped);
+        _status.ReportFaults(dropped.Faults, _automation.TimeProvider.GetUtcNow());
         var stopped = _triggers.MakeUpForChain(_snapshot.Rules, dropped);
         if (stopped.Count > 0)
         {
