@@ -114,6 +114,25 @@ public class AutomationRuleSerializationTests
         Assert.Equal(nameof(AutomationRule.Triggers), Assert.Single(skipped).PropertyName);
     }
 
+    [Theory]
+    [InlineData("\"10\"", "10")]
+    [InlineData("\"ten minutes\"", "ten minutes")]
+    [InlineData("600", "600")]
+    public void WhenTheHoldIsNoDuration_ThenTheReasonNamesTheValue(string value, string expected)
+    {
+        // Arrange
+        var serializer = CreateSerializer();
+        var skipped = new List<SkippedConfigurationProperty>();
+
+        // Act
+        serializer.Deserialize(RuleWithHold(value), created: null, skipped.Add);
+
+        // Assert
+        Assert.Equal(
+            $"'{expected}' is not a duration: use a text such as 10m, 1h30m or 00:10:00.",
+            Assert.Single(skipped).Exception.Message);
+    }
+
     private static string RuleWithHold(string value) => $$"""
         {
           "$type": "HomeBlaze.Automation.AutomationRule",

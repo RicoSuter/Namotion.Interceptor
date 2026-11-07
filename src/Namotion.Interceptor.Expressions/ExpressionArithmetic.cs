@@ -7,6 +7,12 @@ internal static class ExpressionArithmetic
     /// <returns>The result, or null when the values have no arithmetic or the result is out of range.</returns>
     public static object? Apply(ArithmeticOperator arithmeticOperator, object left, object right)
     {
+        // An instant or a duration has no number kind, so it skips the classification of the numbers.
+        if (left is DateTimeOffset or TimeSpan or DateTime)
+        {
+            return ApplyToNonNumbers(arithmeticOperator, left, right);
+        }
+
         var leftKind = ExpressionComparer.GetNumberKind(left);
         var rightKind = ExpressionComparer.GetNumberKind(right);
         if (leftKind != NumberKind.None && rightKind != NumberKind.None)
@@ -14,13 +20,15 @@ internal static class ExpressionArithmetic
             return ApplyToNumbers(arithmeticOperator, left, right, leftKind | rightKind);
         }
 
-        return arithmeticOperator switch
-        {
-            ArithmeticOperator.Add => ApplyToTimes(isSubtraction: false, left, right),
-            ArithmeticOperator.Subtract => ApplyToTimes(isSubtraction: true, left, right),
-            _ => null
-        };
+        return ApplyToNonNumbers(arithmeticOperator, left, right);
     }
+
+    private static object? ApplyToNonNumbers(ArithmeticOperator arithmeticOperator, object left, object right) => arithmeticOperator switch
+    {
+        ArithmeticOperator.Add => ApplyToTimes(isSubtraction: false, left, right),
+        ArithmeticOperator.Subtract => ApplyToTimes(isSubtraction: true, left, right),
+        _ => null
+    };
 
     /// <summary>Negates a value that is not null.</summary>
     /// <returns>The number or duration with the other sign, or null for another value or a result out of range.</returns>

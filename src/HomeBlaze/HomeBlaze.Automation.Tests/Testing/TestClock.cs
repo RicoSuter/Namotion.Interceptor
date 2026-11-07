@@ -12,6 +12,7 @@ internal sealed class TestClock(FakeTimeProvider time) : TimeProvider
     private int _wakeUps;
     private long _wallClockShiftTicks;
     private int _isNextReadPaused;
+    private TaskCompletionSource _readPaused = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>How far the wall clock is ahead of the fake time, or behind it when negative.</summary>
     public TimeSpan WallClockShift
@@ -33,8 +34,12 @@ internal sealed class TestClock(FakeTimeProvider time) : TimeProvider
     public void PauseNextRead()
     {
         _readResumed.Reset();
+        Volatile.Write(ref _readPaused, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
         Volatile.Write(ref _isNextReadPaused, 1);
     }
+
+    /// <summary>Completes once a read of the clock that <see cref="PauseNextRead"/> paused read the time and waits.</summary>
+    public Task NextReadPaused => Volatile.Read(ref _readPaused).Task;
 
     public void ResumeRead() => _readResumed.Set();
 
@@ -43,6 +48,7 @@ internal sealed class TestClock(FakeTimeProvider time) : TimeProvider
         var now = time.GetUtcNow() + WallClockShift;
         if (Interlocked.Exchange(ref _isNextReadPaused, 0) == 1)
         {
+            Volatile.Read(ref _readPaused).TrySetResult();
             _readResumed.Wait(TimeSpan.FromSeconds(30));
         }
 

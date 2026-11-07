@@ -117,4 +117,33 @@ public class AutomationTimeTests
         Assert.Equal(1, host.Blinds.CloseCount);
         Assert.Equal(DateTimeOffset.Parse("2026-10-25T00:30:00Z", CultureInfo.InvariantCulture), host.Rule("daily").LastTriggeredAt);
     }
+
+    [Theory]
+    [InlineData("2026-03-28T23:00:00Z", "2026-03-29T01:00:00Z", "2026-03-30T00:30:00Z")] // 02:30 does not exist on the day daylight saving time starts
+    [InlineData("2026-10-24T22:00:00Z", "2026-10-25T00:30:00Z", "2026-10-26T01:30:00Z")] // 02:30 happens twice on the day it ends
+    public async Task WhenADailyTimeIsInTheHourOfAClockChange_ThenTheRuleRunsOncePerDay(string start, string expectedFirst, string expectedSecond)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(
+            automation => automation.Rules = Keyed(("daily", On("Daily", When("time >= 2h30m"), Invoke("/Blinds/Close")))),
+            DateTimeOffset.Parse(start, CultureInfo.InvariantCulture),
+            Zurich);
+        var runs = new List<DateTimeOffset>();
+
+        // Act
+        for (var minute = 0; minute < 2 * 24 * 60; minute++)
+        {
+            var closeCount = host.Blinds.CloseCount;
+            await host.AdvanceAsync(TimeSpan.FromMinutes(1));
+            if (host.Blinds.CloseCount != closeCount)
+            {
+                runs.Add(host.Time.GetUtcNow());
+            }
+        }
+
+        // Assert
+        Assert.Equal(
+            [DateTimeOffset.Parse(expectedFirst, CultureInfo.InvariantCulture), DateTimeOffset.Parse(expectedSecond, CultureInfo.InvariantCulture)],
+            runs);
+    }
 }
