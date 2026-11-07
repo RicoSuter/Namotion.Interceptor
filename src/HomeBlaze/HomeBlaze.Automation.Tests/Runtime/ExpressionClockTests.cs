@@ -72,7 +72,7 @@ public class ExpressionClockTests
         };
 
         // Act
-        var isDerived = clock.TryGetNextChange(path => instants[path], Now, TimeZoneInfo.Utc, out var nextChange);
+        var isDerived = clock.TryGetNextChange(path => instants[path], Now, TimeZoneInfo.Utc, out var nextChange, out _);
 
         // Assert
         Assert.True(isDerived);
@@ -86,9 +86,9 @@ public class ExpressionClockTests
         var clock = Create("./LastTriggeredAt == null or now - ./LastTriggeredAt > 10m")!;
 
         // Act
-        var isDerivedWithoutValue = clock.TryGetNextChange(_ => null, Now, TimeZoneInfo.Utc, out var withoutValue);
-        var isDerivedWhenPast = clock.TryGetNextChange(_ => Now.AddHours(-1), Now, TimeZoneInfo.Utc, out var whenPast);
-        var isDerivedForANumber = clock.TryGetNextChange(_ => 5.0, Now, TimeZoneInfo.Utc, out _);
+        var isDerivedWithoutValue = clock.TryGetNextChange(_ => null, Now, TimeZoneInfo.Utc, out var withoutValue, out _);
+        var isDerivedWhenPast = clock.TryGetNextChange(_ => Now.AddHours(-1), Now, TimeZoneInfo.Utc, out var whenPast, out _);
+        var isDerivedForANumber = clock.TryGetNextChange(_ => 5.0, Now, TimeZoneInfo.Utc, out _, out _);
 
         // Assert
         Assert.True(isDerivedWithoutValue);
@@ -114,7 +114,7 @@ public class ExpressionClockTests
         var clock = Create(expression)!;
 
         // Act
-        var isDerived = clock.TryGetNextChange(_ => null, DateTimeOffset.Parse(now, CultureInfo.InvariantCulture), Zurich, out var nextChange);
+        var isDerived = clock.TryGetNextChange(_ => null, DateTimeOffset.Parse(now, CultureInfo.InvariantCulture), Zurich, out var nextChange, out _);
 
         // Assert
         Assert.False(clock.IsEverySecond);

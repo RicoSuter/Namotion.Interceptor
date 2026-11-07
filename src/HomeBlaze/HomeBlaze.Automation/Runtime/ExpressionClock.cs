@@ -92,15 +92,9 @@ internal sealed partial class ExpressionClock
     /// <summary>
     /// Gets the next instant after <paramref name="now"/> at which a comparison can change, with the instants the paths
     /// lead to now and the local time of <paramref name="timeZone"/>; null when none can change before one of the
-    /// instants does. False when a path leads to a value that is no instant, so that the expression is evaluated every
+    /// instants does. Also gets whether a comparison changed already before <paramref name="now"/>, which a wall clock set
+    /// back can undo. False when a path leads to a value that is no instant, so that the expression is evaluated every
     /// second.
-    /// </summary>
-    public bool TryGetNextChange(Func<string, object?> readInstant, DateTimeOffset now, TimeZoneInfo timeZone, out DateTimeOffset? nextChange) =>
-        TryGetNextChange(readInstant, now, timeZone, out nextChange, out _);
-
-    /// <summary>
-    /// Gets the next change as the other overload does, and whether a comparison changed already before
-    /// <paramref name="now"/>, which a wall clock set back can undo.
     /// </summary>
     public bool TryGetNextChange(
         Func<string, object?> readInstant, DateTimeOffset now, TimeZoneInfo timeZone, out DateTimeOffset? nextChange, out bool hasChanged)
