@@ -575,7 +575,7 @@ public class MarkdownWidgetBlockTests
     [InlineData("[link](sub/other.md#a-b)", "href=\"/pages/sub/other.md#a-b\"")]
     [InlineData("[link](other.md)", "href=\"/pages/other.md\"")]
     [InlineData("[link](https://example.com/other.md#blocks)", "href=\"https://example.com/other.md#blocks\"")]
-    [InlineData("[link](other.html#blocks)", "href=\"other.html#blocks\"")]
+    [InlineData("[link](other.html#blocks)", "href=\"/files/other.html#blocks\"")]
     public async Task WhenLinkHasAFragment_ThenThePagePartIsRewrittenAndTheFragmentIsKept(string source, string expected)
     {
         // Arrange

@@ -85,7 +85,6 @@ An expression with a mistake does not take a block down. The page shows the mess
 | `The pipe 'raw' takes no arguments` | A pipe with an argument after a colon, like `{{ motor/Speed \| raw:2 }}` | Remove the colon and the argument |
 | `expected ')' at position 16` | A mistake in an expression: a parenthesis, a quote, an operator or a value is missing or in the wrong place. The position counts the characters of the expression from 0 | Correct the expression at that position, see [Conditions](pages.md#conditions) |
 | `use '==' for equality at position 12` | A single `=` in a comparison | Write `==` |
-| `arithmetic is not supported at position 2` | `+`, `-`, `*` or `/` between two values | Show the values separately |
 | `The pipe 'map' takes the name of a value map, such as map:wallbox` | The pipe `map` without a name, or with more than one | Write `map:` and the name of the map |
 | `'value' is not available in the text of a page` | The text of a page uses `value` or `subject`, which are reserved for the values that widgets give their expressions | Write the path of the property |
 | `The pipe 'map' must be the first pipe` | The pipe `map` stands after another pipe, like `{{ motor/Status \| raw \| map:motorstate }}`. The map reads the value itself, which a pipe before it has already turned into text | Write `map` first, or remove the pipes before it |
