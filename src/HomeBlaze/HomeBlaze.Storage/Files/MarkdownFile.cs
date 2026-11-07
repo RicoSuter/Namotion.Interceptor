@@ -248,7 +248,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     /// <summary>
     /// Returns the content with each {{ path }} expression replaced by its current value. Secret configuration values
-    /// in the blocks are replaced by "***" as in <see cref="ReadRawContent"/>, and an expression of a secret value renders empty.
+    /// in the blocks are replaced by "***" as in <see cref="ReadRawContent"/>, and an expression of a secret value renders empty,
+    /// as does one of a property that <see cref="PropertyReadAccess"/> refuses on the current flow, without its source path.
     /// </summary>
     /// <param name="includeSourcePaths">When true, each resolved value is followed by the absolute path of its
     /// property in parentheses, for example "21.5 (/Devices/Kitchen/Temperature)". Null is treated as false.</param>

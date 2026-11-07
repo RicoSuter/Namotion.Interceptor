@@ -191,6 +191,8 @@ Controls the built-in Model Context Protocol server that exposes the knowledge g
 | `McpServer:Enabled` | bool | `true` in Development, `false` otherwise | Registers the MCP server and maps the `/mcp` endpoint. The built-in agents do not need it |
 | `McpServer:ReadOnly` | bool | `true` | Restricts the tools of `/mcp` to read-only operations; `false` allows property writes and operation invocations. `set_property` never writes configuration properties either way. Built-in agents use their own `AllowedTools` instead. See [AI Agents](ai-agents.md#tools-and-permissions) |
 
+Clients of `/mcp` get the access of the built-in role `Everything` with the [system rules](authorization.md#system-rules): they reach every subject, but cannot read secrets, write configuration, run operations that require confirmation, reach agents, or read or change the `Authorization` subject and its roles. All clients share this access; a role per client is not available yet. See [Authorization](authorization.md#external-mcp-clients).
+
 ### Example: Development override
 
 `appsettings.Development.json` enables the MCP server with write access for local testing:
@@ -217,7 +219,7 @@ Controls the built-in Model Context Protocol server that exposes the knowledge g
 }
 ```
 
-Enabling MCP in production exposes the graph to any client that can reach the `/mcp` endpoint. For the authorization story, see [Security Design](../architecture/design/security.md).
+Enabling MCP in production exposes the graph to any client that can reach the `/mcp` endpoint, with the access described above. For the design, see [Security Design](../architecture/design/security.md).
 
 ---
 

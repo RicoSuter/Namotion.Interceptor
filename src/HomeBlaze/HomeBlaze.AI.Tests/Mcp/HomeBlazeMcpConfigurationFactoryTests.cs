@@ -27,7 +27,7 @@ public class HomeBlazeMcpConfigurationFactoryTests
         var services = CreateServices(services => services.AddHomeBlazeMcpToolProvider(_ => new StubToolProvider()));
 
         // Act
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => room, isReadOnly: false, forAgents: false);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => room, isReadOnly: false, TestAccessPolicies.Everything);
         var toolNames = new McpToolFactory(room, configuration).CreateTools().Select(tool => tool.Name).ToArray();
 
         // Assert
@@ -44,7 +44,7 @@ public class HomeBlazeMcpConfigurationFactoryTests
         var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
 
         // Act
-        var tools = CreateTools(room, forAgents: false);
+        var tools = CreateTools(room, isAgent: false);
 
         // Assert
         Assert.All(new[] { tools["browse"].Description, tools["search"].Description }, description =>
@@ -64,7 +64,7 @@ public class HomeBlazeMcpConfigurationFactoryTests
         var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
 
         // Act
-        var tools = CreateTools(room, forAgents: false);
+        var tools = CreateTools(room, isAgent: false);
 
         // Assert
         Assert.EndsWith(
@@ -158,12 +158,12 @@ public class HomeBlazeMcpConfigurationFactoryTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task WhenSettingAConfigurationProperty_ThenItIsRefusedAndTheValueIsUnchanged(bool forAgents)
+    public async Task WhenSettingAConfigurationProperty_ThenItIsRefusedAndTheValueIsUnchanged(bool isAgent)
     {
         // Arrange
         var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
         room.TargetTemperature = 20m;
-        var setProperty = CreateTools(room, forAgents)["set_property"];
+        var setProperty = CreateTools(room, isAgent)["set_property"];
 
         // Act
         var result = JsonSerializer.SerializeToElement(await setProperty.Handler(
@@ -179,11 +179,11 @@ public class HomeBlazeMcpConfigurationFactoryTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task WhenSettingAStateProperty_ThenItIsWritten(bool forAgents)
+    public async Task WhenSettingAStateProperty_ThenItIsWritten(bool isAgent)
     {
         // Arrange
         var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
-        var setProperty = CreateTools(room, forAgents)["set_property"];
+        var setProperty = CreateTools(room, isAgent)["set_property"];
 
         // Act
         var result = JsonSerializer.SerializeToElement(await setProperty.Handler(
@@ -197,13 +197,36 @@ public class HomeBlazeMcpConfigurationFactoryTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task WhenASubjectHasOnlyConfigurationProperties_ThenBrowseAndSearchStillListIt(bool forAgents)
+    public async Task WhenGettingAStateAndAConfigurationProperty_ThenBothAreReadAndOnlyTheStateIsWritable(bool isAgent)
+    {
+        // Arrange
+        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
+        room.TargetTemperature = 20m;
+        var getProperty = CreateTools(room, isAgent)["get_property"];
+
+        // Act
+        var state = JsonSerializer.SerializeToElement(await getProperty.Handler(
+            JsonSerializer.SerializeToElement(new { path = "/Temperature" }), CancellationToken.None));
+        var configuration = JsonSerializer.SerializeToElement(await getProperty.Handler(
+            JsonSerializer.SerializeToElement(new { path = "/TargetTemperature" }), CancellationToken.None));
+
+        // Assert
+        Assert.Equal(21.5m, state.GetProperty("value").GetDecimal());
+        Assert.True(state.GetProperty("isWritable").GetBoolean());
+        Assert.Equal(20m, configuration.GetProperty("value").GetDecimal());
+        Assert.False(configuration.TryGetProperty("isWritable", out _));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenASubjectHasOnlyConfigurationProperties_ThenBrowseAndSearchStillListIt(bool isAgent)
     {
         // Arrange
         var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
         var device = new MetadataSearchTestDevice { Host = "localhost" };
         room.TryGetRegisteredSubject()!.AddProperty<MetadataSearchTestDevice>("Configured", _ => device);
-        var tools = CreateTools(room, forAgents);
+        var tools = CreateTools(room, isAgent);
 
         // Act
         var browse = JsonSerializer.SerializeToElement(await tools["browse"].Handler(
@@ -226,7 +249,7 @@ public class HomeBlazeMcpConfigurationFactoryTests
         var services = CreateServices(services => services.AddSingleton(new SubjectTypeRegistry(typeProvider)));
 
         // Act
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => room, isReadOnly: false, forAgents: false);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => room, isReadOnly: false, TestAccessPolicies.Everything);
 
         // Assert
         Assert.Contains(typeof(AgentExcludedThing), configuration.ExcludeTypes);
@@ -249,7 +272,7 @@ public class HomeBlazeMcpConfigurationFactoryTests
         var typeProvider = new TypeProvider();
         typeProvider.AddTypes([typeof(AgentExcludedThing)]);
         var services = CreateServices(services => services.AddSingleton(new SubjectTypeRegistry(typeProvider)));
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => room, isReadOnly: false, forAgents: false);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => room, isReadOnly: false, TestAccessPolicies.Everything);
         var invokeQuery = new McpToolFactory(room, configuration).CreateTools().First(tool => tool.Name == "invoke_query");
 
         // Act
@@ -270,10 +293,12 @@ public class HomeBlazeMcpConfigurationFactoryTests
         return services.BuildServiceProvider();
     }
 
-    private static Dictionary<string, McpToolInfo> CreateTools(TestThing room, bool forAgents)
+    // The tools of an agent, with the policy agents have today, or of the external MCP server.
+    private static Dictionary<string, McpToolInfo> CreateTools(TestThing room, bool isAgent)
     {
         var services = CreateServices();
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => room, isReadOnly: false, forAgents);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(
+            services, () => room, isReadOnly: false, isAgent ? TestAccessPolicies.Operator : TestAccessPolicies.Everything);
         return new McpToolFactory(room, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }
 
