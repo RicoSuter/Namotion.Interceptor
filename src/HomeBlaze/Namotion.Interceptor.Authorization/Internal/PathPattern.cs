@@ -5,8 +5,9 @@ namespace Namotion.Interceptor.Authorization.Internal;
 
 /// <summary>
 /// A compiled path pattern. It matches a member path, the path of the member's subject followed by the member, when
-/// it matches the whole of it: <c>*</c> alone is one segment, <c>**</c> zero or more. A pattern segment matches a link
-/// in any spelling the link carries.
+/// it matches the whole of it: <c>*</c> alone is one segment, <c>**</c> zero or more. For an allow rule a pattern segment
+/// matches a link in any spelling the reader resolves; for a deny rule in any structural spelling, whether or not a
+/// property shadows it.
 /// </summary>
 internal sealed class PathPattern
 {
@@ -20,12 +21,17 @@ internal sealed class PathPattern
         _segments = segments;
     }
 
-    /// <exception cref="AuthorizationException">The pattern is empty, starts with a path separator of another provider, is malformed, has an empty segment, has a segment with leading or trailing whitespace, or matches no member because it has no segment or its last segment has an index.</exception>
+    /// <exception cref="AuthorizationException">The pattern is empty, contains a control or format character, starts with a path separator of another provider, is malformed, has an empty segment, has a segment with leading or trailing whitespace, or matches no member because it has no segment or its last segment has an index.</exception>
     public static PathPattern Parse(string pattern, PathProviderBase pathProvider, string? roleName)
     {
         if (pattern.Length == 0)
         {
             throw new AuthorizationException($"A path pattern of {PolicyCompiler.DescribeOwner(roleName)} is empty.");
+        }
+
+        if (SelectorText.ContainsInvisibleCharacter(pattern))
+        {
+            throw new AuthorizationException($"Path pattern '{pattern}' of {PolicyCompiler.DescribeOwner(roleName)} contains an invisible (control or format) character.");
         }
 
         ThrowIfStartsWithForeignSeparator(pattern, pathProvider.PathSeparator, roleName);
@@ -150,8 +156,11 @@ internal sealed class PathPattern
     private static bool HasOuterWhitespace(string text)
         => text.Length > 0 && (char.IsWhiteSpace(text[0]) || char.IsWhiteSpace(text[^1]));
 
-    /// <summary>Whether the pattern matches the member path made of the subject's <paramref name="path"/> and <paramref name="member"/>.</summary>
-    public bool Matches(PathLink[] path, in PathLink member)
+    /// <summary>Whether the pattern matches the member path made of the subject's <paramref name="path"/> and <paramref name="member"/>, in the spellings of a deny rule when <paramref name="isDeny"/> is true.</summary>
+    public bool Matches(PathLink[] path, in PathLink member, bool isDeny) => Matches(path.AsSpan(), member, isDeny);
+
+    /// <inheritdoc cref="Matches(PathLink[], in PathLink, bool)"/>
+    public bool Matches(ReadOnlySpan<PathLink> path, in PathLink member, bool isDeny)
     {
         // The classic glob over segments: backtracking to the last ** suffices, because ** matches any segments and
         // every other pattern segment exactly one, which bounds the work by pattern length times path length.
@@ -168,7 +177,7 @@ internal sealed class PathPattern
                 lastAnySegments = patternIndex++;
                 pathAtLastAnySegments = pathIndex;
             }
-            else if (patternIndex < _segments.Length && _segments[patternIndex].Matches(pathIndex < path.Length ? path[pathIndex] : member))
+            else if (patternIndex < _segments.Length && _segments[patternIndex].Matches(pathIndex < path.Length ? path[pathIndex] : member, isDeny))
             {
                 patternIndex++;
                 pathIndex++;
@@ -196,11 +205,16 @@ internal sealed class PathPattern
     {
         // The explicit spelling names the property and optionally its index; the bare spelling of an [InlinePaths]
         // key is a name only, so a segment with an index never matches it.
-        public bool Matches(in PathLink link)
-            => MatchesExplicit(link) || (link.BareKey is not null && Index is null && Glob.IsMatch(Name, link.BareKey));
+        public bool Matches(in PathLink link, bool isDeny)
+            => isDeny
+                ? MatchesSpellings(link.StructuralSegment, link.Index, link.StructuralBareKey)
+                : MatchesSpellings(link.Segment, link.Index, link.BareKey);
 
-        private bool MatchesExplicit(in PathLink link)
-            => link.Segment is not null && Glob.IsMatch(Name, link.Segment) && MatchesIndex(link.Index);
+        private bool MatchesSpellings(string? segment, string? index, string? bareKey)
+            => MatchesExplicit(segment, index) || (bareKey is not null && Index is null && Glob.IsMatch(Name, bareKey));
+
+        private bool MatchesExplicit(string? segment, string? index)
+            => segment is not null && Glob.IsMatch(Name, segment) && MatchesIndex(index);
 
         private bool MatchesIndex(string? index)
             => Index is null || (index is not null && Glob.IsMatch(Index, index));

@@ -196,7 +196,7 @@ internal sealed class PermissionDecisions
         return isShown;
     }
 
-    private bool DecideCanShow(RegisteredSubject subject) => _policy.CanRead(subject) || IsShownAdministeredUser(subject);
+    private bool DecideCanShow(RegisteredSubject subject) => _policy.IsVisible(subject) || IsShownAdministeredUser(subject);
 
     private int GetShownCount()
     {
@@ -250,7 +250,7 @@ internal sealed class PermissionDecisions
 
         foreach (var parent in parents)
         {
-            if (_policy.CanRead(parent.Property) && _policy.CanRead(parent.Property.Parent))
+            if (_policy.CanRead(parent.Property) && _policy.IsVisible(parent.Property.Parent))
             {
                 return true;
             }

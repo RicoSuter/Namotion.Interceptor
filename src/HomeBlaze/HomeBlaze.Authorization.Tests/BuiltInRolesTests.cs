@@ -191,18 +191,17 @@ public class BuiltInRolesTests
             }
         }
 
-        Assert.False(policy.CanRead(subject));
+        Assert.False(policy.IsVisible(subject));
     }
 
     private static RegisteredSubject CreateSubject() =>
         new TagTestSubject(TestContext.Create()).TryGetRegisteredSubject()!;
 
     private static AuthorizationPolicy Compile(string roleName) =>
-        AuthorizationPolicy.Compile(
+        AuthorizationDefinition.Create(
             BuiltInRoles.All,
-            [roleName],
             SystemRules.Rules,
             AuthorizationActions.All,
-            new HomeBlazeMemberTagProvider(),
-            new DefaultPathProvider('/'));
+            new DefaultPathProvider('/'),
+            new HomeBlazeMemberTagProvider()).Compile([roleName]);
 }

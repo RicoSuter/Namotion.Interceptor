@@ -76,6 +76,8 @@ public sealed class AuthorizationServiceConcurrencyTests
 
         public RegisteredSubject? TryGetRegisteredSubject(IInterceptorSubject subject) => null;
 
+        public long StructureVersion => 0;
+
         private IEnumerable<IInterceptorSubject> GetKeys()
         {
             if (Environment.CurrentManagedThreadId != _threadId || FailuresLeft > 0)

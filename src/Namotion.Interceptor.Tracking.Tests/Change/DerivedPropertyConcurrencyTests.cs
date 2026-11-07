@@ -884,5 +884,146 @@ public class DerivedPropertyConcurrencyTests
         }
     }
 
+    [Fact]
+    public async Task WhenManyDependentsChangeDependenciesConcurrently_ThenValuesAndUsedByAgreeAfterWritesSettle()
+    {
+        // More than 32 children, each selecting A or B on its own, so the used-by lists of A and B switch between
+        // small and large storage and both are checked at a mixed split. Many short rounds rather than one long
+        // one: a later write repairs a missed recalculation, so only races among the last writes of a round stay
+        // visible.
+        const int roundCount = 200;
+        const int childCount = 40;
+        const int movingChildCount = 10;
+        const int finalChildCountUsingA = 22;
+        const int operationCount = 20;
+
+        for (var round = 0; round < roundCount; round++)
+        {
+            // Arrange
+            var context = InterceptorSubjectContext
+                .Create()
+                .WithFullPropertyTracking()
+                .WithContextInheritance();
+
+            var root = new ConditionalSourceRoot(context);
+            var children = Enumerable
+                .Range(0, childCount)
+                .Select(_ => new ConditionalSourceChild(root))
+                .ToArray();
+            root.Children = children;
+
+            // Flipping every child twice and then half of them leaves half on each source. Alternating an extra
+            // pass per round alternates which source grows from empty and which shrinks from all children. So both
+            // checks below see one source still large (shrunk to 20, above the demotion count) and the other small
+            // after a demotion; counts above 32 or below 17 are covered by PropertyReferenceCollectionTests.
+            var selectorFlipCount = childCount * (2 + round % 2) + childCount / 2;
+
+            // Act - change dependencies concurrently
+            await ChangeDependenciesConcurrentlyAsync(root, children[movingChildCount..], selectorFlipCount, operationCount);
+
+            // Assert
+            Assert.Same(children, root.Children);
+            AssertValuesAndUsedByAgree(root, children);
+
+            // Act - select a fixed mixed split and write both sources once more
+            for (var index = 0; index < children.Length; index++)
+            {
+                children[index].UseA = index < finalChildCountUsingA;
+            }
+
+            root.A = -1;
+            root.B = -2;
+
+            // Assert
+            AssertValuesAndUsedByAgree(root, children);
+        }
+    }
+
+    private static void AssertValuesAndUsedByAgree(ConditionalSourceRoot root, ConditionalSourceChild[] children)
+    {
+        Assert.All(children, child =>
+        {
+            var expectedValue = child.UseA ? root.A : root.B;
+            Assert.Equal(expectedValue, child.Value);
+            var valueProperty = new PropertyReference(child, nameof(ConditionalSourceChild.Value));
+            Assert.Equal(expectedValue, valueProperty.TryGetDerivedPropertyData()?.LastKnownValue);
+        });
+
+        AssertUsedByIs(new PropertyReference(root, nameof(ConditionalSourceRoot.A)), children.Where(child => child.UseA));
+        AssertUsedByIs(new PropertyReference(root, nameof(ConditionalSourceRoot.B)), children.Where(child => !child.UseA));
+    }
+
+    private static void AssertUsedByIs(PropertyReference source, IEnumerable<ConditionalSourceChild> expectedChildren)
+    {
+        var expected = expectedChildren
+            .Select(child => new PropertyReference(child, nameof(ConditionalSourceChild.Value)))
+            .ToHashSet();
+
+        var usedBy = source.GetUsedByProperties();
+        var count = usedBy.Count;
+        var items = usedBy.Items.ToArray();
+
+        var name = source.Metadata.Name;
+        Assert.True(count == items.Length, $"{name}: count {count} != items {items.Length}");
+        Assert.True(expected.Count == items.Length, $"{name}: expected {expected.Count} items, got {items.Length}");
+        Assert.True(expected.SetEquals(items), $"{name}: used-by does not match the children selecting it");
+    }
+
+    /// <summary>
+    /// Flips the children's selectors in turn, writes A and B, and detaches and re-attaches the children missing
+    /// from the staying ones, each on its own thread. Ends with all children attached.
+    /// </summary>
+    private static async Task ChangeDependenciesConcurrentlyAsync(
+        ConditionalSourceRoot root, ConditionalSourceChild[] stayingChildren, int selectorFlipCount, int operationCount)
+    {
+        var children = root.Children;
+        using var start = new ManualResetEventSlim();
+        var tasks = new[]
+        {
+            StartWhenSignaled(start, () =>
+            {
+                for (var index = 0; index < selectorFlipCount; index++)
+                {
+                    var child = children[index % children.Length];
+                    child.UseA = !child.UseA;
+                }
+            }),
+            StartWhenSignaled(start, () =>
+            {
+                for (var index = 1; index <= operationCount; index++)
+                {
+                    root.A = index;
+                }
+            }),
+            StartWhenSignaled(start, () =>
+            {
+                for (var index = 1; index <= operationCount; index++)
+                {
+                    root.B = index;
+                }
+            }),
+            StartWhenSignaled(start, () =>
+            {
+                for (var index = 0; index < operationCount; index++)
+                {
+                    root.Children = stayingChildren;
+                    root.Children = children;
+                }
+            })
+        };
+
+        start.Set();
+        await Task.WhenAll(tasks);
+    }
+
+    private static Task StartWhenSignaled(ManualResetEventSlim start, Action action)
+    {
+        return Task.Factory.StartNew(() =>
+        {
+            start.Wait();
+            action();
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+    }
+
     private static int TireIndex(int threadIndex) => (threadIndex % 3) + 1;
 }

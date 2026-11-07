@@ -204,13 +204,12 @@ public class GetPropertyHistoryAccessTests
     }
 
     private static AuthorizationMcpAccessPolicy CreatePolicy(string roleName, params AuthorizationRole[] customRoles) =>
-        new(AuthorizationPolicy.Compile(
+        new(AuthorizationDefinition.Create(
             [.. BuiltInRoles.All, .. customRoles],
-            [roleName],
             SystemRules.Rules,
             AuthorizationActions.All,
-            new HomeBlazeMemberTagProvider(),
-            new StateAttributePathProvider()));
+            new StateAttributePathProvider(),
+            new HomeBlazeMemberTagProvider()).Compile([roleName]));
 
     private static async Task<JsonElement> InvokeAsync(Graph graph, string path)
     {

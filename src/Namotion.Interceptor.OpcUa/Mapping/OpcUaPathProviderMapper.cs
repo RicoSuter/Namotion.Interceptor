@@ -19,6 +19,12 @@ public class OpcUaPathProviderMapper : IReversePropertyMapper<OpcUaPropertyMappi
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Forwards <see cref="PathProviderBase.Version"/> when the provider derives from it, and is 0 for any other <see cref="IPathProvider"/>.
+    /// </remarks>
+    public virtual long Version => (_pathProvider as PathProviderBase)?.Version ?? 0;
+
+    /// <inheritdoc />
     public virtual bool TryGetMapping(
         RegisteredSubjectProperty property,
         IInterceptorSubject rootSubject,

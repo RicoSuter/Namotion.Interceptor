@@ -7,7 +7,7 @@ using static Namotion.Interceptor.Authorization.Tests.TestGraph;
 
 namespace Namotion.Interceptor.Authorization.Tests;
 
-public class PathSelectorHardeningTests
+public class IncompletePathTests
 {
     private static readonly PermissionAction[] Read = [PermissionAction.Read];
 
@@ -22,11 +22,16 @@ public class PathSelectorHardeningTests
         var deny = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Rooms[Kitchen]/**"])]));
         var allow = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Rooms[Kitchen]/**"])]));
 
-        // Act & Assert
+        // Act
+        var denyCanReadCeiling = deny.CanRead(ceiling);
+        var denyCanReadLamp = deny.CanRead(lamp);
+        var allowCanReadCeiling = allow.CanRead(ceiling);
+
+        // Assert
         Assert.Same(home.Rooms["Bedroom"], Registered(kitchen).Parents[0].Property.Subject);
-        Assert.False(deny.CanRead(ceiling));
-        Assert.True(deny.CanRead(lamp));
-        Assert.True(allow.CanRead(ceiling));
+        Assert.False(denyCanReadCeiling);
+        Assert.True(denyCanReadLamp);
+        Assert.True(allowCanReadCeiling);
     }
 
     [Fact]
@@ -41,12 +46,48 @@ public class PathSelectorHardeningTests
         var deny = CompileExcludingSpare(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Rooms[Bedroom]/**"])]));
         var allow = CompileExcludingSpare(Role("Reader", allow: [Rule(Read, paths: ["/**"])]));
 
-        // Act & Assert
-        Assert.False(deny.CanRead(brightness));
-        Assert.False(deny.Explain(brightness, PermissionAction.Read).IsAllowed);
-        Assert.True(deny.CanRead(ssid));
-        Assert.False(allow.CanRead(brightness));
-        Assert.True(allow.CanRead(ssid));
+        // Act
+        var denyCanReadBrightness = deny.CanRead(brightness);
+        var denyExplainsReadingBrightnessAsAllowed = deny.Explain(brightness, PermissionAction.Read).IsAllowed;
+        var denyCanReadSsid = deny.CanRead(ssid);
+        var allowCanReadBrightness = allow.CanRead(brightness);
+        var allowCanReadSsid = allow.CanRead(ssid);
+
+        // Assert
+        Assert.False(denyCanReadBrightness);
+        Assert.False(denyExplainsReadingBrightnessAsAllowed);
+        Assert.True(denyCanReadSsid);
+        Assert.False(allowCanReadBrightness);
+        Assert.True(allowCanReadSsid);
+    }
+
+    [Theory]
+    [InlineData(6, true)]
+    [InlineData(7, false)]
+    public void WhenASubjectHasMorePathsThanTheLimit_ThenADenyWithPathsFailsClosedAndAnAllowStillMatchesAListedPath(int diamonds, bool arePathsComplete)
+    {
+        // Arrange: each stacked diamond doubles the paths of the leaf, so 6 give exactly 64 and 7 give 128.
+        var context = CreateContext();
+        var current = new Person(context);
+        for (var i = 0; i < diamonds; i++)
+        {
+            var next = new Person(context);
+            current.Father = next;
+            current.Mother = next;
+            current = next;
+        }
+
+        var member = Member(current, nameof(Person.Children));
+        var deny = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Nope/**"])]));
+        var allow = Compile(Role("Reader", allow: [Rule(Read, paths: ["/**"])]));
+
+        // Act
+        var denyCanRead = deny.CanRead(member);
+        var allowCanRead = allow.CanRead(member);
+
+        // Assert
+        Assert.Equal(arePathsComplete, denyCanRead);
+        Assert.True(allowCanRead);
     }
 
     [Fact]
@@ -58,18 +99,23 @@ public class PathSelectorHardeningTests
         var password = Member(wifi, nameof(Wifi.Password));
         var deny = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Wifi/**"])]));
         var allow = Compile(Role("Reader", allow: [Rule(Read, paths: ["/**"])]));
-        Assert.False(deny.CanRead(password));
-        Assert.True(allow.CanRead(password));
 
         // Act
+        var denyCanReadBefore = deny.CanRead(password);
+        var allowCanReadBefore = allow.CanRead(password);
         home.Wifi = null;
+        var denyCanReadAfter = deny.CanRead(password);
+        var denyCanReadParentAfter = deny.IsVisible(password.Parent);
+        var allowCanReadAfter = allow.CanRead(password);
 
         // Assert
+        Assert.False(denyCanReadBefore);
+        Assert.True(allowCanReadBefore);
         Assert.Null(wifi.TryGetRegisteredSubject());
         Assert.Empty(password.Parent.Parents);
-        Assert.False(deny.CanRead(password));
-        Assert.False(deny.CanRead(password.Parent));
-        Assert.False(allow.CanRead(password));
+        Assert.False(denyCanReadAfter);
+        Assert.False(denyCanReadParentAfter);
+        Assert.False(allowCanReadAfter);
     }
 
     [Fact]
@@ -87,7 +133,6 @@ public class PathSelectorHardeningTests
         var deskBrightness = Member(desk, nameof(Light.Brightness));
         var registeredAnnex = Registered(annex);
         var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Rooms[Kitchen]/**"])]));
-        Assert.False(policy.CanRead(deskBrightness));
 
         bool? ceilingReadable = null;
         bool? deskReadable = null;
@@ -103,13 +148,17 @@ public class PathSelectorHardeningTests
         }));
 
         // Act
+        var deskCanReadBefore = policy.CanRead(deskBrightness);
         home.Rooms = [];
+        var ceilingCanReadAfter = policy.CanRead(ceilingBrightness);
+        var deskCanReadAfter = policy.CanRead(deskBrightness);
 
         // Assert
+        Assert.False(deskCanReadBefore);
         Assert.False(ceilingReadable);
         Assert.False(deskReadable);
-        Assert.False(policy.CanRead(ceilingBrightness));
-        Assert.False(policy.CanRead(deskBrightness));
+        Assert.False(ceilingCanReadAfter);
+        Assert.False(deskCanReadAfter);
     }
 
     [Fact]
@@ -119,14 +168,16 @@ public class PathSelectorHardeningTests
         var home = Create();
         var kitchen = Registered(home.Rooms["Kitchen"]);
         var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, members: ["Rooms"])]));
-        Assert.False(policy.CanRead(kitchen));
 
         // Act
+        var canReadBefore = policy.IsVisible(kitchen);
         home.Rooms = [];
+        var decisionAfter = policy.ExplainVisibility(kitchen);
 
         // Assert
+        Assert.False(canReadBefore);
         Assert.Empty(kitchen.Parents);
-        Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: true, DeniedProperty: null), policy.Explain(kitchen));
+        Assert.Equal(new VisibilityDecision(isVisible: false, hasReadableMember: true, deniedProperty: null), decisionAfter);
     }
 
     [Fact]
@@ -138,12 +189,19 @@ public class PathSelectorHardeningTests
         var deny = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Wifi/**"])]));
         var allow = Compile(Role("Reader", allow: [Rule(Read, paths: ["/*"])]));
 
-        // Act & Assert
-        Assert.True(deny.CanRead(Member(home, nameof(Home.Rooms))));
-        Assert.True(deny.CanRead(Member(unattached, nameof(Wifi.Ssid))));
-        Assert.True(allow.CanRead(Member(home, nameof(Home.Rooms))));
-        Assert.True(allow.CanRead(Member(unattached, nameof(Wifi.Ssid))));
-        Assert.True(deny.CanRead(Registered(unattached)));
+        // Act
+        var denyCanReadRooms = deny.CanRead(Member(home, nameof(Home.Rooms)));
+        var denyCanReadUnattachedSsid = deny.CanRead(Member(unattached, nameof(Wifi.Ssid)));
+        var allowCanReadRooms = allow.CanRead(Member(home, nameof(Home.Rooms)));
+        var allowCanReadUnattachedSsid = allow.CanRead(Member(unattached, nameof(Wifi.Ssid)));
+        var denyCanReadUnattachedSubject = deny.IsVisible(Registered(unattached));
+
+        // Assert
+        Assert.True(denyCanReadRooms);
+        Assert.True(denyCanReadUnattachedSsid);
+        Assert.True(allowCanReadRooms);
+        Assert.True(allowCanReadUnattachedSsid);
+        Assert.True(denyCanReadUnattachedSubject);
     }
 
     [Fact]
@@ -156,11 +214,13 @@ public class PathSelectorHardeningTests
         var role = Role("Operator", allow: [Rule([actions[61]])]);
 
         // Act
-        var policy = AuthorizationPolicy.Compile([role], ["Operator"], [], actions, TestTags.Default, Policies.SlashPaths);
+        var policy = AuthorizationDefinition.Create([role], [], actions, Policies.SlashPaths, TestTags.Default).Compile(["Operator"]);
+        var isAllowedAction61 = policy.IsAllowed(member, actions[61]);
+        var isAllowedAction60 = policy.IsAllowed(member, actions[60]);
 
         // Assert
-        Assert.True(policy.IsAllowed(member, actions[61]));
-        Assert.False(policy.IsAllowed(member, actions[60]));
+        Assert.True(isAllowedAction61);
+        Assert.False(isAllowedAction60);
     }
 
     [Fact]
@@ -174,10 +234,10 @@ public class PathSelectorHardeningTests
         var policy = Compile(Role("Reader", allow: [Rule(Read)]));
 
         // Act
-        var decision = policy.Explain(Registered(first));
+        var decision = policy.ExplainVisibility(Registered(first));
 
         // Assert
-        Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: true, DeniedProperty: null), decision);
+        Assert.Equal(new VisibilityDecision(isVisible: false, hasReadableMember: true, deniedProperty: null), decision);
     }
 
     [Fact]
@@ -192,9 +252,13 @@ public class PathSelectorHardeningTests
         var deny = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/**"])]));
         var allow = Compile(Role("Reader", allow: [Rule(Read, paths: ["/**"])]));
 
-        // Act & Assert
-        Assert.False(deny.CanRead(lights));
-        Assert.False(allow.CanRead(lights));
+        // Act
+        var denyCanReadLights = deny.CanRead(lights);
+        var allowCanReadLights = allow.CanRead(lights);
+
+        // Assert
+        Assert.False(denyCanReadLights);
+        Assert.False(allowCanReadLights);
     }
 
     [Fact]
@@ -211,10 +275,10 @@ public class PathSelectorHardeningTests
         var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, members: ["Rooms"])]));
 
         // Act
-        var decision = policy.Explain(Registered(kitchen));
+        var decision = policy.ExplainVisibility(Registered(kitchen));
 
         // Assert
-        Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: true, Member(home, nameof(Home.Rooms))), decision);
+        Assert.Equal(new VisibilityDecision(isVisible: false, hasReadableMember: true, Member(home, nameof(Home.Rooms))), decision);
     }
 
     [Fact]
@@ -235,10 +299,10 @@ public class PathSelectorHardeningTests
         var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, members: ["Rooms"])]));
 
         // Act
-        var decision = policy.Explain(Registered(kitchen));
+        var decision = policy.ExplainVisibility(Registered(kitchen));
 
         // Assert
-        Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: true, Member(home, nameof(Home.Rooms))), decision);
+        Assert.Equal(new VisibilityDecision(isVisible: false, hasReadableMember: true, Member(home, nameof(Home.Rooms))), decision);
     }
 
     /// <summary>
@@ -259,5 +323,5 @@ public class PathSelectorHardeningTests
     }
 
     private static AuthorizationPolicy CompileExcludingSpare(AuthorizationRole role)
-        => AuthorizationPolicy.Compile([role], [role.Name], [], KnownActions, TestTags.Default, new ExcludingPathProvider(nameof(Home.Spare), '/'));
+        => AuthorizationDefinition.Create([role], [], KnownActions, new ExcludingPathProvider(nameof(Home.Spare), '/'), TestTags.Default).Compile([role.Name]);
 }

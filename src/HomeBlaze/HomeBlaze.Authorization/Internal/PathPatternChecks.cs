@@ -38,7 +38,7 @@ internal static class PathPatternChecks
 
         try
         {
-            AuthorizationPolicy.Compile([role], [PatternValidationRoleName], [], [], TagProvider, pathProvider);
+            AuthorizationDefinition.Create([role], [], [], pathProvider, TagProvider).Compile([PatternValidationRoleName]);
             return null;
         }
         catch (AuthorizationException exception)

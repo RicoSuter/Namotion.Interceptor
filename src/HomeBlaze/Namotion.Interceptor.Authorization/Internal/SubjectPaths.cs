@@ -11,13 +11,11 @@ namespace Namotion.Interceptor.Authorization.Internal;
 /// </summary>
 internal static class SubjectPaths
 {
-    private const int ParentLinksPerPath = 64;
-    private const int CycleDetectionDepthThreshold = 256;
-
     /// <summary>
     /// The segment of the property as the registry spells it when it builds a path: the provider's segment of an included
     /// property, or the browse name of one the provider excludes. An attribute is spelled the same way, so attribute
-    /// paths follow the registry's syntax. A member paths may not pass still has a segment a deny can match.
+    /// paths follow the registry's syntax. A member that paths may not pass through still has a segment, which a deny
+    /// rule can match.
     /// </summary>
     public static string GetSegment(PathProviderBase pathProvider, RegisteredSubjectProperty property)
         => pathProvider.TryGetPropertySegment(property, out var segment) ? segment : property.BrowseName;
@@ -27,40 +25,41 @@ internal static class SubjectPaths
     /// root, in the order the parents are listed. Every subject a chain passes above the starting subject must be
     /// attached (<see cref="RegisteredSubject.IsAttached"/>); the starting subject is not checked, the caller checks
     /// it. A path is its links from the root's property down to the property holding the subject, each in every
-    /// spelling the path reader resolves. A chain passes only properties the path provider effectively includes (see
-    /// <see cref="PathProviderExtensions.IsPropertyEffectivelyIncluded"/>), as the registry's paths do, so a chain through an
-    /// excluded property, or through an attribute of one, has no path. When the chain of first parents ends at a
-    /// subject without parents and has a path, the first path is the one the registry's
+    /// spelling the path reader resolves and in its structural spellings (see <see cref="PathLink"/>). A chain passes
+    /// only properties the path provider effectively includes (see
+    /// <see cref="PathProviderExtensions.IsPropertyEffectivelyIncluded"/>), as the registry's paths do, so a chain
+    /// through an excluded property, or through an attribute of one, has no path. When the chain of first parents ends
+    /// at a subject without parents and has a path, the first path is the one the registry's
     /// <see cref="PathExtensions.TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>
-    /// builds for the subject's first parent. A chain that returns to a subject already on it is not a path and is skipped.
+    /// builds for the subject's first parent. A chain that returns to a subject already on it is not a path and is
+    /// skipped.
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <param name="pathProvider">The path provider.</param>
-    /// <param name="paths">Receives the paths that could be built, each as its links in root-to-subject order.</param>
+    /// <param name="paths">Receives the paths that could be built, each as its links in root-to-subject order, after the paths it already holds.</param>
     /// <param name="maxPaths">The most paths to build; positive.</param>
+    /// <param name="followedSingleParents">True when every subject above the subject had a single parent, so the result came from following them without a search and without spending the search budget.</param>
     /// <returns>
-    /// True when every chain was built; false when a chain could not be built (it passes a property paths may not
-    /// pass, an [InlinePaths] key resolves neither bare nor in the explicit form, because another segment shadows it, or
-    /// the chain passes a subject that is no longer attached), more than <paramref name="maxPaths"/> chains exist, or
-    /// the search took more than 64 parent links per allowed path before every chain was found. A subject without
-    /// parents has no paths and returns true.
+    /// True when every chain was built; false when a chain has no path the registry could build or passes a subject
+    /// that is no longer attached, more than <paramref name="maxPaths"/> chains exist, or the search took more than 64
+    /// parent links per allowed path before every chain was found. A subject without parents has no paths and returns
+    /// true.
     /// </returns>
-    public static bool TryGetPaths(RegisteredSubject subject, PathProviderBase pathProvider, List<PathLink[]> paths, int maxPaths)
+    public static bool TryGetPaths(
+        RegisteredSubject subject, PathProviderBase pathProvider, PathStore paths, int maxPaths, out bool followedSingleParents)
     {
         Debug.Assert(maxPaths > 0, "maxPaths must be positive.");
 
+        followedSingleParents = true;
         var parents = subject.Parents;
-        if (parents.Length == 0)
-        {
-            return true;
-        }
-
         var builder = new ChainBuilder(pathProvider, paths, maxPaths);
-        var frames = new List<SubjectPropertyParent>(8);
+        var frames = paths.Frames;
+        frames.Clear();
         if (!TryBuildSingleParentChain(subject, parents, frames, ref builder))
         {
+            followedSingleParents = false;
             frames.Clear();
-            BuildChains(subject, parents, (long)maxPaths * ParentLinksPerPath, frames, ref builder);
+            BuildChains(subject, parents, (long)maxPaths * Limits.ParentLinksPerPath, frames, ref builder);
         }
 
         return builder.IsComplete;
@@ -71,7 +70,8 @@ internal static class SubjectPaths
     /// with several parents, where the full search has to take over.
     /// </summary>
     private static bool TryBuildSingleParentChain(
-        RegisteredSubject subject, ImmutableArray<SubjectPropertyParent> parents, List<SubjectPropertyParent> frames, ref ChainBuilder builder)
+        RegisteredSubject subject, ImmutableArray<SubjectPropertyParent> parents, List<SubjectPropertyParent> frames,
+        ref ChainBuilder builder)
     {
         var current = subject;
         HashSet<RegisteredSubject>? visited = null;
@@ -79,7 +79,7 @@ internal static class SubjectPaths
         while (parents.Length == 1)
         {
             // Start tracking only past the threshold; a revisit then means the chain is a cycle and has no path.
-            if (++depth > CycleDetectionDepthThreshold && !(visited ??= []).Add(current))
+            if (++depth > Limits.ChainCycleTrackingDepth && !(visited ??= []).Add(current))
             {
                 return true;
             }
@@ -88,9 +88,8 @@ internal static class SubjectPaths
             frames.Add(parent);
             current = parent.Property.Parent;
             parents = current.Parents;
-
-            // Read after the parents: the registry clears it before it removes the last parent.
-            if (!current.IsAttached)
+            var isAttached = current.IsAttached;
+            if (!isAttached)
             {
                 builder.MarkIncomplete();
                 return true;
@@ -165,9 +164,8 @@ internal static class SubjectPaths
     {
         var owner = parent.Property.Parent;
         var ownerParents = owner.Parents;
-
-        // Read after the parents: the registry clears it before it removes the last parent.
-        if (!owner.IsAttached)
+        var isAttached = owner.IsAttached;
+        if (!isAttached)
         {
             builder.MarkIncomplete();
             return true;
@@ -201,11 +199,11 @@ internal static class SubjectPaths
         private readonly PathProviderBase _pathProvider;
         private readonly char _separator;
         private readonly char _indexOpen;
-        private readonly List<PathLink[]> _paths;
+        private readonly PathStore _paths;
         private readonly int _maxPaths;
         private int _built;
 
-        public ChainBuilder(PathProviderBase pathProvider, List<PathLink[]> paths, int maxPaths)
+        public ChainBuilder(PathProviderBase pathProvider, PathStore paths, int maxPaths)
         {
             _pathProvider = pathProvider;
             _separator = pathProvider.PathSeparator;
@@ -229,76 +227,79 @@ internal static class SubjectPaths
                 return false;
             }
 
-            var path = TryGetLinks(frames);
-            if (path is null)
+            if (TryAddLinks(frames))
             {
-                IsComplete = false;
+                _built++;
             }
             else
             {
-                _paths.Add(path);
-                _built++;
+                IsComplete = false;
             }
 
             return IsComplete || _built < _maxPaths;
         }
 
-        /// <summary>The links of the chain root first; null when paths may not pass a property on it or a link cannot be built.</summary>
-        private readonly PathLink[]? TryGetLinks(List<SubjectPropertyParent> frames)
+        /// <summary>Adds the links of the chain root first as a path; false when paths may not pass a property on it or a link cannot be built.</summary>
+        private readonly bool TryAddLinks(List<SubjectPropertyParent> frames)
         {
             // The registry builds and resolves no path through such a property, nor through an attribute of an excluded property.
             foreach (var frame in frames)
             {
                 if (!_pathProvider.IsPropertyEffectivelyIncluded(frame.Property))
                 {
-                    return null;
+                    return false;
                 }
             }
 
-            var links = new PathLink[frames.Count];
-            for (var i = 0; i < links.Length; i++)
+            var start = _paths.BeginPath();
+            for (var i = frames.Count - 1; i >= 0; i--)
             {
-                var frame = frames[frames.Count - 1 - i];
+                var frame = frames[i];
                 var link = GetLink(frame.Property, frame.Index);
                 if (link.Segment is null && link.BareKey is null)
                 {
-                    return null;
+                    _paths.DropPath(start);
+                    return false;
                 }
 
-                links[i] = link;
+                _paths.AddLink(link);
             }
 
-            return links;
+            _paths.EndPath(start);
+            return true;
         }
 
         // These link rules mirror the registry's path reader; SubjectPathsTests cross-checks them against it.
         private readonly PathLink GetLink(RegisteredSubjectProperty property, object? index)
         {
             var ownSegment = GetSegment(_pathProvider, property);
-            if (index is null)
-            {
-                return new PathLink(ownSegment, null, null);
-            }
-
-            var text = PathExtensions.FormatPathIndex(index);
+            var text = index is null ? null : PathExtensions.FormatPathIndex(index);
             if (!InlinePathsAttribute.IsInlinePathsProperty(property.Subject.GetType(), property.Name))
             {
-                return new PathLink(ownSegment, text, null);
+                return new PathLink(ownSegment, text);
             }
 
-            var bareKey = IsReadBare(property, text, ownSegment) ? text : null;
-
-            // The explicit form only reads back while the own segment still resolves to this property.
+            // The own segment, alone or with the key, reads back only while it still resolves to this property. Deny
+            // rules match the structural spellings whether or not a property shadows them.
             var segment = ResolvesTo(property, ownSegment) ? ownSegment : null;
-            return new PathLink(segment, text, bareKey);
+            if (text is null)
+            {
+                return new PathLink(segment, null, null, ownSegment, null);
+            }
+
+            var structuralBareKey = IsSingleName(text, ownSegment) ? text : null;
+            var bareKey = structuralBareKey is not null && ResolvesTo(property, text) ? text : null;
+            return new PathLink(segment, text, bareKey, ownSegment, structuralBareKey);
         }
 
-        /// <summary>The reader takes the text as this key alone when it is one non-empty name that resolves to the property and is not its own segment.</summary>
-        private readonly bool IsReadBare(RegisteredSubjectProperty property, string text, string ownSegment)
+        /// <summary>
+        /// Whether the reader can take the text as a key alone: one non-empty name that is not the property's own
+        /// segment. It takes it only while the name also resolves to the property.
+        /// </summary>
+        private readonly bool IsSingleName(string text, string ownSegment)
             => text.Length > 0 &&
                text.AsSpan().IndexOfAny(_separator, _indexOpen) < 0 &&
-               text != ownSegment &&
-               ResolvesTo(property, text);
+               text != ownSegment;
 
         private readonly bool ResolvesTo(RegisteredSubjectProperty property, string segment)
             => _pathProvider.TryGetPropertyFromSegment(property.Parent, segment, out var resolved) && resolved.Name == property.Name;

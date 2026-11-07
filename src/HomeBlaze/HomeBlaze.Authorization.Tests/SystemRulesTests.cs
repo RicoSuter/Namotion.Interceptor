@@ -140,7 +140,7 @@ public class SystemRulesTests
     }
 
     private static AuthorizationPolicy Compile(PrincipalKind kind, string roleName) =>
-        AuthorizationPolicy.Compile(
-            BuiltInRoles.All, [roleName], SystemRules.For(kind), AuthorizationActions.All,
-            new HomeBlazeMemberTagProvider(), new DefaultPathProvider('/'));
+        AuthorizationDefinition.Create(
+            BuiltInRoles.All, SystemRules.For(kind), AuthorizationActions.All,
+            new DefaultPathProvider('/'), new HomeBlazeMemberTagProvider()).Compile([roleName]);
 }

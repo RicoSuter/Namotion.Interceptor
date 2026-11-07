@@ -90,7 +90,7 @@ public sealed class AuthorizationService : IDisposable
 
     /// <summary>
     /// Changes after every change of the graph that can change whether a subject is shown, see
-    /// <see cref="AuthorizationPolicy.CanRead(RegisteredSubject)"/>: a subject attached or detached, a reference to a
+    /// <see cref="AuthorizationPolicy.IsVisible(RegisteredSubject)"/>: a subject attached or detached, a reference to a
     /// subject added or removed, a kept subject moved to another key or position, a property or attribute added at run
     /// time, and a value of metadata, which decides whether the paths spell an attribute of metadata. A decision about
     /// subjects made after reading it stays valid while it is unchanged; read it before the graph.

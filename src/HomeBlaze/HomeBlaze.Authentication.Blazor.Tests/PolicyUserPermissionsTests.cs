@@ -248,7 +248,7 @@ public class PolicyUserPermissionsTests
 
         // Assert
         Assert.False(policy.CanRead(userName));
-        Assert.False(policy.CanRead(admin));
+        Assert.False(policy.IsVisible(admin));
         Assert.False(decisions.CanRead(userName));
         Assert.False(decisions.CanReadHistory(userName));
         Assert.False(decisions.CanShow(admin));

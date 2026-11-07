@@ -2,7 +2,7 @@ using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Interceptor.Validation.Tests.Models;
 
-/// <summary>A motor with a derived property, kept apart from <see cref="Motor"/> so its recalculation does not reach other tests' validators.</summary>
+/// <summary>A motor with a derived property, for the test of a transaction commit that recalculates it.</summary>
 [InterceptorSubject]
 public partial class PoweredMotor
 {

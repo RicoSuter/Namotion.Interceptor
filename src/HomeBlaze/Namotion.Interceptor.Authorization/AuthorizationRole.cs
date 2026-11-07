@@ -1,26 +1,28 @@
 using System.Collections.Immutable;
+using System.Text.Json.Serialization;
 using Namotion.Interceptor.Authorization.Internal;
 
 namespace Namotion.Interceptor.Authorization;
 
 /// <summary>
 /// A named set of allow and deny rules that can include other roles. The effective rules of a role are its own and
-/// those of every role it includes, transitively.
+/// those of every role it includes, transitively. The lists are never default. Unknown JSON properties are rejected.
 /// </summary>
 /// <remarks>Two instances are equal when every property is equal element by element; role names compare ordinally.</remarks>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record AuthorizationRole
 {
     /// <summary>Gets the name, unique among the roles of a policy, compared ordinally.</summary>
     public required string Name { get; init; }
 
     /// <summary>Gets the names of the included roles.</summary>
-    public ImmutableArray<string> Includes { get; init; } = [];
+    public ImmutableArray<string> Includes { get; init => field = value.IsDefault ? [] : value; } = [];
 
     /// <summary>Gets the rules that grant.</summary>
-    public ImmutableArray<PermissionRule> Allow { get; init; } = [];
+    public ImmutableArray<PermissionRule> Allow { get; init => field = value.IsDefault ? [] : value; } = [];
 
     /// <summary>Gets the rules that remove what any allow rule granted.</summary>
-    public ImmutableArray<PermissionRule> Deny { get; init; } = [];
+    public ImmutableArray<PermissionRule> Deny { get; init => field = value.IsDefault ? [] : value; } = [];
 
     /// <summary>Whether every property of <paramref name="other"/> is equal element by element, in order, role names ordinally.</summary>
     public bool Equals(AuthorizationRole? other)

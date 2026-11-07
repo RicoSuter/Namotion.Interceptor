@@ -45,7 +45,8 @@ public sealed class DenyRuleMatcher
         var role = new AuthorizationRole { Name = ProbeRoleName, Allow = [AllowEverything], Deny = [rule] };
         try
         {
-            return new DenyRuleMatcher(rule, AuthorizationPolicy.Compile([role], [ProbeRoleName], [], AuthorizationActions.All, TagProvider, pathProvider));
+            var definition = AuthorizationDefinition.Create([role], [], AuthorizationActions.All, pathProvider, TagProvider);
+            return new DenyRuleMatcher(rule, definition.Compile([ProbeRoleName]));
         }
         catch (AuthorizationException)
         {

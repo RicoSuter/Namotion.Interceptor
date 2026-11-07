@@ -177,6 +177,9 @@ internal sealed class McpSubjectReadability
 
     private sealed class ReadableSubjectsPathProvider(PathProviderBase inner, McpSubjectReadability readability) : PathProviderBase
     {
+        /// <inheritdoc />
+        public override long Version => inner.Version;
+
         public override char PathSeparator => inner.PathSeparator;
 
         public override char IndexOpen => inner.IndexOpen;

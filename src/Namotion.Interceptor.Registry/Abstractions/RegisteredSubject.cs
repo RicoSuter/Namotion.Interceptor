@@ -40,12 +40,14 @@ public class RegisteredSubject
     /// Gets whether the subject is in the registry's graph through this instance: true from the registry's
     /// registration of the subject until the registry removes the subject's last parent or unregisters it, both of
     /// which happen only when the subject detaches. A subject without parents that is attached is therefore a root.
-    /// A subject attached again is registered as a new instance, so an instance never becomes attached again, and an
-    /// instance created outside the registry is never attached. Lock-free. A reader that combines it with
-    /// <see cref="Parents"/> must read <see cref="Parents"/> first and this property second: the registry clears it
-    /// before it removes the last parent, so a reader that sees the parents empty after a removal then sees it false,
-    /// while the opposite order can see it true and then the parents empty.
+    /// An instance never becomes attached again: a subject attached again is registered as a new instance. An
+    /// instance created outside the registry is never attached. Lock-free.
     /// </summary>
+    /// <remarks>
+    /// A reader that combines it with <see cref="Parents"/> must read <see cref="Parents"/> first and this property
+    /// second: the registry clears it before it removes the last parent, so a reader that sees the parents empty after
+    /// a removal then sees it false, while the opposite order can see it true and then the parents empty.
+    /// </remarks>
     public bool IsAttached => Volatile.Read(ref _isAttached);
 
     /// <summary>
@@ -344,12 +346,18 @@ public class RegisteredSubject
         var property = AddPropertyInternal(name, type, attributes);
 
         // Fires a null→value transition for lifecycle tracking of subject-valued initial values.
-        // TODO(perf): For derived-with-setter this re-enters RecalculateDerivedProperty (total
-        // 3 getter invocations: AttachProperty + invoke below + recalc), but AttachProperty has
-        // already seeded LastKnownValue. Consider a dedicated lifecycle notification for derived,
-        // or passing currentValue so PropertyValueEqualityCheckHandler short-circuits the write.
-        property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject) ?? null,
-            null, delegate { });
+        if (property.Reference.Metadata.IsDerived)
+        {
+            // TODO(perf): AttachProperty has already evaluated the getter and seeded LastKnownValue, yet
+            // publishing reads it again, and once more for the change notification when one is consumed.
+            // For derived-with-setter the write also re-enters RecalculateDerivedProperty, another
+            // evaluation. Consider a dedicated lifecycle notification for derived properties.
+            property.Reference.PublishInitialDerivedPropertyValue();
+        }
+        else
+        {
+            property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject), null, delegate { });
+        }
 
         return property;
     }
