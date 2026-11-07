@@ -119,23 +119,32 @@ internal sealed class AutomationTriggers
     }
 
     /// <summary>
-    /// Hands the state of each property trigger and the subscription of each event trigger of the old rule to the trigger
-    /// at the same position with an equal configuration.
+    /// Hands the state of each property trigger and the subscription of each event trigger of the old rule to a trigger
+    /// with an equal configuration, wherever it moved in the rule: each new trigger takes the first old one with an equal
+    /// configuration that no earlier new trigger took, so that equal triggers pair up in order.
     /// </summary>
     public static void CarryOver(CompiledRule old, CompiledRule rule)
     {
+        var propertyTriggers = new List<CompiledPropertyTrigger>(old.PropertyTriggers);
         foreach (var trigger in rule.PropertyTriggers)
         {
-            var match = old.PropertyTriggers.FirstOrDefault(candidate =>
-                candidate.Index == trigger.Index && candidate.Configuration == trigger.Configuration);
-            match?.MoveStateTo(trigger);
+            var index = propertyTriggers.FindIndex(candidate => candidate.Configuration == trigger.Configuration);
+            if (index >= 0)
+            {
+                propertyTriggers[index].MoveStateTo(trigger);
+                propertyTriggers.RemoveAt(index);
+            }
         }
 
+        var eventTriggers = new List<CompiledEventTrigger>(old.EventTriggers);
         foreach (var trigger in rule.EventTriggers)
         {
-            var match = old.EventTriggers.FirstOrDefault(candidate =>
-                candidate.Index == trigger.Index && candidate.Configuration == trigger.Configuration);
-            match?.MoveSubscriptionTo(trigger);
+            var index = eventTriggers.FindIndex(candidate => candidate.Configuration == trigger.Configuration);
+            if (index >= 0)
+            {
+                eventTriggers[index].MoveSubscriptionTo(trigger);
+                eventTriggers.RemoveAt(index);
+            }
         }
     }
 

@@ -37,4 +37,27 @@ public class AutomationTriggersTests
         Assert.Equal(publishesAfterTheFirstGraphChange, publishesAfterTheSameChildren);
         Assert.Equal(publishesAfterTheFirstGraphChange + 1, publishes);
     }
+
+    [Fact]
+    public void WhenEqualTriggersAreCarriedOver_ThenTheyPairUpInOrderWhereverTheyMoved()
+    {
+        // Arrange
+        static CompiledRule Compile(params AutomationTrigger[] triggers)
+        {
+            Assert.True(AutomationCompiler.TryCompileRule("retract", Create("Retract", AutomationRuleMode.On, triggers, [Invoke("/Blinds/Close")]), [], out var rule, out var error), error);
+            return rule;
+        }
+
+        var old = Compile(When("/Weather/Rain > 0"), When("/Weather/Gust > 8"), When("/Weather/Rain > 0"));
+        var first = old.PropertyTriggers[0].State;
+        var third = old.PropertyTriggers[2].State;
+        var rule = Compile(When("/Weather/Rain > 0"), When("/Weather/Rain > 0"));
+
+        // Act
+        AutomationTriggers.CarryOver(old, rule);
+
+        // Assert
+        Assert.Same(first, rule.PropertyTriggers[0].State);
+        Assert.Same(third, rule.PropertyTriggers[1].State);
+    }
 }

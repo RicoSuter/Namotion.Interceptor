@@ -34,6 +34,61 @@ public class AutomationConfigurationTests
     }
 
     [Fact]
+    public async Task WhenAnEarlierTriggerIsDeleted_ThenAnUnchangedLaterTriggerDoesNotRunAgain()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Gust > 8"), When("/Weather/Rain > 0")], [Invoke("/Blinds/Close")]))));
+        host.Weather.Rain = 1;
+        await host.FlushAsync();
+        var runsBefore = host.Blinds.CloseCount;
+
+        // Act
+        await SaveAsync(host, Keyed(("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Rain > 0")], [Invoke("/Blinds/Close")]))));
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, runsBefore);
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal("On: Triggered, waiting to rearm", host.Rule("retract").Status);
+    }
+
+    [Fact]
+    public async Task WhenATriggerIsInsertedBeforeAnUnchangedTrigger_ThenTheUnchangedTriggerDoesNotRunAgain()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Rain > 0")], [Invoke("/Blinds/Close")]))));
+        host.Weather.Rain = 1;
+        await host.FlushAsync();
+
+        // Act
+        await SaveAsync(host, Keyed(("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Gust > 8"), When("/Weather/Rain > 0")], [Invoke("/Blinds/Close")]))));
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenOnlyTheActionsChange_ThenTheTriggersDoNotRunAgain()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Gust > 8"), When("/Weather/Rain > 0")], [Invoke("/Blinds/Close")]))));
+        host.Weather.Rain = 1;
+        await host.FlushAsync();
+
+        // Act
+        await SaveAsync(host, Keyed(("retract", Create(
+            "Retract", AutomationRuleMode.On, [When("/Weather/Gust > 8"), When("/Weather/Rain > 0")], [Invoke("/Blinds/Close"), Invoke("/Blinds/Close")]))));
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
     public async Task WhenATriggerIsChanged_ThenItIsActivatedAgain()
     {
         // Arrange
@@ -112,6 +167,31 @@ public class AutomationConfigurationTests
         // Assert
         Assert.Equal(3, host.Blinds.CloseCount);
         Assert.Equal(3L, host.Rule("press").RunCount);
+    }
+
+    [Fact]
+    public async Task WhenAnEarlierTriggerIsDeletedWhileEventsAreQueued_ThenTheEventsOfAnUnchangedEventTriggerStillRun()
+    {
+        // Arrange
+        static AutomationRule Press(params AutomationTrigger[] triggers) => Create("Press", AutomationRuleMode.On, triggers, [Invoke("/Blinds/Close")]);
+        static AutomationRule Wait() => On("Wait", When("/Weather/Rain > 0"), Invoke("/Blinds/Wait"));
+        var pressTrigger = OnEvent("/Button", "TestPressEvent", "event/Gesture == Release");
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("press", Press(When("/Weather/Gust > 8"), pressTrigger)), ("wait", Wait())));
+        host.Weather.Rain = 1;
+        await AsyncTestHelpers.WaitUntilAsync(() => host.Blinds.IsWaiting);
+        host.Button.Press("Release");
+        host.Button.Press("Release");
+
+        // Act
+        host.Automation.Rules = Keyed(("press", Press(pressTrigger)), ("wait", Wait()));
+        await host.Automation.ApplyConfigurationAsync(CancellationToken.None);
+        host.Blinds.Release();
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(2, host.Blinds.CloseCount);
+        Assert.Equal(2L, host.Rule("press").RunCount);
     }
 
     [Fact]
