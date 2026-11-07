@@ -389,6 +389,101 @@ public class ConcurrentGraphChangeTests(ITestOutputHelper output)
         Assert.All(visibilityReaders, reader => Assert.True(reader.SettledComplete, "The visibility evaluation did not complete on the settled graph."));
     }
 
+    [Fact]
+    public void WhenAnUnrelatedPartOfTheGraphKeepsChangingDuringEveryAttempt_ThenThePathsAreIncomplete()
+    {
+        // Arrange: S stays under R.Mother while another subject enters and leaves R.Father at every segment lookup. No
+        // path of S passes R.Father, but the registry's structure version counts every change, so no attempt is accepted.
+        var pathProvider = new HookPathProvider();
+        var policy = Compile(pathProvider, allowPaths: ["Mother.**"], denyPaths: null);
+        var root = new Person(CreateContext());
+        var s = new Person();
+        var other = new Person();
+        root.Mother = s;
+        var member = Member(s, nameof(Person.Children));
+        // Guard: the allow applies to the stable graph, so the denial below comes from the changing graph.
+        Assert.True(policy.CanRead(member));
+        pathProvider.SetRepeatingHook(() => root.Father = root.Father is null ? other : null);
+
+        // Act
+        var allowed = policy.CanRead(member);
+
+        // Assert
+        Assert.False(allowed);
+    }
+
+    [Fact]
+    public void WhenAnUnrelatedPartOfTheGraphChangesDuringTheFirstAttempt_ThenTheAnswerIsForTheGraph()
+    {
+        // Arrange
+        var pathProvider = new HookPathProvider();
+        var policy = Compile(pathProvider, allowPaths: ["Mother.**"], denyPaths: null);
+        var root = new Person(CreateContext());
+        var s = new Person();
+        root.Mother = s;
+        var member = Member(s, nameof(Person.Children));
+        pathProvider.SetHook(() => root.Father = new Person());
+
+        // Act
+        var allowed = policy.CanRead(member);
+
+        // Assert
+        Assert.True(allowed);
+        Assert.NotNull(root.Father);
+    }
+
+    [Fact]
+    public void WhenACollectionIsReorderedConcurrently_ThenAPathDenyOnAnIndexNeverLapses()
+    {
+        // Arrange: X is held by C1.Father and C2.Father, and C1 and C2 sit at opposite ends of R.Children, which the
+        // mutator reverses again and again. In either order exactly one of them is at the last index, which the deny
+        // names. The registry updates the index of one item after the other, so a read that took C1's index before the
+        // update and C2's after it would find neither at the last index and miss the deny.
+        const int fillers = 200;
+        var pathProvider = new HookPathProvider(DenyReaderSpinIterations);
+        var policy = Compile(pathProvider, allowPaths: null, denyPaths: [$"Children[{fillers + 1}].**"]);
+        var root = new Person(CreateContext());
+        var c1 = new Person();
+        var c2 = new Person();
+        var x = new Person();
+        var forward = new[] { c1 }.Concat(Enumerable.Range(0, fillers).Select(_ => new Person())).Append(c2).ToArray();
+        var backward = forward.Reverse().ToArray();
+        root.Children = forward;
+        c1.Father = x;
+        c2.Father = x;
+        var member = Member(x, nameof(Person.Children));
+        var subject = Registered(x);
+        // Guard: the deny applies in both orders, so an allow below can only come from a torn read.
+        Assert.False(policy.CanRead(member));
+        root.Children = backward;
+        Assert.False(policy.CanRead(member));
+        Assert.False(policy.IsVisible(subject));
+        root.Children = forward;
+
+        using var start = new ManualResetEventSlim();
+        using var mutatorDone = new ManualResetEventSlim();
+        var memberReaders = Enumerable.Range(0, StressReaderCount / 2)
+            .Select(_ => new StressReader(() => policy.CanRead(member), start, mutatorDone))
+            .ToArray();
+        var visibilityReaders = Enumerable.Range(0, StressReaderCount / 2)
+            .Select(_ => new StressReader(() => policy.IsVisible(subject), start, mutatorDone))
+            .ToArray();
+        StressReader[] readers = [.. memberReaders, .. visibilityReaders];
+
+        // Act
+        RunMutator(start, mutatorDone, readers, () =>
+        {
+            root.Children = backward;
+            root.Children = forward;
+        });
+
+        // Assert
+        output.WriteLine($"evaluations={readers.Sum(r => r.Evaluations)} wrongMemberAllows={memberReaders.Sum(r => r.Allowed)} wrongVisible={visibilityReaders.Sum(r => r.Allowed)}");
+        Assert.All(readers, reader => Assert.Null(reader.Exception));
+        Assert.Equal(0, memberReaders.Sum(reader => reader.Allowed));
+        Assert.Equal(0, visibilityReaders.Sum(reader => reader.Allowed));
+    }
+
     private static AuthorizationPolicy Compile(PathProviderBase pathProvider, string[]? allowPaths, string[]? denyPaths)
         => AuthorizationDefinition.Create(
             [Policies.Role(

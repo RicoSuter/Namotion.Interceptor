@@ -38,7 +38,6 @@ internal static class SubjectPaths
     /// <param name="pathProvider">The path provider.</param>
     /// <param name="paths">Receives the paths that could be built, each as its links in root-to-subject order, after the paths it already holds.</param>
     /// <param name="maxPaths">The most paths to build; positive.</param>
-    /// <param name="reads">Records every parents and attachment read, so the caller can check that they held at one instant.</param>
     /// <param name="followedSingleParents">True when every subject above the subject had a single parent, so the result came from following them without a search and without spending the search budget.</param>
     /// <returns>
     /// True when every chain was built; false when a chain has no path the registry could build or passes a subject
@@ -47,20 +46,20 @@ internal static class SubjectPaths
     /// true.
     /// </returns>
     public static bool TryGetPaths(
-        RegisteredSubject subject, PathProviderBase pathProvider, PathStore paths, int maxPaths, ParentReads reads, out bool followedSingleParents)
+        RegisteredSubject subject, PathProviderBase pathProvider, PathStore paths, int maxPaths, out bool followedSingleParents)
     {
         Debug.Assert(maxPaths > 0, "maxPaths must be positive.");
 
         followedSingleParents = true;
-        var parents = reads.GetParents(subject, out _);
+        var parents = subject.Parents;
         var builder = new ChainBuilder(pathProvider, paths, maxPaths);
         var frames = paths.Frames;
         frames.Clear();
-        if (!TryBuildSingleParentChain(subject, parents, frames, reads, ref builder))
+        if (!TryBuildSingleParentChain(subject, parents, frames, ref builder))
         {
             followedSingleParents = false;
             frames.Clear();
-            BuildChains(subject, parents, (long)maxPaths * Limits.ParentLinksPerPath, frames, reads, ref builder);
+            BuildChains(subject, parents, (long)maxPaths * Limits.ParentLinksPerPath, frames, ref builder);
         }
 
         return builder.IsComplete;
@@ -72,7 +71,7 @@ internal static class SubjectPaths
     /// </summary>
     private static bool TryBuildSingleParentChain(
         RegisteredSubject subject, ImmutableArray<SubjectPropertyParent> parents, List<SubjectPropertyParent> frames,
-        ParentReads reads, ref ChainBuilder builder)
+        ref ChainBuilder builder)
     {
         var current = subject;
         HashSet<RegisteredSubject>? visited = null;
@@ -88,7 +87,8 @@ internal static class SubjectPaths
             var parent = parents[0];
             frames.Add(parent);
             current = parent.Property.Parent;
-            parents = reads.GetParents(current, out var isAttached);
+            parents = current.Parents;
+            var isAttached = current.IsAttached;
             if (!isAttached)
             {
                 builder.MarkIncomplete();
@@ -113,7 +113,7 @@ internal static class SubjectPaths
     /// </summary>
     private static void BuildChains(
         RegisteredSubject subject, ImmutableArray<SubjectPropertyParent> parents, long budget,
-        List<SubjectPropertyParent> frames, ParentReads reads, ref ChainBuilder builder)
+        List<SubjectPropertyParent> frames, ref ChainBuilder builder)
     {
         var visiting = new HashSet<RegisteredSubject> { subject };
 
@@ -135,7 +135,7 @@ internal static class SubjectPaths
             else
             {
                 stack[topIndex] = top with { NextParentIndex = top.NextParentIndex + 1 };
-                if (!TryTake(top.Parents[top.NextParentIndex], stack, frames, visiting, reads, ref builder))
+                if (!TryTake(top.Parents[top.NextParentIndex], stack, frames, visiting, ref builder))
                 {
                     return;
                 }
@@ -160,10 +160,11 @@ internal static class SubjectPaths
     /// </summary>
     private static bool TryTake(
         SubjectPropertyParent parent, List<SearchFrame> stack, List<SubjectPropertyParent> frames,
-        HashSet<RegisteredSubject> visiting, ParentReads reads, ref ChainBuilder builder)
+        HashSet<RegisteredSubject> visiting, ref ChainBuilder builder)
     {
         var owner = parent.Property.Parent;
-        var ownerParents = reads.GetParents(owner, out var isAttached);
+        var ownerParents = owner.Parents;
+        var isAttached = owner.IsAttached;
         if (!isAttached)
         {
             builder.MarkIncomplete();
