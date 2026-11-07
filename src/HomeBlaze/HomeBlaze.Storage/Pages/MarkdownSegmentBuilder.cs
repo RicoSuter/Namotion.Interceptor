@@ -175,9 +175,12 @@ public static partial class MarkdownSegmentBuilder
     /// <summary>
     /// Renders the page and cuts it into segments per block. With <paramref name="markTextBlocks"/>, every text block of the
     /// page (see <see cref="MarkdownTextBlocks"/>) starts an <see cref="HtmlMarkdownSegment"/> of its own that carries it,
-    /// and the HTML of all segments together is the same as without.
+    /// and the HTML of all segments together is the same as without. A link, which is not a picture, whose URL as written
+    /// <paramref name="opensInNewTab"/> accepts gets <c>target="_blank"</c> and <c>rel="noopener noreferrer"</c>, as does an
+    /// autolink that is not an e-mail address.
     /// </summary>
-    internal static IReadOnlyList<MarkdownSegment> Build(MarkdownPage page, Func<string, string>? linkRewriter, bool markTextBlocks)
+    internal static IReadOnlyList<MarkdownSegment> Build(
+        MarkdownPage page, Func<string, string>? linkRewriter, bool markTextBlocks, Func<string, bool>? opensInNewTab = null)
     {
         // Page text may contain marker-shaped comments, so only markers carrying this token count.
         var token = Guid.NewGuid().ToString("N");
@@ -222,6 +225,25 @@ public static partial class MarkdownSegmentBuilder
             var scrollableRenderer = new ScrollableTableRenderer();
             scrollableRenderer.TryWriters.AddRange(tableRenderer.TryWriters);
             renderer.ObjectRenderers.Replace<HtmlTableRenderer>(scrollableRenderer);
+        }
+
+        if (opensInNewTab is not null)
+        {
+            var linkRenderer = renderer.ObjectRenderers.FindExact<LinkInlineRenderer>();
+            if (linkRenderer is not null)
+            {
+                var newTabRenderer = new NewTabLinkInlineRenderer(opensInNewTab) { Rel = linkRenderer.Rel };
+                newTabRenderer.TryWriters.AddRange(linkRenderer.TryWriters);
+                renderer.ObjectRenderers.Replace<LinkInlineRenderer>(newTabRenderer);
+            }
+
+            var autolinkRenderer = renderer.ObjectRenderers.FindExact<AutolinkInlineRenderer>();
+            if (autolinkRenderer is not null)
+            {
+                var newTabRenderer = new NewTabAutolinkInlineRenderer { Rel = autolinkRenderer.Rel };
+                newTabRenderer.TryWriters.AddRange(autolinkRenderer.TryWriters);
+                renderer.ObjectRenderers.Replace<AutolinkInlineRenderer>(newTabRenderer);
+            }
         }
 
         WriteBreaksBetweenBlocks(renderer, page, writer, token);
@@ -567,6 +589,70 @@ public static partial class MarkdownSegmentBuilder
             base.Write(renderer, table);
             renderer.EnsureLine();
             renderer.WriteLine("</div>");
+        }
+    }
+
+    private const string NewTabAttributes = " target=\"_blank\" rel=\"noopener noreferrer\"";
+
+    /// <summary>
+    /// Writes a link that opens in a new tab as <see cref="LinkInlineRenderer"/> of Markdig 0.45 does, with the attributes of
+    /// a new tab added, and every other link and every picture as Markdig does.
+    /// </summary>
+    /// <remarks>
+    /// The attributes are written here and not added to the attributes of the link, because the document of the page is
+    /// kept and rendered again by callers without the rule.
+    /// </remarks>
+    private sealed class NewTabLinkInlineRenderer(Func<string, bool> opensInNewTab) : LinkInlineRenderer
+    {
+        protected override void Write(HtmlRenderer renderer, LinkInline link)
+        {
+            var url = link.GetDynamicUrl != null ? link.GetDynamicUrl() ?? link.Url : link.Url;
+            if (link.IsImage || !renderer.EnableHtmlForInline || url is null || !opensInNewTab(url))
+            {
+                base.Write(renderer, link);
+                return;
+            }
+
+            renderer.Write("<a href=\"");
+            renderer.WriteEscapeUrl(url);
+            renderer.Write('"');
+            renderer.WriteAttributes(link);
+            if (!string.IsNullOrEmpty(link.Title))
+            {
+                renderer.Write(" title=\"");
+                renderer.WriteEscape(link.Title);
+                renderer.Write('"');
+            }
+
+            renderer.Write(NewTabAttributes);
+            renderer.Write('>');
+            renderer.WriteChildren(link);
+            renderer.Write("</a>");
+        }
+    }
+
+    /// <summary>
+    /// Writes an autolink that is not an e-mail address, which always has a scheme, as <see cref="AutolinkInlineRenderer"/>
+    /// of Markdig 0.45 does, with the attributes of a new tab added.
+    /// </summary>
+    private sealed class NewTabAutolinkInlineRenderer : AutolinkInlineRenderer
+    {
+        protected override void Write(HtmlRenderer renderer, AutolinkInline link)
+        {
+            if (link.IsEmail || !renderer.EnableHtmlForInline)
+            {
+                base.Write(renderer, link);
+                return;
+            }
+
+            renderer.Write("<a href=\"");
+            renderer.WriteEscapeUrl(link.Url);
+            renderer.Write('"');
+            renderer.WriteAttributes(link);
+            renderer.Write(NewTabAttributes);
+            renderer.Write('>');
+            renderer.WriteEscape(link.Url);
+            renderer.Write("</a>");
         }
     }
 

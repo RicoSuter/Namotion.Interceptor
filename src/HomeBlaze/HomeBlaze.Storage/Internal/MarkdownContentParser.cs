@@ -108,6 +108,13 @@ public sealed partial class MarkdownContentParser
         return pathEnd < 0 ? route : string.Concat(route, url.AsSpan(pathEnd));
     }
 
+    /// <summary>
+    /// Whether a link of the page opens in a new tab: a link with a scheme, such as a web address, or a link to a file of
+    /// the storage. A link to a file must, because the router of the application would take a click on it as its own route.
+    /// </summary>
+    private static bool OpensInNewTab(string url) =>
+        HasScheme(url) || ClassifyLink(url, out _) == LinkKind.File;
+
     private static string RewritePageLink(string url, int fragmentStart, string basePath, string pageName)
     {
         // The browser resolves a link against the base address of the application and not against the
@@ -336,7 +343,8 @@ public sealed partial class MarkdownContentParser
         var page = MarkdownPageParser.Parse(content);
         var basePath = GetLinkBasePath(parent);
         var pageName = EscapeFileNameForLink(Path.GetFileName(parent.FullPath));
-        var segments = MarkdownSegmentBuilder.Build(page, url => RewriteLink(url, basePath, pageName), markTextBlocks: true);
+        var segments = MarkdownSegmentBuilder.Build(
+            page, url => RewriteLink(url, basePath, pageName), markTextBlocks: true, opensInNewTab: OpensInNewTab);
 
         var state = new ParseState(parent, page, reusableSubjects);
         try

@@ -40,4 +40,37 @@ public class MarkdownFileLinkTests
         // Assert
         Assert.Contains(expected, MarkdownPageFixture.Html(page.Children));
     }
+
+    [Theory]
+    [InlineData("[Manual](manual.pdf)", "<a href=\"/files/Docs/manual.pdf\" target=\"_blank\" rel=\"noopener noreferrer\">Manual</a>")]
+    [InlineData("[Web](https://example.com)", "<a href=\"https://example.com\" target=\"_blank\" rel=\"noopener noreferrer\">Web</a>")]
+    [InlineData("[Other](other.md)", "<a href=\"/pages/Docs/other.md\">Other</a>")]
+    [InlineData("[Section](#a)", "<a href=\"/pages/Docs/page.md#a\">Section</a>")]
+    [InlineData("[App](/browser/Demo)", "<a href=\"/browser/Demo\">App</a>")]
+    public async Task WhenPageHasALink_ThenOnlyFileAndExternalLinksOpenInANewTab(string source, string expected)
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync("Docs/page.md", source);
+
+        // Assert
+        Assert.Contains(expected, MarkdownPageFixture.Html(page.Children));
+    }
+
+    [Fact]
+    public async Task WhenPageHasAPictureFromTheStorage_ThenThePictureHasNoTarget()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync("Docs/page.md", "![Plan](plan.png)");
+
+        // Assert
+        var html = MarkdownPageFixture.Html(page.Children);
+        Assert.Contains("src=\"/files/Docs/plan.png\"", html);
+        Assert.DoesNotContain("target", html);
+    }
 }
