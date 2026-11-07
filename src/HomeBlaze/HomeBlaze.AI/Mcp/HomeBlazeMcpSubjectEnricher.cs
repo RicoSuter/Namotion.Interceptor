@@ -23,7 +23,8 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
     /// <param name="isReadOnly">Whether <c>$methods</c> leaves out operations.</param>
     /// <param name="getPageUrl">Gets the address of the page of a subject, such as <c>/pages/House/Haus.md</c>, or null
     /// for a subject without a page of its own; null for no addresses.</param>
-    /// <param name="accessPolicy">Decides which methods <c>$methods</c> lists: only those it allows to read; all without one.</param>
+    /// <param name="accessPolicy">Decides which methods <c>$methods</c> lists and whether <c>$title</c> and <c>$icon</c> are
+    /// given, when they are registered members: only those it allows to read; all without one.</param>
     public HomeBlazeMcpSubjectEnricher(
         IEnumerable<IMcpTypeProvider> typeProviders,
         bool isReadOnly,
@@ -97,16 +98,7 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
     public IDictionary<string, object?> GetSubjectEnrichments(RegisteredSubject subject)
     {
         var metadata = new Dictionary<string, object?>();
-
-        if (subject.Subject is ITitleProvider titleProvider)
-        {
-            metadata["$title"] = titleProvider.Title;
-        }
-
-        if (subject.Subject is IIconProvider iconProvider)
-        {
-            metadata["$icon"] = iconProvider.IconName;
-        }
+        AddTitleAndIcon(subject, metadata);
 
         if (_getPageUrl?.Invoke(subject.Subject) is { } pageUrl)
         {
@@ -143,4 +135,23 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
 
         return metadata;
     }
+
+    private void AddTitleAndIcon(RegisteredSubject subject, Dictionary<string, object?> metadata)
+    {
+        if (subject.Subject is ITitleProvider titleProvider && IsReadable(subject, nameof(ITitleProvider.Title)))
+        {
+            metadata["$title"] = titleProvider.Title;
+        }
+
+        if (subject.Subject is IIconProvider iconProvider && IsReadable(subject, nameof(IIconProvider.IconName)))
+        {
+            metadata["$icon"] = iconProvider.IconName;
+        }
+    }
+
+    // A title or icon that is a registered member, such as a derived title, is shown only when the policy allows to read it.
+    private bool IsReadable(RegisteredSubject subject, string memberName)
+        => _accessPolicy is null ||
+            subject.TryGetProperty(memberName) is not { } member ||
+            _accessPolicy.IsAllowed(member, McpAccessActions.Read);
 }

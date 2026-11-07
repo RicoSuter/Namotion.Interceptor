@@ -161,25 +161,6 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     }
 
     [Fact]
-    public void WhenARuleAllowsExecuteWithoutRead_ThenTheRoleHintIsAboveTheTabs()
-    {
-        // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow =
-        [
-            new PermissionRule { Paths = ["/Devices/**"], Actions = [AuthorizationActions.Execute] },
-            new PermissionRule { Members = ["Temperature"], Actions = [PermissionAction.Read] }
-        ];
-
-        // Act
-        var component = RenderEditor(role);
-
-        // Assert
-        Assert.Single(component.FindAll("[data-testid='role-edit-execute-without-read']"));
-        Assert.Null(component.Find(".role-edit-tabs").QuerySelector("[data-testid='role-edit-execute-without-read']"));
-    }
-
-    [Fact]
     public async Task WhenARuleIsAdded_ThenItHasNoActionAndTheRoleIsInvalidUntilOneIsChecked()
     {
         // Arrange
@@ -286,7 +267,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     }
 
     [Fact]
-    public void WhenARuleAllowsExecuteWithoutRead_ThenTheRoleAndTheRuleSayTheMethodsCannotBeUsed()
+    public void WhenARuleAllowsExecuteWithoutRead_ThenTheRoleAboveTheTabsAndTheRuleSayTheMethodsCannotBeUsed()
     {
         // Arrange
         var role = Graph.GetRole("Kitchen");
@@ -300,7 +281,8 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         var component = RenderEditor(role);
 
         // Assert
-        var roleHint = component.Find("[data-testid='role-edit-execute-without-read']").TextContent;
+        var roleHint = Assert.Single(component.FindAll("[data-testid='role-edit-execute-without-read']")).TextContent;
+        Assert.Null(component.Find(".role-edit-tabs").QuerySelector("[data-testid='role-edit-execute-without-read']"));
         Assert.Contains("Execute is allowed without read on 2 methods", roleHint);
         Assert.Contains("such as /Devices/Child/Start,", roleHint);
         Assert.Contains("listed and run only when it is readable", roleHint);
@@ -323,7 +305,8 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         var component = RenderEditor(role);
 
         // Assert
-        var roleHint = component.Find("[data-testid='role-edit-execute-without-read']").TextContent;
+        var roleHint = Assert.Single(component.FindAll("[data-testid='role-edit-execute-without-read']")).TextContent;
+        Assert.Null(component.Find(".role-edit-tabs").QuerySelector("[data-testid='role-edit-execute-without-read']"));
         Assert.Contains("Execute is allowed without read on 2 methods", roleHint);
         Assert.Empty(component.FindAll("[data-testid='rule-execute-without-read-hint']"));
     }
@@ -611,6 +594,23 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         Assert.Equal("The roles changed while this dialog was open. Close it and open it again.", exception.Message);
         Assert.Empty(role.Allow);
         Assert.Empty(reloadedRole.Allow);
+    }
+
+    [Fact]
+    public async Task WhenNoAuthorizationHoldsTheRole_ThenSavingThrowsAndChangesNothing()
+    {
+        // Arrange: in the graph, so that the dialog opens, but outside an Authorization, so that it would be saved nowhere.
+        var role = new Role();
+        Graph.Root.Children = new Dictionary<string, IInterceptorSubject>(Graph.Root.Children) { ["Loose"] = role };
+        var component = RenderEditor(role);
+        await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
+        await SetActionAsync(component, 0, "read", true);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None)));
+        Assert.Equal("The roles changed while this dialog was open. Close it and open it again.", exception.Message);
+        Assert.Empty(role.Allow);
     }
 
     [Fact]

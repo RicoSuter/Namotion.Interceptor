@@ -9,6 +9,7 @@ using HomeBlaze.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
 using Xunit.Abstractions;
@@ -86,6 +87,7 @@ public class AuthorizationRoleTests
 
             // Assert
             await WaitForAuthorizationFileAsync(
+                registry,
                 authorizationFilePath,
                 roles => roles[RoleName] is not null,
                 "The added role was not written to Authorization.json.");
@@ -138,12 +140,18 @@ public class AuthorizationRoleTests
             await Assertions.Expect(paths.GetByTestId("rule-paths-chip")).ToHaveTextAsync(FolderPattern, new() { Timeout = Timeout });
             await Assertions.Expect(paths.Locator("input")).ToHaveValueAsync(string.Empty);
 
-            // Typed into a field with suggestions and saved at once, without Enter or leaving the field first.
-            await rule.GetByTestId("rule-types").Locator("input").PressSequentiallyAsync(TypeName);
+            // Entered into a field with suggestions and saved at once, without Enter or leaving the field first. Filled
+            // rather than typed key by key, which can lose keys when the focus moves or the field renders while typing.
+            // The value check catches only a render that replaced the text in the browser before the save, not text the
+            // server never received; the failure below shows the file and the roles in memory for that.
+            var typesInput = rule.GetByTestId("rule-types").Locator("input");
+            await typesInput.FillAsync(TypeName);
+            await Assertions.Expect(typesInput).ToHaveValueAsync(TypeName);
             await SaveAsync(roleDialog);
 
             // Assert
             await WaitForAuthorizationFileAsync(
+                registry,
                 authorizationFilePath,
                 roles => IsStateReadRule(roles[RoleName]?["allow"]?.AsArray().SingleOrDefault()),
                 "The allow rule was not written to Authorization.json.");
@@ -208,6 +216,7 @@ public class AuthorizationRoleTests
 
             // Assert
             await WaitForAuthorizationFileAsync(
+                registry,
                 authorizationFilePath,
                 roles => roles[RoleName] is null && IsStateReadRule(roles[RenamedRoleName]?["allow"]?.AsArray().SingleOrDefault()),
                 "The renamed role was not written to Authorization.json.");
@@ -240,6 +249,7 @@ public class AuthorizationRoleTests
             var panes = rolePane.Page.Locator("#scrollContainer [data-testid='subject-pane']");
             await Assertions.Expect(panes).ToHaveCountAsync(2, new() { Timeout = Timeout });
             await WaitForAuthorizationFileAsync(
+                registry,
                 authorizationFilePath,
                 roles => roles.AsObject().Count == 0,
                 "The deleted role was not removed from Authorization.json.");
@@ -337,22 +347,38 @@ public class AuthorizationRoleTests
         await Assertions.Expect(dialog.Page.GetByText("Configuration saved.")).ToBeVisibleAsync(new() { Timeout = Timeout });
     }
 
-    // The server writes the file in place, so a read can see it held or partly written; the poll tries again.
-    private static async Task WaitForAuthorizationFileAsync(string path, Func<JsonNode, bool> isExpected, string message)
+    private static string DescribeRoles(ISubjectRegistry registry) =>
+        string.Join("; ", registry.KnownSubjects.Keys
+            .OfType<Authorization.Authorization>()
+            .SelectMany(authorization => authorization.Roles ?? new Dictionary<string, Role>())
+            .Select(role => $"{role.Key}: allow {DescribeRules(role.Value.Allow)}, deny {DescribeRules(role.Value.Deny)}"));
+
+    private static string DescribeRules(IReadOnlyList<PermissionRule>? rules) =>
+        "[" + string.Join(", ", (rules ?? []).Select(rule =>
+            $"paths=[{string.Join(",", rule.Paths)}] types=[{string.Join(",", rule.Types)}] members=[{string.Join(",", rule.Members)}] " +
+            $"tags=[{string.Join(",", rule.Tags)}] actions=[{string.Join(",", rule.Actions)}]")) + "]";
+
+    // The server writes the file in place, so a read can see it held or partly written; the poll tries again. A failure
+    // shows the file as last read and the roles in memory, so that it tells which part differs and whether the save
+    // assigned other rules or the write lost them.
+    private static async Task WaitForAuthorizationFileAsync(
+        ISubjectRegistry registry, string path, Func<JsonNode, bool> isExpected, string message)
     {
+        var content = string.Empty;
         await AsyncTestHelpers.WaitUntilAsync(
             () =>
             {
                 try
                 {
-                    return JsonNode.Parse(File.ReadAllText(path))?["roles"] is { } roles && isExpected(roles);
+                    content = File.ReadAllText(path);
+                    return JsonNode.Parse(content)?["roles"] is { } roles && isExpected(roles);
                 }
                 catch (Exception exception) when (exception is IOException or JsonException)
                 {
                     return false;
                 }
             },
-            TimeSpan.FromSeconds(30),
-            message: message);
+            () => $"{message} The file holds: {content} The roles in memory: {DescribeRoles(registry)}",
+            TimeSpan.FromSeconds(30));
     }
 }

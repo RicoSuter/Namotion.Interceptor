@@ -81,7 +81,10 @@ public static class MetadataSearch
         }
     }
 
-    private static bool IsMatch(ImmutableDictionary<string, JsonElement> metadata, string? tag, string? key, string? value)
+    /// <summary>
+    /// Whether the metadata matches every filter that is given, as <see cref="Search"/> matches an entry.
+    /// </summary>
+    public static bool IsMatch(ImmutableDictionary<string, JsonElement> metadata, string? tag, string? key, string? value)
         => (tag is null || metadata.GetTags().Contains(tag, StringComparer.OrdinalIgnoreCase)) &&
            (key is null || metadata.ContainsKey(key)) &&
            (value is null || (key is null ? metadata.Keys.SelectMany(name => GetStrings(metadata, name)) : GetStrings(metadata, key))

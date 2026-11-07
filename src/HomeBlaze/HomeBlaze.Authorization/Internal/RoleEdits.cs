@@ -95,7 +95,7 @@ internal static class RoleEdits
     }
 
     // Names compare ignoring case, as roles resolve; the renamed role may keep its own name in another case.
-    private static void ThrowIfInvalid(string name, Dictionary<string, Role>? roles, Role? except)
+    private static void ThrowIfInvalid(string name, IReadOnlyDictionary<string, Role>? roles, Role? except)
     {
         if (name.Length == 0)
         {
@@ -107,7 +107,7 @@ internal static class RoleEdits
             throw new InvalidOperationException(error);
         }
 
-        foreach (var (key, role) in roles ?? [])
+        foreach (var (key, role) in roles ?? Enumerable.Empty<KeyValuePair<string, Role>>())
         {
             if (!ReferenceEquals(role, except) && string.Equals(key, name, StringComparison.OrdinalIgnoreCase))
             {
@@ -118,10 +118,10 @@ internal static class RoleEdits
 
     // A new dictionary, as only a replaced one is noticed. A file written by hand can hold two roles whose names differ
     // only in case, which this dictionary cannot, so that throws instead of dropping one of them.
-    private static Dictionary<string, Role> CopyRoles(Dictionary<string, Role>? roles, Role? except)
+    private static Dictionary<string, Role> CopyRoles(IReadOnlyDictionary<string, Role>? roles, Role? except)
     {
         var copy = new Dictionary<string, Role>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (key, role) in roles ?? [])
+        foreach (var (key, role) in roles ?? Enumerable.Empty<KeyValuePair<string, Role>>())
         {
             if (!ReferenceEquals(role, except) && !copy.TryAdd(key, role))
             {
@@ -134,7 +134,7 @@ internal static class RoleEdits
 
     // Read under the edit lock: a delete or a reload of the file takes the role out of its Authorization, and a change
     // made through the one it had before would bring it back or be lost.
-    private static (Authorization Authorization, string Name, Dictionary<string, Role> Roles) GetHolder(Role role)
+    private static (Authorization Authorization, string Name, IReadOnlyDictionary<string, Role> Roles) GetHolder(Role role)
     {
         var (authorization, name) = role.FindParent();
         if (authorization is null || name is null)

@@ -255,6 +255,25 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
         Assert.Equal(["Rol"], component.Instance.GetEditedRole().Allow[0].Types.ToArray());
     }
 
+    [Fact]
+    public async Task WhenSavedAfterTheFieldIsLeftWithItsSuggestionsOpen_ThenTheTypedTextIsSavedAndNotAddedAgainOnceTheyClose()
+    {
+        // Arrange
+        var role = Graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+        var autocomplete = await TypeUntilSuggestionsOpenAsync(component, "Rol");
+        await FindInput(component, "rule-types").BlurAsync(new FocusEventArgs());
+
+        // Act
+        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+        await component.InvokeAsync(autocomplete.Instance.CloseMenuAsync);
+
+        // Assert
+        Assert.Equal(["Rol"], role.Allow[0].Types.ToArray());
+        Assert.Equal(["Rol"], component.Instance.GetEditedRole().Allow[0].Types.ToArray());
+    }
+
     private static AngleSharp.Dom.IElement FindInput(IRenderedComponent<RoleEditComponent> component, string input) =>
         component.Find($"[data-testid='{Card}'] [data-testid='{input}'] input");
 

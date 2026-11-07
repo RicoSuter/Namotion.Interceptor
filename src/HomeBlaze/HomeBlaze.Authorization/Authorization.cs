@@ -22,11 +22,12 @@ public partial class Authorization : IConfigurable, IIconProvider
 {
     /// <summary>
     /// The custom roles by name, each reachable at the path of this subject followed by its name. Role names compare
-    /// ignoring case when roles are resolved. The dictionary is replaced as a whole, never changed in place.
+    /// ignoring case when roles are resolved. The dictionary is replaced as a whole; it must not be changed after it is
+    /// assigned, as only an assignment gives principals a newly compiled policy.
     /// </summary>
     [Configuration]
     [InlinePaths]
-    public partial Dictionary<string, Role> Roles { get; set; }
+    public partial IReadOnlyDictionary<string, Role> Roles { get; set; }
 
     /// <summary>
     /// Why this subject is not used, or null.

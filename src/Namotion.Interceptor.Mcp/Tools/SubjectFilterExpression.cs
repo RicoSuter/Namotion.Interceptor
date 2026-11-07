@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Expressions;
+using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 
@@ -76,9 +77,10 @@ internal sealed class SubjectFilterExpression
     /// Evaluates the filter against the current property values of <paramref name="subject"/>. A path reads as missing
     /// when its property is on a subject that is not readable, and a reference to a subject that is not readable reads as null.
     /// </summary>
-    public bool Matches(RegisteredSubject subject, PathProviderBase pathProvider, McpSubjectReadability readability)
+    public bool Matches(
+        RegisteredSubject subject, PathProviderBase pathProvider, McpSubjectReadability readability, IList<IMcpValueFilter> valueFilters)
     {
-        var context = new FilterContext(subject, pathProvider, readability);
+        var context = new FilterContext(subject, pathProvider, readability, valueFilters);
         return _expression.EvaluateCondition(ref context) == true;
     }
 
@@ -213,7 +215,8 @@ internal sealed class SubjectFilterExpression
         return false;
     }
 
-    private readonly struct FilterContext(RegisteredSubject subject, PathProviderBase pathProvider, McpSubjectReadability readability)
+    private readonly struct FilterContext(
+        RegisteredSubject subject, PathProviderBase pathProvider, McpSubjectReadability readability, IList<IMcpValueFilter> valueFilters)
         : IExpressionContext
     {
         public ExpressionValue ResolvePath(string path)
@@ -224,7 +227,7 @@ internal sealed class SubjectFilterExpression
             }
 
             // Browse leaves out a referenced subject that is not readable, so the filter reads the reference as unset.
-            var value = property.GetValue();
+            var value = McpToolHelper.ApplyValueFilters(property, property.GetValue(), valueFilters);
             return property.IsSubjectReference && value is IInterceptorSubject referenced && !readability.IsReadableWithPathCheck(referenced)
                 ? ExpressionValue.FromProperty(property, null)
                 : ExpressionValue.FromProperty(property, value);

@@ -1,5 +1,6 @@
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
+using HomeBlaze.Components;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
@@ -144,6 +145,27 @@ public class MarkdownReadAccessTests
         // Assert
         Assert.Equal("State: 1.23 kW", GetLastLine(evaluated));
         Assert.Equal("State: busy at 1.23 kW", GetLastLine(evaluatedWithoutScope));
+    }
+
+    [Fact]
+    public async Task WhenTheScopeRefusesEveryMemberOfAValueMap_ThenTheMapReadsAsMissing()
+    {
+        // Arrange
+        var (_, page) = await AddPageAsync("State: {{ meter/Power | map:busy }}, other: {{ meter/Power | map:missing }}");
+        var map = page.Children.Values.OfType<ValueMap>().Single();
+
+        // Act
+        string? evaluated;
+        using (PropertyReadAccess.Enter(property => !ReferenceEquals(property.Subject, map)))
+        {
+            evaluated = page.ReadEvaluatedContent();
+        }
+
+        var evaluatedWithoutScope = page.ReadEvaluatedContent();
+
+        // Assert
+        Assert.Equal("State: Cannot resolve map: busy, other: Cannot resolve map: missing", GetLastLine(evaluated));
+        Assert.Equal("State: busy at 1.23 kW, other: Cannot resolve map: missing", GetLastLine(evaluatedWithoutScope));
     }
 
     [Fact]
