@@ -90,7 +90,9 @@ public class HistoryMcpToolProvider : IMcpToolProvider
     /// The configuration the tool is added to, which resolves the paths. A path that does not resolve to a readable
     /// property is not found and one whose property the <see cref="McpServerConfiguration.AccessPolicy"/> does not allow
     /// <c>history</c> on is refused, both without a query. With <see cref="AllowAllMcpAccessPolicy"/>, every path is
-    /// queried as requested, so that the history of a property no longer in the graph stays available.
+    /// queried as requested, so that the history of a property no longer in the graph stays available. The default
+    /// policy of a configuration, <see cref="ReadOnlyMcpAccessPolicy"/>, allows only <c>read</c>, so with it every path
+    /// is refused; give the configuration a policy that allows <c>history</c>.
     /// </param>
     /// <param name="logger">Logs failed queries.</param>
     public HistoryMcpToolProvider(
