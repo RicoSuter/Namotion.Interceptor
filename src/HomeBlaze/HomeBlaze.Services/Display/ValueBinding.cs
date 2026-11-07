@@ -37,7 +37,8 @@ public readonly struct ValueBinding(RegisteredSubjectProperty? property, object?
     /// <summary>
     /// Binds the path of a widget: the value of the property it ends at, or the subject it leads to when it ends at no
     /// property, such as the name of a block or an entry of a collection. A path that is null, empty, malformed or leads
-    /// nowhere gives an empty binding, and so does a path that ends at a property the viewer may not read.
+    /// nowhere gives an empty binding, and so does a path that ends at a property the viewer may not read, at a property of
+    /// a subject the viewer is not shown, or at such a subject.
     /// </summary>
     public static ValueBinding FromPath(SubjectPathResolver resolver, IInterceptorSubject from, string? path, IUserPermissions permissions)
     {
@@ -51,10 +52,10 @@ public readonly struct ValueBinding(RegisteredSubjectProperty? property, object?
             if (resolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, from) is { } property)
             {
                 // Not resolved as a subject instead, which would follow a reference the viewer may not read.
-                return permissions.CanRead(property) ? FromProperty(property) : default;
+                return permissions.CanReadShown(property) ? FromProperty(property) : default;
             }
 
-            return resolver.ResolveScopedSubject(path, PathStyle.Canonical, from) is { } subject
+            return resolver.ResolveScopedSubject(path, PathStyle.Canonical, from) is { } subject && permissions.CanShow(subject)
                 ? new ValueBinding(null, null, subject)
                 : default;
         }

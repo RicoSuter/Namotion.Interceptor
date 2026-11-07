@@ -1,14 +1,17 @@
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using HomeBlaze.Abstractions.Metadata;
+using HomeBlaze.Authorization;
 using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Components;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -169,8 +172,37 @@ public class MarkdownReadAccessTests
         Assert.Equal([10m], values);
     }
 
-    // May do everything except read the properties the predicate refuses.
-    private sealed class ReadablePermissions(Func<RegisteredSubjectProperty, bool> canRead) : IUserPermissions
+    [Fact]
+    public async Task WhenTheRolesDenyReadingThePropertyThatHoldsTheSubject_ThenItsReadablePropertyRendersEmpty()
+    {
+        // Arrange
+        var (fixture, page) = await AddPageAsync("Power: [{{ meter/Power }}]");
+        var pathProvider = new DefaultPathProvider('/');
+        var meter = page.Children.Values.OfType<TestMeter>().Single().TryGetRegisteredSubject()!;
+        var power = meter.TryGetProperty(nameof(TestMeter.Power))!;
+        var holdingPath = meter.Parents[0].Property.TryGetPath(pathProvider, fixture.Storage)!;
+        var role = new AuthorizationRole
+        {
+            Name = "no-blocks",
+            Allow = [new PermissionRule { Actions = [PermissionAction.Read] }],
+            Deny = [new PermissionRule { Paths = [holdingPath], Actions = [PermissionAction.Read] }]
+        };
+        var policy = AuthorizationDefinition.Create(
+            [role], SystemRules.For(PrincipalKind.Person), AuthorizationActions.All, pathProvider, new HomeBlazeMemberTagProvider())
+            .Compile([role.Name]);
+        var permissions = new ReadablePermissions(policy.CanRead, policy.IsVisible);
+
+        // Act
+        var evaluated = page.ReadEvaluatedContent(permissions, includeSourcePaths: true);
+
+        // Assert
+        Assert.True(policy.CanRead(power));
+        Assert.False(policy.IsVisible(meter));
+        Assert.Equal("Power: []", GetLastLine(evaluated));
+    }
+
+    // May do everything except read the properties the predicate refuses and see the subjects the other one refuses.
+    private sealed class ReadablePermissions(Func<RegisteredSubjectProperty, bool> canRead, Func<RegisteredSubject, bool>? canShow = null) : IUserPermissions
     {
         public event Action? Changed
         {
@@ -188,7 +220,7 @@ public class MarkdownReadAccessTests
 
         public bool CanReadHistory(RegisteredSubjectProperty member) => true;
 
-        public bool CanShow(RegisteredSubject subject) => true;
+        public bool CanShow(RegisteredSubject subject) => canShow?.Invoke(subject) ?? true;
 
         public bool HoldsAllRoles(IReadOnlyCollection<string> roles) => true;
 

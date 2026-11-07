@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Net.Http.Headers;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Storage.Blazor;
 
@@ -37,7 +36,7 @@ internal static class StorageFileRequestHandler
 
         // A page, a configuration and a file the viewer may not see are answered as missing as well, so that a response
         // does not tell that they exist: a JSON file can hold secrets.
-        if (subject is not GenericFile file || file.TryGetRegisteredSubject() is not { } registeredFile || !permissions.CanShow(registeredFile))
+        if (subject is not GenericFile file || !permissions.CanShow(file))
         {
             response.StatusCode = StatusCodes.Status404NotFound;
             return;

@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions.Devices.Locks;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Display;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -22,7 +23,8 @@ public class ValueReaderAccessTests
         var device = _device = new AccessTestDevice(context)
         {
             Text = "Value",
-            Lock = new AccessTestLock { LockState = DoorLockState.Locked }
+            Lock = new AccessTestLock { LockState = DoorLockState.Locked },
+            Devices = [new AccessTestRow { Name = "Row" }]
         };
         _resolver = new SubjectPathResolver(() => device);
     }
@@ -95,6 +97,41 @@ public class ValueReaderAccessTests
 
         // Assert
         Assert.Same(_device.Lock, subject);
+    }
+
+    [Fact]
+    public void WhenTheSubjectOfAReadablePropertyIsNotShown_ThenItResolvesAndReadsAsAPathThatLeadsNowhere()
+    {
+        // Arrange
+        var path = LockPath + "/" + nameof(AccessTestLock.LockState);
+        _permissions.CannotShow.Add(_device.Lock!);
+
+        // Act
+        var property = ValueReader.ResolveProperty(_resolver, _device, path, _permissions);
+        var value = ValueReader.ReadValue(_resolver, _device, path, _permissions);
+        var hidden = ValueReader.Read(_resolver, _device, path, null, null, _permissions);
+        var missing = ValueReader.Read(_resolver, _device, WidgetTestGraph.MissingPath, null, null, _permissions);
+
+        // Assert
+        Assert.Null(property);
+        Assert.Null(value);
+        Assert.Equal(missing, hidden);
+    }
+
+    [Fact]
+    public void WhenAPathEndsAtASubjectThatIsNotShown_ThenItBindsNothing()
+    {
+        // Arrange
+        var path = WidgetTestGraph.PathOf(nameof(AccessTestDevice.Devices)) + "[0]";
+        var shown = ValueBinding.FromPath(_resolver, _device, path, _permissions);
+        _permissions.CannotShow.Add(_device.Devices[0]);
+
+        // Act
+        var hidden = ValueBinding.FromPath(_resolver, _device, path, _permissions);
+
+        // Assert
+        Assert.Same(_device.Devices[0], shown.Subject);
+        Assert.True(hidden.IsEmpty);
     }
 
     private RegisteredSubjectProperty Hide(IInterceptorSubject subject, string name)

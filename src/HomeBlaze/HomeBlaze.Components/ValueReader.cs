@@ -22,7 +22,8 @@ public static class ValueReader
     /// <summary>
     /// Reads the value at the path and applies the map. A path that ends at no property but leads to a subject, such as
     /// the name of a block, binds that subject, so that the cases of the map can read its states. A property the viewer may
-    /// not read gives a missing reading, as a path that leads nowhere does.
+    /// not read, or of a subject the viewer is not shown, and a subject the viewer is not shown give a missing reading, as a
+    /// path that leads nowhere does.
     /// </summary>
     /// <param name="resolver">The resolver of the path and the map.</param>
     /// <param name="widget">The subject the path and the map are relative to, usually the widget itself.</param>
@@ -58,7 +59,7 @@ public static class ValueReader
         ITimeZoneDisplay? timeZone,
         IUserPermissions permissions)
     {
-        var binding = property is not null && permissions.CanRead(property) ? ValueBinding.FromProperty(property) : default;
+        var binding = property is not null && permissions.CanReadShown(property) ? ValueBinding.FromProperty(property) : default;
         return ReadCore(binding, valueMap, mapError: null, resolver, timeZone, permissions);
     }
 
@@ -84,7 +85,7 @@ public static class ValueReader
         IUserPermissions permissions)
     {
         var property = string.IsNullOrEmpty(propertyName) ? null : subject.TryGetRegisteredProperty(propertyName);
-        var binding = property is not null && property.IsDisplayable() && permissions.CanRead(property) ? ValueBinding.FromProperty(property) : default;
+        var binding = property is not null && property.IsDisplayable() && permissions.CanReadShown(property) ? ValueBinding.FromProperty(property) : default;
         return ReadCore(binding, valueMap, mapError: null, resolver, timeZone, permissions);
     }
 
@@ -232,7 +233,7 @@ public static class ValueReader
         try
         {
             var property = resolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, widget);
-            return property is not null && permissions.CanRead(property) ? property : null;
+            return property is not null && permissions.CanReadShown(property) ? property : null;
         }
         catch
         {
@@ -278,7 +279,7 @@ public static class ValueReader
                 return resolver.ResolveScopedSubject(path, PathStyle.Canonical, widget);
             }
 
-            if (!permissions.CanRead(property))
+            if (!permissions.CanReadShown(property))
             {
                 return null;
             }

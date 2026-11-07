@@ -340,7 +340,7 @@ public sealed partial class MarkdownContentParser
         if (!includeSourcePaths ||
             expression.SinglePath is not { } path ||
             _pathResolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, parent) is not { } property ||
-            !permissions.CanRead(property) ||
+            !permissions.CanReadShown(property) ||
             GetAbsolutePath(property) is not { } sourcePath)
         {
             return valueText;

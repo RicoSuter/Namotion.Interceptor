@@ -98,6 +98,16 @@ public static class UserPermissionsExtensions
         subject.TryGetRegisteredSubject() is { } registered && permissions.CanShow(registered);
 
     /// <summary>
+    /// Gets whether the user is shown the value of <paramref name="member"/> where a path leads to it: the member is
+    /// readable and its subject is shown, see <see cref="IUserPermissions.CanShow"/>, so that a branch the roles hide
+    /// shows none of its values, also when a member below it is readable.
+    /// </summary>
+    /// <param name="permissions">The permissions of the user.</param>
+    /// <param name="member">The member.</param>
+    public static bool CanReadShown(this IUserPermissions permissions, RegisteredSubjectProperty member) =>
+        permissions.CanRead(member) && permissions.CanShow(member.Parent);
+
+    /// <summary>
     /// Gets whether the user may administer the member <paramref name="propertyName"/> of the subject; false when the
     /// subject has no such member.
     /// </summary>

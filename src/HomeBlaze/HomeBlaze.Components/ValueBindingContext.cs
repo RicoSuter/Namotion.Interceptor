@@ -13,7 +13,8 @@ namespace HomeBlaze.Components;
 /// <summary>
 /// Evaluates an expression that has a bound value, in the case of a value map or in the text of a widget: <c>value</c> and
 /// <c>subject</c> are those of the binding, any other path and the name of a map resolve from the scope, the case or the
-/// widget, and so from the page that holds it. A property that the viewer may not read resolves to missing, and so does
+/// widget, and so from the page that holds it. A property that the viewer may not read, or of a subject the viewer is not
+/// shown, resolves to missing, and so does
 /// <c>subject</c> itself when the viewer may not see it; a readable one resolves to its value as the viewer is shown it,
 /// see <see cref="IUserPermissions.GetValue"/>. Created on the stack for one evaluation.
 /// </summary>
@@ -29,7 +30,7 @@ internal readonly struct ValueBindingContext(
         try
         {
             var property = resolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, scope);
-            return property is null || !permissions.CanRead(property)
+            return property is null || !permissions.CanReadShown(property)
                 ? ExpressionValue.Missing
                 : ExpressionValue.FromProperty(property, permissions.GetValue(property));
         }
@@ -66,7 +67,7 @@ internal readonly struct ValueBindingContext(
         try
         {
             var property = resolver.ResolveDisplayablePropertyFrom(memberPath, PathStyle.Canonical, subject);
-            return property is null || !permissions.CanRead(property)
+            return property is null || !permissions.CanReadShown(property)
                 ? ExpressionValue.Missing
                 : ExpressionValue.FromProperty(property, permissions.GetValue(property));
         }

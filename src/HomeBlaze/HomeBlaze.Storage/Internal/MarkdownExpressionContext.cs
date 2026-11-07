@@ -17,8 +17,8 @@ namespace HomeBlaze.Storage.Internal;
 /// <param name="pathResolver">The resolver of the paths and of the names of maps.</param>
 /// <param name="page">The page the paths resolve from.</param>
 /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
-/// <param name="permissions">The permissions of the viewer, for whom a property it may not read resolves to missing, also in the
-/// cases of a map, and a readable one to its value as the viewer is shown it.</param>
+/// <param name="permissions">The permissions of the viewer, for whom a property it may not read, or of a subject it is not
+/// shown, resolves to missing, also in the cases of a map, and a readable one to its value as the viewer is shown it.</param>
 internal readonly struct MarkdownExpressionContext(
     SubjectPathResolver pathResolver,
     IInterceptorSubject page,
@@ -38,7 +38,7 @@ internal readonly struct MarkdownExpressionContext(
             return ExpressionValue.Missing;
         }
 
-        return property is null || !permissions.CanRead(property)
+        return property is null || !permissions.CanReadShown(property)
             ? ExpressionValue.Missing
             : ExpressionValue.FromProperty(property, permissions.GetValue(property));
     }
