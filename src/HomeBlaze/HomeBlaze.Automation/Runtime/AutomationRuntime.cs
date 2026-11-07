@@ -121,6 +121,7 @@ internal sealed class AutomationRuntime
         EventInput subjectEvent => _engine.OnEventAsync(subjectEvent, cancellationToken),
         TickInput => _engine.OnTickAsync(cancellationToken),
         ActivationInput activation => _engine.OnActivationAsync(activation, cancellationToken),
+        PendingRecheckInput => _engine.OnPendingRecheckAsync(cancellationToken),
         ResynchronizeInput resynchronize => ResynchronizeAsync(resynchronize, cancellationToken),
         ResetStateInput => _engine.ResetStateAsync(),
         _ => Task.CompletedTask

@@ -6,7 +6,8 @@ namespace HomeBlaze.Automation.Runtime;
 /// <summary>
 /// Runs the requests of one input in rule order and records every run. A request that does not run is not recorded: one
 /// that Only if rejects, and, once a rule changed the state, the remaining requests of the input; the rule shows why
-/// and the log says it once per reason. A request of a rule that is no longer active is dropped. Used by the worker only.
+/// and the log says it once per reason, and its property trigger stays pending. A request of a rule that is no longer
+/// active is dropped. Used by the worker only.
 /// </summary>
 internal sealed class RunDispatcher(IRuleRunHost host, AutomationServices services, AutomationStateKeeper keeper, ILogger logger)
 {
@@ -39,6 +40,7 @@ internal sealed class RunDispatcher(IRuleRunHost host, AutomationServices servic
     {
         if (summary.ChangedState)
         {
+            summary.SkippedForStateChange = true;
             Skip(request, $"the state changed to {host.CurrentState} for the same input");
             return;
         }
@@ -56,6 +58,7 @@ internal sealed class RunDispatcher(IRuleRunHost host, AutomationServices servic
         }
 
         request.Rule.SkipReason = null;
+        request.Trigger?.State.Consume();
         summary.Add(result, _recorder.Record(request.Rule, result));
     }
 

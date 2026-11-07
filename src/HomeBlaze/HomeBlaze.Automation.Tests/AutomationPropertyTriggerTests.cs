@@ -175,7 +175,7 @@ public class AutomationPropertyTriggerTests
         Assert.Null(rule.LastRunMessage);
         Assert.Null(rule.LastTriggeredAt);
         Assert.Equal(0, host.Blinds.CloseCount);
-        Assert.Equal("On: Triggered, waiting to rearm; not run: Only if is false", rule.Status);
+        Assert.Equal("On: Waiting since 12:00:20: Only if is false", rule.Status);
         Assert.DoesNotContain("retract", File.Exists(host.CheckpointPath) ? await File.ReadAllTextAsync(host.CheckpointPath) : string.Empty);
     }
 

@@ -33,7 +33,11 @@ public partial class AutomationRule : IConfigurable, ITitleProvider
     [Configuration]
     public partial AutomationTrigger[] Triggers { get; set; }
 
-    /// <summary>The condition a requested run must meet, evaluated when the run starts; null runs every request.</summary>
+    /// <summary>
+    /// The condition a requested run must meet, evaluated when the run starts; null runs every request. A property
+    /// trigger whose request it rejects stays pending while its expression stays true and runs as soon as the condition
+    /// is true; an event it rejects is gone.
+    /// </summary>
     [Configuration]
     public partial string? Guard { get; set; }
 

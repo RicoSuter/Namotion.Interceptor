@@ -145,7 +145,18 @@ internal sealed class AutomationTriggers
     public IReadOnlyList<RunRequest> OnActivation(IReadOnlyList<CompiledRule> activated, IReadOnlyList<CompiledRule> rules) =>
         _propertyTriggers.Activate(activated, rules);
 
-    private static int IndexOf(IReadOnlyList<CompiledRule> rules, CompiledRule rule)
+    /// <summary>Requests the runs of every pending property trigger.</summary>
+    public IReadOnlyList<RunRequest> OnPendingRecheck(IReadOnlyList<CompiledRule> rules) => _propertyTriggers.RequestPendingRuns(rules);
+
+    /// <summary>Queues a request of the runs of every pending property trigger, such as after a state change skipped them.</summary>
+    public void RequestPendingRecheck() => _queue.TryEnqueue(new PendingRecheckInput(AutomationInputQueue.CausedChainDepth));
+
+    /// <summary>Keeps track of the pending property triggers after the requests were dispatched.</summary>
+    public void TrackPending(IReadOnlyList<CompiledRule> rules, IReadOnlyList<RunRequest> requests) =>
+        _propertyTriggers.TrackPending(rules, requests);
+
+    /// <summary>The position of the rule in rule order; the number of rules for a rule that is not one of them.</summary>
+    public static int IndexOf(IReadOnlyList<CompiledRule> rules, CompiledRule rule)
     {
         for (var index = 0; index < rules.Count; index++)
         {

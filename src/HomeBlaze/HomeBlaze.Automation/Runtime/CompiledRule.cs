@@ -1,3 +1,5 @@
+using HomeBlaze.Automation.Expressions;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Expressions;
 
 namespace HomeBlaze.Automation.Runtime;
@@ -20,6 +22,21 @@ internal sealed class CompiledRule(string key, AutomationRule rule, ParsedExpres
     public string? InState { get; } = rule.InState;
 
     public ParsedExpression? Guard { get; } = guard;
+
+    /// <summary>The paths of the guard that are no variable.</summary>
+    public IReadOnlyList<string> GuardPropertyPaths { get; } = guard is null ? [] : [.. AutomationExpressionCheck.GetPropertyPaths(guard)];
+
+    /// <summary>When the guard can change with the clock alone, or null for a guard that does not read the clock.</summary>
+    public GuardClock? GuardClock { get; } = guard is null ? null : GuardClock.Create(guard);
+
+    /// <summary>The properties that <see cref="GuardPropertyPaths"/> resolved to while a trigger of the rule is pending.</summary>
+    public PropertyReference[] GuardDependencies { get; set; } = [];
+
+    /// <summary>When the guard of a rule with a pending trigger is evaluated again for the clock, or null for no such instant.</summary>
+    public DateTimeOffset? GuardRecheckAt { get; set; }
+
+    /// <summary>Whether the guard of a rule with a pending trigger is evaluated again every second.</summary>
+    public bool RechecksGuardEverySecond { get; set; }
 
     public IReadOnlyList<AutomationAction> Actions { get; } = [.. rule.Actions];
 

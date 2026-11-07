@@ -21,6 +21,9 @@ internal sealed record EventInput(EventTriggerSubscription Subscription, Capture
 /// <summary>Rules that became active, whose property triggers evaluate their activation.</summary>
 internal sealed record ActivationInput(IReadOnlyList<CompiledRule> Rules, int ChainDepth) : AutomationInput(ChainDepth);
 
+/// <summary>The pending property triggers request their runs again, such as after a state change skipped them.</summary>
+internal sealed record PendingRecheckInput(int ChainDepth) : AutomationInput(ChainDepth);
+
 /// <summary>A second passed on the clock of the automation.</summary>
 internal sealed record TickInput() : AutomationInput(0)
 {

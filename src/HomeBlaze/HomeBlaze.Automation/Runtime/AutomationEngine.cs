@@ -135,6 +135,9 @@ internal sealed class AutomationEngine : IRuleRunHost
     public Task OnGraphChangedAsync(CancellationToken cancellationToken) =>
         DispatchAsync(_triggers.OnGraphChanged(_snapshot.Rules), cancellationToken);
 
+    public Task OnPendingRecheckAsync(CancellationToken cancellationToken) =>
+        DispatchAsync(_triggers.OnPendingRecheck(_snapshot.Rules), cancellationToken);
+
     public Task OnActivationAsync(ActivationInput input, CancellationToken cancellationToken)
     {
         var rules = input.Rules.Where(rule => rule.IsActivated && _snapshot.Rules.Contains(rule)).ToList();
@@ -190,6 +193,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         if (stopped.Count > 0)
         {
             _dispatcher.Skip(stopped, $"a feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped");
+            _triggers.TrackPending(_snapshot.Rules, stopped);
         }
 
         if (dropped.HasOverload)
@@ -375,6 +379,7 @@ internal sealed class AutomationEngine : IRuleRunHost
     {
         if (requests.Count == 0)
         {
+            _triggers.TrackPending(_snapshot.Rules, requests);
             return;
         }
 
@@ -386,6 +391,13 @@ internal sealed class AutomationEngine : IRuleRunHost
         finally
         {
             PublishStateChanges();
+            _triggers.TrackPending(_snapshot.Rules, requests);
+        }
+
+        // A skipped trigger of a rule that stays active runs in a later input, after the state change.
+        if (summary.SkippedForStateChange)
+        {
+            _triggers.RequestPendingRecheck();
         }
 
         _status.Apply(summary, HasStickyError);

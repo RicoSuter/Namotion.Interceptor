@@ -15,6 +15,12 @@ internal enum TriggerPhase
     /// <summary>The expression is true and the hold has not elapsed.</summary>
     Holding,
 
+    /// <summary>
+    /// Fired, and its run did not run yet, such as because Only if rejected it; runs when a request runs while the
+    /// expression stays true, and is armed again without a run when the expression is false or unknown.
+    /// </summary>
+    Pending,
+
     /// <summary>Fired, or started true with a rearm expression; waits until the expression is false, or the rearm expression is true.</summary>
     WaitingToRearm,
 
