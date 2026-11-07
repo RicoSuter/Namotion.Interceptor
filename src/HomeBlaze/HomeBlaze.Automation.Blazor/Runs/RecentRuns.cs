@@ -78,6 +78,6 @@ internal static class RecentRuns
 internal sealed record RecentRunsResult(bool HasHistory, IReadOnlyList<RunEntry> Runs, string? Error, bool IsBehind)
 {
     public string Caption => HasHistory
-        ? "From history: the runs of the last seven days."
+        ? "From history: the runs of the last seven days. Runs within about 250 ms can show as one, and a crash can drop runs."
         : "Without a history store: the last run of each rule.";
 }
