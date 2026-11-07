@@ -651,7 +651,10 @@ public sealed class AgentRolesTests : IAsyncLifetime
                 async Task CallAsync(string name, object input) => results.Add(JsonSerializer.Serialize(
                     await tools[name].Handler(JsonSerializer.SerializeToElement(input), cancellationToken)));
 
-                await CallAsync(HomeBlazeMarkdownToolProvider.CreateMarkdownToolName, new { folder_path = "/Storage", name = "Roles.md", content = "# Roles\n\n" + block });
+                await CallAsync(HomeBlazeMcpToolProvider.InvokeOperationToolName, new
+                {
+                    path = "/Storage", method = "CreateMarkdownFile", parameters = new { name = "Roles.md", content = "# Roles\n\n" + block }
+                });
                 await CallAsync(HomeBlazeMarkdownToolProvider.WriteMarkdownToolName, new { path = "/Storage/Notes.md", content = "# Notes\n\n" + block });
                 await CallAsync(HomeBlazeMarkdownToolProvider.EditMarkdownToolName, new { path = "/Storage/Notes.md", old_text = "# Notes", new_text = "# Notes\n\n" + block });
                 await CallAsync(HomeBlazeMcpToolProvider.InvokeOperationToolName, new

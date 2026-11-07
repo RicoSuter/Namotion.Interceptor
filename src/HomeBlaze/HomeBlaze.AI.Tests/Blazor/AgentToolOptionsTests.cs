@@ -117,19 +117,19 @@ public class AgentToolOptionsTests
     public void WhenMarkdownToolsAreOffered_ThenTheyAreListedAfterTheReadOnlyToolsAsChangingPages()
     {
         // Arrange
-        var offeredTools = new[] { CreateTool("create_markdown"), CreateTool("edit_markdown"), CreateTool("browse"), CreateTool("write_markdown"), CreateTool("invoke_operation") };
+        var offeredTools = new[] { CreateTool("edit_markdown"), CreateTool("browse"), CreateTool("write_markdown"), CreateTool("invoke_operation") };
 
         // Act
         var options = AgentToolOptions.Create(offeredTools, []);
 
         // Assert
-        Assert.Equal(["browse", "create_markdown", "edit_markdown", "write_markdown", "edit_page_layout", "invoke_operation"], options.Select(option => option.Name));
-        Assert.Equal([false, true, true, true, true, true], options.Select(option => option.CanChangeState));
-        Assert.Equal([false, true, true, true, false, false], options.Select(option => option.ChangesPages));
-        Assert.Equal([false, false, false, false, true, false], options.Select(option => option.ChangesPageLayout));
+        Assert.Equal(["browse", "edit_markdown", "write_markdown", "edit_page_layout", "invoke_operation"], options.Select(option => option.Name));
+        Assert.Equal([false, true, true, true, true], options.Select(option => option.CanChangeState));
+        Assert.Equal([false, true, true, false, false], options.Select(option => option.ChangesPages));
+        Assert.Equal([false, false, false, true, false], options.Select(option => option.ChangesPageLayout));
         Assert.Equal(
-            ["Creates a Markdown page or document in a folder.", "Replaces a passage of a Markdown page or document.", "Replaces the whole text of a Markdown page or document."],
-            options.Skip(1).Take(3).Select(option => option.Description));
+            ["Replaces a passage of a Markdown page or document.", "Replaces the whole text of a Markdown page or document."],
+            options.Skip(1).Take(2).Select(option => option.Description));
     }
 
     [Fact]

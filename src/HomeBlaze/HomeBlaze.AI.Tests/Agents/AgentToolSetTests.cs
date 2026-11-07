@@ -48,7 +48,6 @@ public class AgentToolSetTests
     [InlineData("set_property", true)]
     [InlineData("edit_markdown", true)]
     [InlineData("write_markdown", true)]
-    [InlineData("create_markdown", true)]
     public void WhenCheckingATool_ThenOnlyTheWriteToolsChangeState(string toolName, bool expected)
     {
         // Act

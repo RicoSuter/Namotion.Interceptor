@@ -59,37 +59,16 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
     }
 
     [Theory]
-    [InlineData(DocsPath, "Docs/New.md")]
-    [InlineData("/Storage", "New.md")]
-    public async Task WhenAnAgentCreatesAMarkdownFile_ThenTheOperationIsRefusedBecauseItRequiresAdministration(string folderPath, string expectedFile)
-    {
-        // Arrange
-        var (root, _, services) = await CreateGraphAsync();
-        var tools = CreateTools(services, root);
-
-        // Act
-        var result = await CallAsync(tools["create_markdown"], new { folder_path = folderPath, name = "New.md", content = "# New page" });
-
-        // Assert
-        Assert.Equal("Operation 'CreateMarkdownFile' is not permitted. The access policy does not allow it.", result.GetProperty("error").GetString());
-        Assert.False(File.Exists(Path.Combine(_directory.FullName, expectedFile)));
-    }
-
-    [Theory]
     [InlineData("edit_markdown", "ReplaceText")]
     [InlineData("write_markdown", "ReplaceContent")]
-    [InlineData("create_markdown", "CreateMarkdownFile")]
     public async Task WhenAReaderUsesAMarkdownTool_ThenTheOperationIsRefusedAndNothingIsWritten(string toolName, string operationName)
     {
         // Arrange
         var (root, storage, services) = await CreateGraphAsync();
         var tools = CreateTools(services, root, accessPolicy: TestAccessPolicies.Create(BuiltInRoles.ReaderName));
-        object input = toolName switch
-        {
-            "edit_markdown" => new { path = NotesPath, old_text = "cold", new_text = "too warm" },
-            "write_markdown" => new { path = NotesPath, content = "# Rewritten" },
-            _ => new { folder_path = DocsPath, name = "New.md", content = "# New page" }
-        };
+        object input = toolName == "edit_markdown"
+            ? new { path = NotesPath, old_text = "cold", new_text = "too warm" }
+            : new { path = NotesPath, content = "# Rewritten" };
 
         // Act
         var result = await CallAsync(tools[toolName], input);
@@ -98,7 +77,6 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
         Assert.Equal($"Operation '{operationName}' is not permitted. The access policy does not allow it.", result.GetProperty("error").GetString());
         Assert.Equal("# Notes\n\nThe freezer is cold.", ReadFile("Notes.md"));
         Assert.Equal("# Notes\n\nThe freezer is cold.", GetNotes(storage).Content);
-        Assert.False(File.Exists(Path.Combine(_directory.FullName, "Docs", "New.md")));
     }
 
     [Theory]
@@ -115,21 +93,6 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
 
         // Assert
         Assert.Equal($"'{DocsPath}' is not a Markdown file.", result.GetProperty("error").GetString());
-    }
-
-    [Fact]
-    public async Task WhenTheTargetOfCreateMarkdownIsNotAFolder_ThenTheToolRefusesIt()
-    {
-        // Arrange
-        var (root, _, services) = await CreateGraphAsync();
-        var tools = CreateTools(services, root);
-
-        // Act
-        var result = await CallAsync(tools["create_markdown"], new { folder_path = NotesPath, name = "New.md", content = "# New" });
-
-        // Assert
-        Assert.Equal($"'{NotesPath}' is not a storage folder.", result.GetProperty("error").GetString());
-        Assert.False(File.Exists(Path.Combine(_directory.FullName, "New.md")));
     }
 
     [Fact]
@@ -209,14 +172,11 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
         // Act
         var edit = await CallAsync(tools["edit_markdown"], new { path = NotesPath, old_text = "cold", new_text = "warm" });
         var write = await CallAsync(tools["write_markdown"], new { path = NotesPath, content = "# Rewritten" });
-        var create = await CallAsync(tools["create_markdown"], new { folder_path = DocsPath, name = "New.md", content = "# New" });
 
         // Assert
         Assert.Equal("ReplaceText is refused.", edit.GetProperty("error").GetString());
         Assert.Equal("ReplaceContent is refused.", write.GetProperty("error").GetString());
-        Assert.Equal("CreateMarkdownFile is refused.", create.GetProperty("error").GetString());
         Assert.Equal("# Notes\n\nThe freezer is cold.", ReadFile("Notes.md"));
-        Assert.False(File.Exists(Path.Combine(_directory.FullName, "Docs", "New.md")));
     }
 
     [Fact]
@@ -233,7 +193,7 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
             agentTools.Values.ToList(), AgentToolSet.DefaultAllowedTools, CreateMemoryTool(), maxToolCalls: 5, progress: null);
 
         // Assert
-        string[] markdownTools = ["edit_markdown", "write_markdown", "create_markdown"];
+        string[] markdownTools = ["edit_markdown", "write_markdown"];
         Assert.All(markdownTools, name => Assert.DoesNotContain(name, toolSet.Tools.Select(tool => tool.Name)));
         Assert.All(markdownTools, name => Assert.Same(McpToolAnnotations.Destructive, agentTools[name].Annotations));
         Assert.All(markdownTools, name => Assert.Contains(name, externalTools.Keys));

@@ -34,7 +34,7 @@ MCP tools are split across packages, configured via a single `McpServerConfigura
 | Package | Tools | Scope |
 |---------|-------|-------|
 | `Namotion.Interceptor.Mcp` | `browse`, `search`, `get_property`, `set_property`, `list_types` | Any Namotion.Interceptor application |
-| `HomeBlaze.AI` | `list_methods`, `invoke_query`, `invoke_operation`, `search_markdown`, `edit_markdown`, `write_markdown`, `create_markdown` (via `IMcpToolProvider`) + subject enrichment (`$type`, `$icon`, `$title`, and `$url` for a subject with a page, via `IMcpSubjectEnricher`) + concrete type discovery (via `IMcpTypeProvider`) | HomeBlaze-specific features |
+| `HomeBlaze.AI` | `list_methods`, `invoke_query`, `invoke_operation`, `search_markdown`, `edit_markdown`, `write_markdown` (via `IMcpToolProvider`) + subject enrichment (`$type`, `$icon`, `$title`, and `$url` for a subject with a page, via `IMcpSubjectEnricher`) + concrete type discovery (via `IMcpTypeProvider`) | HomeBlaze-specific features |
 | `HomeBlaze.History.Mcp` | `get_property_history`, and the planned `get_event_history` and `get_command_history` (see [Messages](messages.md)) | Ships with the history packages |
 
 - **One configuration**: `HomeBlazeMcpConfigurationFactory` builds the configuration for both the MCP server and the built-in agents. Satellite packages contribute tool providers once with `AddHomeBlazeMcpToolProvider`.
@@ -58,7 +58,7 @@ MCP tools are split across packages, configured via a single `McpServerConfigura
 
 #### Markdown Tools
 
-- `edit_markdown`, `write_markdown` and `create_markdown` (`HomeBlazeMarkdownToolProvider`) are thin tools over `ReplaceText` and `ReplaceContent` of a `MarkdownFile` and `CreateMarkdownFile` of a `VirtualFolder` or `FluentStorageContainer`, so page changes can be allowed without every operation. `create_markdown` stays listed but is refused for agents and `/mcp` clients: `CreateMarkdownFile` is an administration operation, which the system rules keep from every non-human principal.
+- `edit_markdown` and `write_markdown` (`HomeBlazeMarkdownToolProvider`) are thin tools over `ReplaceText` and `ReplaceContent` of a `MarkdownFile`, so page changes can be allowed without every operation. The two operations are excluded from user interfaces: people change page text only in the page editor, which requires a full administrator. There is no tool that creates a page: `CreateMarkdownFile` is an administration operation, which the system rules keep from every non-human principal.
 - Each tool checks only the type of its target ("'path' is not a Markdown file.", "'path' is not a storage folder."), maps its arguments and calls the operation through `McpMethodInvoker`, the path of `invoke_operation`. Argument conversion, the operation filter, the confirmation rule and error handling are therefore the same.
 - The operations check their own rules, the [page write rules](#page-write-rules), and refuse a change with an `ArgumentException` whose message reaches the caller. An agent has them only when its `AllowedTools` allow them.
 - `search_markdown` finds text without reading every page. It matches `query` within single lines as plain text, or as a .NET regular expression with `regex: true`, ignoring case unless `ignore_case` is false, optionally only in or under `path`.

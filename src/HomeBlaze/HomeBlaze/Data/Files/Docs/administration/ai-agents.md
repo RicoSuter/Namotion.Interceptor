@@ -239,7 +239,6 @@ Each turn offers exactly the tools in `AllowedTools`, plus `update_memory`. What
 | `set_property` | off | Writes a property value |
 | `edit_markdown` | off | Replaces one passage of a page, see [Changing pages](#changing-pages) |
 | `write_markdown` | off | Replaces the whole text of a page |
-| `create_markdown` | off | Creates a page in a folder. Refused: agents never create files, see [Changing pages](#changing-pages) |
 | `edit_page_layout` | off | No tool: lets the page tools change layout blocks, see [Editing page layout](#editing-page-layout) |
 | `update_memory` | always | Changes the agent's memory |
 | `web_search`, `web_fetch` | off | Search the web and load pages, see [Web tools](#web-tools) |
@@ -276,9 +275,8 @@ An agent with `invoke_operation` finds `INotificationPublisher` with `list_types
 |---|---|---|
 | `edit_markdown` | `ReplaceText` | Replaces one exact passage that occurs once in the source |
 | `write_markdown` | `ReplaceContent` | Replaces the whole source |
-| `create_markdown` | `CreateMarkdownFile` of a storage or folder | Refused as not permitted by the access policy: creating a file is administration, which no agent may do |
 
-Each tool can be allowed on its own; the edit form marks them "Changes pages and documents". Agents edit existing pages only: `create_markdown` stays listed but is refused, because creating a subject or a file is administration, which agents never do, see [System Rules](authorization.md#system-rules). A person creates the page and the agent edits it. `invoke_operation` reaches the operations too, so it can change pages with the three tools off. They write like the page editor, and an open page updates as after a save. JSON and other files cannot be changed.
+Each tool can be allowed on its own; the edit form marks them "Changes pages and documents". Agents edit existing pages only, because creating a subject or a file is administration, which agents never do, see [System Rules](authorization.md#system-rules). A person creates the page and the agent edits it. `invoke_operation` reaches the operations too, so it can change pages with both tools off. People do not run these operations in the browser; they change the text of a page in the page editor, which requires a full administrator, see [Administration](authorization.md#administration). They write like the page editor, and an open page updates as after a save. JSON and other files cannot be changed.
 
 The operations change text only and refuse:
 
