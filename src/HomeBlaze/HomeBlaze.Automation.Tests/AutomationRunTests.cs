@@ -257,6 +257,39 @@ public class AutomationRunTests
         Assert.StartsWith("The runs could not be saved and are saved again in 5 seconds", host.Automation.StatusMessage);
     }
 
+    [Fact]
+    public async Task WhenTheRunsCannotBeWrittenRepeatedlyAndThenAreWritten_ThenTheErrorIsLoggedOnceAndCleared()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Idle"];
+            automation.InitialState = "Idle";
+            automation.Rules = Keyed(("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close"))));
+        });
+        File.Delete(host.CheckpointPath);
+        Directory.CreateDirectory(host.CheckpointPath);
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        for (var retry = 0; retry < 4; retry++)
+        {
+            await AdvanceAsync(host, TimeSpan.FromSeconds(5));
+        }
+
+        var messageWhileFailing = host.Automation.StatusMessage;
+
+        // Act
+        Directory.Delete(host.CheckpointPath);
+        await AdvanceAsync(host, TimeSpan.FromSeconds(5));
+
+        // Assert
+        Assert.StartsWith("The runs could not be saved", messageWhileFailing);
+        Assert.Single(host.Logger.Messages, message => message.Contains("The runs could not be saved", StringComparison.Ordinal));
+        Assert.True(File.Exists(host.CheckpointPath));
+        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
+        Assert.Null(host.Automation.StatusMessage);
+    }
+
     private static async Task AdvanceAsync(AutomationTestHost host, TimeSpan time)
     {
         host.Time.Advance(time);

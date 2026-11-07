@@ -26,6 +26,7 @@ internal sealed class AutomationEngine : IRuleRunHost
     // An unreadable checkpoint stays shown after successful runs, until a reset or a valid configuration is applied.
     private bool _hasCheckpointError;
     private volatile bool _isAbandoned;
+    private string? _runWriteError;
 
     /// <summary>Creates the engine, whose property triggers publish their watched set to <paramref name="changes"/>.</summary>
     public AutomationEngine(Automation automation, AutomationInputQueue queue, AutomationStateKeeper keeper, ILogger logger, AutomationChangeReceiver changes)
@@ -78,6 +79,7 @@ internal sealed class AutomationEngine : IRuleRunHost
     {
         Unload();
         _hasCheckpointError = false;
+        _runWriteError = null;
 
         // Written at once, so that an older file at the new path is not read at the next start.
         if (_keeper.TryPersist(_keeper.Current) is { } error)
@@ -130,11 +132,7 @@ internal sealed class AutomationEngine : IRuleRunHost
 
     public Task OnTickAsync(CancellationToken cancellationToken)
     {
-        if (_keeper.WriteRunsIfDue(_automation.TimeProvider.GetUtcNow()) is { } error)
-        {
-            _status.Fail($"The runs could not be saved and are saved again in {AutomationStateKeeper.RunWriteDelay.TotalSeconds:0} seconds: {error}");
-        }
-
+        WriteRunsIfDue();
         return DispatchAsync(_triggers.OnTick(_snapshot.Rules), cancellationToken);
     }
 
@@ -153,6 +151,33 @@ internal sealed class AutomationEngine : IRuleRunHost
         return DispatchAsync(_triggers.OnActivation(rules, _snapshot.Rules), cancellationToken);
     }
 
+    // A failed write of the runs is shown and logged when its error changes, stays shown while the writes fail, and is
+    // cleared once the runs are written.
+    private void WriteRunsIfDue()
+    {
+        var error = _keeper.WriteRunsIfDue(_automation.TimeProvider.GetUtcNow());
+        if (error is not null)
+        {
+            if (!string.Equals(error, _runWriteError, StringComparison.Ordinal))
+            {
+                _runWriteError = error;
+                _status.Fail($"The runs could not be saved and are saved again in {AutomationStateKeeper.RunWriteDelay.TotalSeconds:0} seconds: {error}");
+            }
+
+            return;
+        }
+
+        if (_runWriteError is not null && !_keeper.HasUnwrittenRuns)
+        {
+            _runWriteError = null;
+            _logger.LogInformation("The automation {Automation} saved its runs again.", Name);
+            if (!HasStickyError)
+            {
+                _status.SetRunning();
+            }
+        }
+    }
+
     /// <summary>
     /// Enters the initial state, clears the trigger times and starts every active rule over as if it entered its state:
     /// fresh holds, the activation policy of its triggers applies again and its event triggers subscribe again, also when the
@@ -169,6 +194,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         }
 
         _hasCheckpointError = false;
+        _runWriteError = null;
         if (!_hasConfigurationError)
         {
             _status.SetRunning();
@@ -460,7 +486,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         _states.PublishPendingChanges();
     }
 
-    private bool HasStickyError => _hasConfigurationError || _hasCheckpointError;
+    private bool HasStickyError => _hasConfigurationError || _hasCheckpointError || _runWriteError is not null;
 
     private bool IsActive(CompiledRule rule) => rule.IsActiveIn(_automation.Enabled, CurrentState);
 

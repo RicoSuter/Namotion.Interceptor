@@ -60,16 +60,4 @@ public class PropertyTriggerEngineTests
             "The trigger 1 (/Weather/Gust > 8) of rule Retract in automation Storm is known again."
         ], logger.Messages.ToArray());
     }
-
-    private sealed class MessageLogger : ILogger
-    {
-        public List<string> Messages { get; } = [];
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
-            Messages.Add(formatter(state, exception));
-    }
 }

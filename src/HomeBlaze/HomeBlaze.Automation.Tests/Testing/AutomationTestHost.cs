@@ -2,7 +2,6 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Automation.Runtime;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 
 namespace HomeBlaze.Automation.Tests.Testing;
@@ -31,6 +30,9 @@ internal sealed class AutomationTestHost : IAsyncDisposable
     public string DataDirectory { get; }
 
     public IAutomationAuthorizer Authorizer { get; }
+
+    /// <summary>The logger of every automation of the host.</summary>
+    public MessageLogger Logger { get; } = new();
 
     /// <summary>The services of every automation of the host, which share one change dispatcher.</summary>
     public IServiceProvider ServiceProvider { get; }
@@ -74,7 +76,7 @@ internal sealed class AutomationTestHost : IAsyncDisposable
 
     /// <summary>Creates an automation with the services of the host, not attached yet.</summary>
     public Automation CreateAutomation(string name) =>
-        new(Graph.Resolver, Time, Authorizer, ServiceProvider, NullLogger<Automation>.Instance) { Name = name };
+        new(Graph.Resolver, Time, Authorizer, ServiceProvider, Logger) { Name = name };
 
     /// <summary>Attaches a new automation under <c>/key</c>, starts it and waits until it processed its activation.</summary>
     public async Task<Automation> AddAutomationAsync(string key, Action<Automation> configure)
