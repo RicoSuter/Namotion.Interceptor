@@ -17,11 +17,11 @@ internal sealed class RunLog(string ruleName)
     {
         if (_failures.Count == 0)
         {
-            return new RuleRunResult(AutomationRunOutcome.Succeeded, RuleRunResult.Shorten("Ran " + string.Join("; ", _ran)), true, changedState, null);
+            return new RuleRunResult(AutomationRunOutcome.Succeeded, RuleRunResult.Shorten("Ran " + string.Join("; ", _ran)), changedState, null);
         }
 
         var message = string.Join("; ", _failures) + (_isStopped ? "; the remaining actions were skipped" : string.Empty);
         var outcome = _isStopped ? AutomationRunOutcome.StoppedAfterError : AutomationRunOutcome.CompletedWithErrors;
-        return new RuleRunResult(outcome, RuleRunResult.Shorten(message), true, changedState, $"Rule '{ruleName}': {_failures[^1]}");
+        return new RuleRunResult(outcome, RuleRunResult.Shorten(message), changedState, $"Rule '{ruleName}': {_failures[^1]}");
     }
 }
