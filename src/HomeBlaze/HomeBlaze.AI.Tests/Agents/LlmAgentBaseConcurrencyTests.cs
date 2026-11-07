@@ -7,6 +7,7 @@ using HomeBlaze.AI.Agents;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Mcp;
+using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Xunit;
@@ -359,7 +360,7 @@ public class LlmAgentBaseConcurrencyTests
         BlockingToolSource toolSource, TimeProvider time, RecordingLogger? logger) =>
         AgentTestContext<FakeAgent>.StartAsync(
             services => new FakeAgent(
-                new AgentServices(toolSource, services.TokenRegistry, services.EndpointAddress, services.TimeProvider), logger),
+                new AgentServices(toolSource, services.TokenRegistry, services.EndpointAddress, services.TimeProvider, services.AuthorizationService), logger),
             agent =>
             {
                 agent.AllowedTools = ["browse"];
@@ -417,7 +418,7 @@ internal sealed class BlockingToolSource : IAgentToolSource
 
     public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly) =>
+    public IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly, IMcpAccessPolicy accessPolicy) =>
     [
         new McpToolInfo
         {

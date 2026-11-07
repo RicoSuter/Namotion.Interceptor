@@ -5,6 +5,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.AI.Tests.Mcp;
+using HomeBlaze.Authorization;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
 using HomeBlaze.Storage;
@@ -24,34 +25,75 @@ namespace HomeBlaze.AI.Tests.Agents;
 public class AgentOperationAccessTests
 {
     [Theory]
-    [InlineData("RunNow")]
-    [InlineData("NewConversation")]
-    public async Task WhenAnAgentCallsAnOperationOfAnAgent_ThenItIsRefused(string methodName)
+    [InlineData("RunNow", true)]
+    [InlineData("NewConversation", true)]
+    [InlineData("RunNow", false)]
+    [InlineData("NewConversation", false)]
+    public async Task WhenAnAgentOrAnExternalClientCallsAnOperationOfAnAgent_ThenTheAgentIsNotFound(string methodName, bool isAgent)
     {
         // Arrange
         var (root, agent, services) = CreateGraph();
-        var invokeOperation = CreateTools(services, root, forAgents: true)["invoke_operation"];
+        var invokeOperation = CreateTools(services, root, isAgent)["invoke_operation"];
 
         // Act
         var result = JsonSerializer.SerializeToElement(await invokeOperation.Handler(
             JsonSerializer.SerializeToElement(new { path = "/Agent", method = methodName }), CancellationToken.None));
 
         // Assert
-        Assert.Equal("Agents cannot run operations of agents.", result.GetProperty("error").GetString());
+        Assert.Equal("Subject not found.", result.GetProperty("error").GetString());
         Assert.Equal(0, agent.ResetCount);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenAnAgentOrAnExternalClientListsTheMethodsOfAnAgent_ThenTheAgentIsNotFound(bool isAgent)
+    {
+        // Arrange
+        var (root, _, services) = CreateGraph();
+        var listMethods = CreateTools(services, root, isAgent)["list_methods"];
+
+        // Act
+        var result = JsonSerializer.SerializeToElement(await listMethods.Handler(
+            JsonSerializer.SerializeToElement(new { path = "/Agent" }), CancellationToken.None));
+
+        // Assert
+        Assert.Equal("Subject not found.", result.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task WhenAnExternalClientReadsAnAgent_ThenItIsNotFound()
+    {
+        // Arrange
+        var (root, _, services) = CreateGraph();
+        var tools = CreateTools(services, root, isAgent: false);
+
+        // Act
+        var browse = JsonSerializer.SerializeToElement(await tools["browse"].Handler(
+            JsonSerializer.SerializeToElement(new { path = "/Agent", format = "json" }), CancellationToken.None));
+        var getProperty = JsonSerializer.SerializeToElement(await tools["get_property"].Handler(
+            JsonSerializer.SerializeToElement(new { path = "/Agent/Status" }), CancellationToken.None));
+        var rootBrowse = JsonSerializer.SerializeToElement(await tools["browse"].Handler(
+            JsonSerializer.SerializeToElement(new { format = "json", depth = 1 }), CancellationToken.None));
+
+        // Assert
+        Assert.StartsWith("Path not found", browse.GetProperty("error").GetString());
+        Assert.StartsWith("Path not found", getProperty.GetProperty("error").GetString());
+        Assert.False(rootBrowse.GetProperty("result").GetProperty("properties").TryGetProperty("Agent", out _));
+        Assert.Equal(0, rootBrowse.GetProperty("subjectCount").GetInt32());
     }
 
     [Theory]
     [InlineData("Agent")]
     [InlineData("/Agent")]
-    public async Task WhenAnAgentSetsTheMetadataOfAnAgent_ThenItIsRefused(string path)
+    public async Task WhenAnAgentSetsTheMetadataOfAnAgent_ThenItIsRefusedAsAMissingOne(string path)
     {
         // Arrange
         var (root, agent, services) = CreateGraph();
         var storage = CreateStorage(services);
         root.Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage };
         storage.Children = new Dictionary<string, IInterceptorSubject> { ["Agent"] = agent };
-        var invokeOperation = CreateTools(services, root, forAgents: true)["invoke_operation"];
+        var invokeOperation = CreateTools(services, root, isAgent: true)["invoke_operation"];
 
         // Act
         var result = JsonSerializer.SerializeToElement(await invokeOperation.Handler(
@@ -59,18 +101,19 @@ public class AgentOperationAccessTests
             CancellationToken.None));
 
         // Assert
-        Assert.Equal("Agents cannot change the metadata of agents.", result.GetProperty("error").GetString());
+        Assert.Equal($"No subject at '{path}' in this storage.", result.GetProperty("error").GetString());
+        Assert.Null(agent.TryGetRegisteredSubject()!.TryGetProperty(KnownAttributes.Metadata));
     }
 
     [Fact]
-    public async Task WhenAnAgentSetsTheMetadataOfAPropertyOfAnAgent_ThenItIsRefused()
+    public async Task WhenAnAgentSetsTheMetadataOfAPropertyOfAnAgent_ThenItIsRefusedAsAMissingOne()
     {
         // Arrange
         var (root, agent, services) = CreateGraph();
         var storage = CreateStorage(services);
         root.Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage };
         storage.Children = new Dictionary<string, IInterceptorSubject> { ["Agent"] = agent };
-        var invokeOperation = CreateTools(services, root, forAgents: true)["invoke_operation"];
+        var invokeOperation = CreateTools(services, root, isAgent: true)["invoke_operation"];
 
         // Act
         var result = JsonSerializer.SerializeToElement(await invokeOperation.Handler(
@@ -81,11 +124,11 @@ public class AgentOperationAccessTests
             CancellationToken.None));
 
         // Assert
-        Assert.Equal("Agents cannot change the metadata of agents.", result.GetProperty("error").GetString());
+        Assert.Equal("No subject at 'Agent' in this storage.", result.GetProperty("error").GetString());
     }
 
     [Fact]
-    public async Task WhenAnAgentSetsTheMetadataOfASubjectInsideAnAgent_ThenItIsRefused()
+    public async Task WhenAnAgentSetsTheMetadataOfASubjectInsideAnAgent_ThenItIsRefusedAsAMissingOne()
     {
         // Arrange
         var (root, agent, services) = CreateGraph();
@@ -94,7 +137,7 @@ public class AgentOperationAccessTests
         storage.Children = new Dictionary<string, IInterceptorSubject> { ["Agent"] = agent };
         var inner = new AgentTestRoot();
         agent.TryGetRegisteredSubject()!.AddProperty("Inner", typeof(AgentTestRoot), _ => inner, null);
-        var invokeOperation = CreateTools(services, root, forAgents: true)["invoke_operation"];
+        var invokeOperation = CreateTools(services, root, isAgent: true)["invoke_operation"];
 
         // Act
         var result = JsonSerializer.SerializeToElement(await invokeOperation.Handler(
@@ -102,11 +145,11 @@ public class AgentOperationAccessTests
             CancellationToken.None));
 
         // Assert
-        Assert.Equal("Agents cannot change the metadata of agents.", result.GetProperty("error").GetString());
+        Assert.Equal("No subject at 'Agent/Inner' in this storage.", result.GetProperty("error").GetString());
     }
 
     [Fact]
-    public async Task WhenAnAgentSetsTheMetadataOfASubjectThatAnAgentHoldsAsAnotherParent_ThenItIsRefused()
+    public async Task WhenAnAgentSetsTheMetadataOfASubjectThatAnAgentHoldsAsAnotherParent_ThenTheAccessPolicyAllowsItAsForAnyOtherSubject()
     {
         // Arrange
         var (root, agent, services) = CreateGraph();
@@ -115,7 +158,7 @@ public class AgentOperationAccessTests
         var shared = new AgentTestRoot();
         storage.Children = new Dictionary<string, IInterceptorSubject> { ["Shared"] = shared };
         agent.TryGetRegisteredSubject()!.AddProperty("Shared", typeof(AgentTestRoot), _ => shared, null);
-        var invokeOperation = CreateTools(services, root, forAgents: true)["invoke_operation"];
+        var invokeOperation = CreateTools(services, root, isAgent: true)["invoke_operation"];
 
         // Act
         var result = JsonSerializer.SerializeToElement(await invokeOperation.Handler(
@@ -124,13 +167,15 @@ public class AgentOperationAccessTests
 
         // Assert
         Assert.NotSame(agent, shared.TryGetRegisteredSubject()!.Parents[0].Property.Subject);
-        Assert.Equal("Agents cannot change the metadata of agents.", result.GetProperty("error").GetString());
+        var error = result.GetProperty("error").GetString();
+        Assert.DoesNotContain("No subject", error);
+        Assert.DoesNotContain("not writable", error);
     }
 
     [Theory]
-    [InlineData(false, new[] { "Agent" })]
+    [InlineData(false, new string[0])]
     [InlineData(true, new string[0])]
-    public async Task WhenMetadataIsSearched_ThenOnlyAgentsFindNoMetadataOfAgents(bool forAgents, string[] expectedPaths)
+    public async Task WhenMetadataIsSearched_ThenNoClientFindsMetadataOfAgents(bool isAgent, string[] expectedPaths)
     {
         // Arrange
         var (root, agent, services) = CreateGraph();
@@ -139,7 +184,7 @@ public class AgentOperationAccessTests
         storage.Children = new Dictionary<string, IInterceptorSubject> { ["Agent"] = agent };
         var metadata = ImmutableDictionary<string, JsonElement>.Empty.Add("tags", JsonElement.Parse("""["floor-2"]"""));
         agent.TryGetRegisteredSubject()!.AddProperty(KnownAttributes.Metadata, metadata.GetType(), _ => metadata, null);
-        var invokeQuery = CreateTools(services, root, forAgents)["invoke_query"];
+        var invokeQuery = CreateTools(services, root, isAgent)["invoke_query"];
 
         // Act
         var result = JsonSerializer.SerializeToElement(await invokeQuery.Handler(
@@ -164,7 +209,7 @@ public class AgentOperationAccessTests
         storage.Children = new Dictionary<string, IInterceptorSubject> { ["Hidden"] = hidden };
         var inner = new AgentTestRoot();
         hidden.TryGetRegisteredSubject()!.AddProperty("Inner", typeof(AgentTestRoot), _ => inner, null);
-        var invokeOperation = CreateTools(services, root, forAgents: true)["invoke_operation"];
+        var invokeOperation = CreateTools(services, root, isAgent: true)["invoke_operation"];
 
         // Act
         var result = JsonSerializer.SerializeToElement(await invokeOperation.Handler(
@@ -185,7 +230,7 @@ public class AgentOperationAccessTests
         var storage = CreateStorage(services);
         root.Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage };
         storage.Children = new Dictionary<string, IInterceptorSubject> { ["Hidden"] = new AgentExcludedThing() };
-        var invokeOperation = CreateTools(services, root, forAgents: true)["invoke_operation"];
+        var invokeOperation = CreateTools(services, root, isAgent: true)["invoke_operation"];
 
         // Act
         var result = JsonSerializer.SerializeToElement(await invokeOperation.Handler(
@@ -209,7 +254,7 @@ public class AgentOperationAccessTests
         var storage = CreateStorage(services);
         root.Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage };
         storage.Children = new Dictionary<string, IInterceptorSubject> { ["Thing"] = new AgentTestRoot() };
-        var invokeOperation = CreateTools(services, root, forAgents: true)["invoke_operation"];
+        var invokeOperation = CreateTools(services, root, isAgent: true)["invoke_operation"];
 
         // Act
         var result = JsonSerializer.SerializeToElement(await invokeOperation.Handler(
@@ -221,37 +266,22 @@ public class AgentOperationAccessTests
     }
 
     [Fact]
-    public async Task WhenAnExternalClientSetsTheMetadataOfAnAgent_ThenTheStorageDecides()
+    public async Task WhenAnExternalClientSetsTheMetadataOfAnAgent_ThenItIsRefusedAsAMissingOne()
     {
         // Arrange
         var (root, agent, services) = CreateGraph();
         var storage = CreateStorage(services);
         root.Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage };
         storage.Children = new Dictionary<string, IInterceptorSubject> { ["Agent"] = agent };
-        var invokeOperation = CreateTools(services, root, forAgents: false)["invoke_operation"];
+        var invokeOperation = CreateTools(services, root, isAgent: false)["invoke_operation"];
 
         // Act
         var result = JsonSerializer.SerializeToElement(await invokeOperation.Handler(
             JsonSerializer.SerializeToElement(new { path = "/Storage", method = "SetMetadata", parameters = new { path = "Agent", values = new { navTitle = "x" } } }),
             CancellationToken.None));
 
-        // Assert: the storage is not connected, which is its own refusal.
-        Assert.Equal("Storage not connected", result.GetProperty("error").GetString());
-    }
-
-    [Fact]
-    public async Task WhenAnExternalClientCallsAnOperationOfAnAgent_ThenItRuns()
-    {
-        // Arrange
-        var (root, _, services) = CreateGraph();
-        var invokeOperation = CreateTools(services, root, forAgents: false)["invoke_operation"];
-
-        // Act
-        var result = JsonSerializer.SerializeToElement(await invokeOperation.Handler(
-            JsonSerializer.SerializeToElement(new { path = "/Agent", method = "RunNow" }), CancellationToken.None));
-
         // Assert
-        Assert.True(result.GetProperty("success").GetBoolean());
+        Assert.Equal("No subject at 'Agent' in this storage.", result.GetProperty("error").GetString());
     }
 
     private static (AgentTestRoot Root, FakeAgent Agent, IServiceProvider Services) CreateGraph(params Type[] types)
@@ -278,6 +308,8 @@ public class AgentOperationAccessTests
         var services = new ServiceCollection()
             .AddSingleton(new SubjectTypeRegistry(typeProvider))
             .AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance)
+            .AddSingleton<IInterceptorSubjectContext>(context)
+            .AddHomeBlazeAuthorization(McpAuthorization.PathProvider)
             .BuildServiceProvider();
         return (root, agent, services);
     }
@@ -289,9 +321,12 @@ public class AgentOperationAccessTests
         return new FluentStorageContainer(typeRegistry, new ConfigurableSubjectSerializer(new TypeProvider(), services), services);
     }
 
-    private static Dictionary<string, McpToolInfo> CreateTools(IServiceProvider services, AgentTestRoot root, bool forAgents)
+    // The tools of an agent, with the policy agents have today, or of the external MCP server.
+    private static Dictionary<string, McpToolInfo> CreateTools(IServiceProvider services, AgentTestRoot root, bool isAgent)
     {
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly: false, forAgents);
+        var configuration = isAgent
+            ? HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly: false, McpAuthorization.GetAccessPolicy(services, [BuiltInRoles.OperatorName]))
+            : McpBuilderExtensions.CreateServerConfiguration(services, () => root, isReadOnly: false);
         return new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }
 }

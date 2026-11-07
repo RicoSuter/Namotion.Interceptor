@@ -54,6 +54,19 @@ public partial class TestFolder : ITitleProvider
     }
 }
 
+[InterceptorSubject]
+public partial class TestHolder : ITitleProvider
+{
+    public string? Title => Name;
+
+    [State]
+    public partial string Name { get; set; }
+
+    public partial TestHolder? Open { get; set; }
+
+    public partial TestHolder? Secret { get; set; }
+}
+
 public interface ITestSensorInterface
 {
     decimal Temperature { get; }

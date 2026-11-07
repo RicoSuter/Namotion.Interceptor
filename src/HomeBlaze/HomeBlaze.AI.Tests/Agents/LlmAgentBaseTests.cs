@@ -9,6 +9,7 @@ using HomeBlaze.Storage;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp;
+using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Testing;
 using Xunit;
@@ -33,7 +34,7 @@ public class LlmAgentBaseTests
         string? systemPrompt = null;
         await using var test = await AgentTestContext<FakeAgent>.StartAsync(
             services => new FakeAgent(new AgentServices(
-                new PermissionRecordingToolSource(), services.TokenRegistry, services.EndpointAddress, services.TimeProvider)),
+                new PermissionRecordingToolSource(), services.TokenRegistry, services.EndpointAddress, services.TimeProvider, services.AuthorizationService)),
             agent =>
             {
                 agent.AllowedTools = allowedTools;
@@ -1332,7 +1333,7 @@ public class LlmAgentBaseTests
 /// <summary>Offers tools whose result is whether the permission to edit page layout is granted where they run.</summary>
 internal sealed class PermissionRecordingToolSource : IAgentToolSource
 {
-    public IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly) =>
+    public IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly, IMcpAccessPolicy accessPolicy) =>
         new[] { "browse", "edit_markdown", "invoke_operation" }.Select(name => new McpToolInfo
         {
             Name = name,

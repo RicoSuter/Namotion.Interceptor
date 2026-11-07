@@ -8,7 +8,8 @@ using Namotion.Interceptor;
 namespace HomeBlaze.Services;
 
 /// <summary>
-/// Lists the subject types that can be created, with the information the create dialog shows for them.
+/// Lists the subject types that can be created, with the information the create dialog shows for them, and the names
+/// of the registered subject types and their abstractions.
 /// </summary>
 public partial class SubjectTypeCatalog
 {
@@ -60,6 +61,35 @@ public partial class SubjectTypeCatalog
             .ThenBy(descriptor => descriptor.Group, GroupComparer)
             .ThenBy(descriptor => descriptor.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    /// <summary>
+    /// Gets the simple names of the registered subject types and of the interfaces marked with
+    /// <see cref="SubjectAbstractionAttribute"/> that they implement, distinct by ordinal comparison, as type names match
+    /// case-sensitively, and ordered ignoring case.
+    /// </summary>
+    public IReadOnlyList<string> GetTypeNames()
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var type in _typeRegistry.RegisteredTypes)
+        {
+            names.Add(type.Name);
+            foreach (var implementedInterface in type.GetInterfaces())
+            {
+                if (implementedInterface.IsDefined(typeof(SubjectAbstractionAttribute), false))
+                {
+                    names.Add(implementedInterface.Name);
+                }
+            }
+        }
+
+        var sortedNames = names.ToList();
+        sortedNames.Sort(static (left, right) =>
+        {
+            var comparison = StringComparer.OrdinalIgnoreCase.Compare(left, right);
+            return comparison != 0 ? comparison : StringComparer.Ordinal.Compare(left, right);
+        });
+        return sortedNames;
     }
 
     /// <summary>
