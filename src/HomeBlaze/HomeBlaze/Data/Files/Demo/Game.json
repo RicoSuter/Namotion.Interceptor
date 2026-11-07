@@ -1,0 +1,102 @@
+{
+  "$type": "HomeBlaze.Game.Game",
+  "name": "Demo world",
+  "players": {},
+  "tools": {"wall-tool": {"$type": "HomeBlaze.Game.Buildings.WallTool"}, "tree-tool": {"$type": "HomeBlaze.Game.Nature.TreeTool"}},
+  "regions": {
+    "-1_-1": {
+      "objects": {
+        "garden-02": {"$type": "HomeBlaze.Game.Nature.Tree", "x": -27, "y": -23, "variant": 2, "rotation": 35, "scale": 88},
+        "garden-04": {"$type": "HomeBlaze.Game.Nature.Tree", "x": -26, "y": -16, "variant": 6, "rotation": 67, "scale": 115}
+      }
+    },
+    "-1_0": {
+      "objects": {
+        "house-south-1": {"$type": "HomeBlaze.Game.Buildings.Wall", "x": -28, "y": 8, "width": 26, "depth": 1, "height": 10, "material": "Bricks"},
+        "house-south-2": {"$type": "HomeBlaze.Game.Buildings.Door", "x": -2, "y": 8, "width": 6, "depth": 1, "height": 10, "material": "Bricks", "isOpen": true},
+        "house-north-1": {"$type": "HomeBlaze.Game.Buildings.Wall", "x": -28, "y": 47, "width": 56, "depth": 1, "height": 10, "material": "Bricks"},
+        "house-west-1": {"$type": "HomeBlaze.Game.Buildings.Wall", "x": -28, "y": 9, "width": 1, "depth": 38, "height": 10, "material": "Bricks"},
+        "living-hall-1": {"$type": "HomeBlaze.Game.Buildings.Wall", "x": -7, "y": 9, "width": 1, "depth": 7, "height": 10, "material": "Concrete"},
+        "living-hall-2": {"$type": "HomeBlaze.Game.Buildings.Door", "x": -7, "y": 16, "width": 1, "depth": 5, "height": 10, "material": "Concrete", "isOpen": true},
+        "living-hall-3": {"$type": "HomeBlaze.Game.Buildings.Wall", "x": -7, "y": 21, "width": 1, "depth": 26, "height": 10, "material": "Concrete"},
+        "living-bedroom-1": {"$type": "HomeBlaze.Game.Buildings.Wall", "x": -27, "y": 29, "width": 7, "depth": 1, "height": 10, "material": "Concrete"},
+        "living-bedroom-2": {"$type": "HomeBlaze.Game.Buildings.Door", "x": -20, "y": 29, "width": 5, "depth": 1, "height": 10, "material": "Concrete", "isOpen": false},
+        "living-bedroom-3": {"$type": "HomeBlaze.Game.Buildings.Wall", "x": -15, "y": 29, "width": 8, "depth": 1, "height": 10, "material": "Concrete"},
+        "hall-bedroom-1": {"$type": "HomeBlaze.Game.Buildings.Wall", "x": -6, "y": 29, "width": 6, "depth": 1, "height": 10, "material": "Concrete"},
+        "shed-south-1": {"$type": "HomeBlaze.Game.Buildings.Wall", "x": -48, "y": 12, "width": 12, "depth": 1, "height": 9, "material": "Wood"},
+        "shed-north-1": {"$type": "HomeBlaze.Game.Buildings.Wall", "x": -48, "y": 21, "width": 12, "depth": 1, "height": 9, "material": "Wood"},
+        "shed-west-1": {"$type": "HomeBlaze.Game.Buildings.Wall", "x": -48, "y": 13, "width": 1, "depth": 8, "height": 9, "material": "Wood"},
+        "shed-east-1": {"$type": "HomeBlaze.Game.Buildings.Wall", "x": -37, "y": 13, "width": 1, "depth": 2, "height": 9, "material": "Wood"},
+        "shed-east-2": {"$type": "HomeBlaze.Game.Buildings.Door", "x": -37, "y": 15, "width": 1, "depth": 4, "height": 9, "material": "Wood", "isOpen": false},
+        "shed-east-3": {"$type": "HomeBlaze.Game.Buildings.Wall", "x": -37, "y": 19, "width": 1, "depth": 2, "height": 9, "material": "Wood"},
+        "backyard-02": {"$type": "HomeBlaze.Game.Nature.Tree", "x": -20, "y": 60, "variant": 3, "rotation": 315, "scale": 118}
+      }
+    },
+    "0_-1": {
+      "objects": {
+        "forest-02": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 41, "y": -7, "variant": 1, "rotation": 19, "scale": 85},
+        "forest-07": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 36, "y": -10, "variant": 6, "rotation": 15, "scale": 97},
+        "forest-18": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 49, "y": -10, "variant": 3, "rotation": 277, "scale": 89},
+        "garden-01": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 14, "y": -23, "variant": 0, "rotation": 227, "scale": 93},
+        "garden-03": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 36, "y": -20, "variant": 4, "rotation": 72, "scale": 92}
+      }
+    },
+    "0_0": {
+      "objects": {
+        "house-south-3": {"$type": "HomeBlaze.Game.Buildings.Wall", "x": 4, "y": 8, "width": 24, "depth": 1, "height": 10, "material": "Bricks"},
+        "house-east-1": {"$type": "HomeBlaze.Game.Buildings.Wall", "x": 27, "y": 9, "width": 1, "depth": 38, "height": 10, "material": "Bricks"},
+        "hall-kitchen-1": {"$type": "HomeBlaze.Game.Buildings.Wall", "x": 10, "y": 9, "width": 1, "depth": 7, "height": 10, "material": "Concrete"},
+        "hall-kitchen-2": {"$type": "HomeBlaze.Game.Buildings.Door", "x": 10, "y": 16, "width": 1, "depth": 5, "height": 10, "material": "Concrete", "isOpen": true},
+        "hall-kitchen-3": {"$type": "HomeBlaze.Game.Buildings.Wall", "x": 10, "y": 21, "width": 1, "depth": 15, "height": 10, "material": "Concrete"},
+        "hall-kitchen-4": {"$type": "HomeBlaze.Game.Buildings.Door", "x": 10, "y": 36, "width": 1, "depth": 4, "height": 10, "material": "Concrete", "isOpen": false},
+        "hall-kitchen-5": {"$type": "HomeBlaze.Game.Buildings.Wall", "x": 10, "y": 40, "width": 1, "depth": 7, "height": 10, "material": "Concrete"},
+        "hall-bedroom-2": {"$type": "HomeBlaze.Game.Buildings.Door", "x": 0, "y": 29, "width": 5, "depth": 1, "height": 10, "material": "Concrete", "isOpen": true},
+        "hall-bedroom-3": {"$type": "HomeBlaze.Game.Buildings.Wall", "x": 5, "y": 29, "width": 5, "depth": 1, "height": 10, "material": "Concrete"},
+        "kitchen-bathroom-1": {"$type": "HomeBlaze.Game.Buildings.Wall", "x": 11, "y": 29, "width": 16, "depth": 1, "height": 10, "material": "Concrete"},
+        "forest-03": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 55, "y": 52, "variant": 2, "rotation": 103, "scale": 116},
+        "forest-08": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 44, "y": 32, "variant": 0, "rotation": 240, "scale": 85},
+        "forest-09": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 37, "y": 3, "variant": 1, "rotation": 322, "scale": 107},
+        "forest-13": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 39, "y": 16, "variant": 5, "rotation": 196, "scale": 97},
+        "forest-16": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 40, "y": 48, "variant": 1, "rotation": 320, "scale": 107},
+        "forest-19": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 50, "y": 20, "variant": 4, "rotation": 208, "scale": 87},
+        "forest-21": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 59, "y": 5, "variant": 6, "rotation": 67, "scale": 107},
+        "forest-22": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 49, "y": 43, "variant": 0, "rotation": 334, "scale": 95},
+        "forest-23": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 58, "y": 24, "variant": 1, "rotation": 262, "scale": 116},
+        "forest-26": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 55, "y": 11, "variant": 4, "rotation": 311, "scale": 91},
+        "forest-28": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 48, "y": 12, "variant": 6, "rotation": 335, "scale": 105},
+        "forest-30": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 50, "y": 2, "variant": 1, "rotation": 123, "scale": 105},
+        "forest-32": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 37, "y": 40, "variant": 3, "rotation": 38, "scale": 84},
+        "backyard-01": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 7, "y": 59, "variant": 1, "rotation": 178, "scale": 82},
+        "backyard-03": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 10, "y": 52, "variant": 5, "rotation": 185, "scale": 109},
+        "animal-01": {"$type": "HomeBlaze.Game.Nature.Animal", "x": 58, "y": 43, "variant": "Deer", "homeX": 58, "homeY": 43, "wanderRadius": 24},
+        "animal-03": {"$type": "HomeBlaze.Game.Nature.Animal", "x": 50, "y": 26, "variant": "Deer", "homeX": 50, "homeY": 26, "wanderRadius": 24}
+      }
+    },
+    "1_-1": {
+      "objects": {
+        "forest-04": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 93, "y": -2, "variant": 3, "rotation": 64, "scale": 112},
+        "forest-17": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 89, "y": -9, "variant": 2, "rotation": 318, "scale": 117},
+        "forest-24": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 81, "y": -8, "variant": 2, "rotation": 250, "scale": 120},
+        "forest-29": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 66, "y": -5, "variant": 0, "rotation": 83, "scale": 88}
+      }
+    },
+    "1_0": {
+      "objects": {
+        "forest-01": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 65, "y": 43, "variant": 0, "rotation": 11, "scale": 96},
+        "forest-05": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 82, "y": 14, "variant": 4, "rotation": 255, "scale": 103},
+        "forest-06": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 94, "y": 41, "variant": 5, "rotation": 255, "scale": 88},
+        "forest-10": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 88, "y": 30, "variant": 2, "rotation": 294, "scale": 117},
+        "forest-11": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 84, "y": 1, "variant": 3, "rotation": 339, "scale": 93},
+        "forest-12": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 67, "y": 24, "variant": 4, "rotation": 357, "scale": 109},
+        "forest-14": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 75, "y": 46, "variant": 6, "rotation": 113, "scale": 89},
+        "forest-15": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 88, "y": 53, "variant": 0, "rotation": 33, "scale": 82},
+        "forest-20": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 74, "y": 10, "variant": 5, "rotation": 265, "scale": 87},
+        "forest-25": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 81, "y": 47, "variant": 3, "rotation": 210, "scale": 118},
+        "forest-27": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 76, "y": 51, "variant": 5, "rotation": 17, "scale": 118},
+        "forest-31": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 79, "y": 38, "variant": 2, "rotation": 81, "scale": 85},
+        "animal-02": {"$type": "HomeBlaze.Game.Nature.Animal", "x": 67, "y": 34, "variant": "Stag", "homeX": 67, "homeY": 34, "wanderRadius": 24},
+        "animal-04": {"$type": "HomeBlaze.Game.Nature.Animal", "x": 69, "y": 16, "variant": "Deer", "homeX": 69, "homeY": 16, "wanderRadius": 24}
+      }
+    }
+  }
+}
