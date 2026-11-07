@@ -39,7 +39,10 @@ public class RegisteredSubject
     /// <summary>
     /// Gets whether the subject is in the registry's graph through this instance: true from the registry's
     /// registration of the subject until the registry removes the subject's last parent or unregisters it, both of
-    /// which happen only when the subject detaches. A subject without parents that is attached is therefore a root.
+    /// which happen only when the subject detaches, as long as the registry has seen every reference to the subject. A
+    /// reference added through a property the registry does not know, or before the registry was added, is not
+    /// tracked, so removing the subject's last tracked parent clears the flag although the subject stays in the graph.
+    /// A subject without parents that is attached is therefore a root.
     /// An instance never becomes attached again: a subject attached again is registered as a new instance. An
     /// instance created outside the registry is never attached. Lock-free.
     /// </summary>
