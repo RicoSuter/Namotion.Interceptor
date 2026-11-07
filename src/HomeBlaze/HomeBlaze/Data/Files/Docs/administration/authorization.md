@@ -253,7 +253,7 @@ Clients of `/mcp` use the role `Everything` with the system rules, and `McpServe
 
 ## Watch Paths
 
-The state a background run receives from the agent's `WatchPaths` is read without the agent's roles, as the operator chose the paths, but with the system rules, so the state of agents stays out. A watch path in a branch the roles hide therefore still reaches the agent in its background message. Watch only what the agent may see.
+The state a background run receives from the agent's `WatchPaths` is read with the agent's roles, as the tools read it, so the state of agents and whatever else the roles hide stays out. A watch path that the roles hide as a whole appears in the background message with the error of a path that does not exist, which points to a watch path the roles do not cover; below a watched subject, what the roles hide is left out.
 
 ---
 
@@ -273,7 +273,6 @@ For an agent the policy comes from its roles; for `/mcp` clients it is `Everythi
 - **Subjects with only secrets**: a subject whose only members other than attributes are secrets has no readable member, so it is hidden from every agent and `/mcp` client, as is a subject the roles deny every member of.
 - **Page addresses**: `browse` and `search` give a subject with a page its address as `$url`, which is built with the shallowest path of the subject. When a member or subject on that path is hidden, `$url` is left out, so it names nothing hidden, even when the subject is readable for the tools at another path, such as a subject that is also held below a hidden branch.
 - **Roles changed while they are read**: when an edit or a reload changes the roles while they are compiled, they are read once more; when that fails as well, custom roles are unavailable for that one call, and the next call reads them again.
-- **Watch paths**: see [Watch Paths](#watch-paths).
 
 ---
 

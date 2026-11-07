@@ -154,6 +154,30 @@ public sealed class AgentRolesTests : IAsyncLifetime
         Assert.Contains("not found", stateLines[1].GetProperty("error").GetString());
     }
 
+    [Fact]
+    public async Task WhenTheRolesHideAPartOfAWatchedBranch_ThenTheBackgroundMessageLeavesItOut()
+    {
+        // Arrange
+        var graph = await CreateGraphAsync("# Notes", ("NoCellar", new Role
+        {
+            Includes = [BuiltInRoles.OperatorName],
+            Deny = [new PermissionRule { Paths = ["/Devices/Cellar/**"], Actions = [PermissionAction.Read] }]
+        }));
+        AddDevices(graph);
+        var agent = new FakeAgent(graph.AgentServices) { Roles = ["NoCellar"], WatchPaths = ["/Devices"], MinRunInterval = TimeSpan.Zero };
+        await AttachAndWaitForStartAsync(graph, agent);
+
+        // Act
+        var runCount = agent.RunCount;
+        agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => agent.RunCount > runCount && !agent.IsBusy, message: "The background run should finish.");
+
+        // Assert
+        var message = agent.Requests[^1].UserMessage;
+        Assert.Contains("/Devices/Kitchen", message);
+        Assert.DoesNotContain("Cellar", message);
+    }
+
     [Theory]
     [InlineData(BuiltInRoles.ReaderName, false)]
     [InlineData(BuiltInRoles.OperatorName, true)]
