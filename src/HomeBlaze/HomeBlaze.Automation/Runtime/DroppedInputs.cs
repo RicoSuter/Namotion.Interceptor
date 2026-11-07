@@ -20,11 +20,11 @@ internal sealed class DroppedInputs
     /// <summary>The drops counted when the worker took these inputs, of every kind of input.</summary>
     public QueueFaults Faults { get; set; }
 
-    /// <summary>Whether an input was dropped because the queue was full.</summary>
-    public bool HasOverload => Faults.Overloaded > 0 || HasOverloadedInputs;
-
-    /// <summary>Whether a change or an activation was dropped because the queue was full.</summary>
-    public bool HasOverloadedInputs => _changes.Values.Any(change => !IsChainDrop(change)) || _activations.Exists(activation => !IsChainDrop(activation));
+    /// <summary>
+    /// Whether an input was dropped because the queue was full. The queue counts every drop of the batch in the
+    /// <see cref="Faults"/> it takes with the batch.
+    /// </summary>
+    public bool HasOverload => Faults.Overloaded > 0;
 
     /// <summary>The deepest chain of the changes and activations dropped because the queue was full, 0 without one.</summary>
     public int OverloadDepth => _changes.Values.Where(change => !IsChainDrop(change)).Select(change => change.ChainDepth)

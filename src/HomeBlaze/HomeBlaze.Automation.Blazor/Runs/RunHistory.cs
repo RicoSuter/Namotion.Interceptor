@@ -52,10 +52,6 @@ internal static class RunHistory
         return new RunHistoryResult(runs, isBehind);
     }
 
-    /// <summary>The last run of each rule that ran, in the order of the rules, for a page without a history store.</summary>
-    public static IReadOnlyList<RunEntry> GetLastRuns(IEnumerable<(string RuleName, AutomationRunOutcome? Outcome, string? Message)> rules) =>
-        [.. rules.Where(rule => rule.Outcome is not null).Select(rule => new RunEntry(null, rule.RuleName, rule.Outcome, rule.Message))];
-
     // The query keeps the newest counts, one more than the runs it may return: when it is full, its oldest count is the
     // count before the others, and otherwise the count before the window is read.
     private static async Task<(List<DateTimeOffset> Times, double? StoredCount)> LoadRunTimesAsync(

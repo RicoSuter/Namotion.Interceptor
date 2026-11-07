@@ -23,40 +23,26 @@ public class PendingRowsTests
     }
 
     [Fact]
-    public void WhenTheSameStateIsSetAgain_ThenNothingChanges()
-    {
-        // Arrange
-        var pending = new PendingRows();
-        pending.Set("a", true);
-
-        // Act
-        var marked = pending.Set("a", true);
-        var unmarked = pending.Set("b", false);
-
-        // Assert
-        Assert.False(marked);
-        Assert.False(unmarked);
-        Assert.True(pending.Any);
-    }
-}
-
-public class PendingRowsLifecycleTests
-{
-    [Fact]
-    public void WhenAFieldIsMarkedOrCleared_ThenChangedIsRaisedOncePerChange()
+    public void WhenTheSameStateIsSetAgain_ThenNothingChangesAndChangedIsRaisedOncePerChange()
     {
         // Arrange
         var pending = new PendingRows();
         var raised = 0;
         pending.Changed += () => raised++;
+        pending.Set("a", true);
 
         // Act
-        pending.Set("a", true);
-        pending.Set("a", true);
+        var marked = pending.Set("a", true);
+        var unmarked = pending.Set("b", false);
+        var isStillPending = pending.Any;
         pending.Set("a", false);
-        pending.Set("a", false);
+        var clearedAgain = pending.Set("a", false);
 
         // Assert
+        Assert.False(marked);
+        Assert.False(unmarked);
+        Assert.True(isStillPending);
+        Assert.False(clearedAgain);
         Assert.Equal(2, raised);
     }
 

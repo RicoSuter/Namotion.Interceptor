@@ -12,9 +12,7 @@ namespace HomeBlaze.Automation.Blazor.Runs;
 /// </summary>
 internal static class RecentRuns
 {
-    public const int MaxRuns = 20;
-    public const string HistoryCaption = "From history: the runs of the last seven days.";
-    public const string LastRunsCaption = "Without a history store: the last run of each rule.";
+    private const int MaxRuns = 20;
 
     private static readonly TimeSpan Window = TimeSpan.FromDays(7);
 
@@ -27,7 +25,12 @@ internal static class RecentRuns
         IHistoryStore[] stores = ((IInterceptorSubject)automation).Context.TryGetService<ISubjectRegistry>()?.KnownSubjects.Keys.OfType<IHistoryStore>().ToArray() ?? [];
         if (stores.Length == 0)
         {
-            var lastRuns = RunHistory.GetLastRuns(automation.GetRulesInOrder().Select(pair => (pair.Value.Name ?? pair.Key, pair.Value.LastRunOutcome, pair.Value.LastRunMessage)));
+            IReadOnlyList<RunEntry> lastRuns =
+            [
+                .. automation.GetRulesInOrder()
+                    .Where(pair => pair.Value.LastRunOutcome is not null)
+                    .Select(pair => new RunEntry(null, pair.Value.Name ?? pair.Key, pair.Value.LastRunOutcome, pair.Value.LastRunMessage))
+            ];
             return new RecentRunsResult(false, lastRuns, null, false);
         }
 
@@ -74,5 +77,7 @@ internal static class RecentRuns
 /// </summary>
 internal sealed record RecentRunsResult(bool HasHistory, IReadOnlyList<RunEntry> Runs, string? Error, bool IsBehind)
 {
-    public string Caption => HasHistory ? RecentRuns.HistoryCaption : RecentRuns.LastRunsCaption;
+    public string Caption => HasHistory
+        ? "From history: the runs of the last seven days. Runs within about 250 ms can show as one, and a crash can drop runs."
+        : "Without a history store: the last run of each rule.";
 }

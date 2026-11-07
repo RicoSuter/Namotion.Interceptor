@@ -7,8 +7,8 @@ namespace Namotion.Interceptor.Expressions;
 /// An expression parsed once: paths and literals, computed with <c>+ - * /</c> and negated with <c>-</c>, compared with
 /// <c>== != &lt; &lt;= &gt; &gt;=</c> and combined with <c>and</c> (<c>&amp;&amp;</c>), <c>or</c> (<c>||</c>),
 /// <c>not</c> (<c>!</c>) and parentheses, followed by pipes such as <c>| raw</c>. A bare word after a comparison operator
-/// is text, such as the name of an enum value, unless it holds the path separator or an index, is a variable of
-/// <see cref="Variables"/>, or is an operand of arithmetic.
+/// is text, such as the name of an enum value, unless it holds the path separator or an index, is a variable, or is an
+/// operand of arithmetic.
 /// </summary>
 public sealed class ParsedExpression
 {
@@ -34,11 +34,8 @@ public sealed class ParsedExpression
     /// <summary>The character between the segments of the paths of the expression.</summary>
     public char PathSeparator { get; }
 
-    /// <summary>
-    /// The names that are variables of the expression: those the host declared when it parsed the expression, or
-    /// <see cref="ExpressionVariables.Value"/> and <see cref="ExpressionVariables.Subject"/>.
-    /// </summary>
-    public ImmutableArray<string> Variables { get; }
+    // The variables the host declared when it parsed the expression, or those of ExpressionVariables.
+    internal ImmutableArray<string> Variables { get; }
 
     /// <summary>The distinct paths the expression reads, in order of first appearance.</summary>
     public ImmutableArray<string> Paths { get; }
@@ -52,11 +49,9 @@ public sealed class ParsedExpression
     internal ExpressionNode Body { get; }
 
     /// <summary>
-    /// Parses the text with paths whose segments the separator divides, such as <c>.</c>. A word after a comparison operator
-    /// is text, such as the name of an enum value, unless it holds the separator or an index, is the variable <c>value</c>
-    /// or <c>subject</c>, or is an operand of arithmetic, which are paths. With <c>/</c> as separator a division needs
-    /// spaces, as in <c>a / b</c>, since <c>5/2</c> is a path. On failure the error reads
-    /// <c>&lt;message&gt; at position &lt;zero-based index&gt;</c>.
+    /// Parses the text with paths whose segments the separator divides, such as <c>.</c>, and the variables <c>value</c>
+    /// and <c>subject</c>. With <c>/</c> as separator a division needs spaces, as in <c>a / b</c>, since <c>5/2</c> is a
+    /// path. On failure the error reads <c>&lt;message&gt; at position &lt;zero-based index&gt;</c>.
     /// </summary>
     /// <exception cref="ArgumentException">The separator is white space, a letter, a digit, a quote, a bracket, or one of <c>| &amp; = ! &lt; &gt; + - *</c>.</exception>
     public static bool TryParse(
@@ -70,12 +65,10 @@ public sealed class ParsedExpression
     }
 
     /// <summary>
-    /// Parses the text with paths whose segments the separator divides and with the variables the host declares, which
-    /// replace <see cref="ExpressionVariables.Value"/> and <see cref="ExpressionVariables.Subject"/>. A path whose first
-    /// segment is one of these names starts with the variable, and a word after a comparison operator is text unless it
-    /// holds the separator or an index, is one of these names, or is an operand of arithmetic. Every other word is a path or
-    /// a text, as for a host that does not declare it. On failure the error reads
-    /// <c>&lt;message&gt; at position &lt;zero-based index&gt;</c>.
+    /// Parses the text as <see cref="TryParse(string, char, out ParsedExpression?, out string?)"/> does, with the variables
+    /// the host declares, which replace <see cref="ExpressionVariables.Value"/> and <see cref="ExpressionVariables.Subject"/>.
+    /// A path whose first segment is one of these names starts with the variable. Every other word is a path or a text, as
+    /// for a host that does not declare it.
     /// </summary>
     /// <param name="text">The text.</param>
     /// <param name="pathSeparator">The character between the segments of the paths.</param>
@@ -84,8 +77,8 @@ public sealed class ParsedExpression
     /// <c>true</c>, <c>false</c> and <c>null</c>.</param>
     /// <param name="expression">The expression, or null.</param>
     /// <param name="error">The error, or null.</param>
-    /// <exception cref="ArgumentException">The separator is white space, a letter, a digit, a quote, a bracket, or one of
-    /// <c>| &amp; = ! &lt; &gt; + - *</c>, or a variable is no such word.</exception>
+    /// <exception cref="ArgumentException">The separator cannot be used in an expression, see the overload without variables,
+    /// or a variable is no such word.</exception>
     public static bool TryParse(
         string text,
         char pathSeparator,
@@ -99,8 +92,8 @@ public sealed class ParsedExpression
     }
 
     /// <summary>
-    /// Gets whether the first segment of a path of the expression is one of its <see cref="Variables"/>, and which one, with
-    /// the rest of the path.
+    /// Gets whether the first segment of a path of the expression is one of its variables, those the host declared when it
+    /// parsed the expression or those of <see cref="ExpressionVariables"/>, and which one, with the rest of the path.
     /// </summary>
     /// <param name="path">The path, such as one of <see cref="Paths"/>.</param>
     /// <param name="variable">The variable, or null.</param>

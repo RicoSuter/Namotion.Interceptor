@@ -24,6 +24,7 @@ public class AutomationPreviewTests
         // Assert
         Assert.Null(condition.Error);
         Assert.True(condition.Result);
+        Assert.Null(value.Result);
         Assert.Equal(9.0, value.Value);
         Assert.False(string.IsNullOrEmpty(value.Text));
     }
@@ -103,21 +104,6 @@ public class AutomationPreviewTests
     }
 
     [Fact]
-    public async Task WhenTheExpressionIsNotBoolean_ThenTheResultIsNullAndTheValueIsKept()
-    {
-        // Arrange
-        await using var host = await StartAsync();
-        host.Weather.Gust = 9;
-
-        // Act
-        var preview = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/Gust", allowsEvent: false);
-
-        // Assert
-        Assert.Null(preview.Result);
-        Assert.Equal(9.0, preview.Value);
-    }
-
-    [Fact]
     public async Task WhenADateIsEvaluatedWithATimeZone_ThenTheTextUsesIt()
     {
         // Arrange
@@ -177,5 +163,25 @@ public class AutomationPreviewTests
         Assert.Null(condition.Value);
         Assert.Null(condition.Text);
         Assert.Equal("Gust ", template.Text);
+    }
+
+    [Fact]
+    public async Task WhenReadingAValueThrows_ThenThePreviewSaysWhyInsteadOfThrowing()
+    {
+        // Arrange
+        await using var host = await StartAsync();
+        host.Weather.Reading = new UnreadableReading();
+
+        // Act
+        var value = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/Reading", allowsEvent: false);
+        var template = AutomationPreview.Render(host.Automation, "retract", "Reading {{ /Weather/Reading }}", allowsEvent: false);
+
+        // Assert
+        Assert.Null(value.Error);
+        Assert.Null(value.Result);
+        Assert.Null(value.Value);
+        Assert.Equal("cannot be read: The reading is corrupt", value.Text);
+        Assert.Null(template.Error);
+        Assert.Equal("cannot be read: The reading is corrupt", template.Text);
     }
 }

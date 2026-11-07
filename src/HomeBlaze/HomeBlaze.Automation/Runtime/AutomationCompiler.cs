@@ -111,7 +111,7 @@ internal static class AutomationCompiler
     private static CompiledRule Compile(string key, AutomationRule rule, IReadOnlyList<string> states, ActionTargetCheck? targets, out List<string> errors)
     {
         errors = [];
-        var candidate = new CompiledRule(key, rule, CompileGuard(rule.Guard, errors));
+        var candidate = new CompiledRule(key, rule, CompileOnlyIf(rule.OnlyIf, errors));
         if (!Enum.IsDefined(rule.Mode))
         {
             errors.Add($"the mode {rule.Mode} is not defined");
@@ -188,19 +188,19 @@ internal static class AutomationCompiler
         return names.Contains(initialState) ? null : $"The initial state '{initialState}' is not a state";
     }
 
-    private static ParsedExpression? CompileGuard(string? guard, List<string> errors)
+    private static ParsedExpression? CompileOnlyIf(string? onlyIf, List<string> errors)
     {
-        if (string.IsNullOrWhiteSpace(guard))
+        if (string.IsNullOrWhiteSpace(onlyIf))
         {
             return null;
         }
 
-        if (AutomationExpressionCheck.TryParseExpression(guard, allowsEvent: false, out var expression, out var error))
+        if (AutomationExpressionCheck.TryParseExpression(onlyIf, allowsEvent: false, out var expression, out var error))
         {
             return expression;
         }
 
-        errors.Add($"guard: {error}");
+        errors.Add($"Only if: {error}");
         return null;
     }
 

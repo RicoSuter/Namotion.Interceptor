@@ -8,8 +8,11 @@ namespace HomeBlaze.Automation.Tests.Testing;
 /// </summary>
 internal sealed class TestClock(FakeTimeProvider time) : TimeProvider
 {
+    private readonly ManualResetEventSlim _readResumed = new(initialState: true);
     private int _wakeUps;
     private long _wallClockShiftTicks;
+    private int _isNextReadPaused;
+    private TaskCompletionSource _readPaused = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>How far the wall clock is ahead of the fake time, or behind it when negative.</summary>
     public TimeSpan WallClockShift
@@ -24,7 +27,33 @@ internal sealed class TestClock(FakeTimeProvider time) : TimeProvider
 
     public override long TimestampFrequency => time.TimestampFrequency;
 
-    public override DateTimeOffset GetUtcNow() => time.GetUtcNow() + WallClockShift;
+    /// <summary>
+    /// Makes the next read of the clock wait after it read the time until <see cref="ResumeRead"/>, as a thread that is
+    /// preempted right after it read the clock.
+    /// </summary>
+    public void PauseNextRead()
+    {
+        _readResumed.Reset();
+        Volatile.Write(ref _readPaused, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+        Volatile.Write(ref _isNextReadPaused, 1);
+    }
+
+    /// <summary>Completes once a read of the clock that <see cref="PauseNextRead"/> paused read the time and waits.</summary>
+    public Task NextReadPaused => Volatile.Read(ref _readPaused).Task;
+
+    public void ResumeRead() => _readResumed.Set();
+
+    public override DateTimeOffset GetUtcNow()
+    {
+        var now = time.GetUtcNow() + WallClockShift;
+        if (Interlocked.Exchange(ref _isNextReadPaused, 0) == 1)
+        {
+            Volatile.Read(ref _readPaused).TrySetResult();
+            _readResumed.Wait(TimeSpan.FromSeconds(30));
+        }
+
+        return now;
+    }
 
     public override long GetTimestamp() => time.GetTimestamp();
 

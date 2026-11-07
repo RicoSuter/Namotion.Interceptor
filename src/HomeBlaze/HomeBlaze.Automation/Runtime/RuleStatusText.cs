@@ -31,8 +31,8 @@ internal static class RuleStatusText
             if (trigger is { Phase: TriggerPhase.Pending, PendingSince: { } since })
             {
                 return skipReason is null
-                    ? $"{mode}: Waiting since {FormatTime(since, timeZone)}"
-                    : $"{mode}: Waiting since {FormatTime(since, timeZone)}: {skipReason}";
+                    ? $"{mode}: Waiting since {FormatInstant(since, timeZone)}"
+                    : $"{mode}: Waiting since {FormatInstant(since, timeZone)}: {skipReason}";
             }
         }
 
@@ -99,7 +99,7 @@ internal static class RuleStatusText
     private static string FormatTime(DateTimeOffset instant, TimeZoneInfo timeZone) =>
         TimeZoneInfo.ConvertTime(instant, timeZone).ToString("HH:mm:ss", CultureInfo.InvariantCulture);
 
-    // A value can stay missing for days, so the text names the day as well.
+    // A value can stay missing, and a trigger can wait, for days, so the text names the day as well.
     private static string FormatInstant(DateTimeOffset instant, TimeZoneInfo timeZone) =>
         TimeZoneInfo.ConvertTime(instant, timeZone).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 }

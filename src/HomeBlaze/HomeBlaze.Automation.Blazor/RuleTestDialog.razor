@@ -24,16 +24,16 @@
                     </div>
                 }
             </MudStack>
-            @if (Result.HasGuard)
+            @if (Result.HasOnlyIf)
             {
                 <MudText Typo="Typo.subtitle2">Only if</MudText>
-                <div class="d-flex align-center gap-2 mb-3" data-testid="automation-test-guard">
-                    <MudText Typo="Typo.body2" Style="flex: 1; overflow-wrap: anywhere; font-family: monospace;">@Rule.Guard</MudText>
-                    <MudChip T="string" Size="Size.Small" Color="@GetColor(Result.GuardResult)" Class="ma-0">@FormatResult(Result.GuardResult)</MudChip>
+                <div class="d-flex align-center gap-2 mb-3" data-testid="automation-test-only-if">
+                    <MudText Typo="Typo.body2" Style="flex: 1; overflow-wrap: anywhere; font-family: monospace;">@Rule.OnlyIf</MudText>
+                    <MudChip T="string" Size="Size.Small" Color="@GetColor(Result.OnlyIfResult)" Class="ma-0">@FormatResult(Result.OnlyIfResult)</MudChip>
                 </div>
-                @if (Result.GuardMissingPaths.Count > 0)
+                @if (Result.OnlyIfMissingPaths.Count > 0)
                 {
-                    <MudText Typo="Typo.caption" Color="Color.Warning" Class="mb-3">No value: @string.Join(", ", Result.GuardMissingPaths)</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Warning" Class="mb-3">No value: @string.Join(", ", Result.OnlyIfMissingPaths)</MudText>
                 }
             }
             <MudText Typo="Typo.subtitle2">Actions it would run</MudText>

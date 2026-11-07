@@ -46,7 +46,7 @@
         </MudText>
     }
     <div class="mt-2">
-        <ConditionField Label="Only events where" Lead="When" Value="@_trigger.Filter" ValueChanged="SetFilterAsync"
+        <ConditionField Label="Only events where" Value="@_trigger.Filter" ValueChanged="SetFilterAsync"
                         Fields="_fields" Validate="@RuleExpressions.ValidateFilter" TestId="automation-event-filter" />
     </div>
     <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1">

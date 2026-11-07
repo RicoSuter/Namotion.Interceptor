@@ -5,7 +5,7 @@ namespace HomeBlaze.Automation.Blazor.Tests.Diagram;
 public class StateDiagramLayoutCacheTests
 {
     private static StateDiagramRule Rule(string name, string? inState, string target) =>
-        StateDiagramRule.Create(name.ToLowerInvariant(), name, inState, [new ChangeStateAction { Id = "state-1", TargetState = target }]);
+        StateDiagramRule.From(name.ToLowerInvariant(), new AutomationRule { Name = name, InState = inState, Actions = [new ChangeStateAction { Id = "state-1", TargetState = target }] });
 
     [Fact]
     public void WhenTheStatesAndRulesAreTheSame_ThenTheLayoutIsReused()

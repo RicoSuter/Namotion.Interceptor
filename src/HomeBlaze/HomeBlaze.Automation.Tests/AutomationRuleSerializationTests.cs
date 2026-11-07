@@ -22,7 +22,7 @@ public class AutomationRuleSerializationTests
             Name = "Retract blinds",
             Mode = AutomationRuleMode.On,
             InState = "Day",
-            Guard = "not /Blinds/IsMoving",
+            OnlyIf = "not /Blinds/IsMoving",
             Triggers =
             [
                 new PropertyTrigger { Expression = "/Weather/Gust > 8", For = TimeSpan.FromSeconds(20), Rearm = "/Weather/Gust < 6", OnActivation = TriggerActivation.WaitForFalseToTrue },
@@ -50,6 +50,8 @@ public class AutomationRuleSerializationTests
         // Assert
         using var document = JsonDocument.Parse(json);
         Assert.Equal("PropertyTrigger", document.RootElement.GetProperty("triggers")[0].GetProperty("$type").GetString());
+        Assert.Equal("20s", document.RootElement.GetProperty("triggers")[0].GetProperty("for").GetString());
+        Assert.Equal("not /Blinds/IsMoving", document.RootElement.GetProperty("onlyIf").GetString());
         Assert.Equal("InvokeOperation", document.RootElement.GetProperty("actions")[1].GetProperty("$type").GetString());
         Assert.Equal(rule.Triggers, copy.Triggers);
         Assert.Equal(rule.Actions[2], copy.Actions[2]);
@@ -59,7 +61,109 @@ public class AutomationRuleSerializationTests
         Assert.Equal("Gust {{ /Weather/Gust }} m/s", notify.Arguments["notification.Message"]);
         Assert.Equal(AutomationRuleMode.On, copy.Mode);
         Assert.Equal("Day", copy.InState);
-        Assert.Equal("not /Blinds/IsMoving", copy.Guard);
+        Assert.Equal("not /Blinds/IsMoving", copy.OnlyIf);
+    }
+
+    [Theory]
+    [InlineData("\"10m\"", 0, 10, 0)]
+    [InlineData("\"1h30m\"", 1, 30, 0)]
+    [InlineData("\"20s\"", 0, 0, 20)]
+    [InlineData("\"00:10:00\"", 0, 10, 0)]
+    [InlineData("\"1.02:00:00\"", 26, 0, 0)]
+    public void WhenTheHoldIsADurationOrATimeSpan_ThenItIsRead(string value, int hours, int minutes, int seconds)
+    {
+        // Arrange
+        var serializer = CreateSerializer();
+        var json = RuleWithHold(value);
+
+        // Act
+        var rule = (AutomationRule)serializer.Deserialize(json)!;
+
+        // Assert
+        Assert.Equal(new TimeSpan(hours, minutes, seconds), Assert.IsType<PropertyTrigger>(Assert.Single(rule.Triggers)).For);
+    }
+
+    [Fact]
+    public void WhenTheHoldIsNull_ThenTheTriggerHasNoHold()
+    {
+        // Arrange
+        var serializer = CreateSerializer();
+
+        // Act
+        var rule = (AutomationRule)serializer.Deserialize(RuleWithHold("null"))!;
+
+        // Assert
+        Assert.Null(Assert.IsType<PropertyTrigger>(Assert.Single(rule.Triggers)).For);
+    }
+
+    [Theory]
+    [InlineData("\"10\"")]
+    [InlineData("\"ten minutes\"")]
+    [InlineData("600")]
+    public void WhenTheHoldIsNoDuration_ThenTheTriggersAreRejected(string value)
+    {
+        // Arrange
+        var serializer = CreateSerializer();
+        var skipped = new List<SkippedConfigurationProperty>();
+
+        // Act
+        var rule = (AutomationRule)serializer.Deserialize(RuleWithHold(value), created: null, skipped.Add)!;
+
+        // Assert
+        Assert.Empty(rule.Triggers);
+        Assert.Equal(nameof(AutomationRule.Triggers), Assert.Single(skipped).PropertyName);
+    }
+
+    [Theory]
+    [InlineData("\"10\"", "10")]
+    [InlineData("\"ten minutes\"", "ten minutes")]
+    [InlineData("600", "600")]
+    public void WhenTheHoldIsNoDuration_ThenTheReasonNamesTheValue(string value, string expected)
+    {
+        // Arrange
+        var serializer = CreateSerializer();
+        var skipped = new List<SkippedConfigurationProperty>();
+
+        // Act
+        serializer.Deserialize(RuleWithHold(value), created: null, skipped.Add);
+
+        // Assert
+        Assert.Equal(
+            $"'{expected}' is not a duration: use a text such as 10m, 1h30m or 00:10:00.",
+            Assert.Single(skipped).Exception.Message);
+    }
+
+    private static string RuleWithHold(string value) => $$"""
+        {
+          "$type": "HomeBlaze.Automation.AutomationRule",
+          "name": "Hold",
+          "triggers": [ { "$type": "PropertyTrigger", "expression": "/Weather/Gust > 8", "for": {{value}} } ]
+        }
+        """;
+
+    [Fact]
+    public void WhenTheRuleHasAnUnknownKey_ThenTheKeyIsIgnored()
+    {
+        // Arrange
+        var serializer = CreateSerializer();
+        const string json = """
+            {
+              "$type": "HomeBlaze.Automation.AutomationRule",
+              "name": "Retract",
+              "guard": "not /Blinds/IsMoving",
+              "triggers": [ { "$type": "PropertyTrigger", "expression": "/Weather/Gust > 8" } ]
+            }
+            """;
+        var skipped = new List<SkippedConfigurationProperty>();
+
+        // Act
+        var rule = (AutomationRule)serializer.Deserialize(json, created: null, skipped.Add)!;
+
+        // Assert
+        Assert.Equal("Retract", rule.Name);
+        Assert.Null(rule.OnlyIf);
+        Assert.Single(rule.Triggers);
+        Assert.Empty(skipped);
     }
 
     [Fact]

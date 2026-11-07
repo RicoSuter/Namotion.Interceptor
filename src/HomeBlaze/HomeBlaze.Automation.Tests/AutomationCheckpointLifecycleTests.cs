@@ -44,8 +44,7 @@ public class AutomationCheckpointLifecycleTests
         await host.FlushAsync();
         var statusAfterARun = host.Automation.Status;
         var runs = host.Blinds.CloseCount;
-        host.Automation.ResetState();
-        await host.FlushAsync();
+        await host.ResetAsync();
 
         // Assert
         var setAside = Assert.Single(Directory.GetFiles(Path.GetDirectoryName(host.CheckpointPath)!, "Storm.json.unreadable-*"));
@@ -70,8 +69,7 @@ public class AutomationCheckpointLifecycleTests
         var statusAfterTheStart = host.Automation.Status;
 
         // Act
-        await host.Automation.ApplyConfigurationAsync(CancellationToken.None);
-        await host.FlushAsync();
+        await host.SaveAsync();
 
         // Assert
         Assert.Equal(ServiceStatus.Error, statusAfterTheStart);
@@ -297,12 +295,10 @@ public class AutomationCheckpointLifecycleTests
         }
 
         // Act
-        await host.Automation.ApplyConfigurationAsync(CancellationToken.None);
-        await host.FlushAsync();
+        await host.SaveAsync();
         var statusAfterTheSave = host.Automation.Status;
         var contentAfterTheSave = await File.ReadAllTextAsync(host.CheckpointPath);
-        host.Automation.ResetState();
-        await host.FlushAsync();
+        await host.ResetAsync();
 
         // Assert
         Assert.Equal(ServiceStatus.Error, statusAfterTheSave);

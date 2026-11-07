@@ -95,13 +95,10 @@
 </div>
 
 @code {
-    private static readonly TimeSpan PreviewInterval = TimeSpan.FromSeconds(1);
-
     private readonly ExpressionFieldModel _model = new(null);
     private readonly ExpressionFieldPreview _preview = new();
-    private ITimer? _previewTimer;
+    private PreviewTicker? _ticker;
     private bool _hasPendingRow;
-    private bool _isDisposed;
 
     [Parameter] public string? Value { get; set; }
 
@@ -118,6 +115,9 @@
     /// <summary>Evaluates an expression or a path with the current values, or returns null when it cannot; without it, no values are shown.</summary>
     [Parameter] public Func<string, ExpressionPreview?>? Preview { get; set; }
 
+    /// <summary>Gets the hints of the host for a valid expression, which the field shows as warnings; asked again only when the text changes.</summary>
+    [Parameter] public Func<string, IReadOnlyList<string>>? Hints { get; set; }
+
     /// <summary>The fields a row offers, such as the fields of an event; without them, a row picks a subject path.</summary>
     [Parameter] public IReadOnlyList<string>? Fields { get; set; }
 
@@ -127,8 +127,6 @@
     /// </summary>
     [Parameter] public EventCallback<bool> HasPendingRowChanged { get; set; }
 
-    [Parameter] public char PathSeparator { get; set; } = '/';
-
     /// <summary>The variables the host declares for its expressions; default stands for <c>value</c> and <c>subject</c>.</summary>
     [Parameter] public ImmutableArray<string> Variables { get; set; }
 
@@ -136,7 +134,6 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        _model.PathSeparator = PathSeparator;
         _model.Variables = Variables;
         if (!string.Equals(Value ?? string.Empty, _model.Text, StringComparison.Ordinal))
         {
@@ -144,39 +141,26 @@
         }
 
         Refresh();
-        StartPreviewTimer();
+        if (Preview is not null)
+        {
+            _ticker ??= new PreviewTicker(TimeProvider, InvokeAsync, RefreshValuesAsync);
+        }
+
         await NotifyPendingAsync();
     }
 
-    // The previews read the current values once per interval, outside of a render, so that a value that changes often
-    // neither renders the field on every change nor makes a render evaluate the expression. The timer is created without the
-    // execution context of the render, so that a tick records no reads into a read tracking scope of that render.
-    private void StartPreviewTimer()
+    // Each tick reads the current values of the rows and the result again.
+    private Task RefreshValuesAsync()
     {
-        if (Preview is null || _previewTimer is not null)
-        {
-            return;
-        }
-
-        using (ExecutionContext.SuppressFlow())
-        {
-            _previewTimer = TimeProvider.CreateTimer(_ => _ = InvokeAsync(RefreshValues), null, PreviewInterval, PreviewInterval);
-        }
-    }
-
-    private void RefreshValues()
-    {
-        if (!_isDisposed && _preview.RefreshValues(_model.Rows))
+        if (_preview.RefreshValues(_model.Rows))
         {
             StateHasChanged();
         }
+
+        return Task.CompletedTask;
     }
 
-    public void Dispose()
-    {
-        _isDisposed = true;
-        _previewTimer?.Dispose();
-    }
+    public void Dispose() => _ticker?.Dispose();
 
     private void ShowSimple()
     {
@@ -232,7 +216,7 @@
         }
     }
 
-    private void Refresh() => _preview.Update(_model.Text, _model.Rows, PathSeparator, _model.Variables, Validate, Preview);
+    private void Refresh() => _preview.Update(_model.Text, _model.Rows, _model.PathSeparator, _model.Variables, Validate, Preview, Hints);
 
     private string GetRowText(int index) => index < _preview.RowTexts.Count ? _preview.RowTexts[index] : string.Empty;
 

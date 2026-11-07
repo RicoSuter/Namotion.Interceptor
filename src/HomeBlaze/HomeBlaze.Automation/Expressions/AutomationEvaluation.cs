@@ -13,7 +13,9 @@ namespace HomeBlaze.Automation.Expressions;
 internal sealed class AutomationEvaluation
 {
     private readonly List<string> _missingPaths = [];
+    private readonly TimeZoneInfo _timeZone;
     private readonly Func<RegisteredSubjectProperty, bool>? _canRead;
+    private TimeSpan? _timeOfDay;
 
     /// <param name="resolver">Resolves the paths of expressions.</param>
     /// <param name="rule">The rule that relative paths start at.</param>
@@ -37,7 +39,7 @@ internal sealed class AutomationEvaluation
         Resolver = resolver;
         Rule = rule;
         Now = now;
-        TimeOfDay = TimeZoneInfo.ConvertTime(now, timeZone).TimeOfDay;
+        _timeZone = timeZone;
         Event = capturedEvent;
         Values = values;
         _canRead = canRead;
@@ -49,7 +51,8 @@ internal sealed class AutomationEvaluation
 
     public DateTimeOffset Now { get; }
 
-    public TimeSpan TimeOfDay { get; }
+    /// <summary>The local time of day of <see cref="Now"/>, as <see cref="LocalClock.GetTimeOfDay"/> reads it.</summary>
+    public TimeSpan TimeOfDay => _timeOfDay ??= LocalClock.GetTimeOfDay(Now, _timeZone);
 
     public CapturedEvent? Event { get; }
 

@@ -1816,11 +1816,11 @@ namespace HomeBlaze.Components.Inputs
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<bool> HasPendingRowChanged { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public System.Func<string, System.Collections.Generic.IReadOnlyList<string>>? Hints { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public string Label { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string Lead { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public char PathSeparator { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Func<string, HomeBlaze.Components.Inputs.ExpressionPreview?>? Preview { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -1843,6 +1843,11 @@ namespace HomeBlaze.Components.Inputs
         public bool? Result { get; init; }
         public string? Text { get; init; }
         public object? Value { get; init; }
+    }
+    public sealed class PreviewTicker : System.IDisposable
+    {
+        public PreviewTicker(System.TimeProvider timeProvider, System.Func<System.Func<System.Threading.Tasks.Task>, System.Threading.Tasks.Task> invokeAsync, System.Func<System.Threading.Tasks.Task> tick) { }
+        public void Dispose() { }
     }
     public class SubjectPathField : Microsoft.AspNetCore.Components.ComponentBase
     {

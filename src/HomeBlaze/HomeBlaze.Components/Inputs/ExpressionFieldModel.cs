@@ -16,24 +16,20 @@ internal sealed class ExpressionFieldModel
     private List<PendingRow?> _pending = [];
 
     /// <param name="text">The expression text.</param>
-    /// <param name="pathSeparator">The separator of the paths of the host.</param>
-    /// <param name="variables">The variables the host declares, or default for <c>value</c> and <c>subject</c>.</param>
-    public ExpressionFieldModel(string? text, char pathSeparator = '/', ImmutableArray<string> variables = default)
+    public ExpressionFieldModel(string? text)
     {
-        PathSeparator = pathSeparator;
-        Variables = variables;
         Load(text);
         IsAdvanced = !CanShowSimple;
     }
 
-    public char PathSeparator { get; set; }
+    public char PathSeparator { get; } = '/';
 
     /// <summary>The variables the host declares; default stands for <c>value</c> and <c>subject</c>.</summary>
     public ImmutableArray<string> Variables
     {
         get;
         set => field = value.IsDefault ? DefaultVariables : value;
-    }
+    } = DefaultVariables;
 
     public string Text { get; private set; } = string.Empty;
 

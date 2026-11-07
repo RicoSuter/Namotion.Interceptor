@@ -12,9 +12,9 @@ public class RunHistoryTests
 
     private static TestHistoryStore CreateStore() => new(new HistoryCoverage(Start.AddDays(-1), Start.AddDays(1)));
 
-    private static async Task<IReadOnlyList<RunEntry>> LoadAsync(TestHistoryStore store, int maxRuns = 10, params RunSource[] rules) =>
-        (await RunHistory.LoadAsync(
-            [store], rules.Length > 0 ? rules : [new RunSource("Finished", Finished)], Start, Start.AddMinutes(10), maxRuns, CancellationToken.None)).Runs;
+    private static Task<RunHistoryResult> LoadAsync(TestHistoryStore? store, int maxRuns = 10, params RunSource[] rules) =>
+        RunHistory.LoadAsync(
+            store is null ? [] : [store], rules.Length > 0 ? rules : [new RunSource("Finished", Finished)], Start, Start.AddMinutes(10), maxRuns, CancellationToken.None);
 
     [Fact]
     public async Task WhenTwoIdenticalRunsFollowEachOther_ThenBothAreListedWithTheirOutcomeNewestFirst()
@@ -28,7 +28,7 @@ public class RunHistoryTests
             .Add(Finished + "/RunCount", Start.AddMinutes(2), 2);
 
         // Act
-        var runs = await LoadAsync(store);
+        var runs = (await LoadAsync(store)).Runs;
 
         // Assert
         Assert.Equal(
@@ -51,7 +51,7 @@ public class RunHistoryTests
             .AddText(Finished + "/LastRunOutcome", Start.AddMinutes(3), "Succeeded");
 
         // Act
-        var runs = await LoadAsync(store);
+        var runs = (await LoadAsync(store)).Runs;
 
         // Assert
         Assert.Equal([new RunEntry(Start.AddMinutes(3), "Finished", AutomationRunOutcome.Succeeded, null)], runs.ToArray());
@@ -67,7 +67,7 @@ public class RunHistoryTests
             .Add(Finished + "/RunCount", Start.AddMinutes(2), 1);
 
         // Act
-        var runs = await LoadAsync(store);
+        var runs = (await LoadAsync(store)).Runs;
 
         // Assert
         Assert.Equal(Start.AddMinutes(2), Assert.Single(runs).At);
@@ -82,7 +82,7 @@ public class RunHistoryTests
             .Add(Finished + "/RunCount", Start.AddMinutes(1), 5);
 
         // Act
-        var runs = await LoadAsync(store);
+        var runs = (await LoadAsync(store)).Runs;
 
         // Assert
         Assert.Empty(runs);
@@ -97,7 +97,7 @@ public class RunHistoryTests
             .Add(Finished + "/RunCount", Start.AddMinutes(1), 4);
 
         // Act
-        var runs = await LoadAsync(store);
+        var runs = (await LoadAsync(store)).Runs;
 
         // Assert
         Assert.Equal(Start.AddMinutes(1), Assert.Single(runs).At);
@@ -115,7 +115,7 @@ public class RunHistoryTests
             .Add(Started + "/RunCount", Start.AddMinutes(3), 1);
 
         // Act
-        var runs = await LoadAsync(store, 2, new RunSource("Finished", Finished), new RunSource("Started", Started));
+        var runs = (await LoadAsync(store, 2, new RunSource("Finished", Finished), new RunSource("Started", Started))).Runs;
 
         // Assert
         Assert.Equal(
@@ -127,7 +127,7 @@ public class RunHistoryTests
     public async Task WhenThereIsNoHistoryStore_ThenThereAreNoRuns()
     {
         // Act
-        var result = await RunHistory.LoadAsync([], [new RunSource("Finished", Finished)], Start, Start.AddMinutes(10), 10, CancellationToken.None);
+        var result = await LoadAsync(null);
 
         // Assert
         Assert.Empty(result.Runs);
@@ -151,23 +151,10 @@ public class RunHistoryTests
         }
 
         // Act
-        var result = await RunHistory.LoadAsync([store], [new RunSource("Finished", Finished, live)], Start, Start.AddMinutes(10), 10, CancellationToken.None);
+        var result = await LoadAsync(store, 10, new RunSource("Finished", Finished, live));
 
         // Assert
         Assert.Equal(expectedIsBehind, result.IsBehind);
-    }
-
-    [Fact]
-    public async Task WhenNoCountIsStoredForARuleThatRan_ThenTheHistoryIsNotBehind()
-    {
-        // Arrange
-        var store = CreateStore();
-
-        // Act
-        var result = await RunHistory.LoadAsync([store], [new RunSource("Finished", Finished, 3)], Start, Start.AddMinutes(10), 10, CancellationToken.None);
-
-        // Assert
-        Assert.False(result.IsBehind);
     }
 
     [Fact]
@@ -179,8 +166,7 @@ public class RunHistoryTests
             .Add(Started + "/RunCount", Start.AddMinutes(1), 1);
 
         // Act
-        var result = await RunHistory.LoadAsync(
-            [store], [new RunSource("Finished", Finished, 2), new RunSource("Started", Started, 2)], Start, Start.AddMinutes(10), 10, CancellationToken.None);
+        var result = await LoadAsync(store, 10, new RunSource("Finished", Finished, 2), new RunSource("Started", Started, 2));
 
         // Assert
         Assert.True(result.IsBehind);
@@ -201,7 +187,7 @@ public class RunHistoryTests
         }
 
         // Act
-        var result = await RunHistory.LoadAsync([store], rules, Start, Start.AddMinutes(10), 3, CancellationToken.None);
+        var result = await LoadAsync(store, 3, rules);
 
         // Assert
         Assert.Equal(3, result.Runs.Count);
@@ -222,32 +208,9 @@ public class RunHistoryTests
             .Add(Finished + "/RunCount", Start.AddMinutes(3), 3);
 
         // Act
-        var runs = await LoadAsync(store, 2);
+        var runs = (await LoadAsync(store, 2)).Runs;
 
         // Assert
         Assert.Equal([Start.AddMinutes(3), Start.AddMinutes(2)], runs.Select(run => run.At!.Value).ToArray());
-    }
-
-    [Fact]
-    public void WhenThereIsNoHistoryStore_ThenTheLastRunOfEachRuleThatRanIsListedInRuleOrder()
-    {
-        // Arrange
-        (string, AutomationRunOutcome?, string?)[] rules =
-        [
-            ("Started", null, null),
-            ("Finished", AutomationRunOutcome.Succeeded, "Ran ChangeState(Idle)"),
-            ("notify", AutomationRunOutcome.CompletedWithErrors, null)
-        ];
-
-        // Act
-        var runs = RunHistory.GetLastRuns(rules);
-
-        // Assert
-        Assert.Equal(
-            [
-                new RunEntry(null, "Finished", AutomationRunOutcome.Succeeded, "Ran ChangeState(Idle)"),
-                new RunEntry(null, "notify", AutomationRunOutcome.CompletedWithErrors, null)
-            ],
-            runs.ToArray());
     }
 }

@@ -11,8 +11,7 @@ public class AutomationWakeUpTests
     {
         for (var elapsed = TimeSpan.Zero; elapsed < time; elapsed += step)
         {
-            host.Time.Advance(step);
-            await host.FlushAsync();
+            await host.AdvanceAsync(step);
         }
     }
 
@@ -81,6 +80,27 @@ public class AutomationWakeUpTests
         // Assert
         Assert.Equal(AutomationTestHost.Start.AddMinutes(5).AddSeconds(1), host.Rule("stale").LastTriggeredAt);
         Assert.InRange(host.Clock.WakeUps - wakeUpsAtStart, 1, 12);
+    }
+
+    [Fact]
+    public async Task WhenTheWorkerCompletedAFlush_ThenItDoesNotReadTheClockBeforeTheNextInput()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("stale", On("Stale", When("now - /Weather/LastUpdated > 5m"), Invoke("/Blinds/Close")))));
+        host.Weather.LastUpdated = AutomationTestHost.Start;
+        await host.FlushAsync();
+
+        // Act
+        host.Clock.PauseNextRead();
+        var flushes = Task.WhenAll(host.FlushAsync(), host.FlushAsync());
+        await Task.WhenAny(flushes, host.Clock.NextReadPaused);
+        var hasReadTheClock = host.Clock.NextReadPaused.IsCompleted;
+        host.Clock.ResumeRead();
+        await flushes;
+
+        // Assert
+        Assert.False(hasReadTheClock);
     }
 
     [Fact]

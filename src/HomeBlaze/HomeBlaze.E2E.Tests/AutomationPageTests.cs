@@ -33,65 +33,53 @@ public class AutomationPageTests
     public async Task WhenTheAutomationPageIsOpened_ThenItShowsTheCurrentStateAndTheRules()
     {
         // Arrange
-        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
-        try
-        {
-            // Act
-            var page = await OpenPageAsync(name);
+        await using var washer = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
 
-            // Assert
-            var automationPage = page.GetByTestId("automation-page");
-            await Assertions.Expect(automationPage.GetByRole(AriaRole.Heading, new() { Name = "Washer" })).ToBeVisibleAsync(new() { Timeout = Timeout });
-            await Assertions.Expect(page.GetByTestId("automation-state-node-Idle")).ToContainTextAsync("Current", new() { Timeout = Timeout });
-            await Assertions.Expect(page.GetByTestId("automation-state-node-Running")).ToBeVisibleAsync();
-            await Assertions.Expect(page.GetByTestId("automation-state-edge")).ToHaveCountAsync(2);
-            var rows = page.GetByTestId("automation-rule-row");
-            await Assertions.Expect(rows).ToHaveCountAsync(2);
-            await Assertions.Expect(rows.First).ToContainTextAsync("Started");
-            await Assertions.Expect(rows.First).ToContainTextAsync("Dry run");
-            await Assertions.Expect(rows.Nth(1)).ToContainTextAsync("Active in state Running");
-        }
-        finally
-        {
-            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
-        }
+        // Act
+        var page = await _fixture.OpenSubjectPageAsync(washer.Name);
+
+        // Assert
+        var automationPage = page.GetByTestId("automation-page");
+        await Assertions.Expect(automationPage.GetByRole(AriaRole.Heading, new() { Name = "Washer" })).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("automation-state-node-Idle")).ToContainTextAsync("Current", new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("automation-state-node-Running")).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByTestId("automation-state-edge")).ToHaveCountAsync(2);
+        var rows = page.GetByTestId("automation-rule-row");
+        await Assertions.Expect(rows).ToHaveCountAsync(2);
+        await Assertions.Expect(rows.First).ToContainTextAsync("Started");
+        await Assertions.Expect(rows.First).ToContainTextAsync("Dry run");
+        await Assertions.Expect(rows.Nth(1)).ToContainTextAsync("Active in state Running");
+        await Assertions.Expect(rows.First.GetByTestId("automation-dry-run-hint"))
+            .ToHaveTextAsync("Dry runs do not change the state to Running.");
     }
 
     [Fact]
     public async Task WhenTestNowIsClicked_ThenTheDialogShowsTheTriggersAndWhyTheRuleWouldNotRun()
     {
         // Arrange
-        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
-        try
-        {
-            var page = await OpenPageAsync(name);
-            await page.WaitUntilInteractiveAsync();
+        await using var washer = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        var page = await _fixture.OpenSubjectPageAsync(washer.Name);
 
-            // Act
-            await page.GetByTestId("automation-rule-row").First.GetByTestId("automation-test-now").ClickAsync();
+        // Act
+        await page.GetByTestId("automation-rule-row").First.GetByTestId("automation-test-now").ClickAsync();
 
-            // Assert
-            var dialog = page.GetByRole(AriaRole.Dialog);
-            await Assertions.Expect(dialog).ToContainTextAsync("Test now: Started", new() { Timeout = Timeout });
-            await Assertions.Expect(dialog.GetByTestId("automation-test-trigger")).ToContainTextAsync("/Demo/Motor/Temperature > 1000");
-            await Assertions.Expect(dialog.GetByTestId("automation-test-verdict")).ToContainTextAsync("Would not run now");
-        }
-        finally
-        {
-            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
-        }
+        // Assert
+        var dialog = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(dialog).ToContainTextAsync("Test now: Started", new() { Timeout = Timeout });
+        await Assertions.Expect(dialog.GetByTestId("automation-test-trigger")).ToContainTextAsync("/Demo/Motor/Temperature > 1000");
+        await Assertions.Expect(dialog.GetByTestId("automation-test-verdict")).ToContainTextAsync("Would not run now");
     }
 
     [Fact]
     public async Task WhenTheAutomationIsShownAsAWidget_ThenItShowsTheCurrentStateAndTheStatus()
     {
         // Arrange
-        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        await using var washer = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
         var scratchContent = await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(ScratchPage));
         try
         {
             await _fixture.WriteDemoPageAsync(ScratchPage,
-                $"---\ntitle: Scratch\n---\n\n# Scratch\n\n:: HomeBlaze.Components.Widget Path=\"/{name}\"\n::\n");
+                $"---\ntitle: Scratch\n---\n\n# Scratch\n\n:: HomeBlaze.Components.Widget Path=\"/{washer.Name}\"\n::\n");
             var page = await _fixture.CreatePageAsync();
 
             // Act
@@ -102,12 +90,11 @@ public class AutomationPageTests
             await Assertions.Expect(widget).ToContainTextAsync("Washer", new() { Timeout = Timeout });
             await Assertions.Expect(widget).ToContainTextAsync("Idle since");
             await Assertions.Expect(widget.GetByTestId("automation-widget-status")).ToBeVisibleAsync();
-            await Assertions.Expect(widget.GetByRole(AriaRole.Link, new() { Name = "Washer" })).ToHaveAttributeAsync("href", $"/pages/{name}");
+            await Assertions.Expect(widget.GetByRole(AriaRole.Link, new() { Name = "Washer" })).ToHaveAttributeAsync("href", $"/pages/{washer.Name}");
         }
         finally
         {
             await _fixture.WriteDemoPageAsync(ScratchPage, scratchContent);
-            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
         }
     }
 
@@ -115,32 +102,24 @@ public class AutomationPageTests
     public async Task WhenTheStateIsReset_ThenTheDiagramAndTheRuleStatusesFollow()
     {
         // Arrange
-        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
-        try
-        {
-            var page = await OpenPageAsync(name);
-            await page.WaitUntilInteractiveAsync();
-            await Assertions.Expect(page.GetByTestId("automation-state-node-Idle")).ToContainTextAsync("Current", new() { Timeout = Timeout });
-            automation.InitialState = "Running";
-            await automation.ApplyConfigurationAsync(CancellationToken.None);
-            await page.GetByTestId("automation-reset").ClickAsync();
-            await page.GetByRole(AriaRole.Dialog).GetByRole(AriaRole.Button, new() { Name = "Cancel", Exact = true }).ClickAsync();
-            await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
-            Assert.Equal("Idle", automation.CurrentState);
+        await using var washer = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        var automation = washer.Subject;
+        var page = await _fixture.OpenSubjectPageAsync(washer.Name);
+        await Assertions.Expect(page.GetByTestId("automation-state-node-Idle")).ToContainTextAsync("Current", new() { Timeout = Timeout });
+        automation.InitialState = "Running";
+        await automation.ApplyConfigurationAsync(CancellationToken.None);
+        await page.GetByTestId("automation-reset").ClickAsync();
+        await page.GetByRole(AriaRole.Dialog).GetByRole(AriaRole.Button, new() { Name = "Cancel", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        Assert.Equal("Idle", automation.CurrentState);
 
-            // Act
-            await page.GetByTestId("automation-reset").ClickAsync();
-            await page.GetByRole(AriaRole.Dialog).GetByRole(AriaRole.Button, new() { Name = "Reset", Exact = true }).ClickAsync();
+        // Act
+        await ResetStateAsync(page);
 
-            // Assert
-            await Assertions.Expect(page.GetByTestId("automation-state-node-Running")).ToContainTextAsync("Current", new() { Timeout = Timeout });
-            await Assertions.Expect(page.GetByTestId("automation-state-node-Idle")).Not.ToContainTextAsync("Current");
-            await Assertions.Expect(page.GetByTestId("automation-rule-row").Nth(1)).Not.ToContainTextAsync("Inactive outside state");
-        }
-        finally
-        {
-            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
-        }
+        // Assert
+        await Assertions.Expect(page.GetByTestId("automation-state-node-Running")).ToContainTextAsync("Current", new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("automation-state-node-Idle")).Not.ToContainTextAsync("Current");
+        await Assertions.Expect(page.GetByTestId("automation-rule-row").Nth(1)).Not.ToContainTextAsync("Inactive outside state");
     }
 
     [Fact]
@@ -148,7 +127,7 @@ public class AutomationPageTests
     {
         // Arrange
         // The rule runs as a dry run once the automation is named Go.
-        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(created =>
+        await using var recorder = await _fixture.AddStoredAutomationAsync(created =>
         {
             created.Name = "Recorder";
             created.States = ["Idle", "Done"];
@@ -164,28 +143,28 @@ public class AutomationPageTests
                 }
             };
         });
-        try
-        {
-            var page = await OpenPageAsync(name);
-            await Assertions.Expect(page.GetByTestId("automation-no-runs")).ToBeVisibleAsync(new() { Timeout = Timeout });
-            // A run is a count that follows a stored one, so the restored count must be stored before the run.
-            await WaitUntilRunCountIsStoredAsync(automation.Rules["ran"], 0);
+        var page = await _fixture.OpenSubjectPageAsync(recorder.Name);
+        await Assertions.Expect(page.GetByTestId("automation-no-runs")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        // A run is a count that follows a stored one, so the restored count must be stored before the run.
+        await WaitUntilRunCountIsStoredAsync(recorder.Subject.Rules["ran"], 0);
 
-            // Act
-            automation.Name = "Go";
+        // Act
+        recorder.Subject.Name = "Go";
 
-            // Assert
-            var run = page.GetByTestId("automation-run");
-            await Assertions.Expect(run).ToHaveCountAsync(1, new() { Timeout = Timeout });
-            await Assertions.Expect(run).ToContainTextAsync("Ran");
-            await Assertions.Expect(run).ToContainTextAsync("Would have run (dry run)");
-            await Assertions.Expect(run).ToContainTextAsync("Would run ChangeState(Done)");
-            await Assertions.Expect(page.GetByText("From history: the runs of the last seven days.")).ToBeVisibleAsync();
-        }
-        finally
-        {
-            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
-        }
+        // Assert
+        var run = page.GetByTestId("automation-run");
+        await Assertions.Expect(run).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        await Assertions.Expect(run).ToContainTextAsync("Ran");
+        await Assertions.Expect(run).ToContainTextAsync("Would have run (dry run)");
+        await Assertions.Expect(run).ToContainTextAsync("Would run ChangeState(Done)");
+        await Assertions.Expect(page.GetByText("From history: the runs of the last seven days. Runs within about 250 ms can show as one, and a crash can drop runs.")).ToBeVisibleAsync();
+    }
+
+    /// <summary>Resets the state with the Reset state button of the page and confirms it.</summary>
+    internal static async Task ResetStateAsync(IPage page)
+    {
+        await page.GetByTestId("automation-reset").ClickAsync();
+        await page.GetByRole(AriaRole.Dialog).GetByRole(AriaRole.Button, new() { Name = "Reset", Exact = true }).ClickAsync();
     }
 
     private async Task WaitUntilRunCountIsStoredAsync(AutomationRule rule, long runCount)
@@ -213,12 +192,5 @@ public class AutomationPageTests
             },
             TimeSpan.FromSeconds(30),
             message: $"The history did not store the run count {runCount} of {path}");
-    }
-
-    private async Task<IPage> OpenPageAsync(string name)
-    {
-        var page = await _fixture.CreatePageAsync();
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/{name}");
-        return page;
     }
 }

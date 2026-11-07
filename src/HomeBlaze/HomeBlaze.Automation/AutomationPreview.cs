@@ -21,6 +21,7 @@ public static class AutomationPreview
     /// as a condition: true or false for a boolean, null for anything else or a missing value. The text shows dates in the
     /// zone of <paramref name="timeZone"/>, as pages do for the viewer, and in the server zone when it is null.
     /// <see cref="AutomationExpressionPreview.Value"/> may be a live subject for an expression that leads to one; display it, do not modify it.
+    /// A value that throws when it is read or shown is missing, and the text says why.
     /// </summary>
     public static AutomationExpressionPreview Evaluate(
         Automation automation, string? ruleKey, string? expression, bool allowsEvent, ITimeZoneDisplay? timeZone = null)
@@ -30,18 +31,26 @@ public static class AutomationPreview
             return new AutomationExpressionPreview { Error = error };
         }
 
-        var evaluation = CreateEvaluation(automation, ruleKey);
-        var value = evaluation.Evaluate(parsed);
-        return new AutomationExpressionPreview
+        try
         {
-            Result = value.Value as bool?,
-            Value = value.IsMissing ? null : value.Value,
-            Text = value.IsMissing ? null : ExpressionDisplay.ToText(value, timeZone)
-        };
+            var evaluation = CreateEvaluation(automation, ruleKey);
+            var value = evaluation.Evaluate(parsed);
+            return new AutomationExpressionPreview
+            {
+                Result = value.Value as bool?,
+                Value = value.IsMissing ? null : value.Value,
+                Text = value.IsMissing ? null : ExpressionDisplay.ToText(value, timeZone)
+            };
+        }
+        catch (Exception exception)
+        {
+            return Unreadable(exception);
+        }
     }
 
     /// <summary>
     /// Renders the template with the current values in the server zone, which is where the runtime renders the texts it sends.
+    /// A value that throws when it is read or shown makes the text say why instead.
     /// </summary>
     public static AutomationExpressionPreview Render(Automation automation, string? ruleKey, string? template, bool allowsEvent)
     {
@@ -50,9 +59,16 @@ public static class AutomationPreview
             return new AutomationExpressionPreview { Error = error };
         }
 
-        var evaluation = CreateEvaluation(automation, ruleKey);
-        var text = evaluation.Render(parsed);
-        return new AutomationExpressionPreview { Value = text, Text = text };
+        try
+        {
+            var evaluation = CreateEvaluation(automation, ruleKey);
+            var text = evaluation.Render(parsed);
+            return new AutomationExpressionPreview { Value = text, Text = text };
+        }
+        catch (Exception exception)
+        {
+            return Unreadable(exception);
+        }
     }
 
     /// <summary>
@@ -65,6 +81,9 @@ public static class AutomationPreview
     /// <summary>The saved rule with the key, or a rule outside the graph, from which relative paths lead nowhere.</summary>
     internal static IInterceptorSubject GetAnchor(Automation automation, string? ruleKey) =>
         ruleKey is not null && automation.Rules.TryGetValue(ruleKey, out var rule) ? rule : new AutomationRule();
+
+    // A getter or a text of a device value that throws is a fault of that device, which the preview names in place of the value.
+    private static AutomationExpressionPreview Unreadable(Exception exception) => new() { Text = $"cannot be read: {exception.Message}" };
 
     private static AutomationEvaluation CreateEvaluation(Automation automation, string? ruleKey)
     {

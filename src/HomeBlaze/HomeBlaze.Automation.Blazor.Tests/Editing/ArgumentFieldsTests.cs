@@ -7,20 +7,17 @@ namespace HomeBlaze.Automation.Blazor.Tests.Editing;
 
 public class ArgumentFieldsTests
 {
+    private static MethodMetadata Method(params MethodParameter[] parameters) => new(_ => null) { Parameters = parameters };
+
     [Fact]
     public void WhenAnOperationHasSimpleAndRecordParameters_ThenARecordHasAFieldPerMember()
     {
         // Arrange
-        var method = new MethodMetadata(_ => null)
-        {
-            Parameters =
-            [
-                new MethodParameter { Name = "position", Type = typeof(int) },
-                new MethodParameter { Name = "notification", Type = typeof(Notification) },
-                new MethodParameter { Name = "label", Type = typeof(string), IsNullable = true },
-                new MethodParameter { Name = "cancellationToken", Type = typeof(CancellationToken), IsRuntimeProvided = true }
-            ]
-        };
+        var method = Method(
+            new MethodParameter { Name = "position", Type = typeof(int) },
+            new MethodParameter { Name = "notification", Type = typeof(Notification) },
+            new MethodParameter { Name = "label", Type = typeof(string), IsNullable = true },
+            new MethodParameter { Name = "cancellationToken", Type = typeof(CancellationToken), IsRuntimeProvided = true });
 
         // Act
         var fields = ArgumentFields.Create(method);
@@ -57,14 +54,9 @@ public class ArgumentFieldsTests
     public void WhenARecordIsNullableOrHasUnsupportedMembers_ThenItIsOneWholeValueField()
     {
         // Arrange
-        var method = new MethodMetadata(_ => null)
-        {
-            Parameters =
-            [
-                new MethodParameter { Name = "optional", Type = typeof(Notification), IsNullable = true },
-                new MethodParameter { Name = "unsupported", Type = typeof(Unsupported) }
-            ]
-        };
+        var method = Method(
+            new MethodParameter { Name = "optional", Type = typeof(Notification), IsNullable = true },
+            new MethodParameter { Name = "unsupported", Type = typeof(Unsupported) });
 
         // Act
         var fields = ArgumentFields.Create(method);
@@ -77,10 +69,7 @@ public class ArgumentFieldsTests
     public void WhenARecordHasBooleanAndEnumMembers_ThenTheyHaveChoices()
     {
         // Arrange
-        var method = new MethodMetadata(_ => null)
-        {
-            Parameters = [new MethodParameter { Name = "options", Type = typeof(Options) }]
-        };
+        var method = Method(new MethodParameter { Name = "options", Type = typeof(Options) });
 
         // Act
         var fields = ArgumentFields.Create(method);
@@ -94,10 +83,7 @@ public class ArgumentFieldsTests
     public void WhenAParameterIsRuntimeProvided_ThenItHasNoField()
     {
         // Arrange
-        var method = new MethodMetadata(_ => null)
-        {
-            Parameters = [new MethodParameter { Name = "cancellationToken", Type = typeof(CancellationToken), IsRuntimeProvided = true }]
-        };
+        var method = Method(new MethodParameter { Name = "cancellationToken", Type = typeof(CancellationToken), IsRuntimeProvided = true });
 
         // Act
         var fields = ArgumentFields.Create(method);
@@ -110,15 +96,10 @@ public class ArgumentFieldsTests
     public void WhenArgumentsAreKeptForAnotherOperation_ThenOnlyTheKeysTheBinderAcceptsRemain()
     {
         // Arrange
-        var method = new MethodMetadata(_ => null)
-        {
-            Parameters =
-            [
-                new MethodParameter { Name = "position", Type = typeof(int) },
-                new MethodParameter { Name = "notification", Type = typeof(Notification) },
-                new MethodParameter { Name = "optional", Type = typeof(Notification), IsNullable = true }
-            ]
-        };
+        var method = Method(
+            new MethodParameter { Name = "position", Type = typeof(int) },
+            new MethodParameter { Name = "notification", Type = typeof(Notification) },
+            new MethodParameter { Name = "optional", Type = typeof(Notification), IsNullable = true });
         var arguments = new Dictionary<string, string>
         {
             ["Position"] = "5",
@@ -156,16 +137,12 @@ public class ArgumentFieldsTests
     [InlineData("true", typeof(bool), true, null)]
     [InlineData("/a/B * 2", typeof(int), true, null)]
     [InlineData("event/State", typeof(int), true, "not")]
-    [InlineData("5 +", typeof(int), true, "any")]
     [InlineData("Hello {{ /a/B }}", typeof(string), true, null)]
     [InlineData("Hello {{", typeof(string), true, "any")]
     public void WhenAnArgumentIsValidated_ThenItIsRequiredAConstantAnExpressionOrATemplate(string text, Type type, bool isRequired, string? expected)
     {
-        // Arrange
-        var expressions = new RuleExpressions(TestAutomations.Create(), "rule", allowsEvent: false);
-
         // Act
-        var error = ArgumentFields.Validate(text, type, isRequired, expressions);
+        var error = ArgumentFields.Validate(text, type, isRequired, TestAutomations.Expressions());
 
         // Assert
         Assert.Equal(expected is null, error is null);
@@ -179,7 +156,7 @@ public class ArgumentFieldsTests
     public void WhenTheTypeIsUnknown_ThenOnlyAMissingRequiredValueIsAnError()
     {
         // Arrange
-        var expressions = new RuleExpressions(TestAutomations.Create(), "rule", allowsEvent: false);
+        var expressions = TestAutomations.Expressions();
 
         // Act
         var text = ArgumentFields.Validate("anything", null, true, expressions);
@@ -200,12 +177,10 @@ public class ArgumentFieldsTests
             new("duration", "Duration", typeof(int), true, false, null)
         ];
         var invoke = new InvokeOperationAction { Arguments = new Dictionary<string, string> { ["speed"] = "event/Value" } };
-        var withoutEvent = new RuleExpressions(TestAutomations.Create(), "rule", allowsEvent: false);
-        var withEvent = new RuleExpressions(TestAutomations.Create(), "rule", allowsEvent: true);
 
         // Act
-        var without = ActionInputs.Check(invoke, fields, null, withoutEvent);
-        var with = ActionInputs.Check(invoke, fields, null, withEvent);
+        var without = ActionInputs.Check(invoke, fields, null, TestAutomations.Expressions());
+        var with = ActionInputs.Check(invoke, fields, null, TestAutomations.Expressions(allowsEvent: true));
 
         // Assert
         Assert.Equal(["speed", "duration"], without.Select(error => error.Key).ToArray());

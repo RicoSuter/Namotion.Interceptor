@@ -5,7 +5,8 @@ namespace HomeBlaze.Automation.Blazor.Tests.Diagram;
 
 public class StateDiagramLayoutTests
 {
-    private static StateDiagramRule Rule(string key, string? inState, params AutomationAction[] actions) => StateDiagramRule.Create(key, key, inState, actions);
+    private static StateDiagramRule Rule(string key, string? inState, params AutomationAction[] actions) =>
+        StateDiagramRule.From(key, new AutomationRule { InState = inState, Actions = actions });
 
     private static ChangeStateAction Enter(string state) => new() { Id = "state-1", TargetState = state };
 

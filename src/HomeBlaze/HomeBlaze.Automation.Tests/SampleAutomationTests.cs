@@ -33,6 +33,7 @@ public partial class SampleAutomationTests
         Assert.Equal(["Operator"], automation.Roles);
         Assert.Equal(["cooled", "overheat"], automation.Rules.Keys.Order(StringComparer.Ordinal).ToArray());
         Assert.All(automation.Rules.Values, rule => Assert.Equal(AutomationRuleMode.DryRun, rule.Mode));
+        Assert.Equal(TimeSpan.FromSeconds(30), Assert.IsType<PropertyTrigger>(automation.Rules["overheat"].Triggers[0]).For);
     }
 
     [Fact]
@@ -52,7 +53,7 @@ public partial class SampleAutomationTests
         foreach (var json in examples)
         {
             using var automation = Deserialize(json, provider);
-            var written = new ConfigurableSubjectSerializer(new TypeProvider().AddAssembly(typeof(Automation).Assembly), provider).Serialize(automation);
+            var written = CreateSerializer(provider).Serialize(automation);
             errors.AddRange(FindUnreadMembers(JsonDocument.Parse(json).RootElement, JsonDocument.Parse(written).RootElement, automation.Name ?? "?"));
             errors.AddRange(AutomationValidator.Validate(automation, automation.Roles, automation.States, automation.InitialState, automation.Rules, automation.RuleOrder)
                 .Select(error => $"{automation.Name}: {error.Message}"));
@@ -107,8 +108,10 @@ public partial class SampleAutomationTests
         return services.BuildServiceProvider();
     }
 
-    private static Automation Deserialize(string json, IServiceProvider provider) =>
-        Assert.IsType<Automation>(new ConfigurableSubjectSerializer(new TypeProvider().AddAssembly(typeof(Automation).Assembly), provider).Deserialize(json));
+    private static Automation Deserialize(string json, IServiceProvider provider) => Assert.IsType<Automation>(CreateSerializer(provider).Deserialize(json));
+
+    private static ConfigurableSubjectSerializer CreateSerializer(IServiceProvider provider) =>
+        new(new TypeProvider().AddAssembly(typeof(Automation).Assembly), provider);
 
     private static string FindRepositoryRoot()
     {

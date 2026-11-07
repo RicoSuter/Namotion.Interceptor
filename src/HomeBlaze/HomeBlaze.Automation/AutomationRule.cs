@@ -5,7 +5,7 @@ using Namotion.Interceptor.Attributes;
 namespace HomeBlaze.Automation;
 
 /// <summary>
-/// A rule of an automation: its triggers request runs, its guard decides whether a run executes, and its actions run
+/// A rule of an automation: its triggers request runs, Only if decides whether a run executes, and its actions run
 /// in order. Its key in <see cref="Automation.Rules"/> is its identity, so its state paths survive renaming.
 /// </summary>
 [ExcludeFromCreation]
@@ -39,7 +39,7 @@ public partial class AutomationRule : IConfigurable, ITitleProvider
     /// is true; an event it rejects is gone.
     /// </summary>
     [Configuration]
-    public partial string? Guard { get; set; }
+    public partial string? OnlyIf { get; set; }
 
     /// <summary>The actions, run in this order.</summary>
     [Configuration]
@@ -58,7 +58,7 @@ public partial class AutomationRule : IConfigurable, ITitleProvider
 
     /// <summary>
     /// The number of runs: those that executed their actions and dry runs. A request that did not run, such as one that
-    /// <see cref="Guard"/> rejected, is not counted. Null until the automation restored it. After a crash it can restart
+    /// <see cref="OnlyIf"/> rejected, is not counted. Null until the automation restored it. After a crash it can restart
     /// below the last value history recorded, since runs are saved at most every 5 seconds.
     /// </summary>
     [State("Runs", IsCumulative = true, Position = 3)]

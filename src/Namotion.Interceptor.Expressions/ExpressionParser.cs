@@ -140,7 +140,7 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
         var node = ParseProduct(operatorText, bareWordIsText);
         while (TryConsumeArithmeticOperator(isAdditive: true) is { } arithmetic)
         {
-            node = new ArithmeticNode(ToArithmeticOperand(node), arithmetic.Operator, ParseProduct(arithmetic.Symbol, bareWordIsText: false));
+            node = new ArithmeticNode(node, arithmetic.Operator, ParseProduct(arithmetic.Symbol, bareWordIsText: false));
         }
 
         return node;
@@ -151,15 +151,11 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
         var node = ParseOperand(operatorText, bareWordIsText);
         while (TryConsumeArithmeticOperator(isAdditive: false) is { } arithmetic)
         {
-            node = new ArithmeticNode(ToArithmeticOperand(node), arithmetic.Operator, ParseOperand(arithmetic.Symbol, bareWordIsText: false));
+            node = new ArithmeticNode(node, arithmetic.Operator, ParseOperand(arithmetic.Symbol, bareWordIsText: false));
         }
 
         return node;
     }
-
-    // An operand of arithmetic is a value, so a bare word that was read as text after a comparison operator is a path.
-    private ExpressionNode ToArithmeticOperand(ExpressionNode node) =>
-        node is LiteralNode { IsBareWord: true, Value: string word } ? CreatePathNode(word) : node;
 
     // The operator before a right operand, or null for an operand that no operator precedes.
     private ExpressionNode ParseOperand(string? operatorText, bool bareWordIsText)
@@ -246,10 +242,10 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
 
     private ExpressionNode CreateWordNode(string token, bool bareWordIsText)
     {
-        // A bare word after a comparison operator is text, such as the name of an enum value.
-        if (bareWordIsText && IsBareWord(token))
+        // A bare word after a comparison operator is text, such as the name of an enum value, unless arithmetic follows it.
+        if (bareWordIsText && IsBareWord(token) && !IsArithmeticOperatorNext())
         {
-            return new LiteralNode(token, isBareWord: true);
+            return new LiteralNode(token);
         }
 
         return CreatePathNode(token);
@@ -403,6 +399,9 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
         return token.Equals("null", StringComparison.OrdinalIgnoreCase) ? new LiteralNode(null) : null;
     }
 
+    /// <summary>Whether the token is a keyword, an operator or a literal, without regard to case.</summary>
+    internal static bool IsKeyword(string token) => IsOperatorKeyword(token) || TryCreateKeywordLiteral(token) is not null;
+
     private static bool IsOperatorKeyword(string token) =>
         token.Equals("and", StringComparison.OrdinalIgnoreCase) ||
         token.Equals("or", StringComparison.OrdinalIgnoreCase) ||
@@ -440,20 +439,19 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
     // digit, as in "-5", it is the sign of a number.
     private (ArithmeticOperator Operator, string Symbol)? TryConsumeArithmeticOperator(bool isAdditive)
     {
-        SkipWhitespace();
-        if (_position >= text.Length)
-        {
-            return null;
-        }
-
-        var arithmetic = ReadArithmeticSymbol(isAdditive);
-        if (arithmetic is null || !StandsAlone(_position))
+        if (!IsArithmeticOperatorNext() || ReadArithmeticSymbol(isAdditive) is not { } arithmetic)
         {
             return null;
         }
 
         _position++;
         return arithmetic;
+    }
+
+    private bool IsArithmeticOperatorNext()
+    {
+        SkipWhitespace();
+        return _position < text.Length && IsArithmeticSymbol(text[_position]) && StandsAlone(_position);
     }
 
     private (ArithmeticOperator Operator, string Symbol)? ReadArithmeticSymbol(bool isAdditive) =>

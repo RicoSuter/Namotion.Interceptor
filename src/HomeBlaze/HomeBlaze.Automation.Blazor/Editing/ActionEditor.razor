@@ -51,20 +51,17 @@
 @code {
     private const string ValueHelperText = "A value, or an expression such as /Weather/WindGust * 2";
     private const string ValueKey = ActionInputs.ValueKey;
-    private static readonly TimeSpan TargetCheckInterval = TimeSpan.FromSeconds(1);
 
     private AutomationAction _value = null!;
     private IReadOnlyList<ArgumentField>? _fields;
     private Type? _targetType;
-    private bool _isTextTarget;
     private Dictionary<string, string> _errors = [];
     private AutomationAction? _checkedValue;
     private RuleExpressions? _checkedExpressions;
     private RegisteredSubjectProperty? _target;
     private IAutomationPermissions _permissions = null!;
     private bool? _isTargetAllowed;
-    private ITimer? _targetTimer;
-    private bool _isDisposed;
+    private PreviewTicker? _ticker;
 
     [Parameter, EditorRequired] public AutomationAction Value { get; set; } = null!;
 
@@ -106,29 +103,15 @@
         _permissions = GetPermissions();
         Refresh();
         _isTargetAllowed = IsAllowed(_target);
-        StartTargetTimer();
+        _ticker ??= new PreviewTicker(TimeProvider, InvokeAsync, CheckTargetAsync);
     }
 
-    // The target is resolved and checked against the roles again once per interval, outside of a render, so that an
-    // operation or a property that appears after the action was typed shows its inputs and errors, and a role that changed
-    // meanwhile shows or clears its denial. Only a changed target or a changed verdict checks the action again. The timer is
-    // created without the execution context of the render, so that a tick records no reads into a read tracking scope of that render.
-    private void StartTargetTimer()
-    {
-        if (_targetTimer is not null)
-        {
-            return;
-        }
-
-        using (ExecutionContext.SuppressFlow())
-        {
-            _targetTimer = TimeProvider.CreateTimer(state => _ = InvokeAsync(CheckTargetAsync), null, TargetCheckInterval, TargetCheckInterval);
-        }
-    }
-
+    // Each tick resolves the target and checks it against the roles again, so that an operation or a property that appears
+    // after the action was typed shows its inputs and errors, and a role that changed meanwhile shows or clears its denial.
+    // Only a changed target or a changed verdict checks the action again.
     private async Task CheckTargetAsync()
     {
-        if (_isDisposed || GetTargetPath(_value) is not { } path)
+        if (ActionInputs.GetTargetPath(_value) is not { } path)
         {
             return;
         }
@@ -148,18 +131,7 @@
         await TargetChanged.InvokeAsync();
     }
 
-    public void Dispose()
-    {
-        _isDisposed = true;
-        _targetTimer?.Dispose();
-    }
-
-    private static string? GetTargetPath(AutomationAction action) => action switch
-    {
-        InvokeOperationAction invoke => invoke.OperationPath,
-        SetPropertyAction write => write.PropertyPath,
-        _ => null
-    };
+    public void Dispose() => _ticker?.Dispose();
 
     // The targets are resolved and the inputs checked when the action or the expressions change, not on every render of the editor.
     private void Refresh()
@@ -171,10 +143,9 @@
 
         _checkedValue = _value;
         _checkedExpressions = Expressions;
-        _target = AutomationPreview.ResolveTarget(Automation, RuleKey, GetTargetPath(_value));
+        _target = AutomationPreview.ResolveTarget(Automation, RuleKey, ActionInputs.GetTargetPath(_value));
         _fields = _value is InvokeOperationAction ? ActionInputs.GetFields(_target) : null;
         _targetType = _value is SetPropertyAction ? _target?.Type : null;
-        _isTextTarget = _targetType is not null && (Nullable.GetUnderlyingType(_targetType) ?? _targetType) == typeof(string);
         _errors = ActionInputs.Check(_value, _fields, _targetType, Expressions).ToDictionary(error => error.Key, error => error.Error);
     }
 
@@ -234,7 +205,7 @@
     {
         var error = GetError(ValueKey);
         <div class="mt-2 ml-6">
-            @if (_isTextTarget)
+            @if (ArgumentFields.IsText(_targetType))
             {
                 <TemplateField Label="Value" Value="@write.Value" Expressions="Expressions" ValueChanged="SetWriteValueAsync" />
             }

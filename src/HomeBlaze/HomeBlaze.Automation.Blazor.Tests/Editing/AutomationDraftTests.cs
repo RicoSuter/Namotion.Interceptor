@@ -43,7 +43,7 @@ public class AutomationDraftTests
         // Arrange
         const string json = """
             {
-              "$type": "HomeBlaze.Automation.AutomationRule", "name": null, "mode": "On", "inState": null, "guard": null,
+              "$type": "HomeBlaze.Automation.AutomationRule", "name": null, "mode": "On", "inState": null, "onlyIf": null,
               "triggers": [ null, { "$type": "PropertyTrigger", "expression": null, "rearm": null },
                             { "$type": "SubjectEventTrigger", "subjectPath": null, "eventType": null, "filter": null } ],
               "actions": [ null, { "$type": "InvokeOperation", "id": null, "operationPath": null, "arguments": null },
@@ -87,25 +87,6 @@ public class AutomationDraftTests
         Assert.Equal("Rule 3", third.Name);
         Assert.Equal("Rule 5", added.Name);
         Assert.DoesNotContain(draft.Validate(), error => error.Message.StartsWith("Another rule", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void WhenAnInputErrorIsSetAgainOrClearedTwice_ThenTheVersionChangesOnlyWithTheErrors()
-    {
-        // Arrange
-        var draft = AutomationDraft.From(TestAutomations.Create());
-        var error = new AutomationValidationError(null, "Hold: Use a duration above 0");
-
-        // Act
-        draft.SetInputError("hold", error);
-        draft.SetInputError("hold", error);
-        var afterSet = draft.InputErrorVersion;
-        draft.SetInputError("hold", null);
-        draft.SetInputError("hold", null);
-
-        // Assert
-        Assert.Equal(1, afterSet);
-        Assert.Equal(2, draft.InputErrorVersion);
     }
 
     [Fact]
@@ -315,7 +296,7 @@ public class AutomationDraftTests
                 ["trigger"] = new() { Triggers = [new PropertyTrigger { Expression = "../CurrentState == Idle" }] },
                 ["rearm"] = new() { Triggers = [new PropertyTrigger { Expression = "/a/B", Rearm = "/a/C == Idle" }] },
                 ["filter"] = new() { Triggers = [new SubjectEventTrigger { Filter = "event/NewState == Idle" }] },
-                ["guard"] = new() { Guard = "../CurrentState != Idle" },
+                ["onlyIf"] = new() { OnlyIf = "../CurrentState != Idle" },
                 ["argument"] = new() { Actions = [new InvokeOperationAction { Arguments = new Dictionary<string, string> { ["Message"] = "Was Idle" } }] },
                 ["value"] = new() { Actions = [new SetPropertyAction { Value = "Idle" }] },
                 ["longer"] = new() { Triggers = [new PropertyTrigger { Expression = "../CurrentState == Idleness" }] },
@@ -328,7 +309,7 @@ public class AutomationDraftTests
         var rules = draft.FindRulesMentioning("Idle");
 
         // Assert
-        Assert.Equal(["argument", "filter", "guard", "rearm", "trigger", "value"], rules.Select(rule => rule.Key).Order().ToArray());
+        Assert.Equal(["argument", "filter", "onlyIf", "rearm", "trigger", "value"], rules.Select(rule => rule.Key).Order().ToArray());
     }
 
     [Fact]
@@ -367,7 +348,7 @@ public class AutomationDraftTests
     }
 
     [Fact]
-    public void WhenAnInputHasAnError_ThenTheDraftIsInvalidUntilTheErrorIsCleared()
+    public void WhenAnInputErrorIsSetAgainOrClearedTwice_ThenTheDraftIsInvalidUntilItIsClearedAndTheVersionChangesOnlyWithTheErrors()
     {
         // Arrange
         var draft = AutomationDraft.From(CreateWasher());
@@ -375,11 +356,16 @@ public class AutomationDraftTests
 
         // Act
         draft.SetInputError("hold", error);
+        draft.SetInputError("hold", error);
+        var versionWithError = draft.InputErrorVersion;
         var withError = draft.Validate();
+        draft.SetInputError("hold", null);
         draft.SetInputError("hold", null);
         var withoutError = draft.Validate();
 
         // Assert
+        Assert.Equal(1, versionWithError);
+        Assert.Equal(2, draft.InputErrorVersion);
         Assert.Equal(error, Assert.Single(withError));
         Assert.Empty(withoutError);
     }
@@ -407,7 +393,7 @@ public class AutomationDraftTests
         rule.Triggers[0].Value = new PropertyTrigger { Expression = "/Laundry/Plug/Power > 500", Rearm = " " };
 
         // Act
-        var saved = rule.ToRule();
+        var saved = rule.ToRule(_ => null);
 
         // Assert
         Assert.Null(Assert.IsType<PropertyTrigger>(Assert.Single(saved.Triggers)).Rearm);
@@ -434,7 +420,7 @@ public class AutomationDraftTests
         // Act
         draft.RenameState("Running", "Busy");
         rule.Name = "Changed";
-        rule.Guard = "/a/B";
+        rule.OnlyIf = "/a/B";
         var call = rule.Actions[0];
         call.Value = ((InvokeOperationAction)call.Value) with { OperationPath = "/Other/Send" };
         ((Dictionary<string, string>)((InvokeOperationAction)call.Value).Arguments)["notification.Message"] = "Edited";
@@ -444,7 +430,7 @@ public class AutomationDraftTests
         Assert.Equal(["Idle", "Running"], automation.States.ToArray());
         Assert.Equal("Finished", source.Name);
         Assert.Equal("Running", source.InState);
-        Assert.Null(source.Guard);
+        Assert.Null(source.OnlyIf);
         var sourceCall = Assert.IsType<InvokeOperationAction>(source.Actions[0]);
         Assert.Equal("/Notify/Send", sourceCall.OperationPath);
         Assert.Equal("Done", sourceCall.Arguments["notification.Message"]);

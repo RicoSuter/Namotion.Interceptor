@@ -18,8 +18,6 @@ public static class ExpressionVariables
 
     internal static readonly ImmutableArray<string> Default = [Value, Subject];
 
-    private static readonly string[] Keywords = ["and", "or", "not", "true", "false", "null"];
-
     /// <summary>
     /// Gets whether the first segment of the path is <see cref="Value"/> or <see cref="Subject"/>, and which one. For a path
     /// of an expression parsed with variables the host declares, use <see cref="ParsedExpression.TryGetVariable"/>.
@@ -90,7 +88,7 @@ public static class ExpressionVariables
         for (var index = 0; index < variables.Length; index++)
         {
             var name = variables[index];
-            if (!IsWord(name) || name.Contains(pathSeparator) || Keywords.Contains(name, StringComparer.OrdinalIgnoreCase))
+            if (!IsWord(name) || name.Contains(pathSeparator) || ExpressionParser.IsKeyword(name))
             {
                 throw new ArgumentException($"The variable '{name}' is not a word that an expression can hold.", nameof(variables));
             }

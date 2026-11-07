@@ -10,22 +10,21 @@ namespace HomeBlaze.Automation.Tests;
 
 public class AutomationPropertyTriggerTests
 {
-    private const string StormGuard = "not /Blinds/IsMoving and (./LastTriggeredAt == null or now - ./LastTriggeredAt > 30m)";
+    private const string StormOnlyIf = "not /Blinds/IsMoving and (./LastTriggeredAt == null or now - ./LastTriggeredAt > 30m)";
 
-    private static Action<Automation> Storm(string? guard = null) => automation => automation.Rules = Keyed(
+    private static Action<Automation> Storm(string? onlyIf = null) => automation => automation.Rules = Keyed(
         ("retract", Create(
             "Retract blinds",
             AutomationRuleMode.On,
             [When("/Weather/Gust > 8", TimeSpan.FromSeconds(20), rearm: "/Weather/Gust < 6")],
             [Invoke("/Blinds/Close")],
-            guard)));
+            onlyIf)));
 
     private static async Task HoldGustAsync(AutomationTestHost host, double gust)
     {
         host.Weather.Gust = gust;
         await host.FlushAsync();
-        host.Time.Advance(TimeSpan.FromSeconds(20));
-        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromSeconds(20));
     }
 
     [Fact]
@@ -38,11 +37,9 @@ public class AutomationPropertyTriggerTests
         await host.FlushAsync();
 
         // Act
-        host.Time.Advance(TimeSpan.FromSeconds(19));
-        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromSeconds(19));
         var runsBeforeTheHold = rule.RunCount;
-        host.Time.Advance(TimeSpan.FromSeconds(1));
-        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromSeconds(1));
 
         // Assert
         Assert.Equal(0L, runsBeforeTheHold);
@@ -114,8 +111,7 @@ public class AutomationPropertyTriggerTests
         // Act
         for (var second = 0; second < 5; second++)
         {
-            host.Time.Advance(TimeSpan.FromSeconds(1));
-            await host.FlushAsync();
+            await host.AdvanceAsync(TimeSpan.FromSeconds(1));
         }
 
         // Assert
@@ -159,10 +155,10 @@ public class AutomationPropertyTriggerTests
     }
 
     [Fact]
-    public async Task WhenTheGuardRejects_ThenNoRunIsRecordedAndTheStatusSaysWhy()
+    public async Task WhenOnlyIfRejects_ThenNoRunIsRecordedAndTheStatusSaysWhy()
     {
         // Arrange
-        await using var host = await AutomationTestHost.StartAsync(Storm(StormGuard));
+        await using var host = await AutomationTestHost.StartAsync(Storm(StormOnlyIf));
         var rule = host.Rule("retract");
         host.Blinds.IsMoving = true;
 
@@ -175,15 +171,15 @@ public class AutomationPropertyTriggerTests
         Assert.Null(rule.LastRunMessage);
         Assert.Null(rule.LastTriggeredAt);
         Assert.Equal(0, host.Blinds.CloseCount);
-        Assert.Equal("On: Waiting since 12:00:20: Only if is false", rule.Status);
+        Assert.Equal("On: Waiting since 2026-11-06 12:00:20: Only if is false", rule.Status);
         Assert.DoesNotContain("retract", File.Exists(host.CheckpointPath) ? await File.ReadAllTextAsync(host.CheckpointPath) : string.Empty);
     }
 
     [Fact]
-    public async Task WhenTheRuleTriggersAgainWithinTheCooldown_ThenTheGuardRejectsIt()
+    public async Task WhenTheRuleTriggersAgainWithinTheCooldown_ThenOnlyIfRejectsIt()
     {
         // Arrange
-        await using var host = await AutomationTestHost.StartAsync(Storm(StormGuard));
+        await using var host = await AutomationTestHost.StartAsync(Storm(StormOnlyIf));
         var rule = host.Rule("retract");
         await HoldGustAsync(host, 9);
 
@@ -227,8 +223,7 @@ public class AutomationPropertyTriggerTests
                 Invoke("/Notifier/SendNotification", ("notification.Message", "The rain gauge has not reported for 15 minutes"))))));
 
         // Act
-        host.Time.Advance(TimeSpan.FromMinutes(15));
-        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromMinutes(15));
 
         // Assert
         Assert.Equal("The rain gauge has not reported for 15 minutes", Assert.Single(host.Notifier.Sent).Message);
@@ -260,11 +255,9 @@ public class AutomationPropertyTriggerTests
         await host.FlushAsync();
 
         // Act
-        host.Time.Advance(TimeSpan.FromMinutes(15));
-        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromMinutes(15));
         var runsAtFifteenMinutes = host.Blinds.CloseCount;
-        host.Time.Advance(TimeSpan.FromSeconds(1));
-        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromSeconds(1));
 
         // Assert
         Assert.Equal(0, runsAtFifteenMinutes);

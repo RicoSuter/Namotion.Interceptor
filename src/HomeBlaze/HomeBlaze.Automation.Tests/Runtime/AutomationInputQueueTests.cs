@@ -181,6 +181,28 @@ public class AutomationInputQueueTests
         Assert.False(queue.HasWork);
     }
 
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(AutomationInputQueue.MaxChainDepth + 1, false)]
+    public async Task WhenAnActivationIsDropped_ThenTheTakenInputsHaveAnOverloadOnlyWhenTheQueueWasFull(int chainDepth, bool hasOverload)
+    {
+        // Arrange
+        var queue = new AutomationInputQueue();
+        for (var index = 0; index < AutomationInputQueue.Capacity; index++)
+        {
+            queue.TryEnqueue(TickInput.Instance);
+        }
+
+        // Act
+        queue.TryEnqueue(new ActivationInput([], chainDepth));
+        var (_, resynchronize) = await ReadUntilResynchronizationAsync(queue);
+        var dropped = queue.TakeDroppedInputs(resynchronize);
+
+        // Assert
+        Assert.Single(dropped.Activations);
+        Assert.Equal(hasOverload, dropped.HasOverload);
+    }
+
     [Fact]
     public async Task WhenWritersStayFasterThanTheWorker_ThenAtMostOneResynchronizationIsQueuedAndItTakesEveryDrop()
     {

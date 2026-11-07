@@ -119,23 +119,32 @@ internal sealed class AutomationTriggers
     }
 
     /// <summary>
-    /// Hands the state of each property trigger and the subscription of each event trigger of the old rule to the trigger
-    /// at the same position with an equal configuration.
+    /// Hands the state of each property trigger and the subscription of each event trigger of the old rule to a trigger
+    /// with an equal configuration, wherever it moved in the rule: each new trigger takes the first old one with an equal
+    /// configuration that no earlier new trigger took, so that equal triggers pair up in order.
     /// </summary>
     public static void CarryOver(CompiledRule old, CompiledRule rule)
     {
+        var propertyTriggers = new List<CompiledPropertyTrigger>(old.PropertyTriggers);
         foreach (var trigger in rule.PropertyTriggers)
         {
-            var match = old.PropertyTriggers.FirstOrDefault(candidate =>
-                candidate.Index == trigger.Index && candidate.Configuration == trigger.Configuration);
-            match?.MoveStateTo(trigger);
+            var index = propertyTriggers.FindIndex(candidate => candidate.Configuration == trigger.Configuration);
+            if (index >= 0)
+            {
+                propertyTriggers[index].MoveStateTo(trigger);
+                propertyTriggers.RemoveAt(index);
+            }
         }
 
+        var eventTriggers = new List<CompiledEventTrigger>(old.EventTriggers);
         foreach (var trigger in rule.EventTriggers)
         {
-            var match = old.EventTriggers.FirstOrDefault(candidate =>
-                candidate.Index == trigger.Index && candidate.Configuration == trigger.Configuration);
-            match?.MoveSubscriptionTo(trigger);
+            var index = eventTriggers.FindIndex(candidate => candidate.Configuration == trigger.Configuration);
+            if (index >= 0)
+            {
+                eventTriggers[index].MoveSubscriptionTo(trigger);
+                eventTriggers.RemoveAt(index);
+            }
         }
     }
 
@@ -187,11 +196,18 @@ internal sealed class AutomationTriggers
     /// <summary>Queues a request of the runs of every pending property trigger, such as after a state change skipped them.</summary>
     public void RequestPendingRecheck() => _queue.TryEnqueue(new PendingRecheckInput(AutomationInputQueue.CausedChainDepth));
 
-    /// <summary>Gets when the next property trigger or guard is due for a tick, or null when none is.</summary>
+    /// <summary>Gets when the next property trigger or Only if is due for a tick, or null when none is.</summary>
     public DateTimeOffset? GetNextDueAt(IReadOnlyList<CompiledRule> rules, DateTimeOffset now) => _propertyTriggers.GetNextDueAt(rules, now);
 
-    /// <summary>Keeps track of the pending property triggers after the requests were dispatched.</summary>
-    public void TrackPending(IReadOnlyList<CompiledRule> rules, IReadOnlyList<RunRequest> requests) =>
+    /// <summary>Whether a property trigger is pending.</summary>
+    public bool HasPending => _propertyTriggers.HasPending;
+
+    /// <summary>
+    /// Keeps track of the pending property triggers after the requests were dispatched. Returns whether a trigger became
+    /// pending, whose Only if is to be checked again in a later input: a property it reads may have changed before it was
+    /// watched.
+    /// </summary>
+    public bool TrackPending(IReadOnlyList<CompiledRule> rules, IReadOnlyList<RunRequest> requests) =>
         _propertyTriggers.TrackPending(rules, requests);
 
     /// <summary>The position of the rule in rule order; the number of rules for a rule that is not one of them.</summary>

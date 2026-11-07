@@ -65,12 +65,12 @@ public class RecentRunsTests
     }
 
     [Fact]
-    public void WhenTheRunsComeFromHistory_ThenTheCaptionSaysSo()
+    public void WhenTheRunsComeFromHistory_ThenTheCaptionSaysSoAndNamesWhatHistoryCanMiss()
     {
         // Act
         var result = new RecentRunsResult(true, [], null, false);
 
         // Assert
-        Assert.Equal("From history: the runs of the last seven days.", result.Caption);
+        Assert.Equal("From history: the runs of the last seven days. Runs within about 250 ms can show as one, and a crash can drop runs.", result.Caption);
     }
 }

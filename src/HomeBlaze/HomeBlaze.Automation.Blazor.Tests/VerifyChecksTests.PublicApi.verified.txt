@@ -123,7 +123,6 @@ namespace HomeBlaze.Automation.Blazor.Diagram
         public string Key { get; init; }
         public string Name { get; init; }
         public string? TargetState { get; init; }
-        public static HomeBlaze.Automation.Blazor.Diagram.StateDiagramRule Create(string key, string name, string? inState, System.Collections.Generic.IEnumerable<HomeBlaze.Automation.AutomationAction?>? actions) { }
         public static HomeBlaze.Automation.Blazor.Diagram.StateDiagramRule From(HomeBlaze.Automation.Blazor.Editing.RuleDraft rule) { }
         public static HomeBlaze.Automation.Blazor.Diagram.StateDiagramRule From(string key, HomeBlaze.Automation.AutomationRule rule) { }
     }
@@ -215,11 +214,11 @@ namespace HomeBlaze.Automation.Blazor.Editing
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<string>? Fields { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public System.Func<string, System.Collections.Generic.IReadOnlyList<string>>? Hints { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public string Label { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string Lead { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public char PathSeparator { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Func<string, HomeBlaze.Components.Inputs.ExpressionPreview?>? Preview { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -294,9 +293,9 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public HomeBlaze.Automation.Blazor.Editing.AutomationDraft Draft { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
-    public class GuardEditor : Microsoft.AspNetCore.Components.ComponentBase
+    public class OnlyIfEditor : Microsoft.AspNetCore.Components.ComponentBase
     {
-        public GuardEditor() { }
+        public OnlyIfEditor() { }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback Changed { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
@@ -340,11 +339,11 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public System.Collections.Generic.List<HomeBlaze.Automation.Blazor.Editing.DraftItem<HomeBlaze.Automation.AutomationAction>> Actions { get; }
         public bool AllowsEvent { get; }
         public string DisplayName { get; }
-        public string? Guard { get; set; }
         public string? InState { get; set; }
         public string Key { get; }
         public HomeBlaze.Automation.AutomationRuleMode Mode { get; set; }
         public string? Name { get; set; }
+        public string? OnlyIf { get; set; }
         public System.Collections.Generic.IEnumerable<string> TargetStates { get; }
         public System.Collections.Generic.IEnumerable<string> Texts { get; }
         public System.Collections.Generic.List<HomeBlaze.Automation.Blazor.Editing.DraftItem<HomeBlaze.Automation.AutomationTrigger>> Triggers { get; }
@@ -353,7 +352,7 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public void AddSetProperty() { }
         public void AddTrigger(HomeBlaze.Automation.AutomationTrigger trigger) { }
         public void MoveAction(HomeBlaze.Automation.Blazor.Editing.DraftItem<HomeBlaze.Automation.AutomationAction> action, int offset) { }
-        public HomeBlaze.Automation.AutomationRule ToRule(System.Func<string, HomeBlaze.Abstractions.Metadata.MethodMetadata?>? getMethod = null) { }
+        public HomeBlaze.Automation.AutomationRule ToRule(System.Func<string, HomeBlaze.Abstractions.Metadata.MethodMetadata?> getMethod) { }
         public static HomeBlaze.Automation.Blazor.Editing.RuleDraft Create(string key, string name) { }
         public static HomeBlaze.Automation.Blazor.Editing.RuleDraft From(string key, HomeBlaze.Automation.AutomationRule rule) { }
     }
@@ -389,6 +388,7 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public string? RenderTemplate(string text) { }
         public string? Validate(string text) { }
         public string? ValidateTemplate(string text) { }
+        public static System.Collections.Generic.IReadOnlyList<string> GetConditionHints(string text) { }
         public static string? ValidateFilter(string text) { }
     }
     public class RulesTab : Microsoft.AspNetCore.Components.ComponentBase

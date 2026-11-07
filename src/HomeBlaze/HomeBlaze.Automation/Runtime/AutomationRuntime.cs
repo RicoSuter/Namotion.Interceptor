@@ -73,6 +73,10 @@ internal sealed class AutomationRuntime
         return _queue.TryEnqueue(new ResetStateInput(AutomationInputQueue.CausedChainDepth));
     }
 
+    /// <summary>
+    /// Completes once the worker processed every input queued so far and set its timer for them; the worker changes nothing
+    /// after it completed a flush until it takes the next input.
+    /// </summary>
     public Task FlushAsync()
     {
         var flush = FlushInput.Create();
@@ -108,6 +112,12 @@ internal sealed class AutomationRuntime
             while (!cancellationToken.IsCancellationRequested)
             {
                 var input = await _queue.ReadAsync(cancellationToken);
+                if (input is FlushInput flush)
+                {
+                    CompleteOrRequeue(flush);
+                    continue;
+                }
+
                 await HandleAsync(input, cancellationToken);
                 ScheduleWake();
             }
@@ -127,12 +137,6 @@ internal sealed class AutomationRuntime
 
     private async Task HandleAsync(AutomationInput input, CancellationToken cancellationToken)
     {
-        if (input is FlushInput flush)
-        {
-            CompleteOrRequeue(flush);
-            return;
-        }
-
         ClearPendingFlag(input);
         using var run = AutomationInputQueue.EnterRun(input.ChainDepth);
         try

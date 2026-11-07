@@ -2,7 +2,7 @@ using HomeBlaze.Automation.Blazor.Editing;
 
 namespace HomeBlaze.Automation.Blazor.Tests.Editing;
 
-public class GuardCooldownTests
+public class OnlyIfCooldownTests
 {
     private const string Cooldown30 = "./LastTriggeredAt == null or now - ./LastTriggeredAt > 30m";
 
@@ -12,13 +12,13 @@ public class GuardCooldownTests
     [InlineData("/a/B or /c/D", 30, "(/a/B or /c/D) and (" + Cooldown30 + ")")]
     [InlineData("/a/B", 0, "/a/B")]
     [InlineData(" ", 0, null)]
-    public void WhenAConditionAndACooldownAreCombined_ThenTheGuardHasTheCooldownForm(string? condition, int minutes, string? expected)
+    public void WhenAConditionAndACooldownAreCombined_ThenOnlyIfHasTheCooldownForm(string? condition, int minutes, string? expected)
     {
         // Act
-        var guard = GuardCooldown.Combine(condition, minutes > 0 ? TimeSpan.FromMinutes(minutes) : null);
+        var onlyIf = OnlyIfCooldown.Combine(condition, minutes > 0 ? TimeSpan.FromMinutes(minutes) : null);
 
         // Assert
-        Assert.Equal(expected, guard);
+        Assert.Equal(expected, onlyIf);
     }
 
     [Theory]
@@ -26,13 +26,13 @@ public class GuardCooldownTests
     [InlineData("/a/B or /c/D")]
     [InlineData("(/a/B) and /c/D")]
     [InlineData("/a/B ")]
-    public void WhenACombinedGuardIsSplit_ThenTheConditionAndTheCooldownAreBack(string condition)
+    public void WhenACombinedOnlyIfIsSplit_ThenTheConditionAndTheCooldownAreBack(string condition)
     {
         // Arrange
-        var guard = GuardCooldown.Combine(condition, TimeSpan.FromMinutes(30));
+        var onlyIf = OnlyIfCooldown.Combine(condition, TimeSpan.FromMinutes(30));
 
         // Act
-        var (splitCondition, cooldown) = GuardCooldown.Split(guard);
+        var (splitCondition, cooldown) = OnlyIfCooldown.Split(onlyIf);
 
         // Assert
         Assert.Equal(condition, splitCondition);
@@ -43,8 +43,8 @@ public class GuardCooldownTests
     public void WhenTheConditionIsWrappedInParentheses_ThenTheSplitDropsOnePair()
     {
         // Act
-        var (wrapped, _) = GuardCooldown.Split(GuardCooldown.Combine("(/a/B or /c/D)", TimeSpan.FromMinutes(30)));
-        var (handWritten, cooldown) = GuardCooldown.Split("(/a/B) and (" + Cooldown30 + ")");
+        var (wrapped, _) = OnlyIfCooldown.Split(OnlyIfCooldown.Combine("(/a/B or /c/D)", TimeSpan.FromMinutes(30)));
+        var (handWritten, cooldown) = OnlyIfCooldown.Split("(/a/B) and (" + Cooldown30 + ")");
 
         // Assert
         Assert.Equal("/a/B or /c/D", wrapped);
@@ -53,10 +53,10 @@ public class GuardCooldownTests
     }
 
     [Fact]
-    public void WhenTheGuardIsOnlyTheCooldown_ThenThereIsNoCondition()
+    public void WhenOnlyIfIsOnlyTheCooldown_ThenThereIsNoCondition()
     {
         // Act
-        var (condition, cooldown) = GuardCooldown.Split(Cooldown30);
+        var (condition, cooldown) = OnlyIfCooldown.Split(Cooldown30);
 
         // Assert
         Assert.Null(condition);
@@ -70,13 +70,13 @@ public class GuardCooldownTests
     [InlineData("/a/B) and (" + Cooldown30 + ")")]
     [InlineData("/a/B or /c/D and (" + Cooldown30 + ")")]
     [InlineData("/a/B || /c/D && (" + Cooldown30 + ")")]
-    public void WhenTheGuardHasAnotherForm_ThenItIsTheConditionWithoutACooldown(string guard)
+    public void WhenOnlyIfHasAnotherForm_ThenItIsTheConditionWithoutACooldown(string onlyIf)
     {
         // Act
-        var (condition, cooldown) = GuardCooldown.Split(guard);
+        var (condition, cooldown) = OnlyIfCooldown.Split(onlyIf);
 
         // Assert
-        Assert.Equal(guard, condition);
+        Assert.Equal(onlyIf, condition);
         Assert.Null(cooldown);
     }
 }

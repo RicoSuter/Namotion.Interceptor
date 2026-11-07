@@ -286,7 +286,6 @@ public class ParsedExpressionParseTests
     [Theory]
     [InlineData("Power > 5/2", '/')]
     [InlineData("Power > 5:2", ':')]
-    [InlineData("Power > -5/2", '/')]
     public void WhenTokenStartsLikeANumberAndHoldsTheSeparator_ThenItIsAPath(string text, char separator)
     {
         // Act
@@ -342,11 +341,13 @@ public class ParsedExpressionParseTests
         Assert.Equal("expression is nested too deeply at position 32", error);
     }
 
-    [Fact]
-    public void WhenNotIsRepeatedBeyondLimit_ThenReturnsNestingError()
+    [Theory]
+    [InlineData('!')]
+    [InlineData('-')]
+    public void WhenNotOrMinusIsRepeatedBeyondLimit_ThenReturnsNestingError(char prefix)
     {
         // Arrange
-        var text = new string('!', 40) + "a";
+        var text = new string(prefix, 40) + "a";
 
         // Act
         var success = ParsedExpression.TryParse(text, '/', out _, out var error);
@@ -374,19 +375,11 @@ public class ParsedExpressionParseTests
     }
 
     [Theory]
-    [InlineData("Interval > 1h30m")]
-    [InlineData("Interval > -5m")]
-    [InlineData("Interval > 1.5d")]
-    public void WhenOperandIsADuration_ThenItIsALiteralAndNoPath(string text)
-    {
-        // Act
-        var expression = Parse(text);
-
-        // Assert
-        Assert.Equal(["Interval"], expression.Paths.ToArray());
-    }
-
-    [Theory]
+    // A duration is a literal
+    [InlineData("Interval > 1h30m", new[] { "Interval" })]
+    [InlineData("Interval > -5m", new[] { "Interval" })]
+    [InlineData("Interval > 1.5d", new[] { "Interval" })]
+    // Operands of arithmetic are values, so bare words there are paths
     [InlineData("a - b", new[] { "a", "b" })]
     [InlineData("a + b * c / d", new[] { "a", "b", "c", "d" })]
     [InlineData("(a + b) * 2 > c", new[] { "a", "b" })]
@@ -395,16 +388,7 @@ public class ParsedExpressionParseTests
     [InlineData("x > Kitchen", new[] { "x" })]
     [InlineData("notes-v2.md == a-b", new[] { "notes-v2.md" })]
     [InlineData("a - -5 > 0", new[] { "a" })]
-    public void WhenExpressionHasArithmetic_ThenItsOperandsAreValuesAndBareWordsArePaths(string text, string[] expectedPaths)
-    {
-        // Act
-        var expression = Parse(text);
-
-        // Assert
-        Assert.Equal(expectedPaths, expression.Paths.ToArray());
-    }
-
-    [Theory]
+    // A minus is the sign of a number or a negation
     [InlineData("-x > 0", new[] { "x" })]
     [InlineData("x > -Limit", new[] { "x", "Limit" })]
     [InlineData("a * -x", new[] { "a", "x" })]
@@ -415,7 +399,7 @@ public class ParsedExpressionParseTests
     [InlineData("/Room-1/Power > -/Room-1/Limit", new[] { "/Room-1/Power", "/Room-1/Limit" })]
     [InlineData("Temperature > -5", new[] { "Temperature" })]
     [InlineData("Power > -5/2", new[] { "Power", "-5/2" })]
-    public void WhenMinusPrecedesAnOperand_ThenItIsTheSignOfANumberOrANegation(string text, string[] expectedPaths)
+    public void WhenExpressionHasDurationsArithmeticOrSigns_ThenItsPathsAreTheOperandsThatAreNoLiterals(string text, string[] expectedPaths)
     {
         // Act
         var expression = Parse(text);
@@ -425,35 +409,29 @@ public class ParsedExpressionParseTests
         Assert.Null(expression.SinglePath);
     }
 
-    [Fact]
-    public void WhenMinusIsRepeatedBeyondLimit_ThenReturnsNestingError()
-    {
-        // Arrange
-        var text = new string('-', 40) + "a";
-
-        // Act
-        var success = ParsedExpression.TryParse(text, '/', out _, out var error);
-
-        // Assert
-        Assert.False(success);
-        Assert.Equal("expression is nested too deeply at position 32", error);
-    }
-
     [Theory]
-    [InlineData("now/Ticks > 1")]
-    [InlineData("event/State == 1")]
-    [InlineData("time")]
-    public void WhenNameIsNotADeclaredVariable_ThenThePathIsResolvedAsAPath(string text)
+    [InlineData("now/Ticks > 1", false)]
+    [InlineData("event/State == 1", false)]
+    [InlineData("time", false)]
+    // A declared variable matches only in its case
+    [InlineData("Now", true)]
+    [InlineData("NOW/Ticks", true)]
+    [InlineData("Event/State", true)]
+    public void WhenNameIsNoDeclaredVariable_ThenThePathIsResolvedAsAPath(string text, bool declaresClockAndEvent)
     {
         // Act
-        var expression = Parse(text);
+        var isParsed = declaresClockAndEvent
+            ? ParsedExpression.TryParse(text, '/', ClockAndEventVariables, out var expression, out var error)
+            : ParsedExpression.TryParse(text, '/', out expression, out error);
         var context = new RecordingContext();
-        expression.Evaluate(ref context);
+        expression!.Evaluate(ref context);
 
         // Assert
+        Assert.True(isParsed, error);
         Assert.Null(context.Variable);
         Assert.False(expression.TryGetVariable(expression.Paths[0], out _, out _));
-        Assert.Equal(["value", "subject"], expression.Variables.ToArray());
+        string[] expectedVariables = declaresClockAndEvent ? [.. ClockAndEventVariables] : ["value", "subject"];
+        Assert.Equal(expectedVariables, expression.Variables.ToArray());
     }
 
     [Theory]
@@ -497,22 +475,6 @@ public class ParsedExpressionParseTests
         Assert.Equal(expectedPaths, expression!.Paths.ToArray());
     }
 
-    [Theory]
-    [InlineData("Now")]
-    [InlineData("NOW/Ticks")]
-    [InlineData("Event/State")]
-    public void WhenNameDiffersFromADeclaredVariableInCase_ThenItIsAPath(string text)
-    {
-        // Act
-        Assert.True(ParsedExpression.TryParse(text, '/', ClockAndEventVariables, out var expression, out var error), error);
-        var context = new RecordingContext();
-        expression.Evaluate(ref context);
-
-        // Assert
-        Assert.Null(context.Variable);
-        Assert.False(expression.TryGetVariable(expression.Paths[0], out _, out _));
-    }
-
     [Fact]
     public void WhenTemplateDeclaresVariables_ThenItsExpressionsHaveThem()
     {
@@ -527,26 +489,16 @@ public class ParsedExpressionParseTests
     }
 
     [Theory]
-    [InlineData("")]
-    [InlineData("1st")]
-    [InlineData("_now")]
-    [InlineData("now/x")]
-    [InlineData("time zone")]
-    [InlineData("and")]
-    [InlineData("NULL")]
-    public void WhenVariableIsNoWord_ThenParsingThrows(string variable)
-    {
-        // Act & Assert
-        var parseException = Assert.Throws<ArgumentException>(() => ParsedExpression.TryParse("a", '/', [variable], out _, out _));
-        Assert.Equal("variables", parseException.ParamName);
-        var templateException = Assert.Throws<ArgumentException>(() => TextTemplate.TryParse("a {{ b }}", '/', [variable], out _, out _));
-        Assert.Equal("variables", templateException.ParamName);
-    }
-
-    [Theory]
+    [InlineData('/', new[] { "" })]
+    [InlineData('/', new[] { "1st" })]
+    [InlineData('/', new[] { "_now" })]
+    [InlineData('/', new[] { "now/x" })]
+    [InlineData('/', new[] { "time zone" })]
+    [InlineData('/', new[] { "and" })]
+    [InlineData('/', new[] { "NULL" })]
     [InlineData('_', new[] { "now_utc" })]
     [InlineData('/', new[] { "now", "time", "now" })]
-    public void WhenVariableHoldsTheSeparatorOrIsDeclaredTwice_ThenParsingThrows(char separator, string[] variables)
+    public void WhenVariableIsNoWordHoldsTheSeparatorOrIsDeclaredTwice_ThenParsingThrows(char separator, string[] variables)
     {
         // Act & Assert
         var parseException = Assert.Throws<ArgumentException>(() => ParsedExpression.TryParse("a", separator, [.. variables], out _, out _));

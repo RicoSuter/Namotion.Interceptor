@@ -1,12 +1,12 @@
 namespace HomeBlaze.Automation.Blazor.Editing;
 
 /// <summary>
-/// The cooldown control of a rule as a view over its guard: a cooldown of 30 minutes is the guard
+/// The cooldown control of a rule as a view over its Only if: a cooldown of 30 minutes is the Only if
 /// <c>./LastTriggeredAt == null or now - ./LastTriggeredAt &gt; 30m</c>, after the other condition joined with
-/// <c>and</c>. A guard is split into a condition and a cooldown only when it still has exactly that form; any other guard
+/// <c>and</c>. Only if is split into a condition and a cooldown only when it still has exactly that form; any other Only if
 /// is the condition as it is.
 /// </summary>
-internal static class GuardCooldown
+internal static class OnlyIfCooldown
 {
     private const string CooldownPrefix = "./LastTriggeredAt == null or now - ./LastTriggeredAt > ";
     private const string Separator = " and (";
@@ -19,29 +19,29 @@ internal static class GuardCooldown
             return hasCondition ? condition : null;
         }
 
-        var cooldownGuard = CooldownPrefix + AutomationDuration.Format(duration);
-        return hasCondition ? $"{Wrap(condition!)}{Separator}{cooldownGuard})" : cooldownGuard;
+        var cooldownCondition = CooldownPrefix + AutomationDuration.Format(duration);
+        return hasCondition ? $"{Wrap(condition!)}{Separator}{cooldownCondition})" : cooldownCondition;
     }
 
-    public static (string? Condition, TimeSpan? Cooldown) Split(string? guard)
+    public static (string? Condition, TimeSpan? Cooldown) Split(string? onlyIf)
     {
-        if (string.IsNullOrWhiteSpace(guard))
+        if (string.IsNullOrWhiteSpace(onlyIf))
         {
             return (null, null);
         }
 
-        if (TryParseCooldown(guard, out var alone))
+        if (TryParseCooldown(onlyIf, out var alone))
         {
             return (null, alone);
         }
 
-        var index = guard.LastIndexOf(Separator, StringComparison.Ordinal);
-        if (index > 0 && guard.EndsWith(')') && TryParseCooldown(guard[(index + Separator.Length)..^1], out var cooldown) && IsCombinedCondition(guard[..index]))
+        var index = onlyIf.LastIndexOf(Separator, StringComparison.Ordinal);
+        if (index > 0 && onlyIf.EndsWith(')') && TryParseCooldown(onlyIf[(index + Separator.Length)..^1], out var cooldown) && IsCombinedCondition(onlyIf[..index]))
         {
-            return (Unwrap(guard[..index]), cooldown);
+            return (Unwrap(onlyIf[..index]), cooldown);
         }
 
-        return (guard, null);
+        return (onlyIf, null);
     }
 
     // Combine joins the cooldown to a condition with "or" only inside parentheses; "a or b and (cooldown)" reads as "a or (b and cooldown)".
@@ -56,7 +56,7 @@ internal static class GuardCooldown
     }
 
     // Parentheses keep a top-level "or" of the condition from taking the cooldown into one of its branches. The pair that
-    // a condition has on its own is dropped when the guard is split, so a hand-written "(a) and (cooldown)" reads as "a".
+    // a condition has on its own is dropped when Only if is split, so a hand-written "(a) and (cooldown)" reads as "a".
     private static string Wrap(string condition) => HasTopLevelOr(condition) ? $"({condition})" : condition;
 
     private static string Unwrap(string condition) => IsWrapped(condition) ? condition[1..^1] : condition;

@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// Runs one request of one rule: checks the guard against the graph and does not run a request it rejects, describes the
+/// Runs one request of one rule: checks Only if against the graph and does not run a request it rejects, describes the
 /// rendered actions of a dry run, or, in the mode <see cref="AutomationRuleMode.On"/> only, sets the trigger time and runs
 /// the actions in order under their error policy until the automation stops. Logs every failed action with the automation, the rule, the action and
 /// the trigger.
@@ -22,7 +22,7 @@ internal sealed class RuleRunner(ActionExecutor executor, SubjectPathResolver re
             return RuleRunResult.NotRun($"the mode {request.Rule.Mode} is not defined");
         }
 
-        if (CheckGuard(request) is { } rejection)
+        if (CheckOnlyIf(request) is { } rejection)
         {
             return RuleRunResult.NotRun(rejection);
         }
@@ -50,16 +50,16 @@ internal sealed class RuleRunner(ActionExecutor executor, SubjectPathResolver re
         return request.Rule.Actions.Select(action => executor.Describe(action, scope)).ToList();
     }
 
-    // Returns why the guard rejects the request, or null when it passes.
-    private string? CheckGuard(RunRequest request)
+    // Returns why Only if rejects the request, or null when it passes.
+    private string? CheckOnlyIf(RunRequest request)
     {
-        if (request.Rule.Guard is not { } guard)
+        if (request.Rule.OnlyIf is not { } onlyIf)
         {
             return null;
         }
 
         var evaluation = CreateEvaluation(request);
-        return evaluation.EvaluateCondition(guard) switch
+        return evaluation.EvaluateCondition(onlyIf) switch
         {
             true => null,
             false => "Only if is false",
@@ -114,7 +114,7 @@ internal sealed class RuleRunner(ActionExecutor executor, SubjectPathResolver re
     private ActionScope CreateScope(RunRequest request, IRuleRunHost host) =>
         new(host.Automation, request.Rule.Rule, CreateEvaluation(request), request.Rule.AllowsEvent, host.Roles, host.RejectedRoles);
 
-    // A new evaluation per guard and per action, so that each reads now when it is evaluated.
+    // A new evaluation for Only if and per action, so that each reads now when it is evaluated.
     private AutomationEvaluation CreateEvaluation(RunRequest request) =>
         new(resolver, request.Rule.Rule, timeProvider.GetUtcNow(), timeProvider.LocalTimeZone, request.Event);
 }

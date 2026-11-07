@@ -1,7 +1,7 @@
 namespace HomeBlaze.Automation;
 
 /// <summary>
-/// What <see cref="AutomationRule.TestNow"/> found with the current values: the result of each trigger and of the guard,
+/// What <see cref="AutomationRule.TestNow"/> found with the current values: the result of each trigger and of Only if,
 /// with the paths that led to no value, and the actions with their rendered arguments.
 /// </summary>
 public sealed record AutomationRuleTestResult
@@ -14,12 +14,12 @@ public sealed record AutomationRuleTestResult
 
     public IReadOnlyList<AutomationTriggerTestResult> Triggers { get; init; } = [];
 
-    public bool HasGuard { get; init; }
+    public bool HasOnlyIf { get; init; }
 
-    /// <summary>True, false or null for unknown; true without a guard.</summary>
-    public bool? GuardResult { get; init; }
+    /// <summary>True, false or null for unknown; true without Only if.</summary>
+    public bool? OnlyIfResult { get; init; }
 
-    public IReadOnlyList<string> GuardMissingPaths { get; init; } = [];
+    public IReadOnlyList<string> OnlyIfMissingPaths { get; init; } = [];
 
     /// <summary>The actions as a run would execute them now, such as <c>/Living/Blinds/MoveTo(position: 40)</c>.</summary>
     public IReadOnlyList<string> Actions { get; init; } = [];

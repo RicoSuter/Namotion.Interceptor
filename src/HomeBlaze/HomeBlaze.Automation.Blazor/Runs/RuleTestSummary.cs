@@ -27,16 +27,16 @@ internal static class RuleTestSummary
                 : "Would not run now: no condition is true.");
         }
 
-        return result.GuardResult switch
+        return result.OnlyIfResult switch
         {
             false => new RuleTestVerdict(false, $"Would not run now: Only if is false. {GetWaitText("false")}"),
-            null when result.GuardMissingPaths.Count > 0 => new RuleTestVerdict(
-                false, $"Would not run now: Only if is unknown, missing {string.Join(", ", result.GuardMissingPaths)}. {GetWaitText("unknown")}"),
+            null when result.OnlyIfMissingPaths.Count > 0 => new RuleTestVerdict(
+                false, $"Would not run now: Only if is unknown, missing {string.Join(", ", result.OnlyIfMissingPaths)}. {GetWaitText("unknown")}"),
             null => new RuleTestVerdict(false, $"Would not run now: Only if is unknown. {GetWaitText("unknown")}"),
             _ => new RuleTestVerdict(true, "Would run now.")
         };
     }
 
-    private static string GetWaitText(string guardResult) =>
-        $"A condition that becomes true while Only if is {guardResult} waits until Only if is true.";
+    private static string GetWaitText(string onlyIfResult) =>
+        $"A condition that becomes true while Only if is {onlyIfResult} waits until Only if is true.";
 }

@@ -8,7 +8,7 @@ namespace HomeBlaze.Automation.Runtime;
 /// A validated rule: its configuration as it was when compiled, its parsed expressions and the runtime state of its
 /// triggers. Used by the worker only.
 /// </summary>
-internal sealed class CompiledRule(string key, AutomationRule rule, ParsedExpression? guard)
+internal sealed class CompiledRule(string key, AutomationRule rule, ParsedExpression? onlyIf)
 {
     private int _version;
 
@@ -23,22 +23,22 @@ internal sealed class CompiledRule(string key, AutomationRule rule, ParsedExpres
 
     public string? InState { get; } = rule.InState;
 
-    public ParsedExpression? Guard { get; } = guard;
+    public ParsedExpression? OnlyIf { get; } = onlyIf;
 
-    /// <summary>The paths of the guard that are no variable.</summary>
-    public IReadOnlyList<string> GuardPropertyPaths { get; } = guard is null ? [] : [.. AutomationExpressionCheck.GetPropertyPaths(guard)];
+    /// <summary>The paths of Only if that are no variable.</summary>
+    public IReadOnlyList<string> OnlyIfPropertyPaths { get; } = onlyIf is null ? [] : [.. AutomationExpressionCheck.GetPropertyPaths(onlyIf)];
 
-    /// <summary>When the guard can change with the clock alone, or null for a guard that does not read the clock.</summary>
-    public ExpressionClock? GuardClock { get; } = guard is null ? null : ExpressionClock.Create(guard);
+    /// <summary>When Only if can change with the clock alone, or null for an Only if that does not read the clock.</summary>
+    public ExpressionClock? OnlyIfClock { get; } = onlyIf is null ? null : ExpressionClock.Create(onlyIf);
 
-    /// <summary>The properties that <see cref="GuardPropertyPaths"/> resolved to while a trigger of the rule is pending.</summary>
-    public PropertyReference[] GuardDependencies { get; set; } = [];
+    /// <summary>The properties that <see cref="OnlyIfPropertyPaths"/> resolved to while a trigger of the rule is pending.</summary>
+    public PropertyReference[] OnlyIfDependencies { get; set; } = [];
 
-    /// <summary>When the guard of a rule with a pending trigger is evaluated again for the clock, or null for no such instant.</summary>
-    public DateTimeOffset? GuardRecheckAt { get; set; }
+    /// <summary>When Only if of a rule with a pending trigger is evaluated again for the clock, or null for no such instant.</summary>
+    public DateTimeOffset? OnlyIfRecheckAt { get; set; }
 
-    /// <summary>Whether the guard of a rule with a pending trigger is evaluated again every second.</summary>
-    public bool RechecksGuardEverySecond { get; set; }
+    /// <summary>Whether Only if of a rule with a pending trigger is evaluated again every second.</summary>
+    public bool RechecksOnlyIfEverySecond { get; set; }
 
     public IReadOnlyList<AutomationAction> Actions { get; } = [.. rule.Actions];
 

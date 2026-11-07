@@ -42,7 +42,6 @@ namespace Namotion.Interceptor.Expressions
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Expressions.ExpressionPipe> Pipes { get; }
         public string? SinglePath { get; }
         public string Text { get; }
-        public System.Collections.Immutable.ImmutableArray<string> Variables { get; }
         public Namotion.Interceptor.Expressions.ExpressionValue Evaluate<TContext>(ref TContext context)
             where TContext :  struct, Namotion.Interceptor.Expressions.IExpressionContext { }
         public bool? EvaluateCondition<TContext>(ref TContext context)
