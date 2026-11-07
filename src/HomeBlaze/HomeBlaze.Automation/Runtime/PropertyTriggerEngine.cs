@@ -418,18 +418,9 @@ internal sealed class PropertyTriggerEngine(
     // Returns whether the properties differ from those resolved before.
     private bool ResolveOnlyIfDependencies(CompiledRule rule)
     {
-        var dependencies = new List<PropertyReference>(rule.OnlyIfPropertyPaths.Count);
-        foreach (var path in rule.OnlyIfPropertyPaths)
-        {
-            if (AutomationPaths.ResolveProperty(resolver, path, rule.Rule) is { } property)
-            {
-                dependencies.Add(property.Reference);
-            }
-        }
-
-        var changed = !dependencies.SequenceEqual(rule.OnlyIfDependencies);
-        rule.OnlyIfDependencies = [.. dependencies];
-        return changed;
+        var previous = rule.OnlyIfDependencies;
+        rule.OnlyIfDependencies = Resolve(rule.OnlyIfPropertyPaths, rule.Rule);
+        return !rule.OnlyIfDependencies.AsSpan().SequenceEqual(previous);
     }
 
     // Derives when Only if can change with the clock alone, from the instants its comparisons read now.
@@ -480,18 +471,23 @@ internal sealed class PropertyTriggerEngine(
     // Returns whether the properties differ from those resolved before.
     private bool ResolveDependencies(CompiledPropertyTrigger trigger)
     {
-        var dependencies = new List<PropertyReference>(trigger.PropertyPaths.Count);
-        foreach (var path in trigger.PropertyPaths)
+        var previous = trigger.Dependencies;
+        trigger.Dependencies = Resolve(trigger.PropertyPaths, trigger.Rule.Rule);
+        return !trigger.Dependencies.AsSpan().SequenceEqual(previous);
+    }
+
+    private PropertyReference[] Resolve(IReadOnlyList<string> paths, AutomationRule rule)
+    {
+        var resolved = new List<PropertyReference>(paths.Count);
+        foreach (var path in paths)
         {
-            if (AutomationPaths.ResolveProperty(resolver, path, trigger.Rule.Rule) is { } property)
+            if (AutomationPaths.ResolveProperty(resolver, path, rule) is { } property)
             {
-                dependencies.Add(property.Reference);
+                resolved.Add(property.Reference);
             }
         }
 
-        var changed = !dependencies.SequenceEqual(trigger.Dependencies);
-        trigger.Dependencies = [.. dependencies];
-        return changed;
+        return [.. resolved];
     }
 
     private void PublishWatched(IReadOnlyList<CompiledRule> rules, IEnumerable<CompiledPropertyTrigger> activating)
