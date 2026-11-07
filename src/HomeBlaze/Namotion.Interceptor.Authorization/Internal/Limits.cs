@@ -4,8 +4,8 @@ namespace Namotion.Interceptor.Authorization.Internal;
 internal static class Limits
 {
     // An evaluation tries this many times to read the graph between two equal even structure versions. Between
-    // attempts it spins, and from SpinWait's tenth wait on it yields the thread, so a burst of registry changes usually
-    // ends before the evaluation fails closed; a registry that changes without pause can still make it fail closed,
+    // attempts it waits with SpinWait, which spins first and later also yields the thread, so a burst of registry
+    // changes usually ends before the evaluation fails closed; a registry that changes without pause can still make it fail closed,
     // which only a read under the registry's lock would avoid.
     public const int MaxConsistencyAttempts = 40;
 
