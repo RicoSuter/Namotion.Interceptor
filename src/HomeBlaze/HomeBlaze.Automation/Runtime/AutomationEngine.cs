@@ -31,6 +31,9 @@ internal sealed class AutomationEngine : IRuleRunHost
     private string? _runWriteError;
     private readonly RuleStatusPublisher _statusPublisher = new();
 
+    // Created once, since the worker publishes the rule statuses after every input.
+    private readonly Action _publishRuleStatuses;
+
     /// <summary>Creates the engine, whose property triggers publish their watched set to <paramref name="changes"/>.</summary>
     public AutomationEngine(Automation automation, AutomationInputQueue queue, AutomationStateKeeper keeper, ILogger logger, AutomationChangeReceiver changes)
     {
@@ -41,6 +44,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         _dispatcher = new RunDispatcher(this, automation, keeper, logger);
         _states = new StateTransitions(automation, keeper, automation.TimeProvider, logger);
         _status = new AutomationStatusReporter(automation, logger);
+        _publishRuleStatuses = PublishRuleStatuses;
     }
 
     public string Name => _automation.Title ?? "Automation";
@@ -250,13 +254,7 @@ internal sealed class AutomationEngine : IRuleRunHost
     public void ReportUnexpectedError(Exception exception)
     {
         _logger.LogError(exception, "The automation {Automation} failed to process an input.", Name);
-        lock (_status)
-        {
-            if (!_isAbandoned)
-            {
-                _status.SetError(exception.Message);
-            }
-        }
+        RunUnlessAbandoned(() => _status.SetError(exception.Message));
     }
 
     /// <summary>
@@ -272,16 +270,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         }
     }
 
-    public void RefreshRuleStatuses()
-    {
-        lock (_status)
-        {
-            if (!_isAbandoned)
-            {
-                PublishRuleStatuses();
-            }
-        }
-    }
+    public void RefreshRuleStatuses() => RunUnlessAbandoned(_publishRuleStatuses);
 
     private void PublishRuleStatuses()
     {
@@ -303,20 +292,15 @@ internal sealed class AutomationEngine : IRuleRunHost
     public void End()
     {
         Stop();
-        lock (_status)
+        RunUnlessAbandoned(() =>
         {
-            if (_isAbandoned)
-            {
-                return;
-            }
-
             if (_keeper.WriteRuns() is { } error)
             {
                 _logger.LogWarning("The automation {Automation} could not save its last runs when it stopped: {Error}", Name, error);
             }
 
             RuleStatusPublisher.PublishStopped(_automation.Rules, _automation.TimeProvider.LocalTimeZone);
-        }
+        });
     }
 
     public string? ChangeState(string targetState) => _states.ChangeState(_snapshot, targetState);
@@ -352,11 +336,7 @@ internal sealed class AutomationEngine : IRuleRunHost
     private void Replace(CompiledAutomation compiled)
     {
         CarryOver(_snapshot, compiled);
-        foreach (var rule in _snapshot.Rules)
-        {
-            Deactivate(rule);
-        }
-
+        Stop();
         _snapshot = compiled;
         PruneCheckpoint();
 
