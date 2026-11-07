@@ -8,7 +8,8 @@ namespace HomeBlaze.Authorization;
 
 /// <summary>
 /// A custom role of an <see cref="Authorization"/>: rules that allow, rules that deny, and the roles it includes.
-/// Its name is its key in <see cref="Authorization.Roles"/>.
+/// Its name is its key in <see cref="Authorization.Roles"/>. Each list is replaced as a whole; a list must not be changed
+/// after it is assigned, as only an assignment gives principals a newly compiled policy.
 /// </summary>
 [Description("Custom role with the rules it allows and denies")]
 [DisplayName("Role")]
@@ -21,19 +22,19 @@ public partial class Role : IConfigurable
     /// The names of the built-in or custom roles whose rules this role includes.
     /// </summary>
     [Configuration]
-    public partial List<string> Includes { get; set; }
+    public partial IReadOnlyList<string> Includes { get; set; }
 
     /// <summary>
     /// The rules whose matches are allowed.
     /// </summary>
     [Configuration]
-    public partial List<PermissionRule> Allow { get; set; }
+    public partial IReadOnlyList<PermissionRule> Allow { get; set; }
 
     /// <summary>
     /// The rules whose matches are denied, whichever role allowed them.
     /// </summary>
     [Configuration]
-    public partial List<PermissionRule> Deny { get; set; }
+    public partial IReadOnlyList<PermissionRule> Deny { get; set; }
 
     /// <summary>
     /// Why the role cannot be used, such as a compile error or a reserved name, or null.

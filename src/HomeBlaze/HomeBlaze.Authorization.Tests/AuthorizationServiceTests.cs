@@ -330,6 +330,24 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.True(after.CanRead(Member(nameof(TagTestSubject.Temperature))));
     }
 
+    // The service notices only a replaced collection, so a collection changed in place would keep the earlier policy.
+    [Theory]
+    [InlineData(typeof(Role), nameof(Role.Includes))]
+    [InlineData(typeof(Role), nameof(Role.Allow))]
+    [InlineData(typeof(Role), nameof(Role.Deny))]
+    [InlineData(typeof(Authorization), nameof(Authorization.Roles))]
+    public void WhenTheRolesAreExposed_ThenTheirCollectionsCannotBeChangedInPlace(Type type, string propertyName)
+    {
+        // Arrange
+        var propertyType = type.GetProperty(propertyName)!.PropertyType;
+
+        // Act
+        Type[] interfaces = [propertyType, .. propertyType.GetInterfaces()];
+
+        // Assert
+        Assert.DoesNotContain(interfaces, candidate => candidate.IsGenericType && candidate.GetGenericTypeDefinition() == typeof(ICollection<>));
+    }
+
     [Fact]
     public void WhenARoleIsAdded_ThenTheNextPolicyResolvesIt()
     {
