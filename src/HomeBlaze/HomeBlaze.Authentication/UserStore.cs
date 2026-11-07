@@ -122,6 +122,23 @@ public sealed class UserStore : IMcpClientAccess
         return _state.ById.TryGetValue(userId, out var user) && !user.IsLockedByAdministrator ? user.Roles : [];
     }
 
+    /// <summary>
+    /// Whether a session of the user with <paramref name="userId"/> may go on, as the store knows without reading the
+    /// database: the user exists, no administrator locked them, and they need not change their password, as after a
+    /// reset, unless the session is one that must change it, see <paramref name="sessionMustChangePassword"/>.
+    /// </summary>
+    public bool IsSessionAllowed(string userId, bool sessionMustChangePassword)
+    {
+        ArgumentNullException.ThrowIfNull(userId);
+
+        if (!_state.ById.TryGetValue(userId, out var user) || user.IsBuiltIn || user.IsLockedByAdministrator)
+        {
+            return false;
+        }
+
+        return sessionMustChangePassword || !user.MustChangePassword;
+    }
+
     /// <summary>Gets the id of the user named <paramref name="userName"/>, or null.</summary>
     public string? GetUserId(string userName)
     {

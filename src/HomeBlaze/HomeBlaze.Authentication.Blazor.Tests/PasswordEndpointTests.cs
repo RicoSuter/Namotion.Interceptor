@@ -257,7 +257,7 @@ public class PasswordEndpointTests
         var response = await SetPasswordAsync(browser, "a password of the attacker");
 
         // Assert
-        Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(response));
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.False(browser.HasSessionCookie);
         Assert.False(await HasPasswordAsync(host, "kid"));
     }

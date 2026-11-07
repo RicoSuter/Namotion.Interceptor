@@ -12,6 +12,36 @@ namespace HomeBlaze.Authentication.Blazor.Tests;
 
 public class AuthenticationPipelineTests
 {
+    [Theory]
+    [InlineData("reset")]
+    [InlineData("lock")]
+    [InlineData("remove")]
+    public async Task WhenTheSessionOfAPersonEnds_ThenAProtectedEndpointRefusesItsCookieAtOnce(string change)
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        var added = await host.AdministrationAsAdmin.AddUserAsync("kid", null, [BuiltInRoles.ReaderName], CancellationToken.None);
+        Assert.True(added.Succeeded, added.Error);
+        using var browser = host.CreateBrowser();
+        await host.SignInAsync(browser, "kid");
+        Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync("/protected")).StatusCode);
+        var administration = host.AdministrationAsAdmin;
+        var result = change switch
+        {
+            "reset" => await administration.ResetPasswordAsync("kid", CancellationToken.None),
+            "lock" => await administration.SetLockedAsync("kid", true, CancellationToken.None),
+            _ => await administration.RemoveAsync("kid", CancellationToken.None)
+        };
+
+        // Act
+        var response = await browser.GetAsync("/protected");
+
+        // Assert
+        Assert.True(result.Succeeded, result.Error);
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.False(browser.HasSessionCookie);
+    }
+
     [Fact]
     public async Task WhenAnUnauthenticatedVisitorRequestsAProtectedEndpoint_ThenTheyAreRedirectedToTheAppWithTheReturnUrl()
     {

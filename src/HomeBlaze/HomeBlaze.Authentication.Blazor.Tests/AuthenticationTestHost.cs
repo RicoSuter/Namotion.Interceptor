@@ -194,12 +194,13 @@ internal sealed class AuthenticationTestHost : IAsyncDisposable
         application.MapPost(McpPath, () => "mcp").AllowAnonymous();
         application.MapGet(EchoPath, (HttpContext context) =>
             $"{context.Request.Scheme}|{context.Request.Host}|{context.Connection.RemoteIpAddress}|{context.Request.PathBase}").AllowAnonymous();
-        application.MapPost(SignInPath, async (string? userName, UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager) =>
+        application.MapPost(SignInPath, async (string? userName, UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, UserStore userStore) =>
         {
             // As after setting a password, which every endpoint but the app and the password endpoint requires first.
             var user = (await userManager.FindByNameAsync(userName ?? AdminSeeding.AdminUserName))!;
             user.MustChangePassword = false;
             await userManager.UpdateAsync(user);
+            await userStore.RefreshUserAsync(user.Id, CancellationToken.None);
             await signInManager.SignInAsync(user, isPersistent: false);
         }).AllowAnonymous();
 

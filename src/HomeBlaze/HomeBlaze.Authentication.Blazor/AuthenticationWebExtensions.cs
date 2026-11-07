@@ -57,7 +57,7 @@ public static class AuthenticationWebExtensions
             options.Events.OnRedirectToLogin = context => RedirectOrAnswerAsync(context, StatusCodes.Status401Unauthorized);
             options.Events.OnRedirectToAccessDenied = context => RedirectOrAnswerAsync(context, StatusCodes.Status403Forbidden);
         });
-        services.Configure<SecurityStampValidatorOptions>(options => options.ValidationInterval = TimeSpan.FromMinutes(5));
+        services.AddSessionValidation();
 
         services.AddAuthorization(options =>
         {
