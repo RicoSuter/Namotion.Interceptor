@@ -106,6 +106,18 @@ public class RuleStatusTextTests
     }
 
     [Fact]
+    public void WhenATriggerRearmedWhileItsExpressionIsTrue_ThenTheRuleIsArmedAndWaitsUntilItIsFalse()
+    {
+        // Act
+        var rearmed = RuleStatusText.Format(AutomationRuleMode.On, null, [Phase(TriggerPhase.RearmedWhileTrue), Phase(TriggerPhase.WaitingToRearm)], TimeZoneInfo.Utc);
+        var withAnArmedTrigger = RuleStatusText.Format(AutomationRuleMode.On, null, [Phase(TriggerPhase.RearmedWhileTrue), Phase(TriggerPhase.Armed)], TimeZoneInfo.Utc);
+
+        // Assert
+        Assert.Equal("On: Armed, waiting until false", rearmed);
+        Assert.Equal("On: Armed", withAnArmedTrigger);
+    }
+
+    [Fact]
     public void WhenATriggerCanFire_ThenTheRuleIsArmed()
     {
         // Act

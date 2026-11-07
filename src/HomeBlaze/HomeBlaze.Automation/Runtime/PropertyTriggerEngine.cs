@@ -214,6 +214,10 @@ internal sealed class PropertyTriggerEngine(
             {
                 requests.Add(CreateRequest(trigger));
             }
+            else if (wasPending && trigger.State.Phase != TriggerPhase.Pending)
+            {
+                EndWait(trigger.Rule);
+            }
 
             LogUnknownChange(trigger, wasUnknown);
         }
@@ -237,6 +241,15 @@ internal sealed class PropertyTriggerEngine(
         return added is null
             ? requests
             : [.. requests.Concat(added).OrderBy(request => AutomationTriggers.IndexOf(rules, request.Rule))];
+    }
+
+    // The wait ended without a run, so the reason it did not run no longer applies and a new wait is logged again.
+    private static void EndWait(CompiledRule rule)
+    {
+        if (!rule.PropertyTriggers.Exists(trigger => trigger.State.Phase == TriggerPhase.Pending))
+        {
+            rule.SkipReason = null;
+        }
     }
 
     private static bool IsPending(CompiledPropertyTrigger trigger) =>

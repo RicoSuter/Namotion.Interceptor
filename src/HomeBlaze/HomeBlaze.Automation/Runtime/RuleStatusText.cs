@@ -5,7 +5,8 @@ namespace HomeBlaze.Automation.Runtime;
 /// <summary>
 /// The status text of a rule: its mode, then why it is inactive, or the first pending trigger with why its run did not
 /// run, the first holding trigger, the first problem, the first unknown trigger, "Triggered, waiting to rearm" when
-/// every trigger fired, and otherwise "Armed", followed by why its last request did not run. Times are local to the
+/// every trigger fired, "Armed, waiting until false" when one of them rearmed while its expression stayed true, and
+/// otherwise "Armed", followed by why its last request did not run. Times are local to the
 /// host. The text changes only on a transition, so history records it once per transition.
 /// </summary>
 internal static class RuleStatusText
@@ -63,9 +64,18 @@ internal static class RuleStatusText
             }
         }
 
-        return triggers.Count > 0 && triggers.All(trigger => trigger.Phase is TriggerPhase.WaitingToRearm or TriggerPhase.WaitingForFalse)
-            ? "Triggered, waiting to rearm"
-            : "Armed";
+        return DescribeFired(triggers);
+    }
+
+    // Every trigger fired: it waits to rearm, or rearmed while its expression is still true and waits until it is false.
+    private static string DescribeFired(IReadOnlyList<TriggerStatus> triggers)
+    {
+        if (triggers.Count == 0 || !triggers.All(trigger => trigger.Phase is TriggerPhase.WaitingToRearm or TriggerPhase.WaitingForFalse or TriggerPhase.RearmedWhileTrue))
+        {
+            return "Armed";
+        }
+
+        return triggers.Any(trigger => trigger.Phase == TriggerPhase.RearmedWhileTrue) ? "Armed, waiting until false" : "Triggered, waiting to rearm";
     }
 
     private static string DescribeUnknown(DateTimeOffset since, IReadOnlyList<string> missingPaths, TimeZoneInfo timeZone) =>

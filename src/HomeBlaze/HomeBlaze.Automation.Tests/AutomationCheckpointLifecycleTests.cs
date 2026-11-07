@@ -263,4 +263,45 @@ public class AutomationCheckpointLifecycleTests
         Assert.False(File.Exists(Path.Combine(host.DataDirectory, "AutomationState", "Washer.json")));
         Assert.True(File.Exists(Path.Combine(host.DataDirectory, "AutomationState", "Basement", "Washer.json")));
     }
+
+    [Fact]
+    public async Task WhenTheUnreadableCheckpointCannotBeMovedAside_ThenAValidConfigurationKeepsTheErrorUntilAReset()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
+        await host.StopAsync();
+        var folder = Path.GetDirectoryName(host.CheckpointPath)!;
+        Directory.CreateDirectory(folder);
+        await File.WriteAllTextAsync(host.CheckpointPath, "{ \"currentState\": ");
+        File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            await ((IHostedService)host.Automation).StartAsync(CancellationToken.None);
+            await host.FlushAsync();
+        }
+        finally
+        {
+            File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        // Act
+        await host.Automation.ApplyConfigurationAsync(CancellationToken.None);
+        await host.FlushAsync();
+        var statusAfterTheSave = host.Automation.Status;
+        var contentAfterTheSave = await File.ReadAllTextAsync(host.CheckpointPath);
+        host.Automation.ResetState();
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, statusAfterTheSave);
+        Assert.Equal("{ \"currentState\": ", contentAfterTheSave);
+        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
+        Assert.NotEqual(contentAfterTheSave, await File.ReadAllTextAsync(host.CheckpointPath));
+    }
 }

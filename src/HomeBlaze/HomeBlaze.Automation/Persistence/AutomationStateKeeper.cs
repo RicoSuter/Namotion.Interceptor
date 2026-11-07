@@ -91,6 +91,9 @@ internal sealed class AutomationStateKeeper(AutomationCheckpointStore store)
         }
     }
 
+    /// <summary>Whether every write is refused, since an unreadable checkpoint could not be moved aside, until <see cref="AllowOverwrite"/>.</summary>
+    public bool RefusesWrites => _overwriteRefusal is not null;
+
     /// <summary>Writes again after an unreadable checkpoint could not be moved aside, which then is replaced.</summary>
     public void AllowOverwrite() => _overwriteRefusal = null;
 

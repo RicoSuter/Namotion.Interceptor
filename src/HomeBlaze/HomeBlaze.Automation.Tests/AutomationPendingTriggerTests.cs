@@ -76,7 +76,7 @@ public class AutomationPendingTriggerTests
 
         // Assert
         Assert.Equal(1, host.Blinds.CloseCount);
-        Assert.Equal("On: Armed; not run: Only if is false", host.Rule("overheat").Status);
+        Assert.Equal("On: Armed", host.Rule("overheat").Status);
     }
 
     [Fact]
@@ -204,5 +204,26 @@ public class AutomationPendingTriggerTests
         Assert.Equal(0, runsWhileMoving);
         Assert.Equal(1, host.Blinds.CloseCount);
         Assert.Equal("On: Triggered, waiting to rearm", host.Rule("storm").Status);
+    }
+
+    [Fact]
+    public async Task WhenTheWaitEndsBecauseTheTriggerTurnsFalse_ThenTheReasonIsClearedAndANewRejectionIsLoggedAgain()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(ConveyorGuard());
+        await RunOnceAndTriggerWithinTheCooldownAsync(host);
+        var statusWhileWaiting = host.Rule("overheat").Status;
+
+        // Act
+        await SetAsync(host, 37);
+        var statusAfterTheWait = host.Rule("overheat").Status;
+        await SetAsync(host, 41);
+        await AdvanceAsync(host, TimeSpan.FromSeconds(30));
+
+        // Assert
+        Assert.Equal("On: Waiting since 12:01:00: Only if is false", statusWhileWaiting);
+        Assert.Equal("On: Armed", statusAfterTheWait);
+        Assert.Equal("On: Waiting since 12:01:30: Only if is false", host.Rule("overheat").Status);
+        Assert.Equal(2, host.Logger.Messages.Count(message => message.EndsWith("did not run: Only if is false.", StringComparison.Ordinal)));
     }
 }

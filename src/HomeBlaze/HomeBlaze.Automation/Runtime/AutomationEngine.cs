@@ -334,18 +334,21 @@ internal sealed class AutomationEngine : IRuleRunHost
 
         _snapshot = compiled;
         PruneCheckpoint();
+
+        // An unreadable checkpoint that could not be moved aside stays an error until a reset, since nothing is written.
+        var refusesWrites = _keeper.RefusesWrites;
         var problem = _states.EnterInitialState(compiled) ?? StateTransitions.CheckState(compiled, CurrentState);
         if (problem is not null)
         {
             _status.Fail(problem);
         }
-        else if (_hasConfigurationError || _hasCheckpointError)
+        else if ((_hasConfigurationError || _hasCheckpointError) && !refusesWrites)
         {
             _status.SetRunning();
         }
 
         _hasConfigurationError = false;
-        _hasCheckpointError = false;
+        _hasCheckpointError = refusesWrites;
         _status.ApplyEnabled();
         ActivateRules();
     }
