@@ -5,6 +5,7 @@ using HomeBlaze.History.Abstractions;
 using HomeBlaze.Services.Lifecycle;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -36,7 +37,7 @@ public class GetPropertyHistoryToolTests
         }
 
         var provider = new HistoryMcpToolProvider(
-            () => root, new StateAttributePathProvider(), NullLogger<HistoryMcpToolProvider>.Instance);
+            () => root, new McpServerConfiguration { PathProvider = new StateAttributePathProvider() }, NullLogger<HistoryMcpToolProvider>.Instance);
 
         var tool = provider.GetTools().First(candidate => candidate.Name == "get_property_history");
         var input = JsonSerializer.SerializeToElement(inputObject);
@@ -317,13 +318,13 @@ public class GetPropertyHistoryToolTests
     {
         // Arrange
         var provider = new HistoryMcpToolProvider(
-            () => throw new InvalidOperationException("Not used."), new StateAttributePathProvider(), NullLogger<HistoryMcpToolProvider>.Instance);
+            () => throw new InvalidOperationException("Not used."), new McpServerConfiguration { PathProvider = new StateAttributePathProvider() }, NullLogger<HistoryMcpToolProvider>.Instance);
 
         // Act
         var tool = provider.GetTools().Single();
 
         // Assert
-        Assert.Same(Namotion.Interceptor.Mcp.McpToolAnnotations.ReadOnly, tool.Annotations);
+        Assert.Same(McpToolAnnotations.ReadOnly, tool.Annotations);
     }
 
     [Fact]

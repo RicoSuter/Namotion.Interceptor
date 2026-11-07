@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Namotion.Interceptor.Mcp;
+using Namotion.Interceptor.Mcp.Abstractions;
 
 namespace HomeBlaze.AI.Agents;
 
@@ -40,18 +41,25 @@ internal static class AgentWatchPaths
     }
 
     /// <summary>
-    /// Fetches the state at each of the normalized watch paths with the read-only tools of <paramref name="toolSource"/>;
-    /// a path whose state cannot be fetched gets an error state.
+    /// Fetches the state at each of the normalized watch paths with the read-only tools of <paramref name="toolSource"/>
+    /// under <paramref name="accessPolicy"/>; a path whose state cannot be fetched gets an error state.
     /// </summary>
+    /// <param name="normalizedWatchPaths">The watch paths, normalized with <see cref="Normalize"/>.</param>
+    /// <param name="toolSource">Creates the tools that read the state.</param>
+    /// <param name="accessPolicy">
+    /// The policy of the tools: the operator chose the paths, so not the agent's roles, but one that keeps the system
+    /// rules, such as that of the <c>Everything</c> role.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the fetch.</param>
     public static async Task<IReadOnlyList<AgentWatchedState>> FetchStateAsync(
-        string[] normalizedWatchPaths, IAgentToolSource toolSource, CancellationToken cancellationToken)
+        string[] normalizedWatchPaths, IAgentToolSource toolSource, IMcpAccessPolicy accessPolicy, CancellationToken cancellationToken)
     {
         if (normalizedWatchPaths.Length == 0)
         {
             return [];
         }
 
-        var tools = toolSource.CreateTools(isReadOnly: true);
+        var tools = toolSource.CreateTools(isReadOnly: true, accessPolicy);
         var browse = tools.FirstOrDefault(tool => tool.Name == "browse");
         var getProperty = tools.FirstOrDefault(tool => tool.Name == "get_property");
         var states = new List<AgentWatchedState>(normalizedWatchPaths.Length);
