@@ -3,7 +3,7 @@ using Namotion.Interceptor.Registry.Abstractions;
 namespace HomeBlaze.Authorization.Abstractions;
 
 /// <summary>
-/// What the person of the current circuit may see and do. Scoped per circuit; the default registration denies everything. The answers of one instance come from one snapshot of the person, so that they never belong to different people.
+/// What the person of the current circuit, or of the current request outside a circuit, may see and do. Scoped per circuit and per request; the default registration denies everything. The answers of one instance come from one snapshot of the person, so that they never belong to different people.
 /// </summary>
 public interface IUserPermissions
 {
