@@ -24,6 +24,11 @@ internal sealed class PropertyTriggerEngine(
 {
     private readonly ObservedValues _values = new();
     private readonly List<CompiledPropertyTrigger> _pending = [];
+
+    // The triggers whose properties, and the rules whose guard properties, a refresh resolved differently since the last
+    // graph change, which evaluates them; a refresh for an activation evaluates only the triggers it activates.
+    private readonly HashSet<CompiledPropertyTrigger> _rebound = [];
+    private readonly HashSet<CompiledRule> _reboundGuards = [];
     private FrozenSet<PropertyReference> _watched = FrozenSet<PropertyReference>.Empty;
 
     /// <summary>Activates the inactive triggers of the rules and returns the runs they request at once.</summary>
@@ -84,13 +89,30 @@ internal sealed class PropertyTriggerEngine(
     }
 
     /// <summary>
-    /// Resolves the properties again, since paths may lead elsewhere now, evaluates every active trigger and requests the
-    /// runs of the pending triggers.
+    /// Resolves the properties again, since paths may lead elsewhere now, and evaluates the triggers whose properties
+    /// changed, or every active trigger with <paramref name="evaluateAll"/>; requests the runs of the pending triggers
+    /// whose properties or guard properties changed, or of every pending trigger with <paramref name="evaluateAll"/>.
     /// </summary>
-    public IReadOnlyList<RunRequest> OnGraphChanged(IReadOnlyList<CompiledRule> rules)
+    public IReadOnlyList<RunRequest> OnGraphChanged(IReadOnlyList<CompiledRule> rules, bool evaluateAll)
     {
         Refresh(rules);
-        return ObserveWhere(rules, _ => true, _ => true);
+        try
+        {
+            if (evaluateAll)
+            {
+                return ObserveWhere(rules, _ => true, _ => true);
+            }
+
+            var requests = _rebound.Count == 0 ? [] : ObserveWhere(rules, _rebound.Contains, _ => true);
+            return _reboundGuards.Count == 0 || _pending.Count == 0
+                ? requests
+                : AddPendingRequests(rules, requests, trigger => _reboundGuards.Contains(trigger.Rule));
+        }
+        finally
+        {
+            _rebound.Clear();
+            _reboundGuards.Clear();
+        }
     }
 
     /// <summary>Requests the runs of every pending trigger, such as after a state change skipped them.</summary>
@@ -164,10 +186,18 @@ internal sealed class PropertyTriggerEngine(
         var now = timeProvider.GetUtcNow();
         foreach (var trigger in ActiveTriggers(rules))
         {
-            ResolveDependencies(trigger);
+            if (ResolveDependencies(trigger))
+            {
+                _rebound.Add(trigger);
+            }
+
             if (trigger.State.Phase == TriggerPhase.Pending)
             {
-                ResolveGuardDependencies(trigger.Rule);
+                if (ResolveGuardDependencies(trigger.Rule))
+                {
+                    _reboundGuards.Add(trigger.Rule);
+                }
+
                 ScheduleGuardRecheck(trigger.Rule, now);
                 _pending.Add(trigger);
             }
@@ -255,7 +285,8 @@ internal sealed class PropertyTriggerEngine(
     private static bool IsPending(CompiledPropertyTrigger trigger) =>
         trigger.State.Phase == TriggerPhase.Pending && trigger.Rule.IsActivated;
 
-    private void ResolveGuardDependencies(CompiledRule rule)
+    // Returns whether the properties differ from those resolved before.
+    private bool ResolveGuardDependencies(CompiledRule rule)
     {
         var dependencies = new List<PropertyReference>(rule.GuardPropertyPaths.Count);
         foreach (var path in rule.GuardPropertyPaths)
@@ -266,7 +297,9 @@ internal sealed class PropertyTriggerEngine(
             }
         }
 
+        var changed = !dependencies.SequenceEqual(rule.GuardDependencies);
         rule.GuardDependencies = [.. dependencies];
+        return changed;
     }
 
     // Derives when the guard can change with the clock alone, from the instants its comparisons read now.
@@ -312,7 +345,8 @@ internal sealed class PropertyTriggerEngine(
     private static bool ReadsRearm(TriggerPhase phase, bool? value) =>
         phase == TriggerPhase.WaitingToRearm || (phase is TriggerPhase.Inactive or TriggerPhase.AwaitingBaseline && value == true);
 
-    private void ResolveDependencies(CompiledPropertyTrigger trigger)
+    // Returns whether the properties differ from those resolved before.
+    private bool ResolveDependencies(CompiledPropertyTrigger trigger)
     {
         var dependencies = new List<PropertyReference>(trigger.PropertyPaths.Count);
         foreach (var path in trigger.PropertyPaths)
@@ -323,7 +357,9 @@ internal sealed class PropertyTriggerEngine(
             }
         }
 
+        var changed = !dependencies.SequenceEqual(trigger.Dependencies);
         trigger.Dependencies = [.. dependencies];
+        return changed;
     }
 
     private void PublishWatched(IReadOnlyList<CompiledRule> rules, IEnumerable<CompiledPropertyTrigger> activating)

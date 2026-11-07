@@ -15,16 +15,25 @@ internal sealed class AutomationTriggers
     private readonly AutomationInputQueue _queue;
     private readonly PropertyTriggerEngine _propertyTriggers;
     private readonly EventTriggerEngine _eventTriggers;
+    private readonly Func<long> _getStructureVersion;
+    private long _boundStructureVersion = -1;
 
+    /// <summary>
+    /// Creates the triggers, whose property triggers publish their watched set to <paramref name="publishWatched"/> and
+    /// whose paths are resolved again on a graph change only when <paramref name="getStructureVersion"/>, the structure
+    /// version of the registry, changed since.
+    /// </summary>
     public AutomationTriggers(
         SubjectPathResolver resolver,
         TimeProvider timeProvider,
         AutomationInputQueue queue,
         ILogger logger,
         Func<string> getAutomationName,
-        Action<FrozenSet<PropertyReference>> publishWatched)
+        Action<FrozenSet<PropertyReference>> publishWatched,
+        Func<long> getStructureVersion)
     {
         _queue = queue;
+        _getStructureVersion = getStructureVersion;
         _propertyTriggers = new PropertyTriggerEngine(resolver, timeProvider, logger, getAutomationName, publishWatched);
         _eventTriggers = new EventTriggerEngine(resolver, timeProvider, queue);
     }
@@ -82,7 +91,7 @@ internal sealed class AutomationTriggers
         bool evaluateAll)
     {
         var changed = _propertyTriggers.Apply(changes);
-        var requests = new List<RunRequest>(evaluateAll ? OnGraphChanged(rules) : _propertyTriggers.ObserveReaders(rules, changed));
+        var requests = new List<RunRequest>(evaluateAll ? RebindAndEvaluateAll(rules) : _propertyTriggers.ObserveReaders(rules, changed));
         var activated = activations.SelectMany(activation => activation.Rules)
             .Where(rule => rule.IsActivated && rules.Contains(rule))
             .Distinct()
@@ -137,10 +146,29 @@ internal sealed class AutomationTriggers
 
     public IReadOnlyList<RunRequest> OnEvent(EventInput input) => _eventTriggers.OnEvent(input);
 
+    /// <summary>
+    /// Resolves the paths again after a change of a property that holds subjects, unless the structure of the graph is
+    /// the same as at the last time, such as for a write of the same children, and evaluates the triggers whose
+    /// properties changed.
+    /// </summary>
     public IReadOnlyList<RunRequest> OnGraphChanged(IReadOnlyList<CompiledRule> rules)
     {
+        // Read before the paths are resolved; an odd version is a change in progress, after which they resolve again.
+        var version = _getStructureVersion();
+        if (version >= 0 && version == _boundStructureVersion)
+        {
+            return [];
+        }
+
+        _boundStructureVersion = version % 2 == 0 ? version : -1;
         _eventTriggers.Rebind(rules);
-        return _propertyTriggers.OnGraphChanged(rules);
+        return _propertyTriggers.OnGraphChanged(rules, evaluateAll: false);
+    }
+
+    private IReadOnlyList<RunRequest> RebindAndEvaluateAll(IReadOnlyList<CompiledRule> rules)
+    {
+        _eventTriggers.Rebind(rules);
+        return _propertyTriggers.OnGraphChanged(rules, evaluateAll: true);
     }
 
     /// <summary>Activates the property triggers of the rules and returns the runs they request at once.</summary>

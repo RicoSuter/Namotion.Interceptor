@@ -2,6 +2,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Automation.Persistence;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Automation.Runtime;
 
@@ -34,7 +35,9 @@ internal sealed class AutomationEngine : IRuleRunHost
         _automation = automation;
         _keeper = keeper;
         _logger = logger;
-        _triggers = new AutomationTriggers(automation.PathResolver, automation.TimeProvider, queue, logger, () => Name, changes.PublishWatched);
+        var registry = ((IInterceptorSubject)automation).Context.TryGetService<ISubjectRegistry>();
+        _triggers = new AutomationTriggers(
+            automation.PathResolver, automation.TimeProvider, queue, logger, () => Name, changes.PublishWatched, () => registry?.StructureVersion ?? -1);
         _dispatcher = new RunDispatcher(this, automation, keeper, logger);
         _states = new StateTransitions(automation, keeper, automation.TimeProvider, logger);
         _status = new AutomationStatusReporter(automation, logger);
