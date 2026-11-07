@@ -90,6 +90,29 @@ public class AutomationConfigurationTests
     }
 
     [Fact]
+    public async Task WhenTheConfigurationWithNewRolesIsInvalid_ThenThePreviousRolesStay()
+    {
+        // Arrange
+        var authorizer = RecordingAuthorizer.AllowingAll();
+        await using var host = await AutomationTestHost.StartAsync(
+            automation =>
+            {
+                automation.Roles = ["Operator"];
+                automation.Rules = Keyed(("retract", Retract()));
+            },
+            authorizer: _ => authorizer);
+
+        // Act
+        host.Automation.Roles = ["Reader"];
+        await SaveAsync(host, Keyed(("retract", Retract("/Weather/Gust >"))));
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(["Operator"], authorizer.Requests[^1].ToArray());
+    }
+
+    [Fact]
     public async Task WhenARuleIsRemoved_ThenItsRunsLeaveTheCheckpoint()
     {
         // Arrange

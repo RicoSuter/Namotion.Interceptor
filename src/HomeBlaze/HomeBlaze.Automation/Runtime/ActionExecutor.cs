@@ -122,7 +122,7 @@ internal sealed class ActionExecutor(
         }
 
         // Refused before the authorizer is asked: what an automation never does, and a disabled operation.
-        error = AutomationTargets.CheckOperation(path, property, method, null) ??
+        error = AutomationTargets.CheckOperationNever(path, method) ??
             (property.IsMethodEnabled() ? null : $"{path} is disabled") ??
             AutomationTargets.CheckOperation(path, property, method, GetPermissions(scope));
         if (error is not null)
@@ -151,7 +151,7 @@ internal sealed class ActionExecutor(
             return false;
         }
 
-        error = AutomationTargets.CheckWrite(path, property, null) ?? AutomationTargets.CheckWrite(path, property, GetPermissions(scope));
+        error = AutomationTargets.CheckWriteNever(path, property) ?? AutomationTargets.CheckWrite(path, property, GetPermissions(scope));
         if (error is not null)
         {
             return false;

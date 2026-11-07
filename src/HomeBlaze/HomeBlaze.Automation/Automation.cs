@@ -68,8 +68,8 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
     public partial bool Enabled { get; set; }
 
     /// <summary>
-    /// The names of the roles that decide which operations the rules may call and which properties they may write. None by
-    /// default, which allows no call and no write; a state change needs no role. Replaced as a whole, never changed in place.
+    /// The names of the roles that decide which operations the rules may call and which properties they may write. What the rules may call and
+    /// write for these roles is decided by the registered <see cref="IAutomationAuthorizer"/>; a state change needs no role. Replaced as a whole, never changed in place.
     /// </summary>
     [Configuration]
     public partial string[] Roles { get; set; }

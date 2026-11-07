@@ -120,6 +120,39 @@ public class ActionExecutorTests
     }
 
     [Fact]
+    public async Task WhenTheAuthorizerReturnsNoPermissions_ThenEveryCallAndWriteIsRefused()
+    {
+        // Arrange
+        var executor = CreateExecutor(new NullAuthorizer());
+
+        // Act
+        var call = await executor.InvokeOperationAsync(Invoke("/Blinds/Close"), CreateScope(), CancellationToken.None);
+        var write = executor.SetProperty(new SetPropertyAction { PropertyPath = "/Blinds/Position", Value = "5" }, CreateScope());
+
+        // Assert
+        Assert.Equal("/Blinds/Close: the authorization failed: the authorizer returned no permissions", call.Message);
+        Assert.Equal("/Blinds/Position: the authorization failed: the authorizer returned no permissions", write.Message);
+        Assert.Equal(0, _blinds.CloseCount);
+        Assert.Equal(0, _blinds.Position);
+    }
+
+    [Fact]
+    public async Task WhenAnOperationRequiresConfirmationOrIsDisabled_ThenTheAuthorizerIsNotAsked()
+    {
+        // Arrange
+        var authorizer = RecordingAuthorizer.AllowingAll();
+        var executor = CreateExecutor(authorizer);
+        _blinds.IsLocked = true;
+
+        // Act
+        await executor.InvokeOperationAsync(Invoke("/Blinds/Calibrate"), CreateScope(), CancellationToken.None);
+        await executor.InvokeOperationAsync(Invoke("/Blinds/Open"), CreateScope(), CancellationToken.None);
+
+        // Assert
+        Assert.Empty(authorizer.Requests);
+    }
+
+    [Fact]
     public async Task WhenTheRolesCannotBeUsed_ThenEveryCallAndWriteIsRefusedWithTheReason()
     {
         // Arrange

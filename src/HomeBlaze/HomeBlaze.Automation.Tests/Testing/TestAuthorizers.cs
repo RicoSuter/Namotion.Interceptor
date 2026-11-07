@@ -12,6 +12,12 @@ internal sealed class DenyingPermissions(string? error = null) : IAutomationPerm
     public string? GetPropertyWriteDenial(RegisteredSubjectProperty property) => $"the automation may not write {property.Name}";
 }
 
+/// <summary>An authorizer that has no permissions to give.</summary>
+internal sealed class NullAuthorizer : IAutomationAuthorizer
+{
+    public IAutomationPermissions GetPermissions(IReadOnlyList<string> roles) => null!;
+}
+
 /// <summary>An authorizer that gives the same permissions for any roles and records the roles it was asked with.</summary>
 internal sealed class RecordingAuthorizer(IAutomationPermissions permissions) : IAutomationAuthorizer
 {

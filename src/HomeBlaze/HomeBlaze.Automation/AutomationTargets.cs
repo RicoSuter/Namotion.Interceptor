@@ -45,7 +45,7 @@ public static class AutomationTargets
     {
         try
         {
-            return authorizer.GetPermissions(roles);
+            return authorizer.GetPermissions(roles) ?? new FailedPermissions("the authorization failed: the authorizer returned no permissions");
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -53,27 +53,19 @@ public static class AutomationTargets
         }
     }
 
-    /// <summary>
-    /// Gets why the operation cannot be called, starting with the path, or null; its enabled state is not checked.
-    /// Null permissions leave the roles out.
-    /// </summary>
-    internal static string? CheckOperation(string path, RegisteredSubjectProperty property, MethodMetadata method, IAutomationPermissions? permissions)
+    /// <summary>Gets why an automation never calls the operation, starting with the path, or null; neither roles nor its enabled state are checked.</summary>
+    internal static string? CheckOperationNever(string path, MethodMetadata method)
     {
         if (method.Kind != MethodKind.Operation)
         {
             return $"{path} is a query, not an operation";
         }
 
-        if (method.RequiresConfirmation)
-        {
-            return $"{path} requires confirmation by a person and cannot be called by an automation";
-        }
-
-        return permissions is null ? null : GetDenial(path, property, permissions, isWrite: false);
+        return method.RequiresConfirmation ? $"{path} requires confirmation by a person and cannot be called by an automation" : null;
     }
 
-    /// <summary>Gets why the property cannot be written, starting with the path, or null. Null permissions leave the roles out.</summary>
-    internal static string? CheckWrite(string path, RegisteredSubjectProperty property, IAutomationPermissions? permissions)
+    /// <summary>Gets why an automation never writes the property, starting with the path, or null; roles are not checked.</summary>
+    internal static string? CheckWriteNever(string path, RegisteredSubjectProperty property)
     {
         if (property.TryGetMethodMetadata() is not null)
         {
@@ -85,13 +77,16 @@ public static class AutomationTargets
             return $"{path} is read-only";
         }
 
-        if (property.IsConfigurationProperty())
-        {
-            return $"{path} is configuration, which an automation cannot change";
-        }
-
-        return permissions is null ? null : GetDenial(path, property, permissions, isWrite: true);
+        return property.IsConfigurationProperty() ? $"{path} is configuration, which an automation cannot change" : null;
     }
+
+    /// <summary>Gets why the operation cannot be called, starting with the path, or null; its enabled state is not checked.</summary>
+    internal static string? CheckOperation(string path, RegisteredSubjectProperty property, MethodMetadata method, IAutomationPermissions permissions) =>
+        CheckOperationNever(path, method) ?? GetDenial(path, property, permissions, isWrite: false);
+
+    /// <summary>Gets why the property cannot be written, starting with the path, or null.</summary>
+    internal static string? CheckWrite(string path, RegisteredSubjectProperty property, IAutomationPermissions permissions) =>
+        CheckWriteNever(path, property) ?? GetDenial(path, property, permissions, isWrite: true);
 
     private static bool CallsOrWrites(AutomationRule? rule) =>
         rule?.Actions.Any(action => action is InvokeOperationAction or SetPropertyAction) == true;

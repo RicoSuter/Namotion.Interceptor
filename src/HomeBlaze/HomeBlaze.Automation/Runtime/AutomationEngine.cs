@@ -138,7 +138,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         _keeper.RestoreRules(rules);
         if (AutomationCompiler.TryCompile(_automation.States, _automation.InitialState, rules, _automation.RuleOrder, out var compiled, out var error))
         {
-            _roles = roles;
+            _roles = [.. roles];
             Replace(compiled);
         }
         else
