@@ -9,19 +9,7 @@ public class AutomationEvaluationTests
 {
     private static readonly DateTimeOffset Now = new(2026, 11, 6, 7, 45, 0, TimeSpan.Zero);
 
-    private readonly TestGraph _graph = new();
-    private readonly TestSensor _sensor = new();
-    private readonly AutomationRule _rule = new();
-    private readonly TestRuleHost _host = new();
-
-    public AutomationEvaluationTests()
-    {
-        _host.Rules = new Dictionary<string, AutomationRule> { ["r1"] = _rule };
-        _graph.Add("Weather", _sensor);
-        _graph.Add("Host", _host);
-        _sensor.Gust = 9;
-        _sensor.Name = "WS90";
-    }
+    private readonly RuleGraph _graph = new();
 
     private static ParsedExpression Parse(string text)
     {
@@ -30,7 +18,7 @@ public class AutomationEvaluationTests
     }
 
     private AutomationEvaluation CreateEvaluation(TimeZoneInfo? timeZone = null, CapturedEvent? capturedEvent = null) =>
-        new(_graph.Resolver, _rule, Now, timeZone ?? TimeZoneInfo.Utc, capturedEvent);
+        new(_graph.Resolver, _graph.Rule, Now, timeZone ?? TimeZoneInfo.Utc, capturedEvent);
 
     [Theory]
     [InlineData("/Weather/Gust > 8")]
@@ -40,7 +28,7 @@ public class AutomationEvaluationTests
     public void WhenPathsResolve_ThenTheyReadFromTheRootTheRuleAndItsParent(string text)
     {
         // Arrange
-        _host.EnteredAt = Now.AddMinutes(-11);
+        _graph.Host.EnteredAt = Now.AddMinutes(-11);
         var evaluation = CreateEvaluation();
 
         // Act
@@ -54,7 +42,7 @@ public class AutomationEvaluationTests
     public void WhenNowAndTimeAreUsed_ThenTheyAreTheInstantAndTheLocalTimeOfDay()
     {
         // Arrange
-        _host.EnteredAt = Now.AddMinutes(-11);
+        _graph.Host.EnteredAt = Now.AddMinutes(-11);
         var oneHourAhead = TimeZoneInfo.CreateCustomTimeZone("Test+1", TimeSpan.FromHours(1), "Test+1", "Test+1");
         var evaluation = CreateEvaluation(oneHourAhead);
 
@@ -72,7 +60,7 @@ public class AutomationEvaluationTests
     {
         // Arrange
         var payload = new TestPressEvent { Timestamp = Now, DeviceId = "b1", Gesture = "Release" };
-        var evaluation = CreateEvaluation(capturedEvent: new CapturedEvent(_sensor, payload));
+        var evaluation = CreateEvaluation(capturedEvent: new CapturedEvent(_graph.Weather, payload));
 
         // Act
         var result = evaluation.EvaluateCondition(Parse("event/Gesture == Release and subject/Name == WS90 and event/DeviceId == b1"));
@@ -87,8 +75,8 @@ public class AutomationEvaluationTests
     public void WhenAValueIsSecretOrExcludedFromExpressions_ThenItIsMissing(string path)
     {
         // Arrange
-        _sensor.ApiKey = "secret";
-        _sensor.RawPayload = "{ \"key\": \"secret\" }";
+        _graph.Weather.ApiKey = "secret";
+        _graph.Weather.RawPayload = "{ \"key\": \"secret\" }";
         var evaluation = CreateEvaluation();
 
         // Act
@@ -138,7 +126,7 @@ public class AutomationEvaluationTests
         // Arrange
         var zurich = TimeZoneInfo.FindSystemTimeZoneById("Europe/Zurich");
         var evaluation = new AutomationEvaluation(
-            _graph.Resolver, _rule, DateTimeOffset.Parse(instant, CultureInfo.InvariantCulture), zurich);
+            _graph.Resolver, _graph.Rule, DateTimeOffset.Parse(instant, CultureInfo.InvariantCulture), zurich);
 
         // Act
         var timeOfDay = evaluation.TimeOfDay;

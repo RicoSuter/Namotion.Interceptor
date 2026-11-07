@@ -1,3 +1,5 @@
+using HomeBlaze.Automation.Runtime;
+
 namespace HomeBlaze.Automation.Tests.Testing;
 
 /// <summary>Short forms of rules, triggers and actions for tests.</summary>
@@ -32,6 +34,13 @@ internal static class RuleBuilder
     public static SetPropertyAction Set(string path, string value) => new() { Id = "set " + path, PropertyPath = path, Value = value };
 
     public static ChangeStateAction Enter(string state) => new() { Id = "enter " + state, TargetState = state };
+
+    /// <summary>Compiles the rule under <paramref name="key"/> with the states, which must succeed.</summary>
+    public static CompiledRule Compile(string key, AutomationRule rule, params string[] states)
+    {
+        Assert.True(AutomationCompiler.TryCompileRule(key, rule, states, out var compiled, out var error), error);
+        return compiled;
+    }
 
     public static Dictionary<string, AutomationRule> Keyed(params (string Key, AutomationRule Rule)[] rules) =>
         rules.ToDictionary(rule => rule.Key, rule => rule.Rule);

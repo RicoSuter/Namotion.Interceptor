@@ -11,20 +11,10 @@ public class ArgumentBinderTests
 {
     private static readonly DateTimeOffset Now = new(2026, 11, 6, 12, 0, 0, TimeSpan.Zero);
 
-    private readonly TestGraph _graph = new();
-    private readonly TestSensor _sensor = new();
-    private readonly AutomationRule _rule = new();
+    private readonly RuleGraph _graph = new();
 
-    public ArgumentBinderTests()
-    {
-        _graph.Add("Weather", _sensor);
-        _graph.Add("Host", new TestRuleHost { Rules = new Dictionary<string, AutomationRule> { ["r1"] = _rule } });
-        _sensor.Gust = 9;
-        _sensor.Name = "WS90";
-    }
-
-    private ArgumentBinder CreateBinder(bool allowsEvent = false) =>
-        new(new AutomationEvaluation(_graph.Resolver, _rule, Now, TimeZoneInfo.Utc), allowsEvent);
+    private ArgumentBinder CreateBinder() =>
+        new(new AutomationEvaluation(_graph.Resolver, _graph.Rule, Now, TimeZoneInfo.Utc), allowsEvent: false);
 
     private static MethodParameter Parameter<T>(string name, bool isNullable = false) =>
         new() { Name = name, Type = typeof(T), IsNullable = isNullable };
@@ -170,7 +160,7 @@ public class ArgumentBinderTests
     {
         // Arrange
         var payload = new TestPressEvent { Timestamp = Now, DeviceId = "b1", Gesture = "Release" };
-        var evaluation = new AutomationEvaluation(_graph.Resolver, _rule, Now, TimeZoneInfo.Utc, new CapturedEvent(_sensor, payload));
+        var evaluation = new AutomationEvaluation(_graph.Resolver, _graph.Rule, Now, TimeZoneInfo.Utc, new CapturedEvent(_graph.Weather, payload));
         var binder = new ArgumentBinder(evaluation, allowsEvent: true);
 
         // Act

@@ -11,19 +11,8 @@ public class RuleRunnerTests
 {
     private static readonly DateTimeOffset Now = new(2026, 11, 6, 12, 0, 0, TimeSpan.Zero);
 
-    private readonly TestGraph _graph = new();
-    private readonly TestSensor _sensor = new();
-    private readonly TestBlinds _blinds = new();
-    private readonly TestRuleHost _host = new();
+    private readonly RuleGraph _graph = new();
     private readonly FakeTimeProvider _time = new(Now);
-
-    public RuleRunnerTests()
-    {
-        _graph.Add("Weather", _sensor);
-        _graph.Add("Blinds", _blinds);
-        _graph.Add("Host", _host);
-        _sensor.Gust = 9;
-    }
 
     private RuleRunner CreateRunner()
     {
@@ -33,9 +22,8 @@ public class RuleRunnerTests
 
     private RunRequest Request(AutomationRule rule, CapturedEvent? capturedEvent = null)
     {
-        _host.Rules = new Dictionary<string, AutomationRule> { ["r1"] = rule };
-        Assert.True(AutomationCompiler.TryCompileRule("r1", rule, ["Idle", "Running"], out var compiled, out var error), error);
-        return new RunRequest(compiled, capturedEvent, "trigger 1");
+        _graph.Host.Rules = new Dictionary<string, AutomationRule> { ["r1"] = rule };
+        return new RunRequest(RuleBuilder.Compile("r1", rule, "Idle", "Running"), capturedEvent, "trigger 1");
     }
 
     private static AutomationRule Rule(AutomationRuleMode mode, string? onlyIf, params AutomationAction[] actions) => new()
@@ -60,7 +48,7 @@ public class RuleRunnerTests
     {
         // Arrange
         var rule = Rule(AutomationRuleMode.On, "not /Blinds/IsMoving", Invoke("/Blinds/MoveTo", position: "40"), Invoke("/Blinds/Close"));
-        var host = new FakeRunHost(_host);
+        var host = new FakeRunHost(_graph.Host);
 
         // Act
         var result = await CreateRunner().RunAsync(Request(rule), host, CancellationToken.None);
@@ -70,8 +58,8 @@ public class RuleRunnerTests
         Assert.Equal("Ran /Blinds/MoveTo(position: 40); /Blinds/Close()", result.Message);
         Assert.True(result.ExecutedActions);
         Assert.Null(result.Error);
-        Assert.Equal(40, _blinds.Position);
-        Assert.Equal(1, _blinds.CloseCount);
+        Assert.Equal(40, _graph.Blinds.Position);
+        Assert.Equal(1, _graph.Blinds.CloseCount);
         Assert.Equal(Now, rule.LastTriggeredAt);
     }
 
@@ -80,16 +68,16 @@ public class RuleRunnerTests
     {
         // Arrange
         var rule = Rule(AutomationRuleMode.On, "not /Blinds/IsMoving", Invoke("/Blinds/Close"));
-        _blinds.IsMoving = true;
+        _graph.Blinds.IsMoving = true;
 
         // Act
-        var result = await CreateRunner().RunAsync(Request(rule), new FakeRunHost(_host), CancellationToken.None);
+        var result = await CreateRunner().RunAsync(Request(rule), new FakeRunHost(_graph.Host), CancellationToken.None);
 
         // Assert
         Assert.Null(result.Outcome);
         Assert.Equal("Only if is false", result.Message);
         Assert.False(result.ExecutedActions);
-        Assert.Equal(0, _blinds.CloseCount);
+        Assert.Equal(0, _graph.Blinds.CloseCount);
         Assert.Null(rule.LastTriggeredAt);
     }
 
@@ -100,7 +88,7 @@ public class RuleRunnerTests
         var rule = Rule(AutomationRuleMode.On, "/Weather/Rain > 0", Invoke("/Blinds/Close"));
 
         // Act
-        var result = await CreateRunner().RunAsync(Request(rule), new FakeRunHost(_host), CancellationToken.None);
+        var result = await CreateRunner().RunAsync(Request(rule), new FakeRunHost(_graph.Host), CancellationToken.None);
 
         // Assert
         Assert.Null(result.Outcome);
@@ -112,7 +100,7 @@ public class RuleRunnerTests
     {
         // Arrange
         var rule = Rule(AutomationRuleMode.DryRun, null, Invoke("/Blinds/MoveTo", position: "/Weather/Gust * 2"), new ChangeStateAction { TargetState = "Running" });
-        var host = new FakeRunHost(_host);
+        var host = new FakeRunHost(_graph.Host);
 
         // Act
         var result = await CreateRunner().RunAsync(Request(rule), host, CancellationToken.None);
@@ -120,7 +108,7 @@ public class RuleRunnerTests
         // Assert
         Assert.Equal(AutomationRunOutcome.DryRun, result.Outcome);
         Assert.Equal("Would run /Blinds/MoveTo(position: 18); ChangeState(Running)", result.Message);
-        Assert.Equal(0, _blinds.Position);
+        Assert.Equal(0, _graph.Blinds.Position);
         Assert.Null(host.CurrentState);
         Assert.Null(rule.LastTriggeredAt);
     }
@@ -132,13 +120,13 @@ public class RuleRunnerTests
         var rule = Rule(AutomationRuleMode.On, null, Invoke("/Blinds/Jam"), Invoke("/Blinds/Close"));
 
         // Act
-        var result = await CreateRunner().RunAsync(Request(rule), new FakeRunHost(_host), CancellationToken.None);
+        var result = await CreateRunner().RunAsync(Request(rule), new FakeRunHost(_graph.Host), CancellationToken.None);
 
         // Assert
         Assert.Equal(AutomationRunOutcome.CompletedWithErrors, result.Outcome);
         Assert.Equal("action 'Jam' failed: /Blinds/Jam() failed: The motor is jammed.", result.Message);
         Assert.Equal("Rule 'Storm': action 'Jam' failed: /Blinds/Jam() failed: The motor is jammed.", result.Error);
-        Assert.Equal(1, _blinds.CloseCount);
+        Assert.Equal(1, _graph.Blinds.CloseCount);
     }
 
     [Fact]
@@ -148,12 +136,12 @@ public class RuleRunnerTests
         var rule = Rule(AutomationRuleMode.On, null, Invoke("/Blinds/Jam", ActionErrorPolicy.StopRule), Invoke("/Blinds/Close"));
 
         // Act
-        var result = await CreateRunner().RunAsync(Request(rule), new FakeRunHost(_host), CancellationToken.None);
+        var result = await CreateRunner().RunAsync(Request(rule), new FakeRunHost(_graph.Host), CancellationToken.None);
 
         // Assert
         Assert.Equal(AutomationRunOutcome.StoppedAfterError, result.Outcome);
         Assert.EndsWith("; the remaining actions were skipped", result.Message);
-        Assert.Equal(0, _blinds.CloseCount);
+        Assert.Equal(0, _graph.Blinds.CloseCount);
     }
 
     [Fact]
@@ -161,7 +149,7 @@ public class RuleRunnerTests
     {
         // Arrange
         var rule = Rule(AutomationRuleMode.On, null, new ChangeStateAction { TargetState = "Running" });
-        var host = new FakeRunHost(_host);
+        var host = new FakeRunHost(_graph.Host);
 
         // Act
         var result = await CreateRunner().RunAsync(Request(rule), host, CancellationToken.None);
@@ -186,10 +174,10 @@ public class RuleRunnerTests
         var payload = new TestPressEvent { Timestamp = Now, DeviceId = "button", Gesture = "Release" };
 
         // Act
-        await CreateRunner().RunAsync(Request(rule, new CapturedEvent(_blinds, payload)), new FakeRunHost(_host), CancellationToken.None);
+        await CreateRunner().RunAsync(Request(rule, new CapturedEvent(_graph.Blinds, payload)), new FakeRunHost(_graph.Host), CancellationToken.None);
 
         // Assert
-        Assert.Equal("Release", _sensor.Name);
+        Assert.Equal("Release", _graph.Weather.Name);
     }
 
     [Fact]
@@ -202,10 +190,10 @@ public class RuleRunnerTests
         var compiled = new CompiledRule("r1", rule, onlyIf: null);
 
         // Act
-        var result = await CreateRunner().RunAsync(request with { Rule = compiled }, new FakeRunHost(_host), CancellationToken.None);
+        var result = await CreateRunner().RunAsync(request with { Rule = compiled }, new FakeRunHost(_graph.Host), CancellationToken.None);
 
         // Assert
-        Assert.Equal(0, _blinds.CloseCount);
+        Assert.Equal(0, _graph.Blinds.CloseCount);
         Assert.Null(rule.LastTriggeredAt);
         Assert.Null(result.Outcome);
     }
@@ -216,7 +204,7 @@ public class RuleRunnerTests
         // Arrange
         var rule = Rule(AutomationRuleMode.On, null, Invoke("/Blinds/Hang"));
         using var stopping = new CancellationTokenSource();
-        var run = CreateRunner().RunAsync(Request(rule), new FakeRunHost(_host), stopping.Token);
+        var run = CreateRunner().RunAsync(Request(rule), new FakeRunHost(_graph.Host), stopping.Token);
 
         // Act
         await stopping.CancelAsync();
