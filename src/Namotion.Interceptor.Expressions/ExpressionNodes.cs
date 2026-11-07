@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Expressions;
 
 internal abstract class ExpressionNode;
 
-/// <summary>A number (a boxed <see cref="double"/>), a duration (a boxed <see cref="TimeSpan"/>), a boolean, a text or null.</summary>
+/// <summary>A number (a boxed <see cref="decimal"/> when it is exact, otherwise a boxed <see cref="double"/>), a duration (a boxed <see cref="TimeSpan"/>), a boolean, a text or null.</summary>
 internal sealed class LiteralNode(object? value, bool isBareWord = false) : ExpressionNode
 {
     public object? Value { get; } = value;

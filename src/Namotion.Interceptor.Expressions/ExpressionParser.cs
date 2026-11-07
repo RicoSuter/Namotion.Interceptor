@@ -14,6 +14,7 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
     internal const int MaximumNestingDepth = 32;
 
     private const decimal OutOfRangeTicks = 2m * long.MaxValue;
+    private const int MaximumDecimalDigits = 28;
 
     // Boxed once, so that evaluating a literal allocates nothing.
     private static readonly object True = true;
@@ -266,6 +267,11 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
 
     private LiteralNode ParseNumber(string token, int start)
     {
+        if (TryParseDecimal(token, out var exact))
+        {
+            return new LiteralNode(exact);
+        }
+
         if (double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out var number))
         {
             if (!double.IsFinite(number))
@@ -285,6 +291,19 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
 
         _position = start;
         throw CreateError($"invalid number '{token}'");
+    }
+
+    // A number without an exponent and with at most 28 digits, none of them beyond the 28th decimal place, is exactly a
+    // decimal; more digits would make decimal.TryParse round.
+    private static bool TryParseDecimal(string token, out decimal number)
+    {
+        number = 0;
+        var digits = token.AsSpan().TrimStart("+-").TrimStart('0');
+        var point = digits.IndexOf('.');
+        var fractionLength = point < 0 ? 0 : digits.Length - point - 1;
+        var digitCount = point < 0 ? digits.Length : digits.Length - 1;
+        return fractionLength <= MaximumDecimalDigits && digitCount <= MaximumDecimalDigits &&
+            decimal.TryParse(token, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out number);
     }
 
     // A duration is one or more pairs of a number and a unit, from the largest unit to the smallest and each unit at most

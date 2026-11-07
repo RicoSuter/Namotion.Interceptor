@@ -461,7 +461,8 @@ public class ParsedExpressionEvaluationTests
     [InlineData("Count / Four", typeof(decimal), "0.75")]
     [InlineData("Big + One", typeof(decimal), "9007199254740994")]
     [InlineData("Price + Price", typeof(decimal), "0.2")]
-    [InlineData("Power - 1000", typeof(double), "6400")]
+    [InlineData("Power - 1000", typeof(decimal), "6400")]
+    [InlineData("Measured + 0.2", typeof(double), "0.30000000000000004")]
     [InlineData("One / Count", typeof(double), "0.3333333333333333")]
     [InlineData("Max + Max", typeof(double), "1.5845632502852868E+29")]
     [InlineData("Tiny * Tiny", typeof(double), "1E-40")]
@@ -485,7 +486,8 @@ public class ParsedExpressionEvaluationTests
             ["Max"] = decimal.MaxValue,
             ["Tiny"] = 1e-20m,
             ["Ratio"] = 0.1f,
-            ["Zero"] = 0d
+            ["Zero"] = 0d,
+            ["Measured"] = 0.1
         });
 
         // Act
@@ -567,10 +569,32 @@ public class ParsedExpressionEvaluationTests
     [InlineData("Ratio + 0 == 0.1", true)]
     [InlineData("Ratio * 10 == 1", true)]
     [InlineData("Ratio - Ratio == 0", true)]
+    [InlineData("First * 3 == 0.3", true)]
+    [InlineData("0.1 + 0.2 == 0.3", true)]
+    [InlineData("Ratio == 0.1", true)]
+    [InlineData("Ratio < 0.1", false)]
+    [InlineData("Ratio + 0.2 == 0.3", true)]
+    [InlineData("Measured + 0.2 == 0.3", false)]
+    [InlineData("Measured + 0.2 == 0.30000000000000004", true)]
+    [InlineData("Measured == 0.1", true)]
+    [InlineData("Big == 9007199254740993", true)]
+    [InlineData("Big == 9007199254740992", false)]
+    [InlineData("Big > 9007199254740992", true)]
+    [InlineData("Count == 3", true)]
+    [InlineData("Count == 3.0", true)]
+    [InlineData("Count == 3e0", true)]
     public void WhenOperandsAreExactOrFloats_ThenTheResultEqualsTheLiteral(string text, bool expected)
     {
         // Arrange
-        var values = new Dictionary<string, object?> { ["First"] = 0.1m, ["Second"] = 0.2m, ["Count"] = 3, ["Ratio"] = 0.1f };
+        var values = new Dictionary<string, object?>
+        {
+            ["First"] = 0.1m,
+            ["Second"] = 0.2m,
+            ["Count"] = 3,
+            ["Ratio"] = 0.1f,
+            ["Measured"] = 0.1,
+            ["Big"] = 9007199254740993L
+        };
 
         // Act
         var result = EvaluateCondition(text, values);
@@ -578,6 +602,29 @@ public class ParsedExpressionEvaluationTests
         // Assert
         Assert.Equal(expected, result);
     }
+
+    [Theory]
+    [InlineData("1.50", typeof(decimal), "1.50")]
+    [InlineData("-5", typeof(decimal), "-5")]
+    [InlineData(".5", typeof(decimal), "0.5")]
+    [InlineData("0.1 + 0.2", typeof(decimal), "0.3")]
+    [InlineData("1e3", typeof(double), "1000")]
+    [InlineData("1000000000000000000000000000000", typeof(double), "1E+30")]
+    [InlineData("0.12345678901234567890123456789", typeof(double), "0.12345678901234568")]
+    public void WhenNumberLiteralIsEvaluated_ThenItIsADecimalUnlessItHasAnExponentOrDoesNotFit(string text, Type expectedType, string expectedValue)
+    {
+        // Arrange
+        Assert.True(ParsedExpression.TryParse(text, '/', out var expression, out var error), error);
+        var context = new TestExpressionContext([]);
+
+        // Act
+        var result = expression.Evaluate(ref context);
+
+        // Assert
+        Assert.IsType(expectedType, result.Value);
+        Assert.Equal(expectedValue, Convert.ToString(result.Value, CultureInfo.InvariantCulture));
+    }
+
     [Theory]
     [InlineData("Now - EnteredAt > 30m", true)]
     [InlineData("Now - EnteredAt == 38m", true)]
