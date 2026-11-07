@@ -270,9 +270,9 @@
         lock (AuthorizationEditLock.Instance)
         {
             // A reload of the roles replaces them, so this role would be saved nowhere, or into a file it is no longer
-            // part of. Every save assigns new lists, so other lists are the save of another dialog, which this one would
-            // revert.
-            if (!ReferenceEquals(role.FindParent().Authorization, _authorization) || !_loadedLists.AreHeldBy(role))
+            // part of; so would a role that no Authorization held when the dialog opened. Every save assigns new lists,
+            // so other lists are the save of another dialog, which this one would revert.
+            if (_authorization is null || !ReferenceEquals(role.FindParent().Authorization, _authorization) || !_loadedLists.AreHeldBy(role))
             {
                 throw new InvalidOperationException(ConcurrentChangeMessage);
             }

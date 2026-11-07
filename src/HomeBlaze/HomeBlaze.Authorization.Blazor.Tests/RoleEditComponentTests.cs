@@ -614,6 +614,23 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     }
 
     [Fact]
+    public async Task WhenNoAuthorizationHoldsTheRole_ThenSavingThrowsAndChangesNothing()
+    {
+        // Arrange: in the graph, so that the dialog opens, but outside an Authorization, so that it would be saved nowhere.
+        var role = new Role();
+        Graph.Root.Children = new Dictionary<string, IInterceptorSubject>(Graph.Root.Children) { ["Loose"] = role };
+        var component = RenderEditor(role);
+        await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
+        await SetActionAsync(component, 0, "read", true);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None)));
+        Assert.Equal("The roles changed while this dialog was open. Close it and open it again.", exception.Message);
+        Assert.Empty(role.Allow);
+    }
+
+    [Fact]
     public async Task WhenAnotherDialogSavedTheRoleWhileThisOneWasOpen_ThenSavingThrowsAndKeepsTheOtherSave()
     {
         // Arrange
