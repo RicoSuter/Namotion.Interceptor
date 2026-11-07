@@ -112,10 +112,13 @@ internal static class ExpressionComparer
     private static string GetEnumName(Enum enumValue) =>
         Enum.GetName(enumValue.GetType(), enumValue) ?? enumValue.ToString();
 
-    internal static bool IsNumber(object value) =>
-        value is float or double or decimal || IsSignedInteger(value) || IsUnsignedInteger(value);
+    internal static bool IsNumber(object value) => value is float or double || IsIntegerOrDecimal(value);
+
+    internal static bool IsIntegerOrDecimal(object value) => value is decimal || IsSignedInteger(value) || IsUnsignedInteger(value);
 
     internal static double ToDouble(object value) => Convert.ToDouble(value, CultureInfo.InvariantCulture);
+
+    internal static decimal ToDecimal(object value) => Convert.ToDecimal(value, CultureInfo.InvariantCulture);
 
     private static bool IsSignedInteger(object value) => value is sbyte or short or int or long;
 

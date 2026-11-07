@@ -96,7 +96,7 @@ Two values that are not null compare by these rules, in the class `ExpressionCom
 
 Two values that are not null compute by these rules, in the class `ExpressionArithmetic`:
 
-- **Numbers** of any numeric type compute as `double`. A division by zero, or any other result that is no finite number, is missing.
+- **Numbers**: two integers or decimals compute as `decimal` when the result is exact, so the decimals `0.1m` plus `0.2m` equal the literal `0.3`, and the quotient of the integers 3 and 4 is `0.75`; a result that would round or overflow computes as `double`. A `float` with any number computes as `float`, so it compares with a literal as the `float` itself does, see [Comparisons](#comparisons). Every other pair, which includes every number literal since a literal is a `double`, computes as `double`, so large integers and decimals combined with a literal are rounded. A division by zero, a NaN operand, or any other result that is no finite number, is missing, and a negative zero is zero.
 - **Instants**: a `DateTimeOffset` or `DateTime` minus another one is a `TimeSpan`, and an instant plus or minus a `TimeSpan`, or a `TimeSpan` plus an instant, is an instant, so `Now - StartedAt > 15m` tests an elapsed time. Instant arithmetic gives a `DateTimeOffset`, and a `DateTime` is read by its kind, as UTC when the kind is unspecified.
 - **Durations**: two `TimeSpan` values add and subtract.
 - **Every other pair**, such as a text, a boolean, an instant plus an instant or a duration times a number, is missing, and so is a result beyond the range of its type.

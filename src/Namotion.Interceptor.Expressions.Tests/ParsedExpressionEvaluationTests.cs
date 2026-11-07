@@ -1,3 +1,4 @@
+using System.Globalization;
 using Namotion.Interceptor.Expressions;
 
 namespace Namotion.Interceptor.Expressions.Tests;
@@ -436,21 +437,66 @@ public class ParsedExpressionEvaluationTests
         Assert.Null(result);
     }
 
-    [Fact]
-    public void WhenArithmeticIsEvaluatedAsValue_ThenItIsADouble()
+    [Theory]
+    [InlineData("Power - Offset", typeof(decimal), "7300")]
+    [InlineData("Count + Count", typeof(decimal), "6")]
+    [InlineData("Count / Four", typeof(decimal), "0.75")]
+    [InlineData("Big + One", typeof(decimal), "9007199254740994")]
+    [InlineData("Price + Price", typeof(decimal), "0.2")]
+    [InlineData("Power - 1000", typeof(double), "6400")]
+    [InlineData("One / Count", typeof(double), "0.3333333333333333")]
+    [InlineData("Max + Max", typeof(double), "1.5845632502852868E+29")]
+    [InlineData("Tiny * Tiny", typeof(double), "1E-40")]
+    [InlineData("Ratio + 0", typeof(float), "0.1")]
+    [InlineData("Ratio * Count", typeof(float), "0.3")]
+    [InlineData("Ratio + Price", typeof(float), "0.2")]
+    [InlineData("Zero * -1", typeof(double), "0")]
+    public void WhenArithmeticIsEvaluatedAsValue_ThenItKeepsTheExactnessOfItsOperands(string text, Type expectedType, string expectedValue)
     {
         // Arrange
-        Assert.True(ParsedExpression.TryParse("Power - Offset", '/', out var expression, out var error), error);
-        var context = new TestExpressionContext(new Dictionary<string, object?> { ["Power"] = 7400m, ["Offset"] = 100 });
+        Assert.True(ParsedExpression.TryParse(text, '/', out var expression, out var error), error);
+        var context = new TestExpressionContext(new Dictionary<string, object?>
+        {
+            ["Power"] = 7400m,
+            ["Offset"] = 100,
+            ["Count"] = 3,
+            ["Four"] = (byte)4,
+            ["One"] = 1L,
+            ["Big"] = 9007199254740993L,
+            ["Price"] = 0.1m,
+            ["Max"] = decimal.MaxValue,
+            ["Tiny"] = 1e-20m,
+            ["Ratio"] = 0.1f,
+            ["Zero"] = 0d
+        });
 
         // Act
         var result = expression.Evaluate(ref context);
 
         // Assert
-        Assert.Equal(7300d, result.Value);
+        Assert.IsType(expectedType, result.Value);
+        Assert.Equal(expectedValue, Convert.ToString(result.Value, CultureInfo.InvariantCulture));
         Assert.Null(result.Property);
     }
 
+    [Theory]
+    [InlineData("First + Second == 0.3", true)]
+    [InlineData("Second - First == 0.1", true)]
+    [InlineData("First * Count == 0.3", true)]
+    [InlineData("Ratio + 0 == 0.1", true)]
+    [InlineData("Ratio * 10 == 1", true)]
+    [InlineData("Ratio - Ratio == 0", true)]
+    public void WhenOperandsAreExactOrFloats_ThenTheResultEqualsTheLiteral(string text, bool expected)
+    {
+        // Arrange
+        var values = new Dictionary<string, object?> { ["First"] = 0.1m, ["Second"] = 0.2m, ["Count"] = 3, ["Ratio"] = 0.1f };
+
+        // Act
+        var result = EvaluateCondition(text, values);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
     [Theory]
     [InlineData("Now - EnteredAt > 30m", true)]
     [InlineData("Now - EnteredAt == 38m", true)]
