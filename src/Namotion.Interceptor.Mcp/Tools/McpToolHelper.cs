@@ -20,6 +20,24 @@ internal static class McpToolHelper
             ? new { error = $"Path not found: {path}" }
             : new { error = $"Invalid path syntax: {error}" };
 
+    /// <summary>
+    /// The value of the property or attribute as the tools return it: its value after the
+    /// <see cref="McpServerConfiguration.ValueFilters"/>.
+    /// </summary>
+    internal static object? GetValue(RegisteredSubjectProperty property, McpServerConfiguration configuration)
+        => ApplyValueFilters(property, property.GetValue(), configuration.ValueFilters);
+
+    /// <summary>The value after <paramref name="filters"/>, applied in order.</summary>
+    internal static object? ApplyValueFilters(RegisteredSubjectProperty property, object? value, IList<IMcpValueFilter> filters)
+    {
+        for (var index = 0; index < filters.Count; index++)
+        {
+            value = filters[index].Filter(property, value);
+        }
+
+        return value;
+    }
+
     internal static bool ShouldExcludeByType(RegisteredSubject subject, Type[] excludeTypes, string[]? requestExcludeTypes)
     {
         var subjectType = subject.Subject.GetType();
@@ -253,7 +271,7 @@ internal static class McpToolHelper
         }
 
         return new ScalarProperty(
-            property.GetValue(),
+            GetValue(property, configuration),
             JsonSchemaTypeMapper.ToJsonSchemaType(property.Type) ?? "object",
             IsWritable: IsWritable(property, configuration),
             Attributes: attributes);
@@ -275,7 +293,7 @@ internal static class McpToolHelper
         }
 
         // A read-only attribute without a value says nothing about its property; a writable one can be set.
-        value = attribute.GetValue();
+        value = GetValue(attribute, configuration);
         return value is not null || attribute.HasSetter;
     }
 

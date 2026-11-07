@@ -3,6 +3,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.AI.Mcp;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -62,10 +63,12 @@ public abstract partial class LlmAgentBase
 
     private void RequestRunOnWatchedChange(ReadOnlySpan<SubjectPropertyChange> changes, ISubjectPathResolver resolver, string[] watchPaths)
     {
+        AuthorizationPolicy? policy = null;
         foreach (var change in changes)
         {
             var subjectPath = resolver.GetPath(change.Property.Subject, PathStyle.Canonical);
-            if (subjectPath is not null && AgentWatchPaths.Matches(subjectPath, change.Property.Name, watchPaths))
+            if (subjectPath is not null && AgentWatchPaths.Matches(subjectPath, change.Property.Name, watchPaths) &&
+                IsReadable(change.Property, policy ??= _services.AuthorizationService.GetPolicy(Roles).Policy))
             {
                 if (_logger.IsEnabled(LogLevel.Debug))
                 {
@@ -82,6 +85,10 @@ public abstract partial class LlmAgentBase
         }
     }
 
+    // A change the roles hide starts no run, so that the timing of runs does not tell when a hidden value changes.
+    private static bool IsReadable(PropertyReference property, AuthorizationPolicy policy)
+        => property.TryGetRegisteredProperty() is { } member && policy.CanRead(member) && policy.IsVisible(member.Parent);
+
     /// <summary>
     /// Whether a change request could start a run: the agent runs and no run is pending, since a request would
     /// coalesce into the pending run, which reads the watched state only when it starts.
@@ -94,12 +101,12 @@ public abstract partial class LlmAgentBase
         }
     }
 
-    // The operator chose the watch paths, so they are read without the agent's roles but with the system rules.
+    // Read with the agent's roles, so a watched value never reaches a conversation beyond the agent's policy.
     private Task<IReadOnlyList<AgentWatchedState>> FetchWatchedStateAsync(CancellationToken cancellationToken) =>
         AgentWatchPaths.FetchStateAsync(
             Volatile.Read(ref _normalizedWatchPaths),
             _services.ToolSource,
-            McpAuthorization.GetAccessPolicy(_services.AuthorizationService, McpAuthorization.EverythingRoleNames),
+            McpAuthorization.GetAccessPolicy(_services.AuthorizationService, Roles),
             cancellationToken);
 
     // The scheduler callback: an exception escaping it ends the scheduler loop, so only cancellation of the

@@ -3,6 +3,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Components.Abstractions.TimeZones;
 using Namotion.Interceptor.Expressions;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Services.Display;
 
@@ -103,7 +104,8 @@ public static class ExpressionDisplay
 
     /// <summary>
     /// Applies a value map to a value: the text of the first case that matches, otherwise the text of the value. A name
-    /// that leads to no map gives <c>Cannot resolve map: name</c>, and a map with a mistake gives its message.
+    /// that leads to no map, or to one none of whose members <see cref="PropertyReadAccess"/> allows on the current flow,
+    /// gives <c>Cannot resolve map: name</c>, and a map with a mistake gives its message.
     /// </summary>
     /// <param name="resolver">The resolver of the name of the map and of the paths of its cases.</param>
     /// <param name="scope">The subject the name resolves from, such as the page or the widget, like the <c>Map</c> of a widget.</param>
@@ -128,7 +130,7 @@ public static class ExpressionDisplay
             map = null;
         }
 
-        if (map is not IValueMap valueMap)
+        if (map is not IValueMap valueMap || !IsReadable(map))
         {
             return ExpressionValue.FromText($"Cannot resolve map: {mapName}");
         }
@@ -140,6 +142,26 @@ public static class ExpressionDisplay
 
         var binding = ValueBinding.FromExpressionValue(input);
         return ExpressionValue.FromText(valueMap.GetText(binding, resolver, timeZone) ?? ToText(input, timeZone));
+    }
+
+    // A map that the caller may not reach reads as a missing one, so that neither its texts nor its existence are shown.
+    // It is reachable when a member of it may be read, as the check of the flow refuses a member below a hidden subject.
+    private static bool IsReadable(IInterceptorSubject map)
+    {
+        if (map.TryGetRegisteredSubject() is not { } registered)
+        {
+            return true;
+        }
+
+        foreach (var property in registered.Properties)
+        {
+            if (!property.IsAttribute && PropertyReadAccess.CanRead(property))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Gets what is wrong with the pipes and variables of an expression where it stands, or null.</summary>

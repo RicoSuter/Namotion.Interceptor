@@ -150,7 +150,7 @@ internal class SearchTool
 
             unseenPropertyNames?.Observe(registered, pathProvider, readability);
 
-            if (filter is not null && !filter.Matches(registered, pathProvider, readability))
+            if (filter is not null && !filter.Matches(registered, pathProvider, readability, _configuration.ValueFilters))
             {
                 continue;
             }

@@ -492,7 +492,7 @@
     private sealed record RoleChecks(string? Error, string? Warning, ExecuteWithoutReadFindings? ExecuteWithoutRead);
 
     // The lists of the role as this dialog read them, compared by reference.
-    private readonly record struct LoadedLists(List<string>? Includes, List<PermissionRule>? Allow, List<PermissionRule>? Deny)
+    private readonly record struct LoadedLists(IReadOnlyList<string>? Includes, IReadOnlyList<PermissionRule>? Allow, IReadOnlyList<PermissionRule>? Deny)
     {
         public LoadedLists(Role role)
             : this(role.Includes, role.Allow, role.Deny)

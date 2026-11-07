@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using HomeBlaze.Authorization.Tests.Subjects;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Authorization;
@@ -248,9 +249,11 @@ public sealed class AuthorizationServiceTests : IDisposable
     [InlineData("\uFEFFKitchen", "The name '\uFEFFKitchen' cannot contain invisible characters, such as a zero-width space or a control character.")]
     [InlineData("Kit\tchen", "The name 'Kit\tchen' cannot contain invisible characters, such as a zero-width space or a control character.")]
     [InlineData("Kitchen\U000E0041", "The name 'Kitchen\U000E0041' cannot contain invisible characters, such as a zero-width space or a control character.")] // a tag character, outside the BMP
-    [InlineData("\u06A9\u062A\u0627\u0628\u200C\u062E\u0627\u0646\u0647", null)] // Persian for library, spelled with a zero-width non-joiner
-    [InlineData("\U0001F9D1\u200D\U0001F373 Kitchen", null)] // the cook emoji, a zero-width joiner sequence
-    public void WhenARoleNameIsChecked_ThenOnlyBlankReservedPathAndInvisibleCharacterNamesHaveAnError(string name, string? expectedError)
+    [InlineData("Kit\u200Cchen", "The name 'Kit\u200Cchen' cannot contain invisible characters, such as a zero-width space or a control character.")]
+    [InlineData("Kit\u200Dchen", "The name 'Kit\u200Dchen' cannot contain invisible characters, such as a zero-width space or a control character.")]
+    [InlineData("Kitchen ", "The name 'Kitchen ' cannot start or end with whitespace.")]
+    [InlineData(" Kitchen", "The name ' Kitchen' cannot start or end with whitespace.")]
+    public void WhenARoleNameIsChecked_ThenOnlyBlankReservedPathOuterWhitespaceAndInvisibleCharacterNamesHaveAnError(string name, string? expectedError)
     {
         // Act
         var error = AuthorizationService.GetRoleNameError(name);
@@ -276,6 +279,34 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.Equal($"Role '{name}' is unavailable: {expectedStatus}", result.Error);
         Assert.DoesNotContain(name, _service.GetRoleNames());
         await StatusAssert.EqualAsync(expectedStatus, () => invalid.Status);
+    }
+
+    [Theory]
+    [InlineData("kitchen ")]
+    [InlineData(" kitchen")]
+    [InlineData("kit\u200Bchen")]
+    [InlineData("kit\u200Cchen")]
+    [InlineData("kit\u200Dchen")]
+    [InlineData("kit\u0007chen")]
+    [InlineData("kit\U000E0041chen")]
+    public async Task WhenACustomRoleNameHasOuterWhitespaceOrAnInvisibleCharacter_ThenOnlyThatRoleIsUnavailable(string name)
+    {
+        // Arrange
+        var badlyNamed = new Role { Allow = [ReadPlain()] };
+        AddAuthorization((name, badlyNamed), ("good", new Role { Allow = [ReadPlain()] }));
+
+        // Act
+        var badlyNamedResult = _service.GetPolicy([name]);
+        var goodResult = _service.GetPolicy(["good"]);
+        var readerResult = _service.GetPolicy([BuiltInRoles.ReaderName]);
+
+        // Assert
+        Assert.Same(AuthorizationPolicy.DenyAll, badlyNamedResult.Policy);
+        Assert.Null(goodResult.Error);
+        Assert.True(goodResult.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+        Assert.Null(readerResult.Error);
+        Assert.Contains(name, _service.GetUnavailableRoles().Keys);
+        await StatusAssert.NotNullAsync(() => badlyNamed.Status);
     }
 
     [Fact]
@@ -367,6 +398,24 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.False(before.CanRead(Member(nameof(TagTestSubject.Temperature))));
         Assert.False(after.CanRead(Member(nameof(TagTestSubject.Plain))));
         Assert.True(after.CanRead(Member(nameof(TagTestSubject.Temperature))));
+    }
+
+    // The service notices only a replaced collection, so a collection changed in place would keep the earlier policy.
+    [Theory]
+    [InlineData(typeof(Role), nameof(Role.Includes))]
+    [InlineData(typeof(Role), nameof(Role.Allow))]
+    [InlineData(typeof(Role), nameof(Role.Deny))]
+    [InlineData(typeof(Authorization), nameof(Authorization.Roles))]
+    public void WhenTheRolesAreExposed_ThenTheirCollectionsCannotBeChangedInPlace(Type type, string propertyName)
+    {
+        // Arrange
+        var propertyType = type.GetProperty(propertyName)!.PropertyType;
+
+        // Act
+        Type[] interfaces = [propertyType, .. propertyType.GetInterfaces()];
+
+        // Assert
+        Assert.DoesNotContain(interfaces, candidate => candidate.IsGenericType && candidate.GetGenericTypeDefinition() == typeof(ICollection<>));
     }
 
     [Fact]
@@ -469,6 +518,18 @@ public sealed class AuthorizationServiceTests : IDisposable
         // Assert
         Assert.Equal(["Twin"], unavailable.Keys);
         Assert.Equal("The name 'Twin' is used by more than one role, ignoring case.", unavailable["twin"]);
+    }
+
+    [Fact]
+    public void WhenTheUnavailableRolesAreChangedThroughACast_ThenItThrowsAndTheRoleStaysUsable()
+    {
+        // Arrange
+        AddAuthorization(("good", new Role { Allow = [ReadPlain()] }));
+        var unavailable = (IDictionary<string, string>)_service.GetUnavailableRoles();
+
+        // Act & Assert
+        Assert.Throws<NotSupportedException>(() => unavailable.Add("good", "Changed by a caller."));
+        Assert.Null(_service.GetPolicy(["good"]).Error);
     }
 
     [Fact]
@@ -717,6 +778,35 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.True(result.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
         await StatusAssert.EqualAsync(null, () => role.Status);
         await StatusAssert.EqualAsync(null, () => role.Warning);
+    }
+
+    [Fact]
+    public async Task WhenTheServiceIsDisposed_ThenItsContextNoLongerHoldsIt()
+    {
+        // Arrange
+        var context = TestContext.Create();
+
+        // Act
+        var service = CreateAndDisposeService(context);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                return !service.IsAlive;
+            },
+            message: "The disposed service is still reachable.");
+        GC.KeepAlive(context);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference CreateAndDisposeService(IInterceptorSubjectContext context)
+    {
+        var service = new AuthorizationService(context, new DefaultPathProvider('/'));
+        service.Dispose();
+        return new WeakReference(service);
     }
 
     private Authorization AddAuthorization(params (string Name, Role Role)[] roles)

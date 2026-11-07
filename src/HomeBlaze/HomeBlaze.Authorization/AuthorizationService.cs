@@ -34,6 +34,7 @@ public sealed class AuthorizationService : IDisposable
     private readonly PathProviderBase _pathProvider;
     private readonly ILogger<AuthorizationService>? _logger;
     private readonly IDisposable _subscription;
+    private readonly GraphObserver _graphObserver;
     private readonly PrincipalRoleNames _principals = new();
     private readonly PathPatterns _pathPatterns;
 
@@ -82,7 +83,8 @@ public sealed class AuthorizationService : IDisposable
 
         _pathPatterns = new PathPatterns(_registry, pathProvider);
         context.AddService(_pathPatterns);
-        context.AddService(new GraphObserver(this));
+        _graphObserver = new GraphObserver(this);
+        context.AddService(_graphObserver);
         _subscription = context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(OnPropertyChanged);
@@ -165,8 +167,8 @@ public sealed class AuthorizationService : IDisposable
     /// <summary>
     /// Gets why <paramref name="name"/> cannot name a custom role, or null: it is blank, is the name of a built-in role or
     /// of the system rules, ignoring case, contains <c>/</c>, <c>[</c> or <c>]</c>, which would break the path of the role,
-    /// or contains an invisible character, one of the Unicode categories Format or Control, such as a zero-width space,
-    /// other than the zero-width non-joiner and joiner. Uniqueness among the custom roles is not checked.
+    /// starts or ends with whitespace, or contains an invisible character, one of the Unicode categories Format or Control,
+    /// such as a zero-width space. Uniqueness among the custom roles is not checked.
     /// </summary>
     public static string? GetRoleNameError(string name)
     {
@@ -184,8 +186,8 @@ public sealed class AuthorizationService : IDisposable
 
     /// <summary>
     /// Gets the custom roles that exist but cannot be used, by name ignoring case, with the reason: a name that is blank,
-    /// used by more than one role, reserved for the system rules or contains a path or invisible character, see
-    /// <see cref="GetRoleNameError"/>, or any custom role while several <see cref="Authorization"/>
+    /// used by more than one role, reserved for the system rules, starts or ends with whitespace or contains a path or
+    /// invisible character, see <see cref="GetRoleNameError"/>, or any custom role while several <see cref="Authorization"/>
     /// subjects exist. A custom role named like a built-in role is not listed, as the name means the built-in role.
     /// </summary>
     public IReadOnlyDictionary<string, string> GetUnavailableRoles() => GetSnapshot().UnavailableRoles;
@@ -200,8 +202,11 @@ public sealed class AuthorizationService : IDisposable
 
         _principals.Set(principal, roleNames);
         Interlocked.Increment(ref _statusVersion);
-        GetSnapshot();
-        WriteStatuses();
+        GetSnapshot(out var hasWrittenStatuses);
+        if (!hasWrittenStatuses)
+        {
+            WriteStatuses();
+        }
     }
 
     /// <summary>
@@ -222,12 +227,13 @@ public sealed class AuthorizationService : IDisposable
     }
 
     /// <summary>
-    /// Stops observing property changes. Policies already returned stay valid.
+    /// Stops observing the graph. Policies already returned stay valid.
     /// </summary>
     public void Dispose()
     {
         _isDisposed = true;
         _subscription.Dispose();
+        _graphObserver.Detach();
     }
 
     private void OnPropertyChanged(SubjectPropertyChange change)
@@ -282,6 +288,11 @@ public sealed class AuthorizationService : IDisposable
 
     private void Refresh()
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
         // Cleared first, so that a change during the rebuild schedules another one.
         Volatile.Write(ref _isRefreshScheduled, 0);
         try
@@ -294,8 +305,12 @@ public sealed class AuthorizationService : IDisposable
         }
     }
 
-    private AuthorizationSnapshot GetSnapshot()
+    private AuthorizationSnapshot GetSnapshot() => GetSnapshot(out _);
+
+    // hasWrittenStatuses tells whether this call built a snapshot, and so wrote the statuses after publishing it.
+    private AuthorizationSnapshot GetSnapshot(out bool hasWrittenStatuses)
     {
+        hasWrittenStatuses = false;
         var version = Volatile.Read(ref _version);
         var snapshot = Volatile.Read(ref _snapshot);
         if (snapshot is not null && (snapshot.Version == version || Volatile.Read(ref _updateCount) > 0))
@@ -329,6 +344,7 @@ public sealed class AuthorizationService : IDisposable
 
         // Outside the lock: a write notifies observers synchronously, which must not wait for a rebuild.
         WriteStatuses();
+        hasWrittenStatuses = true;
         return snapshot;
     }
 
@@ -414,14 +430,19 @@ public sealed class AuthorizationService : IDisposable
     }
 
     // After the registry, so that a rebuild started by a change finds the subject among the known subjects, or no longer.
+    // The context has no way to remove a service, so Detach lets go of a disposed service while the observer stays.
     [RunsAfter(typeof(SubjectRegistry))]
     private sealed class GraphObserver(AuthorizationService service) : ILifecycleHandler
     {
+        private AuthorizationService? _service = service;
+
+        public void Detach() => Volatile.Write(ref _service, null);
+
         public void HandleLifecycleChange(SubjectLifecycleChange change)
         {
             if (change.Subject is Authorization or Role)
             {
-                service.Invalidate();
+                Volatile.Read(ref _service)?.Invalidate();
             }
         }
     }
