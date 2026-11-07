@@ -31,7 +31,7 @@ The names, numbers and lines in the messages below are examples.
 | `The value of 'Title' has no closing quote.` | A value starts with a double quote and never ends | Add the closing double quote |
 | `Expected a space after the value of 'Title'.` | Something follows the closing double quote directly | Put a space between two arguments |
 | `The value of 'Title' contains a quote. Put the whole value in quotes.` | A value without quotes has a double quote in it | Put the value in double quotes and write `\"` for the double quote inside |
-| `'value' is reserved for expressions and cannot be the name of a block.` | A block named `#value`, `#subject`, `#now`, `#time` or `#event` | Give the block another name, and change the paths that use it |
+| `'value' is reserved for expressions and cannot be the name of a block.` | A block named `#value` or `#subject` | Give the block another name, and change the paths that use it |
 
 ## Type Errors
 
@@ -86,8 +86,7 @@ An expression with a mistake does not take a block down. The page shows the mess
 | `expected ')' at position 16` | A mistake in an expression: a parenthesis, a quote, an operator or a value is missing or in the wrong place. The position counts the characters of the expression from 0 | Correct the expression at that position, see [Conditions](pages.md#conditions) |
 | `use '==' for equality at position 12` | A single `=` in a comparison | Write `==` |
 | `The pipe 'map' takes the name of a value map, such as map:wallbox` | The pipe `map` without a name, or with more than one | Write `map:` and the name of the map |
-| `'value' is not available in the text of a page` | The text of a page uses `value`, `subject`, `now`, `time` or `event`, which are reserved for the values that widgets and automations give their expressions | Write the path of the property |
-| `'now' is not available in pages, widgets and value maps` | A widget, a value map or a case uses `now`, `time` or `event`, which only automations have | Write a path to a property, such as the `LastUpdated` of a device |
+| `'value' is not available in the text of a page` | The text of a page uses `value` or `subject`, which are reserved for the values that widgets give their expressions | Write the path of the property |
 | `The pipe 'map' must be the first pipe` | The pipe `map` stands after another pipe, like `{{ motor/Status \| raw \| map:motorstate }}`. The map reads the value itself, which a pipe before it has already turned into text | Write `map` first, or remove the pipes before it |
 | `expression is longer than 1000 characters at position 1000` | An expression is longer than 1000 characters. In a text with expressions between double braces, the position counts inside the braces of that expression | Shorten the expression, see [Expression Limits](pages.md#expression-limits) |
 | `expression is nested too deeply at position 32` | An expression nests more than 32 levels of parentheses and `not`. In a text with expressions between double braces, the position counts inside the braces of that expression | Flatten the expression, see [Expression Limits](pages.md#expression-limits) |
