@@ -1,8 +1,13 @@
 namespace HomeBlaze.Automation.Blazor.Runs;
 
-/// <summary>Sums up the result of Test now: whether the rule would run with the current values, and the first reason why not.</summary>
+/// <summary>
+/// Sums up the result of Test now: whether the rule would run with the current values, and the first reason why not. A true
+/// condition that Only if rejects waits, so the rule would run once Only if is true.
+/// </summary>
 public static class RuleTestSummary
 {
+    private const string WaitText = "The rule runs once Only if is true while the condition stays true.";
+
     public static RuleTestVerdict Describe(AutomationRuleTestResult result, bool hasEventTrigger)
     {
         if (result.Error is { } error)
@@ -24,8 +29,8 @@ public static class RuleTestSummary
 
         return result.GuardResult switch
         {
-            false => new RuleTestVerdict(false, "Would not run now: Only if is false."),
-            null => new RuleTestVerdict(false, $"Would not run now: Only if is unknown, missing {string.Join(", ", result.GuardMissingPaths)}."),
+            false => new RuleTestVerdict(false, $"Would wait now: Only if is false. {WaitText}"),
+            null => new RuleTestVerdict(false, $"Would wait now: Only if is unknown, missing {string.Join(", ", result.GuardMissingPaths)}. {WaitText}"),
             _ => new RuleTestVerdict(true, "Would run now.")
         };
     }

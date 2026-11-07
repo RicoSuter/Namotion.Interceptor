@@ -9,6 +9,7 @@ public class AutomationSummaryTests
     [InlineData("On: Armed", "Armed")]
     [InlineData("DryRun: Holding since 13:00:00 for 10m", "Holding since 13:00:00 for 10m")]
     [InlineData("Off", "Off")]
+    [InlineData("On: Waiting since 12:01:00: Only if is false", "Waiting since 12:01:00: Only if is false")]
     [InlineData(null, null)]
     public void WhenTheStatusOfARuleIsShown_ThenItsModeIsLeftOut(string? status, string? expected)
     {
@@ -42,6 +43,18 @@ public class AutomationSummaryTests
         Assert.Equal("Remind: Unknown since 2026-11-06 09:20:00, missing /Door/State", headline);
     }
 
+    [Theory]
+    [InlineData("On: Waiting since 12:01:00: Only if is false", "Retract: Waiting since 12:01:00: Only if is false")]
+    [InlineData("On: Armed; not run: Only if is false", "Retract: Armed; not run: Only if is false")]
+    public void WhenARuleWaitsOrDidNotRun_ThenTheHeadlineSaysWhy(string status, string expected)
+    {
+        // Act
+        var headline = AutomationSummary.GetHeadline(ServiceStatus.Running, null, [("Started", "On: Armed, waiting until false"), ("Retract", status)]);
+
+        // Assert
+        Assert.Equal(expected, headline);
+    }
+
     [Fact]
     public void WhenEveryRuleIsSettled_ThenThereIsNoHeadline()
     {
@@ -57,7 +70,7 @@ public class AutomationSummaryTests
     [InlineData(AutomationRunOutcome.CompletedWithErrors, "Completed with errors")]
     [InlineData(AutomationRunOutcome.StoppedAfterError, "Stopped after an error")]
     [InlineData(AutomationRunOutcome.DryRun, "Would have run (dry run)")]
-    [InlineData(AutomationRunOutcome.Canceled, "Canceled")]
+    [InlineData(AutomationRunOutcome.Canceled, "Canceled by a stop")]
     public void WhenAnOutcomeIsShown_ThenItIsReadable(AutomationRunOutcome outcome, string expected)
     {
         // Act

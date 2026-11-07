@@ -19,6 +19,7 @@ public static class AutomationColors
         AutomationRunOutcome.Succeeded => Color.Success,
         AutomationRunOutcome.CompletedWithErrors or AutomationRunOutcome.StoppedAfterError => Color.Error,
         AutomationRunOutcome.DryRun => Color.Info,
+        AutomationRunOutcome.Canceled => Color.Warning,
         _ => Color.Default
     };
 }

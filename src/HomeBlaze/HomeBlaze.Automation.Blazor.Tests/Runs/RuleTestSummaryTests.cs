@@ -19,8 +19,11 @@ public class RuleTestSummaryTests
         { Result(isActive: false), false, false, "Would not run now: the rule is not active." },
         { Result(trigger: false), false, false, "Would not run now: no condition is true." },
         { Result(trigger: null), true, false, "Would not run now: no condition is true; an event runs it when it passes the filter." },
-        { Result(guard: false), false, false, "Would not run now: Only if is false." },
-        { Result(guard: null, guardMissingPaths: "/Blinds/IsMoving"), false, false, "Would not run now: Only if is unknown, missing /Blinds/IsMoving." },
+        { Result(guard: false), false, false, "Would wait now: Only if is false. The rule runs once Only if is true while the condition stays true." },
+        {
+            Result(guard: null, guardMissingPaths: "/Blinds/IsMoving"), false, false,
+            "Would wait now: Only if is unknown, missing /Blinds/IsMoving. The rule runs once Only if is true while the condition stays true."
+        },
         { Result(), false, true, "Would run now." }
     };
 

@@ -26,12 +26,13 @@ public static class AutomationSummary
         AutomationRunOutcome.CompletedWithErrors => "Completed with errors",
         AutomationRunOutcome.StoppedAfterError => "Stopped after an error",
         AutomationRunOutcome.DryRun => "Would have run (dry run)",
+        AutomationRunOutcome.Canceled => "Canceled by a stop",
         _ => outcome.ToString()
     };
 
     /// <summary>
-    /// The line a widget shows below the state: the error of the automation, otherwise the first rule that holds a
-    /// condition or misses values, otherwise nothing.
+    /// The line a widget shows below the state: the error of the automation, otherwise the first rule that waits for Only
+    /// if, holds a condition, misses values or did not run its last request, otherwise nothing.
     /// </summary>
     public static string? GetHeadline(ServiceStatus status, string? statusMessage, IEnumerable<(string Name, string? Status)> rules)
     {
@@ -42,8 +43,7 @@ public static class AutomationSummary
 
         foreach (var (name, ruleStatus) in rules)
         {
-            if (GetStatusText(ruleStatus) is { } text &&
-                (text.StartsWith("Holding", StringComparison.Ordinal) || text.StartsWith("Unknown", StringComparison.Ordinal)))
+            if (GetStatusText(ruleStatus) is { } text && IsNotable(text))
             {
                 return $"{name}: {text}";
             }
@@ -51,4 +51,10 @@ public static class AutomationSummary
 
         return null;
     }
+
+    private static bool IsNotable(string statusText) =>
+        statusText.StartsWith("Waiting", StringComparison.Ordinal) ||
+        statusText.StartsWith("Holding", StringComparison.Ordinal) ||
+        statusText.StartsWith("Unknown", StringComparison.Ordinal) ||
+        statusText.Contains("; not run: ", StringComparison.Ordinal);
 }
