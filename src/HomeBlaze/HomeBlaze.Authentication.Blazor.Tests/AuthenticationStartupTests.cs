@@ -28,7 +28,7 @@ public class AuthenticationStartupTests
             services.AddLogging();
             services.AddSingleton<IConfiguration>(configuration);
             services.AddHomeBlazeServices();
-            services.AddHomeBlazeAuthorization(new StateAttributePathProvider());
+            services.AddHomeBlazeAuthorization(new RulePathProvider());
             services.AddDataProtection();
             services.AddHomeBlazeAuthentication(configuration);
             await using var provider = services.BuildServiceProvider();

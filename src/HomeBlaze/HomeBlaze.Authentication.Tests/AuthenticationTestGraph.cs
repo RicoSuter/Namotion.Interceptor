@@ -112,7 +112,7 @@ internal sealed class AuthenticationTestGraph : IAsyncDisposable
 
         var context = TestContext.Create();
         // The path provider of the application, an instance like the one of the MCP tools.
-        var authorizationService = new AuthorizationService(context, new StateAttributePathProvider());
+        var authorizationService = new AuthorizationService(context, new RulePathProvider());
         var root = new TestRoot(context)
         {
             Children = new Dictionary<string, IInterceptorSubject> { ["Authorization"] = new AuthorizationSubject() }

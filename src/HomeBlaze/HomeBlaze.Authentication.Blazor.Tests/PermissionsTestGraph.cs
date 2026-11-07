@@ -99,7 +99,7 @@ internal sealed class PermissionsTestGraph : IAsyncDisposable
         services.AddLogging();
         services.AddDataProtection();
         services.AddSingleton(context);
-        services.AddHomeBlazeAuthorization(new StateAttributePathProvider());
+        services.AddHomeBlazeAuthorization(new RulePathProvider());
         services.AddHomeBlazeAuthentication(configuration);
         services.AddHomeBlazeWebAuthentication();
         var provider = services.BuildServiceProvider();

@@ -143,7 +143,7 @@ internal sealed class AuthenticationTestHost : IAsyncDisposable
         }
 
         builder.Services.AddHomeBlazeServices();
-        builder.Services.AddHomeBlazeAuthorization(new StateAttributePathProvider());
+        builder.Services.AddHomeBlazeAuthorization(new RulePathProvider());
         builder.Services.AddDataProtection();
         builder.Services.AddHomeBlazeAuthentication(builder.Configuration);
         builder.Services.AddHomeBlazeWebAuthentication();

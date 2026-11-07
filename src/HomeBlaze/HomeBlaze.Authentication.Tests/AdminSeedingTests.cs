@@ -280,7 +280,7 @@ public class AdminSeedingTests
         services.AddLogging();
         services.AddDataProtection();
         services.AddHomeBlazeServices();
-        services.AddHomeBlazeAuthorization(new StateAttributePathProvider());
+        services.AddHomeBlazeAuthorization(new RulePathProvider());
         services.AddHomeBlazeAuthentication(configuration);
         return services.BuildServiceProvider();
     }
