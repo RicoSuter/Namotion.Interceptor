@@ -88,6 +88,51 @@ public class AutomationConfigurationTests
     }
 
     [Fact]
+    public async Task WhenTheConfigurationIsSavedWhileEventsAreQueued_ThenTheEventsOfAnUnchangedTriggerStillRun()
+    {
+        // Arrange
+        static AutomationRule Press() => Create(
+            "Press", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent", "event/Gesture == Release")], [Invoke("/Blinds/Close")]);
+        static AutomationRule Wait() => On("Wait", When("/Weather/Rain > 0"), Invoke("/Blinds/Wait"));
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(("press", Press()), ("wait", Wait())));
+        host.Weather.Rain = 1;
+        await AsyncTestHelpers.WaitUntilAsync(() => host.Blinds.IsWaiting);
+        host.Button.Press("Release");
+        host.Button.Press("Release");
+
+        // Act
+        host.Automation.Name = "Renamed";
+        host.Automation.Rules = Keyed(("press", Press()), ("wait", Wait()));
+        await host.Automation.ApplyConfigurationAsync(CancellationToken.None);
+        host.Blinds.Release();
+        await host.FlushAsync();
+        host.Button.Press("Release");
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(3, host.Blinds.CloseCount);
+        Assert.Equal(3L, host.Rule("press").RunCount);
+    }
+
+    [Fact]
+    public async Task WhenTheFilterOfAnEventTriggerIsChanged_ThenTheTriggerUsesTheNewFilter()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("press", Create("Press", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent", "event/Gesture == Release")], [Invoke("/Blinds/Close")]))));
+
+        // Act
+        await SaveAsync(host, Keyed(
+            ("press", Create("Press", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent", "event/Gesture == Hold")], [Invoke("/Blinds/Close")]))));
+        host.Button.Press("Release");
+        host.Button.Press("Hold");
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
     public async Task WhenARunEndsAfterTheRulesWereReplaced_ThenTheNewRuleKeepsTheRun()
     {
         // Arrange

@@ -299,7 +299,8 @@ internal sealed class AutomationEngine : IRuleRunHost
         _triggers.Rebind(_snapshot.Rules);
     }
 
-    // A trigger that stays the same in a rule that stays active keeps its state, so that a Save does not run it again.
+    // A trigger that stays the same in a rule that stays active keeps its state, so that a Save does not run it again, and
+    // its subscription, so that a Save drops no queued event.
     private void CarryOver(CompiledAutomation previous, CompiledAutomation next)
     {
         foreach (var rule in next.Rules)

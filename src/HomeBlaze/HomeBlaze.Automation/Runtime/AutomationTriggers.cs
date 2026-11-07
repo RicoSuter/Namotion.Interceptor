@@ -100,7 +100,10 @@ internal sealed class AutomationTriggers
         EventTriggerEngine.Deactivate(rule);
     }
 
-    /// <summary>Hands the state of each property trigger of the old rule to the trigger at the same position with an equal configuration.</summary>
+    /// <summary>
+    /// Hands the state of each property trigger and the subscription of each event trigger of the old rule to the trigger
+    /// at the same position with an equal configuration.
+    /// </summary>
     public static void CarryOver(CompiledRule old, CompiledRule rule)
     {
         foreach (var trigger in rule.PropertyTriggers)
@@ -108,6 +111,13 @@ internal sealed class AutomationTriggers
             var match = old.PropertyTriggers.FirstOrDefault(candidate =>
                 candidate.Index == trigger.Index && candidate.Configuration == trigger.Configuration);
             match?.MoveStateTo(trigger);
+        }
+
+        foreach (var trigger in rule.EventTriggers)
+        {
+            var match = old.EventTriggers.FirstOrDefault(candidate =>
+                candidate.Index == trigger.Index && candidate.Configuration == trigger.Configuration);
+            match?.MoveSubscriptionTo(trigger);
         }
     }
 
