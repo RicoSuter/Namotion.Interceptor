@@ -32,11 +32,12 @@ internal sealed class WakeTimer : IDisposable
 
     /// <summary>
     /// Sets the timer to <paramref name="dueAt"/>, or stops it for null; does nothing when it is set to that future
-    /// instant already, so that most inputs cost one comparison here.
+    /// instant already or is stopped and nothing is due, so that most inputs cost one comparison here.
     /// </summary>
     public void Schedule(DateTimeOffset? dueAt, DateTimeOffset now)
     {
-        if (_isScheduled && dueAt == _scheduledDueAt && dueAt > now)
+        // While not scheduled, the one-shot timer is not set: only its callback and a stop clear the flag.
+        if (dueAt is null ? !_isScheduled : _isScheduled && dueAt == _scheduledDueAt && dueAt > now)
         {
             return;
         }
