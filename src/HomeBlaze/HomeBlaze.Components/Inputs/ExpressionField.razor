@@ -124,8 +124,6 @@
     /// </summary>
     [Parameter] public EventCallback<bool> HasPendingRowChanged { get; set; }
 
-    [Parameter] public char PathSeparator { get; set; } = '/';
-
     /// <summary>The variables the host declares for its expressions; default stands for <c>value</c> and <c>subject</c>.</summary>
     [Parameter] public ImmutableArray<string> Variables { get; set; }
 
@@ -133,7 +131,6 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        _model.PathSeparator = PathSeparator;
         _model.Variables = Variables;
         if (!string.Equals(Value ?? string.Empty, _model.Text, StringComparison.Ordinal))
         {
@@ -216,7 +213,7 @@
         }
     }
 
-    private void Refresh() => _preview.Update(_model.Text, _model.Rows, PathSeparator, _model.Variables, Validate, Preview);
+    private void Refresh() => _preview.Update(_model.Text, _model.Rows, _model.PathSeparator, _model.Variables, Validate, Preview);
 
     private string GetRowText(int index) => index < _preview.RowTexts.Count ? _preview.RowTexts[index] : string.Empty;
 
