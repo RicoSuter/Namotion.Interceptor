@@ -37,6 +37,6 @@ internal static class RuleTestSummary
         };
     }
 
-    private static string GetWaitText(string guardResult) =>
-        $"A condition that becomes true while Only if is {guardResult} waits until Only if is true.";
+    private static string GetWaitText(string onlyIfResult) =>
+        $"A condition that becomes true while Only if is {onlyIfResult} waits until Only if is true.";
 }

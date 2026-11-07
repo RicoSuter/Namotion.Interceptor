@@ -44,7 +44,7 @@ public static class AutomationValidator
         return errors;
     }
 
-    /// <summary>Gets the error of an expression of a trigger, a rearm, a guard or an event filter, or null when it is valid.</summary>
+    /// <summary>Gets the error of an expression of a trigger, a rearm, Only if or an event filter, or null when it is valid.</summary>
     /// <param name="text">The expression.</param>
     /// <param name="allowsEvent">Whether an event is captured where it is evaluated: in event filters and in rules with an event trigger.</param>
     public static string? ValidateExpression(string? text, bool allowsEvent) =>

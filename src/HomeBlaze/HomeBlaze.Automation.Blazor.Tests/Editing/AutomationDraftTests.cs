@@ -38,7 +38,7 @@ public class AutomationDraftTests
         // Arrange
         const string json = """
             {
-              "$type": "HomeBlaze.Automation.AutomationRule", "name": null, "mode": "On", "inState": null, "guard": null,
+              "$type": "HomeBlaze.Automation.AutomationRule", "name": null, "mode": "On", "inState": null, "onlyIf": null,
               "triggers": [ null, { "$type": "PropertyTrigger", "expression": null, "rearm": null },
                             { "$type": "SubjectEventTrigger", "subjectPath": null, "eventType": null, "filter": null } ],
               "actions": [ null, { "$type": "InvokeOperation", "id": null, "operationPath": null, "arguments": null },
@@ -200,7 +200,7 @@ public class AutomationDraftTests
                 ["trigger"] = new() { Triggers = [new PropertyTrigger { Expression = "../CurrentState == Idle" }] },
                 ["rearm"] = new() { Triggers = [new PropertyTrigger { Expression = "/a/B", Rearm = "/a/C == Idle" }] },
                 ["filter"] = new() { Triggers = [new SubjectEventTrigger { Filter = "event/NewState == Idle" }] },
-                ["guard"] = new() { OnlyIf = "../CurrentState != Idle" },
+                ["onlyIf"] = new() { OnlyIf = "../CurrentState != Idle" },
                 ["argument"] = new() { Actions = [new InvokeOperationAction { Arguments = new Dictionary<string, string> { ["Message"] = "Was Idle" } }] },
                 ["value"] = new() { Actions = [new SetPropertyAction { Value = "Idle" }] },
                 ["longer"] = new() { Triggers = [new PropertyTrigger { Expression = "../CurrentState == Idleness" }] },
@@ -213,7 +213,7 @@ public class AutomationDraftTests
         var rules = draft.FindRulesMentioning("Idle");
 
         // Assert
-        Assert.Equal(["argument", "filter", "guard", "rearm", "trigger", "value"], rules.Select(rule => rule.Key).Order().ToArray());
+        Assert.Equal(["argument", "filter", "onlyIf", "rearm", "trigger", "value"], rules.Select(rule => rule.Key).Order().ToArray());
     }
 
     [Fact]
@@ -324,7 +324,7 @@ public class AutomationDraftTests
         // Act
         draft.RenameState("Running", "Busy");
         rule.Name = "Changed";
-        rule.Guard = "/a/B";
+        rule.OnlyIf = "/a/B";
         var call = rule.Actions[0];
         call.Value = ((InvokeOperationAction)call.Value) with { OperationPath = "/Other/Send" };
         ((Dictionary<string, string>)((InvokeOperationAction)call.Value).Arguments)["notification.Message"] = "Edited";

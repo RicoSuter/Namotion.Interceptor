@@ -25,7 +25,7 @@ public sealed class RuleDraft
 
     public string? InState { get; set; }
 
-    public string? Guard { get; set; }
+    public string? OnlyIf { get; set; }
 
     public List<DraftItem<AutomationTrigger>> Triggers { get; } = [];
 
@@ -41,15 +41,15 @@ public sealed class RuleDraft
     public IEnumerable<string> TargetStates =>
         Actions.Select(action => action.Value).OfType<ChangeStateAction>().Select(action => action.TargetState);
 
-    /// <summary>The texts the rule evaluates: the expressions of its triggers and guard, the filters, and the arguments and values of its actions.</summary>
+    /// <summary>The texts the rule evaluates: the expressions of its triggers and Only if, the filters, and the arguments and values of its actions.</summary>
     public IEnumerable<string> Texts => Triggers.Select(trigger => trigger.Value).SelectMany(GetTexts)
-        .Append(Guard)
+        .Append(OnlyIf)
         .Concat(Actions.Select(action => action.Value).SelectMany(GetTexts))
         .OfType<string>();
 
     public static RuleDraft From(string key, AutomationRule rule)
     {
-        var draft = new RuleDraft(key) { Name = rule.Name, Mode = rule.Mode, InState = rule.InState, Guard = rule.OnlyIf };
+        var draft = new RuleDraft(key) { Name = rule.Name, Mode = rule.Mode, InState = rule.InState, OnlyIf = rule.OnlyIf };
         draft.Triggers.AddRange((rule.Triggers ?? []).OfType<AutomationTrigger>().Select(trigger => new DraftItem<AutomationTrigger>(WithoutNulls(trigger))));
         draft.Actions.AddRange((rule.Actions ?? []).OfType<AutomationAction>().Select(action => new DraftItem<AutomationAction>(WithoutNulls(action))));
         return draft;
@@ -74,7 +74,7 @@ public sealed class RuleDraft
     public void MoveAction(DraftItem<AutomationAction> action, int offset) => DraftLists.Move(Actions, action, offset);
 
     /// <summary>
-    /// The rule as it is saved: a blank name, guard, rearm or filter is none. An operation action whose operation was changed
+    /// The rule as it is saved: a blank name, Only if, rearm or filter is none. An operation action whose operation was changed
     /// keeps only the arguments that its operation, looked up by its path, takes, which the binder requires, and all of them
     /// when the path leads to no operation. Any other action is saved as it was loaded.
     /// </summary>
@@ -83,7 +83,7 @@ public sealed class RuleDraft
         Name = string.IsNullOrWhiteSpace(Name) ? null : Name.Trim(),
         Mode = Mode,
         InState = InState,
-        OnlyIf = string.IsNullOrWhiteSpace(Guard) ? null : Guard,
+        OnlyIf = string.IsNullOrWhiteSpace(OnlyIf) ? null : OnlyIf,
         Triggers = [.. Triggers.Select(trigger => Normalize(trigger.Value))],
         Actions = [.. Actions.Select(action => action.IsOperationChanged ? Prune(action.Value, getMethod) : action.Value)]
     };

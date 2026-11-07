@@ -287,9 +287,9 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public HomeBlaze.Automation.Blazor.Editing.AutomationDraft Draft { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
-    public class GuardEditor : Microsoft.AspNetCore.Components.ComponentBase
+    public class OnlyIfEditor : Microsoft.AspNetCore.Components.ComponentBase
     {
-        public GuardEditor() { }
+        public OnlyIfEditor() { }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback Changed { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
@@ -333,11 +333,11 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public System.Collections.Generic.List<HomeBlaze.Automation.Blazor.Editing.DraftItem<HomeBlaze.Automation.AutomationAction>> Actions { get; }
         public bool AllowsEvent { get; }
         public string DisplayName { get; }
-        public string? Guard { get; set; }
         public string? InState { get; set; }
         public string Key { get; }
         public HomeBlaze.Automation.AutomationRuleMode Mode { get; set; }
         public string? Name { get; set; }
+        public string? OnlyIf { get; set; }
         public System.Collections.Generic.IEnumerable<string> TargetStates { get; }
         public System.Collections.Generic.IEnumerable<string> Texts { get; }
         public System.Collections.Generic.List<HomeBlaze.Automation.Blazor.Editing.DraftItem<HomeBlaze.Automation.AutomationTrigger>> Triggers { get; }

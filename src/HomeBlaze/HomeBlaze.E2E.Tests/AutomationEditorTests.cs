@@ -153,14 +153,14 @@ public class AutomationEditorTests
     }
 
     [Fact]
-    public async Task WhenARuleWithAGuardAndACooldownIsOpenedAndSaved_ThenItsGuardTextIsUnchanged()
+    public async Task WhenARuleWithOnlyIfAndACooldownIsOpenedAndSaved_ThenItsOnlyIfTextIsUnchanged()
     {
         // Arrange
-        const string guard = "(/Demo/Motor/Temperature > 1) and (./LastTriggeredAt == null or now - ./LastTriggeredAt > 30m)";
+        const string onlyIf = "(/Demo/Motor/Temperature > 1) and (./LastTriggeredAt == null or now - ./LastTriggeredAt > 30m)";
         await using var washer = await _fixture.AddStoredAutomationAsync(configured =>
         {
             WasherAutomation.Configure(configured);
-            configured.Rules["started"].OnlyIf = guard;
+            configured.Rules["started"].OnlyIf = onlyIf;
         });
         var (page, dialog) = await OpenEditorAsync(washer.Name, tab: RulesTab);
 
@@ -169,7 +169,7 @@ public class AutomationEditorTests
         await SaveAsync(page, dialog);
 
         // Assert
-        Assert.Equal(guard, (await ReadRuleAsync(washer.FilePath, "started")).GetProperty("guard").GetString());
+        Assert.Equal(onlyIf, (await ReadRuleAsync(washer.FilePath, "started")).GetProperty("onlyIf").GetString());
     }
 
     [Fact]
@@ -504,7 +504,7 @@ public class AutomationEditorTests
     }
 
     [Fact]
-    public async Task WhenTheCooldownIsBeingTypedOrIsZero_ThenAnErrorShowsOnlyForWhatCannotBecomeValidAndAValidOneIsSavedAsTheGuard()
+    public async Task WhenTheCooldownIsBeingTypedOrIsZero_ThenAnErrorShowsOnlyForWhatCannotBecomeValidAndAValidOneIsSavedAsOnlyIf()
     {
         // Arrange
         await using var washer = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
@@ -518,16 +518,16 @@ public class AutomationEditorTests
         // Assert
         await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToHaveCountAsync(0);
         await cooldown.FillAsync("0s");
-        await Assertions.Expect(dialog.GetByTestId("automation-guard")).ToContainTextAsync("Use a duration above 0", new() { Timeout = Timeout });
+        await Assertions.Expect(dialog.GetByTestId("automation-only-if")).ToContainTextAsync("Use a duration above 0", new() { Timeout = Timeout });
         await Assertions.Expect(cooldown).ToHaveValueAsync("0s");
         await cooldown.FillAsync("1h30m");
         await SaveAsync(page, dialog);
-        var guard = (await ReadRuleAsync(washer.FilePath, "started")).GetProperty("guard").GetString();
-        Assert.Equal("./LastTriggeredAt == null or now - ./LastTriggeredAt > 1h30m", guard);
+        var onlyIf = (await ReadRuleAsync(washer.FilePath, "started")).GetProperty("onlyIf").GetString();
+        Assert.Equal("./LastTriggeredAt == null or now - ./LastTriggeredAt > 1h30m", onlyIf);
     }
 
     [Fact]
-    public async Task WhenAParenthesisIsTypedIntoTheGuardOfARuleWithACooldown_ThenTheCooldownIsKept()
+    public async Task WhenAParenthesisIsTypedIntoOnlyIfOfARuleWithACooldown_ThenTheCooldownIsKept()
     {
         // Arrange
         const string condition = "(/Demo/Motor/Temperature > 1 or /Demo/Motor/Temperature < 0)";
@@ -541,14 +541,14 @@ public class AutomationEditorTests
         await Assertions.Expect(dialog.GetByLabel("At most once every")).ToHaveValueAsync("30m", new() { Timeout = Timeout });
 
         // Act
-        await dialog.GetByTestId("automation-guard-condition-advanced").ClickAsync();
-        await dialog.GetByTestId("automation-guard-condition-text").PressSequentiallyAsync(condition);
-        await Assertions.Expect(dialog.GetByTestId("automation-guard-condition-text")).ToHaveValueAsync(condition);
+        await dialog.GetByTestId("automation-only-if-condition-advanced").ClickAsync();
+        await dialog.GetByTestId("automation-only-if-condition-text").PressSequentiallyAsync(condition);
+        await Assertions.Expect(dialog.GetByTestId("automation-only-if-condition-text")).ToHaveValueAsync(condition);
         await SaveAsync(page, dialog);
 
         // Assert
-        var guard = (await ReadRuleAsync(washer.FilePath, "started")).GetProperty("guard").GetString();
-        Assert.Equal($"{condition} and ({cooldown})", guard);
+        var onlyIf = (await ReadRuleAsync(washer.FilePath, "started")).GetProperty("onlyIf").GetString();
+        Assert.Equal($"{condition} and ({cooldown})", onlyIf);
     }
 
     [Fact]

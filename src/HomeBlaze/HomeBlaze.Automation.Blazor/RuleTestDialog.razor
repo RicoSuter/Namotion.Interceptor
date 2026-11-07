@@ -27,7 +27,7 @@
             @if (Result.HasOnlyIf)
             {
                 <MudText Typo="Typo.subtitle2">Only if</MudText>
-                <div class="d-flex align-center gap-2 mb-3" data-testid="automation-test-guard">
+                <div class="d-flex align-center gap-2 mb-3" data-testid="automation-test-only-if">
                     <MudText Typo="Typo.body2" Style="flex: 1; overflow-wrap: anywhere; font-family: monospace;">@Rule.OnlyIf</MudText>
                     <MudChip T="string" Size="Size.Small" Color="@GetColor(Result.OnlyIfResult)" Class="ma-0">@FormatResult(Result.OnlyIfResult)</MudChip>
                 </div>
