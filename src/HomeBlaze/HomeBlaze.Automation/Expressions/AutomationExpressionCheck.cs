@@ -4,9 +4,9 @@ using Namotion.Interceptor.Expressions;
 namespace HomeBlaze.Automation.Expressions;
 
 /// <summary>
-/// Parses the expressions and text templates of automations and checks what they use: the variables <c>now</c> and
-/// <c>time</c> everywhere, <c>event</c> and <c>subject</c> only where an event is captured, never <c>value</c>; pipes
-/// only in templates, <c>display</c> and <c>raw</c>.
+/// Parses the expressions and text templates of automations with <see cref="AutomationVariables"/> and checks what they
+/// use: the variables <c>now</c> and <c>time</c> everywhere, <c>event</c> and <c>subject</c> only where an event is
+/// captured, never <c>value</c>; pipes only in templates, <c>display</c> and <c>raw</c>.
 /// </summary>
 internal static class AutomationExpressionCheck
 {
@@ -23,7 +23,7 @@ internal static class AutomationExpressionCheck
         [NotNullWhen(true)] out ParsedExpression? expression,
         [NotNullWhen(false)] out string? error)
     {
-        if (!ParsedExpression.TryParse(text ?? string.Empty, AutomationPaths.Separator, out expression, out error))
+        if (!ParsedExpression.TryParse(text ?? string.Empty, AutomationPaths.Separator, AutomationVariables.All, out expression, out error))
         {
             return false;
         }
@@ -48,7 +48,7 @@ internal static class AutomationExpressionCheck
         [NotNullWhen(true)] out TextTemplate? template,
         [NotNullWhen(false)] out string? error)
     {
-        if (!TextTemplate.TryParse(text ?? string.Empty, AutomationPaths.Separator, out template, out error))
+        if (!TextTemplate.TryParse(text ?? string.Empty, AutomationPaths.Separator, AutomationVariables.All, out template, out error))
         {
             return false;
         }
@@ -69,12 +69,12 @@ internal static class AutomationExpressionCheck
     /// <summary>Gets whether the expression reads <c>now</c> or <c>time</c>, so that its result changes with the clock.</summary>
     public static bool UsesTime(ParsedExpression expression) =>
         expression.Paths.Any(path =>
-            ExpressionVariables.TryGetVariable(path, AutomationPaths.Separator, out var variable) &&
-            variable is ExpressionVariables.Now or ExpressionVariables.Time);
+            expression.TryGetVariable(path, out var variable, out _) &&
+            variable is AutomationVariables.Now or AutomationVariables.Time);
 
     /// <summary>Gets the paths of the expression that are no variable, in order of first appearance.</summary>
     public static IEnumerable<string> GetPropertyPaths(ParsedExpression expression) =>
-        expression.Paths.Where(path => !ExpressionVariables.TryGetVariable(path, AutomationPaths.Separator, out _));
+        expression.Paths.Where(path => !expression.TryGetVariable(path, out _, out _));
 
     private static string? CheckPipes(ParsedExpression expression)
     {
@@ -99,7 +99,7 @@ internal static class AutomationExpressionCheck
     {
         foreach (var path in expression.Paths)
         {
-            if (ExpressionVariables.TryGetVariable(path, AutomationPaths.Separator, out var variable, out var memberPath) &&
+            if (expression.TryGetVariable(path, out var variable, out var memberPath) &&
                 GetVariableError(variable, memberPath, allowsEvent) is { } error)
             {
                 return error;
@@ -111,9 +111,9 @@ internal static class AutomationExpressionCheck
 
     private static string? GetVariableError(string variable, string? memberPath, bool allowsEvent) => variable switch
     {
-        ExpressionVariables.Value => "'value' is not available in automations",
-        ExpressionVariables.Now or ExpressionVariables.Time when memberPath is not null => $"'{variable}' has no members",
-        ExpressionVariables.Event or ExpressionVariables.Subject when !allowsEvent =>
+        AutomationVariables.Value => "'value' is not available in automations",
+        AutomationVariables.Now or AutomationVariables.Time when memberPath is not null => $"'{variable}' has no members",
+        AutomationVariables.Event or AutomationVariables.Subject when !allowsEvent =>
             $"'{variable}' is only available in event filters and in the arguments of a rule with an event trigger",
         _ => null
     };

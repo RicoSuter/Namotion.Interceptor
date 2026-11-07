@@ -27,21 +27,42 @@ public sealed class TextTemplate
     public ImmutableArray<ParsedExpression> Expressions { get; }
 
     /// <summary>
-    /// Parses the text. On failure the error is that of the first expression that does not parse, with the position inside
-    /// its braces, or <c>'{{' is not closed at position &lt;n&gt;</c>.
+    /// Parses the text with the variables of <see cref="ExpressionVariables"/>. On failure the error is that of the first
+    /// expression that does not parse, with the position inside its braces, or <c>'{{' is not closed at position &lt;n&gt;</c>.
     /// </summary>
     /// <param name="text">The text.</param>
     /// <param name="pathSeparator">The character between the segments of the paths of its expressions.</param>
     /// <param name="template">The template, or null.</param>
     /// <param name="error">The error, or null.</param>
-    /// <exception cref="ArgumentException">The separator cannot be used in an expression, see <see cref="ParsedExpression.TryParse"/>.</exception>
+    /// <exception cref="ArgumentException">The separator cannot be used in an expression, see <see cref="ParsedExpression.TryParse(string, char, out ParsedExpression?, out string?)"/>.</exception>
     public static bool TryParse(
         string text,
         char pathSeparator,
         [NotNullWhen(true)] out TextTemplate? template,
+        [NotNullWhen(false)] out string? error) =>
+        TryParse(text, pathSeparator, ExpressionVariables.Default, out template, out error);
+
+    /// <summary>
+    /// Parses the text with the variables the host declares, which replace those of <see cref="ExpressionVariables"/>. On
+    /// failure the error is that of the first expression that does not parse, with the position inside its braces, or
+    /// <c>'{{' is not closed at position &lt;n&gt;</c>.
+    /// </summary>
+    /// <param name="text">The text.</param>
+    /// <param name="pathSeparator">The character between the segments of the paths of its expressions.</param>
+    /// <param name="variables">The names that are variables of its expressions, see <see cref="ParsedExpression.Variables"/>.</param>
+    /// <param name="template">The template, or null.</param>
+    /// <param name="error">The error, or null.</param>
+    /// <exception cref="ArgumentException">The separator cannot be used in an expression, or a variable is no word an
+    /// expression can hold, see <see cref="ParsedExpression.TryParse(string, char, ImmutableArray{string}, out ParsedExpression?, out string?)"/>.</exception>
+    public static bool TryParse(
+        string text,
+        char pathSeparator,
+        ImmutableArray<string> variables,
+        [NotNullWhen(true)] out TextTemplate? template,
         [NotNullWhen(false)] out string? error)
     {
         ParsedExpression.ValidatePathSeparator(pathSeparator);
+        ExpressionVariables.Validate(variables);
 
         var parts = ImmutableArray.CreateBuilder<object>();
         var expressions = ImmutableArray.CreateBuilder<ParsedExpression>();
@@ -68,7 +89,7 @@ public sealed class TextTemplate
                 return false;
             }
 
-            if (!ParsedExpression.TryParse(text[(open + 2)..close].Trim(), pathSeparator, out var expression, out error))
+            if (!ParsedExpression.TryParseValidated(text[(open + 2)..close].Trim(), pathSeparator, variables, out var expression, out error))
             {
                 template = null;
                 return false;

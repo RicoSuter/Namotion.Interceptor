@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Globalization;
 
 namespace Namotion.Interceptor.Expressions;
@@ -15,11 +16,11 @@ internal sealed class LiteralNode(object? value, string? bareWord = null) : Expr
 
 internal sealed class PathNode : ExpressionNode
 {
-    public PathNode(string path, char pathSeparator)
+    public PathNode(string path, char pathSeparator, ImmutableArray<string> variables)
     {
         Path = path;
         // Split once here, so that an evaluation allocates no part of the path.
-        if (ExpressionVariables.TryGetVariable(path, pathSeparator, out var variable, out var memberPath))
+        if (ExpressionVariables.TryGetVariable(path, pathSeparator, variables, out var variable, out var memberPath))
         {
             Variable = variable;
             MemberPath = memberPath;

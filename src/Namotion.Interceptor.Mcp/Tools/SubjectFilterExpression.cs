@@ -95,9 +95,9 @@ internal sealed class SubjectFilterExpression
             var memberPath = path;
             if (ExpressionVariables.TryGetVariable(path, pathSeparator, out var variable, out var variableMemberPath))
             {
-                if (variable != ExpressionVariables.Subject)
+                if (variable == ExpressionVariables.Value)
                 {
-                    error = ErrorPrefix + $"'{variable}' is not available in where";
+                    error = ErrorPrefix + $"'{ExpressionVariables.Value}' is not available in where";
                     return false;
                 }
 
@@ -201,7 +201,7 @@ internal sealed class SubjectFilterExpression
                 : ExpressionValue.FromProperty(property, value);
         }
 
-        // TryParse refuses every variable but 'subject'.
+        // TryParse refuses 'value', so only 'subject' arrives here.
         public ExpressionValue ResolveVariable(string variable, string? memberPath) =>
             memberPath is null ? ExpressionValue.FromValue(subject.Subject) : ResolvePath(memberPath);
 

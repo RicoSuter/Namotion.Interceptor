@@ -49,10 +49,6 @@ public class ExpressionDisplayTests
     [InlineData("subject/Power.Max > value", ExpressionUse.CaseCondition, null)]
     [InlineData("subject/Maximum < value", ExpressionUse.CaseCondition, null)]
     [InlineData("subject > 1 and value", ExpressionUse.CaseCondition, null)]
-    [InlineData("now", ExpressionUse.PageText, "'now' is not available in the text of a page")]
-    [InlineData("a/B > now", ExpressionUse.WidgetText, "'now' is not available in pages, widgets and value maps")]
-    [InlineData("time > 8h", ExpressionUse.CaseCondition, "'time' is not available in pages, widgets and value maps")]
-    [InlineData("event/State | raw", ExpressionUse.CaseText, "'event' is not available in pages, widgets and value maps")]
     public void WhenExpressionIsChecked_ThenItsPipesAndVariablesMustFitWhereItStands(string text, ExpressionUse use, string? expected)
     {
         // Act

@@ -31,10 +31,10 @@ internal readonly struct AutomationExpressionContext(AutomationEvaluation evalua
     {
         var value = variable switch
         {
-            ExpressionVariables.Now when memberPath is null => ExpressionValue.FromValue(evaluation.Now),
-            ExpressionVariables.Time when memberPath is null => ExpressionValue.FromValue(evaluation.TimeOfDay),
-            ExpressionVariables.Event => ResolveEvent(memberPath),
-            ExpressionVariables.Subject => ResolveSource(memberPath),
+            AutomationVariables.Now when memberPath is null => ExpressionValue.FromValue(evaluation.Now),
+            AutomationVariables.Time when memberPath is null => ExpressionValue.FromValue(evaluation.TimeOfDay),
+            AutomationVariables.Event => ResolveEvent(memberPath),
+            AutomationVariables.Subject => ResolveSource(memberPath),
             _ => ExpressionValue.Missing
         };
 
