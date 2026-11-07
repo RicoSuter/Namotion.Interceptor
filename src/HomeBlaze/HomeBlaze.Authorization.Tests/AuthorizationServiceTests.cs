@@ -613,6 +613,34 @@ public sealed class AuthorizationServiceTests : IDisposable
     }
 
     [Fact]
+    public void WhenARoleChangedJustBeforeAnUpdate_ThenTheUpdateKeepsTheChange()
+    {
+        // Arrange
+        var role = new Role { Allow = [ReadPlain()] };
+        AddAuthorization(("Custom", role));
+        var readableDuringUpdate = 0;
+
+        // Act: repeated, as a background rebuild that runs between the change and the update would hide the failure.
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            role.Allow = [ReadPlain()];
+            Assert.True(_service.GetPolicy(["Custom"]).Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+
+            role.Allow = [];
+            using (_service.BeginUpdate())
+            {
+                if (_service.GetPolicy(["Custom"]).Policy.CanRead(Member(nameof(TagTestSubject.Plain))))
+                {
+                    readableDuringUpdate++;
+                }
+            }
+        }
+
+        // Assert
+        Assert.Equal(0, readableDuringUpdate);
+    }
+
+    [Fact]
     public void WhenUpdatesAreNested_ThenTheChangeTakesEffectOnceTheLastEnds()
     {
         // Arrange

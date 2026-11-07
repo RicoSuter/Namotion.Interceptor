@@ -212,15 +212,29 @@ public sealed class AuthorizationService : IDisposable
     /// <summary>
     /// Starts an update of several roles or of the <see cref="Authorization"/> that takes effect as a whole. Until the
     /// returned scope and every other open one are disposed, <see cref="GetPolicy"/>, <see cref="PreviewPolicy"/>,
-    /// <see cref="GetRoleNames"/> and <see cref="GetUnavailableRoles"/> keep giving the results compiled before the update,
-    /// so that none sees a part of it. Disposing the last scope compiles the roles again in the background.
+    /// <see cref="GetRoleNames"/> and <see cref="GetUnavailableRoles"/> keep giving the results of the roles as they were
+    /// when the first of them started, so that none sees a part of it. Disposing the last scope compiles the roles again in
+    /// the background.
     /// </summary>
     public IDisposable BeginUpdate()
     {
+        var isRebuilt = false;
         lock (_rebuildLock)
         {
-            // Taking the lock also waits for a rebuild that reads the roles, which then sees none of the update.
+            // Taking the lock also waits for a rebuild that reads the roles, which then sees none of the update. A change
+            // made before the update is compiled first, as the results kept during it would otherwise not show it.
+            if (_updateCount == 0 && (_snapshot is null || _snapshot.Version != Volatile.Read(ref _version)))
+            {
+                Rebuild();
+                isRebuilt = true;
+            }
+
             _updateCount++;
+        }
+
+        if (isRebuilt)
+        {
+            WriteStatuses();
         }
 
         return new UpdateScope(this);
@@ -320,31 +334,39 @@ public sealed class AuthorizationService : IDisposable
 
         lock (_rebuildLock)
         {
-            version = Volatile.Read(ref _version);
             snapshot = _snapshot;
-            if (snapshot is not null && (snapshot.Version == version || _updateCount > 0))
+            if (snapshot is not null && (snapshot.Version == Volatile.Read(ref _version) || _updateCount > 0))
             {
                 return snapshot;
             }
 
-            // Built from the version read before the graph, so a change while building leaves it stale.
-            snapshot = BuildSnapshot(version);
-            Volatile.Write(ref _snapshot, snapshot);
-            Interlocked.Increment(ref _statusVersion);
-            if (snapshot.Version == version)
-            {
-                if (_builtVersion != 0 && _builtVersion != version)
-                {
-                    ThreadPool.UnsafeQueueUserWorkItem(static service => service.RaisePoliciesChanged(), this, preferLocal: false);
-                }
-
-                _builtVersion = version;
-            }
+            snapshot = Rebuild();
         }
 
         // Outside the lock: a write notifies observers synchronously, which must not wait for a rebuild.
         WriteStatuses();
         hasWrittenStatuses = true;
+        return snapshot;
+    }
+
+    // The caller holds _rebuildLock and writes the statuses after releasing it.
+    private AuthorizationSnapshot Rebuild()
+    {
+        // Built from the version read before the graph, so a change while building leaves it stale.
+        var version = Volatile.Read(ref _version);
+        var snapshot = BuildSnapshot(version);
+        Volatile.Write(ref _snapshot, snapshot);
+        Interlocked.Increment(ref _statusVersion);
+        if (snapshot.Version == version)
+        {
+            if (_builtVersion != 0 && _builtVersion != version)
+            {
+                ThreadPool.UnsafeQueueUserWorkItem(static service => service.RaisePoliciesChanged(), this, preferLocal: false);
+            }
+
+            _builtVersion = version;
+        }
+
         return snapshot;
     }
 
