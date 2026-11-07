@@ -151,7 +151,7 @@ namespace HomeBlaze.Automation.Blazor.Diagram
 }
 namespace HomeBlaze.Automation.Blazor.Editing
 {
-    public class ActionEditor : Microsoft.AspNetCore.Components.ComponentBase
+    public class ActionEditor : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public ActionEditor() { }
         [Microsoft.AspNetCore.Components.EditorRequired]
@@ -173,12 +173,15 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public string RuleKey { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<string> States { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback TargetChanged { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.AutomationAction Value { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<HomeBlaze.Automation.AutomationAction> ValueChanged { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
         protected override void OnParametersSet() { }
     }
     public sealed class AutomationDraft
@@ -364,6 +367,8 @@ namespace HomeBlaze.Automation.Blazor.Editing
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.AutomationValidationError> Errors { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback InputChanged { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<HomeBlaze.Automation.Blazor.Editing.RuleDraft> Removed { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
@@ -396,6 +401,8 @@ namespace HomeBlaze.Automation.Blazor.Editing
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.AutomationValidationError> Errors { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback InputChanged { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public string? SelectedRuleKey { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<string?> SelectedRuleKeyChanged { get; set; }
@@ -420,7 +427,7 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public void Dispose() { }
         protected override void OnInitialized() { }
     }
-    public class TemplateField : Microsoft.AspNetCore.Components.ComponentBase
+    public class TemplateField : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public TemplateField() { }
         [Microsoft.AspNetCore.Components.EditorRequired]
@@ -435,6 +442,7 @@ namespace HomeBlaze.Automation.Blazor.Editing
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<string?> ValueChanged { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
         protected override void OnParametersSet() { }
     }
 }
