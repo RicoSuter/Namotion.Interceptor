@@ -13,7 +13,7 @@ namespace HomeBlaze.Authentication;
 /// A change is validated against the roles of every principal (the users, those of every
 /// <see cref="IRoleNameReferences"/> and those recorded with <see cref="AuthorizationService.SetPrincipalRoles"/>) and
 /// committed before the projection changes. A change is also refused when it would leave no unlocked user holding
-/// <see cref="BuiltInRoles.EverythingName"/> while one does now. Changes run one at a time, together with the changes of
+/// <see cref="BuiltInRoles.EverythingName"/> without a deny rule on <c>administer</c> while one does now. Changes run one at a time, together with the changes of
 /// users, through the <see cref="AuthorizationChangeGate"/>. Thread-safe.
 /// </summary>
 /// <remarks>

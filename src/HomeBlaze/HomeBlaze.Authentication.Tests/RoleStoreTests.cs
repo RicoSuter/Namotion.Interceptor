@@ -461,8 +461,36 @@ public class RoleStoreTests
         // Assert
         Assert.True(demoted.Succeeded, demoted.Error);
         Assert.False(result.Succeeded);
-        Assert.Equal("This change would leave no unlocked user with everything; give another user everything first.", result.Error);
+        Assert.Equal("This change would leave no unlocked user with everything and no deny rule on administer; give another user everything first.", result.Error);
         Assert.Equal([BuiltInRoles.EverythingName], graph.Authorization.Roles["admins"].Includes);
+    }
+
+    [Fact]
+    public async Task WhenTheRoleOfTheOnlyFullAdministratorWouldDenyAdminister_ThenTheChangeIsRefused()
+    {
+        // Arrange
+        await using var graph = await AuthenticationTestGraph.CreateAsync();
+        await graph.RoleStore.SaveRoleAsync(null, new AuthorizationRole { Name = "admins", Includes = [BuiltInRoles.EverythingName] }, null, CancellationToken.None);
+        await graph.AddUserAsync("boss", ["admins"]);
+        var demoted = await graph.AdministrationAs(graph.AdminUserId).SetRolesAsync("admin", [BuiltInRoles.OperatorName], CancellationToken.None);
+
+        // Act
+        var result = await graph.RoleStore.SaveRoleAsync(
+            "admins",
+            new AuthorizationRole
+            {
+                Name = "admins",
+                Includes = [BuiltInRoles.EverythingName],
+                Deny = [new PermissionRule { Types = ["Authorization"], Actions = [AuthorizationActions.Administer] }]
+            },
+            graph.RoleStore.GetConcurrencyStamp("admins"),
+            CancellationToken.None);
+
+        // Assert
+        Assert.True(demoted.Succeeded, demoted.Error);
+        Assert.False(result.Succeeded);
+        Assert.Equal("This change would leave no unlocked user with everything and no deny rule on administer; give another user everything first.", result.Error);
+        Assert.Empty(graph.Authorization.Roles["admins"].Deny);
     }
 
     [Fact]
@@ -486,7 +514,7 @@ public class RoleStoreTests
         Assert.True(demoted.Succeeded, demoted.Error);
         Assert.True(graph.Authorization.Users["boss"].IsLockedOut);
         Assert.False(result.Succeeded);
-        Assert.Equal("This change would leave no user with everything; give another user everything first.", result.Error);
+        Assert.Equal("This change would leave no user with everything and no deny rule on administer; give another user everything first.", result.Error);
         Assert.Equal([BuiltInRoles.EverythingName], graph.Authorization.Roles["admins"].Includes);
     }
 

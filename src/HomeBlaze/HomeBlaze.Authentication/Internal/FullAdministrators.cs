@@ -3,7 +3,10 @@ using Namotion.Interceptor.Authorization;
 
 namespace HomeBlaze.Authentication.Internal;
 
-/// <summary>Whether role sets reach <see cref="BuiltInRoles.EverythingName"/> through the includes of a given set of custom roles.</summary>
+/// <summary>
+/// Whether role sets reach <see cref="BuiltInRoles.EverythingName"/> through the includes of a given set of custom roles,
+/// with no role in reach that denies <c>administer</c>, which would keep the person from administering roles and users.
+/// </summary>
 internal static class FullAdministrators
 {
     /// <summary>
@@ -25,7 +28,7 @@ internal static class FullAdministrators
         {
             return AnyHoldsEverything(candidateRoles, unlockedRoleSets, rename)
                 ? null
-                : $"This change would leave no unlocked user with {BuiltInRoles.EverythingName}; give another user {BuiltInRoles.EverythingName} first.";
+                : $"This change would leave no unlocked user with {BuiltInRoles.EverythingName} and no deny rule on {AuthorizationActions.Administer}; give another user {BuiltInRoles.EverythingName} first.";
         }
 
         var allRoleSets = personRoleSets.Select(person => person.RoleNames).ToList();
@@ -34,7 +37,7 @@ internal static class FullAdministrators
             return null;
         }
 
-        return $"This change would leave no user with {BuiltInRoles.EverythingName}; give another user {BuiltInRoles.EverythingName} first.";
+        return $"This change would leave no user with {BuiltInRoles.EverythingName} and no deny rule on {AuthorizationActions.Administer}; give another user {BuiltInRoles.EverythingName} first.";
     }
 
     private static bool AnyHoldsEverything(
@@ -42,39 +45,44 @@ internal static class FullAdministrators
         IReadOnlyCollection<IReadOnlyCollection<string>> roleSets,
         (string OldName, string NewName)? rename)
     {
-        var includes = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        var roles = new Dictionary<string, AuthorizationRole>(StringComparer.Ordinal);
         foreach (var role in BuiltInRoles.All.Concat(customRoles))
         {
-            includes[role.Name] = role.Includes;
+            roles[role.Name] = role;
         }
 
-        return roleSets.Any(roleSet => HoldsEverything(roleSet, includes, rename));
+        return roleSets.Any(roleSet => HoldsEverything(roleSet, roles, rename));
     }
 
     private static bool HoldsEverything(
         IReadOnlyCollection<string> roleNames,
-        Dictionary<string, IReadOnlyList<string>> includes,
+        Dictionary<string, AuthorizationRole> roles,
         (string OldName, string NewName)? rename)
     {
+        var holdsEverything = false;
         var visited = new HashSet<string>(StringComparer.Ordinal);
         var pending = new Stack<string>(roleNames.Select(name =>
             rename is { } renamed && string.Equals(name, renamed.OldName, StringComparison.Ordinal) ? renamed.NewName : name));
         while (pending.TryPop(out var name))
         {
-            if (string.Equals(name, BuiltInRoles.EverythingName, StringComparison.Ordinal))
+            holdsEverything |= string.Equals(name, BuiltInRoles.EverythingName, StringComparison.Ordinal);
+            if (!visited.Add(name) || !roles.TryGetValue(name, out var role))
             {
-                return true;
+                continue;
             }
 
-            if (visited.Add(name) && includes.TryGetValue(name, out var included))
+            // Any deny of administer counts, whatever it selects, as the guard does not resolve rules against the graph.
+            if (role.Deny.Any(rule => rule.Actions.Contains(AuthorizationActions.Administer)))
             {
-                foreach (var include in included)
-                {
-                    pending.Push(include);
-                }
+                return false;
+            }
+
+            foreach (var include in role.Includes)
+            {
+                pending.Push(include);
             }
         }
 
-        return false;
+        return holdsEverything;
     }
 }

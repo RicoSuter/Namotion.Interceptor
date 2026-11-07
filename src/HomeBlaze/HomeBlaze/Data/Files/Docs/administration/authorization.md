@@ -100,7 +100,7 @@ The field "Roles" of "Add User" and "Set Roles" picks the roles from a list with
 
 The pane of a user disables the operations that do not apply to the user, with the reason as tooltip: "Remove", "Reset Password", "Lock", "Unlock" and "Set Display Name" on the built-in users, and "Create Key" and "Revoke Key" on every user but `mcp`. Passwords, security stamps and setup codes are never part of a user. Every change of a user, role or the `mcp` key is logged without secrets, as are sign-ins, failed sign-ins, lockouts and setup codes, which is the record available until an audit trail exists.
 
-Two rules protect the installation: the last unlocked user with `everything` cannot be removed, locked or lose `everything`, and a change of a role that would leave no unlocked user with `everything` is refused.
+Two rules protect the installation: the last unlocked user with `everything` cannot be removed, locked or lose `everything`, and a change of a role that would leave no unlocked user with `everything` is refused, as is one that would give a deny rule on `administer` to every unlocked user with `everything`.
 
 ### Names
 
@@ -233,7 +233,7 @@ Users, agents and the custom roles that include a role name it. A rename keeps t
 
 - **Rename**: the role keeps its rules and its assignments. The users, the agents and the roles that include it take over the new name at once, so the old name is free afterwards. Another role or an agent that names a name later, such as a role that is added under the old name, gets the rules of the role of that name.
 - **Delete**: the Delete button is refused while a user or an agent uses the role, with "Delete Failed" and "The role 'light-operator' is used by users or agents; remove it from them first."
-- **Never a broken principal**: a save, rename or deletion that would make the roles of any user, agent or the built-in users fail to compile, or name a role that does not exist, is refused with the reason, and so is a change that would leave no unlocked user with `everything`. One broken role therefore never leaves an administrator without access.
+- **Never a broken principal**: a save, rename or deletion that would make the roles of any user, agent or the built-in users fail to compile, or name a role that does not exist, is refused with the reason, and so is a change that would leave no unlocked user with `everything` and no deny rule on `administer`. One broken role therefore never leaves an administrator without access.
 - **Includes**: a custom role that includes a deleted role shows the status "Role '...' includes 'light-operator', which is not defined." and cannot be used until its includes are changed. A deletion that would leave a role in use in that state is refused, as it would break the principals that use that role.
 
 ### Status and Usage
