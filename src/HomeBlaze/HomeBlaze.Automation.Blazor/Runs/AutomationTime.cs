@@ -3,7 +3,7 @@ using HomeBlaze.Components.Abstractions.TimeZones;
 namespace HomeBlaze.Automation.Blazor.Runs;
 
 /// <summary>The short form in which the pages of an automation show a time in the zone of the viewer.</summary>
-public static class AutomationTime
+internal static class AutomationTime
 {
     /// <summary>
     /// The time of day for a time on the current day of the viewer, otherwise the date and the time; the placeholder of

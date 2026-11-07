@@ -5,7 +5,7 @@ namespace HomeBlaze.Automation.Blazor.Editing;
 /// its row, so the editor blocks the save while any field is listed here and says why. The editor cascades one instance
 /// to its tabs; a <see cref="PendingRowTracker"/> registers a field and removes it again when it goes away.
 /// </summary>
-public sealed class PendingRows
+internal sealed class PendingRows
 {
     private readonly HashSet<string> _fieldIds = new(StringComparer.Ordinal);
 

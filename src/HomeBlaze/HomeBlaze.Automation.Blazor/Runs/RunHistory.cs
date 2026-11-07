@@ -10,7 +10,7 @@ namespace HomeBlaze.Automation.Blazor.Runs;
 /// sample. A count that follows no sample or a null sample is the count restored when the automation started, and a count that
 /// is equal or lower is a counter reset, neither is a run.
 /// </summary>
-public static class RunHistory
+internal static class RunHistory
 {
     private const string Separator = "/";
 

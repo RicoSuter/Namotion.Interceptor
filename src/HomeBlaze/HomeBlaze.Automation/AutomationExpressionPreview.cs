@@ -14,7 +14,4 @@ public sealed record AutomationExpressionPreview
 
     /// <summary>The value as pages show it, or the rendered template; null when the value is missing.</summary>
     public string? Text { get; init; }
-
-    /// <summary>The paths that led to no value.</summary>
-    public IReadOnlyList<string> MissingPaths { get; init; } = [];
 }

@@ -176,16 +176,6 @@ namespace HomeBlaze.Automation.Blazor.Editing
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override void OnParametersSet() { }
     }
-    public sealed class ArgumentField : System.IEquatable<HomeBlaze.Automation.Blazor.Editing.ArgumentField>
-    {
-        public ArgumentField(string Key, string Label, System.Type Type, bool IsRequired, bool IsTemplate, System.Collections.Generic.IReadOnlyList<string>? Choices) { }
-        public System.Collections.Generic.IReadOnlyList<string>? Choices { get; init; }
-        public bool IsRequired { get; init; }
-        public bool IsTemplate { get; init; }
-        public string Key { get; init; }
-        public string Label { get; init; }
-        public System.Type Type { get; init; }
-    }
     public sealed class AutomationDraft
     {
         public AutomationDraft() { }
@@ -198,8 +188,6 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public string AddState() { }
         public void ApplyTo(HomeBlaze.Automation.Automation automation) { }
         public HomeBlaze.Automation.Blazor.Editing.RuleDraft? FindRule(string? key) { }
-        public System.Collections.Generic.List<HomeBlaze.Automation.Blazor.Editing.RuleDraft> FindRulesMentioning(string state) { }
-        public HomeBlaze.Automation.Blazor.Editing.StateUsage GetStateUsage(string state) { }
         public void MoveRule(HomeBlaze.Automation.Blazor.Editing.RuleDraft rule, int offset) { }
         public void RemoveRule(HomeBlaze.Automation.Blazor.Editing.RuleDraft rule) { }
         public bool RemoveState(string state) { }
@@ -312,19 +300,6 @@ namespace HomeBlaze.Automation.Blazor.Editing
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override void OnParametersSet() { }
     }
-    public sealed class PendingRowTracker : System.IDisposable
-    {
-        public PendingRowTracker(HomeBlaze.Automation.Blazor.Editing.PendingRows? registry, string fieldId) { }
-        public void Dispose() { }
-        public void Report(bool hasPendingRow) { }
-    }
-    public sealed class PendingRows
-    {
-        public PendingRows() { }
-        public bool Any { get; }
-        public event System.Action? Changed;
-        public bool Set(string fieldId, bool hasPendingRow) { }
-    }
     public class PropertyTriggerEditor : Microsoft.AspNetCore.Components.ComponentBase
     {
         public PropertyTriggerEditor() { }
@@ -418,15 +393,6 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public Microsoft.AspNetCore.Components.EventCallback<string?> SelectedRuleKeyChanged { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
-    public sealed class StateUsage : System.IEquatable<HomeBlaze.Automation.Blazor.Editing.StateUsage>
-    {
-        public StateUsage(System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Editing.RuleDraft> EnteredBy, System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Editing.RuleDraft> ActiveIn, System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Editing.RuleDraft> LeftBy) { }
-        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Editing.RuleDraft> ActiveIn { get; init; }
-        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Editing.RuleDraft> EnteredBy { get; init; }
-        public bool IsUsed { get; }
-        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Editing.RuleDraft> LeftBy { get; init; }
-        public int UseCount { get; }
-    }
     public class StatesTab : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public StatesTab() { }
@@ -459,56 +425,5 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public Microsoft.AspNetCore.Components.EventCallback<string?> ValueChanged { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override void OnParametersSet() { }
-    }
-}
-namespace HomeBlaze.Automation.Blazor.Runs
-{
-    public static class AutomationColors
-    {
-        public static MudBlazor.Color GetOutcomeColor(HomeBlaze.Automation.AutomationRunOutcome outcome) { }
-        public static MudBlazor.Color GetStatusColor(HomeBlaze.Abstractions.ServiceStatus status) { }
-    }
-    public static class AutomationSummary
-    {
-        public static string FormatMode(HomeBlaze.Automation.AutomationRuleMode mode) { }
-        public static string FormatOutcome(HomeBlaze.Automation.AutomationRunOutcome outcome) { }
-        public static string? GetHeadline(HomeBlaze.Abstractions.ServiceStatus status, string? statusMessage, [System.Runtime.CompilerServices.TupleElementNames(new string?[]?[] {
-                "Name",
-                "Status"})] System.Collections.Generic.IEnumerable<System.ValueTuple<string, string?>> rules) { }
-        public static string? GetStatusText(string? status) { }
-    }
-    public static class AutomationTime
-    {
-        public static string Format(HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay timeZone, System.DateTimeOffset value, System.DateTimeOffset now) { }
-    }
-    public static class RuleTestSummary
-    {
-        public static HomeBlaze.Automation.Blazor.Runs.RuleTestVerdict Describe(HomeBlaze.Automation.AutomationRuleTestResult result, bool hasEventTrigger) { }
-    }
-    public sealed class RuleTestVerdict : System.IEquatable<HomeBlaze.Automation.Blazor.Runs.RuleTestVerdict>
-    {
-        public RuleTestVerdict(bool WouldRun, string Text) { }
-        public string Text { get; init; }
-        public bool WouldRun { get; init; }
-    }
-    public sealed class RunEntry : System.IEquatable<HomeBlaze.Automation.Blazor.Runs.RunEntry>
-    {
-        public RunEntry(System.DateTimeOffset? At, string RuleName, HomeBlaze.Automation.AutomationRunOutcome? Outcome, string? Message) { }
-        public System.DateTimeOffset? At { get; init; }
-        public string? Message { get; init; }
-        public HomeBlaze.Automation.AutomationRunOutcome? Outcome { get; init; }
-        public string RuleName { get; init; }
-    }
-    public static class RunHistory
-    {
-        public static System.Threading.Tasks.Task<bool> IsBehindAsync(System.Collections.Generic.IReadOnlyCollection<HomeBlaze.History.Abstractions.IHistoryStore> stores, System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Runs.RunSource> rules, System.DateTimeOffset at, System.Threading.CancellationToken cancellationToken) { }
-        public static System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Runs.RunEntry>> LoadAsync(System.Collections.Generic.IReadOnlyCollection<HomeBlaze.History.Abstractions.IHistoryStore> stores, System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Runs.RunSource> rules, System.DateTimeOffset from, System.DateTimeOffset to, int maxRuns, System.Threading.CancellationToken cancellationToken) { }
-    }
-    public sealed class RunSource : System.IEquatable<HomeBlaze.Automation.Blazor.Runs.RunSource>
-    {
-        public RunSource(string RuleName, string RulePath, long? RunCount = default) { }
-        public string RuleName { get; init; }
-        public string RulePath { get; init; }
-        public long? RunCount { get; init; }
     }
 }

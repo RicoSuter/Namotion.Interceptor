@@ -10,4 +10,4 @@ namespace HomeBlaze.Automation.Blazor.Editing;
 /// <param name="IsRequired">Whether the operation needs a value.</param>
 /// <param name="IsTemplate">Whether the text is a template, which it is for a string.</param>
 /// <param name="Choices">The names of an enum or the values of a boolean, or null.</param>
-public sealed record ArgumentField(string Key, string Label, Type Type, bool IsRequired, bool IsTemplate, IReadOnlyList<string>? Choices);
+internal sealed record ArgumentField(string Key, string Label, Type Type, bool IsRequired, bool IsTemplate, IReadOnlyList<string>? Choices);

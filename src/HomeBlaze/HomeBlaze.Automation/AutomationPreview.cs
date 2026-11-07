@@ -34,8 +34,7 @@ public static class AutomationPreview
         {
             Result = value.Value as bool?,
             Value = value.IsMissing ? null : value.Value,
-            Text = value.IsMissing ? null : ExpressionDisplay.ToText(value, timeZone),
-            MissingPaths = [.. evaluation.MissingPaths]
+            Text = value.IsMissing ? null : ExpressionDisplay.ToText(value, timeZone)
         };
     }
 
@@ -51,7 +50,7 @@ public static class AutomationPreview
 
         var evaluation = CreateEvaluation(automation, ruleKey);
         var text = evaluation.Render(parsed);
-        return new AutomationExpressionPreview { Value = text, Text = text, MissingPaths = [.. evaluation.MissingPaths] };
+        return new AutomationExpressionPreview { Value = text, Text = text };
     }
 
     /// <summary>

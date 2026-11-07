@@ -3,7 +3,7 @@ using HomeBlaze.Abstractions;
 namespace HomeBlaze.Automation.Blazor.Runs;
 
 /// <summary>The texts the page, the widget and the editor show about an automation and its rules.</summary>
-public static class AutomationSummary
+internal static class AutomationSummary
 {
     private const string ModeSeparator = ": ";
 

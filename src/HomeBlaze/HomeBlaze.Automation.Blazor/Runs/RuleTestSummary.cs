@@ -4,7 +4,7 @@ namespace HomeBlaze.Automation.Blazor.Runs;
 /// Sums up the result of Test now: whether the rule would run with the current values, and the first reason why not. A true
 /// condition that Only if rejects waits, so the rule would run once Only if is true.
 /// </summary>
-public static class RuleTestSummary
+internal static class RuleTestSummary
 {
     private const string WaitText = "The rule runs once Only if is true while the condition stays true.";
 

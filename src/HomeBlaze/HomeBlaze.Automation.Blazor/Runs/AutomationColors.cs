@@ -4,7 +4,7 @@ using MudBlazor;
 namespace HomeBlaze.Automation.Blazor.Runs;
 
 /// <summary>The colors of the status of an automation and of the outcome of a run.</summary>
-public static class AutomationColors
+internal static class AutomationColors
 {
     public static Color GetStatusColor(ServiceStatus status) => status switch
     {

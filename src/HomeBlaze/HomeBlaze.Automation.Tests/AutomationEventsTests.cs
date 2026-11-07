@@ -24,8 +24,7 @@ public class AutomationEventsTests
         var fields = AutomationEvents.GetPayloadFields(typeof(TestPressEvent));
 
         // Assert
-        Assert.Equal(["DeviceId", "Gesture", "Timestamp"], fields.Select(field => field.Name).ToArray());
-        Assert.Equal(typeof(string), fields.Single(field => field.Name == "Gesture").Type);
+        Assert.Equal(["DeviceId", "Gesture", "Timestamp"], fields.ToArray());
     }
 
     [Fact]

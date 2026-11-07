@@ -24,13 +24,12 @@ public class AutomationPreviewTests
         // Assert
         Assert.Null(condition.Error);
         Assert.True(condition.Result);
-        Assert.Empty(condition.MissingPaths);
         Assert.Equal(9.0, value.Value);
         Assert.False(string.IsNullOrEmpty(value.Text));
     }
 
     [Fact]
-    public async Task WhenAValueIsMissing_ThenTheResultIsUnknownWithTheMissingPath()
+    public async Task WhenAValueIsMissing_ThenTheResultIsUnknown()
     {
         // Arrange
         await using var host = await StartAsync();
@@ -40,7 +39,7 @@ public class AutomationPreviewTests
 
         // Assert
         Assert.Null(preview.Result);
-        Assert.Equal(["/Weather/Rain"], preview.MissingPaths.ToArray());
+        Assert.Null(preview.Value);
     }
 
     [Fact]
@@ -56,7 +55,7 @@ public class AutomationPreviewTests
         // Assert
         Assert.Equal("Retract", saved.Value);
         Assert.Null(unsaved.Value);
-        Assert.Equal(["./Name"], unsaved.MissingPaths.ToArray());
+        Assert.Null(unsaved.Text);
     }
 
     [Fact]
@@ -119,20 +118,6 @@ public class AutomationPreviewTests
     }
 
     [Fact]
-    public async Task WhenTwoValuesAreMissing_ThenTheMissingPathsAreThoseOfTheSingleEvaluation()
-    {
-        // Arrange
-        await using var host = await StartAsync();
-
-        // Act
-        var preview = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/Rain > 0 && /Weather/Hail > 0", allowsEvent: false);
-
-        // Assert
-        Assert.Null(preview.Result);
-        Assert.Equal(["/Weather/Rain", "/Weather/Hail"], preview.MissingPaths.ToArray());
-    }
-
-    [Fact]
     public async Task WhenADateIsEvaluatedWithATimeZone_ThenTheTextUsesIt()
     {
         // Arrange
@@ -166,10 +151,8 @@ public class AutomationPreviewTests
         // Assert
         Assert.Null(secret.Value);
         Assert.Null(secret.Text);
-        Assert.Equal(["/Weather/ApiKey"], secret.MissingPaths.ToArray());
         Assert.Null(excluded.Value);
         Assert.DoesNotContain("secret", template.Text);
         Assert.DoesNotContain("payload", template.Text);
-        Assert.Equal(["/Weather/ApiKey", "/Weather/RawPayload"], template.MissingPaths.ToArray());
     }
 }

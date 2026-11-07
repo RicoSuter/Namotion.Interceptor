@@ -80,24 +80,17 @@ namespace HomeBlaze.Automation
         public static string Format(System.TimeSpan duration) { }
         public static bool TryParse(string? text, out System.TimeSpan duration) { }
     }
-    public sealed class AutomationEventField : System.IEquatable<HomeBlaze.Automation.AutomationEventField>
-    {
-        public AutomationEventField(string Name, System.Type Type) { }
-        public string Name { get; init; }
-        public System.Type Type { get; init; }
-    }
     public static class AutomationEvents
     {
         public const string OwnAutomationPath = "..";
         public static System.Collections.Generic.IReadOnlyList<System.Type> GetEventTypes(System.Type subjectType) { }
-        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.AutomationEventField> GetPayloadFields(System.Type eventType) { }
+        public static System.Collections.Generic.IReadOnlyList<string> GetPayloadFields(System.Type eventType) { }
         public static Namotion.Interceptor.IInterceptorSubject? ResolveSource(HomeBlaze.Automation.Automation automation, string? ruleKey, string? subjectPath) { }
     }
     public sealed class AutomationExpressionPreview : System.IEquatable<HomeBlaze.Automation.AutomationExpressionPreview>
     {
         public AutomationExpressionPreview() { }
         public string? Error { get; init; }
-        public System.Collections.Generic.IReadOnlyList<string> MissingPaths { get; init; }
         public bool? Result { get; init; }
         public string? Text { get; init; }
         public object? Value { get; init; }

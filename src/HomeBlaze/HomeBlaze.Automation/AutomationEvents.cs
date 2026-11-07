@@ -15,13 +15,9 @@ public static class AutomationEvents
 
     public static IReadOnlyList<Type> GetEventTypes(Type subjectType) => EventSources.GetEventTypes(subjectType);
 
-    /// <summary>The fields of a payload type, ordered by name.</summary>
-    public static IReadOnlyList<AutomationEventField> GetPayloadFields(Type eventType) =>
-    [
-        .. EventPayloadReader.GetMembers(eventType).Values
-            .OrderBy(member => member.Name, StringComparer.Ordinal)
-            .Select(member => new AutomationEventField(member.Name, member.PropertyType))
-    ];
+    /// <summary>The names of the fields of a payload type, ordered by name.</summary>
+    public static IReadOnlyList<string> GetPayloadFields(Type eventType) =>
+        [.. EventPayloadReader.GetMembers(eventType).Values.Select(member => member.Name).Order(StringComparer.Ordinal)];
 
     /// <summary>
     /// Resolves the subject that publishes the events of a trigger, from the saved rule with the key. For a rule that is

@@ -136,7 +136,7 @@ public sealed class AutomationDraft
         return true;
     }
 
-    public StateUsage GetStateUsage(string state) => new(
+    internal StateUsage GetStateUsage(string state) => new(
         Rules.FindAll(rule => rule.TargetStates.Contains(state)),
         Rules.FindAll(rule => rule.InState == state),
         Rules.FindAll(rule => (rule.InState == state || rule.InState is null) && rule.TargetStates.Any(target => target != state)));
@@ -145,7 +145,7 @@ public sealed class AutomationDraft
     /// The rules with a condition, filter, argument or value that contains the state name as a word. A rename does not change
     /// such texts, which compare with the name as text, so they may need the new name.
     /// </summary>
-    public List<RuleDraft> FindRulesMentioning(string state)
+    internal List<RuleDraft> FindRulesMentioning(string state)
     {
         var word = new Regex($@"(?<!\w){Regex.Escape(state)}(?!\w)", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
         return Rules.FindAll(rule => rule.Texts.Any(word.IsMatch));
