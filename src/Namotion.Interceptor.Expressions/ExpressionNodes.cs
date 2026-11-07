@@ -4,10 +4,13 @@ namespace Namotion.Interceptor.Expressions;
 
 internal abstract class ExpressionNode;
 
-/// <summary>A number (a boxed <see cref="double"/>), a boolean, a text or null.</summary>
-internal sealed class LiteralNode(object? value) : ExpressionNode
+/// <summary>A number (a boxed <see cref="double"/>), a duration (a boxed <see cref="TimeSpan"/>), a boolean, a text or null.</summary>
+internal sealed class LiteralNode(object? value, string? bareWord = null) : ExpressionNode
 {
     public object? Value { get; } = value;
+
+    /// <summary>The word when the literal is a bare word after a comparison operator, which arithmetic reads as a path.</summary>
+    public string? BareWord { get; } = bareWord;
 }
 
 internal sealed class PathNode : ExpressionNode
@@ -83,4 +86,21 @@ internal sealed class ComparisonNode(ExpressionNode left, ComparisonOperator com
         DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var instant)
             ? instant
             : null;
+}
+
+internal enum ArithmeticOperator
+{
+    Add,
+    Subtract,
+    Multiply,
+    Divide
+}
+
+internal sealed class ArithmeticNode(ExpressionNode left, ArithmeticOperator arithmeticOperator, ExpressionNode right) : ExpressionNode
+{
+    public ExpressionNode Left { get; } = left;
+
+    public ArithmeticOperator Operator { get; } = arithmeticOperator;
+
+    public ExpressionNode Right { get; } = right;
 }

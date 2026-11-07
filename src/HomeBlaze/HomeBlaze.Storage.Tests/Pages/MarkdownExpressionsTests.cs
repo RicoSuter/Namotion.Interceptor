@@ -54,6 +54,8 @@ public class MarkdownExpressionsTests
     [InlineData("meter/Power > 1000")]
     [InlineData("meter/IsOn and not meter/Power < 5")]
     [InlineData(@"meter/IsOn \|\| meter/Power == 5")]
+    [InlineData("meter/Power - meter/Offset > 5")]
+    [InlineData("/Demo/Pump/Runtime > 1h30m")]
     public void WhenTextIsACondition_ThenItParses(string text)
     {
         // Act
@@ -69,7 +71,6 @@ public class MarkdownExpressionsTests
     [InlineData("motor/Speed | raw:2", "The pipe 'raw' takes no arguments")]
     [InlineData("value", "'value' is not available in the text of a page")]
     [InlineData("subject/Power > 5", "'subject' is not available in the text of a page")]
-    [InlineData("a - b", "arithmetic is not supported at position 2")]
     [InlineData("a = b", "use '==' for equality at position 2")]
     public void WhenTextIsWrongForAPage_ThenErrorIsShown(string text, string expectedError)
     {

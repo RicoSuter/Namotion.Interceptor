@@ -219,14 +219,20 @@ public class ParsedExpressionParseTests
     [InlineData("Name == \"abc", "unterminated string at position 8")]
     [InlineData("Temperature > 1 Name == x", "unexpected 'N' at position 16")]
     [InlineData("Temperature > 1.2.3", "invalid number '1.2.3' at position 14")]
-    [InlineData("a - b", "arithmetic is not supported at position 2")]
-    [InlineData("a * 2", "arithmetic is not supported at position 2")]
-    [InlineData("a + b", "arithmetic is not supported at position 2")]
-    [InlineData("a / 2", "arithmetic is not supported at position 2")]
     [InlineData("a and", "expected a value at position 5")]
     [InlineData("a == and", "expected a value after '==' at position 5")]
     [InlineData("a |", "expected a pipe name after '|' at position 3")]
     [InlineData("a | unit:", "expected an argument after ':' at position 9")]
+    [InlineData("Interval > 30m1h", "invalid number '30m1h' at position 11")]
+    [InlineData("Interval > 1h1h", "invalid number '1h1h' at position 11")]
+    [InlineData("Interval > 5x", "invalid number '5x' at position 11")]
+    [InlineData("Interval > 1e5m", "invalid number '1e5m' at position 11")]
+    [InlineData("a -", "expected a value after '-' at position 3")]
+    [InlineData("a * ", "expected a value after '*' at position 4")]
+    [InlineData("a == - b", "expected a value after '==' at position 5")]
+    [InlineData("a -5", "put a space after '-' at position 2")]
+    [InlineData("a +b", "put a space after '+' at position 2")]
+    [InlineData("Now -5m", "put a space after '-' at position 4")]
     public void WhenExpressionIsInvalid_ThenErrorHasMessageAndPosition(string text, string expectedError)
     {
         // Act
@@ -347,6 +353,37 @@ public class ParsedExpressionParseTests
     {
         // Act & Assert
         Parse(text);
+    }
+
+    [Theory]
+    [InlineData("Interval > 1h30m")]
+    [InlineData("Interval > -5m")]
+    [InlineData("Interval > 1.5d")]
+    public void WhenOperandIsADuration_ThenItIsALiteralAndNoPath(string text)
+    {
+        // Act
+        var expression = Parse(text);
+
+        // Assert
+        Assert.Equal(["Interval"], expression.Paths.ToArray());
+    }
+
+    [Theory]
+    [InlineData("a - b", new[] { "a", "b" })]
+    [InlineData("a + b * c / d", new[] { "a", "b", "c", "d" })]
+    [InlineData("(a + b) * 2 > c", new[] { "a", "b" })]
+    [InlineData("x > Phase1 + Phase2", new[] { "x", "Phase1", "Phase2" })]
+    [InlineData("x > Phase1 * 2", new[] { "x", "Phase1" })]
+    [InlineData("x > Kitchen", new[] { "x" })]
+    [InlineData("notes-v2.md == a-b", new[] { "notes-v2.md" })]
+    [InlineData("a - -5 > 0", new[] { "a" })]
+    public void WhenExpressionHasArithmetic_ThenItsOperandsAreValuesAndBareWordsArePaths(string text, string[] expectedPaths)
+    {
+        // Act
+        var expression = Parse(text);
+
+        // Assert
+        Assert.Equal(expectedPaths, expression.Paths.ToArray());
     }
 
     private struct RecordingContext : IExpressionContext
