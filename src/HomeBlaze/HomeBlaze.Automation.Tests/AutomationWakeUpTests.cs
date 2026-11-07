@@ -83,25 +83,24 @@ public class AutomationWakeUpTests
     }
 
     [Fact]
-    public async Task WhenTheTimeAdvancesRightAfterAFlush_ThenATriggerThatWaitsForTimeSinceAnInstantFiresOnTime()
+    public async Task WhenTheWorkerCompletedAFlush_ThenItDoesNotReadTheClockBeforeTheNextInput()
     {
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
             ("stale", On("Stale", When("now - /Weather/LastUpdated > 5m"), Invoke("/Blinds/Close")))));
         host.Weather.LastUpdated = AutomationTestHost.Start;
         await host.FlushAsync();
-        await AdvanceAsync(host, TimeSpan.FromSeconds(299), TimeSpan.FromSeconds(1));
 
         // Act
         host.Clock.PauseNextRead();
-        await host.FlushAsync();
-        host.Time.Advance(TimeSpan.FromSeconds(1));
+        var flushes = Task.WhenAll(host.FlushAsync(), host.FlushAsync());
+        await Task.WhenAny(flushes, host.Clock.NextReadPaused);
+        var hasReadTheClock = host.Clock.NextReadPaused.IsCompleted;
         host.Clock.ResumeRead();
-        await host.FlushAsync();
-        await host.AdvanceAsync(TimeSpan.FromSeconds(1));
+        await flushes;
 
         // Assert
-        Assert.Equal(AutomationTestHost.Start.AddMinutes(5).AddSeconds(1), host.Rule("stale").LastTriggeredAt);
+        Assert.False(hasReadTheClock);
     }
 
     [Fact]
