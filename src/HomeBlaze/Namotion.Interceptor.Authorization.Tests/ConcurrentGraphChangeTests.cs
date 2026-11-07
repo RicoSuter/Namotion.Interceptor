@@ -1,8 +1,11 @@
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Authorization.Tests.Models;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Xunit.Abstractions;
 using static Namotion.Interceptor.Authorization.Tests.TestGraph;
 
@@ -413,7 +416,81 @@ public class ConcurrentGraphChangeTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void WhenAnUnrelatedPartOfTheGraphChangesDuringTheFirstAttempt_ThenTheAnswerIsForTheGraph()
+    public void WhenASubjectIsEvaluatedThroughAnotherGraphsRegistry_ThenPathRulesFailClosed()
+    {
+        // Arrange: S is held by two graphs; its context reaches only the first graph's registry.
+        var context1 = CreateContext();
+        var context2 = CreateContext();
+        var root1 = new Person(context1);
+        var root2 = new Person(context2);
+        var s = new Person();
+        root1.Mother = s;
+        root2.Father = s;
+        var inR1 = context1.GetService<ISubjectRegistry>().TryGetRegisteredSubject(s)!;
+        var inR2 = context2.GetService<ISubjectRegistry>().TryGetRegisteredSubject(s)!;
+        Assert.NotSame(inR1, inR2);
+        var policy = Compile(DefaultPathProvider.Instance, allowPaths: ["Father.**", "Mother.**"], denyPaths: null);
+
+        // Act
+        var canReadInR1 = policy.CanRead(inR1.TryGetProperty(nameof(Person.Children))!);
+        var isVisibleInR1 = policy.IsVisible(inR1);
+        var canReadInR2 = policy.CanRead(inR2.TryGetProperty(nameof(Person.Children))!);
+        var isVisibleInR2 = policy.IsVisible(inR2);
+
+        // Assert
+        Assert.True(canReadInR1);
+        Assert.True(isVisibleInR1);
+        Assert.False(canReadInR2);
+        Assert.False(isVisibleInR2);
+    }
+
+    [Fact]
+    public void WhenASubjectIsEvaluatedWhileItsContextDoesNotReachTheRegistryYet_ThenAPathAllowDoesNotMatch()
+    {
+        // Arrange: the handler runs after the registry registered the subject and before its context is inherited.
+        var context = CreateContext();
+        var probe = new AttachWindowProbe(Compile(DefaultPathProvider.Instance, allowPaths: ["Mother.**"], denyPaths: null));
+        context.AddService(probe);
+        var root = new Person(context);
+        probe.Registry = context.GetService<ISubjectRegistry>();
+        var s = new Person();
+
+        // Act
+        root.Mother = s;
+
+        // Assert
+        Assert.True(probe.HasParentButNoRegistryInContext);
+        Assert.False(probe.CanRead);
+        Assert.True(probe.Policy.CanRead(Member(s, nameof(Person.Children))));
+    }
+
+    [RunsAfter(typeof(SubjectRegistry))]
+    [RunsBefore(typeof(ContextInheritanceHandler))]
+    private sealed class AttachWindowProbe(AuthorizationPolicy policy) : ILifecycleHandler
+    {
+        public AuthorizationPolicy Policy { get; } = policy;
+        public ISubjectRegistry? Registry { get; set; }
+        public bool HasParentButNoRegistryInContext { get; private set; }
+        public bool CanRead { get; private set; } = true;
+
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            var registered = change.IsContextAttach && change.Property is not null
+                ? Registry?.TryGetRegisteredSubject(change.Subject)
+                : null;
+            if (registered is null)
+            {
+                return;
+            }
+
+            HasParentButNoRegistryInContext = registered.IsAttached && registered.Parents.Length == 1
+                && change.Subject.Context.TryGetService<ISubjectRegistry>() is null;
+            CanRead = Policy.CanRead(registered.TryGetProperty(nameof(Person.Children))!);
+        }
+    }
+
+    [Fact]
+    public void WhenAnUnrelatedPartOfTheGraphChangesDuringTheFirstAttempt_ThenAPathAllowStillApplies()
     {
         // Arrange
         var pathProvider = new HookPathProvider();

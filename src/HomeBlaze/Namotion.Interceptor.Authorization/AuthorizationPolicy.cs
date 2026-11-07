@@ -94,16 +94,17 @@ public sealed class AuthorizationPolicy
         var state = EvaluationState.Rent();
         try
         {
-            // The version belongs to the registry that holds the subject. A subject whose context no longer reaches a
-            // registry is detached, so it is hidden whatever the walk finds; the walk still runs for the reason it
-            // reports. An unvalidated walk may not make a subject visible.
+            // The version validates only reads of the registry that holds this instance. When the context reaches no
+            // registry that holds it, the instance is detached, is being attached, or belongs to another graph's
+            // registry, so it is hidden whatever the walk finds, and the walk runs once only for the reason it reports.
+            // An unvalidated walk may not make a subject visible.
             var registry = subject.Subject.Context.TryGetService<ISubjectRegistry>();
-            if (registry is null)
+            if (registry is null || !ReferenceEquals(registry.TryGetRegisteredSubject(subject.Subject), subject))
             {
-                var detachedDecision = ExplainOnce(subject, state);
-                return detachedDecision.IsVisible
+                var unvalidatedDecision = ExplainOnce(subject, state);
+                return unvalidatedDecision.IsVisible
                     ? new VisibilityDecision(isVisible: false, hasReadableMember: false, deniedProperty: null)
-                    : detachedDecision;
+                    : unvalidatedDecision;
             }
 
             // The member checks, the walk and its link checks run in one attempt, so the answer rests on one instant.
@@ -329,8 +330,9 @@ public sealed class AuthorizationPolicy
             return isAttached ? PathList.Root : PathList.Unknown;
         }
 
+        // Only the registry that holds this instance validates reads of its paths; without one the paths are unknown.
         var registry = subject.Subject.Context.TryGetService<ISubjectRegistry>();
-        if (registry is null)
+        if (registry is null || !ReferenceEquals(registry.TryGetRegisteredSubject(subject.Subject), subject))
         {
             return PathList.Unknown;
         }
