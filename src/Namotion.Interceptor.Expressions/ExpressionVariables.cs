@@ -20,14 +20,21 @@ public static class ExpressionVariables
 
     private static readonly string[] Keywords = ["and", "or", "not", "true", "false", "null"];
 
-    /// <summary>Gets whether the first segment of the path is a variable, and which one.</summary>
+    /// <summary>
+    /// Gets whether the first segment of the path is <see cref="Value"/> or <see cref="Subject"/>, and which one. For a path
+    /// of an expression parsed with variables the host declares, use <see cref="ParsedExpression.TryGetVariable"/>.
+    /// </summary>
     /// <param name="path">The path.</param>
     /// <param name="pathSeparator">The character between the segments of the path.</param>
     /// <param name="variable">The variable, or null.</param>
     public static bool TryGetVariable(string path, char pathSeparator, [NotNullWhen(true)] out string? variable) =>
         TryGetVariable(path, pathSeparator, Default, out variable, out _);
 
-    /// <summary>Gets whether the first segment of the path is a variable, and which one, with the rest of the path.</summary>
+    /// <summary>
+    /// Gets whether the first segment of the path is <see cref="Value"/> or <see cref="Subject"/>, and which one, with the
+    /// rest of the path. For a path of an expression parsed with variables the host declares, use
+    /// <see cref="ParsedExpression.TryGetVariable"/>.
+    /// </summary>
     /// <param name="path">The path.</param>
     /// <param name="pathSeparator">The character between the segments of the path.</param>
     /// <param name="variable">The variable, or null.</param>
@@ -73,22 +80,30 @@ public static class ExpressionVariables
     }
 
     // A variable is a word that the parser does not read as a keyword, a number or a path with more than one segment.
-    internal static void Validate(ImmutableArray<string> variables)
+    internal static void Validate(ImmutableArray<string> variables, char pathSeparator)
     {
         if (variables.IsDefault)
         {
             throw new ArgumentException("The variables are not initialized.", nameof(variables));
         }
 
-        foreach (var name in variables)
+        for (var index = 0; index < variables.Length; index++)
         {
-            if (string.IsNullOrEmpty(name) ||
-                !char.IsLetter(name[0]) ||
-                !name.All(character => char.IsLetterOrDigit(character) || character == '_') ||
-                Keywords.Contains(name, StringComparer.OrdinalIgnoreCase))
+            var name = variables[index];
+            if (!IsWord(name) || name.Contains(pathSeparator) || Keywords.Contains(name, StringComparer.OrdinalIgnoreCase))
             {
                 throw new ArgumentException($"The variable '{name}' is not a word that an expression can hold.", nameof(variables));
             }
+
+            if (variables.AsSpan()[(index + 1)..].Contains(name))
+            {
+                throw new ArgumentException($"The variable '{name}' is declared twice.", nameof(variables));
+            }
         }
     }
+
+    private static bool IsWord(string name) =>
+        !string.IsNullOrEmpty(name) &&
+        char.IsLetter(name[0]) &&
+        name.All(character => char.IsLetterOrDigit(character) || character == '_');
 }

@@ -5,6 +5,8 @@ namespace Namotion.Interceptor.Expressions.Tests;
 
 public class ParsedExpressionParseTests
 {
+    private static readonly ImmutableArray<string> ClockAndEventVariables = ["subject", "now", "time", "event"];
+
     private static ParsedExpression Parse(string text)
     {
         Assert.True(ParsedExpression.TryParse(text, '/', out var expression, out var error), error);
@@ -386,8 +388,6 @@ public class ParsedExpressionParseTests
         Assert.Equal(expectedPaths, expression.Paths.ToArray());
     }
 
-    private static readonly ImmutableArray<string> ClockAndEventVariables = ["subject", "now", "time", "event"];
-
     [Theory]
     [InlineData("now/Ticks > 1")]
     [InlineData("event/State == 1")]
@@ -446,6 +446,22 @@ public class ParsedExpressionParseTests
         Assert.Equal(expectedPaths, expression!.Paths.ToArray());
     }
 
+    [Theory]
+    [InlineData("Now")]
+    [InlineData("NOW/Ticks")]
+    [InlineData("Event/State")]
+    public void WhenNameDiffersFromADeclaredVariableInCase_ThenItIsAPath(string text)
+    {
+        // Act
+        Assert.True(ParsedExpression.TryParse(text, '/', ClockAndEventVariables, out var expression, out var error), error);
+        var context = new RecordingContext();
+        expression.Evaluate(ref context);
+
+        // Assert
+        Assert.Null(context.Variable);
+        Assert.False(expression.TryGetVariable(expression.Paths[0], out _, out _));
+    }
+
     [Fact]
     public void WhenTemplateDeclaresVariables_ThenItsExpressionsHaveThem()
     {
@@ -473,6 +489,18 @@ public class ParsedExpressionParseTests
         var parseException = Assert.Throws<ArgumentException>(() => ParsedExpression.TryParse("a", '/', [variable], out _, out _));
         Assert.Equal("variables", parseException.ParamName);
         var templateException = Assert.Throws<ArgumentException>(() => TextTemplate.TryParse("a {{ b }}", '/', [variable], out _, out _));
+        Assert.Equal("variables", templateException.ParamName);
+    }
+
+    [Theory]
+    [InlineData('_', new[] { "now_utc" })]
+    [InlineData('/', new[] { "now", "time", "now" })]
+    public void WhenVariableHoldsTheSeparatorOrIsDeclaredTwice_ThenParsingThrows(char separator, string[] variables)
+    {
+        // Act & Assert
+        var parseException = Assert.Throws<ArgumentException>(() => ParsedExpression.TryParse("a", separator, [.. variables], out _, out _));
+        Assert.Equal("variables", parseException.ParamName);
+        var templateException = Assert.Throws<ArgumentException>(() => TextTemplate.TryParse("a {{ b }}", separator, [.. variables], out _, out _));
         Assert.Equal("variables", templateException.ParamName);
     }
 

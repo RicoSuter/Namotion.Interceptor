@@ -77,8 +77,9 @@ public sealed class ParsedExpression
     /// </summary>
     /// <param name="text">The text.</param>
     /// <param name="pathSeparator">The character between the segments of the paths.</param>
-    /// <param name="variables">The names that are variables, each a word of letters, digits and underscores that starts with a
-    /// letter and is none of the keywords <c>and</c>, <c>or</c>, <c>not</c>, <c>true</c>, <c>false</c> and <c>null</c>.</param>
+    /// <param name="variables">The names that are variables, each once and a word of letters, digits and underscores that
+    /// starts with a letter, holds no path separator and is none of the keywords <c>and</c>, <c>or</c>, <c>not</c>,
+    /// <c>true</c>, <c>false</c> and <c>null</c>.</param>
     /// <param name="expression">The expression, or null.</param>
     /// <param name="error">The error, or null.</param>
     /// <exception cref="ArgumentException">The separator is white space, a letter, a digit, a quote, a bracket, or one of
@@ -91,7 +92,7 @@ public sealed class ParsedExpression
         [NotNullWhen(false)] out string? error)
     {
         ValidatePathSeparator(pathSeparator);
-        ExpressionVariables.Validate(variables);
+        ExpressionVariables.Validate(variables, pathSeparator);
         return TryParseValidated(text, pathSeparator, variables, out expression, out error);
     }
 

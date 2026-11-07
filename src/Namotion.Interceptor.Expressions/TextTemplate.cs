@@ -39,8 +39,11 @@ public sealed class TextTemplate
         string text,
         char pathSeparator,
         [NotNullWhen(true)] out TextTemplate? template,
-        [NotNullWhen(false)] out string? error) =>
-        TryParse(text, pathSeparator, ExpressionVariables.Default, out template, out error);
+        [NotNullWhen(false)] out string? error)
+    {
+        ParsedExpression.ValidatePathSeparator(pathSeparator);
+        return TryParseValidated(text, pathSeparator, ExpressionVariables.Default, out template, out error);
+    }
 
     /// <summary>
     /// Parses the text with the variables the host declares, which replace those of <see cref="ExpressionVariables"/>. On
@@ -62,8 +65,17 @@ public sealed class TextTemplate
         [NotNullWhen(false)] out string? error)
     {
         ParsedExpression.ValidatePathSeparator(pathSeparator);
-        ExpressionVariables.Validate(variables);
+        ExpressionVariables.Validate(variables, pathSeparator);
+        return TryParseValidated(text, pathSeparator, variables, out template, out error);
+    }
 
+    private static bool TryParseValidated(
+        string text,
+        char pathSeparator,
+        ImmutableArray<string> variables,
+        [NotNullWhen(true)] out TextTemplate? template,
+        [NotNullWhen(false)] out string? error)
+    {
         var parts = ImmutableArray.CreateBuilder<object>();
         var expressions = ImmutableArray.CreateBuilder<ParsedExpression>();
         var position = 0;
