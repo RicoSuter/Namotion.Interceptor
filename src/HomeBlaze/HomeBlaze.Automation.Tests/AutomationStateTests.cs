@@ -133,6 +133,30 @@ public class AutomationStateTests
     }
 
     [Fact]
+    public async Task WhenARuleChangesTheStateForAnInput_ThenTheLaterRulesOfThatInputDoNotRun()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Idle", "Running"];
+            automation.InitialState = "Idle";
+            automation.RuleOrder = ["started", "idleOnly"];
+            automation.Rules = Keyed(
+                ("started", Create("Started", AutomationRuleMode.On, [When("/Weather/Power > 500")], [Enter("Running")], inState: "Idle")),
+                ("idleOnly", Create("Idle only", AutomationRuleMode.On, [When("/Weather/Power > 500")], [Invoke("/Blinds/Close")], inState: "Idle")));
+        });
+
+        // Act
+        await SetPowerAsync(host, 600);
+
+        // Assert
+        Assert.Equal("Running", host.Automation.CurrentState);
+        Assert.Equal(0, host.Blinds.CloseCount);
+        Assert.Equal(0L, host.Rule("idleOnly").RunCount);
+        Assert.Null(host.Rule("idleOnly").LastRunOutcome);
+    }
+
+    [Fact]
     public async Task WhenTheStateChanges_ThenAnotherAutomationCanReactToIt()
     {
         // Arrange

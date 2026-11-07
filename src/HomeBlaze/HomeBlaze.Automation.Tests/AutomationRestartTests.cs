@@ -136,7 +136,7 @@ public class AutomationRestartTests
 
         // Assert
         Assert.Equal(1, host.Blinds.CloseCount);
-        Assert.Equal(2L, host.Rule("retract").RunCount);
-        Assert.Equal(AutomationRunOutcome.RejectedByGuard, host.Rule("retract").LastRunOutcome);
+        Assert.Equal(1L, host.Rule("retract").RunCount);
+        Assert.Equal(AutomationRunOutcome.Succeeded, host.Rule("retract").LastRunOutcome);
     }
 }

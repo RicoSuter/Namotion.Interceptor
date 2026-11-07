@@ -76,7 +76,7 @@ public class RuleRunnerTests
     }
 
     [Fact]
-    public async Task WhenTheGuardIsFalse_ThenTheRunIsRejectedAndNothingRuns()
+    public async Task WhenTheGuardIsFalse_ThenTheRequestDoesNotRunAndNothingRuns()
     {
         // Arrange
         var rule = Rule(AutomationRuleMode.On, "not /Blinds/IsMoving", Invoke("/Blinds/Close"));
@@ -86,15 +86,15 @@ public class RuleRunnerTests
         var result = await CreateRunner().RunAsync(Request(rule), new FakeRunHost(_host), CancellationToken.None);
 
         // Assert
-        Assert.Equal(AutomationRunOutcome.RejectedByGuard, result.Outcome);
-        Assert.Equal("Rejected: the guard is false", result.Message);
+        Assert.Null(result.Outcome);
+        Assert.Equal("Only if is false", result.Message);
         Assert.False(result.ExecutedActions);
         Assert.Equal(0, _blinds.CloseCount);
         Assert.Null(rule.LastTriggeredAt);
     }
 
     [Fact]
-    public async Task WhenTheGuardIsUnknown_ThenTheRunIsRejectedNamingTheMissingPaths()
+    public async Task WhenTheGuardIsUnknown_ThenTheRequestDoesNotRunNamingTheMissingPaths()
     {
         // Arrange
         var rule = Rule(AutomationRuleMode.On, "/Weather/Rain > 0", Invoke("/Blinds/Close"));
@@ -103,8 +103,8 @@ public class RuleRunnerTests
         var result = await CreateRunner().RunAsync(Request(rule), new FakeRunHost(_host), CancellationToken.None);
 
         // Assert
-        Assert.Equal(AutomationRunOutcome.RejectedByGuard, result.Outcome);
-        Assert.Equal("Rejected: the guard is unknown, missing /Weather/Rain", result.Message);
+        Assert.Null(result.Outcome);
+        Assert.Equal("Only if is unknown, missing /Weather/Rain", result.Message);
     }
 
     [Fact]
@@ -207,7 +207,7 @@ public class RuleRunnerTests
         // Assert
         Assert.Equal(0, _blinds.CloseCount);
         Assert.Null(rule.LastTriggeredAt);
-        Assert.False(result.ExecutedActions);
+        Assert.Null(result.Outcome);
     }
 
     [Fact]

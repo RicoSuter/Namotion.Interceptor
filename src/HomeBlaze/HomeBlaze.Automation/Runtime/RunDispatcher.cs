@@ -4,9 +4,9 @@ using Microsoft.Extensions.Logging;
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// Runs the requests of one input in rule order and records every run. Once a rule changed the state, the remaining
-/// requests of the input are recorded as canceled; a request of a rule that is no longer active is dropped. Used by the
-/// worker only.
+/// Runs the requests of one input in rule order and records every run. A request that does not run is not recorded: one
+/// that Only if rejects, and, once a rule changed the state, the remaining requests of the input; the rule shows why
+/// and the log says it once per reason. A request of a rule that is no longer active is dropped. Used by the worker only.
 /// </summary>
 internal sealed class RunDispatcher(IRuleRunHost host, AutomationServices services, AutomationStateKeeper keeper, ILogger logger)
 {
@@ -25,16 +25,13 @@ internal sealed class RunDispatcher(IRuleRunHost host, AutomationServices servic
         return summary;
     }
 
-    /// <summary>Records the requests as canceled with the reason, without running them.</summary>
-    public DispatchSummary Cancel(IReadOnlyList<RunRequest> requests, string reason)
+    /// <summary>Does not run the requests, for the reason.</summary>
+    public void Skip(IReadOnlyList<RunRequest> requests, string reason)
     {
-        var summary = new DispatchSummary();
         foreach (var request in requests)
         {
-            Record(request.Rule, RuleRunResult.Canceled(reason), summary);
+            Skip(request, reason);
         }
-
-        return summary;
     }
 
     private async Task DispatchOneAsync(
@@ -42,16 +39,37 @@ internal sealed class RunDispatcher(IRuleRunHost host, AutomationServices servic
     {
         if (summary.ChangedState)
         {
-            Record(request.Rule, RuleRunResult.Canceled($"Canceled: the state changed to {host.CurrentState} for the same input"), summary);
+            Skip(request, $"the state changed to {host.CurrentState} for the same input");
             return;
         }
 
-        if (request.Rule.IsActivated && isActive(request.Rule))
+        if (!request.Rule.IsActivated || !isActive(request.Rule))
         {
-            Record(request.Rule, await _runner.RunAsync(request, host, cancellationToken), summary);
+            return;
         }
+
+        var result = await _runner.RunAsync(request, host, cancellationToken);
+        if (!result.IsRun)
+        {
+            Skip(request, result.Message);
+            return;
+        }
+
+        request.Rule.SkipReason = null;
+        summary.Add(result, _recorder.Record(request.Rule, result));
     }
 
-    private void Record(CompiledRule rule, RuleRunResult result, DispatchSummary summary) =>
-        summary.Add(result, _recorder.Record(rule, result));
+    private void Skip(RunRequest request, string reason)
+    {
+        var rule = request.Rule;
+        if (string.Equals(rule.SkipReason, reason, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        rule.SkipReason = reason;
+        logger.LogInformation(
+            "The {Source} of rule {Rule} in automation {Automation} requested a run that did not run: {Reason}.",
+            request.Source, rule.Name, host.Name, reason);
+    }
 }

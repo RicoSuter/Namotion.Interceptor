@@ -107,7 +107,7 @@ public class AutomationResynchronizationTests
         var statusWhenStopped = host.Automation.StatusMessage;
         var runsWhenStopped = host.Rule("left").RunCount;
         var outcomeWhenStopped = host.Rule("left").LastRunOutcome;
-        var messageWhenStopped = host.Rule("left").LastRunMessage;
+        var ruleStatusWhenStopped = host.Rule("left").Status;
 
         // Act
         host.Weather.Power = 0;
@@ -118,8 +118,8 @@ public class AutomationResynchronizationTests
         // Assert
         Assert.Equal("Right", stateWhenStopped);
         Assert.StartsWith($"A feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped", statusWhenStopped);
-        Assert.Equal(AutomationRunOutcome.Canceled, outcomeWhenStopped);
-        Assert.StartsWith("Canceled: a feedback chain", messageWhenStopped);
+        Assert.Equal(AutomationRunOutcome.Succeeded, outcomeWhenStopped);
+        Assert.Contains($"a feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped", ruleStatusWhenStopped);
         Assert.True(host.Rule("left").RunCount > runsWhenStopped, $"The rule 'left' ran {host.Rule("left").RunCount} times, {runsWhenStopped} before.");
     }
 }

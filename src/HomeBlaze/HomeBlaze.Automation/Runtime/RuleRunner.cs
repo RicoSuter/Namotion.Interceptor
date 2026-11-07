@@ -5,9 +5,10 @@ using Microsoft.Extensions.Logging;
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// Runs one request of one rule: checks the guard against the graph, records a dry run with the rendered actions, or, in
-/// the mode <see cref="AutomationRuleMode.On"/> only, sets the trigger time and runs the actions in order under their
-/// error policy. Logs every failed action with the automation, the rule, the action and the trigger.
+/// Runs one request of one rule: checks the guard against the graph and does not run a request it rejects, describes the
+/// rendered actions of a dry run, or, in the mode <see cref="AutomationRuleMode.On"/> only, sets the trigger time and runs
+/// the actions in order under their error policy. Logs every failed action with the automation, the rule, the action and
+/// the trigger.
 /// </summary>
 internal sealed class RuleRunner(ActionExecutor executor, SubjectPathResolver resolver, TimeProvider timeProvider, ILogger logger)
 {
@@ -19,19 +20,19 @@ internal sealed class RuleRunner(ActionExecutor executor, SubjectPathResolver re
 
     public async Task<RuleRunResult> RunAsync(RunRequest request, IRuleRunHost host, CancellationToken cancellationToken)
     {
+        if (request.Rule.Mode is not (AutomationRuleMode.DryRun or AutomationRuleMode.On))
+        {
+            return RuleRunResult.NotRun($"the mode {request.Rule.Mode} is not defined");
+        }
+
         if (CheckGuard(request) is { } rejection)
         {
-            return rejection;
+            return RuleRunResult.NotRun(rejection);
         }
 
         if (request.Rule.Mode == AutomationRuleMode.DryRun)
         {
             return RuleRunResult.DryRun("Would run " + string.Join("; ", Describe(request, host)));
-        }
-
-        if (request.Rule.Mode != AutomationRuleMode.On)
-        {
-            return RuleRunResult.Rejected($"Not run: the mode {request.Rule.Mode} is not defined");
         }
 
         request.Rule.Rule.LastTriggeredAt = timeProvider.GetUtcNow();
@@ -62,7 +63,8 @@ internal sealed class RuleRunner(ActionExecutor executor, SubjectPathResolver re
 
     private static string DescribeChangeState(ChangeStateAction change) => $"ChangeState({change.TargetState})";
 
-    private RuleRunResult? CheckGuard(RunRequest request)
+    // Returns why the guard rejects the request, or null when it passes.
+    private string? CheckGuard(RunRequest request)
     {
         if (request.Rule.Guard is not { } guard)
         {
@@ -73,10 +75,10 @@ internal sealed class RuleRunner(ActionExecutor executor, SubjectPathResolver re
         return evaluation.EvaluateCondition(guard) switch
         {
             true => null,
-            false => RuleRunResult.Rejected("Rejected: the guard is false"),
-            null => RuleRunResult.Rejected(evaluation.MissingPaths.Count > 0
-                ? $"Rejected: the guard is unknown, missing {string.Join(", ", evaluation.MissingPaths)}"
-                : "Rejected: the guard is unknown")
+            false => "Only if is false",
+            null => evaluation.MissingPaths.Count > 0
+                ? $"Only if is unknown, missing {string.Join(", ", evaluation.MissingPaths)}"
+                : "Only if is unknown"
         };
     }
 

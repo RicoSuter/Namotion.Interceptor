@@ -139,9 +139,8 @@ namespace HomeBlaze.Automation
         Succeeded = 0,
         CompletedWithErrors = 1,
         StoppedAfterError = 2,
-        RejectedByGuard = 3,
-        DryRun = 4,
-        Canceled = 5,
+        DryRun = 3,
+        Canceled = 4,
     }
     public static class AutomationServiceCollectionExtensions
     {

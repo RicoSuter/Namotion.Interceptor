@@ -33,6 +33,9 @@ internal sealed class CompiledRule(string key, AutomationRule rule, ParsedExpres
     /// <summary>Whether the rule is active: its triggers are subscribed or about to evaluate their activation.</summary>
     public bool IsActivated { get; set; }
 
+    /// <summary>Why the last request of the rule did not run, until a request runs or the rule is deactivated; null otherwise.</summary>
+    public string? SkipReason { get; set; }
+
     /// <summary>
     /// Whether the rule observes its triggers in an automation with this enabled flag and current state: only in the modes
     /// <see cref="AutomationRuleMode.DryRun"/> and <see cref="AutomationRuleMode.On"/>.

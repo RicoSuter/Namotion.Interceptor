@@ -5,8 +5,8 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// The <see cref="IMonitoredService"/> status of an automation: an error stays until a run that executed actions without
-/// failure, a valid configuration after an invalid one, or a saved reset of the state clears it; a rejected run changes
-/// nothing. An invalid configuration and an unreadable checkpoint are cleared only by a valid configuration or a reset.
+/// failure, a valid configuration after an invalid one, or a saved reset of the state clears it; a request that did not
+/// run changes nothing. An invalid configuration and an unreadable checkpoint are cleared only by a valid configuration or a reset.
 /// An unknown value is no error.
 /// </summary>
 internal sealed class AutomationStatusReporter(Automation automation, ILogger logger)

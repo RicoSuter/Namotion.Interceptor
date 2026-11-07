@@ -1,6 +1,9 @@
 namespace HomeBlaze.Automation;
 
-/// <summary>The outcome of a recorded run of a rule.</summary>
+/// <summary>
+/// The outcome of a recorded run of a rule. A request that did not run, such as one that Only if rejected, is not a run
+/// and has no outcome.
+/// </summary>
 public enum AutomationRunOutcome
 {
     /// <summary>Every action succeeded.</summary>
@@ -12,12 +15,9 @@ public enum AutomationRunOutcome
     /// <summary>An action failed and the remaining actions were skipped.</summary>
     StoppedAfterError,
 
-    /// <summary>The guard was false or unknown, so no action ran.</summary>
-    RejectedByGuard,
-
     /// <summary>The rule is a dry run: its actions were rendered and not executed.</summary>
     DryRun,
 
-    /// <summary>The run was canceled because the automation stopped or its state changed for the same input.</summary>
+    /// <summary>The run started and was canceled before its actions completed, because the automation stopped.</summary>
     Canceled
 }

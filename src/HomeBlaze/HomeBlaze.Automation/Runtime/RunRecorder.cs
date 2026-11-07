@@ -11,12 +11,13 @@ internal sealed class RunRecorder(AutomationStateKeeper keeper)
     /// <summary>Records the run and returns the error of the save, or null.</summary>
     public string? Record(CompiledRule rule, RuleRunResult result)
     {
+        var outcome = result.Outcome ?? throw new ArgumentException("A request that did not run is not recorded.", nameof(result));
         var subject = rule.Rule;
         var run = new RuleCheckpoint
         {
             LastTriggeredAt = subject.LastTriggeredAt,
             RunCount = (subject.RunCount ?? 0) + 1,
-            LastRunOutcome = result.Outcome,
+            LastRunOutcome = outcome,
             LastRunMessage = result.Message
         };
 

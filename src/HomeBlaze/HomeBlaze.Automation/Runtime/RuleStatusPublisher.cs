@@ -19,7 +19,7 @@ internal static class RuleStatusPublisher
         foreach (var (key, subject) in rules)
         {
             subject.Status = snapshot.FindRule(key) is { } rule && ReferenceEquals(rule.Rule, subject)
-                ? RuleStatusText.Format(rule.Mode, getInactiveReason(rule), rule.GetTriggerStatuses(), timeZone)
+                ? RuleStatusText.Format(rule.Mode, getInactiveReason(rule), rule.GetTriggerStatuses(), timeZone, rule.SkipReason)
                 : notApplied;
         }
     }

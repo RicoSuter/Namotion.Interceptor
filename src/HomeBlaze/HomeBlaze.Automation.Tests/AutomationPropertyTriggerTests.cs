@@ -159,7 +159,7 @@ public class AutomationPropertyTriggerTests
     }
 
     [Fact]
-    public async Task WhenTheGuardRejects_ThenTheRunIsRecordedWithoutActions()
+    public async Task WhenTheGuardRejects_ThenNoRunIsRecordedAndTheStatusSaysWhy()
     {
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(Storm(StormGuard));
@@ -170,11 +170,13 @@ public class AutomationPropertyTriggerTests
         await HoldGustAsync(host, 9);
 
         // Assert
-        Assert.Equal(1L, rule.RunCount);
-        Assert.Equal(AutomationRunOutcome.RejectedByGuard, rule.LastRunOutcome);
-        Assert.Equal("Rejected: the guard is false", rule.LastRunMessage);
+        Assert.Equal(0L, rule.RunCount);
+        Assert.Null(rule.LastRunOutcome);
+        Assert.Null(rule.LastRunMessage);
         Assert.Null(rule.LastTriggeredAt);
         Assert.Equal(0, host.Blinds.CloseCount);
+        Assert.Equal("On: Triggered, waiting to rearm; not run: Only if is false", rule.Status);
+        Assert.DoesNotContain("retract", File.Exists(host.CheckpointPath) ? await File.ReadAllTextAsync(host.CheckpointPath) : string.Empty);
     }
 
     [Fact]
@@ -190,8 +192,8 @@ public class AutomationPropertyTriggerTests
         await HoldGustAsync(host, 9);
 
         // Assert
-        Assert.Equal(2L, rule.RunCount);
-        Assert.Equal(AutomationRunOutcome.RejectedByGuard, rule.LastRunOutcome);
+        Assert.Equal(1L, rule.RunCount);
+        Assert.Equal(AutomationRunOutcome.Succeeded, rule.LastRunOutcome);
         Assert.Equal(1, host.Blinds.CloseCount);
     }
 

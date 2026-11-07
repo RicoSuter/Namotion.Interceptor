@@ -180,17 +180,16 @@ internal sealed class AutomationEngine : IRuleRunHost
 
     /// <summary>
     /// Reports the dropped inputs and makes up for them, after the inputs that were queued before the drop. The runs that
-    /// inputs dropped from a feedback chain request are recorded as canceled, because running them would continue the
-    /// chain. After an overload every trigger is evaluated again.
+    /// inputs dropped from a feedback chain request do not run, because running them would continue the chain. After an
+    /// overload every trigger is evaluated again.
     /// </summary>
     public async Task ResynchronizeAsync(DroppedInputs dropped, CancellationToken cancellationToken)
     {
         _status.ReportFaults(dropped);
-        var canceled = _triggers.MakeUpForChain(_snapshot.Rules, dropped);
-        if (canceled.Count > 0)
+        var stopped = _triggers.MakeUpForChain(_snapshot.Rules, dropped);
+        if (stopped.Count > 0)
         {
-            var reason = $"Canceled: a feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped";
-            _status.Apply(_dispatcher.Cancel(canceled, reason), HasStickyError);
+            _dispatcher.Skip(stopped, $"a feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped");
         }
 
         if (dropped.HasOverload)
@@ -354,6 +353,7 @@ internal sealed class AutomationEngine : IRuleRunHost
     private static void Deactivate(CompiledRule rule)
     {
         rule.IsActivated = false;
+        rule.SkipReason = null;
         AutomationTriggers.Deactivate(rule);
     }
 

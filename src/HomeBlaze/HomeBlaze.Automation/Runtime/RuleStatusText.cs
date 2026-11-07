@@ -4,19 +4,27 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// The status text of a rule: its mode, then why it is inactive, or the first holding trigger, the first problem, the
-/// first unknown trigger, "Triggered, waiting to rearm" when every trigger fired, and otherwise "Armed". Times are local
-/// to the host. The text changes only on a transition, so history records it once per transition.
+/// first unknown trigger, "Triggered, waiting to rearm" when every trigger fired, and otherwise "Armed", followed by why
+/// its last request did not run. Times are local to the host. The text changes only on a transition, so history records
+/// it once per transition.
 /// </summary>
 internal static class RuleStatusText
 {
-    public static string Format(AutomationRuleMode mode, string? inactiveReason, IReadOnlyList<TriggerStatus> triggers, TimeZoneInfo timeZone)
+    public static string Format(
+        AutomationRuleMode mode, string? inactiveReason, IReadOnlyList<TriggerStatus> triggers, TimeZoneInfo timeZone, string? skipReason = null)
     {
         if (mode == AutomationRuleMode.Off)
         {
             return "Off";
         }
 
-        return $"{mode}: {inactiveReason ?? Describe(triggers, timeZone)}";
+        if (inactiveReason is not null)
+        {
+            return $"{mode}: {inactiveReason}";
+        }
+
+        var description = Describe(triggers, timeZone);
+        return skipReason is null ? $"{mode}: {description}" : $"{mode}: {description}; not run: {skipReason}";
     }
 
     private static string Describe(IReadOnlyList<TriggerStatus> triggers, TimeZoneInfo timeZone)
