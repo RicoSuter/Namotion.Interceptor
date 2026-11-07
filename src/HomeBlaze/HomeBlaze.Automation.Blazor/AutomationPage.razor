@@ -15,6 +15,8 @@
 @if (Subject is Automation automation)
 {
     var path = PathResolver.GetPath(automation, PathStyle.Canonical);
+    @* Read in the render of the page itself, not in the content of a child component, so that a run renders the page and its runs are read again. *@
+    _renderedRunsKey = GetRunsKey(automation);
     <div class="d-flex flex-column gap-4 pt-2 pt-sm-4 pb-4" data-testid="automation-page">
         @* The right padding keeps the buttons clear of the page's edit mode menu, which floats over the top right corner. *@
         <MudStack Row="true" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center" Spacing="2" Class="pr-12">
@@ -140,24 +142,19 @@
     private IReadOnlyList<RunEntry> _runs = [];
     private bool _hasHistory;
     private string? _runsError;
+    private int? _renderedRunsKey;
     private int? _loadedRunsKey;
     private int _loadVersion;
 
     [Parameter] public IInterceptorSubject? Subject { get; set; }
 
-    // The run counts are rendered, so a run or a saved configuration renders the page again. The runs are read at most once
-    // per interval, and once more after it while the history lags behind the counts.
+    // The page reads the run counts in its render, so a run or a saved configuration renders it again. The runs are read
+    // at most once per interval, and once more after it while the history lags behind the counts.
     protected override void OnAfterRender(bool firstRender)
     {
-        if (Subject is not Automation automation)
+        if (Subject is Automation && _renderedRunsKey != _loadedRunsKey)
         {
-            return;
-        }
-
-        var runsKey = GetRunsKey(automation);
-        if (runsKey != _loadedRunsKey)
-        {
-            _loadedRunsKey = runsKey;
+            _loadedRunsKey = _renderedRunsKey;
             RequestLoad();
         }
     }
@@ -349,11 +346,7 @@
     }
 
     private static IReadOnlyList<RunEntry> GetLastRuns(Automation automation) =>
-    [
-        .. automation.GetRulesInOrder()
-            .Where(pair => pair.Value.LastRunOutcome is not null)
-            .Select(pair => new RunEntry(null, pair.Value.Name ?? pair.Key, pair.Value.LastRunOutcome, pair.Value.LastRunMessage))
-    ];
+        RunHistory.GetLastRuns(automation.GetRulesInOrder().Select(pair => (pair.Value.Name ?? pair.Key, pair.Value.LastRunOutcome, pair.Value.LastRunMessage)));
 
     public void Dispose()
     {

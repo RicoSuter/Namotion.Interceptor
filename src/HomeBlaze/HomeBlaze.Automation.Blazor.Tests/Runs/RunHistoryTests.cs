@@ -214,4 +214,27 @@ public class RunHistoryTests
         // Assert
         Assert.Equal([Start.AddMinutes(3), Start.AddMinutes(2)], runs.Select(run => run.At!.Value).ToArray());
     }
+
+    [Fact]
+    public void WhenThereIsNoHistoryStore_ThenTheLastRunOfEachRuleThatRanIsListedInRuleOrder()
+    {
+        // Arrange
+        (string, AutomationRunOutcome?, string?)[] rules =
+        [
+            ("Started", null, null),
+            ("Finished", AutomationRunOutcome.Succeeded, "Ran ChangeState(Idle)"),
+            ("notify", AutomationRunOutcome.CompletedWithErrors, null)
+        ];
+
+        // Act
+        var runs = RunHistory.GetLastRuns(rules);
+
+        // Assert
+        Assert.Equal(
+            [
+                new RunEntry(null, "Finished", AutomationRunOutcome.Succeeded, "Ran ChangeState(Idle)"),
+                new RunEntry(null, "notify", AutomationRunOutcome.CompletedWithErrors, null)
+            ],
+            runs.ToArray());
+    }
 }

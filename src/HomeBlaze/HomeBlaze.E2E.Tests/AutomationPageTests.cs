@@ -1,5 +1,14 @@
+using HomeBlaze.Abstractions;
+using HomeBlaze.Automation;
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.History;
+using HomeBlaze.History.Abstractions;
+using HomeBlaze.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -78,6 +87,7 @@ public class AutomationPageTests
     {
         // Arrange
         var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        var scratchContent = await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(ScratchPage));
         try
         {
             await _fixture.WriteDemoPageAsync(ScratchPage,
@@ -96,6 +106,7 @@ public class AutomationPageTests
         }
         finally
         {
+            await _fixture.WriteDemoPageAsync(ScratchPage, scratchContent);
             await _fixture.DeleteStoredSubjectAsync(filePath, automation);
         }
     }
@@ -112,6 +123,10 @@ public class AutomationPageTests
             await Assertions.Expect(page.GetByTestId("automation-state-node-Idle")).ToContainTextAsync("Current", new() { Timeout = Timeout });
             automation.InitialState = "Running";
             await automation.ApplyConfigurationAsync(CancellationToken.None);
+            await page.GetByTestId("automation-reset").ClickAsync();
+            await page.GetByRole(AriaRole.Dialog).GetByRole(AriaRole.Button, new() { Name = "Cancel", Exact = true }).ClickAsync();
+            await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
+            Assert.Equal("Idle", automation.CurrentState);
 
             // Act
             await page.GetByTestId("automation-reset").ClickAsync();
@@ -126,6 +141,78 @@ public class AutomationPageTests
         {
             await _fixture.DeleteStoredSubjectAsync(filePath, automation);
         }
+    }
+
+    [Fact]
+    public async Task WhenARuleRuns_ThenThePageListsTheRunFromHistoryWithItsOutcomeAndMessage()
+    {
+        // Arrange
+        // The rule runs as a dry run once the automation is named Go.
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(created =>
+        {
+            created.Name = "Recorder";
+            created.States = ["Idle", "Done"];
+            created.InitialState = "Idle";
+            created.Rules = new Dictionary<string, AutomationRule>
+            {
+                ["ran"] = new()
+                {
+                    Name = "Ran",
+                    Mode = AutomationRuleMode.DryRun,
+                    Triggers = [new PropertyTrigger { Expression = "../Name == Go" }],
+                    Actions = [new ChangeStateAction { Id = "state-1", TargetState = "Done" }]
+                }
+            };
+        });
+        try
+        {
+            var page = await OpenPageAsync(name);
+            await Assertions.Expect(page.GetByTestId("automation-no-runs")).ToBeVisibleAsync(new() { Timeout = Timeout });
+            // A run is a count that follows a stored one, so the restored count must be stored before the run.
+            await WaitUntilRunCountIsStoredAsync(automation.Rules["ran"], 0);
+
+            // Act
+            automation.Name = "Go";
+
+            // Assert
+            var run = page.GetByTestId("automation-run");
+            await Assertions.Expect(run).ToHaveCountAsync(1, new() { Timeout = Timeout });
+            await Assertions.Expect(run).ToContainTextAsync("Ran");
+            await Assertions.Expect(run).ToContainTextAsync("Would have run (dry run)");
+            await Assertions.Expect(run).ToContainTextAsync("Would run ChangeState(Done)");
+            await Assertions.Expect(page.GetByText("From history: the runs of the last seven days.")).ToBeVisibleAsync();
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    private async Task WaitUntilRunCountIsStoredAsync(AutomationRule rule, long runCount)
+    {
+        var resolver = _fixture.ServerServices.GetRequiredService<SubjectPathResolver>();
+        var path = resolver.GetPath(rule, PathStyle.Canonical) + "/" + nameof(AutomationRule.RunCount);
+        var registry = _fixture.ServerServices.GetRequiredService<IInterceptorSubjectContext>().GetService<ISubjectRegistry>();
+
+        // The condition is synchronous, so a poll starts a lookup and a later poll reads its result.
+        Task<HistoryPoint?>? lookup = null;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                if (lookup is { IsCompletedSuccessfully: true, Result.Number: { } number } && (long)number == runCount)
+                {
+                    return true;
+                }
+
+                if (lookup is null || lookup.IsCompleted)
+                {
+                    lookup = registry.GetValueAtAsync(path, DateTimeOffset.UtcNow, CancellationToken.None);
+                }
+
+                return false;
+            },
+            TimeSpan.FromSeconds(30),
+            message: $"The history did not store the run count {runCount} of {path}");
     }
 
     private async Task<IPage> OpenPageAsync(string name)
