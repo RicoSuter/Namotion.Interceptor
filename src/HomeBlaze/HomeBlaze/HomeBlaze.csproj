@@ -30,6 +30,7 @@
         <ProjectReference Include="..\HomeBlaze.AI\HomeBlaze.AI.csproj" />
         <ProjectReference Include="..\HomeBlaze.AI.Blazor\HomeBlaze.AI.Blazor.csproj" />
         <ProjectReference Include="..\HomeBlaze.Authorization\HomeBlaze.Authorization.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Authorization.Blazor\HomeBlaze.Authorization.Blazor.csproj" />
         <ProjectReference Include="..\HomeBlaze.History.Mcp\HomeBlaze.History.Mcp.csproj" />
         <ProjectReference Include="..\HomeBlaze.Host\HomeBlaze.Host.csproj" />
         <ProjectReference Include="..\HomeBlaze.Samples\HomeBlaze.Samples.csproj" />

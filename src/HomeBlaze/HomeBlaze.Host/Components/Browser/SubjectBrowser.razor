@@ -437,10 +437,12 @@
 
         var subjectName = SubjectDisplayExtensions.GetIdentifyingDisplayName(pane.DisplayName, pane.Index);
 
-        // The one confirmation of the delete, also for an operation that requires confirmation.
+        // The one confirmation of the delete, also for an operation that requires confirmation, so it carries the
+        // operation's description, which can name a consequence of the delete.
+        var question = $"Delete '{subjectName}'?";
         var confirmed = await DialogService.ShowMessageBoxAsync(
             "Delete",
-            $"Delete '{subjectName}'?",
+            string.IsNullOrWhiteSpace(deleteOperation.Description) ? question : $"{question} {deleteOperation.Description}",
             yesText: "Delete",
             cancelText: "Cancel");
 

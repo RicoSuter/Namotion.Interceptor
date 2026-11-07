@@ -1006,12 +1006,11 @@
     {
         if (Subject == null) return false;
 
-        // Can edit if there's a custom edit component or configuration properties
         var hasEditComponent = ComponentRegistry.HasComponent(
             Subject.GetType(),
             SubjectComponentType.Edit);
 
-        return hasEditComponent || Subject.HasConfigurationProperties();
+        return hasEditComponent || ConfigurationPropertiesEditor.HasEditableProperties(Subject);
     }
 
     private async Task OpenEditDialog()

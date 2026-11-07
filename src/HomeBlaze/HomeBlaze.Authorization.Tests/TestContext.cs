@@ -7,7 +7,8 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 namespace HomeBlaze.Authorization.Tests;
 
 /// <summary>
-/// A registry context that registers the HomeBlaze markers: state and configuration attributes and method properties.
+/// A registry context that tracks parents, as the host does, and registers the HomeBlaze markers: state and
+/// configuration attributes and method properties.
 /// </summary>
 internal static class TestContext
 {
@@ -15,6 +16,7 @@ internal static class TestContext
         InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry()
+            .WithParents()
             .WithLifecycle()
             .WithService<ILifecycleHandler>(
                 () => new MethodPropertyInitializer(),

@@ -8,7 +8,7 @@ namespace HomeBlaze.Services.Display;
 /// <summary>
 /// Tells the values whose text must not be shown because it can contain a secret configuration value.
 /// </summary>
-internal static class SecretValueTypes
+public static class SecretValueTypes
 {
     // Weak, so that the types of an unloaded plugin are not kept alive; the two shared boxes avoid an allocation per type.
     private static readonly ConditionalWeakTable<Type, StrongBox<bool>> HoldsSecretByType = new();

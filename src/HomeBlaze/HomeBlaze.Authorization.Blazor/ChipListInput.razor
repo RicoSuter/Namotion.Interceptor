@@ -1,0 +1,510 @@
+@* A list of texts shown as chips, with a field that adds the typed text on Enter, with its Add button or when it loses
+   focus, or a picked suggestion. Typed text is split at commas into several values, see SplitsAtCommas. Text that is typed
+   and invalid stays in the field with its error, see HasInvalidText. A picked text goes into the field to be edited before
+   it is added. Backspace in the empty field removes the last chip. *@
+@implements IHandleEvent
+
+<div data-testid="@TestId">
+    <div class="d-flex align-start gap-2">
+        <div class="flex-grow-1">
+            @if (Suggestions is null)
+            {
+                <MudTextField T="string" @ref="_textField" Label="@Label" Value="@_text" ValueChanged="@OnTextChangedAsync" OnBlur="@CommitTextAsync"
+                              OnKeyDown="@OnTextKeyDownAsync" OnKeyUp="@OnTextKeyUpAsync" Immediate="true" Placeholder="@Placeholder"
+                              HelperText="@HelperText" Error="@(_error is not null)" ErrorText="@_error" />
+            }
+            else
+            {
+                @* The value changes only when a suggestion is picked; typed text is added on Enter, not on every keystroke. The
+                   keys are seen on the element around the field, as the field passes a key on only after it handled it, which
+                   can wait for the browser, so that a later key could be seen first. *@
+                <div @onkeydown="OnSuggestionKeyDownAsync" @onfocusin="OnSuggestionFocusIn">
+                    <MudAutocomplete T="string" @ref="_autocomplete" Label="@Label" Placeholder="@Placeholder" HelperText="@HelperText"
+                                     Error="@(_error is not null)" ErrorText="@_error"
+                                     ValueChanged="@AddSuggestionAsync" TextChanged="@OnTextChangedAsync" OnKeyUp="@OnSuggestionKeyUpAsync"
+                                     OnBlur="@OnSuggestionBlurAsync" OpenChanged="@OnSuggestionOpenChangedAsync"
+                                     SearchFunc="@SearchAsync" CoerceText="false" />
+                </div>
+            }
+        </div>
+        @* A button rather than an icon in the field, which the keyboard does not reach. *@
+        @if (Pick is not null)
+        {
+            <MudIconButton Icon="@Icons.Material.Filled.Search" Variant="Variant.Outlined" Color="Color.Primary" Class="mt-4" OnClick="@PickAsync"
+                           aria-label="@($"Browse {Label}")" data-testid="@($"{TestId}-browse")" />
+        }
+        @* Leaving the field adds its text before the click, which then finds the field empty. *@
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Class="mt-4" Disabled="@IsAddDisabled"
+                   OnClick="@CommitTextAsync" aria-label="@($"Add {Label}")" data-testid="@($"{TestId}-add")">Add</MudButton>
+    </div>
+    @if (_warning is not null)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-1" data-testid="@($"{TestId}-text-warning")">@_warning</MudText>
+    }
+    <MudStack Row="true" Wrap="Wrap.Wrap" Spacing="1" Class="mt-2">
+        @if (Values.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="@($"{TestId}-any")">any</MudText>
+        }
+        @* Not keyed by value, as a value from the file can be listed twice; the chips are matched by position. *@
+        @for (var index = 0; index < Values.Count; index++)
+        {
+            var position = index;
+            var value = Values[position];
+            if (GetValueError(Values, position, Validator, Comparer, SplitsAtCommas) is { } error)
+            {
+                <MudTooltip Text="@error">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Icon="@Icons.Material.Filled.ErrorOutline"
+                             Class="ma-0" data-testid="@($"{TestId}-chip")">
+                        @value<ChipRemoveButton Value="@value" OnRemove="@(() => RemoveChipAsync(position))" />
+                    </MudChip>
+                </MudTooltip>
+            }
+            else if (Warning?.Invoke(value) is { } warning)
+            {
+                <MudTooltip Text="@warning">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" Icon="@Icons.Material.Filled.WarningAmber"
+                             Class="ma-0" data-testid="@($"{TestId}-chip")">
+                        @value<ChipRemoveButton Value="@value" OnRemove="@(() => RemoveChipAsync(position))" />
+                    </MudChip>
+                </MudTooltip>
+            }
+            else
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0" data-testid="@($"{TestId}-chip")">
+                    @value<ChipRemoveButton Value="@value" OnRemove="@(() => RemoveChipAsync(position))" />
+                </MudChip>
+            }
+        }
+    </MudStack>
+</div>
+
+@code {
+    private MudTextField<string>? _textField;
+    private MudAutocomplete<string>? _autocomplete;
+    private string? _text;
+    private string? _error;
+
+    // Why the valid text in the field may be wrong, see Warning; shown below the field.
+    private string? _warning;
+    private bool _reportedInvalidText;
+
+    // Set when the field lost focus while its suggestions were open, so that the text is added once they close.
+    private bool _isCommitPending;
+
+    // Set on Enter to the text to add once the key is released; null when Enter picks a suggestion.
+    private string? _enterText;
+    private bool _isSuggestionChosen;
+
+    // Set by an event handler that changed nothing shown, see IHandleEvent.HandleEventAsync.
+    private bool _isUnchanged;
+
+    /// <summary>The texts shown as chips.</summary>
+    [Parameter]
+    public IReadOnlyList<string> Values { get; set; } = [];
+
+    /// <summary>Raised with a new list when a text is added or removed.</summary>
+    [Parameter]
+    public EventCallback<IReadOnlyList<string>> ValuesChanged { get; set; }
+
+    [Parameter]
+    public string? Label { get; set; }
+
+    [Parameter]
+    public string? Placeholder { get; set; }
+
+    [Parameter]
+    public string? HelperText { get; set; }
+
+    /// <summary>The suggestions offered while typing, those containing the typed text; null for a plain text field.</summary>
+    [Parameter]
+    public IReadOnlyList<string>? Suggestions { get; set; }
+
+    /// <summary>
+    /// Gets why a text is invalid, or null. An invalid text is not added; an invalid value, or one listed twice, shows as a
+    /// red chip.
+    /// </summary>
+    [Parameter]
+    public Func<string, string?>? Validator { get; set; }
+
+    /// <summary>
+    /// Gets why a valid value may be wrong, or null; such a value shows as a yellow chip and is still valid. In a plain
+    /// text field, such typed text shows the warning below the field.
+    /// </summary>
+    [Parameter]
+    public Func<string, string?>? Warning { get; set; }
+
+    /// <summary>
+    /// Whether typed text is split at commas into several values, and a value with a comma is invalid; true by default.
+    /// When false, the whole text is one value.
+    /// </summary>
+    [Parameter]
+    public bool SplitsAtCommas { get; set; } = true;
+
+    /// <summary>Compares the texts to find one that is added already.</summary>
+    [Parameter]
+    public StringComparer Comparer { get; set; } = StringComparer.Ordinal;
+
+    /// <summary>
+    /// Picks a text, such as from a dialog, or returns null; shown as a button in a plain text field. The text replaces
+    /// the text in the field, to be edited and added from there.
+    /// </summary>
+    [Parameter]
+    public Func<Task<string?>>? Pick { get; set; }
+
+    /// <summary>Raised with <see cref="HasInvalidText"/> when it changes.</summary>
+    [Parameter]
+    public EventCallback<bool> HasInvalidTextChanged { get; set; }
+
+    /// <summary>The <c>data-testid</c> of the element around the input; its chips use it followed by <c>-chip</c>.</summary>
+    [Parameter]
+    public string? TestId { get; set; }
+
+    /// <summary>
+    /// Gets whether the field holds text that the validator rejects, which is neither added nor dropped.
+    /// </summary>
+    internal bool HasInvalidText => _error is not null;
+
+    /// <summary>
+    /// Gets why the value at <paramref name="index"/> is invalid, or null: it is listed before, compared with
+    /// <paramref name="comparer"/>, it holds a comma while <paramref name="splitsAtCommas"/>, it has leading or trailing
+    /// whitespace, which typed text never has but a file can, or <paramref name="validator"/> rejects it.
+    /// </summary>
+    internal static string? GetValueError(
+        IReadOnlyList<string> values, int index, Func<string, string?>? validator, StringComparer comparer, bool splitsAtCommas)
+    {
+        var value = values[index];
+        for (var other = 0; other < index; other++)
+        {
+            if (comparer.Equals(values[other], value))
+            {
+                return "Listed twice.";
+            }
+        }
+
+        if (splitsAtCommas && value.Contains(','))
+        {
+            return "Contains a comma, which separates values; remove it and add each part on its own.";
+        }
+
+        if (value.Length > 0 && (char.IsWhiteSpace(value[0]) || char.IsWhiteSpace(value[^1])))
+        {
+            return "Has leading or trailing whitespace.";
+        }
+
+        return validator?.Invoke(value);
+    }
+
+    /// <summary>
+    /// Gets whether no value is invalid, see <see cref="GetValueError"/>.
+    /// </summary>
+    internal static bool AreValid(
+        IReadOnlyList<string> values, Func<string, string?>? validator, StringComparer comparer, bool splitsAtCommas)
+    {
+        for (var index = 0; index < values.Count; index++)
+        {
+            if (GetValueError(values, index, validator, comparer, splitsAtCommas) is not null)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool IsAddDisabled => string.IsNullOrWhiteSpace(_text) || _error is not null;
+
+    // An event renders the field only when its handler changed what is shown, so that a key renders it at most once: a
+    // key reaches several handlers, which mostly change nothing, and each render delays the events after it. Only a
+    // handler that completed at once can skip the render, as another event can run and set the flag while one awaits.
+    Task IHandleEvent.HandleEventAsync(EventCallbackWorkItem item, object? arg)
+    {
+        _isUnchanged = false;
+        var task = item.InvokeAsync(arg);
+        if (task.IsCompletedSuccessfully && _isUnchanged)
+        {
+            return Task.CompletedTask;
+        }
+
+        StateHasChanged();
+        return task.IsCompleted ? task : RenderOnCompletionAsync(task);
+    }
+
+    private async Task RenderOnCompletionAsync(Task task)
+    {
+        await task;
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Adds the text in the field, unless it is blank or invalid, as Enter would.
+    /// </summary>
+    internal async Task CommitTextAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(_text) && await AddAsync(_text) && _autocomplete is not null)
+        {
+            // The field keeps the text of what it added, which would look like a value not added yet.
+            await _autocomplete.ClearAsync();
+        }
+    }
+
+    // The field shows its text itself, so that most keys change nothing else shown.
+    private async Task OnTextChangedAsync(string? text)
+    {
+        var shown = (_error, _warning, IsAddDisabled);
+        SetText(text);
+        _isUnchanged = shown == (_error, _warning, IsAddDisabled);
+
+        // Typing searches again, which highlights the first suggestion.
+        _isSuggestionChosen = false;
+        await ReportInvalidTextAsync();
+    }
+
+    private async Task ReportInvalidTextAsync()
+    {
+        if (HasInvalidText != _reportedInvalidText)
+        {
+            _reportedInvalidText = HasInvalidText;
+            await HasInvalidTextChanged.InvokeAsync(_reportedInvalidText);
+        }
+    }
+
+    private Task OnTextKeyDownAsync(KeyboardEventArgs args) => RemoveLastOnBackspaceAsync(args);
+
+    private Task OnTextKeyUpAsync(KeyboardEventArgs args)
+    {
+        if (args.Key is "Enter" or "NumpadEnter")
+        {
+            return AddAsync(_text);
+        }
+
+        _isUnchanged = true;
+        return Task.CompletedTask;
+    }
+
+    // The text is that of the input before the key, as the input events before it are handled first. A held key repeats,
+    // so that holding it to delete the text would go on to remove every chip.
+    private Task RemoveLastOnBackspaceAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Backspace" && !args.Repeat && string.IsNullOrEmpty(_text) && Values.Count > 0)
+        {
+            return RemoveAtAsync(Values.Count - 1);
+        }
+
+        _isUnchanged = true;
+        return Task.CompletedTask;
+    }
+
+    private async Task PickAsync()
+    {
+        if (Pick is not null && await Pick() is { } text)
+        {
+            SetText(text);
+            await ReportInvalidTextAsync();
+        }
+    }
+
+    // Returns whether the text was taken, added now or before; a text with an invalid part stays in the field with the
+    // error of that part, and none of its parts is added.
+    private async Task<bool> AddAsync(string? text)
+    {
+        var parts = SplitText(text);
+        if (parts.Length == 0)
+        {
+            return false;
+        }
+
+        _error = GetTextError(parts);
+        if (_error is not null)
+        {
+            _text = text!.Trim();
+            _warning = null;
+            await ReportInvalidTextAsync();
+            return false;
+        }
+
+        _text = null;
+        _warning = null;
+        await ReportInvalidTextAsync();
+        var values = Values.ToList();
+        foreach (var part in parts.Where(part => !values.Contains(part, Comparer)))
+        {
+            values.Add(part);
+        }
+
+        if (values.Count > Values.Count)
+        {
+            await ValuesChanged.InvokeAsync(values);
+        }
+
+        return true;
+    }
+
+    private void SetText(string? text)
+    {
+        _text = text;
+        var parts = SplitText(text);
+        _error = GetTextError(parts);
+
+        // A field with suggestions offers the values while typing, so that text not completed yet warns of nothing.
+        _warning = _error is null && Suggestions is null && Warning is { } warning
+            ? parts.Select(warning).FirstOrDefault(partWarning => partWarning is not null)
+            : null;
+    }
+
+    // The parts between commas, or the whole text unless SplitsAtCommas; trimmed, without empty ones.
+    private string[] SplitText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        return SplitsAtCommas ? text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries) : [text.Trim()];
+    }
+
+    private string? GetTextError(string[] parts)
+    {
+        if (Validator is { } validator)
+        {
+            foreach (var part in parts)
+            {
+                if (validator(part) is { } error)
+                {
+                    return error;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private Task RemoveAtAsync(int index) => ValuesChanged.InvokeAsync([.. Values.Take(index), .. Values.Skip(index + 1)]);
+
+    // The chips are matched by position, so the button of a removed chip shows the next value and keeps the focus, except
+    // for the last chip, whose button goes away and would leave the focus nowhere.
+    private async Task RemoveChipAsync(int index)
+    {
+        var isLast = index == Values.Count - 1;
+        await RemoveAtAsync(index);
+        if (!isLast)
+        {
+            return;
+        }
+
+        if (_autocomplete is not null)
+        {
+            await _autocomplete.FocusAsync();
+        }
+        else if (_textField is not null)
+        {
+            await _textField.FocusAsync();
+        }
+    }
+
+    // A picked suggestion; also called with null when the field is cleared. On Enter the field picks the highlighted
+    // suggestion, which can be one of a search for text typed before, so Enter adds the typed text instead unless a
+    // suggestion was chosen with the arrow keys and not dismissed with Escape since.
+    private async Task AddSuggestionAsync(string? suggestion)
+    {
+        if (suggestion is null)
+        {
+            return;
+        }
+
+        var text = _enterText ?? suggestion;
+        _enterText = null;
+
+        // The field keeps the text of what it added, which would look like a value not added yet.
+        if (await AddAsync(text) && _autocomplete is not null)
+        {
+            await _autocomplete.ClearAsync();
+        }
+    }
+
+    // A click on a suggestion takes the focus from the field while the suggestions are open, and picks it after; the
+    // typed text is added only when they close without a pick, which clears the text.
+    private async Task OnSuggestionBlurAsync(FocusEventArgs args)
+    {
+        if (_autocomplete?.Open == true)
+        {
+            _isCommitPending = true;
+            _isUnchanged = true;
+            return;
+        }
+
+        await CommitTextAsync();
+    }
+
+    private void OnSuggestionFocusIn()
+    {
+        _isCommitPending = false;
+        _isUnchanged = true;
+    }
+
+    private async Task OnSuggestionOpenChangedAsync(bool isOpen)
+    {
+        if (isOpen || !_isCommitPending)
+        {
+            _isUnchanged = true;
+            return;
+        }
+
+        _isCommitPending = false;
+        await CommitTextAsync();
+    }
+
+    // Runs in the order of the keys, before the field handles the release of Enter.
+    private Task OnSuggestionKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (args.Key is "ArrowDown" or "ArrowUp")
+        {
+            _isSuggestionChosen = true;
+        }
+        else if (args.Key is "Escape")
+        {
+            _isSuggestionChosen = false;
+        }
+        else if (args.Key is "Enter" or "NumpadEnter")
+        {
+            _enterText = _isSuggestionChosen ? null : _text ?? string.Empty;
+        }
+
+        return RemoveLastOnBackspaceAsync(args);
+    }
+
+    // Runs after the field handled the key: when Enter picked a suggestion, the text was added already.
+    private async Task OnSuggestionKeyUpAsync(KeyboardEventArgs args)
+    {
+        if (args.Key is not ("Enter" or "NumpadEnter"))
+        {
+            _isUnchanged = true;
+            return;
+        }
+
+        var text = _enterText;
+        _enterText = null;
+        _isSuggestionChosen = false;
+        if (text is null)
+        {
+            _isUnchanged = true;
+            return;
+        }
+
+        await AddSuggestionAsync(text);
+    }
+
+    // The suggestions that contain the text and are not added yet, after the text itself unless it is one of them.
+    private Task<IEnumerable<string>> SearchAsync(string? text, CancellationToken cancellationToken)
+    {
+        var suggestions = (Suggestions ?? []).Where(suggestion => !Values.Contains(suggestion, Comparer));
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return Task.FromResult(suggestions);
+        }
+
+        var typed = text.Trim();
+        var matches = suggestions.Where(suggestion => suggestion.Contains(typed, StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(Suggestions?.Contains(typed, Comparer) == true ? matches : matches.Prepend(typed));
+    }
+}

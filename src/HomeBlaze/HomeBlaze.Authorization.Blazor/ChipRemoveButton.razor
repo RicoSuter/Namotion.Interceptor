@@ -1,0 +1,14 @@
+@* Removes a chip: a button that the keyboard reaches and that names the value, which the close button of MudChip does
+   not. It goes into the content of the chip and looks like that close button. *@
+<MudIconButton Class="mud-chip-close-button" Icon="@Icons.Material.Filled.Cancel" Size="Size.Small"
+               aria-label="@($"Remove {Value}")" OnClick="@OnRemove" />
+
+@code {
+    /// <summary>The text of the chip, which names the button.</summary>
+    [Parameter, EditorRequired]
+    public string Value { get; set; } = string.Empty;
+
+    /// <summary>Raised when the button is clicked or pressed.</summary>
+    [Parameter]
+    public EventCallback OnRemove { get; set; }
+}
