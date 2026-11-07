@@ -452,6 +452,18 @@ public sealed class AuthorizationServiceTests : IDisposable
     }
 
     [Fact]
+    public void WhenTheUnavailableRolesAreChangedThroughACast_ThenItThrowsAndTheRoleStaysUsable()
+    {
+        // Arrange
+        AddAuthorization(("good", new Role { Allow = [ReadPlain()] }));
+        var unavailable = (IDictionary<string, string>)_service.GetUnavailableRoles();
+
+        // Act & Assert
+        Assert.Throws<NotSupportedException>(() => unavailable.Add("good", "Changed by a caller."));
+        Assert.Null(_service.GetPolicy(["good"]).Error);
+    }
+
+    [Fact]
     public void WhenSeveralAuthorizationsExist_ThenTheirCustomRolesAreListedAsUnavailable()
     {
         // Arrange
