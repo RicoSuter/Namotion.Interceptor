@@ -175,7 +175,7 @@ internal sealed class AutomationRuntime
             case ResetStateInput:
                 _engine.ResetState();
                 return Task.CompletedTask;
-            case GraphChangedInput:
+            case GraphChangedInput when _engine.MayHaveMoved:
                 FollowPath();
                 break;
         }
@@ -246,7 +246,7 @@ internal sealed class AutomationRuntime
         }
         else if (input is GraphChangedInput)
         {
-            _changes.OnGraphChangeTaken();
+            _engine.TakeGraphChanges();
         }
     }
 

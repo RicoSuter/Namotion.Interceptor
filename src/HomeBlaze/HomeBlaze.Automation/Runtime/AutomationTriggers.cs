@@ -14,13 +14,10 @@ internal sealed class AutomationTriggers
     private readonly AutomationInputQueue _queue;
     private readonly PropertyTriggerEngine _propertyTriggers;
     private readonly EventTriggerEngine _eventTriggers;
-    private readonly GraphRoutes _routes;
-    private long _boundStructureVersion = -1;
 
     /// <summary>
-    /// Creates the triggers, which resolve their paths with <paramref name="routes"/> and resolve them again on a graph
-    /// change only when the structure version of the registry changed since, and whose property triggers publish their
-    /// watched set to <paramref name="publishWatched"/>.
+    /// Creates the triggers, which resolve their paths with <paramref name="routes"/>, and whose property triggers publish
+    /// their watched set to <paramref name="publishWatched"/>.
     /// </summary>
     public AutomationTriggers(
         GraphRoutes routes,
@@ -31,7 +28,6 @@ internal sealed class AutomationTriggers
         Action<FrozenSet<PropertyReference>> publishWatched)
     {
         _queue = queue;
-        _routes = routes;
         _propertyTriggers = new PropertyTriggerEngine(routes, timeProvider, logger, getAutomationName, publishWatched);
         _eventTriggers = new EventTriggerEngine(routes, timeProvider, queue);
     }
@@ -140,7 +136,7 @@ internal sealed class AutomationTriggers
     public void Rebind(IReadOnlyList<CompiledRule> rules)
     {
         _propertyTriggers.Refresh(rules);
-        _eventTriggers.Rebind(rules);
+        _eventTriggers.Rebind(rules, onlyChanged: false);
     }
 
     /// <summary>
@@ -191,27 +187,19 @@ internal sealed class AutomationTriggers
     };
 
     /// <summary>
-    /// Resolves the paths again after a graph change, unless the structure of the graph is the same as at the last time,
-    /// such as for a write of the same children, and evaluates the triggers whose properties changed.
+    /// Resolves again the paths that the graph changes taken last may lead elsewhere now, see
+    /// <see cref="GraphRoutes.NeedsResolving"/>, such as none for a write of the same children, and evaluates the triggers
+    /// whose properties changed.
     /// </summary>
     public IReadOnlyList<RunRequest> OnGraphChanged(IReadOnlyList<CompiledRule> rules)
     {
-        // Read before the paths are resolved; an odd version is a change in progress, after which they resolve again.
-        var version = _routes.StructureVersion;
-        if (version >= 0 && version == _boundStructureVersion)
-        {
-            _propertyTriggers.ForgetRebound();
-            return [];
-        }
-
-        _boundStructureVersion = version % 2 == 0 ? version : -1;
-        _eventTriggers.Rebind(rules);
+        _eventTriggers.Rebind(rules, onlyChanged: true);
         return _propertyTriggers.OnGraphChanged(rules, evaluateAll: false);
     }
 
     private IReadOnlyList<RunRequest> RebindAndEvaluateAll(IReadOnlyList<CompiledRule> rules)
     {
-        _eventTriggers.Rebind(rules);
+        _eventTriggers.Rebind(rules, onlyChanged: false);
         return _propertyTriggers.OnGraphChanged(rules, evaluateAll: true);
     }
 

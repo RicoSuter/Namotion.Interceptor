@@ -146,13 +146,23 @@ internal sealed class PropertyTriggerEngine(
         candidate is { } instant && (current is null || instant < current) ? instant : current;
 
     /// <summary>
-    /// Resolves the properties again, since paths may lead elsewhere now, and evaluates the triggers whose properties
-    /// changed, or every active trigger with <paramref name="evaluateAll"/>; requests the runs of the pending triggers
-    /// whose properties or Only if properties changed, or of every pending trigger with <paramref name="evaluateAll"/>.
+    /// Resolves again the properties whose paths the graph changes taken last may lead elsewhere now, see
+    /// <see cref="GraphRoutes.NeedsResolving"/>, and evaluates the triggers whose properties changed; with
+    /// <paramref name="evaluateAll"/>, resolves every property again and evaluates every active trigger. Requests the runs
+    /// of the pending triggers whose properties or Only if properties changed, or of every pending trigger with
+    /// <paramref name="evaluateAll"/>.
     /// </summary>
     public IReadOnlyList<RunRequest> OnGraphChanged(IReadOnlyList<CompiledRule> rules, bool evaluateAll)
     {
-        Refresh(rules);
+        if (evaluateAll)
+        {
+            Refresh(rules);
+        }
+        else
+        {
+            RefreshChanged(rules);
+        }
+
         try
         {
             if (evaluateAll)
@@ -171,11 +181,9 @@ internal sealed class PropertyTriggerEngine(
         }
     }
 
-    /// <summary>
-    /// Forgets the triggers that a refresh resolved differently, for a graph change that leaves the structure as it was,
-    /// so that triggers of replaced rules are not kept.
-    /// </summary>
-    public void ForgetRebound()
+    // Forgets the triggers that a refresh resolved differently once they were evaluated, so that triggers of replaced
+    // rules are not kept.
+    private void ForgetRebound()
     {
         _rebound.Clear();
         _reboundOnlyIfRules.Clear();
@@ -276,6 +284,63 @@ internal sealed class PropertyTriggerEngine(
         PublishWatched(rules, []);
     }
 
+    // Publishes the watched set only when a path was resolved again.
+    private void RefreshChanged(IReadOnlyList<CompiledRule> rules)
+    {
+        var now = timeProvider.GetUtcNow();
+        var hasResolved = false;
+        foreach (var rule in rules)
+        {
+            if (!rule.IsActivated)
+            {
+                continue;
+            }
+
+            foreach (var trigger in rule.PropertyTriggers)
+            {
+                if (trigger.State.Phase != TriggerPhase.Inactive)
+                {
+                    hasResolved |= RefreshChangedOne(trigger, now);
+                }
+            }
+        }
+
+        if (hasResolved)
+        {
+            PublishWatched(rules, []);
+        }
+    }
+
+    // A pending trigger stays pending, so the pending triggers are kept as they are.
+    private bool RefreshChangedOne(CompiledPropertyTrigger trigger, DateTimeOffset now)
+    {
+        var hasResolved = false;
+        if (routes.NeedsResolving(trigger.Route, trigger.RouteVersion))
+        {
+            if (ResolveDependencies(trigger))
+            {
+                _rebound.Add(trigger);
+            }
+
+            ScheduleCheck(trigger, now);
+            hasResolved = true;
+        }
+
+        var rule = trigger.Rule;
+        if (trigger.State.Phase == TriggerPhase.Pending && routes.NeedsResolving(rule.OnlyIfRoute, rule.OnlyIfRouteVersion))
+        {
+            if (ResolveOnlyIfDependencies(rule))
+            {
+                _reboundOnlyIfRules.Add(rule);
+            }
+
+            ScheduleOnlyIfRecheck(rule, now);
+            hasResolved = true;
+        }
+
+        return hasResolved;
+    }
+
     private void RefreshOne(CompiledPropertyTrigger trigger, DateTimeOffset now)
     {
         if (ResolveDependencies(trigger))
@@ -304,11 +369,13 @@ internal sealed class PropertyTriggerEngine(
             trigger.State.Deactivate();
             trigger.Dependencies = [];
             trigger.Route = GraphRoute.Empty;
+            trigger.RouteVersion = -1;
             trigger.NextCheckAt = null;
         }
 
         rule.OnlyIfDependencies = [];
         rule.OnlyIfRoute = GraphRoute.Empty;
+        rule.OnlyIfRouteVersion = -1;
     }
 
     // A change queued while its property was watched may arrive after it no longer is; kept, it would hide the current
@@ -437,8 +504,10 @@ internal sealed class PropertyTriggerEngine(
     {
         var previous = rule.OnlyIfDependencies;
         var route = rule.OnlyIfRoute;
-        rule.OnlyIfDependencies = Resolve(rule.OnlyIfPropertyPaths, rule.Rule, previous, ref route);
+        var version = rule.OnlyIfRouteVersion;
+        rule.OnlyIfDependencies = Resolve(rule.OnlyIfPropertyPaths, rule.Rule, previous, ref route, ref version);
         rule.OnlyIfRoute = route;
+        rule.OnlyIfRouteVersion = version;
         return !ReferenceEquals(rule.OnlyIfDependencies, previous);
     }
 
@@ -492,14 +561,17 @@ internal sealed class PropertyTriggerEngine(
     {
         var previous = trigger.Dependencies;
         var route = trigger.Route;
-        trigger.Dependencies = Resolve(trigger.PropertyPaths, trigger.Rule.Rule, previous, ref route);
+        var version = trigger.RouteVersion;
+        trigger.Dependencies = Resolve(trigger.PropertyPaths, trigger.Rule.Rule, previous, ref route, ref version);
         trigger.Route = route;
+        trigger.RouteVersion = version;
         return !ReferenceEquals(trigger.Dependencies, previous);
     }
 
     // Returns previous itself when the properties are the same, and the graph route of the paths in route, which stays the
-    // same instance when it is equal.
-    private PropertyReference[] Resolve(IReadOnlyList<string> paths, AutomationRule rule, PropertyReference[] previous, ref GraphRoute route)
+    // same instance when it is equal, with the structure version it was recorded at in version.
+    private PropertyReference[] Resolve(
+        IReadOnlyList<string> paths, AutomationRule rule, PropertyReference[] previous, ref GraphRoute route, ref long version)
     {
         var builder = routes.BeginRoute();
         _resolved.Clear();
@@ -512,6 +584,7 @@ internal sealed class PropertyTriggerEngine(
         }
 
         route = builder.ToRoute(route);
+        version = builder.ResolvedAt;
         return CollectionsMarshal.AsSpan(_resolved).SequenceEqual(previous) ? previous : [.. _resolved];
     }
 

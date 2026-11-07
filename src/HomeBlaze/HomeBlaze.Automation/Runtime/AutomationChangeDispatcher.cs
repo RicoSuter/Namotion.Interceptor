@@ -273,8 +273,8 @@ internal sealed class AutomationChangeDispatcher
 
             // Also for watchers of the property, since paths through it may lead elsewhere now. A listener with an unbounded
             // route that has the property is notified twice, which its receiver coalesces.
-            NotifyGraphChanged(routed, chainDepth);
-            NotifyGraphChanged(unbounded, chainDepth);
+            NotifyGraphChanged(routed, property, chainDepth);
+            NotifyGraphChanged(unbounded, property, chainDepth);
         }
 
         public void OnError(Exception error)
@@ -287,7 +287,7 @@ internal sealed class AutomationChangeDispatcher
             // The change stream never completes.
         }
 
-        private static void NotifyGraphChanged(IAutomationChangeListener[]? listeners, int chainDepth)
+        private static void NotifyGraphChanged(IAutomationChangeListener[]? listeners, PropertyReference property, int chainDepth)
         {
             if (listeners is null)
             {
@@ -296,7 +296,7 @@ internal sealed class AutomationChangeDispatcher
 
             foreach (var listener in listeners)
             {
-                listener.OnGraphChanged(chainDepth);
+                listener.OnGraphChanged(property, chainDepth);
             }
         }
 

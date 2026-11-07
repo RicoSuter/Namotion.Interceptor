@@ -24,6 +24,7 @@ public class AutomationTriggersTests
         var rule = Compile("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")));
         rule.IsActivated = true;
         triggers.Activate([rule], [rule]);
+        triggers.GetRequests(new ActivationInput([rule], 0), [rule]);
         triggers.OnGraphChanged([rule]);
         var publishesAfterTheFirstGraphChange = publishes;
 

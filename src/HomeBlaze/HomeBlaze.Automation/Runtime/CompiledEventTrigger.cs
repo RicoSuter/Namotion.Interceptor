@@ -23,6 +23,9 @@ internal sealed class CompiledEventTrigger(CompiledRule rule, int index, Subject
     /// <summary>The graph route of the path of the source when it was last resolved.</summary>
     public GraphRoute SourceRoute { get; set; } = GraphRoute.Empty;
 
+    /// <summary>The structure version that <see cref="SourceRoute"/> was recorded at, see <see cref="GraphRouteBuilder.ResolvedAt"/>.</summary>
+    public long SourceRouteVersion { get; set; } = -1;
+
     public EventTriggerSubscription? Subscription { get; set; }
 
     /// <summary>Why the trigger receives no events, or null while it is subscribed.</summary>
@@ -57,6 +60,7 @@ internal sealed class CompiledEventTrigger(CompiledRule rule, int index, Subject
         target.Subscription = subscription;
         target.Source = Source;
         target.SourceRoute = SourceRoute;
+        target.SourceRouteVersion = SourceRouteVersion;
         target.SourceError = SourceError;
         Subscription = null;
     }

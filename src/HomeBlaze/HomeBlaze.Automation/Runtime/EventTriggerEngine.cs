@@ -35,11 +35,16 @@ internal sealed class EventTriggerEngine(GraphRoutes routes, TimeProvider timePr
         {
             Unsubscribe(trigger);
             trigger.SourceRoute = GraphRoute.Empty;
+            trigger.SourceRouteVersion = -1;
         }
     }
 
-    /// <summary>Subscribes the triggers of the active rules again whose path now leads to another subject.</summary>
-    public void Rebind(IReadOnlyList<CompiledRule> rules)
+    /// <summary>
+    /// Subscribes the triggers of the active rules again whose path now leads to another subject; with
+    /// <paramref name="onlyChanged"/>, resolves only the paths that the graph changes taken last may lead elsewhere now,
+    /// see <see cref="GraphRoutes.NeedsResolving"/>.
+    /// </summary>
+    public void Rebind(IReadOnlyList<CompiledRule> rules, bool onlyChanged)
     {
         foreach (var rule in rules)
         {
@@ -50,6 +55,11 @@ internal sealed class EventTriggerEngine(GraphRoutes routes, TimeProvider timePr
 
             foreach (var trigger in rule.EventTriggers)
             {
+                if (onlyChanged && !routes.NeedsResolving(trigger.SourceRoute, trigger.SourceRouteVersion))
+                {
+                    continue;
+                }
+
                 var source = ResolveSource(trigger);
                 if (!ReferenceEquals(source, trigger.Source))
                 {
@@ -87,6 +97,7 @@ internal sealed class EventTriggerEngine(GraphRoutes routes, TimeProvider timePr
         var route = routes.BeginRoute();
         var source = routes.ResolveSubject(trigger.Configuration.SubjectPath, trigger.Rule.Rule, route);
         trigger.SourceRoute = route.ToRoute(trigger.SourceRoute);
+        trigger.SourceRouteVersion = route.ResolvedAt;
         return source;
     }
 

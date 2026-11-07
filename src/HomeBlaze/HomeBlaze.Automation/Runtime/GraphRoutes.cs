@@ -10,7 +10,8 @@ namespace HomeBlaze.Automation.Runtime;
 /// The graph routes of the paths that the worker of an automation resolves ahead of time: resolves them with the resolver
 /// and records their routes with <see cref="GraphRouteWalker"/>, and builds the union that the worker publishes, so that a
 /// graph change reaches the automation only when it can change one of them. A resolution whose walk found something else
-/// than the resolver, or failed, has an unbounded route. Used by the worker only.
+/// than the resolver, or failed, has an unbounded route. On a graph change, only the paths whose routes have a changed
+/// property are resolved again, see <see cref="NeedsResolving"/>. Used by the worker only.
 /// </summary>
 /// <remarks>
 /// A change that commits while paths are resolved is not routed by a route published only afterwards. The structure
@@ -24,6 +25,8 @@ internal sealed class GraphRoutes
     private readonly AutomationChangeReceiver? _changes;
     private readonly GraphRouteBuilder _builder = new();
     private readonly HashSet<PropertyReference> _union = [];
+    private readonly HashSet<PropertyReference> _changed = [];
+    private bool _isFullChange = true;
     private bool _isUnionUnbounded;
     private bool _hasResolved;
     private long _resolvedSince;
@@ -54,11 +57,11 @@ internal sealed class GraphRoutes
 
     public SubjectPathResolver Resolver { get; }
 
-    /// <summary>The structure version of the registry, or a negative number without a registry.</summary>
-    public long StructureVersion => _getStructureVersion();
-
     /// <summary>The route of the canonical path of the automation, which tells when it moved.</summary>
     public GraphRoute Location { get; private set; } = GraphRoute.Empty;
+
+    /// <summary>The structure version that the route of the location was recorded at, see <see cref="GraphRouteBuilder.ResolvedAt"/>.</summary>
+    public long LocationVersion { get; private set; } = -1;
 
     // White-box test hook: runs on the worker before a publication, where a test commits a change after the paths were
     // resolved and before the route that has its property is published.
@@ -67,14 +70,53 @@ internal sealed class GraphRoutes
     /// <summary>Starts the route of a resolution, which <see cref="GraphRouteBuilder.ToRoute"/> completes.</summary>
     public GraphRouteBuilder BeginRoute()
     {
+        var version = _getStructureVersion();
         if (!_hasResolved)
         {
             _hasResolved = true;
-            _resolvedSince = _getStructureVersion();
+            _resolvedSince = version;
         }
 
-        _builder.Clear();
+        _builder.Clear(version);
         return _builder;
+    }
+
+    /// <summary>
+    /// Takes the properties of the graph changes queued since the last graph change that the worker took, or that every
+    /// path may be affected; without a receiver, every path may be.
+    /// </summary>
+    public void TakeGraphChanges()
+    {
+        _changed.Clear();
+        _isFullChange = _changes?.TakeGraphChanges(_changed) ?? true;
+    }
+
+    /// <summary>
+    /// Whether a path with the route, resolved at the structure version <paramref name="resolvedAt"/>, may resolve
+    /// differently after the graph changes taken last: its route has a changed property or is unbounded, or the change
+    /// may affect every path, and the structure of the graph changed since it was resolved.
+    /// </summary>
+    public bool NeedsResolving(GraphRoute route, long resolvedAt)
+    {
+        if (resolvedAt >= 0 && resolvedAt == _getStructureVersion())
+        {
+            return false;
+        }
+
+        if (_isFullChange || route.IsUnbounded)
+        {
+            return true;
+        }
+
+        foreach (var property in route.Properties)
+        {
+            if (_changed.Contains(property))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Resolves the property as <see cref="AutomationPaths.ResolveProperty"/> does and adds its route.</summary>
@@ -129,6 +171,7 @@ internal sealed class GraphRoutes
         }
 
         Location = route.ToRoute(Location);
+        LocationVersion = route.ResolvedAt;
     }
 
     /// <summary>

@@ -164,6 +164,12 @@ internal sealed class AutomationEngine : IRuleRunHost
 
     private static DateTimeOffset? Earliest(DateTimeOffset? first, DateTimeOffset? second) => first is null || second < first ? second : first;
 
+    /// <summary>Takes the properties of the graph changes, when the worker takes a graph change.</summary>
+    public void TakeGraphChanges() => _routes.TakeGraphChanges();
+
+    /// <summary>Whether the graph changes taken last may have moved the automation.</summary>
+    public bool MayHaveMoved => _routes.NeedsResolving(_routes.Location, _routes.LocationVersion);
+
     /// <summary>Records the graph route of the checkpoint path, before the worker reads the path.</summary>
     public void RecordLocation() => _routes.RecordLocation(_automation);
 

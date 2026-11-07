@@ -15,11 +15,25 @@ internal sealed class GraphRouteBuilder
     private readonly HashSet<PropertyReference> _added = [];
     private bool _isUnbounded;
 
+    /// <summary>
+    /// The structure version of the registry read before the resolution started, or -1 for a version read during a
+    /// change or without a registry.
+    /// </summary>
+    public long ResolvedAt { get; private set; } = -1;
+
+    /// <summary>Starts a route of a resolution that starts at <paramref name="structureVersion"/>.</summary>
+    public void Clear(long structureVersion)
+    {
+        Clear();
+        ResolvedAt = structureVersion >= 0 && structureVersion % 2 == 0 ? structureVersion : -1;
+    }
+
     public void Clear()
     {
         _properties.Clear();
         _added.Clear();
         _isUnbounded = false;
+        ResolvedAt = -1;
     }
 
     public void Add(PropertyReference property)

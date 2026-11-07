@@ -381,6 +381,6 @@ public class AutomationPropertyTriggerTests
             inner.OnWatchedPropertyChanged(input);
         }
 
-        public void OnGraphChanged(int chainDepth) => inner.OnGraphChanged(chainDepth);
+        public void OnGraphChanged(PropertyReference property, int chainDepth) => inner.OnGraphChanged(property, chainDepth);
     }
 }

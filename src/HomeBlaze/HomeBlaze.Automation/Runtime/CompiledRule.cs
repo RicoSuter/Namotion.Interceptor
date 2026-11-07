@@ -37,6 +37,9 @@ internal sealed class CompiledRule(string key, AutomationRule rule, ParsedExpres
     /// <summary>The graph route of <see cref="OnlyIfPropertyPaths"/> when they were last resolved.</summary>
     public GraphRoute OnlyIfRoute { get; set; } = GraphRoute.Empty;
 
+    /// <summary>The structure version that <see cref="OnlyIfRoute"/> was recorded at, see <see cref="GraphRouteBuilder.ResolvedAt"/>.</summary>
+    public long OnlyIfRouteVersion { get; set; } = -1;
+
     /// <summary>When Only if of a rule with a pending trigger is evaluated again for the clock, or null for no such instant.</summary>
     public DateTimeOffset? OnlyIfRecheckAt { get; set; }
 
