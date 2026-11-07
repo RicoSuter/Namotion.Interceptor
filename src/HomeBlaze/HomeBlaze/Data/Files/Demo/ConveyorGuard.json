@@ -14,7 +14,7 @@
         {
           "$type": "PropertyTrigger",
           "expression": "/Demo/Conveyor/Temperature > 40",
-          "for": "00:00:30",
+          "for": "30s",
           "rearm": "/Demo/Conveyor/Temperature < 38"
         }
       ],
@@ -41,7 +41,7 @@
         {
           "$type": "PropertyTrigger",
           "expression": "/Demo/Conveyor/Temperature < 37",
-          "for": "00:01:00",
+          "for": "1m",
           "onActivation": "WaitForFalseToTrue"
         }
       ],

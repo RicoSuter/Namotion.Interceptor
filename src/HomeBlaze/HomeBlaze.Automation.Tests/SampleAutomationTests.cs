@@ -28,6 +28,7 @@ public class SampleAutomationTests
         Assert.True(isValid, error);
         Assert.Equal(["cooled", "overheat"], automation.Rules.Keys.Order(StringComparer.Ordinal).ToArray());
         Assert.All(automation.Rules.Values, rule => Assert.Equal(AutomationRuleMode.DryRun, rule.Mode));
+        Assert.Equal(TimeSpan.FromSeconds(30), Assert.IsType<PropertyTrigger>(automation.Rules["overheat"].Triggers[0]).For);
     }
 
     private static string FindRepositoryRoot()

@@ -23,8 +23,12 @@ public sealed record PropertyTrigger : AutomationTrigger
     [Configuration]
     public string Expression { get; init; } = string.Empty;
 
-    /// <summary>How long the expression must stay true before the trigger fires; null or zero fires at once.</summary>
+    /// <summary>
+    /// How long the expression must stay true before the trigger fires; null or zero fires at once. Written as a
+    /// duration such as <c>10m</c>.
+    /// </summary>
     [Configuration]
+    [JsonConverter(typeof(DurationJsonConverter))]
     public TimeSpan? For { get; init; }
 
     /// <summary>The condition that rearms the trigger after it fired, in place of the expression being false.</summary>
