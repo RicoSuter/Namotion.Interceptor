@@ -822,6 +822,8 @@ public class MarkdownFileWriteTests : IDisposable
     }
 
     [Theory]
+    [InlineData("# Notes\n\n:: HomeBlaze.Automation.Automation#guard\n```json\n{ \"Roles\": [ \"Everything\" ] }\n```\n::")]
+    [InlineData("# Notes\n\n:: HomeBlaze.Components.Card\n```json\n{ \"Title\": { \"$type\": \"HomeBlaze.Automation.Automation\", \"Roles\": [ \"Everything\" ] } }\n```\n::")]
     [InlineData("# Notes\n\n:: HomeBlaze.Samples.Motor#motor Name=Motor\n::")]
     [InlineData("# Notes\n\n:: HomeBlaze.Samples.Motor")]
     [InlineData("# Notes\n\n:: HomeBlaze.Samples.Motor\n```json\n{ \"TargetSpeed\": 500 }\n```\n::")]
@@ -1052,6 +1054,9 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Widget Path=missing\n::", "leads to no existing subject")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.ValueTile Path=motor/CurrentSpeed Map=missing\n::", "leads to no existing subject")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Samples.Motor#other Name=Other\n::", "With the permission to edit page layout")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Automation.Automation#guard\n```json\n{ \"Roles\": [ \"Everything\" ] }\n```\n::", "With the permission to edit page layout")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Card\n```json\n{ \"Title\": { \"$type\": \"HomeBlaze.Automation.Automation\", \"Roles\": [ \"Everything\" ] } }\n```\n::", "With the permission to edit page layout")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.GridLayout\n::: Cell\n:::: HomeBlaze.Automation.Automation#guard\n::::\n:::\n::", "With the permission to edit page layout")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Storage.FluentStorageContainer#store StorageType=inmemory\n::", "With the permission to edit page layout")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Card\n```json\n{ \"Title\": { \"$type\": \"HomeBlaze.Samples.Motor\" } }\n```\n::", "With the permission to edit page layout")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Widget\n```json\n{ \"Path\": { \"$type\": \"HomeBlaze.Samples.Motor\" } }\n```\n::", "With the permission to edit page layout")]
@@ -1082,6 +1087,27 @@ public class MarkdownFileWriteTests : IDisposable
         var exception = await Assert.ThrowsAsync<ArgumentException>(() => markdown.ReplaceTextAsync(oldText, newText, CancellationToken.None));
         Assert.Contains(expectedMessage, exception.Message);
         Assert.Equal(PageWithLayout, ReadFile("Plant.md"));
+    }
+
+    [Fact]
+    public async Task WhenAnAutomationBlockIsWrittenIntoAPage_ThenTheWriteIsRejectedAndTheFileIsUnchanged()
+    {
+        // Arrange
+        WriteFile("Notes.md", "# Notes\n");
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
+        const string block = ":: HomeBlaze.Automation.Automation#guard\n```json\n{ \"Roles\": [ \"Everything\" ] }\n```\n::\n";
+
+        // Act
+        var replaced = await Assert.ThrowsAsync<ArgumentException>(
+            () => markdown.ReplaceContentAsync("# Notes\n\n" + block, CancellationToken.None));
+        var inserted = await Assert.ThrowsAsync<ArgumentException>(
+            () => markdown.ReplaceTextAsync("# Notes", "# Notes\n\n" + block, CancellationToken.None));
+
+        // Assert
+        Assert.StartsWith("Blocks cannot be added, changed or removed", replaced.Message);
+        Assert.StartsWith("Blocks cannot be added, changed or removed", inserted.Message);
+        Assert.Equal("# Notes\n", ReadFile("Notes.md"));
     }
 
     private const string PageWithNestedDevices = """
@@ -1560,6 +1586,7 @@ public class MarkdownFileWriteTests : IDisposable
         typeProvider.AddAssembly(typeof(Samples.Motor).Assembly);
         typeProvider.AddAssembly(typeof(Components.Card).Assembly);
         typeProvider.AddAssembly(typeof(History.Blazor.HistoryChart).Assembly);
+        typeProvider.AddAssembly(typeof(Automation.Automation).Assembly);
         typeProvider.AddAssembly(typeof(MarkdownFileWriteTests).Assembly);
 
         var services = new ServiceCollection();
