@@ -144,7 +144,7 @@ internal static class AgentTestContext
         var graphContext = context.TryGetService<ISubjectRegistry>() is not null
             ? context
             : InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        return new AuthorizationService(graphContext, new StateAttributePathProvider());
+        return new AuthorizationService(graphContext, McpAuthorization.PathProvider);
     }
 }
 

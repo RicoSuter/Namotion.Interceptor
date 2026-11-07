@@ -19,6 +19,6 @@ internal static class TestAccessPolicies
             [.. BuiltInRoles.All, .. customRoles],
             SystemRules.Rules,
             AuthorizationActions.All,
-            new StateAttributePathProvider(),
+            McpAuthorization.PathProvider,
             new HomeBlazeMemberTagProvider()).Compile([roleName]));
 }

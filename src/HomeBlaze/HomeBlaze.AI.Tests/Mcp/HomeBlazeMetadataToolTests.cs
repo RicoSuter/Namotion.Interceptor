@@ -154,6 +154,84 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         Assert.Equal("Pump", metadata.GetProperty("value").GetProperty("navTitle").GetString());
     }
 
+    [Theory]
+    [InlineData(PumpFileSizeMetadataPath, false)]
+    [InlineData(PumpFileSizeMetadataPath, true)]
+    [InlineData(PumpMetadataPath, false)]
+    [InlineData(PumpMetadataPath, true)]
+    public async Task WhenARoleDeniesWritingMetadataByPath_ThenOnlyThatMemberIsRefusedWhetherOrNotItHasMetadata(string deniedPath, bool hasMetadata)
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        if (hasMetadata)
+        {
+            WriteFile("Docs/Pump.metadata.json", """{ "navTitle": "Pump", "$properties": { "FileSize": { "comment": "grows" } } }""");
+        }
+
+        var role = new AuthorizationRole
+        {
+            Name = "DeniedMetadataPath",
+            Includes = [BuiltInRoles.OperatorName],
+            Deny = [new PermissionRule { Paths = [deniedPath], Actions = [PermissionAction.Write] }]
+        };
+        var (tools, _) = await CreateToolsAsync(accessPolicy: TestAccessPolicies.Create(role.Name, role));
+
+        // Act
+        var propertyResult = await SetPumpMetadataAsync(tools, "FileSize");
+        var subjectResult = await SetPumpMetadataAsync(tools, null);
+
+        // Assert
+        Assert.Equal(deniedPath == PumpFileSizeMetadataPath, propertyResult.TryGetProperty("error", out _));
+        Assert.Equal(deniedPath == PumpMetadataPath, subjectResult.TryGetProperty("error", out _));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenARoleAllowsWritingTheMetadataOfAPropertyByPath_ThenTheFirstAndLaterWritesSucceed(bool hasMetadata)
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        if (hasMetadata)
+        {
+            WriteFile("Docs/Pump.metadata.json", """{ "$properties": { "FileSize": { "comment": "grows" } } }""");
+        }
+
+        var role = new AuthorizationRole
+        {
+            Name = "FileSizeMetadataOnly",
+            Includes = [BuiltInRoles.ReaderName],
+            Allow =
+            [
+                new PermissionRule { Members = ["SetMetadata"], Actions = [AuthorizationActions.Execute] },
+                new PermissionRule { Paths = [PumpFileSizeMetadataPath], Actions = [PermissionAction.Write] }
+            ]
+        };
+        var (tools, storage) = await CreateToolsAsync(accessPolicy: TestAccessPolicies.Create(role.Name, role));
+
+        // Act
+        var first = await SetPumpMetadataAsync(tools, "FileSize");
+        var second = await SetPumpMetadataAsync(tools, "FileSize");
+        var subjectResult = await SetPumpMetadataAsync(tools, null);
+
+        // Assert
+        Assert.True(first.GetProperty("success").GetBoolean());
+        Assert.True(second.GetProperty("success").GetBoolean());
+        Assert.Equal("Metadata of 'Docs/Pump.json' is not writable. The access policy does not allow it.", subjectResult.GetProperty("error").GetString());
+        var pump = ((VirtualFolder)storage.Children["Docs"]).Children["Pump.json"];
+        Assert.Equal("x", pump.TryGetRegisteredSubject()!.TryGetProperty("FileSize")!.GetMetadata()!["comment"].GetString());
+    }
+
+    private const string PumpMetadataPath = "/Storage/Docs/Pump.json/HomeBlaze:Metadata";
+
+    private const string PumpFileSizeMetadataPath = "/Storage/Docs/Pump.json/FileSize@HomeBlaze:Metadata";
+
+    private static Task<JsonElement> SetPumpMetadataAsync(Dictionary<string, McpToolInfo> tools, string? property) =>
+        CallAsync(tools["invoke_operation"], new
+        {
+            path = "/Storage", method = "SetMetadata", parameters = new { path = "Docs/Pump.json", property, values = new { comment = "x" } }
+        });
+
     [Fact]
     public async Task WhenARoleHidesABranch_ThenSetMetadataRefusesItsSubjectsAsMissingOnes()
     {
