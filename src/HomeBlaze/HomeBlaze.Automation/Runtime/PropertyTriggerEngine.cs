@@ -27,8 +27,9 @@ internal sealed class PropertyTriggerEngine(
     private readonly ObservedValues _values = new();
     private readonly List<CompiledPropertyTrigger> _pending = [];
 
-    // Reused by every resolution, so that one whose result stayed the same allocates nothing.
+    // Reused by every resolution and publication, so that one whose result stayed the same allocates nothing.
     private readonly List<PropertyReference> _resolved = [];
+    private readonly HashSet<PropertyReference> _watchedBuffer = [];
 
     // The latest instant from which an instant when a trigger or Only if is due was derived; a later tick before it means
     // that the clock was set back.
@@ -256,28 +257,44 @@ internal sealed class PropertyTriggerEngine(
     {
         _pending.Clear();
         var now = timeProvider.GetUtcNow();
-        foreach (var trigger in ActiveTriggers(rules))
+        foreach (var rule in rules)
         {
-            if (ResolveDependencies(trigger))
+            if (!rule.IsActivated)
             {
-                _rebound.Add(trigger);
+                continue;
             }
 
-            ScheduleCheck(trigger, now);
-
-            if (trigger.State.Phase == TriggerPhase.Pending)
+            foreach (var trigger in rule.PropertyTriggers)
             {
-                if (ResolveOnlyIfDependencies(trigger.Rule))
+                if (trigger.State.Phase != TriggerPhase.Inactive)
                 {
-                    _reboundOnlyIfRules.Add(trigger.Rule);
+                    RefreshOne(trigger, now);
                 }
-
-                ScheduleOnlyIfRecheck(trigger.Rule, now);
-                _pending.Add(trigger);
             }
         }
 
         PublishWatched(rules, []);
+    }
+
+    private void RefreshOne(CompiledPropertyTrigger trigger, DateTimeOffset now)
+    {
+        if (ResolveDependencies(trigger))
+        {
+            _rebound.Add(trigger);
+        }
+
+        ScheduleCheck(trigger, now);
+
+        if (trigger.State.Phase == TriggerPhase.Pending)
+        {
+            if (ResolveOnlyIfDependencies(trigger.Rule))
+            {
+                _reboundOnlyIfRules.Add(trigger.Rule);
+            }
+
+            ScheduleOnlyIfRecheck(trigger.Rule, now);
+            _pending.Add(trigger);
+        }
     }
 
     public static void Deactivate(CompiledRule rule)
@@ -298,11 +315,6 @@ internal sealed class PropertyTriggerEngine(
     // value from a trigger that reads the property again later.
     private bool TryObserve(PropertyChangedInput change) =>
         _watched.Contains(change.Property) && _values.TryApply(change.Property, change.Value, change.Revision);
-
-    private static IEnumerable<CompiledPropertyTrigger> ActiveTriggers(IReadOnlyList<CompiledRule> rules) =>
-        rules.Where(rule => rule.IsActivated)
-            .SelectMany(rule => rule.PropertyTriggers)
-            .Where(trigger => trigger.State.Phase != TriggerPhase.Inactive);
 
     // A trigger that stays pending requests its run again where requestPending allows it. Allocates nothing when no
     // trigger matches.
@@ -503,18 +515,72 @@ internal sealed class PropertyTriggerEngine(
         return CollectionsMarshal.AsSpan(_resolved).SequenceEqual(previous) ? previous : [.. _resolved];
     }
 
-    private void PublishWatched(IReadOnlyList<CompiledRule> rules, IEnumerable<CompiledPropertyTrigger> activating)
+    private void PublishWatched(IReadOnlyList<CompiledRule> rules, IReadOnlyList<CompiledPropertyTrigger> activating)
     {
-        var watched = ActiveTriggers(rules).Concat(activating).SelectMany(trigger => trigger.Dependencies)
-            .Concat(_pending.SelectMany(trigger => trigger.Rule.OnlyIfDependencies))
-            .ToFrozenSet();
+        _watchedBuffer.Clear();
+        foreach (var rule in rules)
+        {
+            if (rule.IsActivated)
+            {
+                AddDependencies(rule.PropertyTriggers, includeInactive: false);
+            }
+        }
+
+        AddDependencies(activating, includeInactive: true);
+        foreach (var trigger in _pending)
+        {
+            AddToWatchedBuffer(trigger.Rule.OnlyIfDependencies);
+        }
+
         var previous = _watched;
-        _watched = watched;
-        publishWatched(watched);
+        if (!HasSameProperties(previous, _watchedBuffer))
+        {
+            _watched = _watchedBuffer.ToFrozenSet();
+        }
+
+        publishWatched(_watched);
 
         // A value read while its property was not watched may have changed since without a queued change, so a property
         // that becomes watched is read from the graph again.
-        _values.Retain(watched, previous);
+        _values.Retain(_watched, previous);
+    }
+
+    private static bool HasSameProperties(FrozenSet<PropertyReference> set, HashSet<PropertyReference> properties)
+    {
+        if (set.Count != properties.Count)
+        {
+            return false;
+        }
+
+        foreach (var property in properties)
+        {
+            if (!set.Contains(property))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void AddDependencies(IReadOnlyList<CompiledPropertyTrigger> triggers, bool includeInactive)
+    {
+        for (var index = 0; index < triggers.Count; index++)
+        {
+            var trigger = triggers[index];
+            if (includeInactive || trigger.State.Phase != TriggerPhase.Inactive)
+            {
+                AddToWatchedBuffer(trigger.Dependencies);
+            }
+        }
+    }
+
+    private void AddToWatchedBuffer(PropertyReference[] properties)
+    {
+        foreach (var property in properties)
+        {
+            _watchedBuffer.Add(property);
+        }
     }
 
     private static RunRequest CreateRequest(CompiledPropertyTrigger trigger) => new(trigger.Rule, null, trigger.Description, trigger);
