@@ -64,8 +64,18 @@ public class AutomationCompilerTests
         { [], null, Rule(triggers: [new PropertyTrigger { Expression = "event/Gesture == Release" }]), "Rule 'Storm': trigger 1: " + EventOnly },
         { [], null, Rule(triggers: [new PropertyTrigger { Expression = "/Weather/Gust > 8", For = TimeSpan.FromSeconds(-1) }]), "Rule 'Storm': trigger 1: the hold cannot be negative" },
         { [], null, Rule(triggers: [new SubjectEventTrigger { SubjectPath = "/Button" }]), "Rule 'Storm': trigger 1: the event type is missing" },
+        { [], null, Rule(triggers: [new PropertyTrigger { Expression = "" }]), "Rule 'Storm': trigger 1: expected a value at position 0" },
+        { [], null, Rule(triggers: [new PropertyTrigger { Expression = "   " }]), "Rule 'Storm': trigger 1: expected a value at position 3" },
         { [], null, Rule(onlyIf: "event/Gesture == Release"), "Rule 'Storm': Only if: " + EventOnly },
         { [], null, Rule(actions: [new InvokeOperationAction { OperationPath = "" }]), "Rule 'Storm': action 1: the operation path is missing" },
+        { [], null, Rule(actions: [new SetPropertyAction { Id = "set", PropertyPath = "", Value = "1" }]), "Rule 'Storm': action 'set': the property path is missing" },
+        {
+            [], null,
+            Rule(actions: [new SetPropertyAction { Id = "set", PropertyPath = "/Blinds/Level", Value = "{{ /Weather/Gust" }]),
+            "Rule 'Storm': action 'set': value: '{{' is not closed at position 0"
+        },
+        { [], null, Rule(actions: [new SetPropertyAction { Id = "set", PropertyPath = "/Blinds/Level", Value = null! }]), "Rule 'Storm': action 'set': the value is missing" },
+        { [], null, Rule(actions: [EventArgumentAction()]), "Rule 'Storm': action 'notify': argument 'Message': " + EventOnly },
         {
             [], null,
             Rule(actions: [new InvokeOperationAction
@@ -182,23 +192,6 @@ public class AutomationCompilerTests
             error);
     }
 
-    [Theory]
-    [InlineData("", 0)]
-    [InlineData("   ", 3)]
-    public void WhenAPropertyTriggerExpressionIsBlank_ThenItIsRejected(string expression, int position)
-    {
-        // Arrange
-        var rule = Rule(triggers: [new PropertyTrigger { Expression = expression }]);
-
-        // Act
-        var isCompiled = AutomationCompiler.TryCompileRule("storm", rule, [], out var compiled, out var error);
-
-        // Assert
-        Assert.False(isCompiled);
-        Assert.Null(compiled);
-        Assert.Equal($"Rule 'Storm': trigger 1: expected a value at position {position}", error);
-    }
-
     [Fact]
     public void WhenTheHoldIsZero_ThenTheTriggerIsAccepted()
     {
@@ -230,24 +223,6 @@ public class AutomationCompilerTests
         Assert.Equal("A state needs a name", error);
     }
 
-    [Theory]
-    [InlineData("", "1", "the property path is missing")]
-    [InlineData("/Blinds/Level", "{{ /Weather/Gust", "value: '{{' is not closed at position 0")]
-    [InlineData("/Blinds/Level", null, "the value is missing")]
-    public void WhenASetPropertyActionIsInvalid_ThenItIsRejected(string path, string? value, string expected)
-    {
-        // Arrange
-        var rule = Rule(actions: [new SetPropertyAction { Id = "set", PropertyPath = path, Value = value! }]);
-
-        // Act
-        var isCompiled = AutomationCompiler.TryCompileRule("storm", rule, [], out var compiled, out var error);
-
-        // Assert
-        Assert.False(isCompiled);
-        Assert.Null(compiled);
-        Assert.Equal($"Rule 'Storm': action 'set': {expected}", error);
-    }
-
     [Fact]
     public void WhenTheRuleHasAnEventTrigger_ThenAnActionArgumentMayReadTheEvent()
     {
@@ -262,21 +237,6 @@ public class AutomationCompilerTests
         // Assert
         Assert.True(isCompiled, error);
         Assert.NotNull(compiled);
-    }
-
-    [Fact]
-    public void WhenTheRuleHasNoEventTrigger_ThenAnActionArgumentCannotReadTheEvent()
-    {
-        // Arrange
-        var rule = Rule(actions: [EventArgumentAction()]);
-
-        // Act
-        var isCompiled = AutomationCompiler.TryCompileRule("storm", rule, [], out var compiled, out var error);
-
-        // Assert
-        Assert.False(isCompiled);
-        Assert.Null(compiled);
-        Assert.Equal("Rule 'Storm': action 'notify': argument 'Message': " + EventOnly, error);
     }
 
     private static InvokeOperationAction EventArgumentAction() => new()
