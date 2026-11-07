@@ -67,6 +67,24 @@ public class AutomationDraftTests
     }
 
     [Fact]
+    public void WhenARuleIsAddedAfterAnotherWasRemoved_ThenItGetsANameNoOtherRuleHas()
+    {
+        // Arrange
+        var draft = AutomationDraft.From(CreateWasher());
+        var third = draft.AddRule();
+        draft.RemoveRule(draft.Rules[0]);
+        draft.Rules[0].Name = "rule 4";
+
+        // Act
+        var added = draft.AddRule();
+
+        // Assert
+        Assert.Equal("Rule 3", third.Name);
+        Assert.Equal("Rule 5", added.Name);
+        Assert.DoesNotContain(draft.Validate(), error => error.Message.StartsWith("Another rule", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void WhenTheDraftIsRead_ThenItHasTheConfigurationWithTheRulesInRunOrder()
     {
         // Act

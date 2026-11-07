@@ -83,11 +83,18 @@ public sealed class AutomationDraft
 
     public RuleDraft? FindRule(string? key) => key is null ? null : Rules.Find(rule => rule.Key == key);
 
+    /// <summary>Adds a rule named "Rule n" with a number that no other rule has, as the editor compares names without regard to case.</summary>
     public RuleDraft AddRule()
     {
-        var rule = RuleDraft.Create(DraftKeys.NewRuleKey(Rules.Select(existing => existing.Key)), $"Rule {Rules.Count + 1}");
-        Rules.Add(rule);
-        return rule;
+        var number = Rules.Count + 1;
+        while (Rules.Exists(rule => string.Equals(rule.Name?.Trim(), $"Rule {number}", StringComparison.OrdinalIgnoreCase)))
+        {
+            number++;
+        }
+
+        var added = RuleDraft.Create(DraftKeys.NewRuleKey(Rules.Select(existing => existing.Key)), $"Rule {number}");
+        Rules.Add(added);
+        return added;
     }
 
     public void RemoveRule(RuleDraft rule) => Rules.Remove(rule);
