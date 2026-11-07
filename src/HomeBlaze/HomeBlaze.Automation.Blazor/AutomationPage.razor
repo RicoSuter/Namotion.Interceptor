@@ -90,6 +90,12 @@
                         </tbody>
                     </MudSimpleTable>
                 </div>
+                @if (automation.Rules.Values.Any(rule => rule.Mode == AutomationRuleMode.DryRun))
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary" data-testid="automation-last-triggered-note">
+                        Last triggered is when the first action of the last run that was not a dry run started. Cooldowns read it, and dry runs leave it unchanged.
+                    </MudText>
+                }
             }
         </section>
 
