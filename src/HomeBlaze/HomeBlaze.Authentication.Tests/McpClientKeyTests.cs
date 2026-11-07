@@ -29,8 +29,8 @@ public class McpClientKeyTests
         var key = await McpClientKey.CreateAsync(graph.UserManager, mcp);
 
         // Assert
-        Assert.True(await McpClientKey.VerifyAsync(graph.UserManager, mcp, key));
-        Assert.False(await McpClientKey.VerifyAsync(graph.UserManager, mcp, key + "x"));
+        Assert.True(McpClientKey.Matches(await GetStoredHashAsync(graph), key));
+        Assert.False(McpClientKey.Matches(await GetStoredHashAsync(graph), key + "x"));
     }
 
     [Fact]
@@ -45,8 +45,8 @@ public class McpClientKeyTests
         await McpClientKey.RevokeAsync(graph.UserManager, mcp);
 
         // Assert
-        Assert.False(await McpClientKey.HasKeyAsync(graph.UserManager, mcp));
-        Assert.False(await McpClientKey.VerifyAsync(graph.UserManager, mcp, key));
+        Assert.Null(await GetStoredHashAsync(graph));
+        Assert.False(McpClientKey.Matches(await GetStoredHashAsync(graph), key));
     }
 
     [Fact]
@@ -66,8 +66,8 @@ public class McpClientKeyTests
         Assert.NotEqual(first, second);
         Assert.NotNull(stored);
         Assert.DoesNotContain(second, stored);
-        Assert.False(await McpClientKey.VerifyAsync(graph.UserManager, mcp, first));
-        Assert.True(await McpClientKey.VerifyAsync(graph.UserManager, mcp, second));
+        Assert.False(McpClientKey.Matches(await GetStoredHashAsync(graph), first));
+        Assert.True(McpClientKey.Matches(await GetStoredHashAsync(graph), second));
     }
 
     [Fact]
@@ -109,8 +109,7 @@ public class McpClientKeyTests
         Assert.True(graph.Authorization.Users[NameRules.McpUserName].HasKey);
         Assert.False(graph.Authorization.Users[AdminSeeding.AdminUserName].HasKey);
         Assert.Equal([graph.UserStore.GetUserId(NameRules.McpUserName)!], changed);
-        var mcp = (await graph.UserManager.FindByNameAsync(NameRules.McpUserName))!;
-        Assert.True(await McpClientKey.VerifyAsync(graph.UserManager, mcp, result.McpKey!));
+        Assert.True(McpClientKey.Matches(await GetStoredHashAsync(graph), result.McpKey!));
     }
 
     [Fact]
@@ -131,8 +130,7 @@ public class McpClientKeyTests
         Assert.False(access.RequiresKey);
         Assert.False(access.Verify(created.McpKey!));
         Assert.False(graph.Authorization.Users[NameRules.McpUserName].HasKey);
-        var mcp = (await graph.UserManager.FindByNameAsync(NameRules.McpUserName))!;
-        Assert.False(await McpClientKey.HasKeyAsync(graph.UserManager, mcp));
+        Assert.Null(await GetStoredHashAsync(graph));
     }
 
     [Fact]
@@ -261,5 +259,11 @@ public class McpClientKeyTests
         Assert.Equal("Only the built-in user 'mcp' has a key.", create.Message);
         Assert.Equal("Only the built-in user 'mcp' has a key.", revoke.Message);
         Assert.False(((IMcpClientAccess)graph.UserStore).RequiresKey);
+    }
+
+    private static async Task<string?> GetStoredHashAsync(AuthenticationTestGraph graph)
+    {
+        var mcp = (await graph.UserManager.FindByNameAsync(NameRules.McpUserName))!;
+        return await graph.UserManager.GetAuthenticationTokenAsync(mcp, McpClientKey.LoginProvider, McpClientKey.TokenName);
     }
 }

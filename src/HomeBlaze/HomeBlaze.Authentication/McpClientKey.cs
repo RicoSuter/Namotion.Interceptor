@@ -41,25 +41,6 @@ internal static class McpClientKey
         ThrowIfFailed(await userManager.RemoveAuthenticationTokenAsync(mcpUser, LoginProvider, TokenName));
     }
 
-    /// <summary>Gets whether <paramref name="mcpUser"/> has a key.</summary>
-    public static async Task<bool> HasKeyAsync(UserManager<ApplicationUser> userManager, ApplicationUser mcpUser)
-    {
-        ArgumentNullException.ThrowIfNull(userManager);
-        ArgumentNullException.ThrowIfNull(mcpUser);
-
-        return await userManager.GetAuthenticationTokenAsync(mcpUser, LoginProvider, TokenName) is not null;
-    }
-
-    /// <summary>Gets whether <paramref name="presented"/> is the key of <paramref name="mcpUser"/>; false when it has none.</summary>
-    public static async Task<bool> VerifyAsync(UserManager<ApplicationUser> userManager, ApplicationUser mcpUser, string presented)
-    {
-        ArgumentNullException.ThrowIfNull(userManager);
-        ArgumentNullException.ThrowIfNull(mcpUser);
-        ArgumentNullException.ThrowIfNull(presented);
-
-        return Matches(await userManager.GetAuthenticationTokenAsync(mcpUser, LoginProvider, TokenName), presented);
-    }
-
     /// <summary>
     /// Gets whether <paramref name="presented"/> hashes to <paramref name="storedHash"/>, compared in constant time; false
     /// when nothing is stored.
