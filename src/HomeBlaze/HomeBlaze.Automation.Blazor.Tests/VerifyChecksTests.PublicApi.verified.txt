@@ -67,6 +67,8 @@ namespace HomeBlaze.Automation.Blazor.Diagram
         public StateDiagram() { }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? CurrentDetail { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? CurrentState { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.Blazor.Diagram.StateDiagramLayout Layout { get; set; }
@@ -95,6 +97,7 @@ namespace HomeBlaze.Automation.Blazor.Diagram
     }
     public sealed class StateDiagramLayout
     {
+        public const int MaxEdges = 40;
         public const double NodeHeight = 64D;
         public const double NodeWidth = 150D;
         public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Diagram.StateDiagramEdge> Edges { get; }
@@ -102,12 +105,11 @@ namespace HomeBlaze.Automation.Blazor.Diagram
         public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Diagram.StateDiagramNode> Nodes { get; }
         public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Diagram.StateDiagramRule> OtherRules { get; }
         public double Width { get; }
-        public static HomeBlaze.Automation.Blazor.Diagram.StateDiagramLayout Create(System.Collections.Generic.IReadOnlyList<string> states, string? initialState, string? currentState, System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Diagram.StateDiagramRule> rules) { }
+        public static HomeBlaze.Automation.Blazor.Diagram.StateDiagramLayout Create(System.Collections.Generic.IReadOnlyList<string> states, string? initialState, System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Diagram.StateDiagramRule> rules) { }
     }
     public sealed class StateDiagramNode : System.IEquatable<HomeBlaze.Automation.Blazor.Diagram.StateDiagramNode>
     {
-        public StateDiagramNode(string? State, bool IsInitial, bool IsCurrent, double X, double Y) { }
-        public bool IsCurrent { get; init; }
+        public StateDiagramNode(string? State, bool IsInitial, double X, double Y) { }
         public bool IsInitial { get; init; }
         public string? State { get; init; }
         public double X { get; init; }
@@ -115,11 +117,14 @@ namespace HomeBlaze.Automation.Blazor.Diagram
     }
     public sealed class StateDiagramRule : System.IEquatable<HomeBlaze.Automation.Blazor.Diagram.StateDiagramRule>
     {
-        public StateDiagramRule(string Key, string Name, string? InState, System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.AutomationAction> Actions) { }
-        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.AutomationAction> Actions { get; init; }
+        public StateDiagramRule(string Key, string Name, string? InState, string? TargetState, int ActionCount) { }
+        public int ActionCount { get; init; }
         public string? InState { get; init; }
         public string Key { get; init; }
         public string Name { get; init; }
+        public string? TargetState { get; init; }
+        public static HomeBlaze.Automation.Blazor.Diagram.StateDiagramRule Create(string key, string name, string? inState, System.Collections.Generic.IEnumerable<HomeBlaze.Automation.AutomationAction?>? actions) { }
+        public static HomeBlaze.Automation.Blazor.Diagram.StateDiagramRule From(HomeBlaze.Automation.Blazor.Editing.RuleDraft rule) { }
         public static HomeBlaze.Automation.Blazor.Diagram.StateDiagramRule From(string key, HomeBlaze.Automation.AutomationRule rule) { }
     }
     public class StateDiagramText : Microsoft.AspNetCore.Components.ComponentBase

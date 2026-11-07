@@ -15,7 +15,7 @@
         else
         {
             var layout = CreateLayout();
-            <StateDiagram Layout="layout" SelectedState="@_selection.SelectedState" StateClicked="SelectClickedAsync" RuleClicked="OpenRuleAsync" />
+            <StateDiagram Layout="layout" CurrentState="@Automation.CurrentState" SelectedState="@_selection.SelectedState" StateClicked="SelectClickedAsync" RuleClicked="OpenRuleAsync" />
             @if (layout.OtherRules.Count > 0)
             {
                 <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2">
@@ -67,6 +67,7 @@
 </div>
 
 @code {
+    private readonly StateDiagramLayoutCache _layouts = new();
     private StateSelection _selection = null!;
 
     [CascadingParameter] private PendingRows? PendingRows { get; set; }
@@ -85,11 +86,8 @@
 
     protected override void OnInitialized() => _selection = new StateSelection(Draft);
 
-    private StateDiagramLayout CreateLayout() => StateDiagramLayout.Create(
-        Draft.States,
-        Draft.InitialState,
-        Automation.CurrentState,
-        [.. Draft.Rules.Select(rule => new StateDiagramRule(rule.Key, rule.DisplayName, rule.InState, [.. rule.Actions.Select(action => action.Value)]))]);
+    private StateDiagramLayout CreateLayout() =>
+        _layouts.Get(Draft.States, Draft.InitialState, [.. Draft.Rules.Select(StateDiagramRule.From)]);
 
     public void Dispose()
     {

@@ -39,19 +39,20 @@
         @foreach (var node in Layout.Nodes)
         {
             var isSelected = node.State is not null && node.State == SelectedState;
+            var isCurrent = node.State is not null && node.State == CurrentState;
             var isNodeClickable = node.State is not null && StateClicked.HasDelegate;
             <g @onclick="@(() => ClickStateAsync(node))" @onkeydown="@(args => OnKeyDownAsync(args, () => ClickStateAsync(node)))"
                role="@(isNodeClickable ? "button" : null)" tabindex="@(isNodeClickable ? "0" : null)"
                aria-label="@(isNodeClickable ? $"State {node.State}" : null)" aria-pressed="@(isNodeClickable ? isSelected.ToString().ToLowerInvariant() : null)"
                data-automation-clickable="@(isNodeClickable ? "true" : null)" data-testid="@($"automation-state-node-{node.State ?? "any"}")">
                 <rect class="automation-state-box" x="@Format(node.X)" y="@Format(node.Y)" width="@Format(StateDiagramLayout.NodeWidth)" height="@Format(StateDiagramLayout.NodeHeight)" rx="8"
-                      fill="@(node.IsCurrent ? "color-mix(in srgb, var(--mud-palette-primary) 28%, var(--mud-palette-surface))" : "var(--mud-palette-surface)")"
-                      stroke="@(node.IsCurrent || isSelected ? "var(--mud-palette-primary)" : "var(--mud-palette-lines-default)")"
-                      stroke-width="@GetStrokeWidth(node, isSelected)"
+                      fill="@(isCurrent ? "color-mix(in srgb, var(--mud-palette-primary) 28%, var(--mud-palette-surface))" : "var(--mud-palette-surface)")"
+                      stroke="@(isCurrent || isSelected ? "var(--mud-palette-primary)" : "var(--mud-palette-lines-default)")"
+                      stroke-width="@GetStrokeWidth(isCurrent, isSelected)"
                       stroke-dasharray="@(node.State is null ? "4 3" : null)" />
                 <StateDiagramText X="@Format(node.X + (StateDiagramLayout.NodeWidth / 2))" Y="@Format(node.Y + 28)" FontSize="15" FontWeight="500"
                                   Fill="var(--mud-palette-text-primary)">@(node.State ?? "Any state")</StateDiagramText>
-                @if (GetDetail(node) is { } detail)
+                @if (GetDetail(node, isCurrent) is { } detail)
                 {
                     <StateDiagramText X="@Format(node.X + (StateDiagramLayout.NodeWidth / 2))" Y="@Format(node.Y + 48)" FontSize="12"
                                       Fill="var(--mud-palette-text-secondary)">@detail</StateDiagramText>
@@ -75,6 +76,9 @@
     [Parameter] public string? CurrentDetail { get; set; }
 
     [Parameter] public string? SelectedState { get; set; }
+
+    /// <summary>The state the automation is in, which the diagram highlights, or null.</summary>
+    [Parameter] public string? CurrentState { get; set; }
 
     [Parameter] public EventCallback<string> StateClicked { get; set; }
 
@@ -150,9 +154,9 @@
     private Task ClickStateAsync(StateDiagramNode node) =>
         node.State is { } state ? StateClicked.InvokeAsync(state) : Task.CompletedTask;
 
-    private string? GetDetail(StateDiagramNode node)
+    private string? GetDetail(StateDiagramNode node, bool isCurrent)
     {
-        if (node.IsCurrent)
+        if (isCurrent)
         {
             return CurrentDetail ?? "Current";
         }
@@ -163,18 +167,18 @@
     private string GetDescription()
     {
         var states = string.Join(", ", Layout.Nodes.Where(node => node.State is not null).Select(node => node.State));
-        var current = Layout.Nodes.FirstOrDefault(node => node.IsCurrent)?.State;
+        var current = Layout.Nodes.FirstOrDefault(node => node.State is not null && node.State == CurrentState)?.State;
         return current is null ? $"States {states}" : $"States {states}, current state {current}";
     }
 
-    private static string GetStrokeWidth(StateDiagramNode node, bool isSelected)
+    private static string GetStrokeWidth(bool isCurrent, bool isSelected)
     {
         if (isSelected)
         {
             return "3";
         }
 
-        return node.IsCurrent ? "2" : "1";
+        return isCurrent ? "2" : "1";
     }
 
     private static string Format(double value) => value.ToString("0.#", CultureInfo.InvariantCulture);

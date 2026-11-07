@@ -5,13 +5,16 @@ namespace HomeBlaze.Automation.Blazor.Diagram;
 /// <summary>
 /// The picture of the states of an automation and the rules between them: one row of states, preceded by an "Any state"
 /// node when a rule without a state scope changes the state. A rule with exactly one state change, from the state it is
-/// active in to another state, is an edge; an edge to the right arcs above the row and one to the left below it, as high as it takes to clear the labels and arrows below it. Every other rule is listed in <see cref="OtherRules"/>, so the rule list stays the only store
-/// of transitions. The positions are computed and never stored.
+/// active in to another state, is an edge, up to <see cref="MaxEdges"/>; an edge to the right arcs above the row and one to the left below it, as high as it takes to clear the labels and arrows below it. Every other rule is listed in <see cref="OtherRules"/>, so the rule list stays the only store
+/// of transitions. The positions are computed and never stored, and they do not depend on the current state.
 /// </summary>
 public sealed class StateDiagramLayout
 {
     public const double NodeWidth = 150;
     public const double NodeHeight = 64;
+
+    /// <summary>The most edges the diagram draws; the rules after them are listed in <see cref="OtherRules"/>.</summary>
+    public const int MaxEdges = 40;
 
     private const double Margin = 16;
     private const double Gap = 110;
@@ -39,14 +42,13 @@ public sealed class StateDiagramLayout
 
     public double Height { get; }
 
-    public static StateDiagramLayout Create(
-        IReadOnlyList<string> states, string? initialState, string? currentState, IReadOnlyList<StateDiagramRule> rules)
+    public static StateDiagramLayout Create(IReadOnlyList<string> states, string? initialState, IReadOnlyList<StateDiagramRule> rules)
     {
         var transitions = new List<Transition>();
         var others = new List<StateDiagramRule>();
         foreach (var rule in rules)
         {
-            if (GetTransition(rule, states) is { } transition)
+            if (transitions.Count < MaxEdges && GetTransition(rule, states) is { } transition)
             {
                 transitions.Add(transition);
             }
@@ -68,7 +70,7 @@ public sealed class StateDiagramLayout
         var rowTop = Margin + placed.Where(arc => arc.Arc.IsAbove).Select(arc => arc.LabelExtent).DefaultIfEmpty(0).Max();
         var spaceBelow = placed.Where(arc => !arc.Arc.IsAbove).Select(arc => arc.LabelExtent).DefaultIfEmpty(0).Max();
         var nodes = columns
-            .Select((state, column) => new StateDiagramNode(state, state is not null && state == initialState, state is not null && state == currentState, ColumnX(column), rowTop))
+            .Select((state, column) => new StateDiagramNode(state, state is not null && state == initialState, ColumnX(column), rowTop))
             .ToList();
         var edges = placed.OrderBy(arc => arc.Arc.Index).Select(arc => CreateEdge(arc, rowTop)).ToList();
         var width = (Margin * 2) + (columns.Count * NodeWidth) + (Math.Max(columns.Count - 1, 0) * Gap);
@@ -79,13 +81,11 @@ public sealed class StateDiagramLayout
 
     private static Transition? GetTransition(StateDiagramRule rule, IReadOnlyList<string> states)
     {
-        var targets = rule.Actions.OfType<ChangeStateAction>().Select(action => action.TargetState).ToList();
-        if (targets.Count != 1 || !states.Contains(targets[0]))
+        if (rule.TargetState is not { } target || !states.Contains(target))
         {
             return null;
         }
 
-        var target = targets[0];
         if (rule.InState is null)
         {
             return new Transition(rule, null, target);
@@ -164,7 +164,7 @@ public sealed class StateDiagramLayout
         return new StateDiagramEdge(rule.Key, arc.Label, arc.Detail, arc.Transition.From, arc.Transition.To, path, middleX, labelY, rule.Name);
     }
 
-    private static string? DescribeOtherActions(StateDiagramRule rule) => (rule.Actions.Count - 1) switch
+    private static string? DescribeOtherActions(StateDiagramRule rule) => (rule.ActionCount - 1) switch
     {
         <= 0 => null,
         1 => "and 1 more action",
@@ -198,6 +198,9 @@ public sealed class StateDiagramLayout
     private sealed class Lane(bool isAbove)
     {
         private const double RiseStep = 8;
+
+        // An arc that clears nothing below this height is drawn at it, over the others, so that a dense diagram stays cheap.
+        private const int MaxRiseSteps = 64;
         private const int Samples = 48;
         private const double Clearance = 3;
         private const double ArrowClearance = 10;
@@ -214,32 +217,31 @@ public sealed class StateDiagramLayout
 
         public double Fit(double startX, double endX, double labelWidth)
         {
-            var rise = BaseRise;
-            while (true)
+            var curve = new (double X, double Height)[Samples + 1];
+            double rise;
+            Box label;
+            var step = 0;
+            do
             {
-                var curve = Sample(startX, endX, rise);
-                var label = CreateLabelBox((startX + endX) / 2, labelWidth, rise);
-                if (!Conflicts(curve, label))
-                {
-                    _curves.Add(curve);
-                    _labels.Add(label);
-                    return rise;
-                }
-
-                rise += RiseStep;
+                rise = BaseRise + (step * RiseStep);
+                Sample(curve, startX, endX, rise);
+                label = CreateLabelBox((startX + endX) / 2, labelWidth, rise);
+                step++;
             }
+            while (step <= MaxRiseSteps && Conflicts(curve, label));
+
+            _curves.Add(curve);
+            _labels.Add(label);
+            return rise;
         }
 
-        private static (double X, double Height)[] Sample(double startX, double endX, double rise)
+        private static void Sample((double X, double Height)[] points, double startX, double endX, double rise)
         {
-            var points = new (double X, double Height)[Samples + 1];
             for (var index = 0; index <= Samples; index++)
             {
                 var t = (double)index / Samples;
                 points[index] = (startX + ((endX - startX) * t * t * (3 - (2 * t))), 3 * t * (1 - t) * rise);
             }
-
-            return points;
         }
 
         private Box CreateLabelBox(double middleX, double labelWidth, double rise)

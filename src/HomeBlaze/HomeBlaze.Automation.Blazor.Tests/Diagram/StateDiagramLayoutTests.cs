@@ -5,7 +5,7 @@ namespace HomeBlaze.Automation.Blazor.Tests.Diagram;
 
 public class StateDiagramLayoutTests
 {
-    private static StateDiagramRule Rule(string key, string? inState, params AutomationAction[] actions) => new(key, key, inState, actions);
+    private static StateDiagramRule Rule(string key, string? inState, params AutomationAction[] actions) => StateDiagramRule.Create(key, key, inState, actions);
 
     private static ChangeStateAction Enter(string state) => new() { Id = "state-1", TargetState = state };
 
@@ -18,14 +18,13 @@ public class StateDiagramLayoutTests
         var layout = StateDiagramLayout.Create(
             ["Idle", "Running"],
             "Idle",
-            "Running",
             [Rule("started", "Idle", Enter("Running")), Rule("finished", "Running", Notify(), Enter("Idle")), Rule("offline", null, Notify())]);
 
         // Assert
         var idle = layout.Nodes[0];
         var running = layout.Nodes[1];
-        Assert.Equal(("Idle", true, false), (idle.State, idle.IsInitial, idle.IsCurrent));
-        Assert.Equal(("Running", false, true), (running.State, running.IsInitial, running.IsCurrent));
+        Assert.Equal(("Idle", true), (idle.State, idle.IsInitial));
+        Assert.Equal(("Running", false), (running.State, running.IsInitial));
         var started = layout.Edges.Single(edge => edge.RuleKey == "started");
         var finished = layout.Edges.Single(edge => edge.RuleKey == "finished");
         Assert.Equal(("Idle", "Running"), (started.From, started.To));
@@ -42,7 +41,7 @@ public class StateDiagramLayoutTests
     public void WhenARuleChangesTheStateFromAnyState_ThenItsEdgeStartsAtAnAnyStateNode()
     {
         // Act
-        var layout = StateDiagramLayout.Create(["Closed", "Open"], "Closed", null, [Rule("shut", null, Enter("Closed"))]);
+        var layout = StateDiagramLayout.Create(["Closed", "Open"], "Closed", [Rule("shut", null, Enter("Closed"))]);
 
         // Assert
         Assert.Null(layout.Nodes[0].State);
@@ -59,7 +58,6 @@ public class StateDiagramLayoutTests
         var layout = StateDiagramLayout.Create(
             ["A", "B"],
             "A",
-            null,
             [Rule("twice", "A", Enter("B"), Enter("A")), Rule("unknown", "A", Enter("C")), Rule("same", "A", Enter("A")), Rule("outside", "C", Enter("B"))]);
 
         // Assert
@@ -71,7 +69,7 @@ public class StateDiagramLayoutTests
     public void WhenTwoRulesConnectTheSameStates_ThenTheirArcsHaveDifferentHeights()
     {
         // Act
-        var layout = StateDiagramLayout.Create(["A", "B"], "A", null, [Rule("first", "A", Enter("B")), Rule("second", "A", Enter("B"))]);
+        var layout = StateDiagramLayout.Create(["A", "B"], "A", [Rule("first", "A", Enter("B")), Rule("second", "A", Enter("B"))]);
 
         // Assert
         Assert.NotEqual(layout.Edges[0].LabelY, layout.Edges[1].LabelY);
@@ -83,7 +81,7 @@ public class StateDiagramLayoutTests
     {
         // Act
         var layout = StateDiagramLayout.Create(
-            ["A", "B"], "A", null, [Rule("first", "A", Notify(), Enter("B")), Rule("second", "A", Notify(), Enter("B")), Rule("back", "B", Notify(), Enter("A"))]);
+            ["A", "B"], "A", [Rule("first", "A", Notify(), Enter("B")), Rule("second", "A", Notify(), Enter("B")), Rule("back", "B", Notify(), Enter("A"))]);
 
         // Assert
         var labelsAbove = layout.Edges.Where(edge => edge.From == "A").Select(edge => edge.LabelY).Order().ToArray();
@@ -110,7 +108,7 @@ public class StateDiagramLayoutTests
         rules.Add(Rule("reset", null, Enter("S1")));
 
         // Act
-        var layout = StateDiagramLayout.Create(states, "S1", null, rules);
+        var layout = StateDiagramLayout.Create(states, "S1", rules);
 
         // Assert
         Assert.Empty(layout.OtherRules);
@@ -129,6 +127,22 @@ public class StateDiagramLayoutTests
             Assert.DoesNotContain(labels, label => label.Box.Left < node.X + StateDiagramLayout.NodeWidth && node.X < label.Box.Right
                 && label.Box.Top < node.Y + StateDiagramLayout.NodeHeight && node.Y < label.Box.Bottom);
         }
+    }
+
+    [Fact]
+    public void WhenEveryStateChangesToEveryOther_ThenTheDiagramDrawsAtMostItsLimitAndListsTheOtherRules()
+    {
+        // Arrange
+        var states = Enumerable.Range(1, 16).Select(number => $"S{number}").ToArray();
+        var rules = states.SelectMany(from => states.Where(to => to != from).Select(to => Rule($"{from}-{to}", from, Enter(to)))).ToList();
+
+        // Act
+        var layout = StateDiagramLayout.Create(states, "S1", rules);
+
+        // Assert
+        Assert.Equal(StateDiagramLayout.MaxEdges, layout.Edges.Count);
+        Assert.Equal(rules.Count - StateDiagramLayout.MaxEdges, layout.OtherRules.Count);
+        Assert.Equal(rules[0].Key, layout.Edges[0].RuleKey);
     }
 
     private static (double Left, double Right, double Top, double Bottom) GetLabelBox(StateDiagramEdge edge)
