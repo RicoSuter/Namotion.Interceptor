@@ -155,4 +155,27 @@ public class AutomationPreviewTests
         Assert.DoesNotContain("secret", template.Text);
         Assert.DoesNotContain("payload", template.Text);
     }
+
+    [Fact]
+    public async Task WhenTheCallerMayNotReadAValue_ThenThePreviewTreatsItAsMissing()
+    {
+        // Arrange
+        await using var host = await StartAsync();
+        host.Weather.Gust = 12345;
+
+        // Act
+        AutomationExpressionPreview condition;
+        AutomationExpressionPreview template;
+        using (PropertyReadAccess.Enter(property => property.Name != nameof(TestSensor.Gust)))
+        {
+            condition = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/Gust > 8", allowsEvent: false);
+            template = AutomationPreview.Render(host.Automation, "retract", "Gust {{ /Weather/Gust | raw }}", allowsEvent: false);
+        }
+
+        // Assert
+        Assert.Null(condition.Result);
+        Assert.Null(condition.Value);
+        Assert.Null(condition.Text);
+        Assert.Equal("Gust ", template.Text);
+    }
 }

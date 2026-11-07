@@ -122,4 +122,26 @@ public class AutomationRuleTestNowTests
         Assert.Equal(MethodKind.Query, method.Kind);
         Assert.IsType<AutomationRuleTestResult>(result);
     }
+
+    [Fact]
+    public async Task WhenTheCallerMayNotReadAValue_ThenTestNowTreatsItAsMissing()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(("retract", Retract())));
+        host.Weather.Gust = 12345;
+        var rule = host.Rule("retract");
+
+        // Act
+        AutomationRuleTestResult result;
+        using (PropertyReadAccess.Enter(property => property.Name != nameof(TestSensor.Gust)))
+        {
+            result = rule.TestNow();
+        }
+
+        // Assert
+        Assert.Null(result.Triggers[0].Result);
+        Assert.Equal(["/Weather/Gust"], result.Triggers[0].MissingPaths.ToArray());
+        Assert.Equal("/Notifier/SendNotification(notification.Message: \"Gust \")", result.Actions[1]);
+        Assert.DoesNotContain(result.Actions, action => action.Contains("12345", StringComparison.Ordinal));
+    }
 }

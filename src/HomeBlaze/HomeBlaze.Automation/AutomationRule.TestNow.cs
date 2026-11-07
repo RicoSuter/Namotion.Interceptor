@@ -8,7 +8,8 @@ public partial class AutomationRule
 {
     /// <summary>
     /// Evaluates the triggers and the guard against the current values and renders the actions with their arguments, in
-    /// every mode. Executes nothing and records nothing.
+    /// every mode. Executes nothing and records nothing. A value the caller may not read, such as for an agent that calls
+    /// this query through MCP, is missing.
     /// </summary>
     [Query(
         Title = "Test Now",

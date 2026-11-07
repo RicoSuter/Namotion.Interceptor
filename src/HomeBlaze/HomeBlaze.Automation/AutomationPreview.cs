@@ -1,5 +1,6 @@
 using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Components.Abstractions.TimeZones;
+using HomeBlaze.Services;
 using HomeBlaze.Services.Display;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -10,7 +11,8 @@ namespace HomeBlaze.Automation;
 /// Evaluates what an editor shows next to the expressions of a rule: the value and the result of an expression with the
 /// current values of the graph, a rendered template, and the target of an action. Paths start at the saved rule with the
 /// key, as they do when the rule runs; for a rule that is not saved yet, relative paths lead nowhere. Executes and
-/// records nothing.
+/// records nothing. A value that the read check of the calling flow (<see cref="PropertyReadAccess"/>) refuses is
+/// missing, as in page expressions.
 /// </summary>
 public static class AutomationPreview
 {
@@ -67,6 +69,7 @@ public static class AutomationPreview
     private static AutomationEvaluation CreateEvaluation(Automation automation, string? ruleKey)
     {
         return new AutomationEvaluation(
-            automation.PathResolver, GetAnchor(automation, ruleKey), automation.TimeProvider.GetUtcNow(), automation.TimeProvider.LocalTimeZone);
+            automation.PathResolver, GetAnchor(automation, ruleKey), automation.TimeProvider.GetUtcNow(), automation.TimeProvider.LocalTimeZone,
+            canRead: PropertyReadAccess.CanRead);
     }
 }

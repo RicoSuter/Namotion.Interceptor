@@ -1,5 +1,6 @@
 using HomeBlaze.Automation.Events;
 using HomeBlaze.Automation.Expressions;
+using HomeBlaze.Services;
 
 namespace HomeBlaze.Automation.Runtime;
 
@@ -18,7 +19,7 @@ internal static class RuleTester
             return new AutomationRuleTestResult { Error = error };
         }
 
-        var evaluation = new AutomationEvaluation(automation.PathResolver, rule, automation.TimeProvider.GetUtcNow(), automation.TimeProvider.LocalTimeZone);
+        var evaluation = new AutomationEvaluation(automation.PathResolver, rule, automation.TimeProvider.GetUtcNow(), automation.TimeProvider.LocalTimeZone, canRead: PropertyReadAccess.CanRead);
         var guard = compiled.Guard is { } guardExpression ? evaluation.EvaluateCondition(guardExpression) : true;
         IReadOnlyList<string> guardMissingPaths = guard is null ? [.. evaluation.MissingPaths] : [];
         var triggers = compiled.PropertyTriggers.Select(trigger => TestPropertyTrigger(trigger, evaluation))
