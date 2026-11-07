@@ -1,6 +1,6 @@
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Automation.Runtime;
-using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.Automation;
 
@@ -17,7 +17,7 @@ public partial class AutomationRule
         Position = 1)]
     public AutomationRuleTestResult TestNow()
     {
-        var automation = this.TryGetRegisteredSubject()?.Parents is [var parent, ..] ? parent.Property.Subject as Automation : null;
+        var automation = this.TryGetFirstParentOrSelf<Automation>();
         return automation is null
             ? new AutomationRuleTestResult { Error = "The rule is not part of an automation." }
             : RuleTester.Test(automation, this);

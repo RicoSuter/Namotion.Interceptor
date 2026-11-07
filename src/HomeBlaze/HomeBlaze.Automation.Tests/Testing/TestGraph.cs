@@ -7,7 +7,7 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Automation.Tests.Testing;
 
-/// <summary>A subject graph with a root of named children, the registry, operation metadata and path resolution.</summary>
+/// <summary>A subject graph with a root of named children, the registry, parents, operation metadata and path resolution.</summary>
 internal sealed class TestGraph
 {
     public TestGraph()
@@ -15,7 +15,7 @@ internal sealed class TestGraph
         Context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry()
-            .WithLifecycle()
+            .WithParents()
             .WithService<ILifecycleHandler>(() => new MethodPropertyInitializer(), handler => handler is MethodPropertyInitializer)
             .WithService<IPropertyLifecycleHandler>(() => new PropertyAttributeInitializer(), handler => handler is PropertyAttributeInitializer);
         Root = new TestRoot(Context);
