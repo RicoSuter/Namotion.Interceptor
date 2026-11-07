@@ -163,4 +163,46 @@ public class AutomationPendingTriggerTests
         Assert.Equal(1, host.Blinds.CloseCount);
         Assert.Equal(1L, host.Rule("anyState").RunCount);
     }
+
+    [Fact]
+    public async Task WhenTwoTriggersOfARuleFireForOneInput_ThenTheRuleRunsOnceAndNotAgainAfterTheCooldown()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(("storm", Create(
+            "Storm", AutomationRuleMode.On, [When("/Weather/Power > 40"), When("/Weather/Power > 45")], [Invoke("/Blinds/Close")], Cooldown))));
+
+        // Act
+        await SetAsync(host, 50);
+        var status = host.Rule("storm").Status;
+        await AdvanceAsync(host, TimeSpan.FromMinutes(11));
+
+        // Assert
+        Assert.Equal("On: Triggered, waiting to rearm", status);
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(1L, host.Rule("storm").RunCount);
+    }
+
+    [Fact]
+    public async Task WhenTwoWaitingTriggersOfARuleMayRun_ThenTheRuleRunsOnce()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(("storm", Create(
+            "Storm", AutomationRuleMode.On, [When("/Weather/Power > 40"), When("/Weather/Rain > 0")], [Invoke("/Blinds/Close")],
+            "not /Blinds/IsMoving"))));
+        host.Blinds.IsMoving = true;
+        await SetAsync(host, 50);
+        host.Weather.Rain = 1;
+        await host.FlushAsync();
+        var runsWhileMoving = host.Blinds.CloseCount;
+
+        // Act
+        host.Blinds.IsMoving = false;
+        await host.FlushAsync();
+        await AdvanceAsync(host, TimeSpan.FromMinutes(11));
+
+        // Assert
+        Assert.Equal(0, runsWhileMoving);
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal("On: Triggered, waiting to rearm", host.Rule("storm").Status);
+    }
 }

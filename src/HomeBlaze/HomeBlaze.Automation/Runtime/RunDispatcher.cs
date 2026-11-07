@@ -4,7 +4,8 @@ using Microsoft.Extensions.Logging;
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// Runs the requests of one input in rule order and records every run. A request that does not run is not recorded: one
+/// Runs the requests of one input in rule order, each rule at most once, and records every run. A run consumes every
+/// pending property trigger of its rule. A request that does not run is not recorded: one
 /// that Only if rejects, and, once a rule changed the state, the remaining requests of the input; the rule shows why
 /// and the log says it once per reason, and its property trigger stays pending. A request of a rule that is no longer
 /// active is dropped, and so are the requests after a run that a stop canceled. Used by the worker only.
@@ -51,7 +52,7 @@ internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, Au
             return;
         }
 
-        if (!request.Rule.IsActivated || !isActive(request.Rule))
+        if (!request.Rule.IsActivated || !isActive(request.Rule) || summary.HasRun(request.Rule))
         {
             return;
         }
@@ -69,9 +70,15 @@ internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, Au
         }
 
         request.Rule.SkipReason = null;
-        request.Trigger?.State.Consume();
+
+        // Every trigger of the rule that waits for a run had it now, also one of another request of the same input.
+        foreach (var trigger in request.Rule.PropertyTriggers)
+        {
+            trigger.State.Consume();
+        }
+
         _recorder.Record(request.Rule, result);
-        summary.Add(result);
+        summary.Add(request.Rule, result);
     }
 
     private void Skip(RunRequest request, string reason)

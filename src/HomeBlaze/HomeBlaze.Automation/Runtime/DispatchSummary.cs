@@ -5,6 +5,8 @@ namespace HomeBlaze.Automation.Runtime;
 /// </summary>
 internal sealed class DispatchSummary
 {
+    private readonly HashSet<CompiledRule> _ran = [];
+
     public bool ChangedState { get; private set; }
 
     /// <summary>Whether a state change skipped a request of the same input.</summary>
@@ -14,8 +16,12 @@ internal sealed class DispatchSummary
 
     public string? LastError { get; private set; }
 
-    public void Add(RuleRunResult result)
+    /// <summary>Whether the rule ran for this input already.</summary>
+    public bool HasRun(CompiledRule rule) => _ran.Contains(rule);
+
+    public void Add(CompiledRule rule, RuleRunResult result)
     {
+        _ran.Add(rule);
         ChangedState |= result.ChangedState;
         ExecutedActions |= result.ExecutedActions;
         LastError = result.Error ?? LastError;
