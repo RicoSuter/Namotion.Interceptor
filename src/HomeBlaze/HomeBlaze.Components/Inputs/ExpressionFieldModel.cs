@@ -14,12 +14,14 @@ internal sealed class ExpressionFieldModel
 
     private List<ExpressionRow> _rows = [];
     private List<PendingRow?> _pending = [];
+    private string _ownerValue;
 
     /// <param name="text">The expression text.</param>
     public ExpressionFieldModel(string? text)
     {
         Load(text);
         IsAdvanced = !CanShowSimple;
+        _ownerValue = Text;
     }
 
     public char PathSeparator { get; } = '/';
@@ -43,6 +45,26 @@ internal sealed class ExpressionFieldModel
 
     /// <summary>Whether a row holds an edit that is not part of <see cref="Text"/>, because it is invalid or not finished.</summary>
     public bool HasPendingRow => _pending.Exists(pending => pending is not null);
+
+    /// <summary>
+    /// Takes the value of the owner of the field and loads it only when it differs from both the value the owner passed
+    /// last and <see cref="Text"/>. A render can still pass the value from before the latest edit, and loading that would
+    /// undo the edit and show a row that is not finished as advanced text.
+    /// </summary>
+    public void SetValue(string? value)
+    {
+        value ??= string.Empty;
+        if (string.Equals(value, _ownerValue, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _ownerValue = value;
+        if (!string.Equals(value, Text, StringComparison.Ordinal))
+        {
+            Load(value);
+        }
+    }
 
     /// <summary>Takes a text from outside the rows: from the owner of the field or from the advanced input. Never rewrites it.</summary>
     public void Load(string? text)
