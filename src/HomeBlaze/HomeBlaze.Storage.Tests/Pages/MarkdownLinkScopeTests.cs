@@ -9,11 +9,13 @@ public class MarkdownLinkScopeTests
 {
     private static readonly string Namespace = typeof(TestLeaf).Namespace!;
 
-    private static async Task<(MarkdownPageFixture Fixture, IInterceptorSubject Leaf, string Html)> AddPageAsync()
+    private static async Task<(MarkdownPageFixture Fixture, IInterceptorSubject Leaf, string Html)> AddPageAsync(string pagePath = "page.md")
     {
         var fixture = await MarkdownPageFixture.CreateAsync();
-        var page = await fixture.AddPageAsync("page.md", $$$"""
+        var page = await fixture.AddPageAsync(pagePath, $$$"""
             [Other](other.md)
+
+            ![Picture](picture.png)
 
             :: {{{Namespace}}}.TestLeaf#leaf Count=1
             ::
@@ -38,10 +40,64 @@ public class MarkdownLinkScopeTests
         Assert.Contains($"href=\"{link}\"", html);
     }
 
+    [Fact]
+    public async Task WhenLinkIsToAFileNextToThePage_ThenItResolvesLikeAPictureInTheText()
+    {
+        // Arrange
+        var (_, leaf, html) = await AddPageAsync();
+
+        // Act
+        var link = leaf.ResolveScopedLink("picture.png");
+
+        // Assert
+        Assert.Equal("/files/picture.png", link);
+        Assert.Contains($"src=\"{link}\"", html);
+    }
+
+    [Fact]
+    public async Task WhenPageIsInAFolderWithSpecialCharacters_ThenAFileLinkEscapesTheFolderLikeThePictureInTheText()
+    {
+        // Arrange
+        var (_, leaf, html) = await AddPageAsync("Docs/C# notes/page.md");
+
+        // Act
+        var link = leaf.ResolveScopedLink("picture.png");
+
+        // Assert
+        // The browser escapes the space of a widget's attribute itself; Markdig escapes it in the text of the page.
+        Assert.Equal("/files/Docs/C%23 notes/picture.png", link);
+        Assert.Contains("src=\"/files/Docs/C%23%20notes/picture.png\"", html);
+    }
+
+    [Fact]
+    public async Task WhenLinkIsToAFolder_ThenItResolvesToTheFolderInTheBrowser()
+    {
+        // Arrange
+        var (_, leaf, _) = await AddPageAsync();
+
+        // Act
+        var link = leaf.ResolveScopedLink("sub/");
+
+        // Assert
+        Assert.Equal("/browser/sub", link);
+    }
+
+    [Fact]
+    public async Task WhenLinkIsOnlyAQuery_ThenItResolvesToThePageItselfWithTheQuery()
+    {
+        // Arrange
+        var (_, leaf, _) = await AddPageAsync();
+
+        // Act
+        var link = leaf.ResolveScopedLink("?view=edit");
+
+        // Assert
+        Assert.Equal("/pages/page.md?view=edit", link);
+    }
+
     [Theory]
     [InlineData("/pages/Demo/Blocks.md")]
     [InlineData("https://example.com/a.md")]
-    [InlineData("picture.png")]
     public async Task WhenLinkNeedsNoResolving_ThenItIsReturnedAsWritten(string written)
     {
         // Arrange
