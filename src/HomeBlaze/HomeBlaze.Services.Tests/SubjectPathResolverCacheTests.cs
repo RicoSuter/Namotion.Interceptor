@@ -2,6 +2,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Services.Tests.Models;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services.Tests;
@@ -29,6 +30,27 @@ public class SubjectPathResolverCacheTests : SubjectPathResolverTestBase
 
         // Assert
         Assert.Null(path2);
+    }
+
+    [Fact]
+    public void WhenResolverIsNotRegisteredAsALifecycleHandler_ThenItsCacheFollowsADetach()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var child = new TestContainer(context) { Name = "Child" };
+        var root = new TestContainer(context) { Name = "Root", Child = child };
+        var resolver = new SubjectPathResolver(() => root);
+        Assert.Equal("/Child", resolver.GetPath(child, PathStyle.Canonical));
+
+        // Act
+        root.Child = null;
+        var path = resolver.GetPath(child, PathStyle.Canonical);
+
+        // Assert
+        Assert.Null(path);
     }
 
     [Fact]
