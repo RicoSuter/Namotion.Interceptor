@@ -253,7 +253,7 @@ Clients of `/mcp` use the role `Everything` with the system rules, and `McpServe
 
 ## Watch Paths
 
-The state a background run receives from the agent's `WatchPaths` is read with the agent's roles, as the tools read it, so the state of agents and whatever else the roles hide stays out. A watch path that the roles hide as a whole appears in the background message with the error of a path that does not exist, which points to a watch path the roles do not cover; below a watched subject, what the roles hide is left out.
+The state a background run receives from the agent's `WatchPaths` is read with the agent's roles, as the tools read it, so the state of agents and whatever else the roles hide stays out. A watch path that the roles hide as a whole appears in the background message with the error of a path that does not exist, which points to a watch path the roles do not cover; below a watched subject, what the roles hide is left out. A change the roles hide starts no background run either, so the timing of runs does not tell when a hidden value changes.
 
 ---
 

@@ -52,7 +52,7 @@ They apply to every non-human client, agents and `/mcp` alike, and no role lifts
 | Principal | Policy |
 |-----------|--------|
 | Built-in agent | Its `Roles`, default `["Operator"]`, which allows every write and operation the system rules leave, so `AllowedTools` is the gate of an agent with the default. A chat turn and a background run take the policy once, next to the `AllowedTools` snapshot. Roles that yield `DenyAll`, also an empty list, show "Invalid roles: ..." in the agent's status, and the turn runs with tools that deny everything |
-| Watch paths of an agent | The agent's `Roles`, read when a background run starts, so the background message holds only what the agent's tools may read |
+| Watch paths of an agent | The agent's `Roles`, read when a background run starts, so the background message holds only what the agent's tools may read, and a watched change starts a run only when the roles allow to read the property and show its subject |
 | External `/mcp` | `Everything` with the system rules, and `McpServer:ReadOnly` |
 | People in the browser | No policy yet |
 

@@ -180,6 +180,32 @@ public sealed class AgentRolesTests : IAsyncLifetime
         Assert.DoesNotContain("Cellar", message);
     }
 
+    [Fact]
+    public async Task WhenAWatchedChangeIsHiddenByTheRoles_ThenItStartsNoRunWhileAReadableOneDoes()
+    {
+        // Arrange
+        var graph = await CreateGraphAsync("# Notes", ("NoCellar", new Role
+        {
+            Includes = [BuiltInRoles.OperatorName],
+            Deny = [new PermissionRule { Paths = ["/Devices/Cellar/**"], Actions = [PermissionAction.Read] }]
+        }));
+        AddDevices(graph);
+        var logger = new RecordingLogger();
+        var agent = new FakeAgent(graph.AgentServices, logger) { Roles = ["NoCellar"], WatchPaths = ["/Devices"], MinRunInterval = TimeSpan.Zero };
+        await AttachAndWaitForStartAsync(graph, agent);
+        var devices = (AgentTestRoot)graph.Root.Children["Devices"];
+
+        // Act
+        ((TestThing)devices.Children["Cellar"]).Temperature = 5;
+        ((TestThing)devices.Children["Kitchen"]).Temperature = 25;
+        await AsyncTestHelpers.WaitUntilAsync(() => agent.RunCount == 1, message: "The readable change should start a run.");
+
+        // Assert
+        // Changes are evaluated in order, so once the later readable change has started a run, the hidden one was evaluated too.
+        var runRequest = Assert.Single(logger.Entries, entry => entry.Message.Contains("requests a background run", StringComparison.Ordinal));
+        Assert.Contains("/Devices/Kitchen", runRequest.Message);
+    }
+
     [Theory]
     [InlineData(BuiltInRoles.ReaderName, false)]
     [InlineData(BuiltInRoles.OperatorName, true)]
