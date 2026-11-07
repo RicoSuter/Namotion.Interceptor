@@ -22,6 +22,10 @@ internal sealed class ActionExecutor(
     /// <summary>How long an operation may run before its cancellation is requested.</summary>
     public static readonly TimeSpan Timeout = TimeSpan.FromMinutes(1);
 
+    /// <summary>Creates the executor of the rules of the automation, with its services.</summary>
+    public static ActionExecutor For(Automation automation) =>
+        new(automation.PathResolver, automation.Authorizer, automation.ServiceProvider, automation.TimeProvider);
+
     public async Task<ActionResult> InvokeOperationAsync(InvokeOperationAction action, ActionScope scope, CancellationToken cancellationToken)
     {
         if (!TryPrepareOperation(action, scope, cancellationToken, out var operation, out var error))
@@ -31,11 +35,19 @@ internal sealed class ActionExecutor(
 
         using var timeout = new CancellationTokenSource(Timeout, timeProvider);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
+        using var abandon = new CancellationTokenSource();
+        using var onStop = cancellationToken.Register(() => AbandonWhenBoth(timeout.Token, abandon));
+        using var onTimeout = timeout.Token.Register(() => AbandonWhenBoth(cancellationToken, abandon));
         try
         {
-            // Awaited also after the timeout, so that an operation that ignores its cancellation never overlaps a later run.
-            await operation.Method.InvokeAsync(operation.Arguments, serviceProvider, linked.Token);
+            // Awaited also after the timeout, so that an operation that ignores its cancellation never overlaps a later
+            // run; only a stop gives up on it, once it timed out, since no later run follows.
+            await operation.Method.InvokeAsync(operation.Arguments, serviceProvider, linked.Token).WaitAsync(abandon.Token);
             return ActionResult.Success(operation.Description);
+        }
+        catch (OperationCanceledException) when (abandon.IsCancellationRequested)
+        {
+            return ActionResult.Failure($"{operation.Description} did not end within {Timeout.TotalSeconds:0} seconds and was abandoned, since the automation stopped");
         }
         catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
@@ -65,12 +77,30 @@ internal sealed class ActionExecutor(
         }
     }
 
-    /// <summary>Describes the call with its bound arguments without running it, or why it could not run.</summary>
-    public string Describe(InvokeOperationAction action, ActionScope scope) =>
+    // Each token checks the other when it is canceled, so that whichever comes second abandons the operation.
+    private static void AbandonWhenBoth(CancellationToken other, CancellationTokenSource abandon)
+    {
+        if (other.IsCancellationRequested)
+        {
+            abandon.Cancel();
+        }
+    }
+
+    /// <summary>Describes the action with its bound arguments without running it, or why it could not run.</summary>
+    public string Describe(AutomationAction action, ActionScope scope) => action switch
+    {
+        InvokeOperationAction invoke => Describe(invoke, scope),
+        SetPropertyAction set => Describe(set, scope),
+        ChangeStateAction change => DescribeChangeState(change),
+        _ => "an action of an unknown type"
+    };
+
+    public static string DescribeChangeState(ChangeStateAction change) => $"ChangeState({change.TargetState})";
+
+    private string Describe(InvokeOperationAction action, ActionScope scope) =>
         TryPrepareOperation(action, scope, CancellationToken.None, out var operation, out var error) ? operation.Description : NameTarget(action.OperationPath, error);
 
-    /// <summary>Describes the write with its bound value without running it, or why it could not run.</summary>
-    public string Describe(SetPropertyAction action, ActionScope scope) =>
+    private string Describe(SetPropertyAction action, ActionScope scope) =>
         TryPrepareWrite(action, scope, out var write, out var error) ? write.Description : NameTarget(action.PropertyPath, error);
 
     // Refusals already start with the path; binding errors name only the argument.

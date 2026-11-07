@@ -171,8 +171,8 @@ public class AutomationValidatorTests
     {
         // Arrange
         var graph = new TestGraph();
-        var services = new AutomationServices(graph.Resolver, TimeProvider.System, new AllowAllAutomationAuthorizer(), new ServiceCollection().BuildServiceProvider());
-        using var automation = new Automation(services, NullLogger<Automation>.Instance)
+        using var automation = new Automation(
+            graph.Resolver, TimeProvider.System, new AllowAllAutomationAuthorizer(), new ServiceCollection().BuildServiceProvider(), NullLogger<Automation>.Instance)
         {
             Rules = new Dictionary<string, AutomationRule> { ["b"] = Rule("B"), ["a"] = Rule("A"), ["c"] = Rule("C") },
             RuleOrder = ["c", "missing"]

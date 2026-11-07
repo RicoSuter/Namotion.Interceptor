@@ -1,4 +1,5 @@
 using System.Reactive;
+using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Automation.Tests.Testing;
 using Namotion.Interceptor.Testing;
@@ -152,16 +153,182 @@ public class AutomationRunTests
             automation.Rules = Keyed(("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
         host.Weather.Gust = 9;
         await host.FlushAsync();
+        await AdvanceAsync(host, TimeSpan.FromSeconds(5));
         var sizeAfterOneRun = new FileInfo(host.CheckpointPath).Length;
 
         // Act
         host.Weather.Gust = 5;
         host.Weather.Gust = 9;
         await host.FlushAsync();
+        await AdvanceAsync(host, TimeSpan.FromSeconds(5));
 
         // Assert
         Assert.Equal(sizeAfterOneRun, new FileInfo(host.CheckpointPath).Length);
-        Assert.Contains("\"runCount\": 2", await File.ReadAllTextAsync(host.CheckpointPath));
+        Assert.Equal(2L, await ReadRunCountAsync(host, "retract"));
+    }
+
+    [Fact]
+    public async Task WhenRulesRun_ThenTheirRunsAreWrittenAtMostEveryFiveSeconds()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+            automation.Rules = Keyed(("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        host.Weather.Gust = 5;
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+
+        // Act
+        await AdvanceAsync(host, TimeSpan.FromSeconds(4));
+        var writtenAfterFourSeconds = await ReadRunCountAsync(host, "retract");
+        await AdvanceAsync(host, TimeSpan.FromSeconds(1));
+
+        // Assert
+        Assert.Equal(2L, host.Rule("retract").RunCount);
+        Assert.Null(writtenAfterFourSeconds);
+        Assert.Equal(2L, await ReadRunCountAsync(host, "retract"));
+    }
+
+    [Fact]
+    public async Task WhenTheAutomationStops_ThenTheRunsNotWrittenYetAreWritten()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+            automation.Rules = Keyed(("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+
+        // Act
+        await host.StopAsync();
+
+        // Assert
+        Assert.Equal(1L, await ReadRunCountAsync(host, "retract"));
+    }
+
+    [Fact]
+    public async Task WhenTheStateChanges_ThenTheRunsNotWrittenYetAreWrittenWithIt()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Idle", "Running"];
+            automation.InitialState = "Idle";
+            automation.Rules = Keyed(
+                ("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close"))),
+                ("started", Create("Started", AutomationRuleMode.On, [When("/Weather/Power > 500")], [Enter("Running")], inState: "Idle")));
+        });
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+
+        // Act
+        host.Weather.Power = 600;
+        await host.FlushAsync();
+
+        // Assert
+        using var checkpoint = JsonDocument.Parse(await File.ReadAllTextAsync(host.CheckpointPath));
+        Assert.Equal("Running", checkpoint.RootElement.GetProperty("currentState").GetString());
+        Assert.Equal(1L, await ReadRunCountAsync(host, "retract"));
+    }
+
+    [Fact]
+    public async Task WhenTheRunsCannotBeWritten_ThenTheAutomationShowsTheError()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Idle"];
+            automation.InitialState = "Idle";
+            automation.Rules = Keyed(("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close"))));
+        });
+        File.Delete(host.CheckpointPath);
+        Directory.CreateDirectory(host.CheckpointPath);
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        var statusAfterTheRun = host.Automation.Status;
+
+        // Act
+        await AdvanceAsync(host, TimeSpan.FromSeconds(5));
+
+        // Assert
+        Assert.Equal(ServiceStatus.Running, statusAfterTheRun);
+        Assert.Equal(1L, host.Rule("retract").RunCount);
+        Assert.Equal(ServiceStatus.Error, host.Automation.Status);
+        Assert.StartsWith("The runs could not be saved and are saved again in 5 seconds", host.Automation.StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenTheRunsCannotBeWrittenRepeatedlyAndThenAreWritten_ThenTheErrorIsLoggedOnceAndCleared()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Idle"];
+            automation.InitialState = "Idle";
+            automation.Rules = Keyed(("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close"))));
+        });
+        File.Delete(host.CheckpointPath);
+        Directory.CreateDirectory(host.CheckpointPath);
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        for (var retry = 0; retry < 4; retry++)
+        {
+            await AdvanceAsync(host, TimeSpan.FromSeconds(5));
+        }
+
+        var messageWhileFailing = host.Automation.StatusMessage;
+
+        // Act
+        Directory.Delete(host.CheckpointPath);
+        await AdvanceAsync(host, TimeSpan.FromSeconds(5));
+
+        // Assert
+        Assert.StartsWith("The runs could not be saved", messageWhileFailing);
+        Assert.Single(host.Logger.Messages, message => message.Contains("The runs could not be saved", StringComparison.Ordinal));
+        Assert.True(File.Exists(host.CheckpointPath));
+        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
+        Assert.Null(host.Automation.StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenARequestDoesNotRunAfterAFailedRun_ThenTheErrorStaysShown()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("jam", On("Jam", When("/Weather/Rain > 0"), Invoke("/Blinds/Jam"))),
+            ("close", Create("Close", AutomationRuleMode.On, [When("/Weather/Gust > 8")], [Invoke("/Blinds/Close")], guard: "/Blinds/IsLocked"))));
+        host.Weather.Rain = 1;
+        await host.FlushAsync();
+        var messageAfterTheFailure = host.Automation.StatusMessage;
+
+        // Act
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+
+        // Assert
+        Assert.NotNull(messageAfterTheFailure);
+        Assert.Equal(messageAfterTheFailure, host.Automation.StatusMessage);
+        Assert.Equal(ServiceStatus.Error, host.Automation.Status);
+        Assert.Equal(0L, host.Rule("close").RunCount);
+    }
+
+    private static async Task AdvanceAsync(AutomationTestHost host, TimeSpan time)
+    {
+        host.Time.Advance(time);
+        await host.FlushAsync();
+    }
+
+    private static async Task<long?> ReadRunCountAsync(AutomationTestHost host, string ruleKey)
+    {
+        if (!File.Exists(host.CheckpointPath))
+        {
+            return null;
+        }
+
+        using var checkpoint = JsonDocument.Parse(await File.ReadAllTextAsync(host.CheckpointPath));
+        return checkpoint.RootElement.TryGetProperty("rules", out var rules) && rules.TryGetProperty(ruleKey, out var rule)
+            ? rule.GetProperty("runCount").GetInt64()
+            : null;
     }
 
     [Fact]

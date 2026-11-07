@@ -1,3 +1,4 @@
+using System.Text.Json;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -47,8 +48,9 @@ public class AutomationRuleSerializationTests
         var copy = (AutomationRule)serializer.Deserialize(json)!;
 
         // Assert
-        Assert.Contains("\"$type\": \"PropertyTrigger\"", json);
-        Assert.Contains("\"$type\": \"InvokeOperation\"", json);
+        using var document = JsonDocument.Parse(json);
+        Assert.Equal("PropertyTrigger", document.RootElement.GetProperty("triggers")[0].GetProperty("$type").GetString());
+        Assert.Equal("InvokeOperation", document.RootElement.GetProperty("actions")[1].GetProperty("$type").GetString());
         Assert.Equal(rule.Triggers, copy.Triggers);
         Assert.Equal(rule.Actions[2], copy.Actions[2]);
         Assert.Equal(rule.Actions[3], copy.Actions[3]);

@@ -5,16 +5,25 @@ namespace HomeBlaze.Automation.Runtime;
 /// </summary>
 internal sealed class DispatchSummary
 {
+    private readonly HashSet<CompiledRule> _ran = [];
+
     public bool ChangedState { get; private set; }
+
+    /// <summary>Whether a state change skipped a request of the same input.</summary>
+    public bool SkippedForStateChange { get; set; }
 
     public bool ExecutedActions { get; private set; }
 
     public string? LastError { get; private set; }
 
-    public void Add(RuleRunResult result, string? saveError)
+    /// <summary>Whether the rule ran for this input already.</summary>
+    public bool HasRun(CompiledRule rule) => _ran.Contains(rule);
+
+    public void Add(CompiledRule rule, RuleRunResult result)
     {
+        _ran.Add(rule);
         ChangedState |= result.ChangedState;
         ExecutedActions |= result.ExecutedActions;
-        LastError = saveError ?? result.Error ?? LastError;
+        LastError = result.Error ?? LastError;
     }
 }

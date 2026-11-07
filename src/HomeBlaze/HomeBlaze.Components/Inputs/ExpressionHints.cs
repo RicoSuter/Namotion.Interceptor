@@ -9,10 +9,7 @@ namespace HomeBlaze.Components.Inputs;
 /// </summary>
 internal static class ExpressionHints
 {
-    private static readonly string[] Variables =
-    [
-        ExpressionVariables.Now, ExpressionVariables.Time, ExpressionVariables.Event, ExpressionVariables.Subject, ExpressionVariables.Value
-    ];
+    private static readonly string[] Variables = ["now", "time", "event", ExpressionVariables.Subject, ExpressionVariables.Value];
 
     private static readonly string[] ArithmeticSymbols = ["+", "-", "*", "/"];
 

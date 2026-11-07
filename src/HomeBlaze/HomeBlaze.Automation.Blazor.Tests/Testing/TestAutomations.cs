@@ -9,9 +9,12 @@ internal static class TestAutomations
 {
     public static Automation Create(Action<Automation>? configure = null)
     {
-        var services = new AutomationServices(
-            new SubjectPathResolver(() => null), TimeProvider.System, new AllowAllAutomationAuthorizer(), new ServiceCollection().BuildServiceProvider());
-        var automation = new Automation(services, NullLogger<Automation>.Instance);
+        var automation = new Automation(
+            new SubjectPathResolver(() => null),
+            TimeProvider.System,
+            new AllowAllAutomationAuthorizer(),
+            new ServiceCollection().BuildServiceProvider(),
+            NullLogger<Automation>.Instance);
         configure?.Invoke(automation);
         return automation;
     }

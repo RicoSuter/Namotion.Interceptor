@@ -12,6 +12,9 @@ internal interface IRuleRunHost
 
     string? CurrentState { get; }
 
+    /// <summary>Runs the write unless a stop abandoned the worker, which then writes nothing anymore; returns whether it ran.</summary>
+    bool RunUnlessAbandoned(Action write);
+
     /// <summary>
     /// Enters the state after the checkpoint with it was written; returns why it did not, or null. Entering the current
     /// state does nothing.

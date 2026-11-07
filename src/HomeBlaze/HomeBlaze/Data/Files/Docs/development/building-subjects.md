@@ -162,7 +162,7 @@ The subject keeps the value from decreasing: if the API reports periodic buckets
 
 ### Readings Are Null Until Observed
 
-A property that holds a reading of a device or a service, such as a temperature, a power or the state of a door, is nullable and stays `null` until the subject received the value from its source. Do not restore it at startup from a cache, a file or the history, and set it back to `null` when the source stops reporting it, as an integration does for a sensor that went offline. [Automations](../administration/automation.md#unknown-values) and page expressions treat `null` as unknown: a rule over a reading waits after a restart until the device reports, instead of acting on a value from before the restart. A subject whose values can be old should also implement `ILastUpdatedProvider`, so that a rule can check their age, as in `now - /Devices/Meter/LastUpdated < 1m`.
+A property that holds a reading of a device or a service, such as a temperature, a power or the state of a door, is nullable and `null` until the subject received the value from its source. A subject must not restore readings at startup from a cache, a file or the history, and should set a reading back to `null` when it knows that its source is offline. [Automations](../administration/automation.md#unknown-values) and page expressions treat `null` as unknown, so a rule over a reading waits after a restart until the device reports. Where values can get stale, implementing `ILastUpdatedProvider` is recommended, so that a rule can check their age, as in `now - /Devices/Meter/LastUpdated < 1m`.
 
 ### Interface Inheritance and Attribute Merging
 

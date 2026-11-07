@@ -52,10 +52,35 @@ public class ObservedValuesTests
         sensor.Gust = 4;
 
         // Act
-        values.Retain(FrozenSet<PropertyReference>.Empty);
+        values.Retain(FrozenSet<PropertyReference>.Empty, FrozenSet<PropertyReference>.Empty);
         var value = values.GetValue(property);
 
         // Assert
         Assert.Equal(4.0, value);
+    }
+
+    [Fact]
+    public void WhenAPropertyBecomesWatched_ThenItsValueIsReadFromTheGraphAgainAndAWatchedOneIsKept()
+    {
+        // Arrange
+        var graph = new TestGraph();
+        var sensor = new TestSensor();
+        graph.Add("Weather", sensor);
+        var gust = sensor.TryGetRegisteredProperty(nameof(TestSensor.Gust))!;
+        var rain = sensor.TryGetRegisteredProperty(nameof(TestSensor.Rain))!;
+        var values = new ObservedValues();
+        sensor.Gust = 9;
+        sensor.Rain = 1;
+        values.GetValue(gust);
+        values.GetValue(rain);
+        sensor.Gust = 4;
+        sensor.Rain = 2;
+
+        // Act
+        values.Retain(new[] { gust.Reference, rain.Reference }.ToFrozenSet(), new[] { rain.Reference }.ToFrozenSet());
+
+        // Assert
+        Assert.Equal(4.0, values.GetValue(gust));
+        Assert.Equal(1.0, values.GetValue(rain));
     }
 }

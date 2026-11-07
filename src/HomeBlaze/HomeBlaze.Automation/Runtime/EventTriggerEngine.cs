@@ -12,10 +12,17 @@ namespace HomeBlaze.Automation.Runtime;
 /// </summary>
 internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvider timeProvider, AutomationInputQueue queue)
 {
+    /// <summary>Subscribes the triggers of the rule, except one that a Save carried over and whose path still leads to its source.</summary>
     public void Activate(CompiledRule rule)
     {
         foreach (var trigger in rule.EventTriggers)
         {
+            if (trigger.Subscription is not null && ReferenceEquals(ResolveSource(trigger), trigger.Source))
+            {
+                continue;
+            }
+
+            Unsubscribe(trigger);
             Subscribe(trigger);
         }
     }
@@ -43,8 +50,8 @@ internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvi
 
     public IReadOnlyList<RunRequest> OnEvent(EventInput input)
     {
-        var trigger = input.Trigger;
-        if (input.Generation != trigger.Generation || trigger.Subscription is null || !trigger.Rule.IsActivated)
+        var trigger = input.Subscription.Trigger;
+        if (!ReferenceEquals(trigger.Subscription, input.Subscription) || !trigger.Rule.IsActivated)
         {
             return [];
         }
@@ -68,7 +75,6 @@ internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvi
 
     private void Subscribe(CompiledEventTrigger trigger)
     {
-        trigger.Generation++;
         var source = ResolveSource(trigger);
         trigger.Source = source;
         if (source is null)
@@ -84,15 +90,17 @@ internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvi
         }
 
         trigger.SourceError = null;
-        var generation = trigger.Generation;
-        trigger.Subscription = EventSources.Subscribe(source, eventType, payload =>
-            queue.TryEnqueue(new EventInput(trigger, generation, new CapturedEvent(source, payload), AutomationInputQueue.CausedChainDepth)));
+
+        // Assigned before the source is subscribed, so that an event it publishes at once is not taken for a stale one.
+        var subscription = new EventTriggerSubscription(trigger);
+        trigger.Subscription = subscription;
+        subscription.Handle = EventSources.Subscribe(source, eventType, payload =>
+            queue.TryEnqueue(new EventInput(subscription, new CapturedEvent(source, payload), AutomationInputQueue.CausedChainDepth)));
     }
 
     private static void Unsubscribe(CompiledEventTrigger trigger)
     {
         trigger.Subscription?.Dispose();
         trigger.Subscription = null;
-        trigger.Generation++;
     }
 }

@@ -23,15 +23,23 @@ internal sealed class AutomationEngine : IRuleRunHost
     private int _appliedConfigurationVersion = -1;
     private bool _hasConfigurationError;
 
-    public AutomationEngine(Automation automation, AutomationInputQueue queue, AutomationStateKeeper keeper, ILogger logger)
+    // An unreadable checkpoint stays shown after successful runs, until a reset or a valid configuration is applied.
+    private bool _hasCheckpointError;
+    // Set by a stop under the lock of _status, which the worker holds while it writes the automation and its rules, so
+    // that an abandoned worker writes nothing after the stop showed the rules as stopped.
+    private bool _isAbandoned;
+    private string? _runWriteError;
+    private readonly RuleStatusPublisher _statusPublisher = new();
+
+    /// <summary>Creates the engine, whose property triggers publish their watched set to <paramref name="changes"/>.</summary>
+    public AutomationEngine(Automation automation, AutomationInputQueue queue, AutomationStateKeeper keeper, ILogger logger, AutomationChangeReceiver changes)
     {
-        var services = automation.Services;
         _automation = automation;
         _keeper = keeper;
         _logger = logger;
-        _triggers = new AutomationTriggers(services, queue, logger, () => Name);
-        _dispatcher = new RunDispatcher(this, services, keeper, logger);
-        _states = new StateTransitions(automation, keeper, services.TimeProvider, logger);
+        _triggers = AutomationTriggers.For(automation, queue, logger, () => Name, changes.PublishWatched);
+        _dispatcher = new RunDispatcher(this, automation, keeper, logger);
+        _states = new StateTransitions(automation, keeper, automation.TimeProvider, logger);
         _status = new AutomationStatusReporter(automation, logger);
     }
 
@@ -41,23 +49,37 @@ internal sealed class AutomationEngine : IRuleRunHost
 
     public string? CurrentState => _automation.CurrentState;
 
-    public bool IsWatched(PropertyReference property) => _triggers.IsWatched(property);
+    public bool RunUnlessAbandoned(Action write)
+    {
+        lock (_status)
+        {
+            if (_isAbandoned)
+            {
+                return false;
+            }
+
+            write();
+            return true;
+        }
+    }
 
     /// <summary>Restores the checkpoint without a state-change event and applies the configuration.</summary>
     public void Start()
     {
-        var checkpoint = _keeper.Load(out var error);
-        if (error is not null)
-        {
-            _status.Fail($"The checkpoint could not be read, so the automation starts from its initial state: {error}");
-        }
-        else if (checkpoint is null)
+        _hasCheckpointError = false;
+        var checkpoint = _keeper.Load(_automation.TimeProvider.GetUtcNow(), out var error);
+        if (error is null && checkpoint is null)
         {
             _logger.LogInformation("The automation {Automation} has no checkpoint at {Path} and starts from its initial state.", Name, _keeper.Store.FilePath);
         }
 
         Begin(checkpoint);
-        if (_automation.Status == ServiceStatus.Starting)
+        if (error is not null)
+        {
+            _hasCheckpointError = true;
+            _status.Fail(error);
+        }
+        else if (_automation.Status == ServiceStatus.Starting)
         {
             _status.SetRunning();
         }
@@ -71,9 +93,11 @@ internal sealed class AutomationEngine : IRuleRunHost
     public void StartFresh()
     {
         Unload();
+        _hasCheckpointError = false;
+        _runWriteError = null;
 
         // Written at once, so that an older file at the new path is not read at the next start.
-        if (_keeper.TryPersist(_keeper.Persisted) is { } error)
+        if (_keeper.TryPersist(_keeper.Current) is { } error)
         {
             _status.Fail($"The checkpoint at the new path could not be written: {error}");
         }
@@ -118,22 +142,57 @@ internal sealed class AutomationEngine : IRuleRunHost
         }
     }
 
-    public Task OnPropertyChangedAsync(PropertyChangedInput input, CancellationToken cancellationToken) =>
-        DispatchAsync(_triggers.OnPropertyChanged(_snapshot.Rules, input), cancellationToken);
-
-    public Task OnTickAsync(CancellationToken cancellationToken) =>
-        DispatchAsync(_triggers.OnTick(_snapshot.Rules), cancellationToken);
-
-    public Task OnEventAsync(EventInput input, CancellationToken cancellationToken) =>
-        DispatchAsync(_triggers.OnEvent(input), cancellationToken);
-
-    public Task OnGraphChangedAsync(CancellationToken cancellationToken) =>
-        DispatchAsync(_triggers.OnGraphChanged(_snapshot.Rules), cancellationToken);
-
-    public Task OnActivationAsync(ActivationInput input, CancellationToken cancellationToken)
+    /// <summary>
+    /// Gets when the next tick is due: for a trigger or a guard that is due, to write the runs or to log drops; null when nothing is,
+    /// so that an automation without holds, clock reads, waiting rules or unwritten runs is never woken up.
+    /// </summary>
+    public DateTimeOffset? GetNextDueAt(DateTimeOffset now)
     {
-        var rules = input.Rules.Where(rule => rule.IsActivated && _snapshot.Rules.Contains(rule)).ToList();
-        return DispatchAsync(_triggers.OnActivation(rules, _snapshot.Rules), cancellationToken);
+        return Earliest(Earliest(_triggers.GetNextDueAt(_snapshot.Rules, now), _keeper.RunsDueAt), _status.UnloggedFaultsDueAt);
+    }
+
+    private static DateTimeOffset? Earliest(DateTimeOffset? first, DateTimeOffset? second) => first is null || second < first ? second : first;
+
+    /// <summary>
+    /// Runs the requests of an input of the triggers: a property change, a tick, which also writes the runs that are due,
+    /// an event, a graph change, an activation or a recheck of the pending triggers.
+    /// </summary>
+    public Task HandleAsync(AutomationInput input, CancellationToken cancellationToken)
+    {
+        if (input is TickInput)
+        {
+            WriteRunsIfDue();
+            _status.LogUnloggedFaults(_automation.TimeProvider.GetUtcNow());
+        }
+
+        return DispatchAsync(_triggers.GetRequests(input, _snapshot.Rules), cancellationToken);
+    }
+
+    // A failed write of the runs is shown and logged when its error changes, stays shown while the writes fail, and is
+    // cleared once the runs are written.
+    private void WriteRunsIfDue()
+    {
+        var error = _keeper.WriteRunsIfDue(_automation.TimeProvider.GetUtcNow());
+        if (error is not null)
+        {
+            if (!string.Equals(error, _runWriteError, StringComparison.Ordinal))
+            {
+                _runWriteError = error;
+                _status.Fail($"The runs could not be saved and are saved again in {AutomationStateKeeper.RunWriteDelay.TotalSeconds:0} seconds: {error}");
+            }
+
+            return;
+        }
+
+        if (_runWriteError is not null && !_keeper.HasUnwrittenRuns)
+        {
+            _runWriteError = null;
+            _logger.LogInformation("The automation {Automation} saved its runs again.", Name);
+            if (!HasStickyError)
+            {
+                _status.SetRunning();
+            }
+        }
     }
 
     /// <summary>
@@ -142,48 +201,42 @@ internal sealed class AutomationEngine : IRuleRunHost
     /// state did not change. A saved reset clears the error shown unless the configuration is invalid, since a reset is how
     /// an automation leaves a saved state that its configuration no longer has.
     /// </summary>
-    public Task ResetStateAsync()
+    public void ResetState()
     {
+        _keeper.AllowOverwrite();
         if (_states.Reset(_snapshot, _automation.Rules.Values, RestartRules) is { } error)
         {
             _status.Fail(error);
-            return Task.CompletedTask;
+            return;
         }
 
+        _hasCheckpointError = false;
+        _runWriteError = null;
         if (!_hasConfigurationError)
         {
             _status.SetRunning();
         }
-
-        return Task.CompletedTask;
     }
 
     private void RestartRules()
     {
-        foreach (var rule in _snapshot.Rules)
-        {
-            if (rule.IsActivated)
-            {
-                Deactivate(rule);
-            }
-        }
-
-        ApplyScopeChange();
+        Stop();
+        ActivateRules();
     }
 
     /// <summary>
     /// Reports the dropped inputs and makes up for them, after the inputs that were queued before the drop. The runs that
-    /// inputs dropped from a feedback chain request are recorded as canceled, because running them would continue the
-    /// chain. After an overload every trigger is evaluated again.
+    /// inputs dropped from a feedback chain request do not run, because running them would continue the chain. After an
+    /// overload every trigger is evaluated again.
     /// </summary>
     public async Task ResynchronizeAsync(DroppedInputs dropped, CancellationToken cancellationToken)
     {
-        _status.ReportFaults(dropped);
-        var canceled = _triggers.MakeUpForChain(_snapshot.Rules, dropped);
-        if (canceled.Count > 0)
+        _status.ReportFaults(dropped.Faults, _automation.TimeProvider.GetUtcNow());
+        var stopped = _triggers.MakeUpForChain(_snapshot.Rules, dropped);
+        if (stopped.Count > 0)
         {
-            var reason = $"Canceled: a feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped";
-            _status.Apply(_dispatcher.Cancel(canceled, reason), _hasConfigurationError);
+            _dispatcher.Skip(stopped, $"a feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped");
+            _triggers.TrackPending(_snapshot.Rules, stopped);
         }
 
         if (dropped.HasOverload)
@@ -195,18 +248,48 @@ internal sealed class AutomationEngine : IRuleRunHost
     public void ReportUnexpectedError(Exception exception)
     {
         _logger.LogError(exception, "The automation {Automation} failed to process an input.", Name);
-        _status.SetError(exception.Message);
+        lock (_status)
+        {
+            if (!_isAbandoned)
+            {
+                _status.SetError(exception.Message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Shows every rule as stopped and has a worker that a stop abandoned change nothing anymore. Called by the stop, not
+    /// by the worker.
+    /// </summary>
+    public void Abandon()
+    {
+        lock (_status)
+        {
+            _isAbandoned = true;
+            RuleStatusPublisher.PublishStopped(_automation.Rules, _automation.TimeProvider.LocalTimeZone);
+        }
     }
 
     public void RefreshRuleStatuses()
     {
+        lock (_status)
+        {
+            if (!_isAbandoned)
+            {
+                PublishRuleStatuses();
+            }
+        }
+    }
+
+    private void PublishRuleStatuses()
+    {
         var notApplied = _hasConfigurationError && _automation.ConfigurationVersion == _appliedConfigurationVersion
             ? RuleStatusPublisher.NotAppliedInvalid
             : RuleStatusPublisher.NotAppliedYet;
-        RuleStatusPublisher.Publish(_automation.Rules, _snapshot, GetInactiveReason, _automation.Services.TimeProvider.LocalTimeZone, notApplied);
+        _statusPublisher.Publish(_automation, _snapshot, GetInactiveReason, notApplied);
     }
 
-    public void Stop()
+    private void Stop()
     {
         foreach (var rule in _snapshot.Rules)
         {
@@ -214,11 +297,24 @@ internal sealed class AutomationEngine : IRuleRunHost
         }
     }
 
-    /// <summary>Deactivates every rule and shows it as inactive, once the worker ends.</summary>
+    /// <summary>Deactivates every rule, writes the runs not written yet and shows every rule as inactive, once the worker ends.</summary>
     public void End()
     {
         Stop();
-        RuleStatusPublisher.PublishStopped(_automation.Rules, _automation.Services.TimeProvider.LocalTimeZone);
+        lock (_status)
+        {
+            if (_isAbandoned)
+            {
+                return;
+            }
+
+            if (_keeper.WriteRuns() is { } error)
+            {
+                _logger.LogWarning("The automation {Automation} could not save its last runs when it stopped: {Error}", Name, error);
+            }
+
+            RuleStatusPublisher.PublishStopped(_automation.Rules, _automation.TimeProvider.LocalTimeZone);
+        }
     }
 
     public string? ChangeState(string targetState) => _states.ChangeState(_snapshot, targetState);
@@ -261,17 +357,21 @@ internal sealed class AutomationEngine : IRuleRunHost
 
         _snapshot = compiled;
         PruneCheckpoint();
+
+        // An unreadable checkpoint that could not be moved aside stays an error until a reset, since nothing is written.
+        var refusesWrites = _keeper.RefusesWrites;
         var problem = _states.EnterInitialState(compiled) ?? StateTransitions.CheckState(compiled, CurrentState);
         if (problem is not null)
         {
             _status.Fail(problem);
         }
-        else if (_hasConfigurationError)
+        else if ((_hasConfigurationError || _hasCheckpointError) && !refusesWrites)
         {
             _status.SetRunning();
         }
 
         _hasConfigurationError = false;
+        _hasCheckpointError = refusesWrites;
         _status.ApplyEnabled();
         ActivateRules();
     }
@@ -300,7 +400,8 @@ internal sealed class AutomationEngine : IRuleRunHost
         _triggers.Rebind(_snapshot.Rules);
     }
 
-    // A trigger that stays the same in a rule that stays active keeps its state, so that a Save does not run it again.
+    // A trigger that stays the same in a rule that stays active keeps its state, so that a Save does not run it again, and
+    // its subscription, so that a Save drops no queued event.
     private void CarryOver(CompiledAutomation previous, CompiledAutomation next)
     {
         foreach (var rule in next.Rules)
@@ -345,17 +446,18 @@ internal sealed class AutomationEngine : IRuleRunHost
     private static void Deactivate(CompiledRule rule)
     {
         rule.IsActivated = false;
+        rule.SkipReason = null;
         AutomationTriggers.Deactivate(rule);
     }
 
     private void PruneCheckpoint()
     {
-        if (_keeper.Persisted.Rules.Keys.All(key => _snapshot.FindRule(key) is not null))
+        if (_keeper.Current.Rules.Keys.All(key => _snapshot.FindRule(key) is not null))
         {
             return;
         }
 
-        var pruned = AutomationStateKeeper.WithRulesOf(_keeper.Persisted, _snapshot.Rules.Select(rule => rule.Key));
+        var pruned = AutomationStateKeeper.WithRulesOf(_keeper.Current, _snapshot.Rules.Select(rule => rule.Key));
         if (_keeper.TryPersist(pruned) is { } error)
         {
             _logger.LogWarning("The automation {Automation} could not remove deleted rules from its checkpoint: {Error}", Name, error);
@@ -366,17 +468,49 @@ internal sealed class AutomationEngine : IRuleRunHost
     {
         if (requests.Count == 0)
         {
+            _triggers.TrackPending(_snapshot.Rules, requests);
             return;
         }
 
-        var summary = await _dispatcher.DispatchAsync(requests, IsActive, cancellationToken);
-        if (summary.ChangedState)
+        DispatchSummary summary;
+        try
         {
-            ApplyScopeChange();
+            summary = await _dispatcher.DispatchAsync(requests, IsActive, cancellationToken);
+        }
+        finally
+        {
+            RunUnlessAbandoned(() =>
+            {
+                PublishStateChanges();
+                _triggers.TrackPending(_snapshot.Rules, requests);
+            });
         }
 
-        _status.Apply(summary, _hasConfigurationError);
+        RunUnlessAbandoned(() =>
+        {
+            // A skipped trigger of a rule that stays active runs in a later input, after the state change.
+            if (summary.SkippedForStateChange)
+            {
+                _triggers.RequestPendingRecheck();
+            }
+
+            _status.Apply(summary, HasStickyError);
+        });
     }
+
+    // The rules of the entered state are activated first, so that they receive the event of entering it.
+    private void PublishStateChanges()
+    {
+        if (!_states.HasPendingChanges)
+        {
+            return;
+        }
+
+        ApplyScopeChange();
+        _states.PublishPendingChanges();
+    }
+
+    private bool HasStickyError => _hasConfigurationError || _hasCheckpointError || _runWriteError is not null;
 
     private bool IsActive(CompiledRule rule) => rule.IsActiveIn(_automation.Enabled, CurrentState);
 

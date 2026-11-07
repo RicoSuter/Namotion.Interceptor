@@ -93,7 +93,7 @@
         var eventType = eventTypes.FirstOrDefault(type => type.Name == _trigger.EventType);
         _fields = eventType is null
             ? []
-            : [.. AutomationEvents.GetPayloadFields(eventType).Select(field => $"{ExpressionVariables.Event}/{field.Name}")];
+            : [.. AutomationEvents.GetPayloadFields(eventType).Select(field => $"event/{field.Name}")];
     }
 
     private Task UpdateAsync(SubjectEventTrigger trigger)

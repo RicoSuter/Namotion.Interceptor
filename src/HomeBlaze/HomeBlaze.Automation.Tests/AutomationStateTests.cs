@@ -99,6 +99,64 @@ public class AutomationStateTests
     }
 
     [Fact]
+    public async Task WhenARuleEntersAState_ThenARuleActiveInThatStateReceivesTheEntryEvent()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Idle", "Running"];
+            automation.InitialState = "Idle";
+            automation.RuleOrder = ["started", "onEntry", "onLeave"];
+            automation.Rules = Keyed(
+                ("started", Create("Started", AutomationRuleMode.On, [When("/Weather/Power > 500")], [Enter("Running")], inState: "Idle")),
+                ("onEntry", Create(
+                    "On entry",
+                    AutomationRuleMode.On,
+                    [OnEvent("..", "AutomationStateChangedEvent", "event/NewState == Running")],
+                    [Invoke("/Blinds/Close")],
+                    inState: "Running")),
+                ("onLeave", Create(
+                    "On leave",
+                    AutomationRuleMode.On,
+                    [OnEvent("..", "AutomationStateChangedEvent")],
+                    [Invoke("/Blinds/Open")],
+                    inState: "Idle")));
+        });
+
+        // Act
+        await SetPowerAsync(host, 600);
+
+        // Assert
+        Assert.Equal("Running", host.Automation.CurrentState);
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(0, host.Blinds.OpenCount);
+    }
+
+    [Fact]
+    public async Task WhenARuleChangesTheStateForAnInput_ThenTheLaterRulesOfThatInputDoNotRun()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Idle", "Running"];
+            automation.InitialState = "Idle";
+            automation.RuleOrder = ["started", "idleOnly"];
+            automation.Rules = Keyed(
+                ("started", Create("Started", AutomationRuleMode.On, [When("/Weather/Power > 500")], [Enter("Running")], inState: "Idle")),
+                ("idleOnly", Create("Idle only", AutomationRuleMode.On, [When("/Weather/Power > 500")], [Invoke("/Blinds/Close")], inState: "Idle")));
+        });
+
+        // Act
+        await SetPowerAsync(host, 600);
+
+        // Assert
+        Assert.Equal("Running", host.Automation.CurrentState);
+        Assert.Equal(0, host.Blinds.CloseCount);
+        Assert.Equal(0L, host.Rule("idleOnly").RunCount);
+        Assert.Null(host.Rule("idleOnly").LastRunOutcome);
+    }
+
+    [Fact]
     public async Task WhenTheStateChanges_ThenAnotherAutomationCanReactToIt()
     {
         // Arrange
@@ -215,7 +273,7 @@ public class AutomationStateTests
         Assert.Equal(AutomationRunOutcome.CompletedWithErrors, host.Rule("started").LastRunOutcome);
         Assert.Contains("The state Running was not entered because it could not be saved", host.Rule("started").LastRunMessage);
         Assert.Equal(ServiceStatus.Error, host.Automation.Status);
-        Assert.StartsWith("Rule 'Started': the run was not saved", host.Automation.StatusMessage);
+        Assert.StartsWith("Rule 'Started': action 'enter Running' failed: The state Running was not entered because it could not be saved", host.Automation.StatusMessage);
     }
 
     [Fact]

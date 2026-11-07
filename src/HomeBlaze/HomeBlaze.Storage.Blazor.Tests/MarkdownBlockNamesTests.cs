@@ -126,9 +126,6 @@ public class MarkdownBlockNamesTests
     [Theory]
     [InlineData("value")]
     [InlineData("subject")]
-    [InlineData("now")]
-    [InlineData("time")]
-    [InlineData("event")]
     public void WhenNameIsReserved_ThenItHasAnError(string name)
     {
         // Act

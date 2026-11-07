@@ -21,11 +21,11 @@ public sealed class AutomationStateKeeperTests : IDisposable
         Directory.CreateDirectory(path);
 
         // Act
-        var error = keeper.TryPersist(AutomationStateKeeper.WithState(keeper.Persisted, "Running", Now));
+        var error = keeper.TryPersist(AutomationStateKeeper.WithState(keeper.Current, "Running", Now));
 
         // Assert
         Assert.NotNull(error);
-        Assert.Equal("Idle", keeper.Persisted.CurrentState);
+        Assert.Equal("Idle", keeper.Current.CurrentState);
     }
 
     [Fact]
@@ -37,11 +37,47 @@ public sealed class AutomationStateKeeperTests : IDisposable
         var keeper = new AutomationStateKeeper(new AutomationCheckpointStore(path));
 
         // Act
-        var checkpoint = keeper.Load(out var error);
+        var checkpoint = keeper.Load(Now, out var error);
 
         // Assert
         Assert.Null(checkpoint);
         Assert.NotNull(error);
+    }
+
+    [Fact]
+    public void WhenAnUnreadableCheckpointCannotBeMovedAside_ThenNothingIsWrittenUntilOverwritingIsAllowed()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        // Arrange
+        var folder = Directory.CreateDirectory(Path.Combine(_directory, "Locked")).FullName;
+        var path = Path.Combine(folder, "Storm.json");
+        File.WriteAllText(path, "not a checkpoint");
+        var keeper = new AutomationStateKeeper(new AutomationCheckpointStore(path));
+        File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            keeper.Load(Now, out _);
+        }
+        finally
+        {
+            File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        // Act
+        var writeError = keeper.TryPersist(new AutomationCheckpoint { CurrentState = "Idle" });
+        var content = File.ReadAllText(path);
+        keeper.AllowOverwrite();
+        var errorAfterAllowing = keeper.TryPersist(new AutomationCheckpoint { CurrentState = "Idle" });
+
+        // Assert
+        Assert.NotNull(writeError);
+        Assert.Equal("not a checkpoint", content);
+        Assert.Null(errorAfterAllowing);
+        Assert.Contains("Idle", File.ReadAllText(path));
     }
 
     [Theory]
@@ -56,14 +92,14 @@ public sealed class AutomationStateKeeperTests : IDisposable
         var rule = new AutomationRule();
 
         // Act
-        var checkpoint = keeper.Load(out var error);
+        var checkpoint = keeper.Load(Now, out var error);
         keeper.RestoreAllRules(new Dictionary<string, AutomationRule> { ["retract"] = rule });
 
         // Assert
         Assert.Null(error);
         Assert.NotNull(checkpoint);
         Assert.Equal("Idle", checkpoint.CurrentState);
-        Assert.Empty(keeper.Persisted.Rules);
+        Assert.Empty(keeper.Current.Rules);
         Assert.Equal(0L, rule.RunCount);
     }
 

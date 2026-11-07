@@ -123,9 +123,6 @@ public class MarkdownBlockHeadTests
     [Theory]
     [InlineData("value")]
     [InlineData("subject")]
-    [InlineData("now")]
-    [InlineData("time")]
-    [InlineData("event")]
     public void WhenIdIsAVariableOfExpressions_ThenTheHeadIsRejected(string id)
     {
         // Act

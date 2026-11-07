@@ -15,11 +15,14 @@ internal sealed record PropertyChangedInput(PropertyReference Property, object? 
 /// <summary>A property that holds subjects changed, so that paths may now lead elsewhere.</summary>
 internal sealed record GraphChangedInput(int ChainDepth) : AutomationInput(ChainDepth);
 
-/// <summary>An event for an event trigger, received by its subscription of <see cref="Generation"/>.</summary>
-internal sealed record EventInput(CompiledEventTrigger Trigger, int Generation, CapturedEvent Event, int ChainDepth) : AutomationInput(ChainDepth);
+/// <summary>An event received by the subscription of an event trigger.</summary>
+internal sealed record EventInput(EventTriggerSubscription Subscription, CapturedEvent Event, int ChainDepth) : AutomationInput(ChainDepth);
 
 /// <summary>Rules that became active, whose property triggers evaluate their activation.</summary>
 internal sealed record ActivationInput(IReadOnlyList<CompiledRule> Rules, int ChainDepth) : AutomationInput(ChainDepth);
+
+/// <summary>The pending property triggers request their runs again, such as after a state change skipped them.</summary>
+internal sealed record PendingRecheckInput(int ChainDepth) : AutomationInput(ChainDepth);
 
 /// <summary>A second passed on the clock of the automation.</summary>
 internal sealed record TickInput() : AutomationInput(0)
@@ -37,10 +40,7 @@ internal sealed record ConfigurationChangedInput() : AutomationInput(0)
 /// The state of the automation is reset to its initial state. A reset requested by a run continues the chain of that run,
 /// so that rules that reset the automation and enter a state again are stopped as a feedback chain.
 /// </summary>
-internal sealed record ResetStateInput(int ChainDepth) : AutomationInput(ChainDepth)
-{
-    public static ResetStateInput Instance { get; } = new(0);
-}
+internal sealed record ResetStateInput(int ChainDepth) : AutomationInput(ChainDepth);
 
 /// <summary>Completes once the queue is empty when it is processed.</summary>
 internal sealed record FlushInput(TaskCompletionSource Completion) : AutomationInput(0)

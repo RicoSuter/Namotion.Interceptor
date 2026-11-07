@@ -3,6 +3,7 @@ using System.Reactive.Subjects;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Automation.Runtime;
+using HomeBlaze.Services;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
@@ -29,9 +30,27 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
     private int _configurationVersion;
     private volatile bool _isDetached;
 
-    public Automation(AutomationServices services, ILogger<Automation> logger)
+    /// <summary>Creates an automation with the services it takes, which dependency injection resolves.</summary>
+    /// <param name="pathResolver">Resolves the paths of the rules.</param>
+    /// <param name="timeProvider">The clock of <c>now</c>, <c>time</c>, holds and timeouts; its local time zone is that of <c>time</c>.</param>
+    /// <param name="authorizer">Decides which operation calls and property writes the rules may make.</param>
+    /// <param name="serviceProvider">
+    /// Resolves the services that operations take with <c>[FromServices]</c>, and the dispatcher that routes property
+    /// changes to every automation; without a registered dispatcher, the automation routes its changes on its own.
+    /// </param>
+    /// <param name="logger">The logger of the automation.</param>
+    public Automation(
+        SubjectPathResolver pathResolver,
+        TimeProvider timeProvider,
+        IAutomationAuthorizer authorizer,
+        IServiceProvider serviceProvider,
+        ILogger<Automation> logger)
     {
-        Services = services;
+        PathResolver = pathResolver;
+        TimeProvider = timeProvider;
+        Authorizer = authorizer;
+        ServiceProvider = serviceProvider;
+        ChangeDispatcher = AutomationChangeDispatcher.From(serviceProvider);
         _logger = logger;
         Enabled = true;
         States = [];
@@ -88,7 +107,18 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         _ => null
     };
 
-    internal AutomationServices Services { get; }
+    internal SubjectPathResolver PathResolver { get; }
+
+    /// <summary>The clock of <c>now</c>, <c>time</c>, holds and timeouts; its local time zone is that of <c>time</c>.</summary>
+    internal TimeProvider TimeProvider { get; }
+
+    internal IAutomationAuthorizer Authorizer { get; }
+
+    /// <summary>Resolves the services that operations take with <c>[FromServices]</c>.</summary>
+    internal IServiceProvider ServiceProvider { get; }
+
+    /// <summary>Routes the property changes to the automations: the registered dispatcher, or a dispatcher of its own when none is registered.</summary>
+    internal AutomationChangeDispatcher ChangeDispatcher { get; }
 
     internal int ConfigurationVersion => Volatile.Read(ref _configurationVersion);
 
@@ -97,16 +127,6 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         Interlocked.Increment(ref _configurationVersion);
         Volatile.Read(ref _runtime)?.RequestConfiguration();
         return Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// The rules with their keys in the order they process an input: those in <see cref="RuleOrder"/> first, then the others in key order.
-    /// Reads <see cref="Rules"/> once, so the pairs are consistent even when the configuration is replaced meanwhile.
-    /// </summary>
-    public IReadOnlyList<KeyValuePair<string, AutomationRule>> GetRulesInOrder()
-    {
-        var rules = Rules;
-        return [.. AutomationCompiler.OrderKeys(rules.Keys, RuleOrder).Select(key => new KeyValuePair<string, AutomationRule>(key, rules[key]))];
     }
 
     public IDisposable Subscribe(IObserver<AutomationStateChangedEvent> observer) => _stateChanged.Subscribe(observer);
@@ -158,27 +178,43 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         return base.StartAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Stops the worker and waits until it ended, at most until <paramref name="cancellationToken"/> is canceled or
+    /// <see cref="AutomationRuntime.StopTimeout"/> passed. A worker that did not end, such as one in an operation that ignores its
+    /// cancellation, is abandoned: it changes neither the automation nor its checkpoint anymore, also after a new start.
+    /// </summary>
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
-        await base.StopAsync(cancellationToken);
+        await AutomationRuntime.WaitForStopAsync(token => base.StopAsync(token), TimeProvider, cancellationToken);
 
-        // A stop before the worker ran leaves the runtime of the start behind.
-        if (Interlocked.Exchange(ref _runtime, null) is { } runtime)
-        {
-            runtime.Close();
-            OnWorkerEnded(runtime);
-            Status = ServiceStatus.Stopped;
-        }
-    }
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        if (Volatile.Read(ref _runtime) is not { } runtime)
+        // A worker that ended took its runtime; one that did not end, or never ran because the stop came first, left it.
+        if (Interlocked.Exchange(ref _runtime, null) is not { } runtime)
         {
             return;
         }
 
-        var finalStatus = ServiceStatus.Stopped;
+        if (ExecuteTask is { IsCompleted: false })
+        {
+            _logger.LogWarning(
+                "The automation {Automation} did not stop in time, such as for an operation that ignores its cancellation, and its worker is abandoned.",
+                Title);
+        }
+
+        runtime.Close();
+        OnWorkerEnded(runtime);
+        runtime.Abandon();
+        Status = ServiceStatus.Stopped;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        // A stop that came first already took the runtime of this start, which may be the runtime of a later start now.
+        if (stoppingToken.IsCancellationRequested || Volatile.Read(ref _runtime) is not { } runtime)
+        {
+            return;
+        }
+
+        string? error = null;
         try
         {
             await runtime.RunAsync(stoppingToken);
@@ -190,20 +226,27 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         catch (Exception exception)
         {
             _logger.LogError(exception, "The automation {Automation} stopped after an unexpected error.", Title);
-            StatusMessage = exception.Message;
-            finalStatus = ServiceStatus.Error;
-        }
-        finally
-        {
-            Interlocked.CompareExchange(ref _runtime, null, runtime);
-            OnWorkerEnded(runtime);
+            error = exception.Message;
         }
 
-        Status = finalStatus;
+        // A worker that a stop abandoned no longer owns the automation, which may run again with another worker.
+        if (Interlocked.CompareExchange(ref _runtime, null, runtime) != runtime)
+        {
+            return;
+        }
+
+        OnWorkerEnded(runtime);
+        runtime.Release();
+        if (error is not null)
+        {
+            StatusMessage = error;
+        }
+
+        Status = error is null ? ServiceStatus.Stopped : ServiceStatus.Error;
     }
 
-    // Runs after the worker ended, so that nothing writes the file anymore, and when the graph no longer holds this
-    // automation at the path it started with, so that the path resolves to what took its place.
+    // Runs once the worker ended or a stop abandoned it, which then no longer owns the file, and only when the graph no
+    // longer holds this automation at the path it started with, so that the path resolves to what took its place.
     private void OnWorkerEnded(AutomationRuntime runtime)
     {
         if (_isDetached || runtime.Location.HasMoved(this))

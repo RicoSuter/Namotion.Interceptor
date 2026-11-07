@@ -44,10 +44,28 @@ internal sealed class ObservedValues
         return true;
     }
 
-    /// <summary>Forgets the properties that are not in the set, whose changes are no longer received.</summary>
-    public void Retain(IReadOnlySet<PropertyReference> properties)
+    /// <summary>
+    /// Keeps only the properties that are in both sets: those whose changes were received before and still are. A
+    /// property that is no longer watched is forgotten, and so is one that was not watched before, whose observed value
+    /// may be older than its last write.
+    /// </summary>
+    public void Retain(IReadOnlySet<PropertyReference> watched, IReadOnlySet<PropertyReference> previouslyWatched)
     {
-        foreach (var property in _values.Keys.Where(property => !properties.Contains(property)).ToList())
+        List<PropertyReference>? forgotten = null;
+        foreach (var property in _values.Keys)
+        {
+            if (!watched.Contains(property) || !previouslyWatched.Contains(property))
+            {
+                (forgotten ??= []).Add(property);
+            }
+        }
+
+        if (forgotten is null)
+        {
+            return;
+        }
+
+        foreach (var property in forgotten)
         {
             _values.Remove(property);
         }

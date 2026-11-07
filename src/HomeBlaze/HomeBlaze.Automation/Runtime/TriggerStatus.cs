@@ -8,10 +8,11 @@ internal readonly record struct TriggerStatus(
     DateTimeOffset? UnknownSince,
     IReadOnlyList<string> MissingPaths,
     string? Problem,
+    DateTimeOffset? PendingSince = null,
     bool WasTrueAtActivation = false)
 {
     public static TriggerStatus FromProperty(PropertyTriggerState state, TimeSpan? hold) =>
-        new(state.Phase, state.HoldStartedAt, hold, state.UnknownSince, state.MissingPaths, null, state.WasTrueAtActivation);
+        new(state.Phase, state.HoldStartedAt, hold, state.UnknownSince, state.MissingPaths, null, state.PendingSince, state.WasTrueAtActivation);
 
     /// <summary>An event trigger, armed unless <paramref name="problem"/> says why it receives no events.</summary>
     public static TriggerStatus FromEvent(string? problem) => new(TriggerPhase.Armed, null, null, null, [], problem);

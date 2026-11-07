@@ -6,12 +6,19 @@ using Namotion.Interceptor.Registry.Attributes;
 
 namespace HomeBlaze.Automation.Tests.Testing;
 
-/// <summary>Blinds with operations that succeed, fail, never end, wait for the test or need confirmation.</summary>
+/// <summary>
+/// Blinds with operations that succeed, fail, never end, wait for the test, ignore their cancellation, block their thread
+/// or need confirmation.
+/// </summary>
 [InterceptorSubject]
 public partial class TestBlinds
 {
     private readonly TaskCompletionSource _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _stall = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly ManualResetEventSlim _unblock = new();
     private volatile bool _isWaiting;
+    private volatile bool _isStalled;
+    private volatile bool _isBlocked;
     private int _closeCount;
     private int _openCount;
 
@@ -35,6 +42,10 @@ public partial class TestBlinds
     public int OpenCount => Volatile.Read(ref _openCount);
 
     public bool IsWaiting => _isWaiting;
+
+    public bool IsStalled => _isStalled;
+
+    public bool IsBlocked => _isBlocked;
 
     [Derived]
     [PropertyAttribute(nameof(Open), KnownAttributes.IsEnabled)]
@@ -70,11 +81,32 @@ public partial class TestBlinds
         _isWaiting = false;
     }
 
+    /// <summary>Ends only when the test calls <see cref="EndStall"/>, whatever its caller cancels.</summary>
+    [Operation]
+    public Task StallAsync()
+    {
+        _isStalled = true;
+        return _stall.Task;
+    }
+
+    /// <summary>Blocks the thread of its caller until the test calls <see cref="Unblock"/>.</summary>
+    [Operation]
+    public void Block()
+    {
+        _isBlocked = true;
+        _unblock.Wait();
+        _isBlocked = false;
+    }
+
     [Query]
     public int GetPosition() => Position;
 
     /// <summary>Ends every call of <c>Wait</c>.</summary>
     public void Release() => _gate.TrySetResult();
+
+    public void EndStall() => _stall.TrySetResult();
+
+    public void Unblock() => _unblock.Set();
 }
 
 /// <summary>A step whose call number <see cref="BlockOnCall"/> waits until <see cref="Release"/>.</summary>

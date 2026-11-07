@@ -25,7 +25,6 @@ public static class AutomationSummary
     {
         AutomationRunOutcome.CompletedWithErrors => "Completed with errors",
         AutomationRunOutcome.StoppedAfterError => "Stopped after an error",
-        AutomationRunOutcome.RejectedByGuard => "Rejected by Only if",
         AutomationRunOutcome.DryRun => "Would have run (dry run)",
         _ => outcome.ToString()
     };

@@ -77,24 +77,56 @@ public class AutomationRestartTests
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(DoorReminder());
         await SetDoorAsync(host, DoorState.Open);
-        var stateChanges = new List<string>();
-        using var subscription = host.Automation.Subscribe(Observer.Create<AutomationStateChangedEvent>(change => stateChanges.Add(change.NewState)));
         await host.StopAsync();
         host.Time.Advance(TimeSpan.FromMinutes(15));
-        await host.RestartAsync();
-        var restoredEntryTime = host.Automation.StateEnteredAt;
-        var statusWithoutReading = host.Rule("remind").Status;
 
         // Act
-        await SetDoorAsync(host, DoorState.Open);
         await host.RestartAsync();
 
         // Assert
-        Assert.Equal(AutomationTestHost.Start, restoredEntryTime);
-        Assert.Equal("On: Unknown since 2026-11-06 12:15:00, missing /Weather/Door", statusWithoutReading);
-        Assert.Single(host.Notifier.Sent);
+        Assert.Equal("Open", host.Automation.CurrentState);
+        Assert.Equal(AutomationTestHost.Start, host.Automation.StateEnteredAt);
+        Assert.Equal("On: Unknown since 2026-11-06 12:15:00, missing /Weather/Door", host.Rule("remind").Status);
+        Assert.Empty(host.Notifier.Sent);
+    }
+
+    [Fact]
+    public async Task WhenRestartedInAnOverdueOpenStateAndTheDoorIsOpen_ThenTheReminderIsSentAtOnceWithTheOriginalDeadline()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(DoorReminder());
+        await SetDoorAsync(host, DoorState.Open);
+        await host.StopAsync();
+        host.Time.Advance(TimeSpan.FromMinutes(15));
+        await host.RestartAsync();
+
+        // Act
+        await SetDoorAsync(host, DoorState.Open);
+
+        // Assert
+        Assert.Equal("Front door open since 2026-11-06T12:00:00.0000000+00:00", Assert.Single(host.Notifier.Sent).Message);
         Assert.Equal("Informed", host.Automation.CurrentState);
-        Assert.Equal(["Informed"], stateChanges.ToArray());
+        Assert.Equal(AutomationTestHost.Start.AddMinutes(15), host.Automation.StateEnteredAt);
+    }
+
+    [Fact]
+    public async Task WhenRestoredInTheInformedState_ThenNoStateChangeIsPublishedAndNothingIsSentAgain()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(DoorReminder());
+        await SetDoorAsync(host, DoorState.Open);
+        await AdvanceAsync(host, TimeSpan.FromMinutes(10) + TimeSpan.FromSeconds(1));
+        var stateChanges = new List<string>();
+        using var subscription = host.Automation.Subscribe(Observer.Create<AutomationStateChangedEvent>(change => stateChanges.Add(change.NewState)));
+
+        // Act
+        await host.RestartAsync();
+        await SetDoorAsync(host, DoorState.Open);
+
+        // Assert
+        Assert.Equal("Informed", host.Automation.CurrentState);
+        Assert.Empty(stateChanges);
+        Assert.Single(host.Notifier.Sent);
     }
 
     [Fact]
@@ -136,7 +168,7 @@ public class AutomationRestartTests
 
         // Assert
         Assert.Equal(1, host.Blinds.CloseCount);
-        Assert.Equal(2L, host.Rule("retract").RunCount);
-        Assert.Equal(AutomationRunOutcome.RejectedByGuard, host.Rule("retract").LastRunOutcome);
+        Assert.Equal(1L, host.Rule("retract").RunCount);
+        Assert.Equal(AutomationRunOutcome.Succeeded, host.Rule("retract").LastRunOutcome);
     }
 }

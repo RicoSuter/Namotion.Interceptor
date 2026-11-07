@@ -76,7 +76,7 @@ public class RuleRunnerTests
     }
 
     [Fact]
-    public async Task WhenTheGuardIsFalse_ThenTheRunIsRejectedAndNothingRuns()
+    public async Task WhenTheGuardIsFalse_ThenTheRequestDoesNotRunAndNothingRuns()
     {
         // Arrange
         var rule = Rule(AutomationRuleMode.On, "not /Blinds/IsMoving", Invoke("/Blinds/Close"));
@@ -86,15 +86,15 @@ public class RuleRunnerTests
         var result = await CreateRunner().RunAsync(Request(rule), new FakeRunHost(_host), CancellationToken.None);
 
         // Assert
-        Assert.Equal(AutomationRunOutcome.RejectedByGuard, result.Outcome);
-        Assert.Equal("Rejected: the guard is false", result.Message);
+        Assert.Null(result.Outcome);
+        Assert.Equal("Only if is false", result.Message);
         Assert.False(result.ExecutedActions);
         Assert.Equal(0, _blinds.CloseCount);
         Assert.Null(rule.LastTriggeredAt);
     }
 
     [Fact]
-    public async Task WhenTheGuardIsUnknown_ThenTheRunIsRejectedNamingTheMissingPaths()
+    public async Task WhenTheGuardIsUnknown_ThenTheRequestDoesNotRunNamingTheMissingPaths()
     {
         // Arrange
         var rule = Rule(AutomationRuleMode.On, "/Weather/Rain > 0", Invoke("/Blinds/Close"));
@@ -103,8 +103,8 @@ public class RuleRunnerTests
         var result = await CreateRunner().RunAsync(Request(rule), new FakeRunHost(_host), CancellationToken.None);
 
         // Assert
-        Assert.Equal(AutomationRunOutcome.RejectedByGuard, result.Outcome);
-        Assert.Equal("Rejected: the guard is unknown, missing /Weather/Rain", result.Message);
+        Assert.Null(result.Outcome);
+        Assert.Equal("Only if is unknown, missing /Weather/Rain", result.Message);
     }
 
     [Fact]
@@ -193,6 +193,24 @@ public class RuleRunnerTests
     }
 
     [Fact]
+    public async Task WhenTheModeIsUndefined_ThenNoActionRuns()
+    {
+        // Arrange
+        var rule = Rule(AutomationRuleMode.On, null, Invoke("/Blinds/Close"));
+        var request = Request(rule);
+        rule.Mode = (AutomationRuleMode)5;
+        var compiled = new CompiledRule("r1", rule, guard: null);
+
+        // Act
+        var result = await CreateRunner().RunAsync(request with { Rule = compiled }, new FakeRunHost(_host), CancellationToken.None);
+
+        // Assert
+        Assert.Equal(0, _blinds.CloseCount);
+        Assert.Null(rule.LastTriggeredAt);
+        Assert.Null(result.Outcome);
+    }
+
+    [Fact]
     public async Task WhenTheAutomationStopsDuringARun_ThenTheRunIsCanceled()
     {
         // Arrange
@@ -216,6 +234,12 @@ public class RuleRunnerTests
         public IInterceptorSubject Automation => automation;
 
         public string? CurrentState { get; private set; }
+
+        public bool RunUnlessAbandoned(Action write)
+        {
+            write();
+            return true;
+        }
 
         public string? ChangeState(string targetState)
         {

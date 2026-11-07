@@ -59,7 +59,7 @@ public static class AutomationPreview
     /// display only: callers must not read or write its value, which may be secret.
     /// </summary>
     public static RegisteredSubjectProperty? ResolveTarget(Automation automation, string? ruleKey, string? path) =>
-        string.IsNullOrWhiteSpace(path) ? null : AutomationPaths.ResolveTarget(automation.Services.PathResolver, path, GetAnchor(automation, ruleKey));
+        string.IsNullOrWhiteSpace(path) ? null : AutomationPaths.ResolveTarget(automation.PathResolver, path, GetAnchor(automation, ruleKey));
 
     /// <summary>The saved rule with the key, or a rule outside the graph, from which relative paths lead nowhere.</summary>
     internal static IInterceptorSubject GetAnchor(Automation automation, string? ruleKey) =>
@@ -67,8 +67,7 @@ public static class AutomationPreview
 
     private static AutomationEvaluation CreateEvaluation(Automation automation, string? ruleKey)
     {
-        var services = automation.Services;
         return new AutomationEvaluation(
-            services.PathResolver, GetAnchor(automation, ruleKey), services.TimeProvider.GetUtcNow(), services.TimeProvider.LocalTimeZone);
+            automation.PathResolver, GetAnchor(automation, ruleKey), automation.TimeProvider.GetUtcNow(), automation.TimeProvider.LocalTimeZone);
     }
 }

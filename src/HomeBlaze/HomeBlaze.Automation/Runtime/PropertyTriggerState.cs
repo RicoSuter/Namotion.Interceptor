@@ -4,9 +4,11 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// The arming, hold and unknown state of one property trigger. A trigger fires on a change to true that held for the
-/// hold, once, and rearms when its expression is known false or, with a rearm expression, when that is known true. A
-/// trigger that starts true waits for the same rearm. Unknown never fires and never rearms, and resets a running hold.
-/// Used by the worker only.
+/// hold and stays pending until its run runs, which <see cref="Consume"/> records, or until the expression is false or
+/// unknown, which arms it again without a run. After its run it rearms when its expression is known false or, with a
+/// rearm expression, when that is known true; a rearm while the expression is still true fires only after the
+/// expression was false or unknown again. A trigger that starts true waits for the same rearm. Unknown never fires and
+/// never rearms, and resets a running hold. Used by the worker only.
 /// </summary>
 internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
 {
@@ -14,6 +16,9 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
 
     /// <summary>When the running hold started, or null without one.</summary>
     public DateTimeOffset? HoldStartedAt { get; private set; }
+
+    /// <summary>When the trigger fired while it is <see cref="TriggerPhase.Pending"/>, or null.</summary>
+    public DateTimeOffset? PendingSince { get; private set; }
 
     /// <summary>When the expression became unknown, or null while it is known.</summary>
     public DateTimeOffset? UnknownSince { get; private set; }
@@ -25,6 +30,9 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
     public bool WasTrueAtActivation { get; private set; }
 
     public bool IsUnknown => UnknownSince is not null;
+
+    /// <summary>Increases with every change of the state, so that a status is formatted again only after one.</summary>
+    public int Version { get; private set; }
 
     /// <summary>Activates the trigger with fresh state and returns whether it fires at once.</summary>
     public bool Activate(TriggerActivation policy, TriggerObservation observation, DateTimeOffset now)
@@ -45,6 +53,21 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
     /// <summary>Applies an observation and returns whether the trigger fires.</summary>
     public bool Observe(TriggerObservation observation, DateTimeOffset now)
     {
+        var phase = Phase;
+        var holdStartedAt = HoldStartedAt;
+        var unknownSince = UnknownSince;
+        var missingPaths = MissingPaths;
+        var fires = ObserveCore(observation, now);
+        if (phase != Phase || holdStartedAt != HoldStartedAt || unknownSince != UnknownSince || !ReferenceEquals(missingPaths, MissingPaths))
+        {
+            Version++;
+        }
+
+        return fires;
+    }
+
+    private bool ObserveCore(TriggerObservation observation, DateTimeOffset now)
+    {
         if (Phase == TriggerPhase.Inactive)
         {
             return false;
@@ -56,16 +79,31 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
             TriggerPhase.AwaitingBaseline => SetBaseline(observation, now),
             TriggerPhase.Armed => ObserveArmed(observation.Value, now),
             TriggerPhase.Holding => ObserveHolding(observation.Value, now),
-            TriggerPhase.WaitingToRearm => ObserveWaitingToRearm(observation, now),
+            TriggerPhase.Pending => ObservePending(observation.Value),
+            TriggerPhase.WaitingToRearm => ObserveWaitingToRearm(observation),
             TriggerPhase.WaitingForFalse => ObserveWaitingForFalse(observation.Value),
+            TriggerPhase.RearmedWhileTrue => ObserveRearmedWhileTrue(observation.Value),
             _ => throw new UnreachableException()
         };
     }
 
+    /// <summary>Records that the run of a pending trigger ran, so that the trigger waits to rearm.</summary>
+    public void Consume()
+    {
+        if (Phase == TriggerPhase.Pending)
+        {
+            Phase = TriggerPhase.WaitingToRearm;
+            PendingSince = null;
+            Version++;
+        }
+    }
+
     public void Deactivate()
     {
+        Version++;
         Phase = TriggerPhase.Inactive;
         HoldStartedAt = null;
+        PendingSince = null;
         UnknownSince = null;
         MissingPaths = [];
         WasTrueAtActivation = false;
@@ -98,7 +136,7 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
 
         if (hold is not { } duration || duration <= TimeSpan.Zero)
         {
-            return Fire();
+            return Fire(now);
         }
 
         Phase = TriggerPhase.Holding;
@@ -120,10 +158,23 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
             return false;
         }
 
-        return Fire();
+        return Fire(now);
     }
 
-    private bool ObserveWaitingToRearm(TriggerObservation observation, DateTimeOffset now)
+    // A pending trigger keeps waiting while the expression is true, and a value that is not true ends the wait without a
+    // run. Its run is requested again by the guard, not by the expression, so it fires no second time here.
+    private bool ObservePending(bool? value)
+    {
+        if (value != true)
+        {
+            Phase = TriggerPhase.Armed;
+            PendingSince = null;
+        }
+
+        return false;
+    }
+
+    private bool ObserveWaitingToRearm(TriggerObservation observation)
     {
         var isRearmed = hasRearm ? observation.Rearm == true : observation.Value == false;
         if (!isRearmed)
@@ -131,8 +182,8 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
             return false;
         }
 
-        Phase = TriggerPhase.Armed;
-        return ObserveArmed(observation.Value, now);
+        Phase = observation.Value == true ? TriggerPhase.RearmedWhileTrue : TriggerPhase.Armed;
+        return false;
     }
 
     private bool ObserveWaitingForFalse(bool? value)
@@ -145,9 +196,20 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
         return false;
     }
 
-    private bool Fire()
+    private bool ObserveRearmedWhileTrue(bool? value)
     {
-        Phase = TriggerPhase.WaitingToRearm;
+        if (value != true)
+        {
+            Phase = TriggerPhase.Armed;
+        }
+
+        return false;
+    }
+
+    private bool Fire(DateTimeOffset now)
+    {
+        Phase = TriggerPhase.Pending;
+        PendingSince = now;
         HoldStartedAt = null;
         WasTrueAtActivation = false;
         return true;

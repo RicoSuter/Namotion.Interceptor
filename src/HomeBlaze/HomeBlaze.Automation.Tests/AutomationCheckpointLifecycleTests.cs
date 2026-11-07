@@ -1,8 +1,8 @@
+using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Automation.Persistence;
 using HomeBlaze.Automation.Tests.Testing;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
@@ -16,6 +16,67 @@ public class AutomationCheckpointLifecycleTests
         automation.InitialState = "Idle";
         automation.Rules = Keyed(("started", Create("Started", AutomationRuleMode.On, [When("/Weather/Power > 500")], [Enter("Running")], inState: "Idle")));
     };
+
+    private static async Task<string?> ReadStateAsync(string path)
+    {
+        using var checkpoint = JsonDocument.Parse(await File.ReadAllTextAsync(path));
+        return checkpoint.RootElement.GetProperty("currentState").GetString();
+    }
+
+    [Fact]
+    public async Task WhenTheCheckpointCannotBeRead_ThenItIsMovedAsideAndTheErrorStaysUntilAReset()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            Washer()(automation);
+            automation.Rules["close"] = On("Close", When("/Weather/Gust > 8"), Invoke("/Blinds/Close"));
+        });
+        await host.StopAsync();
+        await File.WriteAllTextAsync(host.CheckpointPath, "{ \"currentState\": ");
+
+        // Act
+        await ((IHostedService)host.Automation).StartAsync(CancellationToken.None);
+        await host.FlushAsync();
+        var stateAfterTheStart = host.Automation.CurrentState;
+        var messageAfterTheStart = host.Automation.StatusMessage;
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        var statusAfterARun = host.Automation.Status;
+        var runs = host.Blinds.CloseCount;
+        host.Automation.ResetState();
+        await host.FlushAsync();
+
+        // Assert
+        var setAside = Assert.Single(Directory.GetFiles(Path.GetDirectoryName(host.CheckpointPath)!, "Storm.json.unreadable-*"));
+        Assert.Equal("{ \"currentState\": ", await File.ReadAllTextAsync(setAside));
+        Assert.Equal("Idle", stateAfterTheStart);
+        Assert.StartsWith("The checkpoint could not be read and was moved to " + setAside, messageAfterTheStart);
+        Assert.Equal(1, runs);
+        Assert.Equal(ServiceStatus.Error, statusAfterARun);
+        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
+        Assert.Null(host.Automation.StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenTheCheckpointCannotBeReadAndAValidConfigurationIsSaved_ThenTheErrorIsCleared()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(Washer());
+        await host.StopAsync();
+        await File.WriteAllTextAsync(host.CheckpointPath, "not a checkpoint");
+        await ((IHostedService)host.Automation).StartAsync(CancellationToken.None);
+        await host.FlushAsync();
+        var statusAfterTheStart = host.Automation.Status;
+
+        // Act
+        await host.Automation.ApplyConfigurationAsync(CancellationToken.None);
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, statusAfterTheStart);
+        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
+    }
 
     [Fact]
     public async Task WhenTheAutomationIsRemoved_ThenItsCheckpointIsDeleted()
@@ -59,8 +120,8 @@ public class AutomationCheckpointLifecycleTests
         Assert.Equal("Running", stateBeforeMove);
         Assert.Equal("Idle", stateAfterMove);
         Assert.Equal(1L, host.Rule("started").RunCount);
-        Assert.False(File.Exists(Path.Combine(host.DataDirectory, "Automations", "Storm.json")));
-        Assert.Contains("\"Running\"", await File.ReadAllTextAsync(Path.Combine(host.DataDirectory, "Automations", "Basement", "Storm.json")));
+        Assert.False(File.Exists(Path.Combine(host.DataDirectory, "AutomationState", "Storm.json")));
+        Assert.Equal("Running", await ReadStateAsync(Path.Combine(host.DataDirectory, "AutomationState", "Basement", "Storm.json")));
     }
 
     [Fact]
@@ -86,8 +147,8 @@ public class AutomationCheckpointLifecycleTests
         Assert.Null(host.Rule("started").LastRunOutcome);
         Assert.Equal(0L, host.Rule("started").RunCount);
         Assert.Equal("Idle", automation.CurrentState);
-        Assert.False(File.Exists(Path.Combine(host.DataDirectory, "Automations", "Storm.json")));
-        Assert.True(File.Exists(Path.Combine(host.DataDirectory, "Automations", "Basement", "Storm.json")));
+        Assert.False(File.Exists(Path.Combine(host.DataDirectory, "AutomationState", "Storm.json")));
+        Assert.True(File.Exists(Path.Combine(host.DataDirectory, "AutomationState", "Basement", "Storm.json")));
     }
 
     [Fact]
@@ -113,8 +174,8 @@ public class AutomationCheckpointLifecycleTests
         Assert.Equal("Idle", automation.CurrentState);
         Assert.Null(host.Rule("started").LastTriggeredAt);
         Assert.Equal(0L, host.Rule("started").RunCount);
-        Assert.False(File.Exists(Path.Combine(host.DataDirectory, "Automations", "Storm.json")));
-        Assert.True(File.Exists(Path.Combine(host.DataDirectory, "Automations", "Laundry.json")));
+        Assert.False(File.Exists(Path.Combine(host.DataDirectory, "AutomationState", "Storm.json")));
+        Assert.True(File.Exists(Path.Combine(host.DataDirectory, "AutomationState", "Laundry.json")));
     }
 
     [Fact]
@@ -147,21 +208,21 @@ public class AutomationCheckpointLifecycleTests
     {
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(automation => { });
-        var checkpointPath = Path.Combine(host.DataDirectory, "Automations", "Basement", "Washer.json");
+        var checkpointPath = Path.Combine(host.DataDirectory, "AutomationState", "Basement", "Washer.json");
         new AutomationCheckpointStore(checkpointPath).Write(new AutomationCheckpoint
         {
             CurrentState = "Running",
             StateEnteredAt = AutomationTestHost.Start.AddHours(-1),
             Rules = new Dictionary<string, RuleCheckpoint> { ["started"] = new() { RunCount = 3, LastTriggeredAt = AutomationTestHost.Start.AddHours(-1) } }
         });
-        var washer = new Automation(host.Services, NullLogger<Automation>.Instance) { Name = "Washer" };
+        var washer = host.CreateAutomation("Washer");
         Washer()(washer);
 
         // In the context of the graph as a root of its own, which has no path.
         ((IInterceptorSubject)washer).Context.AddFallbackContext(host.Graph.Context);
         await ((IHostedService)washer).StartAsync(CancellationToken.None);
         await washer.FlushAsync();
-        var pathAtStart = host.Services.PathResolver.GetPath(washer, PathStyle.Canonical);
+        var pathAtStart = host.Graph.Resolver.GetPath(washer, PathStyle.Canonical);
         var stateWithoutPath = washer.CurrentState;
         var basement = new TestRoot();
         basement.Children = new Dictionary<string, IInterceptorSubject> { ["Washer"] = washer };
@@ -176,6 +237,77 @@ public class AutomationCheckpointLifecycleTests
         Assert.Equal("Idle", stateWithoutPath);
         Assert.Equal("Running", washer.CurrentState);
         Assert.Equal(3L, washer.Rules["started"].RunCount);
-        Assert.Contains("\"Running\"", await File.ReadAllTextAsync(checkpointPath));
+        Assert.Equal("Running", await ReadStateAsync(checkpointPath));
+    }
+
+    [Fact]
+    public async Task WhenTheAutomationMovesBeforeItsWorkerWatchesTheGraph_ThenItFollowsTheMoveAtOnce()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => { });
+        var washer = host.CreateAutomation("Washer");
+        Washer()(washer);
+        host.Graph.Add("Washer", washer);
+        var basement = new TestRoot();
+        host.Graph.Add("Basement", basement);
+
+        // The move happens on the worker while it registers, after the start took the path and before graph changes reach it.
+        host.ChangeDispatcher.ListenerDecorator = listener =>
+        {
+            host.ChangeDispatcher.ListenerDecorator = null;
+            basement.Children = new Dictionary<string, IInterceptorSubject> { ["Washer"] = washer };
+            host.Graph.Remove("Washer");
+            return listener;
+        };
+
+        // Act
+        await ((IHostedService)washer).StartAsync(CancellationToken.None);
+        await washer.FlushAsync();
+        await ((IHostedService)washer).StopAsync(CancellationToken.None);
+
+        // Assert
+        Assert.False(File.Exists(Path.Combine(host.DataDirectory, "AutomationState", "Washer.json")));
+        Assert.True(File.Exists(Path.Combine(host.DataDirectory, "AutomationState", "Basement", "Washer.json")));
+    }
+
+    [Fact]
+    public async Task WhenTheUnreadableCheckpointCannotBeMovedAside_ThenAValidConfigurationKeepsTheErrorUntilAReset()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
+        await host.StopAsync();
+        var folder = Path.GetDirectoryName(host.CheckpointPath)!;
+        Directory.CreateDirectory(folder);
+        await File.WriteAllTextAsync(host.CheckpointPath, "{ \"currentState\": ");
+        File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            await ((IHostedService)host.Automation).StartAsync(CancellationToken.None);
+            await host.FlushAsync();
+        }
+        finally
+        {
+            File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        // Act
+        await host.Automation.ApplyConfigurationAsync(CancellationToken.None);
+        await host.FlushAsync();
+        var statusAfterTheSave = host.Automation.Status;
+        var contentAfterTheSave = await File.ReadAllTextAsync(host.CheckpointPath);
+        host.Automation.ResetState();
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, statusAfterTheSave);
+        Assert.Equal("{ \"currentState\": ", contentAfterTheSave);
+        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
+        Assert.NotEqual(contentAfterTheSave, await File.ReadAllTextAsync(host.CheckpointPath));
     }
 }

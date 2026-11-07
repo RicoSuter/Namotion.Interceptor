@@ -22,6 +22,10 @@ internal static class ExpressionEvaluator
             case ArithmeticNode arithmetic:
                 return EvaluateArithmetic(arithmetic, ref context);
 
+            case NegationNode negation:
+                return ExpressionValue.FromValue(
+                    Evaluate(negation.Operand, ref context).Value is { } value ? ExpressionArithmetic.Negate(value) : null);
+
             default:
                 return ExpressionValue.FromBoolean(EvaluateTruth(node, ref context));
         }

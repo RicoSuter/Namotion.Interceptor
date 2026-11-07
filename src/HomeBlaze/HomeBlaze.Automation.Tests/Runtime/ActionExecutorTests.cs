@@ -2,8 +2,6 @@ using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
 using Microsoft.Extensions.Time.Testing;
-using Namotion.Interceptor;
-using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Automation.Tests.Runtime;
 
@@ -203,14 +201,5 @@ public class ActionExecutorTests
         Assert.Equal("/Blinds/MoveTo(position: 9)", call);
         Assert.Equal("/Blinds/Position = 3", write);
         Assert.Equal(0, _blinds.Position);
-    }
-
-    private sealed class DenyingAuthorizer : IAutomationAuthorizer
-    {
-        public string? GetOperationDenial(IInterceptorSubject automation, RegisteredSubjectProperty operation) =>
-            $"The automation may not call {operation.Name}";
-
-        public string? GetPropertyWriteDenial(IInterceptorSubject automation, RegisteredSubjectProperty property) =>
-            $"The automation may not write {property.Name}";
     }
 }

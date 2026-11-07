@@ -1,5 +1,9 @@
+using System.Collections.Concurrent;
+using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
 using Microsoft.Extensions.Hosting;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Testing;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
 namespace HomeBlaze.Automation.Tests;
@@ -72,6 +76,53 @@ public class AutomationPropertyTriggerTests
     }
 
     [Fact]
+    public async Task WhenTheRearmExpressionIsTrueWhileTheExpressionStaysTrue_ThenTheRuleRunsOnce()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", On("Retract", When("/Weather/Gust > 8", rearm: "/Weather/Rain < 1"), Invoke("/Blinds/Close")))));
+        host.Weather.Rain = 0;
+        host.Weather.Gust = 10;
+        await host.FlushAsync();
+
+        // Act
+        host.Weather.Rain = 0.1;
+        await host.FlushAsync();
+        host.Weather.Rain = 0.2;
+        await host.FlushAsync();
+        var runsWhileTheGustStays = host.Blinds.CloseCount;
+        host.Weather.Gust = 7;
+        await host.FlushAsync();
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, runsWhileTheGustStays);
+        Assert.Equal(2, host.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenATriggerReadsTheTimeAndItsRearmExpressionStaysTrue_ThenTheRuleRunsOnce()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", On("Retract", When("time > 1h and /Weather/Gust > 8", rearm: "/Weather/Rain < 1"), Invoke("/Blinds/Close")))));
+        host.Weather.Rain = 0;
+        host.Weather.Gust = 10;
+        await host.FlushAsync();
+
+        // Act
+        for (var second = 0; second < 5; second++)
+        {
+            host.Time.Advance(TimeSpan.FromSeconds(1));
+            await host.FlushAsync();
+        }
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
     public async Task WhenTheTriggerStartsTrueWithRearm_ThenOnlyTheRearmExpressionAllowsTheFirstRun()
     {
         // Arrange
@@ -108,7 +159,7 @@ public class AutomationPropertyTriggerTests
     }
 
     [Fact]
-    public async Task WhenTheGuardRejects_ThenTheRunIsRecordedWithoutActions()
+    public async Task WhenTheGuardRejects_ThenNoRunIsRecordedAndTheStatusSaysWhy()
     {
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(Storm(StormGuard));
@@ -119,11 +170,13 @@ public class AutomationPropertyTriggerTests
         await HoldGustAsync(host, 9);
 
         // Assert
-        Assert.Equal(1L, rule.RunCount);
-        Assert.Equal(AutomationRunOutcome.RejectedByGuard, rule.LastRunOutcome);
-        Assert.Equal("Rejected: the guard is false", rule.LastRunMessage);
+        Assert.Equal(0L, rule.RunCount);
+        Assert.Null(rule.LastRunOutcome);
+        Assert.Null(rule.LastRunMessage);
         Assert.Null(rule.LastTriggeredAt);
         Assert.Equal(0, host.Blinds.CloseCount);
+        Assert.Equal("On: Waiting since 12:00:20: Only if is false", rule.Status);
+        Assert.DoesNotContain("retract", File.Exists(host.CheckpointPath) ? await File.ReadAllTextAsync(host.CheckpointPath) : string.Empty);
     }
 
     [Fact]
@@ -139,8 +192,8 @@ public class AutomationPropertyTriggerTests
         await HoldGustAsync(host, 9);
 
         // Assert
-        Assert.Equal(2L, rule.RunCount);
-        Assert.Equal(AutomationRunOutcome.RejectedByGuard, rule.LastRunOutcome);
+        Assert.Equal(1L, rule.RunCount);
+        Assert.Equal(AutomationRunOutcome.Succeeded, rule.LastRunOutcome);
         Assert.Equal(1, host.Blinds.CloseCount);
     }
 
@@ -237,5 +290,104 @@ public class AutomationPropertyTriggerTests
 
         // Assert
         Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenASubjectIsReplacedWhileTheWorkerIsBusy_ThenTheTriggerReadsTheCurrentValueOfTheNewSubject()
+    {
+        // Arrange
+        var gate = new TestGate { BlockOnCall = 1 };
+        var holder = new TestSensorHolder { Sensor = new TestSensor() };
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", On("Retract", When("/Holder/Sensor/Gust > 8 and /Weather/Rain > 0"), Invoke("/Blinds/Close"))),
+            ("step", On("Step", When("/Weather/Rain > 0"), Invoke("/Gate/Step"))),
+            ("wait", On("Wait", When("/Weather/Power > 0"), Invoke("/Blinds/Wait")))));
+        host.Graph.Add("Holder", holder);
+        host.Graph.Add("Gate", gate);
+        await host.FlushAsync();
+        host.Weather.Power = 1;
+        await AsyncTestHelpers.WaitUntilAsync(() => host.Blinds.IsWaiting);
+        host.Weather.Rain = 1;
+        var replacement = new TestSensor { Gust = 0 };
+        holder.Sensor = replacement;
+        host.Blinds.Release();
+        await AsyncTestHelpers.WaitUntilAsync(() => gate.IsWaiting);
+
+        // Act
+        replacement.Gust = 10;
+        gate.Release();
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenTwoAutomationsWatchDifferentProperties_ThenAChangeIsRoutedOnlyToTheAutomationThatWatchesIt()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { });
+        var listeners = new List<CountingListener>();
+        host.ChangeDispatcher.ListenerDecorator = listener =>
+        {
+            var counting = new CountingListener(listener);
+            listeners.Add(counting);
+            return counting;
+        };
+        var gusts = await host.AddAutomationAsync("Gusts", automation => automation.Rules = Keyed(
+            ("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
+        var gustsListener = Assert.Single(listeners);
+        var showers = await host.AddAutomationAsync("Showers", automation => automation.Rules = Keyed(
+            ("open", On("Open", When("/Weather/Rain > 5"), Invoke("/Blinds/Open")))));
+        var showersListener = listeners[1];
+
+        // Act
+        host.Weather.Gust = 9;
+        await gusts.FlushAsync();
+        await showers.FlushAsync();
+
+        // Assert
+        Assert.Equal(nameof(TestSensor.Gust), Assert.Single(gustsListener.WatchedChanges).Name);
+        Assert.Empty(showersListener.WatchedChanges);
+        Assert.Equal(1L, gusts.Rules["retract"].RunCount);
+        Assert.Equal(0L, showers.Rules["open"].RunCount);
+        Assert.Equal(1, host.ChangeDispatcher.SourceCount);
+    }
+
+    [Fact]
+    public async Task WhenTheLastAutomationOfAGraphStops_ThenTheDispatcherReleasesTheGraph()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(Storm());
+        var storm = host.Automation;
+        var shower = await host.AddAutomationAsync("Shower", automation => automation.Rules = Keyed(
+            ("open", On("Open", When("/Weather/Rain > 5"), Invoke("/Blinds/Open")))));
+        var dispatcher = host.ChangeDispatcher;
+
+        // Act
+        await ((IHostedService)storm).StopAsync(CancellationToken.None);
+        var sourcesWithOneAutomation = dispatcher.SourceCount;
+        var watchersOfGust = dispatcher.CountWatchers(host.Graph.Context, new PropertyReference(host.Weather, nameof(TestSensor.Gust)));
+        await ((IHostedService)shower).StopAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(1, sourcesWithOneAutomation);
+        Assert.Equal(0, watchersOfGust);
+        Assert.Equal(0, dispatcher.SourceCount);
+    }
+
+    private sealed class CountingListener(IAutomationChangeListener inner) : IAutomationChangeListener
+    {
+        private readonly ConcurrentQueue<PropertyReference> _watchedChanges = new();
+
+        public IReadOnlyList<PropertyReference> WatchedChanges => [.. _watchedChanges];
+
+        public void OnWatchedPropertyChanged(PropertyChangedInput input)
+        {
+            _watchedChanges.Enqueue(input.Property);
+            inner.OnWatchedPropertyChanged(input);
+        }
+
+        public void OnGraphChanged(int chainDepth) => inner.OnGraphChanged(chainDepth);
     }
 }

@@ -62,6 +62,7 @@ public class RuleStatusTextTests
         var state = new PropertyTriggerState(hold: null, hasRearm: true);
         state.Activate(TriggerActivation.EvaluateImmediately, new TriggerObservation(false, null, []), Start);
         state.Observe(new TriggerObservation(true, null, []), Start);
+        state.Consume();
         state.Observe(new TriggerObservation(true, null, ["/Weather/Threshold"]), Start.AddSeconds(5));
 
         // Act
@@ -69,6 +70,19 @@ public class RuleStatusTextTests
 
         // Assert
         Assert.Equal("On: Unknown since 2026-11-06 12:00:05, missing /Weather/Threshold", text);
+    }
+
+    [Fact]
+    public void WhenATriggerIsPending_ThenTheStatusShowsSinceWhenAndWhyItsRunDidNotRun()
+    {
+        // Arrange
+        TriggerStatus[] triggers = [new(TriggerPhase.Holding, Start, TimeSpan.FromSeconds(20), null, [], null), new(TriggerPhase.Pending, null, null, null, [], null, Start)];
+
+        // Act
+        var text = RuleStatusText.Format(AutomationRuleMode.On, null, triggers, TimeZoneInfo.Utc, "Only if is false");
+
+        // Assert
+        Assert.Equal("On: Waiting since 12:00:00: Only if is false", text);
     }
 
     [Fact]
@@ -112,6 +126,18 @@ public class RuleStatusTextTests
 
         // Assert
         Assert.Equal("On: Already true, waiting to rearm", text);
+    }
+
+    [Fact]
+    public void WhenATriggerRearmedWhileItsExpressionIsTrue_ThenTheRuleIsArmedAndWaitsUntilItIsFalse()
+    {
+        // Act
+        var rearmed = RuleStatusText.Format(AutomationRuleMode.On, null, [Phase(TriggerPhase.RearmedWhileTrue), Phase(TriggerPhase.WaitingToRearm)], TimeZoneInfo.Utc);
+        var withAnArmedTrigger = RuleStatusText.Format(AutomationRuleMode.On, null, [Phase(TriggerPhase.RearmedWhileTrue), Phase(TriggerPhase.Armed)], TimeZoneInfo.Utc);
+
+        // Assert
+        Assert.Equal("On: Armed, waiting until false", rearmed);
+        Assert.Equal("On: Armed", withAnArmedTrigger);
     }
 
     [Fact]

@@ -33,7 +33,11 @@ public partial class AutomationRule : IConfigurable, ITitleProvider
     [Configuration]
     public partial AutomationTrigger[] Triggers { get; set; }
 
-    /// <summary>The condition a requested run must meet, evaluated when the run starts; null runs every request.</summary>
+    /// <summary>
+    /// The condition a requested run must meet, evaluated when the run starts; null runs every request. A property
+    /// trigger whose request it rejects stays pending while its expression stays true and runs as soon as the condition
+    /// is true; an event it rejects is gone.
+    /// </summary>
     [Configuration]
     public partial string? Guard { get; set; }
 
@@ -41,7 +45,10 @@ public partial class AutomationRule : IConfigurable, ITitleProvider
     [Configuration]
     public partial AutomationAction[] Actions { get; set; }
 
-    /// <summary>The mode and whether the rule is armed, holding, triggered or unknown with the missing paths.</summary>
+    /// <summary>
+    /// The mode and whether the rule is armed, holding, triggered or unknown with the missing paths, and why its last
+    /// request did not run.
+    /// </summary>
     [State(Position = 1)]
     public partial string? Status { get; internal set; }
 
@@ -49,14 +56,18 @@ public partial class AutomationRule : IConfigurable, ITitleProvider
     [State("Last Triggered", Position = 2)]
     public partial DateTimeOffset? LastTriggeredAt { get; internal set; }
 
-    /// <summary>The number of recorded runs, also of rejected and dry runs. Null until the automation restored it.</summary>
+    /// <summary>
+    /// The number of runs: those that executed their actions and dry runs. A request that did not run, such as one that
+    /// <see cref="Guard"/> rejected, is not counted. Null until the automation restored it. After a crash it can restart
+    /// below the last value history recorded, since runs are saved at most every 5 seconds.
+    /// </summary>
     [State("Runs", IsCumulative = true, Position = 3)]
     public partial long? RunCount { get; internal set; }
 
     [State("Last Outcome", IsDiscrete = true, Position = 4)]
     public partial AutomationRunOutcome? LastRunOutcome { get; internal set; }
 
-    /// <summary>A short summary of the last run: the executed actions, the failures or why it was rejected.</summary>
+    /// <summary>A short summary of the last run: the executed actions, the failures, or the actions a dry run would execute.</summary>
     [State("Last Message", Position = 5)]
     public partial string? LastRunMessage { get; internal set; }
 

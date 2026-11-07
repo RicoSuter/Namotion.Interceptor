@@ -27,7 +27,7 @@ internal sealed class CheckpointLocation
     /// <summary>Gets the location at the current path of the automation.</summary>
     public static CheckpointLocation Of(Automation automation, ILogger logger)
     {
-        var automationPath = automation.Services.PathResolver.GetPath(automation, PathStyle.Canonical);
+        var automationPath = automation.PathResolver.GetPath(automation, PathStyle.Canonical);
         var dataDirectory = ((IInterceptorSubject)automation).Context.TryGetService<IDataDirectoryProvider>()?.DataDirectory;
         var filePath = AutomationCheckpointStore.GetFilePath(dataDirectory, automationPath);
         if (filePath is null)
@@ -43,14 +43,14 @@ internal sealed class CheckpointLocation
     /// parent before it is removed from the old one, it may still resolve to the old path; the removal brings the new one.
     /// </summary>
     public bool HasMoved(Automation automation) =>
-        automation.Services.PathResolver.GetPath(automation, PathStyle.Canonical) is { } currentPath &&
+        automation.PathResolver.GetPath(automation, PathStyle.Canonical) is { } currentPath &&
         !string.Equals(currentPath, AutomationPath, StringComparison.Ordinal);
 
     /// <summary>Deletes the file unless another automation has <see cref="AutomationPath"/> now; logs an I/O error.</summary>
     public void DeleteIfOrphaned(Automation automation, ILogger logger)
     {
         if (AutomationPath is null ||
-            automation.Services.PathResolver.ResolveSubject(AutomationPath, PathStyle.Canonical) is Automation other && !ReferenceEquals(other, automation))
+            automation.PathResolver.ResolveSubject(AutomationPath, PathStyle.Canonical) is Automation other && !ReferenceEquals(other, automation))
         {
             return;
         }

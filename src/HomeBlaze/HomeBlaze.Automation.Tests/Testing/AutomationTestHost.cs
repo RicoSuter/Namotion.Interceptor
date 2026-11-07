@@ -1,7 +1,7 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Automation.Runtime;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 
 namespace HomeBlaze.Automation.Tests.Testing;
@@ -14,21 +14,35 @@ internal sealed class AutomationTestHost : IAsyncDisposable
 {
     public static readonly DateTimeOffset Start = new(2026, 11, 6, 12, 0, 0, TimeSpan.Zero);
 
-    private AutomationTestHost(TestGraph graph, FakeTimeProvider time, string dataDirectory, AutomationServices services)
+    private AutomationTestHost(TestGraph graph, FakeTimeProvider time, string dataDirectory, IAutomationAuthorizer authorizer)
     {
         Graph = graph;
         Time = time;
+        Clock = new TestClock(time);
         DataDirectory = dataDirectory;
-        Services = services;
+        Authorizer = authorizer;
+        ServiceProvider = new ServiceCollection().AddSingleton<AutomationChangeDispatcher>().BuildServiceProvider();
     }
 
     public TestGraph Graph { get; }
 
+    /// <summary>The fake time, which drives the timers of the automations.</summary>
     public FakeTimeProvider Time { get; }
+
+    /// <summary>The clock of the automations: the fake time, with a wall clock that a test can set apart and counted wake-ups.</summary>
+    public TestClock Clock { get; }
 
     public string DataDirectory { get; }
 
-    public AutomationServices Services { get; }
+    public IAutomationAuthorizer Authorizer { get; }
+
+    /// <summary>The logger of every automation of the host.</summary>
+    public MessageLogger Logger { get; } = new();
+
+    /// <summary>The services of every automation of the host, which share one change dispatcher.</summary>
+    public IServiceProvider ServiceProvider { get; }
+
+    public AutomationChangeDispatcher ChangeDispatcher => ServiceProvider.GetRequiredService<AutomationChangeDispatcher>();
 
     public TestSensor Weather { get; } = new();
 
@@ -44,7 +58,7 @@ internal sealed class AutomationTestHost : IAsyncDisposable
 
     public string Key { get; private set; } = string.Empty;
 
-    public string CheckpointPath => Path.Combine(DataDirectory, "Automations", Key + ".json");
+    public string CheckpointPath => Path.Combine(DataDirectory, "AutomationState", Key + ".json");
 
     public static async Task<AutomationTestHost> StartAsync(
         Action<Automation> configure, DateTimeOffset? start = null, TimeZoneInfo? timeZone = null, IAutomationAuthorizer? authorizer = null)
@@ -54,8 +68,7 @@ internal sealed class AutomationTestHost : IAsyncDisposable
         var graph = new TestGraph();
         var dataDirectory = Directory.CreateTempSubdirectory("automation-test").FullName;
         graph.Context.AddService<IDataDirectoryProvider>(new TestDataDirectory(dataDirectory));
-        var services = new AutomationServices(graph.Resolver, time, authorizer ?? new AllowAllAutomationAuthorizer(), new ServiceCollection().BuildServiceProvider());
-        var host = new AutomationTestHost(graph, time, dataDirectory, services);
+        var host = new AutomationTestHost(graph, time, dataDirectory, authorizer ?? new AllowAllAutomationAuthorizer());
         graph.Add("Weather", host.Weather);
         graph.Add("Blinds", host.Blinds);
         graph.Add("Notifier", host.Notifier);
@@ -66,10 +79,14 @@ internal sealed class AutomationTestHost : IAsyncDisposable
 
     public AutomationRule Rule(string key) => Automation.Rules[key];
 
+    /// <summary>Creates an automation with the services of the host, not attached yet.</summary>
+    public Automation CreateAutomation(string name) =>
+        new(Graph.Resolver, Clock, Authorizer, ServiceProvider, Logger) { Name = name };
+
     /// <summary>Attaches a new automation under <c>/key</c>, starts it and waits until it processed its activation.</summary>
     public async Task<Automation> AddAutomationAsync(string key, Action<Automation> configure)
     {
-        var automation = new Automation(Services, NullLogger<Automation>.Instance) { Name = key };
+        var automation = CreateAutomation(key);
         configure(automation);
         Graph.Add(key, automation);
         _automations.Add(automation);

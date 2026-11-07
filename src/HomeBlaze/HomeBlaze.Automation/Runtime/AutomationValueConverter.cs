@@ -5,7 +5,8 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// Converts the value of an expression to the type of a parameter or property: a value of the type as it is, a text or
-/// an enum to an enum by name, a number to another number type, and anything to a text as pages write it raw.
+/// an enum to an enum by name or by the number of a member, a number to another number type, and anything to a text as
+/// pages write it raw.
 /// </summary>
 internal static class AutomationValueConverter
 {
@@ -41,7 +42,7 @@ internal static class AutomationValueConverter
     private static bool TryConvertEnum(object value, Type type, out object? converted)
     {
         var name = value is string or Enum ? value.ToString() : null;
-        if (name is not null && Enum.TryParse(type, name, ignoreCase: true, out var parsed))
+        if (name is not null && Enum.TryParse(type, name, ignoreCase: true, out var parsed) && NamesMembers(parsed))
         {
             converted = parsed;
             return true;
@@ -50,6 +51,10 @@ internal static class AutomationValueConverter
         converted = null;
         return false;
     }
+
+    // A number that names no member, such as 7 for an enum of three members, formats as that number; a combination of
+    // flags formats as the names of its members.
+    private static bool NamesMembers(object value) => value.ToString() is { Length: > 0 } text && !char.IsAsciiDigit(text[0]) && text[0] != '-';
 
     private static bool IsNumber(Type type) => !type.IsEnum && Type.GetTypeCode(type) is >= TypeCode.SByte and <= TypeCode.Decimal;
 

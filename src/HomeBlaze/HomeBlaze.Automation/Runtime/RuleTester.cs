@@ -18,15 +18,14 @@ internal static class RuleTester
             return new AutomationRuleTestResult { Error = error };
         }
 
-        var services = automation.Services;
-        var evaluation = new AutomationEvaluation(services.PathResolver, rule, services.TimeProvider.GetUtcNow(), services.TimeProvider.LocalTimeZone);
+        var evaluation = new AutomationEvaluation(automation.PathResolver, rule, automation.TimeProvider.GetUtcNow(), automation.TimeProvider.LocalTimeZone);
         var guard = compiled.Guard is { } guardExpression ? evaluation.EvaluateCondition(guardExpression) : true;
         IReadOnlyList<string> guardMissingPaths = guard is null ? [.. evaluation.MissingPaths] : [];
         var triggers = compiled.PropertyTriggers.Select(trigger => TestPropertyTrigger(trigger, evaluation))
             .Concat(compiled.EventTriggers.Select(trigger => TestEventTrigger(trigger, automation)))
             .OrderBy(trigger => trigger.Number)
             .ToList();
-        var executor = new ActionExecutor(services.PathResolver, services.Authorizer, services.ServiceProvider, services.TimeProvider);
+        var executor = ActionExecutor.For(automation);
         var scope = new ActionScope(automation, rule, evaluation, compiled.AllowsEvent);
         return new AutomationRuleTestResult
         {
@@ -35,7 +34,7 @@ internal static class RuleTester
             HasGuard = compiled.Guard is not null,
             GuardResult = guard,
             GuardMissingPaths = guardMissingPaths,
-            Actions = [.. compiled.Actions.Select(action => RuleRunner.Describe(executor, action, scope))]
+            Actions = [.. compiled.Actions.Select(action => executor.Describe(action, scope))]
         };
     }
 
@@ -61,7 +60,7 @@ internal static class RuleTester
     {
         var path = trigger.Configuration.SubjectPath;
         var eventType = trigger.Configuration.EventType;
-        var source = AutomationPaths.ResolveSubject(automation.Services.PathResolver, path, trigger.Rule.Rule);
+        var source = AutomationPaths.ResolveSubject(automation.PathResolver, path, trigger.Rule.Rule);
         if (source is null)
         {
             return $"No subject at {path}";

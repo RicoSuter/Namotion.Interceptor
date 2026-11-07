@@ -23,10 +23,7 @@ namespace Namotion.Interceptor.Expressions
     }
     public static class ExpressionVariables
     {
-        public const string Event = "event";
-        public const string Now = "now";
         public const string Subject = "subject";
-        public const string Time = "time";
         public const string Value = "value";
         public static bool TryGetVariable(string path, char pathSeparator, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? variable) { }
         public static bool TryGetVariable(string path, char pathSeparator, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? variable, out string? memberPath) { }
@@ -45,13 +42,16 @@ namespace Namotion.Interceptor.Expressions
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Expressions.ExpressionPipe> Pipes { get; }
         public string? SinglePath { get; }
         public string Text { get; }
+        public System.Collections.Immutable.ImmutableArray<string> Variables { get; }
         public Namotion.Interceptor.Expressions.ExpressionValue Evaluate<TContext>(ref TContext context)
             where TContext :  struct, Namotion.Interceptor.Expressions.IExpressionContext { }
         public bool? EvaluateCondition<TContext>(ref TContext context)
             where TContext :  struct, Namotion.Interceptor.Expressions.IExpressionContext { }
         public Namotion.Interceptor.Expressions.ExpressionValue EvaluateWithoutPipes<TContext>(ref TContext context)
             where TContext :  struct, Namotion.Interceptor.Expressions.IExpressionContext { }
+        public bool TryGetVariable(string path, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? variable, out string? memberPath) { }
         public static bool TryParse(string text, char pathSeparator, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Expressions.ParsedExpression? expression, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
+        public static bool TryParse(string text, char pathSeparator, System.Collections.Immutable.ImmutableArray<string> variables, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Expressions.ParsedExpression? expression, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
     }
     public sealed class TextTemplate
     {
@@ -60,5 +60,6 @@ namespace Namotion.Interceptor.Expressions
         public string Render<TContext>(ref TContext context)
             where TContext :  struct, Namotion.Interceptor.Expressions.IExpressionContext { }
         public static bool TryParse(string text, char pathSeparator, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Expressions.TextTemplate? template, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
+        public static bool TryParse(string text, char pathSeparator, System.Collections.Immutable.ImmutableArray<string> variables, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Expressions.TextTemplate? template, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
     }
 }

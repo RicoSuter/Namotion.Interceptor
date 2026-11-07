@@ -41,6 +41,6 @@ public static class AutomationEvents
             return automation;
         }
 
-        return AutomationPaths.ResolveSubject(automation.Services.PathResolver, subjectPath, AutomationPreview.GetAnchor(automation, ruleKey));
+        return AutomationPaths.ResolveSubject(automation.PathResolver, subjectPath, AutomationPreview.GetAnchor(automation, ruleKey));
     }
 }

@@ -1,9 +1,9 @@
+using HomeBlaze.Automation.Runtime;
+using HomeBlaze.Automation.Tests.Testing;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Namotion.Interceptor;
-using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Automation.Tests;
 
@@ -29,9 +29,40 @@ public class AutomationServiceCollectionExtensionsTests
         using var automation = ActivatorUtilities.CreateInstance<Automation>(provider);
 
         // Assert
-        Assert.IsType<AllowAllAutomationAuthorizer>(provider.GetRequiredService<IAutomationAuthorizer>());
-        Assert.Same(TimeProvider.System, provider.GetRequiredService<AutomationServices>().TimeProvider);
+        Assert.IsType<AllowAllAutomationAuthorizer>(automation.Authorizer);
+        Assert.Same(TimeProvider.System, automation.TimeProvider);
         Assert.True(automation.Enabled);
+    }
+
+    [Fact]
+    public void WhenAutomationIsAdded_ThenEveryAutomationUsesTheRegisteredChangeDispatcher()
+    {
+        // Arrange
+        var services = CreateServices();
+        services.AddHomeBlazeAutomation();
+        using var provider = services.BuildServiceProvider();
+
+        // Act
+        using var first = ActivatorUtilities.CreateInstance<Automation>(provider);
+        using var second = ActivatorUtilities.CreateInstance<Automation>(provider);
+
+        // Assert
+        Assert.Same(provider.GetRequiredService<AutomationChangeDispatcher>(), first.ChangeDispatcher);
+        Assert.Same(first.ChangeDispatcher, second.ChangeDispatcher);
+    }
+
+    [Fact]
+    public void WhenNoChangeDispatcherIsRegistered_ThenTheAutomationHasOneOfItsOwn()
+    {
+        // Arrange
+        using var provider = new ServiceCollection().BuildServiceProvider();
+
+        // Act
+        using var automation = new Automation(
+            new SubjectPathResolver(() => null), TimeProvider.System, new AllowAllAutomationAuthorizer(), provider, NullLogger<Automation>.Instance);
+
+        // Assert
+        Assert.NotNull(automation.ChangeDispatcher);
     }
 
     [Fact]
@@ -44,15 +75,9 @@ public class AutomationServiceCollectionExtensionsTests
         // Act
         services.AddHomeBlazeAutomation();
         using var provider = services.BuildServiceProvider();
+        using var automation = ActivatorUtilities.CreateInstance<Automation>(provider);
 
         // Assert
-        Assert.IsType<DenyingAuthorizer>(provider.GetRequiredService<AutomationServices>().Authorizer);
-    }
-
-    private sealed class DenyingAuthorizer : IAutomationAuthorizer
-    {
-        public string? GetOperationDenial(IInterceptorSubject automation, RegisteredSubjectProperty operation) => "denied";
-
-        public string? GetPropertyWriteDenial(IInterceptorSubject automation, RegisteredSubjectProperty property) => "denied";
+        Assert.IsType<DenyingAuthorizer>(automation.Authorizer);
     }
 }

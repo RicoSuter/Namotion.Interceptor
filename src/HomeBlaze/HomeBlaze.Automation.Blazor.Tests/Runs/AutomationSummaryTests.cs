@@ -56,7 +56,6 @@ public class AutomationSummaryTests
     [InlineData(AutomationRunOutcome.Succeeded, "Succeeded")]
     [InlineData(AutomationRunOutcome.CompletedWithErrors, "Completed with errors")]
     [InlineData(AutomationRunOutcome.StoppedAfterError, "Stopped after an error")]
-    [InlineData(AutomationRunOutcome.RejectedByGuard, "Rejected by Only if")]
     [InlineData(AutomationRunOutcome.DryRun, "Would have run (dry run)")]
     [InlineData(AutomationRunOutcome.Canceled, "Canceled")]
     public void WhenAnOutcomeIsShown_ThenItIsReadable(AutomationRunOutcome outcome, string expected)

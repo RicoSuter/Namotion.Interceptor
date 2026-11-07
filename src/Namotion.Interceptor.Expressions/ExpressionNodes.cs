@@ -1,25 +1,26 @@
+using System.Collections.Immutable;
 using System.Globalization;
 
 namespace Namotion.Interceptor.Expressions;
 
 internal abstract class ExpressionNode;
 
-/// <summary>A number (a boxed <see cref="double"/>), a duration (a boxed <see cref="TimeSpan"/>), a boolean, a text or null.</summary>
-internal sealed class LiteralNode(object? value, string? bareWord = null) : ExpressionNode
+/// <summary>A number (a boxed <see cref="decimal"/> when it is exact, otherwise a boxed <see cref="double"/>), a duration (a boxed <see cref="TimeSpan"/>), a boolean, a text or null.</summary>
+internal sealed class LiteralNode(object? value, bool isBareWord = false) : ExpressionNode
 {
     public object? Value { get; } = value;
 
-    /// <summary>The word when the literal is a bare word after a comparison operator, which arithmetic reads as a path.</summary>
-    public string? BareWord { get; } = bareWord;
+    /// <summary>Whether the literal is a bare word after a comparison operator, which arithmetic reads as a path.</summary>
+    public bool IsBareWord { get; } = isBareWord;
 }
 
 internal sealed class PathNode : ExpressionNode
 {
-    public PathNode(string path, char pathSeparator)
+    public PathNode(string path, char pathSeparator, ImmutableArray<string> variables)
     {
         Path = path;
         // Split once here, so that an evaluation allocates no part of the path.
-        if (ExpressionVariables.TryGetVariable(path, pathSeparator, out var variable, out var memberPath))
+        if (ExpressionVariables.TryGetVariable(path, pathSeparator, variables, out var variable, out var memberPath))
         {
             Variable = variable;
             MemberPath = memberPath;
@@ -33,6 +34,11 @@ internal sealed class PathNode : ExpressionNode
 
     /// <summary>The rest of the path after the variable and its separator, or null for the variable alone or a path without one.</summary>
     public string? MemberPath { get; }
+}
+
+internal sealed class NegationNode(ExpressionNode operand) : ExpressionNode
+{
+    public ExpressionNode Operand { get; } = operand;
 }
 
 internal sealed class NotNode(ExpressionNode operand) : ExpressionNode
