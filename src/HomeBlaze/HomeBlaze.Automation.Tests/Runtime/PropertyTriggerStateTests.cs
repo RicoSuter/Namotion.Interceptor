@@ -279,6 +279,23 @@ public class PropertyTriggerStateTests
         Assert.False(state.WasTrueAtActivation);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void WhenATriggerThatStartedTrueIsRearmedWithoutFiring_ThenItIsNoLongerTrueAtActivation(bool hasRearm)
+    {
+        // Arrange
+        var state = new PropertyTriggerState(hold: null, hasRearm);
+        state.Activate(TriggerActivation.WaitForFalseToTrue, WithRearm(true, false), Start);
+
+        // Act
+        Run(state, WithRearm(false, true), Start.AddSeconds(1));
+
+        // Assert
+        Assert.Equal(TriggerPhase.Armed, state.Phase);
+        Assert.False(state.WasTrueAtActivation);
+    }
+
     [Fact]
     public void WhenATriggerFiresWithoutStartingTrue_ThenItWasNotTrueAtActivation()
     {

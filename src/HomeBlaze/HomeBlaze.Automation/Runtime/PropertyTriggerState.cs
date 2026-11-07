@@ -26,7 +26,7 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
     /// <summary>The paths that led to no value while the expression is unknown.</summary>
     public IReadOnlyList<string> MissingPaths { get; private set; } = [];
 
-    /// <summary>Whether the expression was already true when the trigger became active and the trigger has not fired since.</summary>
+    /// <summary>Whether the expression was already true when the trigger became active and the trigger has neither fired nor rearmed since.</summary>
     public bool WasTrueAtActivation { get; private set; }
 
     public bool IsUnknown => UnknownSince is not null;
@@ -183,6 +183,7 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
         }
 
         Phase = observation.Value == true ? TriggerPhase.RearmedWhileTrue : TriggerPhase.Armed;
+        WasTrueAtActivation = false;
         return false;
     }
 
@@ -191,6 +192,7 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
         if (value == false)
         {
             Phase = TriggerPhase.Armed;
+            WasTrueAtActivation = false;
         }
 
         return false;
