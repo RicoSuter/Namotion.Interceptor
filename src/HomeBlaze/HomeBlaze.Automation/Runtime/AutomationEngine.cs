@@ -23,6 +23,9 @@ internal sealed class AutomationEngine : IRuleRunHost
     private int _appliedConfigurationVersion = -1;
     private bool _hasConfigurationError;
 
+    // An unreadable checkpoint stays shown after successful runs, until a reset or a valid configuration is applied.
+    private bool _hasCheckpointError;
+
     /// <summary>Creates the engine, whose property triggers publish their watched set to <paramref name="changes"/>.</summary>
     public AutomationEngine(Automation automation, AutomationInputQueue queue, AutomationStateKeeper keeper, ILogger logger, AutomationChangeReceiver changes)
     {
@@ -45,18 +48,20 @@ internal sealed class AutomationEngine : IRuleRunHost
     /// <summary>Restores the checkpoint without a state-change event and applies the configuration.</summary>
     public void Start()
     {
-        var checkpoint = _keeper.Load(out var error);
-        if (error is not null)
-        {
-            _status.Fail($"The checkpoint could not be read, so the automation starts from its initial state: {error}");
-        }
-        else if (checkpoint is null)
+        _hasCheckpointError = false;
+        var checkpoint = _keeper.Load(_automation.Services.TimeProvider.GetUtcNow(), out var error);
+        if (error is null && checkpoint is null)
         {
             _logger.LogInformation("The automation {Automation} has no checkpoint at {Path} and starts from its initial state.", Name, _keeper.Store.FilePath);
         }
 
         Begin(checkpoint);
-        if (_automation.Status == ServiceStatus.Starting)
+        if (error is not null)
+        {
+            _hasCheckpointError = true;
+            _status.Fail(error);
+        }
+        else if (_automation.Status == ServiceStatus.Starting)
         {
             _status.SetRunning();
         }
@@ -70,6 +75,7 @@ internal sealed class AutomationEngine : IRuleRunHost
     public void StartFresh()
     {
         Unload();
+        _hasCheckpointError = false;
 
         // Written at once, so that an older file at the new path is not read at the next start.
         if (_keeper.TryPersist(_keeper.Persisted) is { } error)
@@ -143,12 +149,14 @@ internal sealed class AutomationEngine : IRuleRunHost
     /// </summary>
     public Task ResetStateAsync()
     {
+        _keeper.AllowOverwrite();
         if (_states.Reset(_snapshot, _automation.Rules.Values, RestartRules) is { } error)
         {
             _status.Fail(error);
             return Task.CompletedTask;
         }
 
+        _hasCheckpointError = false;
         if (!_hasConfigurationError)
         {
             _status.SetRunning();
@@ -182,7 +190,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         if (canceled.Count > 0)
         {
             var reason = $"Canceled: a feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped";
-            _status.Apply(_dispatcher.Cancel(canceled, reason), _hasConfigurationError);
+            _status.Apply(_dispatcher.Cancel(canceled, reason), HasStickyError);
         }
 
         if (dropped.HasOverload)
@@ -265,12 +273,13 @@ internal sealed class AutomationEngine : IRuleRunHost
         {
             _status.Fail(problem);
         }
-        else if (_hasConfigurationError)
+        else if (_hasConfigurationError || _hasCheckpointError)
         {
             _status.SetRunning();
         }
 
         _hasConfigurationError = false;
+        _hasCheckpointError = false;
         _status.ApplyEnabled();
         ActivateRules();
     }
@@ -379,7 +388,7 @@ internal sealed class AutomationEngine : IRuleRunHost
             PublishStateChanges();
         }
 
-        _status.Apply(summary, _hasConfigurationError);
+        _status.Apply(summary, HasStickyError);
     }
 
     // The rules of the entered state are activated first, so that they receive the event of entering it.
@@ -393,6 +402,8 @@ internal sealed class AutomationEngine : IRuleRunHost
         ApplyScopeChange();
         _states.PublishPendingChanges();
     }
+
+    private bool HasStickyError => _hasConfigurationError || _hasCheckpointError;
 
     private bool IsActive(CompiledRule rule) => rule.IsActiveIn(_automation.Enabled, CurrentState);
 

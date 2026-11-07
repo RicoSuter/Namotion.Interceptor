@@ -9,6 +9,8 @@ namespace HomeBlaze.Automation.Persistence;
 /// </summary>
 internal sealed class AutomationStateKeeper(AutomationCheckpointStore store)
 {
+    private string? _overwriteRefusal;
+
     public AutomationCheckpointStore Store { get; private set; } = store;
 
     public AutomationCheckpoint Persisted { get; private set; } = new();
@@ -20,9 +22,14 @@ internal sealed class AutomationStateKeeper(AutomationCheckpointStore store)
         Persisted = new AutomationCheckpoint();
     }
 
-    /// <summary>Reads the checkpoint into <see cref="Persisted"/>; null without one, and with the error when it cannot be read.</summary>
-    public AutomationCheckpoint? Load(out string? error)
+    /// <summary>
+    /// Reads the checkpoint into <see cref="Persisted"/>; null without one, and with the error when it cannot be read. A
+    /// file that cannot be read is moved aside, so that the next write does not replace it; when that fails too, nothing
+    /// is written until <see cref="AllowOverwrite"/>.
+    /// </summary>
+    public AutomationCheckpoint? Load(DateTimeOffset now, out string? error)
     {
+        _overwriteRefusal = null;
         try
         {
             var checkpoint = Store.Read() is { } read ? WithoutNullRules(read) : null;
@@ -36,14 +43,22 @@ internal sealed class AutomationStateKeeper(AutomationCheckpointStore store)
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
-            error = exception.Message;
+            error = MoveAside(exception.Message, now);
             return null;
         }
     }
 
+    /// <summary>Writes again after an unreadable checkpoint could not be moved aside, which then is replaced.</summary>
+    public void AllowOverwrite() => _overwriteRefusal = null;
+
     /// <summary>Writes the checkpoint and keeps it; returns the error and keeps the previous checkpoint when the write fails.</summary>
     public string? TryPersist(AutomationCheckpoint next)
     {
+        if (_overwriteRefusal is { } refusal)
+        {
+            return refusal;
+        }
+
         try
         {
             Store.Write(next);
@@ -90,6 +105,20 @@ internal sealed class AutomationStateKeeper(AutomationCheckpointStore store)
         rule.LastRunOutcome = run?.LastRunOutcome;
         rule.LastRunMessage = run?.LastRunMessage;
         rule.RunCount = run?.RunCount ?? 0;
+    }
+
+    private string MoveAside(string readError, DateTimeOffset now)
+    {
+        try
+        {
+            var movedTo = Store.MoveAside(now);
+            return $"The checkpoint could not be read and was moved to {movedTo}, so the automation starts from its initial state: {readError}";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _overwriteRefusal = $"The unreadable checkpoint at {Store.FilePath} is not replaced until the automation is reset";
+            return $"The checkpoint could not be read and not be moved aside, so the automation saves nothing until it is reset: {readError}; {exception.Message}";
+        }
     }
 
     // A file may hold an explicit null for the rules or for a rule, which the keeper never expects.

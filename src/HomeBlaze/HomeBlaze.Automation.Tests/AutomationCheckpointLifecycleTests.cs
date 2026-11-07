@@ -18,6 +18,61 @@ public class AutomationCheckpointLifecycleTests
     };
 
     [Fact]
+    public async Task WhenTheCheckpointCannotBeRead_ThenItIsMovedAsideAndTheErrorStaysUntilAReset()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            Washer()(automation);
+            automation.Rules["close"] = On("Close", When("/Weather/Gust > 8"), Invoke("/Blinds/Close"));
+        });
+        await host.StopAsync();
+        await File.WriteAllTextAsync(host.CheckpointPath, "{ \"currentState\": ");
+
+        // Act
+        await ((IHostedService)host.Automation).StartAsync(CancellationToken.None);
+        await host.FlushAsync();
+        var stateAfterTheStart = host.Automation.CurrentState;
+        var messageAfterTheStart = host.Automation.StatusMessage;
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        var statusAfterARun = host.Automation.Status;
+        var runs = host.Blinds.CloseCount;
+        host.Automation.ResetState();
+        await host.FlushAsync();
+
+        // Assert
+        var setAside = Assert.Single(Directory.GetFiles(Path.GetDirectoryName(host.CheckpointPath)!, "Storm.json.unreadable-*"));
+        Assert.Equal("{ \"currentState\": ", await File.ReadAllTextAsync(setAside));
+        Assert.Equal("Idle", stateAfterTheStart);
+        Assert.StartsWith("The checkpoint could not be read and was moved to " + setAside, messageAfterTheStart);
+        Assert.Equal(1, runs);
+        Assert.Equal(ServiceStatus.Error, statusAfterARun);
+        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
+        Assert.Null(host.Automation.StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenTheCheckpointCannotBeReadAndAValidConfigurationIsSaved_ThenTheErrorIsCleared()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(Washer());
+        await host.StopAsync();
+        await File.WriteAllTextAsync(host.CheckpointPath, "not a checkpoint");
+        await ((IHostedService)host.Automation).StartAsync(CancellationToken.None);
+        await host.FlushAsync();
+        var statusAfterTheStart = host.Automation.Status;
+
+        // Act
+        await host.Automation.ApplyConfigurationAsync(CancellationToken.None);
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, statusAfterTheStart);
+        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
+    }
+
+    [Fact]
     public async Task WhenTheAutomationIsRemoved_ThenItsCheckpointIsDeleted()
     {
         // Arrange

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using HomeBlaze.Services;
 
@@ -49,6 +50,28 @@ internal sealed class AutomationCheckpointStore(string? filePath)
         }
 
         return JsonSerializer.Deserialize(File.ReadAllText(FilePath), AutomationCheckpointJsonContext.Default.AutomationCheckpoint);
+    }
+
+    /// <summary>
+    /// Renames the file to <c>{name}.unreadable-{timestamp}</c> next to it, so that a file that cannot be read is kept
+    /// and not replaced by the next write; returns the new path, or null without a path.
+    /// </summary>
+    /// <exception cref="IOException">The file cannot be renamed.</exception>
+    /// <exception cref="UnauthorizedAccessException">The file cannot be renamed.</exception>
+    public string? MoveAside(DateTimeOffset now)
+    {
+        if (FilePath is null)
+        {
+            return null;
+        }
+
+        var target = $"{FilePath}.unreadable-{now.UtcDateTime.ToString("yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture)}";
+        lock (_lock)
+        {
+            File.Move(FilePath, target);
+        }
+
+        return target;
     }
 
     /// <summary>Replaces the file with the checkpoint; does nothing without a path or after <see cref="Delete"/>.</summary>
