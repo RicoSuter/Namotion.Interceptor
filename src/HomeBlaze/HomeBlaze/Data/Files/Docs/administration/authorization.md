@@ -416,6 +416,8 @@ A role has these settings, each optional:
 - **Page addresses**: `browse` and `search` give a subject with a page its address as `$url`, which is built with the shallowest path of the subject. When a member or subject on that path is hidden, `$url` is left out, so it names nothing hidden, even when the subject is readable for the tools at another path, such as a subject that is also held below a hidden branch.
 - **Roles changed while they are read**: when an edit or a reload changes the roles while they are compiled, they are read once more; when that fails as well, custom roles are unavailable for that one call, and the next call reads them again.
 - **Metadata checked before a write**: before it decides `SetMetadata` or `SetOrder`, the check adds an empty `HomeBlaze:Metadata` member to the target, also when the write is then refused, so a client without write rights can add such an empty member and raise a structure change. It holds no value and grants nothing.
+- **Unknown type names**: a rule may name a type that is not loaded, such as a type of a plugin that is not installed yet, so the role is saved and the name only shows as a warning; until the type is loaded, the rule matches nothing.
+- **Role updates from code**: `AuthorizationService.BeginUpdate` and the edit lock of the roles are public, so code that holds an update open keeps every policy as it was when the update started until it ends; the edit dialog and the role operations end their updates themselves.
 
 ---
 
