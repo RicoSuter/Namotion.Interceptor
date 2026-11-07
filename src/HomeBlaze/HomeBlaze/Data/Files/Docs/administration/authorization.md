@@ -273,6 +273,7 @@ For an agent the policy comes from its roles; for `/mcp` clients it is `Everythi
 - **Subjects with only secrets**: a subject whose only members other than attributes are secrets has no readable member, so it is hidden from every agent and `/mcp` client, as is a subject the roles deny every member of.
 - **Page addresses**: `browse` and `search` give a subject with a page its address as `$url`, which is built with the shallowest path of the subject. When a member or subject on that path is hidden, `$url` is left out, so it names nothing hidden, even when the subject is readable for the tools at another path, such as a subject that is also held below a hidden branch.
 - **Roles changed while they are read**: when an edit or a reload changes the roles while they are compiled, they are read once more; when that fails as well, custom roles are unavailable for that one call, and the next call reads them again.
+- **Metadata checked before a write**: before it decides `SetMetadata` or `SetOrder`, the check adds an empty `HomeBlaze:Metadata` member to the target, also when the write is then refused, so a client without write rights can add such an empty member and raise a structure change. It holds no value and grants nothing.
 
 ---
 
