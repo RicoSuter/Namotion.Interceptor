@@ -256,6 +256,7 @@ public class SubjectFilterExpressionTests
     [InlineData("Temperature > Device.Missing", false)]
     [InlineData("not (Missing > 1)", false)]
     [InlineData("not (Device == Light)", false)]
+    [InlineData("Temperature - 1 > 20", true)]
     public void WhenFilterUsesPathsNotOrMissingValues_ThenItMatchesAsTheExpressionLanguageSays(string where, bool expected)
     {
         // Arrange
@@ -274,7 +275,6 @@ public class SubjectFilterExpressionTests
     [InlineData("value > 1", "where: 'value' is not available in where")]
     [InlineData("Name == value", "where: 'value' is not available in where")]
     [InlineData("Name | raw", "where: a condition takes no pipes")]
-    [InlineData("Temperature - 1 > 0", "where: arithmetic is not supported at position 12")]
     [InlineData("Devices[a] == null", "where: a path ends at a property, not at an entry such as 'Devices[a]'")]
     [InlineData("subject.Devices[a] != null", "where: a path ends at a property, not at an entry such as 'subject.Devices[a]'")]
     [InlineData("subject[0] == null", "where: a path ends at a property, not at an entry such as 'subject[0]'")]
