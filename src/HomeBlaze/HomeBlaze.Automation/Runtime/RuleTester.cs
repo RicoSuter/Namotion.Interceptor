@@ -45,7 +45,7 @@ internal static class RuleTester
             Number = trigger.Index + 1,
             Result = result,
             MissingPaths = result is null ? [.. evaluation.MissingPaths] : [],
-            Note = trigger.Configuration.For is { } hold && hold > TimeSpan.Zero ? $"Fires when true for {hold:c}" : null
+            Note = trigger.Configuration.For is { } hold && hold > TimeSpan.Zero ? $"Fires when true for {AutomationDuration.Format(hold)}" : null
         };
     }
 

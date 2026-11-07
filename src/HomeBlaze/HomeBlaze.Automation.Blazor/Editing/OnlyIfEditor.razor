@@ -1,0 +1,57 @@
+@inject ITimeZoneDisplay TimeZone
+@inject TimeProvider TimeProvider
+
+<MudPaper Outlined="true" Class="pa-3" data-testid="automation-only-if">
+    <ConditionField Label="Checked when a trigger fires" Lead="Check" Value="@_condition"
+                    ValueChanged="@(value => SetOnlyIfAsync(value, _cooldown))"
+                    Validate="@Expressions.Validate" Preview="@Expressions.Preview" Hints="@RuleExpressions.GetConditionHints"
+                    TestId="automation-only-if-condition" />
+    <div class="d-flex flex-wrap align-center gap-3 mt-2">
+        <DurationField Label="At most once every" Value="@_cooldown" ValueChanged="@(value => SetOnlyIfAsync(_condition, value))"
+                       Draft="Draft" MustBePositive="true" RuleKey="@Rule.Key" HelperText="Empty: no limit" Style="max-width: 240px;" />
+        @if (LastTriggeredAt is { } lastTriggeredAt)
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">Last triggered @AutomationTime.Format(TimeZone, lastTriggeredAt, TimeProvider.GetUtcNow())</MudText>
+        }
+    </div>
+</MudPaper>
+
+@code {
+    private string? _condition;
+    private TimeSpan? _cooldown;
+    private string? _writtenOnlyIf;
+
+    [Parameter, EditorRequired] public RuleDraft Rule { get; set; } = null!;
+
+    [Parameter, EditorRequired] public AutomationDraft Draft { get; set; } = null!;
+
+    [Parameter, EditorRequired] public RuleExpressions Expressions { get; set; } = null!;
+
+    /// <summary>When the saved rule last triggered, or null.</summary>
+    [Parameter] public DateTimeOffset? LastTriggeredAt { get; set; }
+
+    [Parameter] public EventCallback Changed { get; set; }
+
+    // The two inputs keep what the user typed: a half-typed condition such as "(" does not split back out of Only if,
+    // so they are read from Only if only when it was changed by someone else.
+    protected override void OnParametersSet()
+    {
+        if (Rule.OnlyIf == _writtenOnlyIf)
+        {
+            return;
+        }
+
+        _writtenOnlyIf = Rule.OnlyIf;
+        (_condition, _cooldown) = OnlyIfCooldown.Split(Rule.OnlyIf);
+    }
+
+    // Only if is written only here, after an edit, so that opening a rule never rewrites the text it holds.
+    private Task SetOnlyIfAsync(string? condition, TimeSpan? cooldown)
+    {
+        _condition = condition;
+        _cooldown = cooldown;
+        Rule.OnlyIf = OnlyIfCooldown.Combine(condition, cooldown);
+        _writtenOnlyIf = Rule.OnlyIf;
+        return Changed.InvokeAsync();
+    }
+}

@@ -77,6 +77,7 @@ public class ArgumentBinderTests
     {
         { Parameter<int>("speed"), new() { ["speed"] = "/Weather/Rain + 1" }, "The argument 'speed' is unknown, missing /Weather/Rain" },
         { Parameter<int>("speed"), [], "The argument 'speed' is missing" },
+        { Parameter<int>("speed"), new() { ["speed"] = " " }, "The argument 'speed' is invalid: the value is empty" },
         {
             Parameter<string>("message"), new() { ["message"] = "{{ event/Gesture }}" },
             "The argument 'message' is invalid: 'event' is only available in event filters and in the arguments of a rule with an event trigger"

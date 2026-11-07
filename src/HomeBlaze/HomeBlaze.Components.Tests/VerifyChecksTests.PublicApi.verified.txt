@@ -1807,6 +1807,47 @@ namespace HomeBlaze.Components.Editors
 }
 namespace HomeBlaze.Components.Inputs
 {
+    public class ExpressionField : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    {
+        public ExpressionField() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<string>? Fields { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<bool> HasPendingRowChanged { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Func<string, System.Collections.Generic.IReadOnlyList<string>>? Hints { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Label { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Lead { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Func<string, HomeBlaze.Components.Inputs.ExpressionPreview?>? Preview { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string TestId { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Func<string, string?>? Validate { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Value { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string?> ValueChanged { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Immutable.ImmutableArray<string> Variables { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
+    }
+    public sealed class ExpressionPreview : System.IEquatable<HomeBlaze.Components.Inputs.ExpressionPreview>
+    {
+        public ExpressionPreview(bool? Result, object? Value, string? Text) { }
+        public bool? Result { get; init; }
+        public string? Text { get; init; }
+        public object? Value { get; init; }
+    }
+    public sealed class PreviewTicker : System.IDisposable
+    {
+        public PreviewTicker(System.TimeProvider timeProvider, System.Func<System.Func<System.Threading.Tasks.Task>, System.Threading.Tasks.Task> invokeAsync, System.Func<System.Threading.Tasks.Task> tick) { }
+        public void Dispose() { }
+    }
     public class SubjectPathField : Microsoft.AspNetCore.Components.ComponentBase
     {
         public SubjectPathField() { }
@@ -1816,6 +1857,8 @@ namespace HomeBlaze.Components.Inputs
         public System.Func<Namotion.Interceptor.IInterceptorSubject, bool>? CanSelectSubject { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Class { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? ErrorText { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, bool>? IsPropertyVisible { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]

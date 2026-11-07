@@ -99,6 +99,25 @@ public class AutomationConfigurationTests
     }
 
     [Fact]
+    public async Task WhenConfigurationPropertiesAreSetWithoutApplying_ThenTheAppliedConfigurationKeepsRunning()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(("retract", Retract())));
+
+        // Act
+        host.Automation.States = ["Open", "Closed"];
+        host.Automation.InitialState = "Open";
+        host.Automation.RuleOrder = ["other"];
+        host.Automation.Rules = Keyed(("other", On("Other", When("/Weather/Gust > 100"), Invoke("/Blinds/Close"))));
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Null(host.Automation.CurrentState);
+    }
+
+    [Fact]
     public async Task WhenTheConfigurationIsInvalid_ThenThePreviousConfigurationKeepsRunning()
     {
         // Arrange

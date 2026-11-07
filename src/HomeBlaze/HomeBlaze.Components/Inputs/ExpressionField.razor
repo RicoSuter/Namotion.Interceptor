@@ -1,0 +1,238 @@
+@using System.Collections.Immutable
+@implements IDisposable
+@inject TimeProvider TimeProvider
+@* One field for every condition: simple rows of path, comparison and value with the current value of each row, or
+   the expression as text. The stored value is always the expression text. *@
+
+<div class="expression-field" data-testid="@TestId">
+    <div class="d-flex align-center gap-2 mb-1">
+        <MudText Typo="Typo.subtitle2">@Label</MudText>
+        <MudSpacer />
+        <MudButtonGroup Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined" OverrideStyles="false">
+            <MudButton Size="Size.Small" Color="Color.Primary" Variant="@(_model.IsAdvanced ? Variant.Outlined : Variant.Filled)"
+                       Disabled="@(!_model.CanShowSimple)" OnClick="ShowSimple" data-testid="@($"{TestId}-simple")">Simple</MudButton>
+            <MudButton Size="Size.Small" Color="Color.Primary" Variant="@(_model.IsAdvanced ? Variant.Filled : Variant.Outlined)"
+                       OnClick="ShowAdvancedAsync" data-testid="@($"{TestId}-advanced")">Advanced</MudButton>
+        </MudButtonGroup>
+    </div>
+    @if (_model.IsAdvanced)
+    {
+        <MudTextField T="string" Label="Expression" Value="@_model.Text" ValueChanged="SetTextAsync" Immediate="true" Lines="2"
+                      Variant="Variant.Outlined" data-testid="@($"{TestId}-text")" />
+    }
+    else
+    {
+        <MudStack Spacing="1">
+            @for (var index = 0; index < _model.Rows.Count; index++)
+            {
+                var rowIndex = index;
+                var row = _model.GetDisplayRow(rowIndex);
+                var pathError = _model.GetPathError(rowIndex);
+                var valueError = _model.GetValueError(rowIndex);
+                <div class="d-flex flex-wrap align-center gap-2" data-testid="@($"{TestId}-row")">
+                    <div style="width: 64px;">
+                        @if (rowIndex == 0)
+                        {
+                            <MudText Typo="Typo.body2">@Lead</MudText>
+                        }
+                        else
+                        {
+                            <MudSelect T="string" Dense="true" Value="@row.Combinator" aria-label="Combine with the previous condition"
+                                       ValueChanged="@(value => SetRowAsync(rowIndex, row with { Combinator = value ?? ExpressionRows.Combinators[0] }))">
+                                @foreach (var combinator in ExpressionRows.Combinators)
+                                {
+                                    <MudSelectItem Value="@combinator">@combinator</MudSelectItem>
+                                }
+                            </MudSelect>
+                        }
+                    </div>
+                    <div style="flex: 2 1 220px; min-width: 0;">
+                        @if (Fields is { } fields)
+                        {
+                            <MudAutocomplete T="string" Label="Field" Dense="true" Value="@row.Path" CoerceValue="true" Error="@(pathError is not null)" ErrorText="@pathError"
+                                             ValueChanged="@(value => SetRowAsync(rowIndex, row with { Path = value ?? string.Empty }))"
+                                             SearchFunc="@((text, _) => SearchFieldsAsync(fields, text))" />
+                        }
+                        else
+                        {
+                            <SubjectPathField Label="Property" Value="@row.Path" ErrorText="@pathError"
+                                              ValueChanged="@(value => SetRowAsync(rowIndex, row with { Path = value ?? string.Empty }))" />
+                        }
+                    </div>
+                    <div style="width: 130px;">
+                        <MudSelect T="string" Label="Operator" Dense="true" Value="@row.Operator" ToStringFunc="@GetOperatorText"
+                                   ValueChanged="@(value => SetRowAsync(rowIndex, row with { Operator = value ?? ExpressionRows.Operators[0] }))">
+                            @foreach (var comparison in ExpressionRows.Operators)
+                            {
+                                <MudSelectItem Value="@comparison">@GetOperatorText(comparison)</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </div>
+                    <div style="flex: 1 1 120px; min-width: 0;">
+                        <MudTextField T="string" Label="Value" Value="@row.Value" Error="@(valueError is not null)" ErrorText="@valueError"
+                                      ValueChanged="@(value => SetRowAsync(rowIndex, row with { Value = value ?? string.Empty }))" />
+                    </div>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary" data-testid="@($"{TestId}-row-now")">@GetRowText(rowIndex)</MudText>
+                    <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" aria-label="Remove condition"
+                                   OnClick="@(() => RemoveRowAsync(rowIndex))" />
+                </div>
+            }
+        </MudStack>
+        <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddRowAsync" data-testid="@($"{TestId}-add-row")">Condition</MudButton>
+    }
+    @if (_preview.Error is { } error)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Error" data-testid="@($"{TestId}-error")">@error</MudText>
+    }
+    @foreach (var hint in _preview.Hints)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Warning" data-testid="@($"{TestId}-hint")">@hint</MudText>
+    }
+    @if (_preview.ResultText is { } resultText)
+    {
+        <MudText Typo="Typo.caption" data-testid="@($"{TestId}-result")">Result now: @resultText</MudText>
+    }
+</div>
+
+@code {
+    private readonly ExpressionFieldModel _model = new(null);
+    private readonly ExpressionFieldPreview _preview = new();
+    private PreviewTicker? _ticker;
+    private bool _hasPendingRow;
+
+    [Parameter] public string? Value { get; set; }
+
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    [Parameter] public string Label { get; set; } = "Condition";
+
+    /// <summary>The word in front of the first row, such as "When" or "Check".</summary>
+    [Parameter] public string Lead { get; set; } = "When";
+
+    /// <summary>Gets the error of an expression that is not empty, or null when it is valid.</summary>
+    [Parameter] public Func<string, string?>? Validate { get; set; }
+
+    /// <summary>Evaluates an expression or a path with the current values, or returns null when it cannot; without it, no values are shown.</summary>
+    [Parameter] public Func<string, ExpressionPreview?>? Preview { get; set; }
+
+    /// <summary>Gets the hints of the host for a valid expression, which the field shows as warnings; asked again only when the text changes.</summary>
+    [Parameter] public Func<string, IReadOnlyList<string>>? Hints { get; set; }
+
+    /// <summary>The fields a row offers, such as the fields of an event; without them, a row picks a subject path.</summary>
+    [Parameter] public IReadOnlyList<string>? Fields { get; set; }
+
+    /// <summary>
+    /// Raised with true while a row holds an edit that is not part of <see cref="Value"/>, because it is invalid or not
+    /// finished, and with false when none does. A host blocks saving while it is true.
+    /// </summary>
+    [Parameter] public EventCallback<bool> HasPendingRowChanged { get; set; }
+
+    /// <summary>The variables the host declares for its expressions; default stands for <c>value</c> and <c>subject</c>.</summary>
+    [Parameter] public ImmutableArray<string> Variables { get; set; }
+
+    [Parameter] public string TestId { get; set; } = "expression-field";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _model.Variables = Variables;
+        if (!string.Equals(Value ?? string.Empty, _model.Text, StringComparison.Ordinal))
+        {
+            _model.Load(Value);
+        }
+
+        Refresh();
+        if (Preview is not null)
+        {
+            _ticker ??= new PreviewTicker(TimeProvider, InvokeAsync, RefreshValuesAsync);
+        }
+
+        await NotifyPendingAsync();
+    }
+
+    // Each tick reads the current values of the rows and the result again.
+    private Task RefreshValuesAsync()
+    {
+        if (_preview.RefreshValues(_model.Rows))
+        {
+            StateHasChanged();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public void Dispose() => _ticker?.Dispose();
+
+    private void ShowSimple()
+    {
+        if (_model.ShowSimple())
+        {
+            Refresh();
+        }
+    }
+
+    private async Task ShowAdvancedAsync()
+    {
+        _model.ShowAdvanced();
+        await NotifyPendingAsync();
+    }
+
+    private Task SetTextAsync(string? text)
+    {
+        _model.Load(text);
+        return EmitAsync();
+    }
+
+    private Task SetRowAsync(int index, ExpressionRow row)
+    {
+        _model.SetRow(index, row);
+        return EmitAsync();
+    }
+
+    private Task AddRowAsync()
+    {
+        _model.AddRow();
+        return EmitAsync();
+    }
+
+    private Task RemoveRowAsync(int index)
+    {
+        _model.RemoveRow(index);
+        return EmitAsync();
+    }
+
+    private async Task EmitAsync()
+    {
+        Refresh();
+        await ValueChanged.InvokeAsync(_model.Text);
+        await NotifyPendingAsync();
+    }
+
+    private async Task NotifyPendingAsync()
+    {
+        if (_hasPendingRow != _model.HasPendingRow)
+        {
+            _hasPendingRow = _model.HasPendingRow;
+            await HasPendingRowChanged.InvokeAsync(_hasPendingRow);
+        }
+    }
+
+    private void Refresh() => _preview.Update(_model.Text, _model.Rows, _model.PathSeparator, _model.Variables, Validate, Preview, Hints);
+
+    private string GetRowText(int index) => index < _preview.RowTexts.Count ? _preview.RowTexts[index] : string.Empty;
+
+    private static string GetOperatorText(string? comparison) => comparison switch
+    {
+        "==" => "equals",
+        "!=" => "is not",
+        "<" => "is below",
+        "<=" => "at most",
+        ">" => "is above",
+        ">=" => "at least",
+        _ => comparison ?? string.Empty
+    };
+
+    private static Task<IEnumerable<string>> SearchFieldsAsync(IReadOnlyList<string> fields, string? text) =>
+        Task.FromResult(string.IsNullOrWhiteSpace(text)
+            ? fields.AsEnumerable()
+            : fields.Where(field => field.Contains(text, StringComparison.OrdinalIgnoreCase)));
+}

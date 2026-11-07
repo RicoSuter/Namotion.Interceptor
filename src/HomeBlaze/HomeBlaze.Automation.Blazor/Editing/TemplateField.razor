@@ -1,0 +1,112 @@
+@implements IDisposable
+@inject IDialogService DialogService
+@inject TimeProvider TimeProvider
+
+<div data-testid="automation-template-field">
+    <MudTextField T="string" Label="@Label" Value="@_text" ValueChanged="SetValueAsync" Immediate="true"
+                  HelperText="Text, with {{ path }} for a value" Error="@(_error is not null)" ErrorText="@_error" />
+    <div class="d-flex flex-wrap align-center gap-2">
+        <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.DataObject" OnClick="InsertValueAsync">Insert value</MudButton>
+        @if (_rendered is { Length: > 0 } rendered)
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary" Style="overflow-wrap: anywhere;">Now: @rendered</MudText>
+        }
+    </div>
+</div>
+
+@code {
+    private string? _text;
+    private string? _written;
+    private string? _error;
+    private string? _rendered;
+    private string? _evaluatedText;
+    private RuleExpressions? _evaluatedExpressions;
+    private bool _hasTemplate;
+    private PreviewTicker? _ticker;
+
+    private static readonly Func<IInterceptorSubject, bool> NoSubject = _ => false;
+
+    [Parameter] public string Label { get; set; } = string.Empty;
+
+    /// <summary>Whether an empty text is an error.</summary>
+    [Parameter] public bool IsRequired { get; set; }
+
+    [Parameter] public string? Value { get; set; }
+
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    [Parameter, EditorRequired] public RuleExpressions Expressions { get; set; } = null!;
+
+    // The field renders again after each keystroke, before its parent passes the new value down, so the text is reloaded
+    // only when the parent holds something other than what this field last wrote.
+    protected override void OnParametersSet()
+    {
+        if (Value != _written)
+        {
+            _text = Value;
+            _written = Value;
+        }
+
+        Refresh();
+        _ticker ??= new PreviewTicker(TimeProvider, InvokeAsync, RefreshPreviewAsync);
+    }
+
+    // Each tick renders the template again with the current values.
+    private Task RefreshPreviewAsync()
+    {
+        if (_hasTemplate && _evaluatedText is { } text && _evaluatedExpressions is { } expressions)
+        {
+            var rendered = expressions.RenderTemplate(text);
+            if (rendered != _rendered)
+            {
+                _rendered = rendered;
+                StateHasChanged();
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public void Dispose() => _ticker?.Dispose();
+
+    // Evaluated when the text or the expressions change, not on every render of the editor.
+    private void Refresh()
+    {
+        var text = _text ?? string.Empty;
+        if (text == _evaluatedText && ReferenceEquals(Expressions, _evaluatedExpressions))
+        {
+            return;
+        }
+
+        _evaluatedText = text;
+        _evaluatedExpressions = Expressions;
+        _error = ArgumentFields.Validate(text, typeof(string), IsRequired, Expressions);
+        _hasTemplate = _error is null && text.Contains("{{", StringComparison.Ordinal);
+        _rendered = _hasTemplate ? Expressions.RenderTemplate(text) : null;
+    }
+
+    private Task SetValueAsync(string? value)
+    {
+        _text = value;
+        _written = value;
+        Refresh();
+        return ValueChanged.InvokeAsync(value);
+    }
+
+    private async Task InsertValueAsync()
+    {
+        var parameters = new DialogParameters<SubjectPathPickerDialog>
+        {
+            { dialog => dialog.SelectedPath, null },
+            { dialog => dialog.Label, "Value" },
+            { dialog => dialog.CanSelectSubject, NoSubject }
+        };
+
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialogReference = await DialogService.ShowAsync<SubjectPathPickerDialog>("Insert value", parameters, options);
+        if (await dialogReference.Result is { Canceled: false, Data: string path })
+        {
+            await SetValueAsync($"{_text}{{{{ {path} }}}}");
+        }
+    }
+}

@@ -1,0 +1,185 @@
+@using System.Globalization
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime JavaScript
+
+<style>
+    .automation-state-diagram [data-automation-clickable="true"] { cursor: pointer; outline: none; }
+    .automation-state-diagram [data-automation-clickable="true"]:hover .automation-state-line,
+    .automation-state-diagram [data-automation-clickable="true"]:focus-visible .automation-state-line { stroke: var(--mud-palette-primary); stroke-width: 3; }
+    .automation-state-diagram [data-automation-clickable="true"]:hover .automation-state-box,
+    .automation-state-diagram [data-automation-clickable="true"]:focus-visible .automation-state-box { stroke: var(--mud-palette-primary); stroke-width: 3; }
+</style>
+<div @ref="_container" class="automation-state-diagram" style="overflow-x: auto;" data-testid="automation-state-diagram">
+    <svg viewBox="@($"0 0 {Format(Layout.Width)} {Format(Layout.Height)}")" width="@Format(Layout.Width)" height="@Format(Layout.Height)"
+         style="display: block;" role="@(IsInteractive ? "group" : "img")" aria-label="@GetDescription()">
+        <defs>
+            <marker id="@_markerId" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--mud-palette-text-secondary)" />
+            </marker>
+        </defs>
+        @foreach (var edge in Layout.Edges)
+        {
+            var isEdgeClickable = RuleClicked.HasDelegate;
+            <g @onclick="@(() => RuleClicked.InvokeAsync(edge.RuleKey))" @onkeydown="@(args => OnKeyDownAsync(args, () => RuleClicked.InvokeAsync(edge.RuleKey)))"
+               role="@(isEdgeClickable ? "button" : null)" tabindex="@(isEdgeClickable ? "0" : null)"
+               aria-label="@(isEdgeClickable ? $"{edge.FullLabel}: {edge.From ?? "Any state"} to {edge.To}" : null)"
+               data-automation-clickable="@(isEdgeClickable ? "true" : null)" data-testid="automation-state-edge">
+                <title>@edge.FullLabel</title>
+                <path d="@edge.PathData" fill="none" stroke="transparent" stroke-width="14" pointer-events="stroke" />
+                <path class="automation-state-line" d="@edge.PathData" fill="none" stroke="var(--mud-palette-text-secondary)" stroke-width="2"
+                      marker-end="@($"url(#{_markerId})")" />
+                <StateDiagramText X="@Format(edge.LabelX)" Y="@Format(edge.LabelY)" FontSize="13" Fill="var(--mud-palette-text-primary)">@edge.Label</StateDiagramText>
+                @if (edge.Detail is { } detail)
+                {
+                    <StateDiagramText X="@Format(edge.LabelX)" Y="@Format(edge.LabelY + 14)" FontSize="11" Fill="var(--mud-palette-text-secondary)">@detail</StateDiagramText>
+                }
+            </g>
+        }
+        @foreach (var node in Layout.Nodes)
+        {
+            var isSelected = node.State is not null && node.State == SelectedState;
+            var isCurrent = node.State is not null && node.State == CurrentState;
+            var isNodeClickable = node.State is not null && StateClicked.HasDelegate;
+            <g @onclick="@(() => ClickStateAsync(node))" @onkeydown="@(args => OnKeyDownAsync(args, () => ClickStateAsync(node)))"
+               role="@(isNodeClickable ? "button" : null)" tabindex="@(isNodeClickable ? "0" : null)"
+               aria-label="@(isNodeClickable ? $"State {node.State}" : null)" aria-pressed="@(isNodeClickable ? isSelected.ToString().ToLowerInvariant() : null)"
+               data-automation-clickable="@(isNodeClickable ? "true" : null)" data-testid="@($"automation-state-node-{node.State ?? "any"}")">
+                <rect class="automation-state-box" x="@Format(node.X)" y="@Format(node.Y)" width="@Format(StateDiagramLayout.NodeWidth)" height="@Format(StateDiagramLayout.NodeHeight)" rx="8"
+                      fill="@(isCurrent ? "color-mix(in srgb, var(--mud-palette-primary) 28%, var(--mud-palette-surface))" : "var(--mud-palette-surface)")"
+                      stroke="@(isCurrent || isSelected ? "var(--mud-palette-primary)" : "var(--mud-palette-lines-default)")"
+                      stroke-width="@GetStrokeWidth(isCurrent, isSelected)"
+                      stroke-dasharray="@(node.State is null ? "4 3" : null)" />
+                <StateDiagramText X="@Format(node.X + (StateDiagramLayout.NodeWidth / 2))" Y="@Format(node.Y + 28)" FontSize="15" FontWeight="500"
+                                  Fill="var(--mud-palette-text-primary)">@(node.State ?? "Any state")</StateDiagramText>
+                @if (GetDetail(node, isCurrent) is { } detail)
+                {
+                    <StateDiagramText X="@Format(node.X + (StateDiagramLayout.NodeWidth / 2))" Y="@Format(node.Y + 48)" FontSize="12"
+                                      Fill="var(--mud-palette-text-secondary)">@detail</StateDiagramText>
+                }
+            </g>
+        }
+    </svg>
+</div>
+
+@code {
+    // Each diagram has its own arrow marker, because a page and an open editor show a diagram at the same time.
+    private readonly string _markerId = $"automation-arrow-{Guid.NewGuid():N}";
+    private ElementReference _container;
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _keyGuard;
+    private bool _isDisposed;
+
+    [Parameter, EditorRequired] public StateDiagramLayout Layout { get; set; } = null!;
+
+    /// <summary>The second line of the current state, such as "Current, since 14:02"; "Current" when not set.</summary>
+    [Parameter] public string? CurrentDetail { get; set; }
+
+    [Parameter] public string? SelectedState { get; set; }
+
+    /// <summary>The state the automation is in, which the diagram highlights, or null.</summary>
+    [Parameter] public string? CurrentState { get; set; }
+
+    [Parameter] public EventCallback<string> StateClicked { get; set; }
+
+    [Parameter] public EventCallback<string> RuleClicked { get; set; }
+
+    // A key down cannot be prevented per key in Blazor, and preventing it for all keys would break Tab, so Space, which would scroll
+    // the page, is prevented in the browser on the focused states and edges.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !IsInteractive)
+        {
+            return;
+        }
+
+        try
+        {
+            var module = await JavaScript.InvokeAsync<IJSObjectReference>("import", "./_content/HomeBlaze.Automation.Blazor/Diagram/StateDiagram.razor.js");
+            var keyGuard = await module.InvokeAsync<IJSObjectReference>("preventSpaceScroll", _container);
+            if (_isDisposed)
+            {
+                await ReleaseAsync(keyGuard, module);
+                return;
+            }
+
+            _module = module;
+            _keyGuard = keyGuard;
+        }
+        catch (Exception exception) when (IsInteropFailure(exception))
+        {
+            // The circuit is gone or the script failed to load; the diagram still works.
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _isDisposed = true;
+        var keyGuard = _keyGuard;
+        var module = _module;
+        _keyGuard = null;
+        _module = null;
+        await ReleaseAsync(keyGuard, module);
+    }
+
+    private static async Task ReleaseAsync(IJSObjectReference? keyGuard, IJSObjectReference? module)
+    {
+        try
+        {
+            if (keyGuard is not null)
+            {
+                await keyGuard.InvokeVoidAsync("dispose");
+                await keyGuard.DisposeAsync();
+            }
+
+            if (module is not null)
+            {
+                await module.DisposeAsync();
+            }
+        }
+        catch (Exception exception) when (IsInteropFailure(exception))
+        {
+            // The circuit is gone, and the browser released the references with the page.
+        }
+    }
+
+    private static bool IsInteropFailure(Exception exception) =>
+        exception is JSDisconnectedException or JSException or OperationCanceledException;
+
+    private bool IsInteractive => StateClicked.HasDelegate || RuleClicked.HasDelegate;
+
+    private static Task OnKeyDownAsync(KeyboardEventArgs args, Func<Task> click) =>
+        args.Key is "Enter" or " " ? click() : Task.CompletedTask;
+
+    private Task ClickStateAsync(StateDiagramNode node) =>
+        node.State is { } state ? StateClicked.InvokeAsync(state) : Task.CompletedTask;
+
+    private string? GetDetail(StateDiagramNode node, bool isCurrent)
+    {
+        if (isCurrent)
+        {
+            return CurrentDetail ?? "Current";
+        }
+
+        return node.IsInitial ? "Initial state" : null;
+    }
+
+    private string GetDescription()
+    {
+        var states = string.Join(", ", Layout.Nodes.Where(node => node.State is not null).Select(node => node.State));
+        var current = Layout.Nodes.FirstOrDefault(node => node.State is not null && node.State == CurrentState)?.State;
+        return current is null ? $"States {states}" : $"States {states}, current state {current}";
+    }
+
+    private static string GetStrokeWidth(bool isCurrent, bool isSelected)
+    {
+        if (isSelected)
+        {
+            return "3";
+        }
+
+        return isCurrent ? "2" : "1";
+    }
+
+    private static string Format(double value) => value.ToString("0.#", CultureInfo.InvariantCulture);
+}

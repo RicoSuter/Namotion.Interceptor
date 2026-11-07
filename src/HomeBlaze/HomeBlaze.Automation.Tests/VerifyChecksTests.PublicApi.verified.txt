@@ -80,6 +80,27 @@ namespace HomeBlaze.Automation
         public static string Format(System.TimeSpan duration) { }
         public static bool TryParse(string? text, out System.TimeSpan duration) { }
     }
+    public static class AutomationEvents
+    {
+        public const string OwnAutomationPath = "..";
+        public static System.Collections.Generic.IReadOnlyList<System.Type> GetEventTypes(System.Type subjectType) { }
+        public static System.Collections.Generic.IReadOnlyList<string> GetPayloadFields(System.Type eventType) { }
+        public static Namotion.Interceptor.IInterceptorSubject? ResolveSource(HomeBlaze.Automation.Automation automation, string? ruleKey, string? subjectPath) { }
+    }
+    public sealed class AutomationExpressionPreview : System.IEquatable<HomeBlaze.Automation.AutomationExpressionPreview>
+    {
+        public AutomationExpressionPreview() { }
+        public string? Error { get; init; }
+        public bool? Result { get; init; }
+        public string? Text { get; init; }
+        public object? Value { get; init; }
+    }
+    public static class AutomationPreview
+    {
+        public static HomeBlaze.Automation.AutomationExpressionPreview Evaluate(HomeBlaze.Automation.Automation automation, string? ruleKey, string? expression, bool allowsEvent, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone = null) { }
+        public static HomeBlaze.Automation.AutomationExpressionPreview Render(HomeBlaze.Automation.Automation automation, string? ruleKey, string? template, bool allowsEvent) { }
+        public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveTarget(HomeBlaze.Automation.Automation automation, string? ruleKey, string? path) { }
+    }
     [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class AutomationRule : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
@@ -128,6 +149,10 @@ namespace HomeBlaze.Automation
         DryRun = 1,
         On = 2,
     }
+    public static class AutomationRuleOrder
+    {
+        public static System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string, HomeBlaze.Automation.AutomationRule>> GetRulesInOrder(this HomeBlaze.Automation.Automation automation) { }
+    }
     public sealed class AutomationRuleTestResult : System.IEquatable<HomeBlaze.Automation.AutomationRuleTestResult>
     {
         public AutomationRuleTestResult() { }
@@ -172,6 +197,25 @@ namespace HomeBlaze.Automation
         public string? Note { get; init; }
         public required int Number { get; init; }
         public bool? Result { get; init; }
+    }
+    public sealed class AutomationValidationError : System.IEquatable<HomeBlaze.Automation.AutomationValidationError>
+    {
+        public AutomationValidationError(string? RuleKey, string Message) { }
+        public string Message { get; init; }
+        public string? RuleKey { get; init; }
+    }
+    public static class AutomationValidator
+    {
+        public const string ClockEqualityHint = "The clock never equals a value exactly, so now or time with == or != does not mat" +
+            "ch a moment: use >=, such as time >= 7h.";
+        public const string EverySecondHint = "Checked every second, because when this use of the clock changes cannot be comput" +
+            "ed. A comparison such as now - ./LastTriggeredAt > 30m or time >= 7h is checked " +
+            "only when its result can change.";
+        public static System.Collections.Immutable.ImmutableArray<string> Variables { get; }
+        public static System.Collections.Generic.IReadOnlyList<string> GetConditionHints(string? text) { }
+        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.AutomationValidationError> Validate(System.Collections.Generic.IReadOnlyList<string> states, string? initialState, System.Collections.Generic.IReadOnlyDictionary<string, HomeBlaze.Automation.AutomationRule> rules, System.Collections.Generic.IReadOnlyList<string> ruleOrder) { }
+        public static string? ValidateExpression(string? text, bool allowsEvent) { }
+        public static string? ValidateTemplate(string? text, bool allowsEvent) { }
     }
     public sealed class ChangeStateAction : HomeBlaze.Automation.AutomationAction, System.IEquatable<HomeBlaze.Automation.ChangeStateAction>
     {

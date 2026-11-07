@@ -1,0 +1,146 @@
+@inject ITimeZoneDisplay TimeZone
+
+<MudStack Spacing="3" data-testid="automation-rule-editor">
+    <div class="d-flex flex-wrap align-center gap-3">
+        <div style="flex: 1 1 220px;">
+            <MudTextField T="string" Label="Rule name" Value="@Rule.Name" ValueChanged="@((string? name) => EditAsync(() => Rule.Name = name))" Immediate="true" />
+        </div>
+        <MudButtonGroup Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined" OverrideStyles="false">
+            @foreach (var mode in Modes)
+            {
+                <MudButton Size="Size.Small" Color="Color.Primary" Variant="@(Rule.Mode == mode ? Variant.Filled : Variant.Outlined)"
+                           OnClick="@(() => EditAsync(() => Rule.Mode = mode))" data-testid="@($"automation-rule-mode-{mode}")">@AutomationSummary.FormatMode(mode)</MudButton>
+            }
+        </MudButtonGroup>
+        <MudIconButton Icon="@Icons.Material.Filled.Delete" aria-label="Delete rule" OnClick="@(() => Removed.InvokeAsync(Rule))"
+                       data-testid="automation-delete-rule" />
+    </div>
+    @if (Draft.States.Count > 0)
+    {
+        <div style="max-width: 280px;">
+            <MudSelect T="string" Label="Active in state" Value="@(Rule.InState ?? AnyState)" ValueChanged="@((string? state) => EditAsync(() => Rule.InState = string.IsNullOrEmpty(state) ? null : state))" ToStringFunc="@FormatState">
+                <MudSelectItem Value="@AnyState">@FormatState(AnyState)</MudSelectItem>
+                @foreach (var state in Draft.States)
+                {
+                    <MudSelectItem Value="@state">@state</MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+    }
+    else
+    {
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">This automation has no states, so the rule is active all the time. "Active in state" appears once states exist.</MudText>
+    }
+    @if (AutomationSummary.GetDryRunHint(Rule.Mode, Rule.InState, Rule.TargetStates) is { } dryRunHint)
+    {
+        <MudAlert Severity="Severity.Info" Dense="true" data-testid="automation-rule-dry-run-hint">@dryRunHint</MudAlert>
+    }
+    @foreach (var error in Errors)
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true" data-testid="automation-rule-error">@error.Message</MudAlert>
+    }
+
+    <section>
+        <MudText Typo="Typo.h6">Runs when any of these happens</MudText>
+        <MudStack Spacing="2" Class="mt-2">
+            @foreach (var item in Rule.Triggers)
+            {
+                @switch (item.Value)
+                {
+                    case PropertyTrigger propertyTrigger:
+                        <PropertyTriggerEditor @key="item" Trigger="propertyTrigger" Expressions="_expressions!" Draft="Draft" RuleKey="@Rule.Key"
+                                               TriggerChanged="@(trigger => EditAsync(() => item.Value = trigger))" Removed="@(() => EditAsync(() => Rule.Triggers.Remove(item)))" />
+                        break;
+                    case SubjectEventTrigger eventTrigger:
+                        <EventTriggerEditor @key="item" Trigger="eventTrigger" Automation="Automation" RuleKey="@Rule.Key"
+                                            TriggerChanged="@(trigger => EditAsync(() => item.Value = trigger))" Removed="@(() => EditAsync(() => Rule.Triggers.Remove(item)))" />
+                        break;
+                }
+            }
+        </MudStack>
+        <div class="d-flex flex-wrap gap-2 mt-2">
+            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => EditAsync(() => Rule.AddTrigger(new PropertyTrigger())))"
+                       data-testid="automation-add-property-trigger">Property condition</MudButton>
+            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => EditAsync(() => Rule.AddTrigger(new SubjectEventTrigger())))"
+                       data-testid="automation-add-event-trigger">Event</MudButton>
+        </div>
+    </section>
+
+    <section>
+        <MudText Typo="Typo.h6">Only if</MudText>
+        <div class="mt-2">
+            <OnlyIfEditor Rule="Rule" Draft="Draft" Expressions="_expressions!" LastTriggeredAt="@SavedRule?.LastTriggeredAt" Changed="Changed" />
+        </div>
+    </section>
+
+    <section>
+        <MudText Typo="Typo.h6">Then, in this order</MudText>
+        <MudStack Spacing="2" Class="mt-2">
+            @for (var index = 0; index < Rule.Actions.Count; index++)
+            {
+                var item = Rule.Actions[index];
+                <ActionEditor @key="item" Value="item.Value" Index="index" Count="Rule.Actions.Count" States="Draft.States"
+                              Automation="Automation" RuleKey="@Rule.Key" Expressions="_expressions!"
+                              ValueChanged="@(action => EditAsync(() => SetAction(item, action)))" Moved="@(offset => EditAsync(() => Rule.MoveAction(item, offset)))"
+                              Removed="@(() => EditAsync(() => Rule.Actions.Remove(item)))" TargetChanged="InputChanged" />
+            }
+        </MudStack>
+        <div class="d-flex flex-wrap gap-2 mt-2">
+            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => EditAsync(Rule.AddCallOperation))"
+                       data-testid="automation-add-call-operation">Call operation</MudButton>
+            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => EditAsync(Rule.AddSetProperty))"
+                       data-testid="automation-add-set-property">Set property</MudButton>
+            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => EditAsync(() => Rule.AddChangeState(Draft.States.Count > 0 ? Draft.States[0] : string.Empty)))" Disabled="@(Draft.States.Count == 0)"
+                       data-testid="automation-add-change-state">Change state</MudButton>
+        </div>
+    </section>
+</MudStack>
+
+@code {
+    private const string AnyState = "";
+    private static readonly AutomationRuleMode[] Modes = [AutomationRuleMode.Off, AutomationRuleMode.DryRun, AutomationRuleMode.On];
+
+    private RuleExpressions? _expressions;
+
+    [Parameter, EditorRequired] public Automation Automation { get; set; } = null!;
+
+    [Parameter, EditorRequired] public AutomationDraft Draft { get; set; } = null!;
+
+    [Parameter, EditorRequired] public RuleDraft Rule { get; set; } = null!;
+
+    [Parameter] public IReadOnlyList<AutomationValidationError> Errors { get; set; } = [];
+
+    [Parameter] public EventCallback Changed { get; set; }
+
+    [Parameter] public EventCallback<RuleDraft> Removed { get; set; }
+
+    /// <summary>Raised when the errors of the rule may have changed without an edit, such as when the target of an action appeared.</summary>
+    [Parameter] public EventCallback InputChanged { get; set; }
+
+    private AutomationRule? SavedRule => Automation.Rules.GetValueOrDefault(Rule.Key);
+
+    // The fields evaluate their expressions again only when the expressions change, so they are created again only when
+    // what they check changes.
+    protected override void OnParametersSet()
+    {
+        if (_expressions is null || _expressions.AllowsEvent != Rule.AllowsEvent || !ReferenceEquals(_expressions.Automation, Automation))
+        {
+            _expressions = new RuleExpressions(Automation, Rule.Key, Rule.AllowsEvent, TimeZone);
+        }
+    }
+
+    // Every edit of the rule changes the draft, which the editor validates again.
+    private Task EditAsync(Action edit)
+    {
+        edit();
+        return Changed.InvokeAsync();
+    }
+
+    private static void SetAction(DraftItem<AutomationAction> item, AutomationAction action)
+    {
+        item.IsOperationChanged |= item.Value is InvokeOperationAction previous && action is InvokeOperationAction next && previous.OperationPath != next.OperationPath;
+        item.Value = action;
+    }
+
+    private static string FormatState(string? state) => string.IsNullOrEmpty(state) ? "Any state" : state;
+}
