@@ -12,7 +12,7 @@ namespace HomeBlaze.Authentication.Blazor;
 
 /// <summary>
 /// What a principal may see and do, decided with its compiled policy and the scope of administration: the single place of
-/// these rules for <see cref="PolicyUserPermissions"/> and <see cref="MemberActionRequirement"/>. Immutable.
+/// these rules for <see cref="PolicyUserPermissions"/>. Immutable.
 /// </summary>
 internal sealed class PermissionDecisions
 {

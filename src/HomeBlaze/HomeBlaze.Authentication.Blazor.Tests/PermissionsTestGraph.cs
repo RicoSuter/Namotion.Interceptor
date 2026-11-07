@@ -2,7 +2,6 @@ using System.Security.Claims;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.Authorization;
 using HomeBlaze.Services.Lifecycle;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
@@ -62,9 +61,6 @@ internal sealed class PermissionsTestGraph : IAsyncDisposable
 
     /// <summary>The viewer access of the viewer.</summary>
     public PolicyUserPermissions Permissions { get; private set; } = null!;
-
-    /// <summary>The principal of the viewer.</summary>
-    public ClaimsPrincipal Principal => _authenticationState.Principal;
 
     /// <summary>The services of the graph.</summary>
     public IServiceProvider Services => _services;
@@ -162,14 +158,6 @@ internal sealed class PermissionsTestGraph : IAsyncDisposable
     public void SignInTestUser(bool mustChangePassword = false) =>
         _authenticationState.SetPrincipal(CreateTestUserPrincipal(UserStore.GetUserId(TestUserName)!, mustChangePassword));
 
-    /// <summary>Whether the registered authorization service allows the viewer the policy named <paramref name="policyName"/>.</summary>
-    public async Task<bool> AuthorizeAsync(string policyName) =>
-        (await _services.GetRequiredService<IAuthorizationService>().AuthorizeAsync(Principal, resource: null, policyName)).Succeeded;
-
-    /// <summary>Whether the registered authorization service allows the viewer <paramref name="requirement"/> on <paramref name="resource"/>.</summary>
-    public async Task<bool> AuthorizeAsync(object resource, IAuthorizationRequirement requirement) =>
-        (await _services.GetRequiredService<IAuthorizationService>().AuthorizeAsync(Principal, resource, requirement)).Succeeded;
-
     public async ValueTask DisposeAsync()
     {
         Permissions?.Dispose();
@@ -232,8 +220,6 @@ internal sealed class PermissionsTestGraph : IAsyncDisposable
     private sealed class TestAuthenticationStateProvider : AuthenticationStateProvider
     {
         private volatile Task<AuthenticationState> _state = Task.FromResult(new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity())));
-
-        public ClaimsPrincipal Principal => _state.Result.User;
 
         public override Task<AuthenticationState> GetAuthenticationStateAsync() => _state;
 

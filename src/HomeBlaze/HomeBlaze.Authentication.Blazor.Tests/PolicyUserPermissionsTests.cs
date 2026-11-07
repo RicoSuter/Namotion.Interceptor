@@ -165,9 +165,6 @@ public class PolicyUserPermissionsTests
         Assert.True(graph.Permissions.CanRead(userName));
         Assert.True(graph.Permissions.CanReadHistory(userName));
         Assert.False(graph.Permissions.CanWrite(userName));
-        Assert.True(await graph.AuthorizeAsync(userName, MemberActionRequirement.Read));
-        Assert.True(await graph.AuthorizeAsync(userName, MemberActionRequirement.History));
-        Assert.False(await graph.AuthorizeAsync(userName, MemberActionRequirement.Write));
     }
 
     [Fact]
@@ -183,11 +180,9 @@ public class PolicyUserPermissionsTests
         // Act & Assert
         Assert.True(graph.Permissions.CanShow(kid));
         Assert.True(graph.Permissions.CanRead(kid.TryGetProperty(nameof(User.Roles))!));
-        Assert.True(await graph.AuthorizeAsync(kid.TryGetProperty(nameof(User.Roles))!, MemberActionRequirement.Read));
         Assert.False(graph.Permissions.CanWrite(kid.TryGetProperty(nameof(User.Roles))!));
         Assert.False(graph.Permissions.CanShow(other));
         Assert.False(graph.Permissions.CanRead(other.TryGetProperty(nameof(User.Roles))!));
-        Assert.False(await graph.AuthorizeAsync(other.TryGetProperty(nameof(User.Roles))!, MemberActionRequirement.Read));
     }
 
     [Fact]
@@ -215,7 +210,6 @@ public class PolicyUserPermissionsTests
         Assert.False(graph.Permissions.CanShow(admin));
         Assert.False(graph.Permissions.CanRead(userName));
         Assert.False(graph.Permissions.CanReadHistory(userName));
-        Assert.False(await graph.AuthorizeAsync(userName, MemberActionRequirement.Read));
     }
 
     [Fact]
@@ -231,7 +225,6 @@ public class PolicyUserPermissionsTests
         Assert.False(graph.Permissions.CanShow(admin));
         Assert.False(graph.Permissions.CanRead(userName));
         Assert.False(graph.Permissions.CanReadHistory(userName));
-        Assert.False(await graph.AuthorizeAsync(userName, MemberActionRequirement.Read));
     }
 
     [Fact]
@@ -360,8 +353,6 @@ public class PolicyUserPermissionsTests
         // Act & Assert
         Assert.True(graph.Permissions.CanInvoke(refresh));
         Assert.False(graph.Permissions.CanInvoke(create));
-        Assert.True(await graph.AuthorizeAsync(refresh, MemberActionRequirement.Execute));
-        Assert.False(await graph.AuthorizeAsync(create, MemberActionRequirement.Execute));
     }
 
     [Fact]

@@ -5,23 +5,20 @@
 
 @inject UserStore UserStore
 
-@if (UserStore.IsSeededAdministratorUnclaimed)
+@* Acting through no roles is open exactly to a full administrator, a person, not anonymous, who holds everything. *@
+@if (UserStore.IsSeededAdministratorUnclaimed && Permissions.CanActThrough([]))
 {
-    <AuthorizeView Policy="@HomeBlazePolicies.FullAdministrator">
-        <Authorized>
-            <MudAlert Severity="Severity.Error" Class="mb-4" data-testid="banner-unclaimed-administrator">
-                The administrator has no password yet: anyone who reaches this server can sign in as
-                @AdminSeeding.AdminUserName with an empty password until a password is set.
-            </MudAlert>
-        </Authorized>
-    </AuthorizeView>
+    <MudAlert Severity="Severity.Error" Class="mb-4" data-testid="banner-unclaimed-administrator">
+        The administrator has no password yet: anyone who reaches this server can sign in as
+        @AdminSeeding.AdminUserName with an empty password until a password is set.
+    </MudAlert>
 }
 
 @code {
     protected override void OnInitialized()
     {
         base.OnInitialized();
-        // The policy of the person and the seeded administrator change without a change of the authentication state.
+        // The seeded administrator changes without a change of the permissions of the person.
         UserStore.UserChanged += OnUserChanged;
     }
 

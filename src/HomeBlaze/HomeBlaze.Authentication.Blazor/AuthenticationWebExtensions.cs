@@ -34,10 +34,9 @@ public static class AuthenticationWebExtensions
     /// 14 days sliding; a challenge or refusal redirects to the root of the app, where its dialogs sign in, or answers 401
     /// or 403 to a request that accepts JSON), the <see cref="HomeBlazeAccessRequirement"/> as the fallback policy, the
     /// services of the account endpoints, the <see cref="LoginRateLimitPolicy"/> and <see cref="UiStartRateLimitPolicy"/>
-    /// and the trusted reverse proxies of <see cref="AuthenticationOptions"/>, the policy
-    /// <see cref="HomeBlazePolicies.FullAdministrator"/> and the handler of <see cref="MemberActionRequirement"/>, and per
-    /// circuit the revalidated authentication state, the <see cref="CurrentUser"/>, the <see cref="PolicyUserPermissions"/>
-    /// as <see cref="IUserPermissions"/> and the <see cref="IUserAdministration"/> of that user. Requires
+    /// and the trusted reverse proxies of <see cref="AuthenticationOptions"/>, and per circuit the revalidated
+    /// authentication state, the <see cref="CurrentUser"/>, the <see cref="PolicyUserPermissions"/> as
+    /// <see cref="IUserPermissions"/> and the <see cref="IUserAdministration"/> of that user. Requires
     /// <c>AddHomeBlazeAuthentication</c>; call it after the HomeBlaze services, whose permissions it replaces.
     /// </summary>
     public static IServiceCollection AddHomeBlazeWebAuthentication(this IServiceCollection services)
