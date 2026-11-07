@@ -1,15 +1,19 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(SonosGroup))]
 @inherits SonosWidgetBase
 
+@{
+    // A room the roles hide is not named, neither as a member nor in the title, which joins the names of the members.
+    var shownMembers = (Group?.Members ?? []).Where(member => Permissions.CanShow(member)).ToList();
+}
 <MudPaper Class="pa-4">
     <MudStack Spacing="2">
         <MudStack Row="true" AlignItems="AlignItems.Center">
             <MudIcon Icon="@Icons.Material.Filled.SpeakerGroup" Class="mr-2" />
-            <MudText Typo="Typo.h6">@Group?.Title</MudText>
+            <MudText Typo="Typo.h6">@string.Join(" + ", shownMembers.Select(member => member.RoomName))</MudText>
         </MudStack>
 
         <MudStack Row="true" Spacing="1">
-            @foreach (var member in Group?.Members ?? [])
+            @foreach (var member in shownMembers)
             {
                 <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@member.RoomName</MudChip>
             }

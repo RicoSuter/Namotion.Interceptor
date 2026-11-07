@@ -318,6 +318,56 @@ public sealed class SonosWidgetAccessTests : BunitContext, IAsyncLifetime
         Assert.Equal(0, _permissions.ChangedSubscriberCount);
     }
 
+    [Fact]
+    public void WhenAPlayerIsHidden_ThenTheSystemWidgetNeitherListsNorCountsIt()
+    {
+        // Arrange
+        var system = _connected!.System;
+        var shown = Render<SonosSystemWidget>(parameters => parameters.Add(widget => widget.Subject, system));
+        var roomName = Player.RoomName;
+        var shownMarkup = shown.Markup;
+        _permissions.CannotShow.Add(Player);
+        _permissions.CannotShow.Add(Assert.Single(system.Groups).Value);
+
+        // Act
+        var hidden = Render<SonosSystemWidget>(parameters => parameters.Add(widget => widget.Subject, system));
+
+        // Assert
+        Assert.Contains(roomName, shownMarkup, StringComparison.Ordinal);
+        Assert.DoesNotContain(roomName, hidden.Markup, StringComparison.Ordinal);
+        Assert.Equal(["0", "0"], hidden.FindAll(".mud-typography-h5").Select(count => count.TextContent.Trim()));
+    }
+
+    [Fact]
+    public void WhenAMemberOfAGroupIsHidden_ThenTheGroupWidgetDoesNotNameIt()
+    {
+        // Arrange
+        var group = Assert.Single(_connected!.System.Groups).Value;
+        var roomName = Player.RoomName;
+        _permissions.CannotShow.Add(Player);
+
+        // Act
+        var rendered = Render<SonosGroupWidget>(parameters => parameters.Add(widget => widget.Subject, group));
+
+        // Assert
+        Assert.Contains(Player, group.Members);
+        Assert.DoesNotContain(roomName, rendered.Markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WhenTheHomeTheaterIsHidden_ThenThePlayerWidgetDoesNotShowItsControls()
+    {
+        // Arrange
+        _permissions.CannotShow.Add(HomeTheater);
+
+        // Act
+        var rendered = Render<SonosPlayerWidget>(parameters => parameters.Add(widget => widget.Subject, Player));
+
+        // Assert
+        Assert.Empty(rendered.FindAll("[data-testid=sonos-night-mode]"));
+        Assert.Empty(rendered.FindAll("[data-testid=sonos-speech-enhancement]"));
+    }
+
     private static void AttachContext(SonosSystem system)
     {
         var context = InterceptorSubjectContext.Create()

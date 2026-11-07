@@ -1,4 +1,5 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(SonosSystem))]
+@inherits PermissionsComponentBase
 @implements ISubjectComponent
 
 <MudPaper Class="pa-4">
@@ -22,29 +23,26 @@
         <MudStack Row="true" Spacing="4">
             <MudStack>
                 <MudText Typo="Typo.caption">Rooms</MudText>
-                <MudText Typo="Typo.h5">@(SystemSubject?.Players.Count ?? 0)</MudText>
+                <MudText Typo="Typo.h5">@ShownPlayers.Count()</MudText>
             </MudStack>
             <MudStack>
                 <MudText Typo="Typo.caption">Groups</MudText>
-                <MudText Typo="Typo.h5">@(SystemSubject?.Groups.Count ?? 0)</MudText>
+                <MudText Typo="Typo.h5">@(SystemSubject?.Groups.Values.Count(group => Permissions.CanShow(group)) ?? 0)</MudText>
             </MudStack>
         </MudStack>
 
-        @if (SystemSubject is not null)
+        @foreach (var player in ShownPlayers)
         {
-            @foreach (var player in SystemSubject.Players.Values)
-            {
-                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
-                    <MudIcon Size="Size.Small"
-                             Icon="@(player.IsPlaying == true ? Icons.Material.Filled.PlayCircle : Icons.Material.Filled.Speaker)"
-                             Color="@(player.IsConnected ? Color.Default : Color.Error)" />
-                    <MudText Typo="Typo.body2">@player.RoomName</MudText>
-                    @if (player.IsPlaying == true && SonosTrackText.GetTitle(player.CurrentTrackTitle, player.SourceTitle) is { } title)
-                    {
-                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@title</MudText>
-                    }
-                </MudStack>
-            }
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                <MudIcon Size="Size.Small"
+                         Icon="@(player.IsPlaying == true ? Icons.Material.Filled.PlayCircle : Icons.Material.Filled.Speaker)"
+                         Color="@(player.IsConnected ? Color.Default : Color.Error)" />
+                <MudText Typo="Typo.body2">@player.RoomName</MudText>
+                @if (player.IsPlaying == true && SonosTrackText.GetTitle(player.CurrentTrackTitle, player.SourceTitle) is { } title)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@title</MudText>
+                }
+            </MudStack>
         }
     </MudStack>
 </MudPaper>
@@ -54,4 +52,8 @@
     public IInterceptorSubject? Subject { get; set; }
 
     private SonosSystem? SystemSubject => Subject as SonosSystem;
+
+    // A room the roles hide is neither listed nor counted.
+    private IEnumerable<SonosPlayer> ShownPlayers =>
+        SystemSubject?.Players.Values.Where(player => Permissions.CanShow(player)) ?? [];
 }

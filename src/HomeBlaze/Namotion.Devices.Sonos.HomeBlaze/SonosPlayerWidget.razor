@@ -74,7 +74,7 @@
                            ValueChanged="@(value => RunAsync(player, nameof(SonosPlayer.SetVolumeAsync), value / 100m))" />
             </MudStack>
 
-            @if (player.HomeTheater is { } homeTheater)
+            @if (player.HomeTheater is { } homeTheater && Permissions.CanShow(homeTheater))
             {
                 var canSetNightMode = CanRun(homeTheater, nameof(SonosHomeTheater.SetNightModeAsync));
                 var canSetSpeechEnhancement = CanRun(homeTheater, nameof(SonosHomeTheater.SetSpeechEnhancementAsync));

@@ -1,4 +1,5 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(SunSpecDevice))]
+@inherits PermissionsComponentBase
 @implements ISubjectComponent
 
 <MudPaper Class="pa-4">
@@ -19,7 +20,7 @@
 
         @if (Device is not null)
         {
-            @foreach (var logicalDevice in Device.Units.OrderBy(pair => pair.Key).SelectMany(pair => pair.Value.Devices))
+            @foreach (var logicalDevice in Device.Units.OrderBy(pair => pair.Key).SelectMany(pair => pair.Value.Devices).Where(logicalDevice => Permissions.CanShow(logicalDevice)))
             {
                 <MudStack Row="true" AlignItems="AlignItems.Center">
                     <MudText Typo="Typo.body1">@logicalDevice.Title</MudText>
