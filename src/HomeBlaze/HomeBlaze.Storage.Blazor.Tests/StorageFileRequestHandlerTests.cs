@@ -73,6 +73,37 @@ public class StorageFileRequestHandlerTests
     }
 
     [Theory]
+    [InlineData("notes.txt", "text/plain; charset=utf-8")]
+    [InlineData("data.csv", "text/csv; charset=utf-8")]
+    [InlineData("plan.png", "image/png")]
+    public async Task WhenFileIsServed_ThenATextTypeHasTheUtf8CharsetAndAnyOtherTypeIsUnchanged(string name, string expected)
+    {
+        // Arrange
+        var storage = new FakeStorageContainer(PngContent);
+        var file = CreateFile(storage, name, PngContent.Length);
+        var context = CreateContext();
+
+        // Act
+        await StorageFileRequestHandler.HandleAsync(context, file);
+
+        // Assert
+        Assert.Equal(expected, context.Response.ContentType);
+    }
+
+    [Theory]
+    [InlineData("text/x-vcard", "text/x-vcard; charset=utf-8")]
+    [InlineData("text/plain; charset=iso-8859-1", "text/plain; charset=iso-8859-1")]
+    [InlineData("application/json", "application/json")]
+    public void WhenContentTypeIsGiven_ThenOnlyATextTypeWithoutCharsetGetsUtf8(string contentType, string expected)
+    {
+        // Act
+        var result = StorageFileRequestHandler.WithCharset(contentType);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
     [InlineData("/Demo/x.png", "Demo/x.png")]
     [InlineData("//Demo/x.png", "Demo/x.png")]
     [InlineData("Demo/x.png", "Demo/x.png")]

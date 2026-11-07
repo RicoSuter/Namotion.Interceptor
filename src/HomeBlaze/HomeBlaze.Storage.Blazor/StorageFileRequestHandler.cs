@@ -44,7 +44,7 @@ internal static class StorageFileRequestHandler
             return;
         }
 
-        var contentType = ContentTypes.TryGetContentType(file.Name, out var knownContentType) ? knownContentType : FallbackContentType;
+        var contentType = ContentTypes.TryGetContentType(file.Name, out var knownContentType) ? WithCharset(knownContentType) : FallbackContentType;
         var entityTag = new EntityTagHeaderValue($"\"{file.LastModified.Ticks:x}-{file.FileSize:x}\"", isWeak: true);
         if (IsNotModified(context.Request, entityTag))
         {
@@ -93,6 +93,21 @@ internal static class StorageFileRequestHandler
             await content.CopyToAsync(response.Body, context.RequestAborted);
         }
     }
+
+    /// <summary>Gets a <c>text/*</c> content type with <c>charset=utf-8</c> when it names no charset, and any other type as given.</summary>
+    public static string WithCharset(string contentType) => contentType switch
+    {
+        // The common types are constants, so that serving them allocates no string.
+        "text/plain" => "text/plain; charset=utf-8",
+        "text/html" => "text/html; charset=utf-8",
+        "text/css" => "text/css; charset=utf-8",
+        "text/csv" => "text/csv; charset=utf-8",
+        "text/javascript" => "text/javascript; charset=utf-8",
+        "text/xml" => "text/xml; charset=utf-8",
+        _ when contentType.StartsWith("text/", StringComparison.OrdinalIgnoreCase) &&
+            !contentType.Contains("charset=", StringComparison.OrdinalIgnoreCase) => contentType + "; charset=utf-8",
+        _ => contentType
+    };
 
     private static bool IsNotModified(HttpRequest request, EntityTagHeaderValue entityTag)
     {

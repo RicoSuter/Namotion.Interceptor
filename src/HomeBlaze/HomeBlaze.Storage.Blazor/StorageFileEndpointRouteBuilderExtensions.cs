@@ -16,7 +16,7 @@ public static class StorageFileEndpointRouteBuilderExtensions
     /// route path. Only a file that is no page, no JSON file and no subject of its own type is served (a
     /// <see cref="HomeBlaze.Storage.Files.GenericFile"/>). Every other path is answered with 404, and 503 when the storage
     /// cannot deliver the file now. Every response of a file has <c>X-Content-Type-Options: nosniff</c> and, except for a
-    /// PDF, <c>Content-Security-Policy: sandbox</c>.
+    /// PDF, <c>Content-Security-Policy: sandbox</c>. A <c>text/*</c> content type is served with <c>charset=utf-8</c>.
     /// </summary>
     /// <returns>The builder of the endpoint, for example to require authorization.</returns>
     public static IEndpointConventionBuilder MapStorageFiles(this IEndpointRouteBuilder endpoints) =>
