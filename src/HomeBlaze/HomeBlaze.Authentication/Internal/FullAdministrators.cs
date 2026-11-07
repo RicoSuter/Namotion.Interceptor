@@ -12,8 +12,8 @@ internal static class FullAdministrators
     /// <summary>
     /// Gets why replacing <paramref name="currentRoles"/> by <paramref name="candidateRoles"/>, each every custom role,
     /// would take <see cref="BuiltInRoles.EverythingName"/> from the people of <paramref name="personRoleSets"/>, or
-    /// null. While an unlocked person holds it, a change must leave an unlocked person holding it; while only locked-out
-    /// people hold it, as during a temporary lockout, a change must leave someone holding it. Never refused when nobody
+    /// null. While an unlocked person holds it, a change must leave an unlocked person holding it; while only people an
+    /// administrator locked hold it, a change must leave someone holding it. Never refused when nobody
     /// holds it now, so that a change can repair that state. <paramref name="rename"/> is the role the change renames in
     /// every principal, or null.
     /// </summary>
@@ -23,7 +23,7 @@ internal static class FullAdministrators
         IReadOnlyCollection<PersonRoleSet> personRoleSets,
         (string OldName, string NewName)? rename)
     {
-        var unlockedRoleSets = personRoleSets.Where(person => !person.IsLockedOut).Select(person => person.RoleNames).ToList();
+        var unlockedRoleSets = personRoleSets.Where(person => !person.IsLockedByAdministrator).Select(person => person.RoleNames).ToList();
         if (AnyHoldsEverything(currentRoles, unlockedRoleSets, rename: null))
         {
             return AnyHoldsEverything(candidateRoles, unlockedRoleSets, rename)

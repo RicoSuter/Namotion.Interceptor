@@ -31,6 +31,9 @@ internal sealed class PasswordChange(
     /// <summary>The error of new passwords that differ.</summary>
     public const string MismatchError = "The new passwords do not match.";
 
+    /// <summary>The error while the person is locked out after failed attempts with their password.</summary>
+    public const string LockedOutError = "Too many wrong passwords. Try again in a few minutes.";
+
     /// <summary>
     /// Stores <paramref name="newPassword"/> for the person of <paramref name="context"/>, verifying
     /// <paramref name="currentPassword"/> when they have a password, and returns the outcome and the errors of a refusal.
@@ -46,12 +49,13 @@ internal sealed class PasswordChange(
             return await SignOutAsync();
         }
 
-        // A lockout ends no session, so another session of the user could keep guessing the current password. Without
-        // one there is nothing to guess, so the first password can still be set during a lockout from sign-ins.
+        // A lockout ends no session, so another session of the user could keep guessing the current password; it is
+        // refused without signing the session out, as anyone can start the lockout by failing to sign in as the user.
+        // Without a current password there is nothing to guess, so the first password can still be set.
         var hasPassword = await userManager.HasPasswordAsync(user);
         if (hasPassword && await userManager.IsLockedOutAsync(user))
         {
-            return await SignOutAsync();
+            return (PasswordChangeOutcome.Refused, [LockedOutError]);
         }
 
         if (!string.Equals(newPassword, confirmPassword, StringComparison.Ordinal))

@@ -494,6 +494,27 @@ public class RoleStoreTests
     }
 
     [Fact]
+    public async Task WhenAnotherFullAdministratorIsLockedOutAfterFailedSignIns_ThenTheyCountAsUnlocked()
+    {
+        // Arrange
+        await using var graph = await AuthenticationTestGraph.CreateAsync();
+        await graph.RoleStore.SaveRoleAsync(null, new AuthorizationRole { Name = "admins", Includes = [BuiltInRoles.EverythingName] }, null, CancellationToken.None);
+        await graph.AddUserAsync("boss", ["admins"]);
+        await graph.SetLockoutEndAsync("admin", graph.Time.GetUtcNow().AddMinutes(5));
+
+        // Act
+        var result = await graph.RoleStore.SaveRoleAsync(
+            "admins",
+            new AuthorizationRole { Name = "admins", Includes = [BuiltInRoles.OperatorName] },
+            graph.RoleStore.GetConcurrencyStamp("admins"),
+            CancellationToken.None);
+
+        // Assert
+        Assert.True(graph.Authorization.Users["admin"].IsLockedOut);
+        Assert.True(result.Succeeded, result.Error);
+    }
+
+    [Fact]
     public async Task WhenTheOnlyFullAdministratorIsTemporarilyLockedOut_ThenRemovingEverythingFromTheirRoleIsRefused()
     {
         // Arrange
@@ -514,7 +535,7 @@ public class RoleStoreTests
         Assert.True(demoted.Succeeded, demoted.Error);
         Assert.True(graph.Authorization.Users["boss"].IsLockedOut);
         Assert.False(result.Succeeded);
-        Assert.Equal("This change would leave no user with everything and no deny rule on administer; give another user everything first.", result.Error);
+        Assert.Equal("This change would leave no unlocked user with everything and no deny rule on administer; give another user everything first.", result.Error);
         Assert.Equal([BuiltInRoles.EverythingName], graph.Authorization.Roles["admins"].Includes);
     }
 

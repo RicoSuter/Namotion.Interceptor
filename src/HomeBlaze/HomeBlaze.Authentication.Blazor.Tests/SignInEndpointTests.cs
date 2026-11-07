@@ -152,6 +152,27 @@ public class SignInEndpointTests
     }
 
     [Fact]
+    public async Task WhenOthersFailToSignInAsASignedInAdministrator_ThenTheAdministratorKeepsManagingUsers()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        await host.SetPasswordAsync(AdminSeeding.AdminUserName, Password);
+        var administration = host.AdministrationAsAdmin;
+        using var attacker = host.CreateBrowser();
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            await SignInAsync(attacker, AdminSeeding.AdminUserName, "wrong password");
+        }
+
+        // Act
+        var added = await administration.AddUserAsync("kid", null, [BuiltInRoles.ReaderName], CancellationToken.None);
+
+        // Assert
+        Assert.True(host.GetUser(AdminSeeding.AdminUserName).IsLockedOut);
+        Assert.True(added.Succeeded, added.Error);
+    }
+
+    [Fact]
     public async Task WhenMoreThanTenAttemptsComeFromOneAddressInAMinute_ThenTheyAreRateLimited()
     {
         // Arrange

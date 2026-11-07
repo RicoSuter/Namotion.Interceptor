@@ -309,6 +309,27 @@ public class UserStoreTests
     }
 
     [Fact]
+    public async Task WhenTheActorIsLockedOutAfterFailedSignIns_ThenTheyKeepManagingUsersAndTheirOwnAccount()
+    {
+        // Arrange
+        await using var graph = await AuthenticationTestGraph.CreateAsync();
+        var administration = graph.AdministrationAs(graph.AdminUserId);
+        await graph.AddUserAsync("boss", [BuiltInRoles.EverythingName]);
+        await graph.SetLockoutEndAsync("admin", graph.Time.GetUtcNow().AddMinutes(5));
+
+        // Act
+        var added = await administration.AddUserAsync("kid", null, [BuiltInRoles.ReaderName], CancellationToken.None);
+        var locked = await administration.SetLockedAsync("boss", true, CancellationToken.None);
+        var ownDisplayName = await graph.UserStore.SetOwnDisplayNameAsync(graph.AdminUserId, "Admin", CancellationToken.None);
+
+        // Assert
+        Assert.True(graph.Authorization.Users["admin"].IsLockedOut);
+        Assert.True(added.Succeeded, added.Error);
+        Assert.True(locked.Succeeded, locked.Error);
+        Assert.True(ownDisplayName.Succeeded, ownDisplayName.Error);
+    }
+
+    [Fact]
     public async Task WhenASignInIsRecorded_ThenTheLastLoginIsStoredAndShown()
     {
         // Arrange
@@ -519,6 +540,22 @@ public class UserStoreTests
 
         // Assert
         Assert.Equal("'admin' is the last unlocked full administrator; give another user everything first.", result.Error);
+    }
+
+    [Fact]
+    public async Task WhenTheOnlyOtherFullAdministratorIsLockedOutAfterFailedSignIns_ThenTheyCount()
+    {
+        // Arrange
+        await using var graph = await AuthenticationTestGraph.CreateAsync();
+        var administration = graph.AdministrationAs(graph.AdminUserId);
+        await graph.AddUserAsync("boss", [BuiltInRoles.EverythingName]);
+        await graph.SetLockoutEndAsync("boss", graph.Time.GetUtcNow().AddMinutes(5));
+
+        // Act
+        var result = await administration.SetRolesAsync("admin", [BuiltInRoles.OperatorName], CancellationToken.None);
+
+        // Assert
+        Assert.True(result.Succeeded, result.Error);
     }
 
     [Fact]

@@ -199,21 +199,27 @@ public class PasswordEndpointTests
     }
 
     [Fact]
-    public async Task WhenAUserWithAPasswordIsLockedOutInAnotherSession_ThenSettingAPasswordSignsThemOut()
+    public async Task WhenAUserWithAPasswordIsLockedOutByFailedSignInsElsewhere_ThenChangingThePasswordIsRefusedAndTheSessionKept()
     {
         // Arrange
         await using var host = await AuthenticationTestHost.StartAsync();
         await host.SetPasswordAsync(AdminSeeding.AdminUserName, Password);
         using var browser = host.CreateBrowser();
         await SignInAsync(browser, AdminSeeding.AdminUserName, Password);
-        await host.LockOutAsync(AdminSeeding.AdminUserName);
+        using var attacker = host.CreateBrowser();
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            await SignInAsync(attacker, AdminSeeding.AdminUserName, "wrong password");
+        }
 
         // Act
         var response = await SetPasswordAsync(browser, AnotherPassword, currentPassword: Password);
 
         // Assert
-        Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(response));
-        Assert.False(browser.HasSessionCookie);
+        Assert.True(host.GetUser(AdminSeeding.AdminUserName).IsLockedOut);
+        Assert.Equal([PasswordChange.LockedOutError], await TestBrowser.GetAccountErrorsAsync(response));
+        Assert.True(browser.HasSessionCookie);
+        Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync(BannersTestPage.Path)).StatusCode);
     }
 
     [Fact]

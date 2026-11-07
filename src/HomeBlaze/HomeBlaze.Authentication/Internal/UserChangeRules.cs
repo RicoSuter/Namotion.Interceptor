@@ -16,8 +16,7 @@ namespace HomeBlaze.Authentication.Internal;
 internal sealed class UserChangeRules(
     AuthorizationService authorizationService,
     RoleStore roleStore,
-    AuthorizationProjection projection,
-    TimeProvider timeProvider)
+    AuthorizationProjection projection)
 {
     /// <summary>Gets why the acting person may not add a user named <paramref name="userName"/> holding <paramref name="roles"/>, or null.</summary>
     public string? GetAddRefusal(UserState state, string actingUserId, string userName, string[] roles)
@@ -118,10 +117,12 @@ internal sealed class UserChangeRules(
                 : GetNotAllowedRefusal(target.UserName);
     }
 
-    // An actor is a person: a user who exists, is not built in and is not locked out.
+    // An actor is a person: a user who exists, is not built in and is not locked by an administrator. A lockout after
+    // failed sign-ins only stops guessing the password, so it neither refuses a session that is signed in already nor
+    // lets anyone who fails to sign in as a user take administration away from them.
     private ActingUser? GetActor(UserState state, string actingUserId)
     {
-        if (!state.ById.TryGetValue(actingUserId, out var user) || user.IsBuiltIn || user.IsLockedOut(timeProvider.GetUtcNow()))
+        if (!state.ById.TryGetValue(actingUserId, out var user) || user.IsBuiltIn || user.IsLockedByAdministrator)
         {
             return null;
         }
@@ -172,9 +173,8 @@ internal sealed class UserChangeRules(
 
     private string? GetLastAdministratorRefusal(UserState state, UserEntry target)
     {
-        var now = timeProvider.GetUtcNow();
-        if (!IsActiveFullAdministrator(target, now) ||
-            state.ById.Values.Any(user => user.Id != target.Id && IsActiveFullAdministrator(user, now)))
+        if (!IsActiveFullAdministrator(target) ||
+            state.ById.Values.Any(user => user.Id != target.Id && IsActiveFullAdministrator(user)))
         {
             return null;
         }
@@ -182,8 +182,8 @@ internal sealed class UserChangeRules(
         return $"'{target.UserName}' is the last unlocked full administrator; give another user {BuiltInRoles.EverythingName} first.";
     }
 
-    private bool IsActiveFullAdministrator(UserEntry user, DateTimeOffset now) =>
-        !user.IsBuiltIn && !user.IsLockedOut(now) && authorizationService.IsFullAdministrator(user.Roles);
+    private bool IsActiveFullAdministrator(UserEntry user) =>
+        !user.IsBuiltIn && !user.IsLockedByAdministrator && authorizationService.IsFullAdministrator(user.Roles);
 
     private static string? GetUserNameError(UserState state, string userName)
     {

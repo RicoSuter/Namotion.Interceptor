@@ -58,7 +58,7 @@ public sealed class UserStore : IMcpClientAccess
         _projection = projection;
         _gate = gate;
         _timeProvider = timeProvider;
-        _rules = new UserChangeRules(authorizationService, roleStore, projection, timeProvider);
+        _rules = new UserChangeRules(authorizationService, roleStore, projection);
         roleStore.RoleRenamed += OnRoleRenamed;
     }
 
@@ -141,7 +141,7 @@ public sealed class UserStore : IMcpClientAccess
     /// <summary>
     /// Sets the display name of the person with <paramref name="userId"/> as they change it themselves, see
     /// <see cref="NameRules.GetDisplayNameError"/>; an empty one removes it. Refused for a user who is unknown, built in or
-    /// locked out. Their sessions keep going.
+    /// locked by an administrator. Their sessions keep going.
     /// </summary>
     public Task<UserChangeResult> SetOwnDisplayNameAsync(string userId, string? displayName, CancellationToken cancellationToken)
     {
@@ -165,12 +165,9 @@ public sealed class UserStore : IMcpClientAccess
     /// </summary>
     public IUserAdministration CreateAdministration(string? actingUserId) => UserAdministration.Create(this, actingUserId);
 
-    /// <summary>Gets the role names of every user who is a person, not a built-in user, and whether they are locked out now.</summary>
-    public IReadOnlyCollection<PersonRoleSet> GetPersonRoleSets()
-    {
-        var now = _timeProvider.GetUtcNow();
-        return [.. _state.ById.Values.Where(user => !user.IsBuiltIn).Select(user => new PersonRoleSet(user.Roles, user.IsLockedOut(now)))];
-    }
+    /// <summary>Gets the role names of every user who is a person, not a built-in user, and whether an administrator locked them.</summary>
+    public IReadOnlyCollection<PersonRoleSet> GetPersonRoleSets() =>
+        [.. _state.ById.Values.Where(user => !user.IsBuiltIn).Select(user => new PersonRoleSet(user.Roles, user.IsLockedByAdministrator))];
 
     /// <summary>
     /// Stores now as the last sign-in of the user with <paramref name="userId"/> and reloads what the sign-in changed, as
