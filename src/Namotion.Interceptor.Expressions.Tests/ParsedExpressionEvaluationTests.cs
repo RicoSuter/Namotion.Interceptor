@@ -463,6 +463,10 @@ public class ParsedExpressionEvaluationTests
     [InlineData("Price + Price", typeof(decimal), "0.2")]
     [InlineData("Power - 1000", typeof(decimal), "6400")]
     [InlineData("Measured + 0.2", typeof(double), "0.30000000000000004")]
+    [InlineData("Offset * 1.10", typeof(decimal), "110")]
+    [InlineData("Amount * 2", typeof(decimal), "3")]
+    [InlineData("Amount + 0.50", typeof(decimal), "2")]
+    [InlineData("Amount / 0.5", typeof(decimal), "3")]
     [InlineData("One / Count", typeof(double), "0.3333333333333333")]
     [InlineData("Max + Max", typeof(double), "1.5845632502852868E+29")]
     [InlineData("Tiny * Tiny", typeof(double), "1E-40")]
@@ -487,7 +491,8 @@ public class ParsedExpressionEvaluationTests
             ["Tiny"] = 1e-20m,
             ["Ratio"] = 0.1f,
             ["Zero"] = 0d,
-            ["Measured"] = 0.1
+            ["Measured"] = 0.1,
+            ["Amount"] = 1.50m
         });
 
         // Act
@@ -542,6 +547,7 @@ public class ParsedExpressionEvaluationTests
     [InlineData("-Ratio", typeof(float), "-0.1")]
     [InlineData("-Zero", typeof(double), "0")]
     [InlineData("-Interval", typeof(TimeSpan), "-00:01:30")]
+    [InlineData("-Amount", typeof(decimal), "-1.5")]
     public void WhenNegationIsEvaluatedAsValue_ThenItKeepsTheTypeOfItsOperand(string text, Type expectedType, string expectedValue)
     {
         // Arrange
@@ -551,7 +557,8 @@ public class ParsedExpressionEvaluationTests
             ["Count"] = 3,
             ["Ratio"] = 0.1f,
             ["Zero"] = 0d,
-            ["Interval"] = TimeSpan.FromSeconds(90)
+            ["Interval"] = TimeSpan.FromSeconds(90),
+            ["Amount"] = 1.50m
         });
 
         // Act
@@ -604,7 +611,9 @@ public class ParsedExpressionEvaluationTests
     }
 
     [Theory]
-    [InlineData("1.50", typeof(decimal), "1.50")]
+    [InlineData("1.50", typeof(decimal), "1.5")]
+    [InlineData("11.000", typeof(decimal), "11")]
+    [InlineData("0.00", typeof(decimal), "0")]
     [InlineData("-5", typeof(decimal), "-5")]
     [InlineData(".5", typeof(decimal), "0.5")]
     [InlineData("0.1 + 0.2", typeof(decimal), "0.3")]

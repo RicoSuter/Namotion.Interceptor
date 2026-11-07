@@ -34,7 +34,7 @@ internal static class ExpressionArithmetic
         float single => float.IsFinite(single) ? -single + 0f : null,
         double number => double.IsFinite(number) ? -number + 0d : null,
         TimeSpan duration => duration == TimeSpan.MinValue ? null : duration.Negate(),
-        _ when ExpressionComparer.IsIntegerOrDecimal(value) => -ExpressionComparer.ToDecimal(value),
+        _ when ExpressionComparer.IsIntegerOrDecimal(value) => -Normalize(ExpressionComparer.ToDecimal(value)),
         _ => null
     };
 
@@ -52,12 +52,16 @@ internal static class ExpressionArithmetic
         if (ExpressionComparer.IsIntegerOrDecimal(left) && ExpressionComparer.IsIntegerOrDecimal(right) &&
             TryComputeExactly(arithmeticOperator, ExpressionComparer.ToDecimal(left), ExpressionComparer.ToDecimal(right), out var exact))
         {
-            return exact;
+            return Normalize(exact);
         }
 
         var result = Compute(arithmeticOperator, ExpressionComparer.ToDouble(left), ExpressionComparer.ToDouble(right));
         return double.IsFinite(result) ? result + 0d : null;
     }
+
+    /// <summary>Removes the trailing zeros of a decimal, so that 1.50 times 2 is written as 3 and not as 3.00.</summary>
+    // A division by one with the largest scale gives the smallest scale that keeps the value.
+    internal static decimal Normalize(decimal value) => value / 1.0000000000000000000000000000m;
 
     private static double Compute(ArithmeticOperator arithmeticOperator, double left, double right) => arithmeticOperator switch
     {

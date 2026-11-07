@@ -269,7 +269,7 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
     {
         if (TryParseDecimal(token, out var exact))
         {
-            return new LiteralNode(exact);
+            return new LiteralNode(ExpressionArithmetic.Normalize(exact));
         }
 
         if (double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out var number))
