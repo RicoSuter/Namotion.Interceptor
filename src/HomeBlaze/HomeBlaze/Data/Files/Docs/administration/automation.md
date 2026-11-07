@@ -523,7 +523,7 @@ Rule  Finished   Active in state: Running
 
 ### One-button toggle
 
-One button switches a lamp on and off with two states. Each press reaches only the rule of the current state, and the state it enters takes effect for the next press, so one press never runs both rules. A press while the previous one is still running its actions is ignored.
+One button switches a lamp on and off with two states. Each press reaches only the rule of the current state, and the state it enters takes effect for the next press, so one press never runs both rules. A press while the previous one is still running its actions waits and is handled afterwards in the new state, so two quick presses switch the lamp on and off again.
 
 ```text
 States  Off, On
