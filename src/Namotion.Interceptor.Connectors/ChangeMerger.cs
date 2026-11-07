@@ -14,7 +14,7 @@ namespace Namotion.Interceptor.Connectors;
 /// subject lock, so concurrent writers to one property can enqueue in the opposite order they committed.
 /// Owns the pooled scratch buffers so that a flush allocates nothing per batch.
 /// Not thread-safe: the caller must serialize all calls, which <see cref="ChangeQueueProcessor"/> does
-/// by holding its flush gate for the whole merge, write and reset cycle.
+/// by running one flush, with its whole merge, write and reset cycle, at a time.
 /// </summary>
 internal sealed class ChangeMerger : IDisposable
 {
