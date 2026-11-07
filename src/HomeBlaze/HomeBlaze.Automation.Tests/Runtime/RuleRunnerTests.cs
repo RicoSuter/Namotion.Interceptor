@@ -235,7 +235,11 @@ public class RuleRunnerTests
 
         public string? CurrentState { get; private set; }
 
-        public bool IsAbandoned => false;
+        public bool RunUnlessAbandoned(Action write)
+        {
+            write();
+            return true;
+        }
 
         public string? ChangeState(string targetState)
         {

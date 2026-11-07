@@ -57,11 +57,11 @@ internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, Au
         }
 
         var result = await _runner.RunAsync(request, host, cancellationToken);
-        if (host.IsAbandoned)
-        {
-            return;
-        }
+        host.RunUnlessAbandoned(() => Complete(request, result, summary));
+    }
 
+    private void Complete(RunRequest request, RuleRunResult result, DispatchSummary summary)
+    {
         if (!result.IsRun)
         {
             Skip(request, result.Message);

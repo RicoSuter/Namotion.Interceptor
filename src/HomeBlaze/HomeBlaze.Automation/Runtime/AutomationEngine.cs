@@ -25,7 +25,9 @@ internal sealed class AutomationEngine : IRuleRunHost
 
     // An unreadable checkpoint stays shown after successful runs, until a reset or a valid configuration is applied.
     private bool _hasCheckpointError;
-    private volatile bool _isAbandoned;
+    // Set by a stop under the lock of _status, which the worker holds while it writes the automation and its rules, so
+    // that an abandoned worker writes nothing after the stop showed the rules as stopped.
+    private bool _isAbandoned;
     private string? _runWriteError;
     private readonly RuleStatusPublisher _statusPublisher = new();
 
@@ -47,7 +49,19 @@ internal sealed class AutomationEngine : IRuleRunHost
 
     public string? CurrentState => _automation.CurrentState;
 
-    public bool IsAbandoned => _isAbandoned;
+    public bool RunUnlessAbandoned(Action write)
+    {
+        lock (_status)
+        {
+            if (_isAbandoned)
+            {
+                return false;
+            }
+
+            write();
+            return true;
+        }
+    }
 
     /// <summary>Restores the checkpoint without a state-change event and applies the configuration.</summary>
     public void Start()
@@ -234,9 +248,12 @@ internal sealed class AutomationEngine : IRuleRunHost
     public void ReportUnexpectedError(Exception exception)
     {
         _logger.LogError(exception, "The automation {Automation} failed to process an input.", Name);
-        if (!_isAbandoned)
+        lock (_status)
         {
-            _status.SetError(exception.Message);
+            if (!_isAbandoned)
+            {
+                _status.SetError(exception.Message);
+            }
         }
     }
 
@@ -246,17 +263,26 @@ internal sealed class AutomationEngine : IRuleRunHost
     /// </summary>
     public void Abandon()
     {
-        _isAbandoned = true;
-        RuleStatusPublisher.PublishStopped(_automation.Rules, _automation.TimeProvider.LocalTimeZone);
+        lock (_status)
+        {
+            _isAbandoned = true;
+            RuleStatusPublisher.PublishStopped(_automation.Rules, _automation.TimeProvider.LocalTimeZone);
+        }
     }
 
     public void RefreshRuleStatuses()
     {
-        if (_isAbandoned)
+        lock (_status)
         {
-            return;
+            if (!_isAbandoned)
+            {
+                PublishRuleStatuses();
+            }
         }
+    }
 
+    private void PublishRuleStatuses()
+    {
         var notApplied = _hasConfigurationError && _automation.ConfigurationVersion == _appliedConfigurationVersion
             ? RuleStatusPublisher.NotAppliedInvalid
             : RuleStatusPublisher.NotAppliedYet;
@@ -275,17 +301,20 @@ internal sealed class AutomationEngine : IRuleRunHost
     public void End()
     {
         Stop();
-        if (_isAbandoned)
+        lock (_status)
         {
-            return;
-        }
+            if (_isAbandoned)
+            {
+                return;
+            }
 
-        if (_keeper.WriteRuns() is { } error)
-        {
-            _logger.LogWarning("The automation {Automation} could not save its last runs when it stopped: {Error}", Name, error);
-        }
+            if (_keeper.WriteRuns() is { } error)
+            {
+                _logger.LogWarning("The automation {Automation} could not save its last runs when it stopped: {Error}", Name, error);
+            }
 
-        RuleStatusPublisher.PublishStopped(_automation.Rules, _automation.TimeProvider.LocalTimeZone);
+            RuleStatusPublisher.PublishStopped(_automation.Rules, _automation.TimeProvider.LocalTimeZone);
+        }
     }
 
     public string? ChangeState(string targetState) => _states.ChangeState(_snapshot, targetState);
@@ -450,25 +479,23 @@ internal sealed class AutomationEngine : IRuleRunHost
         }
         finally
         {
-            if (!_isAbandoned)
+            RunUnlessAbandoned(() =>
             {
                 PublishStateChanges();
                 _triggers.TrackPending(_snapshot.Rules, requests);
+            });
+        }
+
+        RunUnlessAbandoned(() =>
+        {
+            // A skipped trigger of a rule that stays active runs in a later input, after the state change.
+            if (summary.SkippedForStateChange)
+            {
+                _triggers.RequestPendingRecheck();
             }
-        }
 
-        if (_isAbandoned)
-        {
-            return;
-        }
-
-        // A skipped trigger of a rule that stays active runs in a later input, after the state change.
-        if (summary.SkippedForStateChange)
-        {
-            _triggers.RequestPendingRecheck();
-        }
-
-        _status.Apply(summary, HasStickyError);
+            _status.Apply(summary, HasStickyError);
+        });
     }
 
     // The rules of the entered state are activated first, so that they receive the event of entering it.
