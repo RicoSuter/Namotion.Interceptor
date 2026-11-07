@@ -28,6 +28,9 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
 
     public bool IsUnknown => UnknownSince is not null;
 
+    /// <summary>Increases with every change of the state, so that a status is formatted again only after one.</summary>
+    public int Version { get; private set; }
+
     /// <summary>Activates the trigger with fresh state and returns whether it fires at once.</summary>
     public bool Activate(TriggerActivation policy, TriggerObservation observation, DateTimeOffset now)
     {
@@ -46,6 +49,21 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
 
     /// <summary>Applies an observation and returns whether the trigger fires.</summary>
     public bool Observe(TriggerObservation observation, DateTimeOffset now)
+    {
+        var phase = Phase;
+        var holdStartedAt = HoldStartedAt;
+        var unknownSince = UnknownSince;
+        var missingPaths = MissingPaths;
+        var fires = ObserveCore(observation, now);
+        if (phase != Phase || holdStartedAt != HoldStartedAt || unknownSince != UnknownSince || !ReferenceEquals(missingPaths, MissingPaths))
+        {
+            Version++;
+        }
+
+        return fires;
+    }
+
+    private bool ObserveCore(TriggerObservation observation, DateTimeOffset now)
     {
         if (Phase == TriggerPhase.Inactive)
         {
@@ -73,11 +91,13 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
         {
             Phase = TriggerPhase.WaitingToRearm;
             PendingSince = null;
+            Version++;
         }
     }
 
     public void Deactivate()
     {
+        Version++;
         Phase = TriggerPhase.Inactive;
         HoldStartedAt = null;
         PendingSince = null;

@@ -27,6 +27,7 @@ internal sealed class AutomationEngine : IRuleRunHost
     private bool _hasCheckpointError;
     private volatile bool _isAbandoned;
     private string? _runWriteError;
+    private readonly RuleStatusPublisher _statusPublisher = new();
 
     /// <summary>Creates the engine, whose property triggers publish their watched set to <paramref name="changes"/>.</summary>
     public AutomationEngine(Automation automation, AutomationInputQueue queue, AutomationStateKeeper keeper, ILogger logger, AutomationChangeReceiver changes)
@@ -257,7 +258,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         var notApplied = _hasConfigurationError && _automation.ConfigurationVersion == _appliedConfigurationVersion
             ? RuleStatusPublisher.NotAppliedInvalid
             : RuleStatusPublisher.NotAppliedYet;
-        RuleStatusPublisher.Publish(_automation.Rules, _snapshot, GetInactiveReason, _automation.TimeProvider.LocalTimeZone, notApplied);
+        _statusPublisher.Publish(_automation, _snapshot, GetInactiveReason, notApplied);
     }
 
     private void Stop()

@@ -10,6 +10,8 @@ namespace HomeBlaze.Automation.Runtime;
 /// </summary>
 internal sealed class CompiledRule(string key, AutomationRule rule, ParsedExpression? guard)
 {
+    private int _version;
+
     public string Key { get; } = key;
 
     /// <summary>The rule subject; a reload that replaces the instance under the same key rebinds it.</summary>
@@ -48,10 +50,58 @@ internal sealed class CompiledRule(string key, AutomationRule rule, ParsedExpres
     public List<CompiledEventTrigger> EventTriggers { get; } = [];
 
     /// <summary>Whether the rule is active: its triggers are subscribed or about to evaluate their activation.</summary>
-    public bool IsActivated { get; set; }
+    public bool IsActivated
+    {
+        get;
+        set
+        {
+            if (field != value)
+            {
+                field = value;
+                _version++;
+            }
+        }
+    }
 
     /// <summary>Why the last request of the rule did not run, until a request runs or the rule is deactivated; null otherwise.</summary>
-    public string? SkipReason { get; set; }
+    public string? SkipReason
+    {
+        get;
+        set
+        {
+            if (!string.Equals(field, value, StringComparison.Ordinal))
+            {
+                field = value;
+                _version++;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Increases with every change of what the status of the rule shows from the rule itself: its activation, the reason
+    /// it did not run and the state of its triggers. Allocates nothing.
+    /// </summary>
+    public long StatusVersion
+    {
+        get
+        {
+            long version = _version;
+            foreach (var trigger in PropertyTriggers)
+            {
+                version += trigger.State.Version;
+            }
+
+            foreach (var trigger in EventTriggers)
+            {
+                version += trigger.Version;
+            }
+
+            return version;
+        }
+    }
+
+    /// <summary>The <see cref="StatusVersion"/> that the status of the rule subject shows, or -1 before one.</summary>
+    public long PublishedStatusVersion { get; set; } = -1;
 
     /// <summary>
     /// Whether the rule observes its triggers in an automation with this enabled flag and current state: only in the modes

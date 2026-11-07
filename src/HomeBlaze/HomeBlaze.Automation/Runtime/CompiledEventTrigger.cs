@@ -23,7 +23,21 @@ internal sealed class CompiledEventTrigger(CompiledRule rule, int index, Subject
     public EventTriggerSubscription? Subscription { get; set; }
 
     /// <summary>Why the trigger receives no events, or null while it is subscribed.</summary>
-    public string? SourceError { get; set; }
+    public string? SourceError
+    {
+        get;
+        set
+        {
+            if (!string.Equals(field, value, StringComparison.Ordinal))
+            {
+                field = value;
+                Version++;
+            }
+        }
+    }
+
+    /// <summary>Increases with every change of <see cref="SourceError"/>, so that a status is formatted again only after one.</summary>
+    public int Version { get; private set; }
 
     /// <summary>
     /// Hands the subscription to the trigger that replaces this one with an equal configuration, so that the events

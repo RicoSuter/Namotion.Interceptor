@@ -5,6 +5,8 @@ internal sealed class CompiledAutomation(IReadOnlyList<CompiledRule> rules, IRea
 {
     public static CompiledAutomation Empty { get; } = new([], [], null);
 
+    private readonly Dictionary<string, CompiledRule> _rulesByKey = rules.ToDictionary(rule => rule.Key, StringComparer.Ordinal);
+
     public IReadOnlyList<CompiledRule> Rules { get; } = rules.ToArray();
 
     public IReadOnlyList<string> States { get; } = states;
@@ -13,7 +15,7 @@ internal sealed class CompiledAutomation(IReadOnlyList<CompiledRule> rules, IRea
 
     public bool HasState(string? state) => state is not null && States.Contains(state, StringComparer.Ordinal);
 
-    public CompiledRule? FindRule(string key) => Rules.FirstOrDefault(rule => rule.Key == key);
+    public CompiledRule? FindRule(string key) => _rulesByKey.GetValueOrDefault(key);
 
     /// <summary>The same configuration with other rules, such as the rules that still exist after a failed reload.</summary>
     public CompiledAutomation WithRules(IReadOnlyList<CompiledRule> rules) => new(rules, States, InitialState);
