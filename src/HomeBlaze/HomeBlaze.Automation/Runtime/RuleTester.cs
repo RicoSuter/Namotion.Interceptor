@@ -34,7 +34,7 @@ internal static class RuleTester
             HasGuard = compiled.Guard is not null,
             GuardResult = guard,
             GuardMissingPaths = guardMissingPaths,
-            Actions = [.. compiled.Actions.Select(action => RuleRunner.Describe(executor, action, scope))]
+            Actions = [.. compiled.Actions.Select(action => executor.Describe(action, scope))]
         };
     }
 

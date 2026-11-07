@@ -86,12 +86,21 @@ internal sealed class ActionExecutor(
         }
     }
 
-    /// <summary>Describes the call with its bound arguments without running it, or why it could not run.</summary>
-    public string Describe(InvokeOperationAction action, ActionScope scope) =>
+    /// <summary>Describes the action with its bound arguments without running it, or why it could not run.</summary>
+    public string Describe(AutomationAction action, ActionScope scope) => action switch
+    {
+        InvokeOperationAction invoke => Describe(invoke, scope),
+        SetPropertyAction set => Describe(set, scope),
+        ChangeStateAction change => DescribeChangeState(change),
+        _ => "an action of an unknown type"
+    };
+
+    public static string DescribeChangeState(ChangeStateAction change) => $"ChangeState({change.TargetState})";
+
+    private string Describe(InvokeOperationAction action, ActionScope scope) =>
         TryPrepareOperation(action, scope, CancellationToken.None, out var operation, out var error) ? operation.Description : NameTarget(action.OperationPath, error);
 
-    /// <summary>Describes the write with its bound value without running it, or why it could not run.</summary>
-    public string Describe(SetPropertyAction action, ActionScope scope) =>
+    private string Describe(SetPropertyAction action, ActionScope scope) =>
         TryPrepareWrite(action, scope, out var write, out var error) ? write.Description : NameTarget(action.PropertyPath, error);
 
     // Refusals already start with the path; binding errors name only the argument.

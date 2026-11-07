@@ -47,18 +47,8 @@ internal sealed class RuleRunner(ActionExecutor executor, SubjectPathResolver re
     public IEnumerable<string> Describe(RunRequest request, IRuleRunHost host)
     {
         var scope = CreateScope(request, host);
-        return request.Rule.Actions.Select(action => Describe(executor, action, scope)).ToList();
+        return request.Rule.Actions.Select(action => executor.Describe(action, scope)).ToList();
     }
-
-    public static string Describe(ActionExecutor executor, AutomationAction action, ActionScope scope) => action switch
-    {
-        InvokeOperationAction invoke => executor.Describe(invoke, scope),
-        SetPropertyAction set => executor.Describe(set, scope),
-        ChangeStateAction change => DescribeChangeState(change),
-        _ => "an action of an unknown type"
-    };
-
-    private static string DescribeChangeState(ChangeStateAction change) => $"ChangeState({change.TargetState})";
 
     // Returns why the guard rejects the request, or null when it passes.
     private string? CheckGuard(RunRequest request)
@@ -119,7 +109,7 @@ internal sealed class RuleRunner(ActionExecutor executor, SubjectPathResolver re
     };
 
     private static ActionResult ChangeState(ChangeStateAction change, IRuleRunHost host) =>
-        host.ChangeState(change.TargetState) is { } error ? ActionResult.Failure(error) : ActionResult.Success(DescribeChangeState(change));
+        host.ChangeState(change.TargetState) is { } error ? ActionResult.Failure(error) : ActionResult.Success(ActionExecutor.DescribeChangeState(change));
 
     private ActionScope CreateScope(RunRequest request, IRuleRunHost host) =>
         new(host.Automation, request.Rule.Rule, CreateEvaluation(request), request.Rule.AllowsEvent);

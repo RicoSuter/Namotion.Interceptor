@@ -13,7 +13,6 @@ namespace HomeBlaze.Automation.Runtime;
 internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, AutomationStateKeeper keeper, ILogger logger)
 {
     private readonly RuleRunner _runner = RuleRunner.Create(automation, logger);
-    private readonly RunRecorder _recorder = new(keeper, automation.TimeProvider);
 
     public async Task<DispatchSummary> DispatchAsync(
         IReadOnlyList<RunRequest> requests, Func<CompiledRule, bool> isActive, CancellationToken cancellationToken)
@@ -77,8 +76,28 @@ internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, Au
             trigger.State.Consume();
         }
 
-        _recorder.Record(request.Rule, result);
+        Record(request.Rule, result);
         summary.Add(request.Rule, result);
+    }
+
+    // Applies the run to the checkpoint in memory, which the keeper writes later, then sets the outcome and the message
+    // of the rule and, last, its run count, so that a history sample of the run count comes after the outcome and the
+    // message of the same run.
+    private void Record(CompiledRule rule, RuleRunResult result)
+    {
+        var subject = rule.Rule;
+        var run = new RuleCheckpoint
+        {
+            LastTriggeredAt = subject.LastTriggeredAt,
+            RunCount = (subject.RunCount ?? 0) + 1,
+            LastRunOutcome = result.Outcome,
+            LastRunMessage = result.Message
+        };
+
+        keeper.RecordRun(rule.Key, run, automation.TimeProvider.GetUtcNow());
+        subject.LastRunOutcome = run.LastRunOutcome;
+        subject.LastRunMessage = run.LastRunMessage;
+        subject.RunCount = run.RunCount;
     }
 
     private void Skip(RunRequest request, string reason)
