@@ -34,4 +34,20 @@ internal static class WasherAutomation
             }
         };
     }
+
+    /// <summary>The washer with one action in the rule with the key: a call of the operation with the arguments, with the id call-1.</summary>
+    public static Action<HomeBlaze.Automation.Automation> WithCall(string ruleKey, string operationPath, params (string Key, string Value)[] arguments) =>
+        automation =>
+        {
+            Configure(automation);
+            automation.Rules[ruleKey].Actions =
+            [
+                new InvokeOperationAction
+                {
+                    Id = "call-1",
+                    OperationPath = operationPath,
+                    Arguments = arguments.ToDictionary(argument => argument.Key, argument => argument.Value)
+                }
+            ];
+        };
 }
