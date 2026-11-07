@@ -468,11 +468,20 @@ public class ParsedExpressionEvaluationTests
     [InlineData("Amount + 0.50", typeof(decimal), "2")]
     [InlineData("Amount / 0.5", typeof(decimal), "3")]
     [InlineData("One / Count", typeof(double), "0.3333333333333333")]
+    [InlineData("Hundred / Seven", typeof(double), "14.285714285714286")]
+    [InlineData("Power / 3.6", typeof(double), "2055.5555555555557")]
+    [InlineData("10 / 3.7", typeof(double), "2.7027027027027026")]
+    [InlineData("Hundred / 0.3", typeof(double), "333.33333333333337")]
+    [InlineData("10 / 4", typeof(decimal), "2.5")]
     [InlineData("Max + Max", typeof(double), "1.5845632502852868E+29")]
     [InlineData("Tiny * Tiny", typeof(double), "1E-40")]
     [InlineData("Ratio + 0", typeof(float), "0.1")]
-    [InlineData("Ratio * Count", typeof(float), "0.3")]
+    [InlineData("Ratio * 3", typeof(float), "0.3")]
     [InlineData("Ratio + Price", typeof(float), "0.2")]
+    [InlineData("Ratio + Ratio", typeof(float), "0.2")]
+    [InlineData("Ratio * Count", typeof(double), "0.30000000447034836")]
+    [InlineData("Ratio + Precise", typeof(double), "123456789.22299999")]
+    [InlineData("Stamp + Ratio", typeof(double), "1700000000123.1")]
     [InlineData("Zero * -1", typeof(double), "0")]
     public void WhenArithmeticIsEvaluatedAsValue_ThenItKeepsTheExactnessOfItsOperands(string text, Type expectedType, string expectedValue)
     {
@@ -489,6 +498,10 @@ public class ParsedExpressionEvaluationTests
             ["Price"] = 0.1m,
             ["Max"] = decimal.MaxValue,
             ["Tiny"] = 1e-20m,
+            ["Hundred"] = 100,
+            ["Seven"] = 7,
+            ["Precise"] = 123456789.123,
+            ["Stamp"] = 1700000000123L,
             ["Ratio"] = 0.1f,
             ["Zero"] = 0d,
             ["Measured"] = 0.1,

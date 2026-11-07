@@ -2,11 +2,12 @@ namespace Namotion.Interceptor.Expressions;
 
 /// <summary>
 /// Applies an arithmetic operator to two values that are not null. Two integers or decimals compute as
-/// <see cref="decimal"/> when the result is exact, and as <see cref="double"/> otherwise; a <see cref="float"/> with any
-/// number computes as <see cref="float"/>; every other pair of numbers computes as <see cref="double"/>. An instant minus
-/// an instant is a <see cref="TimeSpan"/>, an instant plus or minus a <see cref="TimeSpan"/> is an instant, and two
-/// <see cref="TimeSpan"/> values add and subtract. A number or a <see cref="TimeSpan"/> negates. A <see cref="DateTime"/> without a kind is read as UTC. A null result
-/// means the pair has no arithmetic or the result is out of range, so the value is missing.
+/// <see cref="decimal"/> when the result is exact, and as <see cref="double"/> otherwise; a <see cref="float"/> with a
+/// <see cref="float"/> or a <see cref="decimal"/>, such as a number literal, computes as <see cref="float"/>; every other
+/// pair of numbers computes as <see cref="double"/>. An instant minus an instant is a <see cref="TimeSpan"/>, an instant
+/// plus or minus a <see cref="TimeSpan"/> is an instant, and two <see cref="TimeSpan"/> values add and subtract. A number
+/// or a <see cref="TimeSpan"/> negates. A <see cref="DateTime"/> without a kind is read as UTC. A null result means the
+/// pair has no arithmetic or the result is out of range, so the value is missing.
 /// </summary>
 internal static class ExpressionArithmetic
 {
@@ -42,8 +43,9 @@ internal static class ExpressionArithmetic
     // number, such as that of a division by zero, is missing like a result out of range.
     private static object? ApplyToNumbers(ArithmeticOperator arithmeticOperator, object left, object right)
     {
-        // A float keeps the precision of a float, so that its result compares with a literal as the float itself does.
-        if (left is float || right is float)
+        // A float with a float or a literal keeps the precision of a float, so that its result compares with a literal as
+        // the float itself does. With a double or an integer it computes as double, which keeps the precision of both.
+        if (IsFloatPair(left, right))
         {
             var single = (float)Compute(arithmeticOperator, ExpressionComparer.ToDouble(left), ExpressionComparer.ToDouble(right));
             return float.IsFinite(single) ? single + 0f : null;
@@ -59,9 +61,15 @@ internal static class ExpressionArithmetic
         return double.IsFinite(result) ? result + 0d : null;
     }
 
+    private static bool IsFloatPair(object left, object right) => (left, right) switch
+    {
+        (float, float or decimal) or (decimal, float) => true,
+        _ => false
+    };
+
     /// <summary>Removes the trailing zeros of a decimal, so that 1.50 times 2 is written as 3 and not as 3.00.</summary>
     // A division by one with the largest scale gives the smallest scale that keeps the value.
-    internal static decimal Normalize(decimal value) => value / 1.0000000000000000000000000000m;
+    internal static decimal Normalize(decimal value) => value.Scale == 0 ? value : value / 1.0000000000000000000000000000m;
 
     private static double Compute(ArithmeticOperator arithmeticOperator, double left, double right) => arithmeticOperator switch
     {
@@ -96,8 +104,9 @@ internal static class ExpressionArithmetic
                         return false;
                     }
 
+                    // The product is checked as well, since a rounded quotient times the divisor can round back to the dividend.
                     result = left / right;
-                    return result * right == left;
+                    return TryComputeExactly(ArithmeticOperator.Multiply, result, right, out var product) && product == left;
             }
         }
         catch (OverflowException)
