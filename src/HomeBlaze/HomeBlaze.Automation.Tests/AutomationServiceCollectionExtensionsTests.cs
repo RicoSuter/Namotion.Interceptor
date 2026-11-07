@@ -1,10 +1,9 @@
 using HomeBlaze.Automation.Runtime;
+using HomeBlaze.Automation.Tests.Testing;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Namotion.Interceptor;
-using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Automation.Tests;
 
@@ -80,12 +79,5 @@ public class AutomationServiceCollectionExtensionsTests
 
         // Assert
         Assert.IsType<DenyingAuthorizer>(automation.Authorizer);
-    }
-
-    private sealed class DenyingAuthorizer : IAutomationAuthorizer
-    {
-        public string? GetOperationDenial(IInterceptorSubject automation, RegisteredSubjectProperty operation) => "denied";
-
-        public string? GetPropertyWriteDenial(IInterceptorSubject automation, RegisteredSubjectProperty property) => "denied";
     }
 }

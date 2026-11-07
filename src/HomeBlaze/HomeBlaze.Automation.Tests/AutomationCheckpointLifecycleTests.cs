@@ -1,8 +1,8 @@
+using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Automation.Persistence;
 using HomeBlaze.Automation.Tests.Testing;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
@@ -16,6 +16,12 @@ public class AutomationCheckpointLifecycleTests
         automation.InitialState = "Idle";
         automation.Rules = Keyed(("started", Create("Started", AutomationRuleMode.On, [When("/Weather/Power > 500")], [Enter("Running")], inState: "Idle")));
     };
+
+    private static async Task<string?> ReadStateAsync(string path)
+    {
+        using var checkpoint = JsonDocument.Parse(await File.ReadAllTextAsync(path));
+        return checkpoint.RootElement.GetProperty("currentState").GetString();
+    }
 
     [Fact]
     public async Task WhenTheCheckpointCannotBeRead_ThenItIsMovedAsideAndTheErrorStaysUntilAReset()
@@ -115,7 +121,7 @@ public class AutomationCheckpointLifecycleTests
         Assert.Equal("Idle", stateAfterMove);
         Assert.Equal(1L, host.Rule("started").RunCount);
         Assert.False(File.Exists(Path.Combine(host.DataDirectory, "AutomationState", "Storm.json")));
-        Assert.Contains("\"Running\"", await File.ReadAllTextAsync(Path.Combine(host.DataDirectory, "AutomationState", "Basement", "Storm.json")));
+        Assert.Equal("Running", await ReadStateAsync(Path.Combine(host.DataDirectory, "AutomationState", "Basement", "Storm.json")));
     }
 
     [Fact]
@@ -231,7 +237,7 @@ public class AutomationCheckpointLifecycleTests
         Assert.Equal("Idle", stateWithoutPath);
         Assert.Equal("Running", washer.CurrentState);
         Assert.Equal(3L, washer.Rules["started"].RunCount);
-        Assert.Contains("\"Running\"", await File.ReadAllTextAsync(checkpointPath));
+        Assert.Equal("Running", await ReadStateAsync(checkpointPath));
     }
 
     [Fact]

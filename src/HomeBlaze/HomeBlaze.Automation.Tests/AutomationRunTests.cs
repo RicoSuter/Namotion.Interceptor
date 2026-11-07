@@ -290,6 +290,28 @@ public class AutomationRunTests
         Assert.Null(host.Automation.StatusMessage);
     }
 
+    [Fact]
+    public async Task WhenARequestDoesNotRunAfterAFailedRun_ThenTheErrorStaysShown()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("jam", On("Jam", When("/Weather/Rain > 0"), Invoke("/Blinds/Jam"))),
+            ("close", Create("Close", AutomationRuleMode.On, [When("/Weather/Gust > 8")], [Invoke("/Blinds/Close")], guard: "/Blinds/IsLocked"))));
+        host.Weather.Rain = 1;
+        await host.FlushAsync();
+        var messageAfterTheFailure = host.Automation.StatusMessage;
+
+        // Act
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+
+        // Assert
+        Assert.NotNull(messageAfterTheFailure);
+        Assert.Equal(messageAfterTheFailure, host.Automation.StatusMessage);
+        Assert.Equal(ServiceStatus.Error, host.Automation.Status);
+        Assert.Equal(0L, host.Rule("close").RunCount);
+    }
+
     private static async Task AdvanceAsync(AutomationTestHost host, TimeSpan time)
     {
         host.Time.Advance(time);

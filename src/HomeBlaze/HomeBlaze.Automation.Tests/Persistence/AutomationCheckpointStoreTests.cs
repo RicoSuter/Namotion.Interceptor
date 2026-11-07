@@ -1,3 +1,4 @@
+using System.Text.Json;
 using HomeBlaze.Automation.Persistence;
 
 namespace HomeBlaze.Automation.Tests.Persistence;
@@ -82,7 +83,8 @@ public sealed class AutomationCheckpointStoreTests : IDisposable
         Assert.Equal(checkpoint.StateEnteredAt, read.StateEnteredAt);
         Assert.Equal(run, read.Rules["remind"]);
         Assert.Equal([store.FilePath!], Directory.GetFiles(Path.Combine(_directory, "AutomationState")));
-        Assert.Contains("\"lastRunOutcome\": \"DryRun\"", File.ReadAllText(store.FilePath!));
+        using var document = JsonDocument.Parse(File.ReadAllText(store.FilePath!));
+        Assert.Equal("DryRun", document.RootElement.GetProperty("rules").GetProperty("remind").GetProperty("lastRunOutcome").GetString());
     }
 
     [Fact]

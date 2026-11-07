@@ -8,6 +8,10 @@ namespace HomeBlaze.Automation.Tests;
 
 public class AutomationResynchronizationTests
 {
+    // Two rules that enter each other's state run this often each for one input from outside, until the chain of the
+    // inputs their runs cause reaches its limit.
+    private const int RunsOfEachRuleInAChain = (AutomationInputQueue.MaxChainDepth / 2) + 1;
+
     [Fact]
     public async Task WhenAPropertyChangeIsDroppedByAFullQueue_ThenTheRulesAreEvaluatedWithTheCurrentValue()
     {
@@ -63,7 +67,7 @@ public class AutomationResynchronizationTests
     public async Task WhenAnExternalChangeIsQueuedAsAFeedbackChainIsStopped_ThenItsRuleStillRuns()
     {
         // Arrange
-        var gate = new TestGate { BlockOnCall = 9 }; // the ninth run of 'right' is the last one the chain allows
+        var gate = new TestGate { BlockOnCall = RunsOfEachRuleInAChain };
         await using var host = await AutomationTestHost.StartAsync(automation =>
         {
             automation.States = ["Left", "Right"];
@@ -120,6 +124,6 @@ public class AutomationResynchronizationTests
         Assert.StartsWith($"A feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped", statusWhenStopped);
         Assert.Equal(AutomationRunOutcome.Succeeded, outcomeWhenStopped);
         Assert.Contains($"a feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped", ruleStatusWhenStopped);
-        Assert.True(host.Rule("left").RunCount > runsWhenStopped, $"The rule 'left' ran {host.Rule("left").RunCount} times, {runsWhenStopped} before.");
+        Assert.Equal(RunsOfEachRuleInAChain, host.Rule("left").RunCount - runsWhenStopped);
     }
 }
