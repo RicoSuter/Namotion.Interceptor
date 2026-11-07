@@ -31,8 +31,8 @@ States are named values, with no separate entry-action collection. State-entry b
 - A rule has one or more triggers, combined with OR. Any trigger firing requests a run.
 - A property trigger is one expression with an optional minimum hold duration (`For`), an optional rearm expression (`Rearm`), and an activation policy. Conditions are combined inside the expression with `and`, `or`, `not`, and grouping.
 - A subject-event trigger fires on every matching occurrence, filtered by a payload expression.
-- A rule has an optional guard: one expression without a hold, evaluated only when a trigger fires. A rejected request is consumed.
-- Triggers fire on a false-to-true change, never on every reading. A trigger rearms when its expression is known false, or, with `Rearm`, when the rearm expression becomes known true.
+- A rule has an optional guard: one expression without a hold, evaluated only when a trigger fires. A property trigger whose request the guard rejects stays pending and runs as soon as the guard passes while its expression is still true; a rejected event is consumed, because it has no lasting condition.
+- Triggers fire on a false-to-true change, never on every reading. A trigger rearms when its expression is known false, or, with `Rearm`, when the rearm expression becomes known true. A rearm while the expression is still true fires only after the expression was false or unknown and is true again.
 - Expressions support arithmetic on numbers, instants, and durations, duration literals, `now`, and the local time of day `time`. Paths relative to the rule reach the rule and its automation.
 - A missing value makes an expression unknown. Unknown never fires a trigger, never rearms it, never passes a guard, and is shown as a visible rule status rather than treated as false.
 - A cooldown is a guard over the rule's `LastTriggeredAt`. The editor offers a cooldown shortcut that writes this guard.
@@ -44,7 +44,7 @@ States are named values, with no separate entry-action collection. State-entry b
 - A real state change is observable through `CurrentState` and a subject event containing the previous and new states. Restoring a checkpoint does not emit that event.
 - An automation runs as its own principal. Authorization decides which operations it may call. Operations requiring confirmation are always rejected.
 - Action errors are logged and recorded. The default action error policy is `Continue`; an action can select `StopRule`. Successful actions are not rolled back when a later action fails.
-- `IMonitoredService.Status` and `StatusMessage` expose the latest failure. A subsequent fully successful run clears it; a trigger rejected by its guard does not. An error does not disable the automation.
+- `IMonitoredService.Status` and `StatusMessage` expose the latest failure. A subsequent fully successful run clears it; a rejection is not a run and does not. An unreadable checkpoint error is cleared only by a reset or a valid configuration. An error does not disable the automation.
 
 The following detailed mechanics are proposals for review, rather than additional user requirements.
 
@@ -140,11 +140,11 @@ Runs are recorded through the existing history system instead of a run log of th
 
 | Property | Type | Purpose |
 |---|---|---|
-| `RunCount` | `long`, `[State(IsCumulative = true)]` | Increments on every recorded run, so every run is a history sample, also two identical ones in a row. Its `Delta` aggregation gives runs per hour or day. |
-| `LastRunOutcome` | enum: `Succeeded`, `CompletedWithErrors`, `StoppedAfterError`, `RejectedByGuard`, `DryRun`, `Canceled` | The outcome of the last run. |
-| `LastRunMessage` | `string` | A short summary: the executed actions with rendered arguments, the error of a failed action, or the missing paths of a rejection. |
+| `RunCount` | `long`, `[State(IsCumulative = true)]` | Increments on every run that executed, was canceled while running, or was a dry run, so every such run is a history sample, also two identical ones in a row. Its `Delta` aggregation gives runs per hour or day. |
+| `LastRunOutcome` | enum: `Succeeded`, `CompletedWithErrors`, `StoppedAfterError`, `DryRun`, `Canceled` | The outcome of the last run. `Canceled` means a run that started and was canceled. |
+| `LastRunMessage` | `string` | A short summary: the executed actions with rendered arguments, or the error of a failed action. |
 
-The page lists recent runs from history: one entry per `RunCount` sample, with the outcome and message read at or before that sample's time, so repeated identical runs are shown correctly. Without a history store, the page shows only the last run of each rule. The automation's `CurrentState` is a `[State]` string as well, so history also gives a state timeline. Full errors remain in the normal logs; the message stays short and within the history's size limit for strings.
+The page lists recent runs from history: one entry per `RunCount` sample, with the outcome and message read at or before that sample's time, so repeated identical runs are shown correctly. Without a history store, the page shows only the last run of each rule. The automation's `CurrentState` is a `[State]` string as well, so history also gives a state timeline. Only runs that executed (`On`) or were dry runs count: a rejection by the guard or a skipped request is no run, so it changes none of these properties and appears in the rule status and the log instead. Full errors remain in the normal logs; the message stays short and within the history's size limit for strings.
 
 `CurrentState`, `StateEnteredAt`, `LastTriggeredAt`, and the statuses are `[State]` with internal setters, restored from the checkpoint and changed only by the worker. Configuration is edited only through the normal Save flow, so a Save can never overwrite runtime state.
 
@@ -153,7 +153,7 @@ The page lists recent runs from history: one entry per `RunCount` sample, with t
 | Member | Kind | Purpose |
 |---|---|---|
 | `AutomationRule.TestNow()` | `[Query]` | Evaluates the triggers and the guard against current values and returns their results, the unknown paths, and the actions with rendered arguments. Executes nothing and records nothing. Agents reach it through MCP `invoke_query`, for example to explain why a rule did not run. |
-| `Automation.ResetState()` | `[Operation]` | Changes to `InitialState` and clears the rules' `LastTriggeredAt`, publishing a state-change event like any real change. |
+| `Automation.ResetState()` | `[Operation]` | Changes to `InitialState`, clears the rules' `LastTriggeredAt` and starts every rule over, publishing a state-change event like any real change. |
 
 ## Expressions
 
@@ -163,7 +163,8 @@ All predicates and computed values are expression strings parsed once with `Namo
 
 The grammar reserves `+`, `-`, `*`, and `/` so that a later version can add arithmetic without changing what an existing expression means. This design fills that slot in the shared grammar, so pages and value maps gain arithmetic too:
 
-- Numbers support `+`, `-`, `*`, and `/`.
+- Numbers support `+`, `-`, `*`, and `/`, and unary minus (`-x`, `-(a + b)`, `- 5m`), which also negates durations and binds tighter than `*` and `/`. Negating an instant is an error. Unary minus follows the same white-space rule as binary operators, so a path such as `/Room-1` and a literal such as `-5` keep their meaning.
+- Integers and decimals, and decimal literals, are computed in exact decimal arithmetic, falling back to double on overflow; all other operands are computed in double. A float operand keeps float precision in comparisons, so `0.1m + 0.2m == 0.3` and, with a float `F` of `0.1f`, `F + 0 == 0.1` are true.
 - An instant minus an instant is a duration; an instant plus or minus a duration is an instant; durations add, subtract, and compare.
 - Duration literals such as `30s`, `15m`, `2h`, and `8h30m`. Their lexical form must not change the meaning of an existing expression, such as a path segment that starts with a digit.
 - An unknown operand makes the result unknown. Division by zero is unknown.
@@ -172,7 +173,7 @@ The library provides arithmetic and duration literals only; it has no clock. The
 
 ### Paths and Variables
 
-The automation's expression context resolves absolute registry paths, and relative paths from the evaluating rule, the way page expressions resolve from their page: `./LastTriggeredAt` is the rule's last trigger time, and `../StateEnteredAt` or `../CurrentState` belong to its automation. It also binds:
+The host declares the expression variables; the library knows none. The automation's expression context resolves absolute registry paths, and relative paths from the evaluating rule, the way page expressions resolve from their page: `./LastTriggeredAt` is the rule's last trigger time, and `../StateEnteredAt` or `../CurrentState` belong to its automation. It also binds:
 
 | Variable | Bound to | Available in |
 |---|---|---|
@@ -187,7 +188,7 @@ Automation expressions follow the displayability rules of page expressions: secr
 
 ### Time
 
-`now` and `time` are driven by `TimeProvider`. Active property triggers that reference them are re-evaluated every second, aligned to the wall-clock second, so a time-based change is noticed at most one second late. Guards, filters, and template arguments read `now` exactly when they are evaluated. Computing the next flip time instead of ticking is a possible later optimization. Wall-clock corrections and daylight-saving changes must be tested; elapsed times are UTC-based and `time` follows the host time zone.
+`now` and `time` are driven by `TimeProvider`. Time checks use scheduled wake-ups at due times that can be derived: the end of a hold, the end of a cooldown (`now - X > d` becomes true at `X + d`), and the instants at which a time-of-day comparison changes. An automation keeps one timer at the earliest due time and schedules none while nothing is due, so idle rules cost nothing. The 1 s tick, aligned to the wall-clock second, remains only for expressions whose time dependence cannot be derived. A wall-clock reset is noticed within 1 minute and daylight-saving changes are exact. Guards, filters, and template arguments read `now` exactly when they are evaluated. Wall-clock corrections and daylight-saving changes must be tested; elapsed times are UTC-based and `time` follows the host time zone.
 
 `now - ../StateEnteredAt > 10m` replaces a dedicated elapsed-state-time property, and `time >= 8h30m and time < 21h30m` replaces a clock subject.
 
@@ -203,7 +204,7 @@ Unknown is a distinct outcome, never folded into false:
 
 The status is logged once per transition into and out of unknown. It is not an error: `IMonitoredService.Status` stays `Running`, because an offline sensor should not turn every dependent automation red. Outages are detected explicitly with `== null`, `IsConnected`, or `now - <subject>/LastUpdated`, which are not unknown in the cases they are written for.
 
-A guard that evaluates to unknown rejects the request like false, recorded as `RejectedByGuard` with the missing paths in `LastRunMessage`. An input a rule must wait for therefore belongs in its trigger, not its guard, as the door reminder example shows.
+A guard that evaluates to unknown rejects the request like false. It is not a run: the rule status names the missing paths and a property trigger waits for the guard. An input a rule must wait for therefore belongs in its trigger, not its guard, as the door reminder example shows.
 
 ## Triggers and Activation
 
@@ -211,7 +212,7 @@ A guard that evaluates to unknown rejects the request like false, recorded as `R
 
 A subject-event trigger identifies a source subject, an exposed event type, and an optional payload filter. Every matching occurrence is eligible, even when two consecutive payloads are identical. A button press must not be implemented solely by comparing its last stored property value.
 
-The event filter sees the captured payload. The guard reads the graph when the request is processed. A rejected event is consumed; a guard becoming true later does not replay it. Event subscriptions never replay old button presses after enabling, state entry, configuration reload, or process restart.
+The event filter sees the captured payload. The guard reads the graph when the request is processed. A rejected event is consumed, since it has no lasting condition; a guard becoming true later does not replay it. A Save keeps the queued events of event triggers whose configuration and source are unchanged. Event subscriptions never replay old button presses after enabling, state entry, configuration reload, or process restart.
 
 Events are discovered from the existing convention, without registration. A subject's event types are the `IObservable<T>` interfaces its type implements where `T` implements `IEvent`, such as `IObservable<ButtonEvent>` on Hue buttons and `IObservable<SwitchEvent>` on Shelly switches; both events derive from `DeviceEvent : IEvent` in `HomeBlaze.Abstractions`. Because `IObservable<out T>` is covariant, the runtime subscribes to any of them as `IObservable<IEvent>` without reflection. The payload fields offered to filters and arguments are the public properties of the event record, read once per type and cached, like operation metadata. The automation itself implements `IObservable<AutomationStateChangedEvent>`, whose payload holds the previous state, the new state, and the entry time. Plugin authors only need to follow the convention; HomeBlaze is not built for Native AOT, so the cached reflection is acceptable.
 
@@ -221,7 +222,7 @@ Parse the expression once and subscribe to all referenced properties, using the 
 
 HomeBlaze's tracking suppresses writes of an equal value, so a trigger sees changes, not individual readings. Debouncing over consecutive readings is expressed as a hold of about one report interval, for example `WindGust > 8` for `20s`, rather than as a reading count.
 
-A hold begins when the expression becomes known true and resets when it becomes false or unknown. When the hold has elapsed, the trigger requests one run and is disarmed. It rearms when the expression becomes known false, or, if `Rearm` is set, when the rearm expression becomes known true. A rearm expression provides hysteresis: with `WindGust > 8` and `Rearm WindGust < 6`, gusts moving around 8 trigger once per storm. A guard rejection consumes the request; guard changes alone do not generate another request.
+A hold begins when the expression becomes known true and resets when it becomes false or unknown. When the hold has elapsed, the trigger requests one run and is disarmed. It rearms when the expression becomes known false, or, if `Rearm` is set, when the rearm expression becomes known true; a rearm while the expression is still true only rearms, and the trigger fires again after the expression was false or unknown and is true again. A rearm expression provides hysteresis: with `WindGust > 8` and `Rearm WindGust < 6`, gusts moving around 8 trigger once per storm. A request whose run does not execute (the guard is false or unknown, a cooldown, a skip after a state change, the chain limit) is not consumed: the trigger stays pending while its expression holds and runs as soon as the guard passes. A pending trigger ends when its expression becomes false or unknown, when the rule is deactivated, or when it runs. Holds are not restarted by pending.
 
 Each trigger of a rule keeps its own arming state and hold. Two triggers firing in close succession produce two run requests; a cooldown guard limits the second when that is unwanted.
 
@@ -238,9 +239,9 @@ An unresolved source remains inactive with an actionable diagnostic. When the re
 
 ## Guards and Cooldown
 
-A guard is one expression evaluated when a trigger requests a run, immediately before the rule's actions. It has no hold and no subscriptions of its own, and its changes never start a run. It answers "only if", while triggers answer "when": a term such as `not Cover/IsMoving` in a trigger would fire the rule when the cover stops moving, rearm it when its own action starts a movement, and reset its hold on every movement.
+A guard is one expression evaluated when a trigger requests a run, immediately before the rule's actions. It has no hold and no subscriptions of its own, and its changes never start a run by themselves. While a trigger of the rule is pending, the guard's properties are watched and a change of them, or the derived end of a cooldown, re-checks it and runs it once the guard passes, without polling. It answers "only if", while triggers answer "when": a term such as `not Cover/IsMoving` in a trigger would fire the rule when the cover stops moving, rearm it when its own action starts a movement, and reset its hold on every movement.
 
-`LastTriggeredAt` is set when the first action of a run starts, whether the actions then succeed or fail, so a failing device is not retried before the cooldown ends. Guard rejections, dry runs, and "Test now" do not set it. Before the first run it is null, so a cooldown guard must allow that case:
+`LastTriggeredAt` is set when the first action of a run starts, whether the actions then succeed or fail, so a failing device is not retried before the cooldown ends. Rejected requests, dry runs, and "Test now" do not set it. Before the first run it is null, so a cooldown guard must allow that case:
 
 ```
 ./LastTriggeredAt == null or now - ./LastTriggeredAt > 30m
@@ -254,9 +255,9 @@ The simple editor presents this as a cooldown duration and generates the guard. 
 
 `InitialState` is used only when creating an automation without a checkpoint or by `ResetState`. An unknown persisted or target state is a configuration or action error, never an implicit reset. A state name must be unique. A same-state `ChangeState` is a no-op: it does not reset the state-entry time or emit a new event.
 
-Each automation serializes input processing and its actions on one worker. Subscription callbacks enqueue captured input and return; they do not run operations, await storage, or reenter the automation from a property setter or topology lock. Subject events retain their individual occurrences. Configuration versions and activation generations prevent queued input or expired holds from an earlier activation running against a replacement configuration or state.
+Each automation serializes input processing and its actions on one worker. Property changes reach automations through one shared dispatcher per graph that routes only the watched properties to them. Subscription callbacks enqueue captured input and return; they do not run operations, await storage, or reenter the automation from a property setter or topology lock. Subject events retain their individual occurrences. Configuration versions and activation generations prevent queued input or expired holds from an earlier activation running against a replacement configuration or state.
 
-Applicable rules are processed in configured order for one input. Each rule evaluates its filter and guard immediately before its actions. Multiple rules may run. Once a rule actually changes state, finish that rule's remaining actions, then stop processing that original input. A state change is not rolled back if a subsequent action in that rule fails. New state-change events and activation evaluations are queued until the current rule finishes.
+Applicable rules are processed in configured order for one input. Each rule evaluates its filter and guard immediately before its actions. Multiple rules may run. Once a rule actually changes state, finish that rule's remaining actions, then stop processing that original input; a property trigger skipped this way stays pending and runs in a later input if its rule stays active. A state change is not rolled back if a subsequent action in that rule fails. The state-change event is published after the dispatch of the input, once the rules of the entered state are active, so they receive it and the rules of the left state do not. Activation evaluations are queued until the current rule finishes.
 
 One run comprises the whole dispatch of one input, including all eligible rules it executes. An error in an early rule survives a successful later rule in the same dispatch. Separately queued state-change events and activation requests are later runs. An input that executes no actions is not a successful run for clearing an earlier failure.
 
@@ -266,9 +267,9 @@ Changes caused by an automation may generate later inputs. The runtime must iden
 
 The checkpoint holds `CurrentState`, `StateEnteredAt`, and each rule's `LastTriggeredAt`, `RunCount`, `LastRunOutcome`, and `LastRunMessage`, keyed by rule identifier. It holds no list, so its size does not grow with the number of runs; `RunCount` is persisted so that the cumulative counter keeps growing across restarts. It is runtime state, not configuration: a `[Configuration]` property would rewrite the whole configuration file, or the page an automation is placed on, on every trigger, and `IConfigurationWriter` writes the live subject, so a new value would be visible before it is saved.
 
-Each automation owns one checkpoint file in a runtime folder of the data directory, next to `Root.json` and `Files`, like `DataProtection-Keys`. Its path mirrors the automation's path, for example `Data/Automations/Automations/Storm.json` for `/Automations/Storm`, and the folder is a new constant in `HomeBlazePaths`. The folder is not browsed storage, so the file is neither a subject nor visible in the UI. Deleting the automation deletes its checkpoint. Renaming or moving it changes its path, so it starts from `InitialState` with no trigger times, and logs that once.
+Each automation owns one checkpoint file in a runtime folder of the data directory, next to `Root.json` and `Files`, like `DataProtection-Keys`. Its path mirrors the automation's path with an injective name mapping, so two different paths never share a file, for example `Data/AutomationState/<automation path>.json`, and the folder is a new constant in `HomeBlazePaths`. The folder is not browsed storage, so the file is neither a subject nor visible in the UI. Deleting the automation deletes its checkpoint. Renaming or moving it changes its path, so it starts from `InitialState` with no trigger times, and logs that once.
 
-The worker writes the complete checkpoint by replacing the file atomically, then publishes the new values and notifications. A successful `ChangeState` therefore publishes one state-change event with the old state, new state, and entry time only after the file is written, and follow-up rules are released only then. A failed write follows the action's error policy, leaves the in-memory state unchanged, and publishes no event; the next write rereads the file first. `LastTriggeredAt` is applied in memory when the run's first action starts and written in the same way; a failed write is recorded as a run failure, and the in-memory value still applies until a restart.
+The worker writes state changes (`CurrentState`, `StateEnteredAt`, reset) to the checkpoint by replacing the file atomically, then publishes the new values and notifications. Run properties (`RunCount`, `LastTriggeredAt`, `LastRunOutcome`, `LastRunMessage`) are batched and written at most every 5 s, with the next state write, and on stop, so a crash can lose up to 5 s of run counts and `LastTriggeredAt`. A successful `ChangeState` therefore publishes one state-change event with the old state, new state, and entry time only after the file is written, and follow-up rules are released only then. A failed write follows the action's error policy, leaves the in-memory state unchanged, and publishes no event; the next write rereads the file first. `LastTriggeredAt` is applied in memory when the run's first action starts and written with the runs; a failed write is shown as the automation status and retried, and the in-memory value still applies until a restart. An unreadable checkpoint is moved aside, the automation starts from its initial state, and the error stays visible until a reset or a valid configuration.
 
 On restart, restore the checkpoint without a synthetic state-change event. Elapsed-time expressions use the persisted timestamps, so offline time counts and an overdue deadline is already true at startup. Device readings carry no state across a restart: they are null until the device reports, so expressions over them stay unknown and the rule waits. This relies on a convention that holds for every subject today and must be documented for subject authors: sensor readings are nullable, null until observed, and not restored from a cache at startup. A subject that breaks the convention can be guarded with `now - <subject>/LastUpdated < 1m`. Time-of-day expressions reconcile to the current period instead of replaying missed occurrences.
 
@@ -294,9 +295,9 @@ An automation runs as its own principal, and the authorization library (`Namotio
 
 Each action has an error dropdown with `Continue` selected by default and `StopRule` as the alternative. Always log the failure with automation, rule, action, and source context, and record it in the rule's run properties. `Continue` attempts the remaining actions; `StopRule` skips them. `StopRule` does not stop unrelated rules that remain eligible for the original input, unless the failed rule already changed state. Neither policy rolls back successful actions or implies retry.
 
-A run with any action, filter, or argument evaluation failure is unsuccessful even if later actions complete. A later run that executes actions and completes all of them successfully clears `StatusMessage` and restores `Running`. A guard rejection, unknown input, canceled stale request, or empty evaluation is not a successful run. While stopped or disabled, `Status` can be `Stopped` while the last error message remains available for the lifetime of the subject instance.
+A run with any action, filter, or argument evaluation failure is unsuccessful even if later actions complete. A later run that executes actions and completes all of them successfully clears `StatusMessage` and restores `Running`. Rejections and skips are not runs at all, and an unknown input, canceled stale request, or empty evaluation is not a successful run. While stopped or disabled, `Status` can be `Stopped` while the last error message remains available for the lifetime of the subject instance.
 
-`LastRunOutcome` distinguishes succeeded, completed with errors, stopped after an error, rejected by the guard, dry run, and canceled. Cancellation from stopping, disabling, or replacing configuration is not an action failure and does not erase an earlier error. A run timeout is a recorded failure. An operation that does not cooperate with cancellation must not allow a replacement run to overlap it.
+`LastRunOutcome` distinguishes succeeded, completed with errors, stopped after an error, dry run, and canceled; canceled means a started run that was canceled. Cancellation from stopping, disabling, or replacing configuration is not an action failure and does not erase an earlier error. A run timeout is a recorded failure. An operation that does not cooperate with cancellation must not allow a replacement run to overlap it.
 
 ## Modes and Rule Status
 
@@ -307,9 +308,9 @@ A run with any action, filter, or argument evaluation failure is unsuccessful ev
 | `ChangeState` | No | Not executed, so follow-up rules do not run | Yes |
 | `LastTriggeredAt` set | No | No | Yes |
 
-A dry run does not simulate state changes; only the first step of a multi-step workflow is observable that way. `TestNow` works in every mode.
+An undefined mode, activation policy, or error policy is a configuration error, and only `On` executes. A dry run does not simulate state changes; only the first step of a multi-step workflow is observable that way. `TestNow` works in every mode.
 
-A rule's `Status` shows its mode and armed, holding with elapsed and required duration, triggered and waiting to rearm, or unknown with the missing paths. Its page also shows the last trigger time and the last run's outcome and message.
+A rule's `Status` shows its mode and armed, holding with elapsed and required duration, triggered and waiting to rearm, or unknown with the missing paths. A pending trigger adds "waiting since HH:mm:ss: reason", and the last request that did not run adds "; not run: reason". Its page also shows the last trigger time and the last run's outcome and message.
 
 ## Examples
 
@@ -426,18 +427,18 @@ For migration coverage from v1, the reference implementations are `TriggerThingS
 |---|---|
 | Hue button release | Every matching release, including repeated identical events, invokes the configured Sonos operation. Other gestures are filtered out. |
 | Washing machine | A cycle above 500 W followed by ten minutes below 5 W sends one notification. The pump phase does not. Standby after a restart in `Idle` sends nothing. |
-| Storm | A gust held for the hold duration retracts the blinds once; gusts around the threshold do not retrigger before the rearm expression is true. Rain also triggers. The guard rejects a run while the blinds move. A second trigger within the cooldown is rejected, also after a restart. |
+| Storm | A gust held for the hold duration retracts the blinds once; gusts around the threshold do not retrigger before the rearm expression is true. Rain also triggers. The guard rejects a run while the blinds move. A second trigger within the cooldown waits and runs once the cooldown ends if the gust is still above the threshold, also after a restart. |
 | Day/night | Day begins at 08:30 and night at 21:30 in the host time zone, including across a daylight-saving change. Startup reconciles an incorrect saved state to the current period. |
 | Door reminder | Closed to open changes state. Expiry while still open sends the notification and changes state to informed. Closing before expiry returns to closed. |
 | Door reminder after restart | Restoring an overdue open state waits for the first door reading. Open sends immediately without restarting the deadline; closed sends nothing; no reading keeps the rule unknown. Restoring informed does not emit another entry event. |
 | Unknown values | A missing input never fires, rearms, or passes a guard, and the rule shows the missing paths. `== null` and `now - LastUpdated` conditions detect outages. |
-| Expressions | Arithmetic on numbers, instants, and durations evaluates as specified, existing expressions keep their meaning, and triggers referencing `now` or `time` flip within one second under a controlled `TimeProvider`. Secret and excluded values evaluate as missing. |
+| Expressions | Arithmetic on numbers, instants, and durations evaluates as specified, existing expressions keep their meaning, and triggers referencing `now` or `time` flip at their derived due time, or within one second where it cannot be derived, under a controlled `TimeProvider`. Secret and excluded values evaluate as missing. |
 | Templates | Notification text renders current values, including in record members; a missing value renders the placeholder and the action still runs. An unknown non-string argument fails the action. |
-| Run history | Every run, including two identical ones in a row, increments `RunCount` and is listed on the page from history with its outcome and message. Without a history store the last run is shown. The checkpoint file keeps a constant size. |
+| Run history | Every run that executed, including two identical ones in a row, increments `RunCount` (rejections and skips do not) and is listed on the page from history with its outcome and message. Without a history store the last run is shown. The checkpoint file keeps a constant size. |
 | Modes and test | A dry-run rule records a run with outcome `DryRun` and the rendered arguments, and changes nothing else, including state and `LastTriggeredAt`. `TestNow` returns the evaluation through the UI and `invoke_query`, and executes and records nothing. |
 | Authorization | An action denied for the automation's principal fails validation and execution. An operation requiring confirmation is rejected. |
 | State-change trigger | A real change publishes old/new state and can start rules in the same or another automation. Follow-up rules in the same automation wait for the current rule's action list. |
-| Action errors | `Continue` attempts remaining commands, `StopRule` skips them, and neither undoes an already changed state. The latest failure survives later successes within that run. A later fully successful run clears it; guard rejections do not. |
+| Action errors | `Continue` attempts remaining commands, `StopRule` skips them, and neither undoes an already changed state. The latest failure survives later successes within that run. A later fully successful run clears it; rejections are no runs and do not. |
 | Checkpoint | A failed checkpoint write publishes no state change. A restart restores state and trigger times without events. Renaming the automation starts from `InitialState`. A Save in the editor never changes runtime state. |
 | Lifecycle | Source replacement, mode changes, configuration edits, cancellation, and pending hold callbacks cannot execute stale work or leak subscriptions. |
 
@@ -471,7 +472,6 @@ The page ends with a Missing Features chapter, following the device pages, that 
 - A sun subject with sunrise and sunset instants for light rules.
 - A lock that depends on state and applies to every caller, such as nobody extending the blinds during a storm. Static denies through authorization cover only the automation itself.
 - Dry runs that simulate state changes, so a multi-step workflow can be observed end to end.
-- Computed deadlines instead of re-evaluating time-based triggers every second.
 - Keeping the checkpoint when an automation is renamed or moved.
 - Event descriptors: optional metadata for event types, such as display names, descriptions, and units of payload fields, or a hidden field. Discovery from `IObservable<T>` shows the record's property names as they are.
 - Restoring a property from its history at startup, which would interact with the null-until-observed convention.
