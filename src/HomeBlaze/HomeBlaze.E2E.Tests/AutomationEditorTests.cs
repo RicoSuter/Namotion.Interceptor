@@ -91,6 +91,27 @@ public class AutomationEditorTests
     }
 
     [Fact]
+    public async Task WhenAConditionComparesTheTimeOfDayForEquality_ThenTheEditorWarnsAndSaysItIsCheckedEverySecond()
+    {
+        // Arrange
+        await using var washer = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        var (_, dialog) = await OpenEditorAsync(washer.Name, tab: RulesTab);
+        await SelectRuleAsync(dialog, "Finished");
+        await dialog.GetByTestId("automation-trigger-condition-advanced").ClickAsync();
+        var hints = dialog.GetByTestId("automation-trigger-condition-hint");
+
+        // Act
+        await dialog.GetByTestId("automation-trigger-condition-text").FillAsync("time == 7h");
+
+        // Assert
+        await Assertions.Expect(hints).ToHaveCountAsync(2, new() { Timeout = Timeout });
+        await Assertions.Expect(hints.First).ToContainTextAsync("use >=, such as time >= 7h");
+        await Assertions.Expect(hints.Last).ToContainTextAsync("Checked every second");
+        await dialog.GetByTestId("automation-trigger-condition-text").FillAsync("time >= 7h");
+        await Assertions.Expect(hints).ToHaveCountAsync(0, new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenAHoldIsNoSingleDuration_ThenItShowsAnErrorAndSaveIsDisabledUntilItIsFixed()
     {
         // Arrange

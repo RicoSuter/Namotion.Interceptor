@@ -111,4 +111,28 @@ public class ExpressionFieldPreviewTests
         Assert.Single(preview.Hints);
         Assert.False(preview.RefreshValues(Rows("/a > Now")));
     }
+
+    [Fact]
+    public void WhenTheHostHasHints_ThenTheyAreShownAndEvaluatedOnlyWhenTheTextChanges()
+    {
+        // Arrange
+        var host = new Host();
+        var preview = new ExpressionFieldPreview();
+        var hintCount = 0;
+        IReadOnlyList<string> GetHints(string text)
+        {
+            hintCount++;
+            return text.Contains("==") ? ["Use >="] : [];
+        }
+
+        // Act
+        preview.Update("/a == Now", Rows("/a == Now"), '/', Variables, host.Validate, host.Preview, GetHints);
+        preview.RefreshValues(Rows("/a == Now"));
+        preview.Update("/a == Now", Rows("/a == Now"), '/', Variables, host.Validate, host.Preview, GetHints);
+
+        // Assert
+        Assert.Equal(1, hintCount);
+        Assert.Equal("Use >=", preview.Hints[0]);
+        Assert.Equal(2, preview.Hints.Count);
+    }
 }

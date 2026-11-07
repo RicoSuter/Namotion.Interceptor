@@ -50,6 +50,18 @@ public static class AutomationValidator
     public static string? ValidateExpression(string? text, bool allowsEvent) =>
         AutomationExpressionCheck.TryParseExpression(text, allowsEvent, out _, out var error) ? null : error;
 
+    /// <summary>The hint for a condition that compares <c>now</c> or <c>time</c> with <c>==</c> or <c>!=</c>.</summary>
+    public const string ClockEqualityHint = ConditionHints.ClockEquality;
+
+    /// <summary>The hint for a condition whose use of the clock is checked every second.</summary>
+    public const string EverySecondHint = ConditionHints.EverySecond;
+
+    /// <summary>
+    /// Gets the hints for a valid condition of a trigger, a rearm or Only if: <see cref="ClockEqualityHint"/> and
+    /// <see cref="EverySecondHint"/>. Empty for an invalid condition, whose error says more.
+    /// </summary>
+    public static IReadOnlyList<string> GetConditionHints(string? text) => ConditionHints.Get(text);
+
     /// <summary>Gets the error of the text template of an argument, or null when it is valid.</summary>
     /// <param name="text">The template.</param>
     /// <param name="allowsEvent">Whether the rule has an event trigger.</param>

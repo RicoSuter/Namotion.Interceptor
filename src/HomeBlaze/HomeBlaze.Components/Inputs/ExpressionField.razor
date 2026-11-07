@@ -115,6 +115,9 @@
     /// <summary>Evaluates an expression or a path with the current values, or returns null when it cannot; without it, no values are shown.</summary>
     [Parameter] public Func<string, ExpressionPreview?>? Preview { get; set; }
 
+    /// <summary>Gets the hints of the host for a valid expression, which the field shows as warnings; asked again only when the text changes.</summary>
+    [Parameter] public Func<string, IReadOnlyList<string>>? Hints { get; set; }
+
     /// <summary>The fields a row offers, such as the fields of an event; without them, a row picks a subject path.</summary>
     [Parameter] public IReadOnlyList<string>? Fields { get; set; }
 
@@ -213,7 +216,7 @@
         }
     }
 
-    private void Refresh() => _preview.Update(_model.Text, _model.Rows, _model.PathSeparator, _model.Variables, Validate, Preview);
+    private void Refresh() => _preview.Update(_model.Text, _model.Rows, _model.PathSeparator, _model.Variables, Validate, Preview, Hints);
 
     private string GetRowText(int index) => index < _preview.RowTexts.Count ? _preview.RowTexts[index] : string.Empty;
 

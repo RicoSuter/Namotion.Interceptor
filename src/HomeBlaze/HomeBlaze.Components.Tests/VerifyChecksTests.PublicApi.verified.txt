@@ -1815,6 +1815,8 @@ namespace HomeBlaze.Components.Inputs
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<bool> HasPendingRowChanged { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public System.Func<string, System.Collections.Generic.IReadOnlyList<string>>? Hints { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public string Label { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string Lead { get; set; }

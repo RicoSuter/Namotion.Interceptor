@@ -16,6 +16,9 @@ public sealed class RuleExpressions(Automation automation, string ruleKey, bool 
 
     public string? Validate(string text) => AutomationValidator.ValidateExpression(text, allowsEvent);
 
+    /// <summary>The hints for a condition of a trigger, a rearm or Only if, which the automation checks again as the clock moves.</summary>
+    public static IReadOnlyList<string> GetConditionHints(string text) => AutomationValidator.GetConditionHints(text);
+
     /// <summary>Validates an event filter, which always sees the captured event.</summary>
     public static string? ValidateFilter(string text) => AutomationValidator.ValidateExpression(text, allowsEvent: true);
 

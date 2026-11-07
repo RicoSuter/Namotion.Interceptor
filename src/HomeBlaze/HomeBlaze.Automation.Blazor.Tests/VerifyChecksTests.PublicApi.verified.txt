@@ -210,6 +210,8 @@ namespace HomeBlaze.Automation.Blazor.Editing
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<string>? Fields { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public System.Func<string, System.Collections.Generic.IReadOnlyList<string>>? Hints { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public string Label { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string Lead { get; set; }
@@ -382,6 +384,7 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public string? RenderTemplate(string text) { }
         public string? Validate(string text) { }
         public string? ValidateTemplate(string text) { }
+        public static System.Collections.Generic.IReadOnlyList<string> GetConditionHints(string text) { }
         public static string? ValidateFilter(string text) { }
     }
     public class RulesTab : Microsoft.AspNetCore.Components.ComponentBase

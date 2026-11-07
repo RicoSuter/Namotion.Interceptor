@@ -11,12 +11,12 @@ public class AutomationValidatorTests
     private static AutomationRule Rule(
         string? name = "Storm",
         string expression = "/Weather/Gust > 8",
-        string? guard = null,
+        string? onlyIf = null,
         AutomationAction[]? actions = null) => new()
     {
         Name = name,
         Mode = AutomationRuleMode.On,
-        OnlyIf = guard,
+        OnlyIf = onlyIf,
         Triggers = [new PropertyTrigger { Expression = expression }],
         Actions = actions ?? [new InvokeOperationAction { Id = "close", OperationPath = "/Blinds/Close" }]
     };
@@ -54,7 +54,7 @@ public class AutomationValidatorTests
     public void WhenARuleIsInvalid_ThenItsErrorsCarryItsKeyWithoutItsName()
     {
         // Arrange
-        var rules = new Dictionary<string, AutomationRule> { ["a"] = Rule(guard: "/Weather/Gust >", actions: []) };
+        var rules = new Dictionary<string, AutomationRule> { ["a"] = Rule(onlyIf: "/Weather/Gust >", actions: []) };
 
         // Act
         var errors = AutomationValidator.Validate([], null, rules, []);
@@ -166,6 +166,31 @@ public class AutomationValidatorTests
 
         // Assert
         Assert.Equal(expected, error);
+    }
+
+    [Theory]
+    [InlineData("time == 7h", true, true)]
+    [InlineData("time != 7h", true, true)]
+    [InlineData("/Door/OpenedAt == now", true, true)]
+    [InlineData("now - ./LastTriggeredAt == 30m and /Weather/Gust > 8", true, true)]
+    [InlineData("now > /Door/Deadline", false, true)]
+    [InlineData("../StateEnteredAt + 10m < now", false, true)]
+    [InlineData("time >= 7h", false, false)]
+    [InlineData("time >= 8h30m and time < 21h30m", false, false)]
+    [InlineData("now - ./LastTriggeredAt > 30m", false, false)]
+    [InlineData("(/Weather/WS90/LastUpdated == null or now - /Weather/WS90/LastUpdated > 15m)", false, false)]
+    [InlineData("/Living/Heating/Mode == \"time\"", false, false)]
+    [InlineData("/Weather/Gust > 8", false, false)]
+    [InlineData("time ==", false, false)]
+    public void WhenAConditionReadsTheClock_ThenTheHintsNameAnEqualityAndAConditionCheckedEverySecond(string condition, bool hasEqualityHint, bool hasEverySecondHint)
+    {
+        // Act
+        var hints = AutomationValidator.GetConditionHints(condition);
+
+        // Assert
+        Assert.Equal(hasEqualityHint, hints.Contains(AutomationValidator.ClockEqualityHint));
+        Assert.Equal(hasEverySecondHint, hints.Contains(AutomationValidator.EverySecondHint));
+        Assert.Equal(Convert.ToInt32(hasEqualityHint) + Convert.ToInt32(hasEverySecondHint), hints.Count);
     }
 
     [Fact]
