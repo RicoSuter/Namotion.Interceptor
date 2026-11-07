@@ -138,8 +138,12 @@ public class AuthorizationRoleTests
             await Assertions.Expect(paths.GetByTestId("rule-paths-chip")).ToHaveTextAsync(FolderPattern, new() { Timeout = Timeout });
             await Assertions.Expect(paths.Locator("input")).ToHaveValueAsync(string.Empty);
 
-            // Typed into a field with suggestions and saved at once, without Enter or leaving the field first.
-            await rule.GetByTestId("rule-types").Locator("input").PressSequentiallyAsync(TypeName);
+            // Entered into a field with suggestions and saved at once, without Enter or leaving the field first. Filled
+            // rather than typed key by key, which can lose keys when the focus moves or the field renders while typing;
+            // the value is checked so that a failure below tells a lost text apart from a lost save.
+            var typesInput = rule.GetByTestId("rule-types").Locator("input");
+            await typesInput.FillAsync(TypeName);
+            await Assertions.Expect(typesInput).ToHaveValueAsync(TypeName);
             await SaveAsync(roleDialog);
 
             // Assert
@@ -337,22 +341,25 @@ public class AuthorizationRoleTests
         await Assertions.Expect(dialog.Page.GetByText("Configuration saved.")).ToBeVisibleAsync(new() { Timeout = Timeout });
     }
 
-    // The server writes the file in place, so a read can see it held or partly written; the poll tries again.
+    // The server writes the file in place, so a read can see it held or partly written; the poll tries again. A failure
+    // shows the file as last read, so that it tells which part differs.
     private static async Task WaitForAuthorizationFileAsync(string path, Func<JsonNode, bool> isExpected, string message)
     {
+        var content = string.Empty;
         await AsyncTestHelpers.WaitUntilAsync(
             () =>
             {
                 try
                 {
-                    return JsonNode.Parse(File.ReadAllText(path))?["roles"] is { } roles && isExpected(roles);
+                    content = File.ReadAllText(path);
+                    return JsonNode.Parse(content)?["roles"] is { } roles && isExpected(roles);
                 }
                 catch (Exception exception) when (exception is IOException or JsonException)
                 {
                     return false;
                 }
             },
-            TimeSpan.FromSeconds(30),
-            message: message);
+            () => $"{message} The file holds: {content}",
+            TimeSpan.FromSeconds(30));
     }
 }
