@@ -232,9 +232,18 @@ public sealed class AuthorizationService : IDisposable
             _updateCount++;
         }
 
+        // Caught, as Refresh does: a scope that is never returned could not end the update, which would keep every policy
+        // as it is now until the process ends.
         if (isRebuilt)
         {
-            WriteStatuses();
+            try
+            {
+                WriteStatuses();
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogError(exception, "Could not update the statuses of the authorization and its roles.");
+            }
         }
 
         return new UpdateScope(this);

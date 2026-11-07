@@ -1,3 +1,4 @@
+using System.Reactive.Concurrency;
 using System.Runtime.CompilerServices;
 using HomeBlaze.Authorization.Tests.Subjects;
 using Namotion.Interceptor;
@@ -6,6 +7,7 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking;
 using Xunit;
 
 namespace HomeBlaze.Authorization.Tests;
@@ -610,6 +612,50 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.NotSame(before, after.Policy);
         Assert.False(after.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
         Assert.Contains("Added", _service.GetRoleNames());
+    }
+
+    [Fact]
+    public async Task WhenAStatusWriteThrowsWhileAnUpdateStarts_ThenTheUpdateStartsAndLaterChangesStillTakeEffect()
+    {
+        // Arrange: an observer that throws on a status write of this thread, as BeginUpdate writes them.
+        var role = new Role { Allow = [ReadPlain()] };
+        AddAuthorization(("Custom", role));
+        Assert.True(_service.GetPolicy(["Custom"]).Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+        var testThread = Environment.CurrentManagedThreadId;
+        var isThrowing = true;
+        var throwCount = 0;
+        using var subscription = _context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change =>
+            {
+                if (isThrowing && Environment.CurrentManagedThreadId == testThread && change.Property.Name == nameof(Role.Status))
+                {
+                    throwCount++;
+                    throw new InvalidOperationException("A faulty observer.");
+                }
+            });
+
+        // Act: repeated, as a background rebuild that writes the statuses first leaves nothing for BeginUpdate to write.
+        var exceptions = new List<Exception>();
+        for (var attempt = 0; attempt < 50 && throwCount == 0; attempt++)
+        {
+            role.Includes = attempt % 2 == 0 ? ["Missing"] : [];
+            if (Record.Exception(() => _service.BeginUpdate().Dispose()) is { } exception)
+            {
+                exceptions.Add(exception);
+            }
+        }
+
+        isThrowing = false;
+        role.Includes = [];
+        role.Allow = [];
+
+        // Assert
+        Assert.True(throwCount > 0, "No status write of BeginUpdate threw.");
+        Assert.Empty(exceptions);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => !_service.GetPolicy(["Custom"]).Policy.CanRead(Member(nameof(TagTestSubject.Plain))),
+            message: "The removed allow rule still applies.");
     }
 
     [Fact]
