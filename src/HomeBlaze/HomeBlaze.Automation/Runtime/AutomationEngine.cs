@@ -129,14 +129,15 @@ internal sealed class AutomationEngine : IRuleRunHost
     }
 
     /// <summary>
-    /// Gets when the next tick is due: for a trigger or a guard that is due, or to write the runs; null when nothing is,
+    /// Gets when the next tick is due: for a trigger or a guard that is due, to write the runs or to log drops; null when nothing is,
     /// so that an automation without holds, clock reads, waiting rules or unwritten runs is never woken up.
     /// </summary>
     public DateTimeOffset? GetNextDueAt(DateTimeOffset now)
     {
-        var next = _triggers.GetNextDueAt(_snapshot.Rules, now);
-        return _keeper.RunsDueAt is { } runsDueAt && (next is null || runsDueAt < next) ? runsDueAt : next;
+        return Earliest(Earliest(_triggers.GetNextDueAt(_snapshot.Rules, now), _keeper.RunsDueAt), _status.UnloggedFaultsDueAt);
     }
+
+    private static DateTimeOffset? Earliest(DateTimeOffset? first, DateTimeOffset? second) => first is null || second < first ? second : first;
 
     /// <summary>
     /// Runs the requests of an input of the triggers: a property change, a tick, which also writes the runs that are due,
@@ -147,6 +148,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         if (input is TickInput)
         {
             WriteRunsIfDue();
+            _status.LogUnloggedFaults(_automation.TimeProvider.GetUtcNow());
         }
 
         return DispatchAsync(_triggers.GetRequests(input, _snapshot.Rules), cancellationToken);

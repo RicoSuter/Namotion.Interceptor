@@ -79,6 +79,23 @@ internal sealed class AutomationStatusReporter(Automation automation, ILogger lo
         _faultsLoggedAt = now;
     }
 
+    /// <summary>When the drops that were not logged yet are due to be logged, or null without such drops.</summary>
+    public DateTimeOffset? UnloggedFaultsDueAt =>
+        _unloggedFaults != default && _faultsLoggedAt is { } loggedAt ? loggedAt + FaultLogInterval : null;
+
+    /// <summary>Logs the drops that were not logged yet once they are due, such as after an overload ended within the interval.</summary>
+    public void LogUnloggedFaults(DateTimeOffset now)
+    {
+        if (UnloggedFaultsDueAt is not { } dueAt || now < dueAt)
+        {
+            return;
+        }
+
+        logger.LogError("The automation {Automation} failed: {Message}", automation.Title, Describe(_unloggedFaults));
+        _unloggedFaults = default;
+        _faultsLoggedAt = now;
+    }
+
     private static string? Describe(QueueFaults faults)
     {
         var overloaded = faults.Overloaded > 0

@@ -37,4 +37,31 @@ public class AutomationStatusReporterTests
             "The automation Storm failed: The input queue overflowed: 9 inputs were dropped and the rules were evaluated again. A feedback chain of more than 16 inputs was stopped: 1 inputs were dropped."
         ], logger.Messages.ToArray());
     }
+
+    [Fact]
+    public void WhenTheDropsStopWithinTheInterval_ThenTheRestIsLoggedWhenTheIntervalEnds()
+    {
+        // Arrange
+        var logger = new MessageLogger();
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        using var automation = new Automation(new SubjectPathResolver(() => null), TimeProvider.System, new AllowAllAutomationAuthorizer(), provider, logger)
+        {
+            Name = "Storm"
+        };
+        var reporter = new AutomationStatusReporter(automation, logger);
+        reporter.ReportFaults(new QueueFaults(3, 0), Now);
+        reporter.ReportFaults(new QueueFaults(4, 0), Now.AddSeconds(10));
+
+        // Act
+        var dueAt = reporter.UnloggedFaultsDueAt;
+        reporter.LogUnloggedFaults(Now.AddSeconds(30));
+        var messagesWithinTheInterval = logger.Messages.Count;
+        reporter.LogUnloggedFaults(Now + AutomationStatusReporter.FaultLogInterval);
+
+        // Assert
+        Assert.Equal(Now + AutomationStatusReporter.FaultLogInterval, dueAt);
+        Assert.Equal(1, messagesWithinTheInterval);
+        Assert.Equal("The automation Storm failed: The input queue overflowed: 4 inputs were dropped and the rules were evaluated again.", logger.Messages[^1]);
+        Assert.Null(reporter.UnloggedFaultsDueAt);
+    }
 }
