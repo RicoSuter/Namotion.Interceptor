@@ -61,9 +61,7 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
     private string DescribeUnexpectedCharacter()
     {
         var character = text[_position];
-        var next = _position + 1;
-        var isGluedOperator = character is '+' or '-' or '*' or '/' &&
-            next < text.Length && !char.IsWhiteSpace(text[next]) && text[next] != '(';
+        var isGluedOperator = character is '+' or '-' or '*' or '/' && !EndsWord(_position + 1);
         return isGluedOperator ? $"put a space after '{character}'" : $"unexpected '{character}'";
     }
 
@@ -141,7 +139,7 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
 
     // An operand of arithmetic is a value, so a bare word that was read as text after a comparison operator is a path.
     private ExpressionNode ToArithmeticOperand(ExpressionNode node) =>
-        node is LiteralNode { BareWord: { } word } ? CreatePathNode(word) : node;
+        node is LiteralNode { IsBareWord: true, Value: string word } ? CreatePathNode(word) : node;
 
     // The operator before a right operand, or null for an operand that no operator precedes.
     private ExpressionNode ParseOperand(string? operatorText, bool bareWordIsText)
@@ -214,7 +212,7 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
         // A bare word after a comparison operator is text, such as the name of an enum value.
         if (bareWordIsText && IsBareWord(token))
         {
-            return new LiteralNode(token, bareWord: token);
+            return new LiteralNode(token, isBareWord: true);
         }
 
         return CreatePathNode(token);
@@ -385,7 +383,7 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
 
         var arithmetic = ReadArithmeticSymbol(isAdditive);
         var next = _position + 1;
-        if (arithmetic is null || (next < text.Length && !char.IsWhiteSpace(text[next]) && text[next] != '('))
+        if (arithmetic is null || !EndsWord(next))
         {
             return null;
         }
@@ -536,7 +534,7 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
         var end = _position + keyword.Length;
         if (end > text.Length ||
             string.Compare(text, _position, keyword, 0, keyword.Length, StringComparison.OrdinalIgnoreCase) != 0 ||
-            !EndsKeyword(end))
+            !EndsWord(end))
         {
             return false;
         }
@@ -545,7 +543,7 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
         return true;
     }
 
-    private bool EndsKeyword(int end) =>
+    private bool EndsWord(int end) =>
         end >= text.Length || char.IsWhiteSpace(text[end]) || text[end] == '(';
 
     private void EnterNesting(int position)

@@ -6,12 +6,12 @@ namespace Namotion.Interceptor.Expressions;
 internal abstract class ExpressionNode;
 
 /// <summary>A number (a boxed <see cref="double"/>), a duration (a boxed <see cref="TimeSpan"/>), a boolean, a text or null.</summary>
-internal sealed class LiteralNode(object? value, string? bareWord = null) : ExpressionNode
+internal sealed class LiteralNode(object? value, bool isBareWord = false) : ExpressionNode
 {
     public object? Value { get; } = value;
 
-    /// <summary>The word when the literal is a bare word after a comparison operator, which arithmetic reads as a path.</summary>
-    public string? BareWord { get; } = bareWord;
+    /// <summary>Whether the literal is a bare word after a comparison operator, which arithmetic reads as a path.</summary>
+    public bool IsBareWord { get; } = isBareWord;
 }
 
 internal sealed class PathNode : ExpressionNode

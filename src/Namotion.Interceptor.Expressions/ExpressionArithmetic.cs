@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace Namotion.Interceptor.Expressions;
 
 /// <summary>
@@ -17,7 +15,7 @@ internal static class ExpressionArithmetic
     {
         if (ExpressionComparer.IsNumber(left) && ExpressionComparer.IsNumber(right))
         {
-            return ApplyToNumbers(arithmeticOperator, ToDouble(left), ToDouble(right));
+            return ApplyToNumbers(arithmeticOperator, ExpressionComparer.ToDouble(left), ExpressionComparer.ToDouble(right));
         }
 
         return arithmeticOperator switch
@@ -38,7 +36,7 @@ internal static class ExpressionArithmetic
             _ => left / right
         };
 
-        // A division by zero gives infinity or NaN, which is unknown like NaN in a comparison.
+        // A division by zero gives infinity or NaN, which is missing like a result out of range.
         return double.IsFinite(result) ? result : null;
     }
 
@@ -46,7 +44,7 @@ internal static class ExpressionArithmetic
     {
         try
         {
-            if (TryGetInstant(left, out var leftInstant))
+            if (ExpressionComparer.TryGetInstant(left, out var leftInstant))
             {
                 return ApplyToInstant(isSubtraction, leftInstant, right);
             }
@@ -62,7 +60,7 @@ internal static class ExpressionArithmetic
 
     private static object? ApplyToInstant(bool isSubtraction, DateTimeOffset instant, object right)
     {
-        if (isSubtraction && TryGetInstant(right, out var rightInstant))
+        if (isSubtraction && ExpressionComparer.TryGetInstant(right, out var rightInstant))
         {
             return instant - rightInstant;
         }
@@ -82,24 +80,6 @@ internal static class ExpressionArithmetic
             return isSubtraction ? duration - otherDuration : duration + otherDuration;
         }
 
-        return !isSubtraction && TryGetInstant(right, out var instant) ? instant + duration : null;
+        return !isSubtraction && ExpressionComparer.TryGetInstant(right, out var instant) ? instant + duration : null;
     }
-
-    private static bool TryGetInstant(object value, out DateTimeOffset instant)
-    {
-        switch (value)
-        {
-            case DateTimeOffset dateTimeOffset:
-                instant = dateTimeOffset;
-                return true;
-            case DateTime dateTime:
-                instant = ExpressionComparer.ToInstant(dateTime);
-                return true;
-            default:
-                instant = default;
-                return false;
-        }
-    }
-
-    private static double ToDouble(object value) => Convert.ToDouble(value, CultureInfo.InvariantCulture);
 }

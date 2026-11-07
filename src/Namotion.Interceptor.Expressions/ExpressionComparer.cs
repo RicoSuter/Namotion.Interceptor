@@ -33,9 +33,8 @@ internal static class ExpressionComparer
         bool boolean => CompareBoolean(boolean, other, isEquality),
         Enum enumValue => CompareEnum(enumValue, other, isEquality),
         string text => CompareText(text, other, isEquality),
-        DateTimeOffset instant => CompareInstant(instant, other, otherInstant),
-        DateTime dateTime => CompareDateTime(dateTime, other, otherInstant),
         TimeSpan duration => other is TimeSpan otherDuration ? duration.CompareTo(otherDuration) : null,
+        _ when TryGetInstant(value, out var instant) => CompareInstant(instant, other, otherInstant),
         _ => CompareNumber(value, other)
     };
 
@@ -84,27 +83,7 @@ internal static class ExpressionComparer
             return otherInstant is { } literalInstant ? instant.CompareTo(literalInstant) : null;
         }
 
-        return other switch
-        {
-            DateTimeOffset otherDate => instant.CompareTo(otherDate),
-            DateTime otherDateTime => instant.CompareTo(ToInstant(otherDateTime)),
-            _ => null
-        };
-    }
-
-    private static int? CompareDateTime(DateTime dateTime, object other, DateTimeOffset? otherInstant)
-    {
-        if (other is string)
-        {
-            return otherInstant is { } literalInstant ? ToInstant(dateTime).CompareTo(literalInstant) : null;
-        }
-
-        return other switch
-        {
-            DateTime otherDateTime => ToInstant(dateTime).CompareTo(ToInstant(otherDateTime)),
-            DateTimeOffset otherInstantValue => ToInstant(dateTime).CompareTo(otherInstantValue),
-            _ => null
-        };
+        return TryGetInstant(other, out var otherValue) ? instant.CompareTo(otherValue) : null;
     }
 
     private static int? CompareNumber(object value, object other)
@@ -125,7 +104,7 @@ internal static class ExpressionComparer
             return null;
         }
 
-        return Convert.ToDouble(value, CultureInfo.InvariantCulture).CompareTo(Convert.ToDouble(other, CultureInfo.InvariantCulture));
+        return ToDouble(value).CompareTo(ToDouble(other));
     }
 
     // The cached name of a defined value, so a comparison does not allocate; ToString only for flag combinations and
@@ -136,6 +115,8 @@ internal static class ExpressionComparer
     internal static bool IsNumber(object value) =>
         value is float or double or decimal || IsSignedInteger(value) || IsUnsignedInteger(value);
 
+    internal static double ToDouble(object value) => Convert.ToDouble(value, CultureInfo.InvariantCulture);
+
     private static bool IsSignedInteger(object value) => value is sbyte or short or int or long;
 
     private static bool IsUnsignedInteger(object value) => value is byte or ushort or uint or ulong;
@@ -143,8 +124,24 @@ internal static class ExpressionComparer
     private static bool IsNaN(object value) =>
         (value is double number && double.IsNaN(number)) || (value is float single && float.IsNaN(single));
 
+    internal static bool TryGetInstant(object value, out DateTimeOffset instant)
+    {
+        switch (value)
+        {
+            case DateTimeOffset dateTimeOffset:
+                instant = dateTimeOffset;
+                return true;
+            case DateTime dateTime:
+                instant = ToInstant(dateTime);
+                return true;
+            default:
+                instant = default;
+                return false;
+        }
+    }
+
     // A DateTime without a kind is read as UTC, matching how a text without an offset is read.
-    internal static DateTimeOffset ToInstant(DateTime dateTime) =>
+    private static DateTimeOffset ToInstant(DateTime dateTime) =>
         dateTime.Kind == DateTimeKind.Unspecified
             ? new DateTimeOffset(dateTime, TimeSpan.Zero)
             : new DateTimeOffset(dateTime);
