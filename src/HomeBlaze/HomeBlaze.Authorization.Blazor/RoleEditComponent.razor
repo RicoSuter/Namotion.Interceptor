@@ -418,7 +418,7 @@
                        OnClick="@(() => AddRule(rules))" data-testid="@($"role-edit-add-{section}")">Add rule</MudButton>
             @if (rules.Count == 0)
             {
-                <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="@($"role-edit-{section}-empty")">No @section rules yet</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="@($"role-edit-{section}-empty")">No @(section) rules yet</MudText>
             }
         </MudStack>
     };
