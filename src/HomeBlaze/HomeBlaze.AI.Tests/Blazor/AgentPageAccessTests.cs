@@ -108,4 +108,26 @@ public sealed class AgentPageAccessTests : BunitContext, IAsyncLifetime
         // Assert
         page.WaitForAssertion(() => Assert.True(page.Find("[data-testid='agent-run-now']").HasAttribute("disabled")));
     }
+
+    [Fact]
+    public void WhenTheRolesOfTheAgentChangeWhileItsPageIsOpen_ThenTheActivityAndTheMemoryFollow()
+    {
+        // Arrange
+        _permissions.HeldRoles.Clear();
+        _permissions.HeldRoles.Add(BuiltInRoles.OperatorName);
+        _agent.Roles = [BuiltInRoles.OperatorName];
+        var page = Render<AgentPage>(parameters => parameters.Add(component => component.Subject, _agent));
+        page.FindAll(".mud-tab").First(tab => tab.TextContent.Contains("Activity", StringComparison.Ordinal)).Click();
+        var refusedBefore = page.FindAll("[data-testid='agent-activity-refusal']").Count;
+
+        // Act
+        _agent.Roles = [BuiltInRoles.EverythingName];
+
+        // Assert
+        Assert.Equal(0, refusedBefore);
+        page.WaitForAssertion(() => Assert.Single(page.FindAll("[data-testid='agent-activity-refusal']")));
+        page.FindAll(".mud-tab").First(tab => tab.TextContent.Contains("Memory", StringComparison.Ordinal)).Click();
+        Assert.Single(page.FindAll("[data-testid='agent-memory-tab-refusal']"));
+        Assert.True(page.Find("[data-testid='agent-new-conversation']").HasAttribute("disabled"));
+    }
 }

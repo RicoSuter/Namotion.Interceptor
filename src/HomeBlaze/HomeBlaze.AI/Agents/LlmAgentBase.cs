@@ -277,8 +277,8 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     }
 
     /// <summary>
-    /// Raised on the changing thread when the timeline, the memory, <see cref="Status"/>, <see cref="StatusMessage"/>,
-    /// <see cref="IsBusy"/> or the streamed text of the running turn changes. Handlers may run while the agent holds
+    /// Raised on the changing thread when the timeline, the memory, <see cref="Roles"/>, <see cref="Status"/>,
+    /// <see cref="StatusMessage"/>, <see cref="IsBusy"/> or the streamed text of the running turn changes. Handlers may run while the agent holds
     /// its state lock, so they must not block. Exceptions thrown by handlers are logged and swallowed.
     /// </summary>
     public event Action? StateChanged;
@@ -493,6 +493,9 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
                 SetPrincipalRoles(newValue);
             }
         }
+
+        // Who may see the conversation, the timeline and the memory depends on the roles.
+        RaiseStateChanged();
     }
 
     partial void OnStatusChanged(ServiceStatus newValue) => RaiseStateChanged();

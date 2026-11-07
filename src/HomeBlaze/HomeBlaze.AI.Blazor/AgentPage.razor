@@ -15,8 +15,10 @@
 
 @if (Agent is { } agent)
 {
-    var isRunNowDenied = IsDenied(agent, RunNowMember);
-    var isNewConversationDenied = IsDenied(agent, NewConversationMember);
+    @* Decided on every render, which a change of the person's roles or of the agent's roles causes. *@
+    var chatRefusal = AgentChatAccess.GetRefusal(Permissions, agent);
+    var isRunNowDenied = chatRefusal is not null || IsDenied(agent, RunNowMember);
+    var isNewConversationDenied = chatRefusal is not null || IsDenied(agent, NewConversationMember);
     @* Fills the viewport below the app bar, so the chat input stays in view and the tab content scrolls on its own.
        The max height caps it to the pane when the page is shown next to its editor. *@
     <div class="d-flex flex-column gap-2 pt-2 pt-sm-4 pb-2"
@@ -70,23 +72,23 @@
             <MudTabPanel Text="Chat" PanelClass="mud-height-full"><AgentChatTab Agent="agent" TimeZoneVersion="_timeZoneVersion" /></MudTabPanel>
             @* The activity and the memory show what the shared conversation produced, so they follow the chat rule. *@
             <MudTabPanel Text="Activity">
-                @if (_chatRefusal is null)
+                @if (chatRefusal is null)
                 {
                     <AgentActivityTab Agent="agent" />
                 }
                 else
                 {
-                    <MudAlert Severity="Severity.Info" Dense="true" data-testid="agent-activity-refusal">@_chatRefusal</MudAlert>
+                    <MudAlert Severity="Severity.Info" Dense="true" data-testid="agent-activity-refusal">@chatRefusal</MudAlert>
                 }
             </MudTabPanel>
             <MudTabPanel Text="Memory">
-                @if (_chatRefusal is null)
+                @if (chatRefusal is null)
                 {
                     <AgentMemoryTab MemoryEditor="_memoryEditor!" />
                 }
                 else
                 {
-                    <MudAlert Severity="Severity.Info" Dense="true" data-testid="agent-memory-tab-refusal">@_chatRefusal</MudAlert>
+                    <MudAlert Severity="Severity.Info" Dense="true" data-testid="agent-memory-tab-refusal">@chatRefusal</MudAlert>
                 }
             </MudTabPanel>
             <MudTabPanel Text="Settings"><AgentSettingsTab Agent="agent" /></MudTabPanel>
@@ -105,9 +107,6 @@
     private int _isRenderPending;
     private int _timeZoneVersion;
 
-    // Computed once per change of the agent or the person's roles, not per render.
-    private string? _chatRefusal;
-
     // The state the next render shows, read on the agent's threads to skip events that only stream text, which
     // AgentStreamingBubble renders on its own.
     private IReadOnlyList<AgentTimelineEntry>? _renderedEntries;
@@ -115,6 +114,7 @@
     private volatile bool _renderedIsBusy;
     private volatile ServiceStatus _renderedStatus;
     private string? _renderedStatusMessage;
+    private IReadOnlyCollection<string>? _renderedScopeRoles;
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
@@ -127,18 +127,10 @@
         Permissions.Changed += OnPermissionsChanged;
     }
 
-    private void OnPermissionsChanged() => _ = InvokeAsync(() =>
-    {
-        UpdateChatRefusal();
-        StateHasChanged();
-    });
-
-    private void UpdateChatRefusal() =>
-        _chatRefusal = Agent is { } agent ? AgentChatAccess.GetRefusal(Permissions, agent) : null;
+    private void OnPermissionsChanged() => _ = InvokeAsync(StateHasChanged);
 
     protected override void OnParametersSet()
     {
-        UpdateChatRefusal();
         if (!ReferenceEquals(_subscribed, Agent))
         {
             if (_subscribed is not null)
@@ -166,7 +158,8 @@
              !ReferenceEquals(Volatile.Read(ref _renderedMemory), agent.Memory.GetSnapshot()) ||
              _renderedIsBusy != agent.IsBusy ||
              _renderedStatus != agent.Status ||
-             !string.Equals(Volatile.Read(ref _renderedStatusMessage), agent.StatusMessage, StringComparison.Ordinal)))
+             !string.Equals(Volatile.Read(ref _renderedStatusMessage), agent.StatusMessage, StringComparison.Ordinal) ||
+             !ReferenceEquals(Volatile.Read(ref _renderedScopeRoles), ((IRoleScopedSubject)agent).ScopeRoles)))
         {
             RequestRender();
         }
@@ -209,11 +202,12 @@
         _renderedIsBusy = agent.IsBusy;
         _renderedStatus = agent.Status;
         Volatile.Write(ref _renderedStatusMessage, agent.StatusMessage);
+        Volatile.Write(ref _renderedScopeRoles, ((IRoleScopedSubject)agent).ScopeRoles);
     }
 
     // A person who may not chat with the agent may not start its turns or reset its conversation either.
     private bool IsDenied(LlmAgentBase agent, string memberName) =>
-        agent.TryGetRegisteredProperty(memberName) is not { } member || !Permissions.CanInvoke(member) || _chatRefusal is not null;
+        agent.TryGetRegisteredProperty(memberName) is not { } member || !Permissions.CanInvoke(member);
 
     private Task RunNowAsync() => InvokeOperationAsync(RunNowMember);
 
@@ -221,9 +215,9 @@
 
     private async Task InvokeOperationAsync(string memberName)
     {
-        // Checked again, as the roles may have changed without a notification since the buttons rendered.
-        UpdateChatRefusal();
-        if (_chatRefusal is not null || Agent?.TryGetRegisteredProperty(memberName) is not { } member || member.TryGetMethodMetadata() is null)
+        // Checked again, as the roles may have changed since the buttons rendered.
+        if (Agent is not { } agent || AgentChatAccess.GetRefusal(Permissions, agent) is not null ||
+            agent.TryGetRegisteredProperty(memberName) is not { } member || member.TryGetMethodMetadata() is null)
         {
             return;
         }
