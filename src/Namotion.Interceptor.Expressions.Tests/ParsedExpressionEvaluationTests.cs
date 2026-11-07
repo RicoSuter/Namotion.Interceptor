@@ -715,6 +715,29 @@ public class ParsedExpressionEvaluationTests
         Assert.Equal(expected, result);
     }
 
+    [Theory]
+    [InlineData(true, 1, false)]
+    [InlineData(true, -1, true)]
+    [InlineData(true, 0, true)]
+    [InlineData(false, -1, false)]
+    [InlineData(false, 1, true)]
+    public void WhenDateTimeHasAnOffset_ThenItHasAnInstantOnlyWhenItsUtcIsInRange(bool isMinimum, int offsetHours, bool expected)
+    {
+        // Arrange
+        var dateTime = isMinimum ? DateTime.MinValue : DateTime.MaxValue;
+
+        // Act
+        var hasInstant = ExpressionComparer.TryConvertToInstant(dateTime, TimeSpan.FromHours(offsetHours), out var instant);
+
+        // Assert
+        Assert.Equal(expected, hasInstant);
+        if (hasInstant)
+        {
+            Assert.Equal(dateTime.Ticks, instant.Ticks);
+            Assert.Equal(TimeSpan.FromHours(offsetHours), instant.Offset);
+        }
+    }
+
     // Which edge leaves the range depends on the offset of the local time zone; in UTC both stay in it.
     [Theory]
     [InlineData("Clock/Edge < Clock/Offset")]

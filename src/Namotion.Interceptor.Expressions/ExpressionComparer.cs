@@ -142,17 +142,19 @@ internal static class ExpressionComparer
                 instant = dateTimeOffset;
                 return true;
             case DateTime dateTime:
-                return TryConvertToInstant(dateTime, out instant);
+                // A DateTime without a kind is read as UTC, matching how a text without an offset is read.
+                var offset = dateTime.Kind == DateTimeKind.Local ? TimeZoneInfo.Local.GetUtcOffset(dateTime) : TimeSpan.Zero;
+                return TryConvertToInstant(dateTime, offset, out instant);
             default:
                 instant = default;
                 return false;
         }
     }
 
-    // A DateTime without a kind is read as UTC, matching how a text without an offset is read.
-    private static bool TryConvertToInstant(DateTime dateTime, out DateTimeOffset instant)
+    /// <summary>Gets the instant of a date and time at an offset from UTC.</summary>
+    /// <returns>False when its UTC is out of the range of <see cref="DateTime"/>.</returns>
+    internal static bool TryConvertToInstant(DateTime dateTime, TimeSpan offset, out DateTimeOffset instant)
     {
-        var offset = dateTime.Kind == DateTimeKind.Local ? TimeZoneInfo.Local.GetUtcOffset(dateTime) : TimeSpan.Zero;
         var utcTicks = dateTime.Ticks - offset.Ticks;
         if (utcTicks < DateTime.MinValue.Ticks || utcTicks > DateTime.MaxValue.Ticks)
         {
