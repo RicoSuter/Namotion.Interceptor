@@ -13,13 +13,12 @@ namespace HomeBlaze.Authorization.Internal;
 /// </summary>
 internal sealed class AuthorizationSnapshot
 {
-    private static readonly HomeBlazeMemberTagProvider TagProvider = new();
-
     private readonly PathProviderBase _pathProvider;
     private readonly ImmutableArray<AuthorizationRole> _roles;
     private readonly Dictionary<string, string> _unavailableRoles;
     private readonly string? _customRolesError;
     private readonly ConcurrentDictionary<RoleNameSet, AuthorizationResult> _policies = new();
+    private readonly RoleCompiler _compiler;
 
     // The error of each role with a path pattern the application refuses, see PathPatternChecks; null when there is none.
     private readonly Dictionary<string, string>? _leadingSeparatorErrors;
@@ -36,6 +35,7 @@ internal sealed class AuthorizationSnapshot
         _roles = roles;
         _unavailableRoles = unavailableRoles;
         _customRolesError = customRolesError;
+        _compiler = new RoleCompiler(roles, pathProvider);
         _leadingSeparatorErrors = PathPatternChecks.GetLeadingSeparatorErrors(roles, pathProvider.PathSeparator);
         RoleNames = ImmutableArray.CreateRange(roles, static role => role.Name);
     }
@@ -183,16 +183,7 @@ internal sealed class AuthorizationSnapshot
             return new AuthorizationResult(AuthorizationPolicy.DenyAll, patternError);
         }
 
-        try
-        {
-            var policy = AuthorizationPolicy.Compile(
-                _roles, roleNames, SystemRules.Rules, AuthorizationActions.All, TagProvider, _pathProvider);
-            return new AuthorizationResult(policy, null);
-        }
-        catch (AuthorizationException exception)
-        {
-            return new AuthorizationResult(AuthorizationPolicy.DenyAll, exception.Message);
-        }
+        return _compiler.Compile(roleNames);
     }
 
     // Each usable role compiled on its own gives its status and is the policy of a principal holding only it.

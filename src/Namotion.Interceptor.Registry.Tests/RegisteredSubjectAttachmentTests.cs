@@ -116,7 +116,8 @@ public class RegisteredSubjectAttachmentTests
         // Assert
         Assert.Same(registeredLight, light.TryGetRegisteredSubject());
         Assert.True(registeredLight.IsAttached);
-        Assert.NotEmpty(registeredLight.Parents);
+        var parent = Assert.Single(registeredLight.Parents);
+        Assert.Equal("B", parent.Index);
     }
 
     [Fact]
@@ -279,6 +280,61 @@ public class RegisteredSubjectAttachmentTests
 
         // Assert
         Assert.False(registeredSubject.IsAttached);
+    }
+
+    [Fact]
+    public void WhenTheContextOfTheRootIsRemoved_ThenItAndTheSubjectsBelowItAreNoLongerAttached()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var mother = new Person();
+        var person = new Person(context) { Mother = mother };
+        var registeredPerson = person.TryGetRegisteredSubject()!;
+        var registeredMother = mother.TryGetRegisteredSubject()!;
+
+        // Act
+        ((IInterceptorSubject)person).Context.RemoveFallbackContext(context);
+
+        // Assert
+        Assert.False(registeredPerson.IsAttached);
+        Assert.False(registeredMother.IsAttached);
+    }
+
+    [Fact]
+    public void WhenAPropertyTheRegistryDoesNotKnowReceivesASubject_ThenTheSubjectIsNotRegisteredAsAttachedWithoutParents()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var person = new Person(context);
+        Person? value = null;
+        ((IInterceptorSubject)person).AddProperties(new SubjectPropertyMetadata(
+            "Unregistered", typeof(Person), [],
+            _ => value,
+            (_, newValue) => value = (Person?)newValue,
+            isIntercepted: true, isDynamic: true));
+        var child = new Person();
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => new PropertyReference(person, "Unregistered")
+            .SetPropertyValueWithInterception(child, null, (_, newValue) => value = (Person?)newValue));
+        Assert.Null(context.GetService<ISubjectRegistry>().TryGetRegisteredSubject(child));
+    }
+
+    [Fact]
+    public void WhenAPropertyIsAddedThroughAStaleInstance_ThenItsSubjectIsNotRegisteredAsAttachedWithoutParents()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var mother = new Person();
+        var person = new Person(context) { Mother = mother };
+        var staleRegistration = mother.TryGetRegisteredSubject()!;
+        person.Mother = null;
+        person.Mother = mother;
+        var child = new Person();
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => staleRegistration.AddProperty<Person>("Added", _ => child, null));
+        Assert.Null(context.GetService<ISubjectRegistry>().TryGetRegisteredSubject(child));
     }
 
     [Fact]

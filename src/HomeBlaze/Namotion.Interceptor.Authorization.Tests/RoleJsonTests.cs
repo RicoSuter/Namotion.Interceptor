@@ -70,4 +70,64 @@ public class RoleJsonTests
         Assert.True(role.Deny.IsEmpty);
         Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<AuthorizationRole>("{}", JsonSerializerOptions.Web));
     }
+
+    [Theory]
+    [InlineData("""{ "name": "Op", "allow": [{ "actions": ["read"] }], "denny": [{ "actions": ["read"] }] }""")]
+    [InlineData("""{ "name": "Op", "allow": [{ "actions": ["read"] }], "Denies": [{ "actions": ["read"] }] }""")]
+    public void WhenARoleHasAnUnknownProperty_ThenDeserializationFails(string json)
+    {
+        // Act & Assert
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<AuthorizationRole>(json, JsonSerializerOptions.Web));
+    }
+
+    [Fact]
+    public void WhenARoleHasAnUnknownPropertyWithDefaultOptions_ThenDeserializationFails()
+    {
+        // Act & Assert
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<AuthorizationRole>("""{ "Name": "Op", "Denny": [] }"""));
+    }
+
+    [Fact]
+    public void WhenARoleWithoutListsIsDeserializedWithSourceGeneration_ThenTheListsAreEmptyAndItRoundTrips()
+    {
+        // Arrange
+        const string json = """{ "name": "Reader" }""";
+
+        // Act
+        var role = JsonSerializer.Deserialize(json, RoleJsonContext.Default.AuthorizationRole)!;
+        var roundTripped = JsonSerializer.Deserialize(
+            JsonSerializer.Serialize(role, RoleJsonContext.Default.AuthorizationRole), RoleJsonContext.Default.AuthorizationRole)!;
+
+        // Assert
+        Assert.True(role.Includes.IsEmpty);
+        Assert.True(role.Allow.IsEmpty);
+        Assert.True(role.Deny.IsEmpty);
+        Assert.Equal(role, roundTripped);
+    }
+
+    [Fact]
+    public void WhenARoleHasAnUnknownPropertyWithSourceGeneration_ThenDeserializationFails()
+    {
+        // Act & Assert
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize("""{ "name": "Op", "denny": [] }""", RoleJsonContext.Default.AuthorizationRole));
+    }
+
+    [Fact]
+    public void WhenARoleIsCreatedWithDefaultLists_ThenTheListsAreEmpty()
+    {
+        // Act
+        var role = new AuthorizationRole { Name = "Reader", Includes = default, Allow = default, Deny = default };
+
+        // Assert
+        Assert.True(role.Includes.IsEmpty);
+        Assert.True(role.Allow.IsEmpty);
+        Assert.True(role.Deny.IsEmpty);
+    }
+
+    [Fact]
+    public void WhenARoleListIsNull_ThenDeserializationFails()
+    {
+        // Act & Assert
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<AuthorizationRole>("""{ "name": "Op", "deny": null }""", JsonSerializerOptions.Web));
+    }
 }

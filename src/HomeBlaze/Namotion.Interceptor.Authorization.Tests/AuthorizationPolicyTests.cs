@@ -33,8 +33,11 @@ public class AuthorizationPolicyTests
         var home = Create();
         var policy = Compile(Role("Empty"));
 
-        // Act & Assert
-        Assert.False(policy.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
+        // Act
+        var canReadSsid = policy.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid)));
+
+        // Assert
+        Assert.False(canReadSsid);
     }
 
     [Fact]
@@ -45,10 +48,15 @@ public class AuthorizationPolicyTests
         var policy = Compile(Role("Reader", allow: [Rule(Read, tags: ["state"])]));
         var brightness = Member(home.Rooms["Kitchen"].Lights["Ceiling"], nameof(Light.Brightness));
 
-        // Act & Assert
-        Assert.True(policy.CanRead(brightness));
-        Assert.False(policy.CanWrite(brightness));
-        Assert.False(policy.IsAllowed(brightness, Execute));
+        // Act
+        var canReadBrightness = policy.CanRead(brightness);
+        var canWriteBrightness = policy.CanWrite(brightness);
+        var isAllowedBrightness = policy.IsAllowed(brightness, Execute);
+
+        // Assert
+        Assert.True(canReadBrightness);
+        Assert.False(canWriteBrightness);
+        Assert.False(isAllowedBrightness);
     }
 
     [Fact]
@@ -58,9 +66,13 @@ public class AuthorizationPolicyTests
         var home = Create();
         var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, tags: ["secret"])]));
 
-        // Act & Assert
-        Assert.True(policy.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
-        Assert.False(policy.CanRead(Member(home.Wifi!, nameof(Wifi.Password))));
+        // Act
+        var canReadSsid = policy.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid)));
+        var canReadPassword = policy.CanRead(Member(home.Wifi!, nameof(Wifi.Password)));
+
+        // Assert
+        Assert.True(canReadSsid);
+        Assert.False(canReadPassword);
     }
 
     [Fact]
@@ -72,8 +84,11 @@ public class AuthorizationPolicyTests
         var admin = Role("Admin", allow: [Rule(Read, members: ["Password"])], includes: ["Reader"]);
         var policy = Compile([reader, admin], ["Admin"], systemDeny: []);
 
-        // Act & Assert
-        Assert.False(policy.CanRead(Member(home.Wifi!, nameof(Wifi.Password))));
+        // Act
+        var canReadPassword = policy.CanRead(Member(home.Wifi!, nameof(Wifi.Password)));
+
+        // Assert
+        Assert.False(canReadPassword);
     }
 
     [Fact]
@@ -86,9 +101,13 @@ public class AuthorizationPolicyTests
         var policy = Compile([reader, writer], ["Reader", "Writer"], systemDeny: []);
         var brightness = Member(home.Rooms["Kitchen"].Lights["Ceiling"], nameof(Light.Brightness));
 
-        // Act & Assert
-        Assert.True(policy.CanRead(brightness));
-        Assert.True(policy.CanWrite(brightness));
+        // Act
+        var canReadBrightness = policy.CanRead(brightness);
+        var canWriteBrightness = policy.CanWrite(brightness);
+
+        // Assert
+        Assert.True(canReadBrightness);
+        Assert.True(canWriteBrightness);
     }
 
     [Fact]
@@ -99,9 +118,13 @@ public class AuthorizationPolicyTests
         var policy = Compile(Role("Reader", allow: [Rule(Read, members: ["Bright*"])]));
         var light = home.Rooms["Kitchen"].Lights["Ceiling"];
 
-        // Act & Assert
-        Assert.True(policy.CanRead(Member(light, nameof(Light.Brightness))));
-        Assert.False(policy.CanRead(Member(light, nameof(Light.IsOn))));
+        // Act
+        var canReadLightBrightness = policy.CanRead(Member(light, nameof(Light.Brightness)));
+        var canReadLightIsOn = policy.CanRead(Member(light, nameof(Light.IsOn)));
+
+        // Assert
+        Assert.True(canReadLightBrightness);
+        Assert.False(canReadLightIsOn);
     }
 
     [Theory]
@@ -115,9 +138,13 @@ public class AuthorizationPolicyTests
         var home = Create();
         var policy = Compile(Role("Reader", allow: [Rule(Read, types: [typeName])]));
 
-        // Act & Assert
-        Assert.True(policy.CanRead(Member(home.Rooms["Kitchen"].Lights["Ceiling"], nameof(Light.IsOn))));
-        Assert.False(policy.CanRead(Member(home.Rooms["Kitchen"].Sensor!, nameof(Sensor.Temperature))));
+        // Act
+        var canReadCeilingIsOn = policy.CanRead(Member(home.Rooms["Kitchen"].Lights["Ceiling"], nameof(Light.IsOn)));
+        var canReadKitchenTemperature = policy.CanRead(Member(home.Rooms["Kitchen"].Sensor!, nameof(Sensor.Temperature)));
+
+        // Assert
+        Assert.True(canReadCeilingIsOn);
+        Assert.False(canReadKitchenTemperature);
     }
 
     [Fact]
@@ -128,9 +155,13 @@ public class AuthorizationPolicyTests
         var sensor = home.Rooms["Kitchen"].Sensor!;
         var policy = Compile(Role("Reader", allow: [Rule(Read, members: ["Temperature@Unit"])]));
 
-        // Act & Assert
-        Assert.True(policy.CanRead(Attribute(sensor, nameof(Sensor.Temperature), "Unit")));
-        Assert.False(policy.CanRead(Member(sensor, nameof(Sensor.Temperature))));
+        // Act
+        var canReadTemperatureUnit = policy.CanRead(Attribute(sensor, nameof(Sensor.Temperature), "Unit"));
+        var canReadSensorTemperature = policy.CanRead(Member(sensor, nameof(Sensor.Temperature)));
+
+        // Assert
+        Assert.True(canReadTemperatureUnit);
+        Assert.False(canReadSensorTemperature);
     }
 
     [Fact]
@@ -140,9 +171,13 @@ public class AuthorizationPolicyTests
         var home = Create();
         var policy = Compile(Role("Reader", allow: [Rule(Read, tags: ["state", "SECRET"])]));
 
-        // Act & Assert
-        Assert.True(policy.CanRead(Member(home.Wifi!, nameof(Wifi.Password))));
-        Assert.False(policy.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
+        // Act
+        var canReadPassword = policy.CanRead(Member(home.Wifi!, nameof(Wifi.Password)));
+        var canReadSsid = policy.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid)));
+
+        // Assert
+        Assert.True(canReadPassword);
+        Assert.False(canReadSsid);
     }
 
     [Fact]
@@ -152,9 +187,13 @@ public class AuthorizationPolicyTests
         var home = Create();
         var policy = Compile([Role("Reader", allow: [Rule(Read)])], ["Reader"], systemDeny: [Rule(Read, tags: ["secret"])]);
 
-        // Act & Assert
-        Assert.False(policy.CanRead(Member(home.Wifi!, nameof(Wifi.Password))));
-        Assert.True(policy.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
+        // Act
+        var canReadPassword = policy.CanRead(Member(home.Wifi!, nameof(Wifi.Password)));
+        var canReadSsid = policy.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid)));
+
+        // Assert
+        Assert.False(canReadPassword);
+        Assert.True(canReadSsid);
     }
 
     [Fact]
@@ -238,10 +277,11 @@ public class AuthorizationPolicyTests
         var role = Role("Reader", allow: [Rule(Read)]);
 
         // Act
-        var policy = AuthorizationPolicy.Compile([role], ["Reader"], [], [Execute], TestTags.Default, Policies.SlashPaths);
+        var policy = AuthorizationDefinition.Create([role], [], [Execute], Policies.SlashPaths, TestTags.Default).Compile(["Reader"]);
+        var canReadSsid = policy.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid)));
 
         // Assert
-        Assert.True(policy.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
+        Assert.True(canReadSsid);
     }
 
     [Fact]
@@ -252,7 +292,7 @@ public class AuthorizationPolicyTests
 
         // Act & Assert
         var exception = Assert.Throws<AuthorizationException>(
-            () => AuthorizationPolicy.Compile([], [], [], actions, TestTags.Default, Policies.SlashPaths));
+            () => AuthorizationDefinition.Create([], [], actions, Policies.SlashPaths, TestTags.Default));
         Assert.Equal("At most 64 actions are supported.", exception.Message);
     }
 
@@ -276,11 +316,17 @@ public class AuthorizationPolicyTests
         var home = Create();
         var member = Member(home.Wifi!, nameof(Wifi.Ssid));
 
-        // Act & Assert
-        Assert.False(AuthorizationPolicy.DenyAll.CanRead(member));
-        Assert.False(AuthorizationPolicy.DenyAll.IsAllowed(member, new PermissionAction("anything")));
-        Assert.False(AuthorizationPolicy.DenyAll.CanRead(Registered(home)));
-        Assert.Empty(AuthorizationPolicy.DenyAll.Roles);
+        // Act
+        var canReadMember = AuthorizationPolicy.DenyAll.CanRead(member);
+        var isAnythingAllowed = AuthorizationPolicy.DenyAll.IsAllowed(member, new PermissionAction("anything"));
+        var canReadSubject = AuthorizationPolicy.DenyAll.IsVisible(Registered(home));
+        var roles = AuthorizationPolicy.DenyAll.Roles;
+
+        // Assert
+        Assert.False(canReadMember);
+        Assert.False(isAnythingAllowed);
+        Assert.False(canReadSubject);
+        Assert.Empty(roles);
     }
 
     [Fact]
