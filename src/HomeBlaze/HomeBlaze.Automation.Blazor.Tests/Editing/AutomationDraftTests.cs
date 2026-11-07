@@ -85,25 +85,6 @@ public class AutomationDraftTests
     }
 
     [Fact]
-    public void WhenAnInputErrorIsSetAgainOrClearedTwice_ThenTheVersionChangesOnlyWithTheErrors()
-    {
-        // Arrange
-        var draft = new AutomationDraft();
-        var error = new AutomationValidationError(null, "Hold: Use a duration above 0");
-
-        // Act
-        draft.SetInputError("hold", error);
-        draft.SetInputError("hold", error);
-        var afterSet = draft.InputErrorVersion;
-        draft.SetInputError("hold", null);
-        draft.SetInputError("hold", null);
-
-        // Assert
-        Assert.Equal(1, afterSet);
-        Assert.Equal(2, draft.InputErrorVersion);
-    }
-
-    [Fact]
     public void WhenTheDraftIsRead_ThenItHasTheConfigurationWithTheRulesInRunOrder()
     {
         // Act
@@ -271,7 +252,7 @@ public class AutomationDraftTests
     }
 
     [Fact]
-    public void WhenAnInputHasAnError_ThenTheDraftIsInvalidUntilTheErrorIsCleared()
+    public void WhenAnInputErrorIsSetAgainOrClearedTwice_ThenTheDraftIsInvalidUntilItIsClearedAndTheVersionChangesOnlyWithTheErrors()
     {
         // Arrange
         var draft = AutomationDraft.From(CreateWasher());
@@ -279,11 +260,16 @@ public class AutomationDraftTests
 
         // Act
         draft.SetInputError("hold", error);
+        draft.SetInputError("hold", error);
+        var versionWithError = draft.InputErrorVersion;
         var withError = draft.Validate();
+        draft.SetInputError("hold", null);
         draft.SetInputError("hold", null);
         var withoutError = draft.Validate();
 
         // Assert
+        Assert.Equal(1, versionWithError);
+        Assert.Equal(2, draft.InputErrorVersion);
         Assert.Equal(error, Assert.Single(withError));
         Assert.Empty(withoutError);
     }

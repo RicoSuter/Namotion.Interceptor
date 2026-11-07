@@ -24,6 +24,7 @@ public class AutomationPreviewTests
         // Assert
         Assert.Null(condition.Error);
         Assert.True(condition.Result);
+        Assert.Null(value.Result);
         Assert.Equal(9.0, value.Value);
         Assert.False(string.IsNullOrEmpty(value.Text));
     }
@@ -100,21 +101,6 @@ public class AutomationPreviewTests
         Assert.NotNull(target);
         Assert.NotNull(target.TryGetMethodMetadata());
         Assert.Null(AutomationPreview.ResolveTarget(host.Automation, null, "/Blinds/Missing"));
-    }
-
-    [Fact]
-    public async Task WhenTheExpressionIsNotBoolean_ThenTheResultIsNullAndTheValueIsKept()
-    {
-        // Arrange
-        await using var host = await StartAsync();
-        host.Weather.Gust = 9;
-
-        // Act
-        var preview = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/Gust", allowsEvent: false);
-
-        // Assert
-        Assert.Null(preview.Result);
-        Assert.Equal(9.0, preview.Value);
     }
 
     [Fact]

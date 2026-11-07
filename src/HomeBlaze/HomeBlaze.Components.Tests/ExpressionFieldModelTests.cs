@@ -120,6 +120,7 @@ public class ExpressionFieldModelTests
     [InlineData("1/2", "\"1/2\"")]
     [InlineData("2024-01-01", "\"2024-01-01\"")]
     [InlineData("12:00", "\"12:00\"")]
+    [InlineData("event/State", "\"event/State\"")]
     public void WhenAValueIsTypedThatWouldChangeTheMeaning_ThenItIsQuotedAsText(string typed, string expectedValue)
     {
         // Arrange
@@ -291,20 +292,6 @@ public class ExpressionFieldModelTests
         Assert.False(model.HasPendingRow);
         Assert.Equal(2, model.Rows.Count);
         Assert.Equal("/c/D", model.Rows[1].Path);
-    }
-
-    [Fact]
-    public void WhenAValueStartsWithAVariableTheHostDoesNotDeclare_ThenItIsQuotedAsText()
-    {
-        // Arrange
-        var model = new ExpressionFieldModel("/a/B == 1");
-
-        // Act
-        model.SetRow(0, new ExpressionRow(string.Empty, "/a/B", "==", "event/State"));
-
-        // Assert
-        Assert.Equal("/a/B == \"event/State\"", model.Text);
-        AssertTextParsesToTheRows(model);
     }
 
     private static void AssertTextParsesToTheRows(ExpressionFieldModel model)

@@ -1,3 +1,4 @@
+using HomeBlaze.Automation.Blazor.Editing;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -18,4 +19,7 @@ internal static class TestAutomations
         configure?.Invoke(automation);
         return automation;
     }
+
+    /// <summary>The expressions of a rule with the key <c>rule</c> of a new automation.</summary>
+    public static RuleExpressions Expressions(bool allowsEvent = false) => new(Create(), "rule", allowsEvent);
 }

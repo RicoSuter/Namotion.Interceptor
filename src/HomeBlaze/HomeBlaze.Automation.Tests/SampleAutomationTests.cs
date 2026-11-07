@@ -51,7 +51,7 @@ public partial class SampleAutomationTests
         foreach (var json in examples)
         {
             using var automation = Deserialize(json, provider);
-            var written = new ConfigurableSubjectSerializer(new TypeProvider().AddAssembly(typeof(Automation).Assembly), provider).Serialize(automation);
+            var written = CreateSerializer(provider).Serialize(automation);
             errors.AddRange(FindUnreadMembers(JsonDocument.Parse(json).RootElement, JsonDocument.Parse(written).RootElement, automation.Name ?? "?"));
             errors.AddRange(AutomationValidator.Validate(automation.States, automation.InitialState, automation.Rules, automation.RuleOrder)
                 .Select(error => $"{automation.Name}: {error.Message}"));
@@ -104,8 +104,10 @@ public partial class SampleAutomationTests
         return services.BuildServiceProvider();
     }
 
-    private static Automation Deserialize(string json, IServiceProvider provider) =>
-        Assert.IsType<Automation>(new ConfigurableSubjectSerializer(new TypeProvider().AddAssembly(typeof(Automation).Assembly), provider).Deserialize(json));
+    private static Automation Deserialize(string json, IServiceProvider provider) => Assert.IsType<Automation>(CreateSerializer(provider).Deserialize(json));
+
+    private static ConfigurableSubjectSerializer CreateSerializer(IServiceProvider provider) =>
+        new(new TypeProvider().AddAssembly(typeof(Automation).Assembly), provider);
 
     private static string FindRepositoryRoot()
     {

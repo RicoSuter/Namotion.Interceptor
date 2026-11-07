@@ -263,22 +263,6 @@ public class PropertyTriggerStateTests
         Assert.Equal(TriggerPhase.WaitingToRearm, state.Phase);
     }
 
-    [Fact]
-    public void WhenATriggerStartsTrueWithRearm_ThenItWasTrueAtActivationUntilItFires()
-    {
-        // Arrange
-        var state = new PropertyTriggerState(hold: null, hasRearm: true);
-        state.Activate(TriggerActivation.WaitForFalseToTrue, WithRearm(true, null), Start);
-        var wasTrueAtStart = state.WasTrueAtActivation;
-        Run(state, WithRearm(false, true), Start.AddSeconds(1));
-        Run(state, WithRearm(true, false), Start.AddSeconds(2));
-
-        // Assert
-        Assert.True(wasTrueAtStart);
-        Assert.Equal(TriggerPhase.WaitingToRearm, state.Phase);
-        Assert.False(state.WasTrueAtActivation);
-    }
-
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -287,11 +271,13 @@ public class PropertyTriggerStateTests
         // Arrange
         var state = new PropertyTriggerState(hold: null, hasRearm);
         state.Activate(TriggerActivation.WaitForFalseToTrue, WithRearm(true, false), Start);
+        var wasTrueAtStart = state.WasTrueAtActivation;
 
         // Act
         Run(state, WithRearm(false, true), Start.AddSeconds(1));
 
         // Assert
+        Assert.True(wasTrueAtStart);
         Assert.Equal(TriggerPhase.Armed, state.Phase);
         Assert.False(state.WasTrueAtActivation);
     }

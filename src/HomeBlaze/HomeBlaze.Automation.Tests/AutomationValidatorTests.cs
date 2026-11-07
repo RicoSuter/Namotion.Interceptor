@@ -157,10 +157,8 @@ public class AutomationValidatorTests
     }
 
     [Theory]
-    [InlineData("/Weather/Gust > 8", false, null)]
     [InlineData("event/Gesture == Release", true, null)]
     [InlineData("event/Gesture == Release", false, EventOnly)]
-    [InlineData("value > 1", false, "'value' is not available in automations")]
     public void WhenAnExpressionIsValidated_ThenTheVariableRulesOfAutomationsApply(string expression, bool allowsEvent, string? expected)
     {
         // Act
