@@ -32,39 +32,42 @@ internal sealed class GraphRouteWalker(SubjectPathResolver resolver, IIntercepto
     private readonly GraphRouteBuilder _absoluteRoute = new();
     private long _absoluteWalksVersion = -1;
 
-    /// <summary>Walks the path to the property that <see cref="Expressions.AutomationPaths.ResolveProperty"/> resolves.</summary>
-    public RegisteredSubjectProperty? WalkProperty(string path, IInterceptorSubject rule, GraphRouteBuilder route)
+    /// <summary>
+    /// Walks the path that <see cref="Expressions.AutomationPaths.ResolveProperty"/> resolved to <paramref name="resolved"/>
+    /// and returns whether the walk leads to the same property.
+    /// </summary>
+    public bool WalkProperty(string path, IInterceptorSubject rule, RegisteredSubjectProperty? resolved, GraphRouteBuilder route)
     {
         var lastSeparator = path.LastIndexOf('/');
         var name = lastSeparator < 0 ? path : path[(lastSeparator + 1)..];
         if (name.Length == 0)
         {
-            return null;
+            return resolved is null;
         }
 
         var ownerPath = lastSeparator == 0 ? "/" : path[..Math.Max(lastSeparator, 0)];
         var owner = lastSeparator < 0 ? rule : WalkSubject(ownerPath, rule, route);
         if (owner is null)
         {
-            return null;
+            return resolved is null;
         }
 
-        if (owner.TryGetRegisteredSubject() is not { } registered)
+        // A property that the resolver found is one of a registered subject, so the registry is not asked again.
+        if (resolved is not null)
+        {
+            return ReferenceEquals(resolved.Reference.Subject, owner) && string.Equals(resolved.Name, name, StringComparison.Ordinal);
+        }
+
+        if (owner.TryGetRegisteredSubject() is null)
         {
             route.MarkUnbounded();
-            return null;
+            return true;
         }
 
         // A property that is missing or may not be read becomes readable by being added or by gaining its metadata, a
         // change of the property itself.
-        var property = registered.TryGetProperty(name);
-        if (property is null || !property.IsDisplayable())
-        {
-            route.Add(new PropertyReference(owner, name));
-            return null;
-        }
-
-        return property;
+        route.Add(new PropertyReference(owner, name));
+        return true;
     }
 
     /// <summary>Walks the path to the subject that <see cref="Expressions.AutomationPaths.ResolveSubject"/> resolves.</summary>

@@ -51,7 +51,11 @@ internal sealed class AutomationChangeReceiver(AutomationInputQueue queue) : IAu
         lock (_graphChangesLock)
         {
             Volatile.Write(ref _isGraphChangePending, 0);
-            properties.UnionWith(_changedProperties);
+            foreach (var property in _changedProperties)
+            {
+                properties.Add(property);
+            }
+
             _changedProperties.Clear();
             var isFull = _isFullGraphChange;
             _isFullGraphChange = false;

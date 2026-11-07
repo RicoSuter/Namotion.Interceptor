@@ -125,7 +125,7 @@ internal sealed class GraphRoutes
         var property = AutomationPaths.ResolveProperty(Resolver, path, rule);
         try
         {
-            if (_walker.WalkProperty(path, rule, route) is var walked && !Nullable.Equals(walked?.Reference, property?.Reference))
+            if (!_walker.WalkProperty(path, rule, property, route))
             {
                 route.MarkUnbounded();
             }
