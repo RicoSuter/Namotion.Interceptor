@@ -104,10 +104,13 @@ public class DocumentationLinksTests
         {
             if (!pagePath.EndsWith(PageExtension, StringComparison.OrdinalIgnoreCase))
             {
-                // A file of the storage, served under the file route: its path ends at a query or a fragment.
+                // A folder opens in the subject browser and any other file is served under the file route: the path ends at a query or a fragment.
                 var pathEnd = url.IndexOfAny(['?', '#']);
-                var filePath = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(file)!, pathEnd < 0 ? url : url[..pathEnd]));
-                return File.Exists(filePath) || Directory.Exists(filePath) ? null : "leads to a file that does not exist";
+                var targetPath = pathEnd < 0 ? url : url[..pathEnd];
+                var fullPath = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(file)!, targetPath));
+                return targetPath.EndsWith('/')
+                    ? Directory.Exists(fullPath) ? null : "leads to a folder that does not exist"
+                    : File.Exists(fullPath) ? null : "leads to a file that does not exist";
             }
 
             target = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(file)!, pagePath));

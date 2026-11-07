@@ -54,6 +54,19 @@ public class MarkdownLinkScopeTests
         Assert.Contains($"src=\"{link}\"", html);
     }
 
+    [Fact]
+    public async Task WhenLinkIsToAFolder_ThenItResolvesToTheFolderInTheBrowser()
+    {
+        // Arrange
+        var (_, leaf, _) = await AddPageAsync();
+
+        // Act
+        var link = leaf.ResolveScopedLink("sub/");
+
+        // Assert
+        Assert.Equal("/browser/sub", link);
+    }
+
     [Theory]
     [InlineData("/pages/Demo/Blocks.md")]
     [InlineData("https://example.com/a.md")]

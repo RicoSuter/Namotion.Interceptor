@@ -42,6 +42,22 @@ public class MarkdownFileLinkTests
     }
 
     [Theory]
+    [InlineData("Readme.md", "[Demo](Demo/)", "<a href=\"/browser/Demo\">Demo</a>")]
+    [InlineData("Docs/home.md", "[Design](architecture/design/)", "<a href=\"/browser/Docs/architecture/design\">Design</a>")]
+    [InlineData("Docs/architecture/overview.md", "[Up](../)", "<a href=\"/browser/Docs\">Up</a>")]
+    public async Task WhenLinkIsARelativeFolder_ThenItOpensTheFolderInTheBrowserInTheSameTab(string pagePath, string source, string expected)
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync(pagePath, source);
+
+        // Assert
+        Assert.Contains(expected, MarkdownPageFixture.Html(page.Children));
+    }
+
+    [Theory]
     [InlineData("[Manual](manual.pdf)", "<a href=\"/files/Docs/manual.pdf\" target=\"_blank\" rel=\"noopener noreferrer\">Manual</a>")]
     [InlineData("[Web](https://example.com)", "<a href=\"https://example.com\" target=\"_blank\" rel=\"noopener noreferrer\">Web</a>")]
     [InlineData("[Other](other.md)", "<a href=\"/pages/Docs/other.md\">Other</a>")]

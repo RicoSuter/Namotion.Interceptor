@@ -23,6 +23,8 @@ public sealed partial class MarkdownContentParser
     internal const string HtmlKeyPrefix = "Html_";
     internal const string ExpressionKeyPrefix = "Expression_";
 
+    private const string BrowserRoutePrefix = "/browser";
+
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly SubjectPathResolver _pathResolver;
     private readonly TypeProvider _typeProvider;
@@ -32,13 +34,15 @@ public sealed partial class MarkdownContentParser
     /// Rewrites a link of the page. A relative link to a markdown page, or a fragment of the page itself, gets the route of
     /// the page under /pages. A fragment after the page stays on the link, and a link that is only a fragment gets the
     /// route of the page itself, which a link names with <paramref name="pageName"/>. Any other relative link gets the
-    /// route of the file under <see cref="StorageFileRoute.Prefix"/>. A link with a scheme or a leading slash stays as written.
+    /// route of the file under <see cref="StorageFileRoute.Prefix"/>, except a link whose path ends with a slash, which is a folder
+    /// and gets the route of the folder in the subject browser. A link with a scheme or a leading slash stays as written.
     /// </summary>
     private static string RewriteLink(string url, string basePath, string pageName) =>
         ClassifyLink(url, out var pathEnd) switch
         {
             LinkKind.Page => RewritePageLink(url, pathEnd, basePath, pageName),
             LinkKind.File => RewriteFileLink(url, pathEnd, basePath),
+            LinkKind.Folder => RewriteFolderLink(url, pathEnd, basePath),
             _ => url
         };
 
@@ -46,12 +50,14 @@ public sealed partial class MarkdownContentParser
     {
         AsWritten,
         Page,
+        Folder,
         File
     }
 
     /// <summary>
     /// Classifies a link. For a page link, <paramref name="pathEnd"/> is where its fragment starts, or -1 without one.
-    /// For a file link, it is where its query or fragment starts, or -1 without either.
+    /// For a folder link, a relative link whose path ends with a slash, and for a file link, it is where its query or
+    /// fragment starts, or -1 without either.
     /// </summary>
     private static LinkKind ClassifyLink(string url, out int pathEnd)
     {
@@ -72,7 +78,8 @@ public sealed partial class MarkdownContentParser
         }
 
         pathEnd = url.AsSpan().IndexOfAny('?', '#');
-        return LinkKind.File;
+        var path = pathEnd < 0 ? url.AsSpan() : url.AsSpan(0, pathEnd);
+        return path.EndsWith("/") ? LinkKind.Folder : LinkKind.File;
     }
 
     /// <summary>
@@ -105,6 +112,16 @@ public sealed partial class MarkdownContentParser
     {
         var filePath = pathEnd < 0 ? url : url[..pathEnd];
         var route = $"{StorageFileRoute.Prefix}/{ResolvePath(basePath, filePath)}";
+        return pathEnd < 0 ? route : string.Concat(route, url.AsSpan(pathEnd));
+    }
+
+    /// <summary>
+    /// Rewrites a relative link to a folder to its route in the subject browser. A query or a fragment stays on the link.
+    /// </summary>
+    private static string RewriteFolderLink(string url, int pathEnd, string basePath)
+    {
+        var folderPath = pathEnd < 0 ? url : url[..pathEnd];
+        var route = $"{BrowserRoutePrefix}/{ResolvePath(basePath, folderPath)}".TrimEnd('/');
         return pathEnd < 0 ? route : string.Concat(route, url.AsSpan(pathEnd));
     }
 
@@ -183,6 +200,7 @@ public sealed partial class MarkdownContentParser
         {
             LinkKind.Page => RewritePageLink(link, pathEnd, GetLinkBasePath(page), EscapeFileNameForLink(Path.GetFileName(page.FullPath))),
             LinkKind.File => RewriteFileLink(link, pathEnd, GetLinkBasePath(page)),
+            LinkKind.Folder => RewriteFolderLink(link, pathEnd, GetLinkBasePath(page)),
             _ => link
         };
 
