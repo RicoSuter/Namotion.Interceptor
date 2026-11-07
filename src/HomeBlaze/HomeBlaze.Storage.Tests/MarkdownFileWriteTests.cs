@@ -1380,6 +1380,19 @@ public class MarkdownFileWriteTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenAnAgentMayEditPageLayoutAndCreatesAPageWithAnAutomationBlock_ThenItIsRejected()
+    {
+        // Arrange
+        var storage = await ConnectAsync();
+        using var permission = MarkdownPageLayoutPermission.Enter(true);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(() => storage.CreateMarkdownFileAsync(
+            "New.md", "# New\n\n:: HomeBlaze.Automation.Automation#guard\n```json\n{ \"Roles\": [ \"Everything\" ] }\n```\n::", CancellationToken.None));
+        Assert.False(File.Exists(GetFullPath("New.md")));
+    }
+
+    [Fact]
     public async Task WhenNoAgentPermissionIsGranted_ThenALayoutBlockIsRefusedAsBefore()
     {
         // Arrange

@@ -4,8 +4,10 @@ using HomeBlaze.Authorization;
 using HomeBlaze.Automation.Tests.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
 namespace HomeBlaze.Automation.Tests;
@@ -47,17 +49,29 @@ public sealed class AutomationWriteAccessTests : IDisposable
         // Arrange
         var policy = _service.GetPolicy([role]).Policy;
         var rule = _automation.Rules["retract"];
-        string[] automationMembers =
-            [nameof(Automation.Roles), nameof(Automation.Rules), nameof(Automation.RuleOrder), nameof(Automation.States), nameof(Automation.Enabled)];
-        string[] ruleMembers = [nameof(AutomationRule.Actions), nameof(AutomationRule.Mode), nameof(AutomationRule.Triggers), nameof(AutomationRule.Guard)];
 
         // Act
-        var writableOfAutomation = automationMembers.Where(name => policy.CanWrite(_automation.TryGetRegisteredProperty(name)!)).ToArray();
-        var writableOfRule = ruleMembers.Where(name => policy.CanWrite(rule.TryGetRegisteredProperty(name)!)).ToArray();
+        var writableOfAutomation = ConfigurationMembers(_automation).Where(property => policy.CanWrite(property)).Select(property => property.Name).ToArray();
+        var writableOfRule = ConfigurationMembers(rule).Where(property => policy.CanWrite(property)).Select(property => property.Name).ToArray();
 
         // Assert
         Assert.Empty(writableOfAutomation);
         Assert.Empty(writableOfRule);
+    }
+
+    [Fact]
+    public void WhenTheConfigurationMembersAreEnumerated_ThenTheOnesOfAutomationsAreFound()
+    {
+        // Act
+        var automationMembers = ConfigurationMembers(_automation).Select(property => property.Name).ToArray();
+        var ruleMembers = ConfigurationMembers(_automation.Rules["retract"]).Select(property => property.Name).ToArray();
+
+        // Assert
+        Assert.Contains(nameof(Automation.Roles), automationMembers);
+        Assert.Contains(nameof(Automation.Name), automationMembers);
+        Assert.Contains(nameof(Automation.InitialState), automationMembers);
+        Assert.Contains(nameof(AutomationRule.Actions), ruleMembers);
+        Assert.Contains(nameof(AutomationRule.InState), ruleMembers);
     }
 
     [Fact]
@@ -74,6 +88,11 @@ public sealed class AutomationWriteAccessTests : IDisposable
         Assert.True(canReset);
         Assert.False(canWriteRoles);
     }
+
+    private static IEnumerable<RegisteredSubjectProperty> ConfigurationMembers(IInterceptorSubject subject) =>
+        subject.GetType().GetProperties()
+            .Where(property => property.GetCustomAttribute<ConfigurationAttribute>() is not null)
+            .Select(property => subject.TryGetRegisteredProperty(property.Name)!);
 
     [Fact]
     public void WhenTheTypesOfAutomationsAreInspected_ThenNeitherIsALayoutBlockThatAnAgentMayAddToAPage()
