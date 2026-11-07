@@ -83,32 +83,38 @@ public class ArgumentBinderTests
         Assert.Equal(NotificationPriority.High, notification.Priority);
     }
 
-    [Fact]
-    public void WhenAnExpressionArgumentIsUnknown_ThenBindingFailsNamingThePath()
+    public static TheoryData<MethodParameter, Dictionary<string, string>, string> BindingFailures => new()
+    {
+        { Parameter<int>("speed"), new() { ["speed"] = "/Weather/Rain + 1" }, "The argument 'speed' is unknown, missing /Weather/Rain" },
+        { Parameter<int>("speed"), [], "The argument 'speed' is missing" },
+        {
+            Parameter<string>("message"), new() { ["message"] = "{{ event/Gesture }}" },
+            "The argument 'message' is invalid: 'event' is only available in event filters and in the arguments of a rule with an event trigger"
+        },
+        { Parameter<int>("speed"), new() { ["speed"] = "5", ["Sped"] = "6" }, "The argument 'Sped' matches no parameter of the operation" },
+        {
+            Parameter<Notification>("notification"), new() { ["notification.Message"] = "Hi", ["notification.Typo"] = "x" },
+            "The argument 'notification.Typo' matches no member of 'notification'"
+        },
+        {
+            Parameter<Notification>("notification"), new() { ["notification"] = "Hi", ["notification.Message"] = "Hi" },
+            "The argument 'notification' is given both whole and per member"
+        }
+    };
+
+    [Theory]
+    [MemberData(nameof(BindingFailures))]
+    public void WhenTheArgumentsDoNotFitTheParameter_ThenBindingFailsWithTheReason(MethodParameter parameter, Dictionary<string, string> arguments, string expectedError)
     {
         // Arrange
         var binder = CreateBinder();
 
         // Act
-        var isBound = binder.TryBindParameters([Parameter<int>("speed")], new Dictionary<string, string> { ["speed"] = "/Weather/Rain + 1" }, out _, out var error);
+        var isBound = binder.TryBindParameters([parameter], arguments, out _, out var error);
 
         // Assert
         Assert.False(isBound);
-        Assert.Equal("The argument 'speed' is unknown, missing /Weather/Rain", error);
-    }
-
-    [Fact]
-    public void WhenARequiredArgumentIsMissing_ThenBindingFails()
-    {
-        // Arrange
-        var binder = CreateBinder();
-
-        // Act
-        var isBound = binder.TryBindParameters([Parameter<int>("speed")], new Dictionary<string, string>(), out _, out var error);
-
-        // Assert
-        Assert.False(isBound);
-        Assert.Equal("The argument 'speed' is missing", error);
+        Assert.Equal(expectedError, error);
     }
 
     [Fact]
@@ -145,20 +151,6 @@ public class ArgumentBinderTests
     }
 
     [Fact]
-    public void WhenAnArgumentReadsTheEventWithoutAnEventTrigger_ThenBindingFails()
-    {
-        // Arrange
-        var binder = CreateBinder(allowsEvent: false);
-
-        // Act
-        var isBound = binder.TryBindParameters([Parameter<string>("message")], new Dictionary<string, string> { ["message"] = "{{ event/Gesture }}" }, out _, out var error);
-
-        // Assert
-        Assert.False(isBound);
-        Assert.Equal("The argument 'message' is invalid: 'event' is only available in event filters and in the arguments of a rule with an event trigger", error);
-    }
-
-    [Fact]
     public void WhenAConstantIsBoundToAPercentParameter_ThenItIsTheRawStoredValue()
     {
         // Arrange
@@ -171,51 +163,6 @@ public class ArgumentBinderTests
         // Assert
         Assert.True(isBound, error);
         Assert.Equal(0.5m, Assert.Single(values!));
-    }
-
-    [Fact]
-    public void WhenAnArgumentKeyMatchesNoParameter_ThenBindingFails()
-    {
-        // Arrange
-        var binder = CreateBinder();
-        var arguments = new Dictionary<string, string> { ["speed"] = "5", ["Sped"] = "6" };
-
-        // Act
-        var isBound = binder.TryBindParameters([Parameter<int>("speed")], arguments, out _, out var error);
-
-        // Assert
-        Assert.False(isBound);
-        Assert.Equal("The argument 'Sped' matches no parameter of the operation", error);
-    }
-
-    [Fact]
-    public void WhenAMemberKeyMatchesNoMemberOfTheRecord_ThenBindingFails()
-    {
-        // Arrange
-        var binder = CreateBinder();
-        var arguments = new Dictionary<string, string> { ["notification.Message"] = "Hi", ["notification.Typo"] = "x" };
-
-        // Act
-        var isBound = binder.TryBindParameters([Parameter<Notification>("notification")], arguments, out _, out var error);
-
-        // Assert
-        Assert.False(isBound);
-        Assert.Equal("The argument 'notification.Typo' matches no member of 'notification'", error);
-    }
-
-    [Fact]
-    public void WhenAParameterHasAWholeKeyAndMemberKeys_ThenBindingFails()
-    {
-        // Arrange
-        var binder = CreateBinder();
-        var arguments = new Dictionary<string, string> { ["notification"] = "Hi", ["notification.Message"] = "Hi" };
-
-        // Act
-        var isBound = binder.TryBindParameters([Parameter<Notification>("notification")], arguments, out _, out var error);
-
-        // Assert
-        Assert.False(isBound);
-        Assert.Equal("The argument 'notification' is given both whole and per member", error);
     }
 
     [Fact]
