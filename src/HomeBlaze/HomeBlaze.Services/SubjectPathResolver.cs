@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Text;
 using HomeBlaze.Abstractions;
 using Namotion.Interceptor;
@@ -24,11 +25,13 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
 {
     private readonly Func<IInterceptorSubject?> _getRoot;
 
-    // Subject → canonical paths cache (with leading /), see GetStructureVersion for the version
-    private readonly ConcurrentDictionary<IInterceptorSubject, (long Version, IReadOnlyList<string> Paths)> _canonicalPathsCache = new(ReferenceEqualityComparer.Instance);
+    // Subject → canonical paths cache (with leading /), see GetStructureVersion for the version. The route is recorded
+    // for the first caller with a recorder and kept with the entry.
+    private readonly ConcurrentDictionary<IInterceptorSubject, (long Version, IReadOnlyList<string> Paths, RecordedRoute? Route)> _canonicalPathsCache = new(ReferenceEqualityComparer.Instance);
 
-    // (path, style) → Subject resolve cache (absolute paths only), see GetStructureVersion for the version
-    private readonly ConcurrentDictionary<(string Path, PathStyle Style), (long Version, IInterceptorSubject? Subject)> _resolveCache = new();
+    // (path, style) → Subject resolve cache (absolute paths only), see GetStructureVersion for the version. The route is
+    // recorded for the first caller with a recorder and kept with the entry.
+    private readonly ConcurrentDictionary<(string Path, PathStyle Style), (long Version, IInterceptorSubject? Subject, RecordedRoute? Route)> _resolveCache = new();
 
     // In a context of its own, so that a change of the version tells only the components that read it and not the
     // observers of the graph's changes, such as connectors and the history.
@@ -63,7 +66,17 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     public IInterceptorSubject? ResolveSubject(
         string path,
         PathStyle style,
-        IInterceptorSubject? relativeTo = null)
+        IInterceptorSubject? relativeTo = null) => ResolveSubject(path, style, relativeTo, recorder: null);
+
+    /// <summary>
+    /// Resolves a subject from a path as <see cref="ResolveSubject(string, PathStyle, IInterceptorSubject?)"/> does and
+    /// reports the graph route of the resolution to <paramref name="recorder"/>, also for a result served from the cache.
+    /// </summary>
+    public IInterceptorSubject? ResolveSubject(
+        string path,
+        PathStyle style,
+        IInterceptorSubject? relativeTo,
+        ISubjectPathRecorder? recorder)
     {
         var root = _getRoot();
 
@@ -72,26 +85,47 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         _ = _pathsVersion.Value;
 
         if (string.IsNullOrEmpty(path))
-            return relativeTo ?? root;
+        {
+            var baseSubject = relativeTo ?? root;
+            if (baseSubject == null)
+                recorder?.MarkUnbounded();
+
+            return baseSubject;
+        }
 
         // "/" alone = root
         if (path == "/")
+        {
+            if (root == null)
+                recorder?.MarkUnbounded();
+
             return root;
+        }
 
         // Absolute path: /...
         if (path.StartsWith("/"))
         {
             if (root == null)
+            {
+                recorder?.MarkUnbounded();
                 return null;
+            }
 
-            // Looked up first, so that a hit allocates nothing: every render asks for the same paths again.
+            // Looked up first, so that a hit allocates nothing: every render asks for the same paths again. The route is
+            // the same for every caller of an absolute path, so a hit replays the recorded one; an entry computed without a
+            // recorder has none yet and is computed again for the first caller with one.
             var key = (path, style);
             var version = GetStructureVersion(root);
-            if (_resolveCache.TryGetValue(key, out var cached) && cached.Version == version)
+            if (_resolveCache.TryGetValue(key, out var cached) && cached.Version == version && (recorder is null || cached.Route is not null))
+            {
+                cached.Route?.Replay(recorder);
                 return cached.Subject;
+            }
 
-            var resolved = ResolveInternal(root, path[1..], style);
-            _resolveCache[key] = (version, resolved);
+            var route = recorder is null ? null : new RecordedRoute();
+            var resolved = ResolveInternal(root, path[1..], style, route);
+            _resolveCache[key] = (version, resolved, route);
+            route?.Replay(recorder);
             return resolved;
         }
 
@@ -100,9 +134,12 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         {
             var baseSubject = relativeTo ?? root;
             if (baseSubject == null)
+            {
+                recorder?.MarkUnbounded();
                 return null;
+            }
 
-            return ResolveInternal(baseSubject, path[2..], style);
+            return ResolveInternal(baseSubject, path[2..], style, recorder);
         }
 
         // Parent navigation: ../... or ".." alone
@@ -110,7 +147,10 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         {
             var current = relativeTo;
             if (current == null)
+            {
+                recorder?.MarkUnbounded();
                 return null;
+            }
 
             var remaining = path;
             while (remaining.StartsWith("../") || remaining == "..")
@@ -119,13 +159,24 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                 remaining = remaining[consumed..];
                 var registered = current.TryGetRegisteredSubject();
                 if (registered == null)
+                {
+                    recorder?.MarkUnbounded();
                     return null;
+                }
 
                 var parents = registered.Parents;
+                if (parents.Length > 1)
+                {
+                    // Ambiguous - multiple parents. Stays ambiguous when another parent is gained, so only the holders count.
+                    if (recorder != null)
+                        AddHolders(recorder, parents);
+
+                    return null;
+                }
+
+                recorder?.AddParentStep(current, parents);
                 if (parents.Length == 0)
                     return null;
-                if (parents.Length > 1)
-                    return null; // Ambiguous - multiple parents
 
                 current = parents[0].Property.Subject;
             }
@@ -133,16 +184,19 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             if (string.IsNullOrEmpty(remaining))
                 return current;
 
-            return ResolveInternal(current, remaining, style);
+            return ResolveInternal(current, remaining, style, recorder);
         }
 
         // No prefix = relative implicit
         {
             var baseSubject = relativeTo ?? root;
             if (baseSubject == null)
+            {
+                recorder?.MarkUnbounded();
                 return null;
+            }
 
-            return ResolveInternal(baseSubject, path, style);
+            return ResolveInternal(baseSubject, path, style, recorder);
         }
     }
 
@@ -151,15 +205,29 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     /// </summary>
     public IReadOnlyList<string> GetPaths(
         IInterceptorSubject subject,
-        PathStyle style)
+        PathStyle style) => GetPaths(subject, style, recorder: null);
+
+    /// <summary>
+    /// Gets all paths to the subject as <see cref="GetPaths(IInterceptorSubject, PathStyle)"/> does and reports the graph
+    /// route of the paths to <paramref name="recorder"/>, also for paths served from the cache: a parent step of the
+    /// subject, then the properties that hold the subject and its ancestors.
+    /// </summary>
+    public IReadOnlyList<string> GetPaths(
+        IInterceptorSubject subject,
+        PathStyle style,
+        ISubjectPathRecorder? recorder)
     {
         _ = _pathsVersion.Value;
         var version = GetStructureVersion(_getRoot() ?? subject);
-        if (!_canonicalPathsCache.TryGetValue(subject, out var cached) || cached.Version != version)
+        if (!_canonicalPathsCache.TryGetValue(subject, out var cached) || cached.Version != version || (recorder is not null && cached.Route is null))
         {
-            cached = (version, ComputeCanonicalPaths(subject));
+            var route = recorder is null ? null : new RecordedRoute();
+            cached = (version, ComputeCanonicalPaths(subject, route), route);
             _canonicalPathsCache[subject] = cached;
         }
+
+        if (recorder is not null)
+            cached.Route!.Replay(recorder);
 
         var canonicalPaths = cached.Paths;
 
@@ -183,9 +251,18 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     /// </summary>
     public string? GetPath(
         IInterceptorSubject subject,
-        PathStyle style)
+        PathStyle style) => GetPath(subject, style, recorder: null);
+
+    /// <summary>
+    /// Gets the first path to the subject and reports the graph route of its paths to <paramref name="recorder"/>, see
+    /// <see cref="GetPaths(IInterceptorSubject, PathStyle, ISubjectPathRecorder?)"/>.
+    /// </summary>
+    public string? GetPath(
+        IInterceptorSubject subject,
+        PathStyle style,
+        ISubjectPathRecorder? recorder)
     {
-        var paths = GetPaths(subject, style);
+        var paths = GetPaths(subject, style, recorder);
         return paths.Count > 0 ? paths[0] : null;
     }
 
@@ -258,14 +335,25 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         return sb.ToString();
     }
 
-    private IInterceptorSubject? ResolveInternal(IInterceptorSubject baseSubject, string path, PathStyle style)
+    private static void AddHolders(ISubjectPathRecorder recorder, ImmutableArray<SubjectPropertyParent> parents)
+    {
+        foreach (var parent in parents)
+        {
+            recorder.AddProperty(parent.Property.Reference);
+        }
+    }
+
+    private IInterceptorSubject? ResolveInternal(IInterceptorSubject baseSubject, string path, PathStyle style, ISubjectPathRecorder? recorder)
     {
         if (string.IsNullOrEmpty(path))
             return baseSubject;
 
         var registry = baseSubject.Context.TryGetService<ISubjectRegistry>();
         if (registry == null)
+        {
+            recorder?.MarkUnbounded();
             return null;
+        }
 
         var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
         var current = baseSubject;
@@ -297,7 +385,18 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             }
 
             var registered = registry.TryGetRegisteredSubject(current);
-            var property = registered?.TryGetProperty(propertyName);
+            if (registered == null)
+            {
+                recorder?.MarkUnbounded();
+                return null;
+            }
+
+            var property = registered.TryGetProperty(propertyName);
+            if (property == null)
+            {
+                // Added later as a dynamic property, it takes precedence over a child of [InlinePaths].
+                recorder?.AddProperty(new PropertyReference(current, propertyName));
+            }
 
             if (property is not { CanContainSubjects: true })
             {
@@ -305,8 +404,9 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                 var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(current.GetType());
                 if (inlinePathsPropertyName != null)
                 {
-                    if (registered?.TryGetProperty(inlinePathsPropertyName) is { } childrenProperty &&
-                        childrenProperty.GetValue() is { } childrenValue)
+                    var childrenProperty = registered.TryGetProperty(inlinePathsPropertyName);
+                    recorder?.AddProperty(childrenProperty?.Reference ?? new PropertyReference(current, inlinePathsPropertyName));
+                    if (childrenProperty?.GetValue() is { } childrenValue)
                     {
                         var childSubject = SubjectPathResolverExtensions.FindChildByIndex(childrenProperty, childrenValue, segment);
                         if (childSubject is not null)
@@ -319,6 +419,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                 return null;
             }
 
+            recorder?.AddProperty(property.Reference);
             var value = property.GetValue();
             if (value == null)
                 return null;
@@ -354,7 +455,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         return current;
     }
 
-    private IReadOnlyList<string> ComputeCanonicalPaths(IInterceptorSubject subject)
+    private IReadOnlyList<string> ComputeCanonicalPaths(IInterceptorSubject subject, ISubjectPathRecorder? recorder)
     {
         var root = _getRoot();
 
@@ -364,13 +465,21 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
 
         var registry = subject.Context.TryGetService<ISubjectRegistry>();
         if (registry == null)
+        {
+            recorder?.MarkUnbounded();
             return Array.Empty<string>();
+        }
 
         var registered = registry.TryGetRegisteredSubject(subject);
         if (registered == null)
+        {
+            recorder?.MarkUnbounded();
             return Array.Empty<string>();
+        }
 
+        // Every parent gives a path, so a gained parent may give the shortest one.
         var parents = registered.Parents;
+        recorder?.AddParentStep(subject, parents);
         if (parents.Length == 0)
             return Array.Empty<string>();
 
@@ -380,7 +489,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         foreach (var parent in parents)
         {
             var pathSegments = new List<string>();
-            if (BuildPathRecursive(subject, parent, pathSegments, visited, registry, root))
+            if (BuildPathRecursive(subject, parent, pathSegments, visited, registry, root, recorder))
             {
                 pathSegments.Reverse();
                 paths.Add("/" + string.Join("/", pathSegments));
@@ -414,7 +523,8 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         List<string> pathSegments,
         HashSet<IInterceptorSubject> visited,
         ISubjectRegistry registry,
-        IInterceptorSubject? root)
+        IInterceptorSubject? root,
+        ISubjectPathRecorder? recorder)
     {
         if (!visited.Add(currentSubject))
             return false;
@@ -422,6 +532,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         try
         {
             var parentSubject = parent.Property.Subject;
+            recorder?.AddProperty(parent.Property.Reference);
 
             var isInlinePathsProperty = InlinePathsAttribute.IsInlinePathsProperty(
                 parentSubject.GetType(), parent.Property.Name);
@@ -445,19 +556,63 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             if (root != null && parentSubject == root)
                 return true;
 
+            // The first parent of an ancestor stays first when it gains another one, but an ancestor without parents
+            // gains a first one through a property that is not on the route.
             var parentRegistered = registry.TryGetRegisteredSubject(parentSubject);
             if (parentRegistered == null)
+            {
+                recorder?.MarkUnbounded();
                 return false;
+            }
 
             if (parentRegistered.Parents.Length == 0)
+            {
+                recorder?.MarkUnbounded();
                 return true;
+            }
 
             var grandparent = parentRegistered.Parents[0];
-            return BuildPathRecursive(parentSubject, grandparent, pathSegments, visited, registry, root);
+            return BuildPathRecursive(parentSubject, grandparent, pathSegments, visited, registry, root, recorder);
         }
         finally
         {
             visited.Remove(currentSubject);
+        }
+    }
+
+    // The route of a cached result, replayed to the recorder of a later call served from the cache: the parent step of
+    // the subject of GetPaths, which is the only one a resolution records and comes before its properties, then the
+    // properties, then whether the route is unbounded. Filled before the entry is published and never changed after.
+    private sealed class RecordedRoute : ISubjectPathRecorder
+    {
+        private readonly List<PropertyReference> _properties = [];
+        private IInterceptorSubject? _parentStepSubject;
+        private ImmutableArray<SubjectPropertyParent> _parentStepParents;
+        private bool _isUnbounded;
+
+        public void AddProperty(PropertyReference property) => _properties.Add(property);
+
+        public void AddParentStep(IInterceptorSubject subject, ImmutableArray<SubjectPropertyParent> parents)
+        {
+            _parentStepSubject = subject;
+            _parentStepParents = parents;
+        }
+
+        public void MarkUnbounded() => _isUnbounded = true;
+
+        public void Replay(ISubjectPathRecorder? recorder)
+        {
+            if (recorder is null)
+                return;
+
+            if (_parentStepSubject is not null)
+                recorder.AddParentStep(_parentStepSubject, _parentStepParents);
+
+            foreach (var property in _properties)
+                recorder.AddProperty(property);
+
+            if (_isUnbounded)
+                recorder.MarkUnbounded();
         }
     }
 }

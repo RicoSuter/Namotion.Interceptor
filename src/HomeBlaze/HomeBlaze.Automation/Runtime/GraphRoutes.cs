@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Services;
 using Namotion.Interceptor;
@@ -7,11 +8,10 @@ using Namotion.Interceptor.Registry.Abstractions;
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// The graph routes of the paths that the worker of an automation resolves ahead of time: resolves them with the resolver
-/// and records their routes with <see cref="GraphRouteWalker"/>, and builds the union that the worker publishes, so that a
-/// graph change reaches the automation only when it can change one of them. A resolution whose walk found something else
-/// than the resolver, or failed, has an unbounded route. On a graph change, only the paths whose routes have a changed
-/// property are resolved again, see <see cref="NeedsResolving"/>. Used by the worker only.
+/// The graph routes of the paths that the worker of an automation resolves ahead of time: resolves them with the resolver,
+/// which records their routes into a <see cref="GraphRouteBuilder"/>, and builds the union that the worker publishes, so
+/// that a graph change reaches the automation only when it can change one of them. On a graph change, only the paths
+/// whose routes have a changed property are resolved again, see <see cref="NeedsResolving"/>. Used by the worker only.
 /// </summary>
 /// <remarks>
 /// A change that commits while paths are resolved is not routed by a route published only afterwards. The structure
@@ -20,10 +20,9 @@ namespace HomeBlaze.Automation.Runtime;
 /// </remarks>
 internal sealed class GraphRoutes
 {
-    private readonly GraphRouteWalker _walker;
     private readonly Func<long> _getStructureVersion;
     private readonly AutomationChangeReceiver? _changes;
-    private readonly GraphRouteBuilder _builder = new();
+    private readonly GraphRouteBuilder _builder;
     private readonly HashSet<PropertyReference> _union = [];
     private readonly HashSet<PropertyReference> _changed = [];
     private bool _isFullChange = true;
@@ -43,7 +42,7 @@ internal sealed class GraphRoutes
     public GraphRoutes(SubjectPathResolver resolver, IInterceptorSubject? automation, Func<long> getStructureVersion, AutomationChangeReceiver? changes)
     {
         Resolver = resolver;
-        _walker = new GraphRouteWalker(resolver, automation, getStructureVersion);
+        _builder = new GraphRouteBuilder(automation);
         _getStructureVersion = getStructureVersion;
         _changes = changes;
     }
@@ -120,56 +119,18 @@ internal sealed class GraphRoutes
     }
 
     /// <summary>Resolves the property as <see cref="AutomationPaths.ResolveProperty"/> does and adds its route.</summary>
-    public RegisteredSubjectProperty? ResolveProperty(string path, AutomationRule rule, GraphRouteBuilder route)
-    {
-        var property = AutomationPaths.ResolveProperty(Resolver, path, rule);
-        try
-        {
-            if (!_walker.WalkProperty(path, rule, property, route))
-            {
-                route.MarkUnbounded();
-            }
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            route.MarkUnbounded();
-        }
-
-        return property;
-    }
+    public RegisteredSubjectProperty? ResolveProperty(string path, AutomationRule rule, GraphRouteBuilder route) =>
+        AutomationPaths.ResolveProperty(Resolver, path, rule, route);
 
     /// <summary>Resolves the subject as <see cref="AutomationPaths.ResolveSubject"/> does and adds its route.</summary>
-    public IInterceptorSubject? ResolveSubject(string path, AutomationRule rule, GraphRouteBuilder route)
-    {
-        var subject = AutomationPaths.ResolveSubject(Resolver, path, rule);
-        try
-        {
-            if (!ReferenceEquals(_walker.WalkSubject(path, rule, route), subject))
-            {
-                route.MarkUnbounded();
-            }
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            route.MarkUnbounded();
-        }
-
-        return subject;
-    }
+    public IInterceptorSubject? ResolveSubject(string path, AutomationRule rule, GraphRouteBuilder route) =>
+        AutomationPaths.ResolveSubject(Resolver, path, rule, route);
 
     /// <summary>Records the route of the canonical path of the automation, before its path is read.</summary>
     public void RecordLocation(Automation automation)
     {
         var route = BeginRoute();
-        try
-        {
-            _walker.WalkLocation(automation, route);
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            route.MarkUnbounded();
-        }
-
+        Resolver.GetPath(automation, PathStyle.Canonical, route);
         Location = route.ToRoute(Location);
         LocationVersion = route.ResolvedAt;
     }
