@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
@@ -20,7 +21,8 @@ public static class MetadataSearch
     /// metadata matches every filter that is given: a tag in <c>tags</c>, a key that is set, and a value that equals a
     /// string value, or a string in an array, of the key when one is given, else of any key. Keys match exactly, and tags
     /// and values without regard to case. The paths of the matches are relative to <paramref name="root"/>, through the
-    /// first parent that reaches it, as the registry builds them (<c>Pump/Channels[0]</c>); a subject that no path from
+    /// first parent that reaches it through members for which <paramref name="isPathMemberIncluded"/> returns true, every
+    /// member when it is null, as the registry builds them (<c>Pump/Channels[0]</c>); a subject that no such path from
     /// <paramref name="root"/> reaches is not found. The matches are ordered by path and then property, ordinal. A subject
     /// for which <paramref name="isExcluded"/> returns true, and every subject below it, is skipped, and so is metadata whose
     /// member, the dynamic property of a subject or the attribute of a property, <paramref name="isMetadataIncluded"/>
@@ -28,9 +30,11 @@ public static class MetadataSearch
     /// </summary>
     public static IReadOnlyList<MetadataSearchMatch> Search(
         IInterceptorSubject root, Func<RegisteredSubjectProperty, bool> isMetadataIncluded, string? tag = null, string? key = null,
-        string? value = null, IInterceptorSubject? start = null, Func<IInterceptorSubject, bool>? isExcluded = null)
+        string? value = null, IInterceptorSubject? start = null, Func<IInterceptorSubject, bool>? isExcluded = null,
+        Func<RegisteredSubjectProperty, bool>? isPathMemberIncluded = null)
     {
         ArgumentNullException.ThrowIfNull(isMetadataIncluded);
+        PathProviderBase pathProvider = isPathMemberIncluded is null ? PathProvider : new FilteredPathProvider(isPathMemberIncluded);
         var matches = new List<MetadataSearchMatch>();
         foreach (var subject in Walk(start ?? root, isExcluded))
         {
@@ -38,7 +42,7 @@ public static class MetadataSearch
             foreach (var (member, propertyName, metadata) in GetMemberEntries(subject))
             {
                 if (isMetadataIncluded(member) &&
-                    IsMatch(metadata, tag, key, value) && (subjectPath ??= TryGetPath(subject, root)) is { } matchPath)
+                    IsMatch(metadata, tag, key, value) && (subjectPath ??= TryGetPath(subject, root, pathProvider)) is { } matchPath)
                 {
                     matches.Add(new MetadataSearchMatch(matchPath, propertyName));
                 }
@@ -109,7 +113,7 @@ public static class MetadataSearch
         => metadata.GetString(key) is { } text ? [text] : metadata.GetStringArray(key);
 
     // The path through the first parent that reaches the root.
-    private static string? TryGetPath(RegisteredSubject subject, IInterceptorSubject root)
+    private static string? TryGetPath(RegisteredSubject subject, IInterceptorSubject root, PathProviderBase pathProvider)
     {
         if (ReferenceEquals(subject.Subject, root))
         {
@@ -118,13 +122,35 @@ public static class MetadataSearch
 
         foreach (var parent in subject.Parents)
         {
-            if (parent.Property.TryGetPath(PathProvider, root, parent.Index) is { } path)
+            if (parent.Property.TryGetPath(pathProvider, root, parent.Index) is { } path)
             {
                 return path;
             }
         }
 
         return null;
+    }
+
+    // Builds paths only through the included members. Segments still resolve against every member, as the resolution of
+    // a built path does, so that a key is not written bare where an excluded member would take it.
+    private sealed class FilteredPathProvider(Func<RegisteredSubjectProperty, bool> isMemberIncluded) : PathProviderBase
+    {
+        public override char PathSeparator => PathProvider.PathSeparator;
+
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        {
+            if (isMemberIncluded(property))
+            {
+                return base.TryGetPropertySegment(property, out segment);
+            }
+
+            segment = null;
+            return false;
+        }
+
+        public override bool TryGetPropertyFromSegment(
+            RegisteredSubject subject, string segment, [NotNullWhen(true)] out RegisteredSubjectProperty? property)
+            => PathProvider.TryGetPropertyFromSegment(subject, segment, out property);
     }
 
     // The subject and every subject below it, each once, without the excluded ones and those below them.

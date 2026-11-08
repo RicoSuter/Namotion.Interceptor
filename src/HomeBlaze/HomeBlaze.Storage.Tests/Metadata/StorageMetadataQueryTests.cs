@@ -65,6 +65,54 @@ public class StorageMetadataQueryTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenTheFirstMemberThatHoldsASubjectIsNotReadable_ThenSearchMetadataFindsItThroughAReadableOne()
+    {
+        // Arrange
+        WriteFile("Shelly.json", MetadataTestDevice.Serialize());
+        var storage = await ConnectAsync();
+        var device = (MetadataTestDevice)storage.Children["Shelly"];
+        device.Meters = new Dictionary<string, MetadataTestChannel> { ["Main"] = device.Channel! };
+        await storage.SetMetadataAsync("Shelly/Meters[Main]", null, Values("""{ "tags": ["floor-2"] }"""), CancellationToken.None);
+        var permissions = new QueryPermissions(canRead: member => !(member.Name == nameof(MetadataTestDevice.Channel) && member.Parent.Subject is MetadataTestDevice));
+
+        // Act
+        var matches = storage.SearchMetadata("floor-2", null, null, null, permissions);
+
+        // Assert
+        Assert.Equal(["Shelly/Meters[Main]"], matches.Select(match => match.Path));
+    }
+
+    [Fact]
+    public async Task WhenNoReadableMemberHoldsASubject_ThenSearchMetadataLeavesItOut()
+    {
+        // Arrange
+        WriteFile("Shelly.json", MetadataTestDevice.Serialize());
+        var storage = await ConnectAsync();
+        await storage.SetMetadataAsync("Shelly/Channel", null, Values("""{ "tags": ["floor-2"] }"""), CancellationToken.None);
+        var permissions = new QueryPermissions(canRead: member => !(member.Name == nameof(MetadataTestDevice.Channel) && member.Parent.Subject is MetadataTestDevice));
+
+        // Act
+        var matches = storage.SearchMetadata("floor-2", null, null, null, permissions);
+
+        // Assert
+        Assert.Empty(matches);
+    }
+
+    [Fact]
+    public async Task WhenASubjectOnThePathIsNotShown_ThenSearchMetadataLeavesOutTheSubjectsBelowIt()
+    {
+        // Arrange
+        var storage = await ConnectWithTaggedDeviceAndChannelAsync();
+        var permissions = new QueryPermissions(canShow: subject => subject.Subject is not MetadataTestDevice);
+
+        // Act
+        var matches = storage.SearchMetadata("floor-2", null, null, null, permissions);
+
+        // Assert
+        Assert.Empty(matches);
+    }
+
+    [Fact]
     public async Task WhenNoPermissionsAreGiven_ThenTheQueriesFindNothing()
     {
         // Arrange

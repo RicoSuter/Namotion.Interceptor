@@ -47,7 +47,8 @@ internal static class StorageMetadataMethods
     /// Gets the first <see cref="MaxSearchMetadataMatches"/> subjects and properties at or below <paramref name="start"/>
     /// whose metadata member <paramref name="permissions"/> allow to read on a shown subject, see
     /// <see cref="UserPermissionsExtensions.CanReadShown"/>, and whose metadata, as <paramref name="permissions"/> show it,
-    /// matches every filter that is given; see <see cref="MetadataSearch.Search"/>.
+    /// matches every filter that is given, each with a path through members that <paramref name="permissions"/> allow to
+    /// read on shown subjects, and none without such a path; see <see cref="MetadataSearch.Search"/>.
     /// </summary>
     public static MetadataSearchMatch[] Search(
         IInterceptorSubject storage, IInterceptorSubject start, string? tag, string? key, string? value, IUserPermissions permissions)
@@ -57,7 +58,8 @@ internal static class StorageMetadataMethods
             member => permissions.CanReadShown(member) &&
                 permissions.GetValue(member) is ImmutableDictionary<string, JsonElement> metadata &&
                 MetadataSearch.IsMatch(metadata, tag, key, value),
-            start: start);
+            start: start,
+            isPathMemberIncluded: permissions.CanReadShown);
         return [.. matches.Take(MaxSearchMetadataMatches)];
     }
 
