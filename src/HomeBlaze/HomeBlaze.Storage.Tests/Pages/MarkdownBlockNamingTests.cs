@@ -18,7 +18,7 @@ public class MarkdownBlockNamingTests
     private const string ShelfType = $"{Namespace}.TestShelf";
     private const string WidgetType = "HomeBlaze.Components.Widget";
 
-    private const string ShelfPage = $$"""
+    private static readonly string ShelfPage = $$"""
         :: {{ShelfType}}#shelf Rows=1 Columns=2
         ```json
         {
@@ -37,7 +37,7 @@ public class MarkdownBlockNamingTests
         }
         ```
         ::
-        """;
+        """.ReplaceLineEndings("\n");
 
     private static Task<MarkdownPageFixture> CreateFixtureWithComponentsAsync() =>
         MarkdownPageFixture.CreateAsync(services =>

@@ -1,0 +1,57 @@
+name: test portability
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/**'
+      - '.github/workflows/test-portability.yml'
+      - '.gitattributes'
+  push:
+    branches:
+      - master
+    paths:
+      - 'src/**'
+      - '.github/workflows/test-portability.yml'
+      - '.gitattributes'
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  test:
+    name: Portability (${{ matrix.os }})
+    timeout-minutes: 20
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Run Sonos tests
+        run: dotnet test src/HomeBlaze/Namotion.Devices.Sonos.Tests --configuration Release --filter "Category!=Integration" --logger trx --results-directory TestResults
+
+      - name: Run AI tests
+        run: dotnet test src/HomeBlaze/HomeBlaze.AI.Tests --configuration Release --filter "Category!=Integration" --logger trx --results-directory TestResults
+
+      - name: Run storage tests
+        run: dotnet test src/HomeBlaze/HomeBlaze.Storage.Tests --configuration Release --filter "Category!=Integration" --logger trx --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: portability-results-${{ matrix.os }}
+          path: TestResults/**/*.trx
+          if-no-files-found: warn
