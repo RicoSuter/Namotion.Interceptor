@@ -60,11 +60,15 @@
     private string? _applicationToken;
     private readonly List<TargetInput> _targets = [];
 
+    // The keys of the targets the form lists or listed, whose inputs decide them at a save; every other target, such as
+    // one the roles hid when the form opened, is kept as it is.
+    private readonly HashSet<string> _listedKeys = new(StringComparer.Ordinal);
+
     private bool HasStoredApplicationToken => !string.IsNullOrEmpty(Service?.ApplicationToken);
 
     public bool IsValid =>
         (HasStoredApplicationToken || !string.IsNullOrWhiteSpace(_applicationToken)) &&
-        (_targets.Count > 0 || GetHiddenTargets().Any()) &&
+        (_targets.Count > 0 || GetUnlistedTargets().Any()) &&
         _targets.All(target => !string.IsNullOrWhiteSpace(target.Name) && (HasStoredUserKey(target) || !string.IsNullOrWhiteSpace(target.UserKey)));
 
     public bool IsDirty { get; private set; }
@@ -85,6 +89,7 @@
         foreach (var (key, target) in Service.Targets.Where(pair => Permissions.CanShow(pair.Value)))
         {
             _targets.Add(new TargetInput { Key = key, Name = target.Name });
+            _listedKeys.Add(key);
         }
     }
 
@@ -107,11 +112,24 @@
         OnFieldChanged();
     }
 
+    /// <summary>Saves the edits; refused, changing nothing, when the roles hid a listed target since the form opened.</summary>
+    /// <exception cref="InvalidOperationException">A listed target is hidden now.</exception>
     public Task SaveAsync(CancellationToken cancellationToken)
     {
         if (Service == null || !IsValid)
         {
             return Task.CompletedTask;
+        }
+
+        // Neither the edits nor the removal of a target the viewer may no longer see are applied, and keeping it instead
+        // would silently undo a removal.
+        var currentTargets = Service.Targets;
+        foreach (var key in _listedKeys)
+        {
+            if (currentTargets.TryGetValue(key, out var listed) && !Permissions.CanShow(listed))
+            {
+                throw new InvalidOperationException("A target was hidden since the form was opened. Close the form and open it again.");
+            }
         }
 
         Service.Name = _name;
@@ -120,25 +138,29 @@
             Service.ApplicationToken = _applicationToken;
         }
 
-        // Existing targets are kept as instances, so their state survives.
-        var targets = GetHiddenTargets().ToDictionary();
-        foreach (var input in _targets)
+        // In the order of the current targets, existing targets kept as instances, so their state survives; new ones last.
+        var targets = new Dictionary<string, PushoverTarget>();
+        foreach (var (key, target) in currentTargets)
         {
-            var key = input.Key ?? PushoverService.CreateTargetKey(input.Name, targets.Keys.Concat(Service.Targets.Keys).ToArray());
-            var target = TryGetExistingTarget(input, out var existing) ? existing : new PushoverTarget();
-
-            target.Name = input.Name;
-            if (!string.IsNullOrWhiteSpace(input.UserKey))
+            if (!_listedKeys.Contains(key))
             {
-                target.UserKey = input.UserKey;
+                targets[key] = target;
             }
+            else if (_targets.Find(input => input.Key == key) is { } input)
+            {
+                targets[key] = Apply(input, target);
+            }
+        }
 
-            input.Key = key;
-            input.UserKey = null;
-            targets[key] = target;
+        foreach (var input in _targets.Where(input => input.Key is null || !currentTargets.ContainsKey(input.Key)))
+        {
+            input.Key ??= PushoverService.CreateTargetKey(input.Name, targets.Keys.Concat(currentTargets.Keys).ToArray());
+            targets[input.Key] = Apply(input, new PushoverTarget());
         }
 
         Service.Targets = targets;
+        _listedKeys.Clear();
+        _listedKeys.UnionWith(_targets.Select(input => input.Key).OfType<string>());
 
         _applicationToken = null;
         IsDirty = false;
@@ -146,8 +168,20 @@
         return Task.CompletedTask;
     }
 
-    private IEnumerable<KeyValuePair<string, PushoverTarget>> GetHiddenTargets() =>
-        Service?.Targets.Where(pair => !Permissions.CanShow(pair.Value)) ?? [];
+    private static PushoverTarget Apply(TargetInput input, PushoverTarget target)
+    {
+        target.Name = input.Name;
+        if (!string.IsNullOrWhiteSpace(input.UserKey))
+        {
+            target.UserKey = input.UserKey;
+        }
+
+        input.UserKey = null;
+        return target;
+    }
+
+    private IEnumerable<KeyValuePair<string, PushoverTarget>> GetUnlistedTargets() =>
+        Service?.Targets.Where(pair => !_listedKeys.Contains(pair.Key)) ?? [];
 
     // An input whose key is no longer in Service.Targets, for example after an external edit of the configuration,
     // is a new target and needs its user key again.

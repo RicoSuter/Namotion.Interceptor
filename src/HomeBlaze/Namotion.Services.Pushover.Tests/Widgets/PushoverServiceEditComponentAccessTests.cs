@@ -12,7 +12,7 @@ using Xunit;
 namespace Namotion.Services.Pushover.Tests.Widgets;
 
 /// <summary>
-/// The edit component neither lists nor removes the targets the viewer may not see.
+/// The edit component neither lists nor removes the targets the viewer may not see, and edits no target hidden since it opened.
 /// </summary>
 public sealed class PushoverServiceEditComponentAccessTests : BunitContext, IAsyncLifetime
 {
@@ -64,6 +64,40 @@ public sealed class PushoverServiceEditComponentAccessTests : BunitContext, IAsy
         // Assert
         Assert.True(rendered.Instance.IsValid);
         Assert.Equal(["Bob"], service.Targets.Keys);
+    }
+
+    [Fact]
+    public async Task WhenATargetIsHidden_ThenASaveKeepsTheOrderOfTheTargets()
+    {
+        // Arrange
+        var service = CreateService("Alice", "Bob", "Carol");
+        _permissions.CannotShow.Add(service.Targets["Bob"]);
+        var rendered = Render<PushoverServiceEditComponent>(parameters => parameters.Add(component => component.Subject, service));
+
+        // Act
+        await rendered.InvokeAsync(() => rendered.Instance.SaveAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Equal(["Alice", "Bob", "Carol"], service.Targets.Keys);
+    }
+
+    [Fact]
+    public async Task WhenAListedTargetIsHiddenBeforeTheSave_ThenTheSaveIsRefusedAndChangesNothing()
+    {
+        // Arrange
+        var service = CreateService("Alice", "Bob");
+        var targets = service.Targets;
+        var rendered = Render<PushoverServiceEditComponent>(parameters => parameters.Add(component => component.Subject, service));
+        await rendered.InvokeAsync(() => rendered.FindAll("button").Last(button => button.TextContent.Contains("Remove")).Click());
+        _permissions.CannotShow.Add(service.Targets["Bob"]);
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => rendered.InvokeAsync(() => rendered.Instance.SaveAsync(CancellationToken.None)));
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(exception);
+        Assert.Same(targets, service.Targets);
+        Assert.Equal(["Alice", "Bob"], service.Targets.Keys);
     }
 
     private static PushoverService CreateService(params string[] targetKeys)
