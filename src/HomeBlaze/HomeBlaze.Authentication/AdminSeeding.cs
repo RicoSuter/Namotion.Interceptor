@@ -22,7 +22,7 @@ public static class AdminSeeding
         "The authentication database has no users although it was set up before. Run HomeBlaze once with --reset-admin.";
 
     /// <summary>Gets the path of the seed marker of the database at <paramref name="databasePath"/>.</summary>
-    public static string MarkerPath(string databasePath)
+    internal static string MarkerPath(string databasePath)
     {
         ArgumentNullException.ThrowIfNull(databasePath);
 
@@ -42,7 +42,7 @@ public static class AdminSeeding
     /// Any failure, such as a refused row or a marker that cannot be written: nothing is stored, <paramref name="database"/>
     /// is marked unavailable and the exception is rethrown.
     /// </exception>
-    public static async Task<SeedOutcome> SeedAsync(IServiceScopeFactory scopeFactory, AuthenticationDatabase database, CancellationToken cancellationToken)
+    internal static async Task<SeedOutcome> SeedAsync(IServiceScopeFactory scopeFactory, AuthenticationDatabase database, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(scopeFactory);
         ArgumentNullException.ThrowIfNull(database);
@@ -227,7 +227,7 @@ public static class AdminSeeding
 }
 
 /// <summary>The outcome of <see cref="AdminSeeding.SeedAsync"/>.</summary>
-public enum SeedOutcome
+internal enum SeedOutcome
 {
     /// <summary>No person and no seed marker existed: the administrator was seeded and the marker written.</summary>
     Seeded,

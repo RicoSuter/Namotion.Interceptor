@@ -18,10 +18,10 @@ namespace HomeBlaze.Authentication;
 /// <see cref="AuthorizationSubjectBinding"/>, and the startup still becomes ready without a projection. That fails closed
 /// for administration: the role and user dialogs and every change of users need the subject, so they refuse.
 /// </remarks>
-public sealed class AuthenticationStartup : BackgroundService
+internal sealed class AuthenticationStartup : BackgroundService
 {
     /// <summary>Why authentication is unavailable when the roles and users cannot be shown in the graph.</summary>
-    public const string BindingFailedReason = "The roles and users could not be shown in the Authorization subject of the root storage.";
+    internal const string BindingFailedReason = "The roles and users could not be shown in the Authorization subject of the root storage.";
 
     private readonly RootManager _rootManager;
     private readonly AuthenticationDatabase _database;

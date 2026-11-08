@@ -15,7 +15,7 @@ namespace HomeBlaze.Authentication.Blazor;
 /// once when the store changes the person, and against the security stamp in the database every five minutes, which
 /// catches a change made another way, such as by restoring the database.
 /// </summary>
-public sealed partial class HomeBlazeRevalidatingAuthenticationStateProvider : RevalidatingServerAuthenticationStateProvider
+internal sealed partial class HomeBlazeRevalidatingAuthenticationStateProvider : RevalidatingServerAuthenticationStateProvider
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IOptions<IdentityOptions> _identityOptions;

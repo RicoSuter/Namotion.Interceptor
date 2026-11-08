@@ -8,13 +8,13 @@ namespace HomeBlaze.Authentication;
 /// decides, and the roles of the closure with deny rules, as
 /// <see cref="AuthorizationServiceRoleExtensions.GetRolesWithDenyRules"/> gives them.
 /// </summary>
-public sealed record UserActor(string UserId, IReadOnlySet<string> RoleClosure, bool IsFullAdministrator, IReadOnlySet<string> RolesWithDenyRules);
+internal sealed record UserActor(string UserId, IReadOnlySet<string> RoleClosure, bool IsFullAdministrator, IReadOnlySet<string> RolesWithDenyRules);
 
 /// <summary>The user being changed.</summary>
-public sealed record UserTarget(string UserId, bool IsBuiltIn, IReadOnlyCollection<string> Roles, IReadOnlySet<string> RoleClosure);
+internal sealed record UserTarget(string UserId, bool IsBuiltIn, IReadOnlyCollection<string> Roles, IReadOnlySet<string> RoleClosure);
 
 /// <summary>A change of a user that the delegation rules check.</summary>
-public enum UserAction
+internal enum UserAction
 {
     /// <summary>Changing the roles of the user.</summary>
     SetRoles,
@@ -43,7 +43,7 @@ public enum UserAction
 /// removing, or changing the roles to none or to a subset of the role closure the user holds that keeps the roles with
 /// deny rules of the person that the user holds.
 /// </summary>
-public static class UserDelegation
+internal static class UserDelegation
 {
     /// <summary>Gets why <paramref name="actor"/> may not do <paramref name="action"/> on <paramref name="target"/>, or null.</summary>
     /// <param name="actor">The person who changes the user.</param>

@@ -2,6 +2,7 @@
 
     <ItemGroup>
         <InternalsVisibleTo Include="HomeBlaze.Authentication.Tests" />
+        <InternalsVisibleTo Include="HomeBlaze.Authentication.Blazor.Tests" />
     </ItemGroup>
 
     <ItemGroup>

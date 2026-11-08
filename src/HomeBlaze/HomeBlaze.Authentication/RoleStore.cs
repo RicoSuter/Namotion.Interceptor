@@ -42,7 +42,7 @@ public sealed class RoleStore : IRoleStore
     /// <param name="personRoleSets">Gets the role names of every user who is a person, and whether they are locked out.</param>
     /// <param name="projection">Shows the stored roles in the graph.</param>
     /// <param name="gate">Runs the changes of roles and users one at a time.</param>
-    public RoleStore(
+    internal RoleStore(
         IDbContextFactory<AuthenticationDbContext> contextFactory,
         AuthorizationService authorizationService,
         IEnumerable<IRoleNameReferences> references,

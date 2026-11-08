@@ -51,13 +51,16 @@ public class UserDelegationTests
     }
 
     [Theory]
-    [InlineData(UserAction.Remove)]
-    [InlineData(UserAction.Lock)]
-    [InlineData(UserAction.Unlock)]
-    [InlineData(UserAction.Reset)]
-    [InlineData(UserAction.SetRoles)]
-    public void WhenTheTargetHoldsARoleTheManagerDoesNot_ThenEveryActionIsRefused(UserAction action)
+    [InlineData(nameof(UserAction.Remove))]
+    [InlineData(nameof(UserAction.Lock))]
+    [InlineData(nameof(UserAction.Unlock))]
+    [InlineData(nameof(UserAction.Reset))]
+    [InlineData(nameof(UserAction.SetRoles))]
+    public void WhenTheTargetHoldsARoleTheManagerDoesNot_ThenEveryActionIsRefused(string actionName)
     {
+        // Arrange
+        var action = Enum.Parse<UserAction>(actionName);
+
         // Act
         var refusal = UserDelegation.GetRefusal(
             Actor(ManagerClosure), Target("admin", [BuiltInRoles.EverythingName]), action, action == UserAction.SetRoles ? ["family"] : null, action == UserAction.SetRoles ? Closure("family") : null);
@@ -110,11 +113,14 @@ public class UserDelegationTests
     }
 
     [Theory]
-    [InlineData(UserAction.Reset)]
-    [InlineData(UserAction.Unlock)]
-    [InlineData(UserAction.SetRoles)]
-    public void WhenAManagerWithADenyingRoleActsOnAPeerWithoutIt_ThenItIsRefusedWithTheDenyingRole(UserAction action)
+    [InlineData(nameof(UserAction.Reset))]
+    [InlineData(nameof(UserAction.Unlock))]
+    [InlineData(nameof(UserAction.SetRoles))]
+    public void WhenAManagerWithADenyingRoleActsOnAPeerWithoutIt_ThenItIsRefusedWithTheDenyingRole(string actionName)
     {
+        // Arrange
+        var action = Enum.Parse<UserAction>(actionName);
+
         // Act
         var refusal = UserDelegation.GetRefusal(
             KidManager(), TargetIncluding("peer", [BuiltInRoles.OperatorName], BuiltInRoles.ReaderName), action,
@@ -125,10 +131,13 @@ public class UserDelegationTests
     }
 
     [Theory]
-    [InlineData(UserAction.Lock)]
-    [InlineData(UserAction.Remove)]
-    public void WhenAManagerWithADenyingRoleTakesAccessAwayFromAPeerWithoutIt_ThenItIsAllowed(UserAction action)
+    [InlineData(nameof(UserAction.Lock))]
+    [InlineData(nameof(UserAction.Remove))]
+    public void WhenAManagerWithADenyingRoleTakesAccessAwayFromAPeerWithoutIt_ThenItIsAllowed(string actionName)
     {
+        // Arrange
+        var action = Enum.Parse<UserAction>(actionName);
+
         // Act
         var refusal = UserDelegation.GetRefusal(KidManager(), TargetIncluding("peer", [BuiltInRoles.OperatorName], BuiltInRoles.ReaderName), action, null, null);
 

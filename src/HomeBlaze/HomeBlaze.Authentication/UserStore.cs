@@ -35,7 +35,7 @@ public sealed class UserStore : IMcpClientAccess
     /// <param name="projection">Shows the stored users in the graph.</param>
     /// <param name="gate">Runs the changes of roles and users one at a time.</param>
     /// <param name="timeProvider">Gives the time of lockouts and of setup codes.</param>
-    public UserStore(
+    internal UserStore(
         IServiceScopeFactory scopeFactory,
         AuthorizationService authorizationService,
         RoleStore roleStore,
@@ -71,7 +71,7 @@ public sealed class UserStore : IMcpClientAccess
     public IReadOnlyCollection<string> AnonymousRoles => GetRolesByName(NameRules.AnonymousUserName);
 
     /// <summary>The roles of the built-in user of the external MCP endpoint; empty when it does not exist.</summary>
-    public IReadOnlyCollection<string> McpRoles => GetRolesByName(NameRules.McpUserName);
+    internal IReadOnlyCollection<string> McpRoles => GetRolesByName(NameRules.McpUserName);
 
     /// <summary>
     /// Whether the seeded administrator <see cref="AdminSeeding.AdminUserName"/> still signs in with an empty password,
@@ -187,7 +187,7 @@ public sealed class UserStore : IMcpClientAccess
     public IEnumerable<PrincipalRoleSet> GetAllRoleSets() => _state.RoleSets;
 
     /// <summary>Gets the role names of every user who is a person, not a built-in user, and whether an administrator locked them.</summary>
-    public IReadOnlyCollection<PersonRoleSet> GetPersonRoleSets() => _state.PersonRoleSets;
+    internal IReadOnlyCollection<PersonRoleSet> GetPersonRoleSets() => _state.PersonRoleSets;
 
     /// <summary>
     /// Stores now as the last sign-in of the user with <paramref name="userId"/> and reloads what the sign-in changed, as

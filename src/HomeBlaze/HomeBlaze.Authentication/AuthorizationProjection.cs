@@ -8,7 +8,7 @@ namespace HomeBlaze.Authentication;
 /// Holds the roles and users loaded from the database and writes them into the single <see cref="AuthorizationSubject"/>
 /// subject of the graph whenever they change or the subject is attached. Thread-safe.
 /// </summary>
-public sealed class AuthorizationProjection
+internal sealed class AuthorizationProjection
 {
     private readonly Lock _lock = new();
     private IReadOnlyCollection<AuthorizationRole> _roles = [];
@@ -31,7 +31,7 @@ public sealed class AuthorizationProjection
     /// Sets the subject the projection writes to and writes the roles and users to it; null detaches it. Attaching the
     /// subject that is attached already changes nothing, so its roles and users stay the same instances.
     /// </summary>
-    public void Attach(AuthorizationSubject? target)
+    internal void Attach(AuthorizationSubject? target)
     {
         lock (_lock)
         {
@@ -48,7 +48,7 @@ public sealed class AuthorizationProjection
     }
 
     /// <summary>Sets the roles and writes them to the attached subject.</summary>
-    public void SetRoles(IReadOnlyCollection<AuthorizationRole> roles)
+    internal void SetRoles(IReadOnlyCollection<AuthorizationRole> roles)
     {
         ArgumentNullException.ThrowIfNull(roles);
 
@@ -60,7 +60,7 @@ public sealed class AuthorizationProjection
     }
 
     /// <summary>Sets the users and writes them to the attached subject.</summary>
-    public void SetUsers(IReadOnlyCollection<UserSnapshot> users)
+    internal void SetUsers(IReadOnlyCollection<UserSnapshot> users)
     {
         ArgumentNullException.ThrowIfNull(users);
 

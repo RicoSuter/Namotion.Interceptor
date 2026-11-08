@@ -5,7 +5,7 @@ namespace HomeBlaze.Authentication;
 /// users no other change modifies meanwhile, such as a role deleted while it is assigned. Not reentrant. One instance
 /// is shared by both stores.
 /// </summary>
-public sealed class AuthorizationChangeGate
+internal sealed class AuthorizationChangeGate
 {
     private readonly SemaphoreSlim _semaphore = new(1, 1);
 
