@@ -21,7 +21,7 @@ HomeBlaze treats AI as a first-class concern with two complementary modes: **bui
 | Aspect | Built-in Agent | External Agent (MCP) |
 |--------|---------------|---------------------|
 | Runtime | In-process subject | Remote MCP client |
-| Tool access | `AIFunction` calls in-process (`AnthropicAgent`), or the per-turn MCP route `/mcp/agents` (`ClaudeCliAgent`); only the agent's `AllowedTools` | MCP protocol on `/mcp`, with the roles of the built-in user `MCP` (`Reader` by default) |
+| Tool access | `AIFunction` calls in-process (`AnthropicAgent`), or the per-turn MCP route `/mcp/agents` (`ClaudeCliAgent`); only the agent's `AllowedTools` | MCP protocol on `/mcp`, with the roles of the built-in user `mcp` (`reader` by default) |
 | LLM configuration | On the agent: model and effort per mode, plus the API key or the CLI path | Client-side |
 | Visibility | Visible as subject in knowledge graph | Not visible in graph |
 | Interaction | Background runs (poll, debounced change under watch paths, Run now) plus a chat | Pull only (push TBD, depends on MCP evolution) |
