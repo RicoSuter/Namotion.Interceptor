@@ -87,6 +87,28 @@ public class SubjectPathResolverPermissionsTests : SubjectPathResolverTestBase
         Assert.Null(downAgain);
     }
 
+    [Fact]
+    public void WhenTheFirstReadableParentOfANamedSubjectLeadsOutsideTheScope_ThenAnotherReadableParentLeadsToTheScope()
+    {
+        // Arrange
+        var block = new TestContainer(Context) { Name = "Block" };
+        var root = new TestPathScopeRoot(Context) { Outside = new TestContainer(Context) { Name = "Outside", Child = block } };
+        RootManager.Root = root;
+        var scope = new TestPathScope(Context) { Block = block };
+        root.Scope = scope;
+        var readable = new MemberPermissions();
+        var throughScopeHidden = new MemberPermissions(GetMember(scope, nameof(TestPathScope.Block)));
+
+        // Act
+        var forViewer = Resolver.ResolveScopedSubject("block", PathStyle.Canonical, scope, readable);
+        var hidden = Resolver.ResolveScopedSubject("block", PathStyle.Canonical, scope, throughScopeHidden);
+
+        // Assert
+        Assert.Same(root.Outside, block.TryGetRegisteredSubject()!.Parents[0].Property.Subject);
+        Assert.Same(block, forViewer);
+        Assert.Null(hidden);
+    }
+
     private static RegisteredSubjectProperty GetMember(IInterceptorSubject subject, string name) =>
         subject.TryGetRegisteredSubject()!.TryGetProperty(name)!;
 

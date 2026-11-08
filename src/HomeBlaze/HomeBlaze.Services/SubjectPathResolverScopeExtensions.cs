@@ -192,33 +192,58 @@ public static class SubjectPathResolverScopeExtensions
         resolver.ResolveScopedDisplayableProperty(path, style, from)?.GetValue();
 
     // A name stands for a subject somewhere below the scope, so a path through it reads the members that hold the subject
-    // on the way up to the scope. A subject held by more than one parent follows the first link the viewer may read.
+    // on the way up to the scope. A subject held by more than one parent tries each link the viewer may read.
     private static bool IsHeldReadablyBelow(IInterceptorSubject subject, IInterceptorSubject scope, IUserPermissions permissions)
     {
+        HashSet<IInterceptorSubject>? searched = null;
+        return IsHeldReadablyBelow(subject, scope, permissions, MaximumNamedSubjectDepth, ref searched);
+    }
+
+    // Follows a single readable parent in a loop and searches each readable parent of a subject with several. A subject
+    // with several parents is searched once, so that shared ancestors do not multiply the work; one first reached too deep
+    // to get to the scope stays refused, which fails closed.
+    private static bool IsHeldReadablyBelow(
+        IInterceptorSubject subject,
+        IInterceptorSubject scope,
+        IUserPermissions permissions,
+        int remainingDepth,
+        ref HashSet<IInterceptorSubject>? searched)
+    {
         var current = subject;
-        for (var depth = 0; depth < MaximumNamedSubjectDepth; depth++)
+        for (; remainingDepth > 0; remainingDepth--)
         {
             if (ReferenceEquals(current, scope))
             {
                 return true;
             }
 
-            IInterceptorSubject? next = null;
-            foreach (var parent in current.TryGetRegisteredSubject()?.Parents ?? [])
+            var parents = current.TryGetRegisteredSubject()?.Parents ?? [];
+            if (parents.Length > 1)
             {
-                if (permissions.CanRead(parent.Property))
+                searched ??= new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
+                if (!searched.Add(current))
                 {
-                    next = parent.Property.Subject;
-                    break;
+                    return false;
                 }
+
+                foreach (var parent in parents)
+                {
+                    if (permissions.CanRead(parent.Property) &&
+                        IsHeldReadablyBelow(parent.Property.Subject, scope, permissions, remainingDepth - 1, ref searched))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
             }
 
-            if (next is null)
+            if (parents.Length == 0 || !permissions.CanRead(parents[0].Property))
             {
                 return false;
             }
 
-            current = next;
+            current = parents[0].Property.Subject;
         }
 
         return false;
