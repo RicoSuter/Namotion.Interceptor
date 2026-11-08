@@ -10,7 +10,8 @@ namespace Namotion.Interceptor.Authorization;
 /// The answer holds for one instant of the graph. When the parents or attachment of a subject the evaluation read,
 /// on the members' paths or on the way to a root, kept changing during every attempt, the answer fails closed:
 /// <see cref="IsVisible"/> and <see cref="HasReadableMember"/> are false and <see cref="DeniedProperty"/> is null,
-/// whatever the rules say.
+/// whatever the rules say. An instance that the registry of its context does not hold, such as a detached one, answers
+/// the same way.
 /// </remarks>
 public readonly record struct VisibilityDecision
 {
