@@ -210,7 +210,11 @@ public class StructureVersionTests
         Task reorder;
         lock (childrenLock)
         {
-            reorder = Task.Run(() => root.Children = [second, first]);
+            // A dedicated thread, because this test holds its thread-pool worker while it waits, and a work item queued
+            // from there may not start within the timeout while concurrent tests hold every other worker.
+            reorder = Task.Factory.StartNew(
+                () => root.Children = [second, first],
+                CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
             SpinWait.SpinUntil(() => registry.StructureVersion % 2 == 1 || reorder.IsCompleted, TimeSpan.FromSeconds(30));
             observedDuringChange = registry.StructureVersion;
         }
