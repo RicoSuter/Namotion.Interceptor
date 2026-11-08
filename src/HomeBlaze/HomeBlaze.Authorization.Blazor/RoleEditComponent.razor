@@ -15,7 +15,9 @@
 @if (Role is { } role)
 {
     var checks = GetChecks();
-    var canSave = _heldRole is { } heldRole && Permissions.CanInvokeEditOperation(heldRole);
+    var currentRole = GetCurrentRole();
+    var canSave = currentRole is not null && Permissions.CanInvokeEditOperation(currentRole);
+    var shownSaveError = _saveError ?? (currentRole is null && _name is not null ? GetChangedMessage(_name) : null);
     var canAdministerRoles = Permissions.CanAdministerRoles(_authorization);
     <div class="role-edit" data-testid="role-edit">
         @if (checks.Preview.Error is { } error)
@@ -26,7 +28,7 @@
         {
             <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2" data-testid="role-edit-warning">@warning</MudAlert>
         }
-        @if (_saveError is { } saveError)
+        @if (shownSaveError is { } saveError)
         {
             <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2" data-testid="role-edit-save-error">@saveError</MudAlert>
         }
@@ -167,7 +169,7 @@
     // Saving a role replaces Authorization.Roles, which keeps its subject while the role subjects are replaced.
     private Authorization? _authorization;
 
-    // The role subject whose rules the editor saves over, which the next save goes through; see SaveAsync.
+    // The role subject whose rules the editor saves over, which the next save goes through; see GetCurrentRole.
     private Role? _heldRole;
     private string? _saveError;
     private string[] _excluded = [];
@@ -268,7 +270,7 @@
     /// <exception cref="InvalidOperationException">The role has invalid rules, which the host does not save.</exception>
     public async Task<bool> SaveAsync(CancellationToken cancellationToken)
     {
-        if (_heldRole is not { } role)
+        if (_heldRole is null)
         {
             return false;
         }
@@ -285,10 +287,9 @@
             throw new InvalidOperationException("The role has invalid rules and cannot be saved.");
         }
 
-        // The store replaces every role subject on a change, which leaves this one without its edit operation.
-        if (role.FindParent().Authorization is null && _name is not null)
+        if (GetCurrentRole() is not { } role)
         {
-            return ShowSaveError($"The role '{_name}' changed since you opened it.");
+            return ShowSaveError(GetChangedMessage(_name!));
         }
 
         var editedRole = GetEditedRole();
@@ -305,7 +306,8 @@
         // The store replaced every role subject. A subject that holds other rules than the saved ones comes from a change
         // made after this save, which the next save then refuses to overwrite.
         if (_authorization is not null && _name is not null &&
-            _authorization.Roles.TryGetValue(_name, out var savedRole) && HasRules(savedRole, editedRole))
+            _authorization.Roles.TryGetValue(_name, out var savedRole) &&
+            HasRules(savedRole, editedRole.Includes, editedRole.Allow, editedRole.Deny))
         {
             _heldRole = savedRole;
         }
@@ -316,10 +318,32 @@
         return true;
     }
 
-    private static bool HasRules(Role role, AuthorizationRole rules) =>
-        role.Includes.SequenceEqual(rules.Includes, StringComparer.Ordinal) &&
-        role.Allow.SequenceEqual(rules.Allow) &&
-        role.Deny.SequenceEqual(rules.Deny);
+    // The store replaces every role subject on any change of a role, which leaves the held one without its edit operation.
+    // The subject that replaced it is saved through while it has the rules the held one has, as after a change of another
+    // role; null when the role changed since or is gone.
+    private Role? GetCurrentRole()
+    {
+        if (_heldRole is not { } heldRole || _name is null || heldRole.FindParent().Authorization is not null)
+        {
+            return _heldRole;
+        }
+
+        if (_authorization is not null && _authorization.Roles.TryGetValue(_name, out var currentRole) &&
+            HasRules(currentRole, heldRole.Includes, heldRole.Allow, heldRole.Deny))
+        {
+            _heldRole = currentRole;
+            return currentRole;
+        }
+
+        return null;
+    }
+
+    private static string GetChangedMessage(string name) => $"The role '{name}' changed since you opened it.";
+
+    private static bool HasRules(Role role, IEnumerable<string> includes, IEnumerable<PermissionRule> allow, IEnumerable<PermissionRule> deny) =>
+        role.Includes.SequenceEqual(includes, StringComparer.Ordinal) &&
+        role.Allow.SequenceEqual(allow) &&
+        role.Deny.SequenceEqual(deny);
 
     // The host keeps the dialog open when the save fails, and shows the message besides the one in the dialog.
     async Task ISubjectEditComponent.SaveAsync(CancellationToken cancellationToken)

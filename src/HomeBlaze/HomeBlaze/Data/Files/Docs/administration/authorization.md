@@ -246,7 +246,7 @@ The property panel of a role shows these values:
 
 Role names compare exactly, see [Names](#names). A saved change applies to the next tool call of each agent, also within a running turn, and to the open pages of people at once, as a whole: nobody gets a part of the changes of one save.
 
-When a role was changed by someone else since you opened its dialog, "Save" does not overwrite their change. It shows "The role 'light-operator' changed since you opened it."; close the dialog, open it again and repeat the change.
+When a role was changed by someone else since you opened its dialog, "Save" does not overwrite their change. The dialog shows "The role 'light-operator' changed since you opened it." and no longer accepts changes; close the dialog, open it again and repeat the change. A change of another role meanwhile does not affect the open dialog.
 
 ---
 

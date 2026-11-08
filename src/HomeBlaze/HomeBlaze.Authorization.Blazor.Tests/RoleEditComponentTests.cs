@@ -460,6 +460,45 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     }
 
     [Fact]
+    public async Task WhenAnotherRoleChangesWhileTheEditorIsOpen_ThenItStaysEditableAndSavesThroughTheNewSubjectOfTheRole()
+    {
+        // Arrange: the store replaces every role subject on each change.
+        var opened = Graph.GetRole("kitchen");
+        var component = RenderEditor(opened);
+        await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
+        await SetActionAsync(component, 0, "read", true);
+        Graph.SetRole("garden", includes: [BuiltInRoles.ReaderName]);
+        component.Render();
+
+        // Act
+        var saved = await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+
+        // Assert
+        Assert.NotSame(opened, Graph.GetRole("kitchen"));
+        Assert.True(saved);
+        Assert.Equal("kitchen", Assert.Single(Graph.RoleStore.Saves).OriginalName);
+        Assert.Equal([new PermissionRule { Actions = [PermissionAction.Read] }], Graph.GetRole("kitchen").Allow);
+        Assert.Empty(component.FindAll("[data-testid='role-edit-save-error']"));
+    }
+
+    [Fact]
+    public void WhenTheRoleChangesWhileTheEditorIsOpen_ThenTheEditorSaysSoAndIsReadOnly()
+    {
+        // Arrange
+        var component = RenderEditor(Graph.GetRole("kitchen"));
+
+        // Act
+        Graph.SetRole("kitchen", includes: [BuiltInRoles.ReaderName]);
+        component.Render();
+
+        // Assert
+        Assert.Contains("The role 'kitchen' changed since you opened it.", component.Find("[data-testid='role-edit-save-error']").TextContent);
+        Assert.All(
+            component.FindAll("[data-testid='role-edit-tabs'] button[data-testid]").Where(IsOutsideThePreview),
+            button => Assert.True(button.HasAttribute("disabled")));
+    }
+
+    [Fact]
     public async Task WhenTheRoleIsSaved_ThenTheStoreReceivesItUnderItsNameWithItsStamp()
     {
         // Arrange

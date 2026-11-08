@@ -2,6 +2,7 @@ using Bunit;
 using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Components.Tests.Access;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Components;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
@@ -49,6 +50,7 @@ public abstract class RoleEditorTestContext : BunitContext, IAsyncLifetime
         var typeProvider = new TypeProvider();
         typeProvider.AddTypes([typeof(Role), typeof(TestRoot)]);
         Services.AddSingleton(new SubjectTypeCatalog(new SubjectTypeRegistry(typeProvider)));
+        Services.AddSingleton(new SubjectComponentRegistry(new TypeProvider().AddAssembly(typeof(RoleEditComponent).Assembly)));
 
         PopoverProvider = Render<MudPopoverProvider>();
     }

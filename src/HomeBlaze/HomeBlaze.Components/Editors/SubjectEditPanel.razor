@@ -64,9 +64,10 @@
     private bool _isSubjectComponentRendered;
     private ISubjectEditComponent? _subscribedEditComponent;
 
-    // Read when the subject is set, as a save through the edit operation may replace the subject, which then has no
-    // registered operations anymore.
+    // Read when the subject is set, as a save through the edit operation, also one of another subject, may replace the
+    // subject, which then has no registered members anymore.
     private bool _hasEditOperation;
+    private bool _hasConfigurationMembers;
     private ConfigurationPropertiesEditor? _propertiesEditor;
     private bool? _reportedIsValid;
     private Func<Task> _refreshIsValid = () => Task.CompletedTask;
@@ -120,6 +121,7 @@
         {
             _editedSubject = Subject;
             _hasEditOperation = Subject?.TryGetRegisteredSubject()?.GetEditOperation(ExclusionTarget.UserInterface) is not null;
+            _hasConfigurationMembers = Subject?.HasConfigurationProperties() == true;
 
             // The editor of the previous subject is replaced with the next render, and must not answer for the new one until then.
             SubscribeTo(null);
@@ -282,12 +284,18 @@
     /// <see cref="RegisteredSubjectMethodExtensions.CanSaveThroughEditOperation"/>, which decides each save again, and a
     /// hosted component of a file checks the content it writes itself. Otherwise the viewer needs to administer the
     /// configuration of the subject, see <see cref="UserPermissionsExtensions.CanAdministerConfiguration"/>, which requires
-    /// at least one configuration member.
+    /// at least one configuration member. A subject that was replaced since it was set, such as a role after a change of
+    /// any role, is left to its Edit component, which saves through the edit operation of the subject that replaced it, if
+    /// any, and reports why it does not.
     /// </summary>
     private bool CanSave(IInterceptorSubject subject) =>
         (HostedComponentType is not null && subject is IStorageFile) ||
-        (HostedComponentType == SubjectComponentType.Edit && Permissions.CanSaveThroughEditOperation(subject)) ||
+        (HostedComponentType == SubjectComponentType.Edit &&
+         (Permissions.CanSaveThroughEditOperation(subject) || IsReplacedSubjectWithoutConfiguration(subject))) ||
         Permissions.CanAdministerConfiguration(subject);
+
+    private bool IsReplacedSubjectWithoutConfiguration(IInterceptorSubject subject) =>
+        _hasEditOperation && !_hasConfigurationMembers && subject.TryGetRegisteredSubject() is null;
 
     private bool Refuse()
     {
