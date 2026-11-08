@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.History;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage.Abstractions.Metadata;
@@ -234,7 +235,7 @@ public class StorageMetadataApplyTests : StorageTestBase
         await storage.SetMetadataAsync("Shelly/Channels[1]", null, Values("""{ "tags": ["floor-2"] }"""), CancellationToken.None);
 
         // Act
-        var matches = storage.SearchMetadata("floor-2", null, null, path);
+        var matches = storage.SearchMetadata("floor-2", null, null, path, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(expectedPaths, matches.Select(match => match.Path));

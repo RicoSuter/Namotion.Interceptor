@@ -140,7 +140,7 @@ internal sealed class MarkdownSearchSourceFinder
             return _configuration.PathPrefix;
         }
 
-        return subject.Parents.Length == 0 || AgentMetadataAccess.IsOfExcludedType(subject, root.Subject, _configuration.ExcludeTypes)
+        return subject.Parents.Length == 0 || McpPageReadAccess.IsOfExcludedType(subject, root.Subject, _configuration.ExcludeTypes)
             ? null
             : _configuration.TryGetSubjectPath(root, subject);
     }

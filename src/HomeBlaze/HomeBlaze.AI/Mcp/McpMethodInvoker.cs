@@ -27,7 +27,6 @@ internal sealed class McpMethodInvoker
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger _logger;
     private readonly Func<RegisteredSubject, MethodMetadata, object?[], string?>? _operationFilter;
-    private readonly Func<RegisteredSubject, MethodMetadata, object?[], object?, object?>? _resultFilter;
     private readonly McpPageReadAccess _pageReadAccess;
     private readonly ReaderServiceProvider _operationServices;
 
@@ -39,22 +38,18 @@ internal sealed class McpMethodInvoker
     /// <param name="serviceProvider">Resolves the services that the methods take, except <see cref="IUserPermissions"/>.</param>
     /// <param name="logger">Logs failed calls.</param>
     /// <param name="operationFilter">Gets why a call of an operation with the given arguments is refused, or null when it is not.</param>
-    /// <param name="resultFilter">Gets the result that the caller is given in place of the result of a method called with
-    /// the given input arguments; null passes every result on.</param>
     public McpMethodInvoker(
         Func<IInterceptorSubject> rootSubjectProvider,
         McpServerConfiguration configuration,
         IServiceProvider serviceProvider,
         ILogger logger,
-        Func<RegisteredSubject, MethodMetadata, object?[], string?>? operationFilter,
-        Func<RegisteredSubject, MethodMetadata, object?[], object?, object?>? resultFilter = null)
+        Func<RegisteredSubject, MethodMetadata, object?[], string?>? operationFilter)
     {
         _rootSubjectProvider = rootSubjectProvider;
         _configuration = configuration;
         _serviceProvider = serviceProvider;
         _logger = logger;
         _operationFilter = operationFilter;
-        _resultFilter = resultFilter;
         _pageReadAccess = McpPageReadAccess.Create(configuration);
         _operationServices = new ReaderServiceProvider(serviceProvider, DenyAllPermissions.Instance);
     }
@@ -140,7 +135,7 @@ internal sealed class McpMethodInvoker
                 : _operationServices;
             var result = await method.InvokeAsync(arguments, services, cancellationToken);
 
-            result = MethodResultLimit.Apply(_resultFilter is null ? result : _resultFilter(subject, method, arguments ?? [], result));
+            result = MethodResultLimit.Apply(result);
             return result is not null ? new { success = true, result } : new { success = true };
         }
         catch (ArgumentException exception)

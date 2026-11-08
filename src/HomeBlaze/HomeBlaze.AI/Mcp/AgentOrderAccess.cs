@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.Text.Json;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services.Metadata;
@@ -15,9 +14,9 @@ namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
 /// The order of the children of a folder or of the root of a storage that the tools let their clients read and change:
-/// GetOrder, the order in the metadata of the folder and its ChildOrder name only the children that the tools list,
-/// SetOrder needs write access to the metadata of the folder, and an order that names a child the tools do not list is
-/// refused as one naming a child that does not exist.
+/// the order in the metadata of the folder and its ChildOrder name only the children that the tools list, SetOrder needs
+/// write access to the metadata of the folder, and an order that names a child the tools do not list is refused as one
+/// naming a child that does not exist.
 /// </summary>
 internal static class AgentOrderAccess
 {
@@ -25,24 +24,8 @@ internal static class AgentOrderAccess
     internal const string SetOrderMethodName = "SetOrder";
 
     /// <summary>
-    /// Gets the names of the result of GetOrder of a folder or of the root of a storage that are children the tools
-    /// list, in their order; any other result is returned unchanged.
-    /// </summary>
-    public static object? FilterGetOrderResult(
-        RegisteredSubject subject, MethodMetadata method, object? result, McpServerConfiguration configuration, IInterceptorSubject root)
-    {
-        if (method.PropertyName != nameof(FluentStorageContainer.GetOrder) || subject.Subject is not IMetadataContainer || result is not string[] names)
-        {
-            return result;
-        }
-
-        var listedNames = GetListedChildNames(subject, configuration, root);
-        return names.Where(listedNames.Contains).ToArray();
-    }
-
-    /// <summary>
     /// Creates the value filter that leaves out of the order in the metadata of a folder or of the root of a storage, and
-    /// out of its ChildOrder, the names of the children that the tools do not list, as GetOrder does, so that the tools
+    /// out of its ChildOrder, the names of the children that the tools do not list, so that the tools
     /// and page expressions name no hidden child.
     /// </summary>
     public static IMcpValueFilter CreateOrderFilter(McpServerConfiguration configuration, Func<IInterceptorSubject> rootSubjectProvider)
@@ -126,7 +109,7 @@ internal static class AgentOrderAccess
         => path is not null &&
             configuration.TryGetReadableSubject(root, path) is { } listed &&
             ReferenceEquals(listed.Subject, child) &&
-            !AgentMetadataAccess.IsOfExcludedType(listed, folder.Subject, configuration.ExcludeTypes);
+            !McpPageReadAccess.IsOfExcludedType(listed, folder.Subject, configuration.ExcludeTypes);
 
     // The path that the tools build for the folder.
     private static string GetToolPath(RegisteredSubject folder, McpServerConfiguration configuration, IInterceptorSubject root)

@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Abstractions.Metadata;
@@ -128,10 +129,15 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
         => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
 
-    /// <summary>Gets the names of the children of this folder in the order in which they are shown, for agents.</summary>
+    /// <summary>
+    /// Gets the names of the children of this folder that the reader is shown, in the order in which they are shown, for
+    /// agents.
+    /// </summary>
+    /// <param name="permissions">The permissions of the reader; null shows no child.</param>
     [Query(Title = "Get Order", Description = StorageMetadataMethods.GetOrderDescription, Position = 3)]
     [ExcludeFrom(ExclusionTarget.UserInterface)]
-    public string[] GetOrder() => ChildOrdering.GetShownNames(this);
+    public string[] GetOrder([FromServices] IUserPermissions? permissions)
+        => permissions is null ? [] : StorageMetadataMethods.GetOrder(this, permissions);
 
     /// <summary>
     /// Sets the order of the children of this folder, for agents: see <see cref="MetadataStoreExtensions.SetOrderAsync"/>.

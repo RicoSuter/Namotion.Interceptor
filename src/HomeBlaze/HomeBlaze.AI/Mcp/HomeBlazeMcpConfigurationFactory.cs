@@ -34,11 +34,12 @@ internal static class HomeBlazeMcpConfigurationFactory
     /// <paramref name="accessPolicy"/> allows to read and invoke only the methods it allows to execute. invoke_operation and
     /// the Markdown tools refuse SetMetadata of a storage with arguments of another shape, for a subject or property that
     /// the tools do not list, which is refused as a missing one, and for metadata that the policy does not allow to write.
-    /// SearchMetadata of a storage and search_markdown leave out the metadata and notes of the subjects and properties that
-    /// the tools do not list and those that the policy does not allow to read, also where only a hidden child in the order
-    /// of a folder matches. GetOrder of a folder, and the order in its metadata and its ChildOrder as the tools and page
-    /// expressions show them, name only the children that the tools list, SetOrder needs write access to the metadata of the
-    /// folder, and an order that names a child the tools do not list is refused as one naming a child that does not exist.
+    /// A query reads with the permissions of the policy (see <see cref="McpMethodInvoker"/>), so SearchMetadata of a storage
+    /// and GetOrder of a folder find only what those permissions show, and search_markdown leaves out the notes of the
+    /// subjects and properties that the tools do not list and those that the policy does not allow to read. The order in
+    /// the metadata of a folder and its ChildOrder, as the tools and page expressions show them, name only the children that
+    /// the tools list, SetOrder needs write access to the metadata of the folder, and an order that names a child the tools
+    /// do not list is refused as one naming a child that does not exist.
     /// </summary>
     /// <param name="serviceProvider">Services; must contain <see cref="SubjectTypeRegistry"/> and <see cref="ILoggerFactory"/>.</param>
     /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
@@ -85,10 +86,7 @@ internal static class HomeBlazeMcpConfigurationFactory
             configuration,
             serviceProvider,
             serviceProvider.GetRequiredService<ILoggerFactory>().CreateLogger<McpMethodInvoker>(),
-            (subject, method, arguments) => AgentMetadataAccess.GetOperationError(subject, method, arguments, configuration, rootSubjectProvider()),
-            (subject, method, arguments, result) => AgentOrderAccess.FilterGetOrderResult(
-                subject, method, AgentMetadataAccess.FilterSearchMetadataResult(subject, method, arguments, result, configuration),
-                configuration, rootSubjectProvider()));
+            (subject, method, arguments) => AgentMetadataAccess.GetOperationError(subject, method, arguments, configuration, rootSubjectProvider()));
         configuration.ToolProviders.Add(new HomeBlazeMcpToolProvider(invoker));
         configuration.ToolProviders.Add(new HomeBlazeMarkdownToolProvider(invoker));
         configuration.ToolProviders.Add(new HomeBlazeMarkdownSearchToolProvider(rootSubjectProvider, configuration));

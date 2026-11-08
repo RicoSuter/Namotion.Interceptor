@@ -7,6 +7,7 @@ using FluentStorage.Storage;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage.Abstractions;
@@ -862,29 +863,35 @@ public partial class FluentStorageContainer :
         => StorageMetadataMethods.RunAsync(() => MetadataStore.SetMetadataAsync(path, property, values, cancellationToken));
 
     /// <summary>
-    /// Finds the subjects and properties in this storage whose metadata matches every filter that is given, for agents:
-    /// see <see cref="MetadataSearch.Search"/>.
+    /// Finds the subjects and properties in this storage whose metadata the reader may read and, as the reader is shown
+    /// it, matches every filter that is given, for agents: see <see cref="MetadataSearch.Search"/>.
     /// </summary>
+    /// <param name="tag">A tag in the tags of the metadata, or null.</param>
+    /// <param name="key">A key that is set in the metadata, or null.</param>
+    /// <param name="value">A string value, or a string in an array, of <paramref name="key"/>, else of any key, or null.</param>
+    /// <param name="path">The path of a subject relative to this storage that the matches are at or below, or null.</param>
+    /// <param name="permissions">The permissions of the reader; null finds nothing.</param>
     /// <returns>
-    /// Every match, in order, with the path of its subject relative to this storage, as <see cref="SetMetadataAsync(string, string?, JsonElement, CancellationToken)"/>
+    /// The first 100 matches, in order, with the path of its subject relative to this storage, as <see cref="SetMetadataAsync(string, string?, JsonElement, CancellationToken)"/>
     /// takes it; none when <paramref name="path"/> is given and <see cref="ResolveMetadataPath"/> resolves it to no subject.
     /// </returns>
     [Query(Title = "Search Metadata", Description = StorageMetadataMethods.SearchMetadataDescription, Position = 6)]
     [ExcludeFrom(ExclusionTarget.UserInterface)]
-    public MetadataSearchMatch[] SearchMetadata(string? tag, string? key, string? value, string? path)
+    public MetadataSearchMatch[] SearchMetadata(string? tag, string? key, string? value, string? path, [FromServices] IUserPermissions? permissions)
     {
         var start = path is null ? this : ResolveMetadataPath(this, path);
-        return start is null ? [] : [.. MetadataSearch.Search(this, IncludeAllMetadata, tag, key, value, start)];
+        return start is null || permissions is null ? [] : StorageMetadataMethods.Search(this, start, tag, key, value, permissions);
     }
 
-    // Every match is returned: an agent or client of the server gets the matches only through AgentMetadataAccess, which
-    // filters them for its roles, and the UI does not offer this query.
-    private static bool IncludeAllMetadata(RegisteredSubjectProperty member) => true;
-
-    /// <summary>Gets the names of the children of this storage in the order in which they are shown, for agents.</summary>
+    /// <summary>
+    /// Gets the names of the children of this storage that the reader is shown, in the order in which they are shown,
+    /// for agents.
+    /// </summary>
+    /// <param name="permissions">The permissions of the reader; null shows no child.</param>
     [Query(Title = "Get Order", Description = StorageMetadataMethods.GetOrderDescription, Position = 4)]
     [ExcludeFrom(ExclusionTarget.UserInterface)]
-    public string[] GetOrder() => ChildOrdering.GetShownNames(this);
+    public string[] GetOrder([FromServices] IUserPermissions? permissions)
+        => permissions is null ? [] : StorageMetadataMethods.GetOrder(this, permissions);
 
     /// <summary>
     /// Sets the order of the children of this storage, for agents: see
