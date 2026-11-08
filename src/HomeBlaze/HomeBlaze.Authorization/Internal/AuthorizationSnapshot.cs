@@ -86,7 +86,8 @@ internal sealed class AuthorizationSnapshot
         var authorizationStatuses = ImmutableArray.CreateBuilder<(Authorization, string?)>(authorizations.Count);
         var roleStatuses = ImmutableArray.CreateBuilder<(Role, string, string?, string?)>();
         var unavailableRoles = new Dictionary<string, string>(StringComparer.Ordinal);
-        var customRoles = new List<KeyValuePair<string, Role>>();
+        List<KeyValuePair<string, Role>> customRoles = [];
+        var allRoles = BuiltInRoles.All;
         string? customRolesError = null;
 
         if (authorizations.Count > 1)
@@ -108,40 +109,15 @@ internal sealed class AuthorizationSnapshot
         else if (authorizations.Count == 1)
         {
             authorizationStatuses.Add((authorizations[0], null));
-            var roles = GetRoles(authorizations[0], roleStatuses);
-            var countsByName = new Dictionary<string, int>(StringComparer.Ordinal);
-            foreach (var (name, _) in roles)
-            {
-                countsByName[name] = countsByName.GetValueOrDefault(name) + 1;
-            }
-
-            foreach (var entry in roles)
-            {
-                var nameError = GetNameError(entry.Key, countsByName[entry.Key]);
-                if (nameError is null)
-                {
-                    customRoles.Add(entry);
-                    continue;
-                }
-
-                roleStatuses.Add((entry.Value, entry.Key, nameError, null));
-                if (!BuiltInRoles.IsBuiltIn(entry.Key))
-                {
-                    unavailableRoles.TryAdd(entry.Key, nameError);
-                }
-            }
+            (customRoles, allRoles) = ClassifyByName(
+                GetRoles(authorizations[0], roleStatuses),
+                static entry => entry.Key,
+                static entry => ToAuthorizationRole(entry.Key, entry.Value),
+                unavailableRoles,
+                (entry, nameError) => roleStatuses.Add((entry.Value, entry.Key, nameError, null)));
         }
 
-        customRoles.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Key, right.Key));
-
-        var allRoles = ImmutableArray.CreateBuilder<AuthorizationRole>(BuiltInRoles.All.Length + customRoles.Count);
-        allRoles.AddRange(BuiltInRoles.All);
-        foreach (var (name, role) in customRoles)
-        {
-            allRoles.Add(ToAuthorizationRole(name, role));
-        }
-
-        var snapshot = new AuthorizationSnapshot(version, pathProvider, allRoles.MoveToImmutable(), unavailableRoles, customRolesError);
+        var snapshot = new AuthorizationSnapshot(version, pathProvider, allRoles, unavailableRoles, customRolesError);
 
         snapshot.AddCustomRoleStatuses(customRoles, knownSubjects, roleStatuses);
         snapshot.AuthorizationStatuses = authorizationStatuses.ToImmutable();
@@ -156,32 +132,55 @@ internal sealed class AuthorizationSnapshot
     /// </summary>
     public static AuthorizationSnapshot BuildCandidate(IReadOnlyList<AuthorizationRole> customRoles, PathProviderBase pathProvider)
     {
+        var unavailableRoles = new Dictionary<string, string>(StringComparer.Ordinal);
+        var (_, allRoles) = ClassifyByName(customRoles, static role => role.Name, static role => role, unavailableRoles, onNameError: null);
+        return new AuthorizationSnapshot(UnreadableVersion, pathProvider, allRoles, unavailableRoles, customRolesError: null);
+    }
+
+    // The custom roles whose name can be used, ordered by name, and the built-in roles followed by those. Each other one
+    // is passed to onNameError with the reason, and added to unavailableRoles unless its name is that of a built-in role,
+    // which then means the built-in role.
+    private static (List<T> Usable, ImmutableArray<AuthorizationRole> AllRoles) ClassifyByName<T>(
+        IReadOnlyList<T> roles,
+        Func<T, string> getName,
+        Func<T, AuthorizationRole> toRole,
+        Dictionary<string, string> unavailableRoles,
+        Action<T, string>? onNameError)
+    {
         var countsByName = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var role in customRoles)
+        foreach (var role in roles)
         {
-            countsByName[role.Name] = countsByName.GetValueOrDefault(role.Name) + 1;
+            var name = getName(role);
+            countsByName[name] = countsByName.GetValueOrDefault(name) + 1;
         }
 
-        var unavailableRoles = new Dictionary<string, string>(StringComparer.Ordinal);
-        var usableRoles = new List<AuthorizationRole>(customRoles.Count);
-        foreach (var role in customRoles)
+        var usableRoles = new List<T>(roles.Count);
+        foreach (var role in roles)
         {
-            if (GetNameError(role.Name, countsByName[role.Name]) is not { } nameError)
+            var name = getName(role);
+            if (GetNameError(name, countsByName[name]) is not { } nameError)
             {
                 usableRoles.Add(role);
+                continue;
             }
-            else if (!BuiltInRoles.IsBuiltIn(role.Name))
+
+            onNameError?.Invoke(role, nameError);
+            if (!BuiltInRoles.IsBuiltIn(name))
             {
-                unavailableRoles.TryAdd(role.Name, nameError);
+                unavailableRoles.TryAdd(name, nameError);
             }
         }
 
-        usableRoles.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Name, right.Name));
+        usableRoles.Sort((left, right) => StringComparer.Ordinal.Compare(getName(left), getName(right)));
 
         var allRoles = ImmutableArray.CreateBuilder<AuthorizationRole>(BuiltInRoles.All.Length + usableRoles.Count);
         allRoles.AddRange(BuiltInRoles.All);
-        allRoles.AddRange(usableRoles);
-        return new AuthorizationSnapshot(UnreadableVersion, pathProvider, allRoles.MoveToImmutable(), unavailableRoles, customRolesError: null);
+        foreach (var role in usableRoles)
+        {
+            allRoles.Add(toRole(role));
+        }
+
+        return (usableRoles, allRoles.MoveToImmutable());
     }
 
     /// <summary>The version of a snapshot that could not read the roles, which no version of the graph has.</summary>
