@@ -201,6 +201,24 @@ public class MarkdownReadAccessTests
         Assert.Equal("Power: []", GetLastLine(evaluated));
     }
 
+    [Fact]
+    public async Task WhenTheReaderMayNotReadThePropertyThatHoldsABlock_ThenAPathThroughItRendersEmptyAlsoWhenTheBlockIsShown()
+    {
+        // Arrange
+        var (_, page) = await AddPageAsync("Absolute: [{{ /page.md/meter/Power }}], named: [{{ meter/Power }}]");
+        var meter = page.Children.Values.OfType<TestMeter>().Single().TryGetRegisteredSubject()!;
+        var holdingMember = meter.Parents[0].Property;
+        var permissions = new ReadablePermissions(property => property != holdingMember);
+
+        // Act
+        var evaluated = page.ReadEvaluatedContent(permissions);
+        var evaluatedUnrestricted = page.ReadEvaluatedContent(UnrestrictedPermissions.Instance);
+
+        // Assert
+        Assert.Equal("Absolute: [], named: []", GetLastLine(evaluated));
+        Assert.Equal("Absolute: [1.23 kW], named: [1.23 kW]", GetLastLine(evaluatedUnrestricted));
+    }
+
     // May do everything except read the properties the predicate refuses and see the subjects the other one refuses.
     private sealed class ReadablePermissions(Func<RegisteredSubjectProperty, bool> canRead, Func<RegisteredSubject, bool>? canShow = null) : IUserPermissions
     {

@@ -185,7 +185,7 @@ internal static class SubjectTableRows
         RegisteredSubjectProperty? property;
         try
         {
-            property = resolver.ResolveScopedDisplayableProperty(source, PathStyle.Canonical, widget);
+            property = resolver.ResolveScopedDisplayableProperty(source, PathStyle.Canonical, widget, permissions);
         }
         catch
         {
@@ -208,7 +208,16 @@ internal static class SubjectTableRows
         }
 
         // The property the source ends at, if any, was checked for the viewer above.
-        var subject = ValueReader.ResolveSubjectUnchecked(resolver, widget, source);
+        IInterceptorSubject? subject;
+        try
+        {
+            subject = resolver.ResolveScopedSubject(source, PathStyle.Canonical, widget, permissions);
+        }
+        catch
+        {
+            return null;
+        }
+
         if (subject is null)
         {
             return null;

@@ -49,13 +49,13 @@ public readonly struct ValueBinding(RegisteredSubjectProperty? property, object?
 
         try
         {
-            if (resolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, from) is { } property)
+            if (resolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, from, permissions) is { } property)
             {
                 // Not resolved as a subject instead, which would follow a reference the viewer may not read.
                 return permissions.CanReadShown(property) ? FromProperty(property) : default;
             }
 
-            return resolver.ResolveScopedSubject(path, PathStyle.Canonical, from) is { } subject && permissions.CanShow(subject)
+            return resolver.ResolveScopedSubject(path, PathStyle.Canonical, from, permissions) is { } subject && permissions.CanShow(subject)
                 ? new ValueBinding(null, null, subject)
                 : default;
         }

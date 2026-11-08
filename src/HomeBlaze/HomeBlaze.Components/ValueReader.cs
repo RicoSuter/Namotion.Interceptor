@@ -232,8 +232,7 @@ public static class ValueReader
 
         try
         {
-            var property = resolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, widget);
-            return property is not null && permissions.CanReadShown(property) ? property : null;
+            return resolver.ResolveShownProperty(path, widget, permissions);
         }
         catch
         {
@@ -243,9 +242,8 @@ public static class ValueReader
 
     // The path of a property and that of a map are written by the author of a page, and a malformed one
     // must not take the page down. This holds for ResolveProperty above as well.
-    // Checks nothing for the viewer: only for the name of a map, which is configuration rather than a value, for a path
-    // whose property the caller already checked, and for Widget.ResolvedSubject, which no viewer sees. A path a widget
-    // shows resolves through the overload with a viewer.
+    // Checks nothing for the viewer: only for the name of a map, which is configuration rather than a value, and for
+    // Widget.ResolvedSubject, which no viewer sees. A path a widget shows resolves through the overload with a viewer.
     internal static IInterceptorSubject? ResolveSubjectUnchecked(SubjectPathResolver resolver, IInterceptorSubject widget, string path)
     {
         try
@@ -273,10 +271,10 @@ public static class ValueReader
     {
         try
         {
-            var property = resolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, widget);
+            var property = resolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, widget, permissions);
             if (property is null)
             {
-                return resolver.ResolveScopedSubject(path, PathStyle.Canonical, widget);
+                return resolver.ResolveScopedSubject(path, PathStyle.Canonical, widget, permissions);
             }
 
             if (!permissions.CanReadShown(property))
@@ -287,7 +285,7 @@ public static class ValueReader
             // A reference that was just resolved is read rather than resolved a second time.
             return property.IsSubjectReference
                 ? property.GetValue() as IInterceptorSubject
-                : resolver.ResolveScopedSubject(path, PathStyle.Canonical, widget);
+                : resolver.ResolveScopedSubject(path, PathStyle.Canonical, widget, permissions);
         }
         catch
         {

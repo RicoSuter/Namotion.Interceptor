@@ -129,6 +129,26 @@ public class SubjectTableRowsTests
     }
 
     [Theory]
+    [InlineData("../devices/Devices")]
+    [InlineData("../devices")]
+    [InlineData("/devices/Devices")]
+    public void WhenAMemberTheSourceReadsThroughIsHidden_ThenItLeadsNowhere(string source)
+    {
+        // Arrange
+        var graph = CreateGraph();
+        var root = graph.Resolver.ResolveSubject("/", PathStyle.Canonical)!;
+        var permissions = new TestUserPermissions { CannotRead = [root.TryGetRegisteredSubject()!.TryGetProperty(nameof(TestFolder.Children))!] };
+
+        // Act
+        var found = SubjectTableRows.TryGetRows(graph.Resolver, graph.Table, source, null, permissions, out var rows, out var error);
+
+        // Assert
+        Assert.False(found);
+        Assert.Empty(rows);
+        Assert.Equal($"Cannot list subjects of: {source}", error);
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData(null)]
     public void WhenSourceIsNotSet_ThenItIsAnError(string? source)

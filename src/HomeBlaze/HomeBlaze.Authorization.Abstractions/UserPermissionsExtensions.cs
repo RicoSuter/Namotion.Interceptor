@@ -100,7 +100,8 @@ public static class UserPermissionsExtensions
     /// <summary>
     /// Gets whether the user is shown the value of <paramref name="member"/> where a path leads to it: the member is
     /// readable and its subject is shown, see <see cref="IUserPermissions.CanShow"/>, so that a branch the roles hide
-    /// shows none of its values, also when a member below it is readable.
+    /// shows none of its values, also when a member below it is readable. The members a path reads through to
+    /// <paramref name="member"/> are not checked here; the resolution of the path checks them.
     /// </summary>
     /// <param name="permissions">The permissions of the user.</param>
     /// <param name="member">The member.</param>

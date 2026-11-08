@@ -29,8 +29,8 @@ internal readonly struct ValueBindingContext(
     {
         try
         {
-            var property = resolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, scope);
-            return property is null || !permissions.CanReadShown(property)
+            var property = resolver.ResolveShownProperty(path, scope, permissions);
+            return property is null
                 ? ExpressionValue.Missing
                 : ExpressionValue.FromProperty(property, permissions.GetValue(property));
         }
@@ -66,8 +66,8 @@ internal readonly struct ValueBindingContext(
 
         try
         {
-            var property = resolver.ResolveDisplayablePropertyFrom(memberPath, PathStyle.Canonical, subject);
-            return property is null || !permissions.CanReadShown(property)
+            var property = resolver.ResolveShownPropertyFrom(memberPath, subject, permissions);
+            return property is null
                 ? ExpressionValue.Missing
                 : ExpressionValue.FromProperty(property, permissions.GetValue(property));
         }

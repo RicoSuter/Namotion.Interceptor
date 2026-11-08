@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Authorization.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
@@ -27,8 +28,9 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     // Subject → canonical paths cache (with leading /), see GetStructureVersion for the version
     private readonly ConcurrentDictionary<IInterceptorSubject, (long Version, IReadOnlyList<string> Paths)> _canonicalPathsCache = new(ReferenceEqualityComparer.Instance);
 
-    // (path, style) → Subject resolve cache (absolute paths only), see GetStructureVersion for the version
-    private readonly ConcurrentDictionary<(string Path, PathStyle Style), (long Version, IInterceptorSubject? Subject)> _resolveCache = new();
+    // (path, style) → Subject resolve cache (absolute paths only) with the members the path reads through, see
+    // GetStructureVersion for the version
+    private readonly ConcurrentDictionary<(string Path, PathStyle Style), (long Version, IInterceptorSubject? Subject, RegisteredSubjectProperty[] Members)> _resolveCache = new();
 
     // In a context of its own, so that a change of the version tells only the components that read it and not the
     // observers of the graph's changes, such as connectors and the history.
@@ -63,7 +65,24 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     public IInterceptorSubject? ResolveSubject(
         string path,
         PathStyle style,
-        IInterceptorSubject? relativeTo = null)
+        IInterceptorSubject? relativeTo = null) =>
+        ResolveSubject(path, style, relativeTo, permissions: null);
+
+    /// <summary>
+    /// Resolves a subject from a path for a viewer: as <see cref="ResolveSubject(string, PathStyle, IInterceptorSubject?)"/>,
+    /// but null unless the viewer may read every member the path reads through, such as a reference, a collection or the
+    /// member of a parent that <c>..</c> goes up through, and is shown the subject that <c>..</c> leads to.
+    /// </summary>
+    /// <param name="path">The path to resolve, see <see cref="ResolveSubject(string, PathStyle, IInterceptorSubject?)"/>.</param>
+    /// <param name="style">Path style (Canonical or Route).</param>
+    /// <param name="relativeTo">Base subject for relative paths.</param>
+    /// <param name="permissions">The permissions of the viewer, or null to check nothing.</param>
+    /// <returns>The resolved subject, or null if not found or not readable through the path.</returns>
+    public IInterceptorSubject? ResolveSubject(
+        string path,
+        PathStyle style,
+        IInterceptorSubject? relativeTo,
+        IUserPermissions? permissions)
     {
         var root = _getRoot();
 
@@ -84,15 +103,27 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             if (root == null)
                 return null;
 
-            // Looked up first, so that a hit allocates nothing: every render asks for the same paths again.
+            // Looked up first, so that a hit allocates nothing: every render asks for the same paths again. The entry is
+            // computed for no viewer and keeps the members the path reads through, which are checked for the viewer.
             var key = (path, style);
             var version = GetStructureVersion(root);
-            if (_resolveCache.TryGetValue(key, out var cached) && cached.Version == version)
-                return cached.Subject;
+            if (!_resolveCache.TryGetValue(key, out var cached) || cached.Version != version)
+            {
+                var members = new List<RegisteredSubjectProperty>();
+                cached = (version, ResolveInternal(root, path[1..], style, permissions: null, members), members.ToArray());
+                _resolveCache[key] = cached;
+            }
 
-            var resolved = ResolveInternal(root, path[1..], style);
-            _resolveCache[key] = (version, resolved);
-            return resolved;
+            if (permissions is not null)
+            {
+                foreach (var member in cached.Members)
+                {
+                    if (!permissions.CanRead(member))
+                        return null;
+                }
+            }
+
+            return cached.Subject;
         }
 
         // Explicit relative: ./...
@@ -102,7 +133,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             if (baseSubject == null)
                 return null;
 
-            return ResolveInternal(baseSubject, path[2..], style);
+            return ResolveInternal(baseSubject, path[2..], style, permissions, members: null);
         }
 
         // Parent navigation: ../... or ".." alone
@@ -127,13 +158,20 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                 if (parents.Length > 1)
                     return null; // Ambiguous - multiple parents
 
+                if (permissions is not null && !permissions.CanRead(parents[0].Property))
+                    return null;
+
                 current = parents[0].Property.Subject;
             }
+
+            // The members below are checked on the way down, which shows each subject they lead to only when this one is shown.
+            if (permissions is not null && !permissions.CanShow(current))
+                return null;
 
             if (string.IsNullOrEmpty(remaining))
                 return current;
 
-            return ResolveInternal(current, remaining, style);
+            return ResolveInternal(current, remaining, style, permissions, members: null);
         }
 
         // No prefix = relative implicit
@@ -142,7 +180,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             if (baseSubject == null)
                 return null;
 
-            return ResolveInternal(baseSubject, path, style);
+            return ResolveInternal(baseSubject, path, style, permissions, members: null);
         }
     }
 
@@ -258,7 +296,13 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         return sb.ToString();
     }
 
-    private IInterceptorSubject? ResolveInternal(IInterceptorSubject baseSubject, string path, PathStyle style)
+    // Each member the path reads through is added to members and refused unless the viewer may read it.
+    private static IInterceptorSubject? ResolveInternal(
+        IInterceptorSubject baseSubject,
+        string path,
+        PathStyle style,
+        IUserPermissions? permissions,
+        List<RegisteredSubjectProperty>? members)
     {
         if (string.IsNullOrEmpty(path))
             return baseSubject;
@@ -311,6 +355,9 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                         var childSubject = SubjectPathResolverExtensions.FindChildByIndex(childrenProperty, childrenValue, segment);
                         if (childSubject is not null)
                         {
+                            if (!ReadThrough(childrenProperty, permissions, members))
+                                return null;
+
                             current = childSubject;
                             continue;
                         }
@@ -318,6 +365,9 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                 }
                 return null;
             }
+
+            if (!ReadThrough(property, permissions, members))
+                return null;
 
             var value = property.GetValue();
             if (value == null)
@@ -352,6 +402,12 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         }
 
         return current;
+    }
+
+    private static bool ReadThrough(RegisteredSubjectProperty member, IUserPermissions? permissions, List<RegisteredSubjectProperty>? members)
+    {
+        members?.Add(member);
+        return permissions?.CanRead(member) != false;
     }
 
     private IReadOnlyList<string> ComputeCanonicalPaths(IInterceptorSubject subject)

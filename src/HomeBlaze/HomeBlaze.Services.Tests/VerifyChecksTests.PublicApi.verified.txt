@@ -195,19 +195,24 @@ namespace HomeBlaze.Services
         public System.Collections.Generic.IReadOnlyList<string> GetPaths(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Abstractions.PathStyle style) { }
         public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }
         public Namotion.Interceptor.IInterceptorSubject? ResolveSubject(string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject? relativeTo = null) { }
+        public Namotion.Interceptor.IInterceptorSubject? ResolveSubject(string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject? relativeTo, HomeBlaze.Authorization.Abstractions.IUserPermissions? permissions) { }
     }
     public static class SubjectPathResolverExtensions
     {
         public static Namotion.Interceptor.IInterceptorSubject? FindChildByIndex(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, string indexStr) { }
         public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveDisplayablePropertyFrom(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject from) { }
+        public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveShownPropertyFrom(this HomeBlaze.Services.SubjectPathResolver resolver, string path, Namotion.Interceptor.IInterceptorSubject from, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions) { }
         public static object? ResolveValue(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject? relativeTo = null) { }
     }
     public static class SubjectPathResolverScopeExtensions
     {
         public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveScopedDisplayableProperty(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject from) { }
+        public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveScopedDisplayableProperty(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject from, HomeBlaze.Authorization.Abstractions.IUserPermissions? permissions) { }
         public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveScopedProperty(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject from) { }
         public static Namotion.Interceptor.IInterceptorSubject? ResolveScopedSubject(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject from) { }
+        public static Namotion.Interceptor.IInterceptorSubject? ResolveScopedSubject(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject from, HomeBlaze.Authorization.Abstractions.IUserPermissions? permissions) { }
         public static object? ResolveScopedValue(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject from) { }
+        public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveShownProperty(this HomeBlaze.Services.SubjectPathResolver resolver, string path, Namotion.Interceptor.IInterceptorSubject from, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions) { }
     }
     public static class SubjectRegistryExtensions
     {

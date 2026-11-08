@@ -339,8 +339,7 @@ public sealed partial class MarkdownContentParser
         var valueText = context.ToText(expression.Evaluate(ref context));
         if (!includeSourcePaths ||
             expression.SinglePath is not { } path ||
-            _pathResolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, parent) is not { } property ||
-            !permissions.CanReadShown(property) ||
+            _pathResolver.ResolveShownProperty(path, parent, permissions) is not { } property ||
             GetAbsolutePath(property) is not { } sourcePath)
         {
             return valueText;

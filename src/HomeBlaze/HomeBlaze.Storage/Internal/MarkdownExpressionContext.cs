@@ -30,7 +30,7 @@ internal readonly struct MarkdownExpressionContext(
         RegisteredSubjectProperty? property;
         try
         {
-            property = pathResolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, page);
+            property = pathResolver.ResolveShownProperty(path, page, permissions);
         }
         catch
         {
@@ -38,7 +38,7 @@ internal readonly struct MarkdownExpressionContext(
             return ExpressionValue.Missing;
         }
 
-        return property is null || !permissions.CanReadShown(property)
+        return property is null
             ? ExpressionValue.Missing
             : ExpressionValue.FromProperty(property, permissions.GetValue(property));
     }

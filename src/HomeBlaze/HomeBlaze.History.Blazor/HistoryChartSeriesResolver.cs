@@ -389,7 +389,7 @@ internal static partial class HistoryChartSeriesResolver
 
         try
         {
-            var property = resolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, series);
+            var property = resolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, series, permissions);
             return property is not null && permissions.CanRead(property) && permissions.CanReadHistory(property) ? property : null;
         }
         catch

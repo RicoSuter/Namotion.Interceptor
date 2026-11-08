@@ -534,7 +534,7 @@ When an agent or an `/mcp` client reads a page through the tools, a page express
 
 For an agent the policy comes from its roles; for `/mcp` clients it comes from the roles of `mcp`. The check applies to queries, such as `ReadEvaluatedContent`, which evaluate pages: they take the permissions of the reader. An operation runs with permissions that deny everything, so the change handlers, renders and background work it starts are not restricted by the caller's roles.
 
-In the browser the same rule holds for each viewer: a page expression, and a value widget bound by path, shows its value only when the viewer may read every property it read and is shown the subject of each, so a branch the roles hide shows none of its values; it renders empty otherwise. There is no general read check in the application; page methods take the reader's permissions, and a missing reader means nothing may be read.
+In the browser the same rule holds for each viewer: a page expression, and a value widget bound by path, shows its value only when the viewer may read the property and every property its path reads through, such as a reference, a collection or the member that holds a named block, and is shown the subject of the property. So a branch the roles hide shows none of its values, also when a subject in it is shown elsewhere, such as `{{ /Devices/Car/Owner/Name }}` for a role that denies `read` on `Owner` while the person is also listed under `/People`; it renders empty otherwise. There is no general read check in the application; page methods take the reader's permissions, and a missing reader means nothing may be read.
 
 ---
 

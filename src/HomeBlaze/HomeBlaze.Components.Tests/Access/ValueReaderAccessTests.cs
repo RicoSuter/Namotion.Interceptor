@@ -134,6 +134,69 @@ public class ValueReaderAccessTests
         Assert.True(hidden.IsEmpty);
     }
 
+    [Fact]
+    public void WhenAReferenceOnThePathIsNotReadable_ThenAPropertyBehindItResolvesAndReadsAsAPathThatLeadsNowhere()
+    {
+        // Arrange
+        var path = LockPath + "/" + nameof(AccessTestLock.LockState);
+        _device.Widget = _device.Lock;
+        Hide(_device, nameof(AccessTestDevice.Lock));
+
+        // Act
+        var property = ValueReader.ResolveProperty(_resolver, _device, path, _permissions);
+        var value = ValueReader.ReadValue(_resolver, _device, path, _permissions);
+        var hidden = ValueReader.Read(_resolver, _device, path, null, null, _permissions);
+        var relative = ValueReader.ReadValue(_resolver, _device, path[1..], _permissions);
+        var missing = ValueReader.Read(_resolver, _device, WidgetTestGraph.MissingPath, null, null, _permissions);
+
+        // Assert
+        Assert.Null(property);
+        Assert.Null(value);
+        Assert.Null(relative);
+        Assert.Equal(missing, hidden);
+    }
+
+    [Fact]
+    public void WhenACollectionOnThePathIsNotReadable_ThenTheSubjectInItBindsNothing()
+    {
+        // Arrange
+        var path = WidgetTestGraph.PathOf(nameof(AccessTestDevice.Devices)) + "[0]";
+        _device.Widget = _device.Devices[0];
+        var shown = ValueBinding.FromPath(_resolver, _device, path, _permissions);
+        Hide(_device, nameof(AccessTestDevice.Devices));
+
+        // Act
+        var hidden = ValueBinding.FromPath(_resolver, _device, path, _permissions);
+        var subject = ValueReader.ResolveSubject(_resolver, _device, path, _permissions);
+        var name = ValueReader.ReadValue(_resolver, _device, path + "/" + nameof(AccessTestRow.Name), _permissions);
+
+        // Assert
+        Assert.Same(_device.Devices[0], shown.Subject);
+        Assert.True(hidden.IsEmpty);
+        Assert.Null(subject);
+        Assert.Null(name);
+    }
+
+    [Fact]
+    public void WhenAReferenceOnThePathOfATextIsNotReadable_ThenTheTextDoesNotShowTheValueBehindIt()
+    {
+        // Arrange
+        _device.Widget = _device.Lock;
+        var text = new WidgetText("Label", ExpressionUse.WidgetText);
+        var template = "[{{ /Lock/LockState }}] [{{ subject/Lock/LockState }}]";
+        var binding = new ValueBinding(null, null, _device);
+        var shown = text.Render(template, _resolver, _device, binding, null, _permissions, out _);
+        Hide(_device, nameof(AccessTestDevice.Lock));
+
+        // Act
+        var hidden = text.Render(template, _resolver, _device, binding, null, _permissions, out var error);
+
+        // Assert
+        Assert.Null(error);
+        Assert.Equal("[Locked] [Locked]", shown);
+        Assert.Equal("[] []", hidden);
+    }
+
     private RegisteredSubjectProperty Hide(IInterceptorSubject subject, string name)
     {
         var property = WidgetTestGraph.GetProperty(subject, name);
