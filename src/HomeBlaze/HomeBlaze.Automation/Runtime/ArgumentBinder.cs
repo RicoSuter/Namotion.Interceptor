@@ -199,7 +199,7 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
             return false;
         }
 
-        if (!AutomationValueConverter.TryConvert(result, type, out value))
+        if (!ParameterConverter.TryConvertValue(result, type, out value))
         {
             error = $"The argument '{name}' cannot be converted to {(Nullable.GetUnderlyingType(type) ?? type).Name}: {RawValueFormatter.Format(result)}";
             return false;

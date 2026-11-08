@@ -3,6 +3,7 @@ using HomeBlaze.Automation.Runtime;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Time.Testing;
+using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.Automation.Tests.Testing;
 
@@ -114,6 +115,25 @@ internal sealed class AutomationTestHost : IAsyncDisposable
     public async Task AdvanceAsync(TimeSpan time)
     {
         Time.Advance(time);
+        await FlushAsync();
+    }
+
+    /// <summary>
+    /// Starts a run of <c>/Blinds/Wait</c> with a write of <c>/Weather/Power</c>, replaces the sensor of a holder at
+    /// <c>/Holder</c> while the worker is busy, a change of the graph that moves no path of the rules, and advances the
+    /// fake time by <paramref name="time"/>; then ends the run and waits until the automation processed what was queued
+    /// meanwhile. Needs a rule that calls <c>/Blinds/Wait</c> when <c>/Weather/Power</c> is positive.
+    /// </summary>
+    public async Task ChangeTheGraphWhileBusyAsync(TimeSpan time)
+    {
+        var holder = new TestSensorHolder { Sensor = new TestSensor() };
+        Graph.Add("Holder", holder);
+        await FlushAsync();
+        Weather.Power = 1;
+        await AsyncTestHelpers.WaitUntilAsync(() => Blinds.IsWaiting);
+        holder.Sensor = new TestSensor();
+        Time.Advance(time);
+        Blinds.Release();
         await FlushAsync();
     }
 

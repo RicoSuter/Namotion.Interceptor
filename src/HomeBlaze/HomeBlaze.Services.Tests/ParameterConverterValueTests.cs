@@ -1,10 +1,9 @@
 using HomeBlaze.Abstractions.Messaging;
 using HomeBlaze.Abstractions.Sensors;
-using HomeBlaze.Automation.Runtime;
 
-namespace HomeBlaze.Automation.Tests.Runtime;
+namespace HomeBlaze.Services.Tests;
 
-public class AutomationValueConverterTests
+public class ParameterConverterValueTests
 {
     [Theory]
     [InlineData(9.6, typeof(int), 10)]
@@ -16,7 +15,7 @@ public class AutomationValueConverterTests
     public void WhenAValueFitsTheType_ThenItIsConverted(object value, Type type, object expected)
     {
         // Act
-        var isConverted = AutomationValueConverter.TryConvert(value, type, out var converted);
+        var isConverted = ParameterConverter.TryConvertValue(value, type, out var converted);
 
         // Assert
         Assert.True(isConverted);
@@ -32,7 +31,7 @@ public class AutomationValueConverterTests
     public void WhenAValueDoesNotFitTheType_ThenItIsNotConverted(object value, Type type)
     {
         // Act
-        var isConverted = AutomationValueConverter.TryConvert(value, type, out _);
+        var isConverted = ParameterConverter.TryConvertValue(value, type, out _);
 
         // Assert
         Assert.False(isConverted);
@@ -42,7 +41,7 @@ public class AutomationValueConverterTests
     public void WhenADurationIsConvertedToADuration_ThenItIsKept()
     {
         // Act
-        var isConverted = AutomationValueConverter.TryConvert(TimeSpan.FromMinutes(5), typeof(TimeSpan?), out var converted);
+        var isConverted = ParameterConverter.TryConvertValue(TimeSpan.FromMinutes(5), typeof(TimeSpan?), out var converted);
 
         // Assert
         Assert.True(isConverted);

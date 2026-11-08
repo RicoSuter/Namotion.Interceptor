@@ -73,20 +73,23 @@ internal sealed class AutomationTriggers
 
     /// <summary>
     /// Subscribes the event triggers of the rules that became active, publishes the watched set of all active rules and
-    /// queues the activation of the property triggers of the new rules, which evaluates them in a later input.
+    /// queues the activation of the property triggers of the new rules, which evaluates them in a later input. Returns
+    /// whether a pending property trigger began to be tracked, whose Only if is to be checked again in a later input.
     /// </summary>
-    public void Activate(IReadOnlyList<CompiledRule> activated, IReadOnlyList<CompiledRule> rules)
+    public bool Activate(IReadOnlyList<CompiledRule> activated, IReadOnlyList<CompiledRule> rules)
     {
         foreach (var rule in activated)
         {
             _eventTriggers.Activate(rule);
         }
 
-        _propertyTriggers.Refresh(rules);
+        var tracksNewPending = _propertyTriggers.Refresh(rules);
         if (activated.Count > 0)
         {
             _queue.TryEnqueue(new ActivationInput(activated, AutomationInputQueue.CausedChainDepth));
         }
+
+        return tracksNewPending;
     }
 
     /// <summary>

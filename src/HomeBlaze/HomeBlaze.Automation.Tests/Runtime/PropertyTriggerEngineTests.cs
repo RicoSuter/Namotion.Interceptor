@@ -60,4 +60,38 @@ public class PropertyTriggerEngineTests
             "The trigger 1 (/Weather/Gust > 8) of rule Retract in automation Storm is known again."
         ], logger.Messages.ToArray());
     }
+
+    [Fact]
+    public void WhenAGraphChangeChangesNoPropertyOfARule_ThenItsPendingTriggersKeepTheirOrderAndTheNextDueTimeStays()
+    {
+        // Arrange
+        var graph = new TestGraph();
+        var weather = new TestSensor { LastUpdated = Now };
+        graph.Add("Weather", weather);
+        var time = new FakeTimeProvider(Now);
+        var engine = new PropertyTriggerEngine(graph.Resolver, time, NullLogger.Instance, () => "Storm", _ => { });
+        var rule = Compile("storm", Create(
+            "Storm", AutomationRuleMode.On, [When("/Weather/Gust > 8"), When("/Weather/Rain > 0")], [Invoke("/Blinds/Close")],
+            "now - /Weather/LastUpdated > 20s"));
+        rule.IsActivated = true;
+        engine.Activate([rule], [rule]);
+        weather.Rain = 1;
+        engine.TrackPending([rule], engine.OnPropertyChanged([rule], new PropertyChangedInput(new PropertyReference(weather, nameof(TestSensor.Rain)), 1.0, 0, 0)));
+        weather.Gust = 9;
+        engine.TrackPending([rule], engine.OnPropertyChanged([rule], new PropertyChangedInput(new PropertyReference(weather, nameof(TestSensor.Gust)), 9.0, 0, 0)));
+        time.Advance(TimeSpan.FromSeconds(30));
+        var dueBefore = engine.GetNextDueAt([rule], time.GetUtcNow());
+
+        // Act
+        graph.Add("Holder", new TestSensorHolder());
+        var requests = engine.OnGraphChanged([rule], evaluateAll: false);
+
+        // Assert
+        Assert.Empty(requests);
+        Assert.Equal(Now.AddSeconds(20).AddTicks(1), dueBefore);
+        Assert.Equal(dueBefore, engine.GetNextDueAt([rule], time.GetUtcNow()));
+        Assert.Equal(
+            [rule.PropertyTriggers[1], rule.PropertyTriggers[0]],
+            engine.RequestPendingRuns([rule]).Select(request => request.Trigger).ToArray());
+    }
 }

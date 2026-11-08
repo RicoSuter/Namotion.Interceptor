@@ -6,7 +6,8 @@ namespace HomeBlaze.Automation.Runtime;
 /// <summary>
 /// The property changes of one automation: registers with <see cref="AutomationChangeDispatcher"/>, publishes the
 /// watched set and the graph route of the worker to that registration, and enqueues the routed changes on the writing
-/// thread, a graph change only while none is queued yet.
+/// thread, a graph change only while none is queued yet, which it tells the registration once the graph change is no
+/// longer queued.
 /// </summary>
 internal sealed class AutomationChangeReceiver(AutomationInputQueue queue) : IAutomationChangeListener
 {
@@ -23,7 +24,10 @@ internal sealed class AutomationChangeReceiver(AutomationInputQueue queue) : IAu
     public IDisposable Register(AutomationChangeDispatcher dispatcher, IInterceptorSubjectContext context)
     {
         var registration = dispatcher.Register(context, this);
-        _registration = registration;
+        Volatile.Write(ref _registration, registration);
+
+        // A graph change that the queue refused before the registration was known released nothing.
+        registration.OnGraphChangeReleased();
         return registration;
     }
 
@@ -31,14 +35,16 @@ internal sealed class AutomationChangeReceiver(AutomationInputQueue queue) : IAu
     public void PublishWatched(FrozenSet<PropertyReference> watched) => _registration?.PublishWatched(watched);
 
     /// <summary>
-    /// Routes the attach of one of these properties, and a change of one that holds subjects, to the automation as a graph
-    /// change from now on, and with <paramref name="isUnbounded"/> every change of a property that holds subjects.
-    /// Called by the worker only.
+    /// Routes a graph change of one of these properties to the automation from now on, and with
+    /// <paramref name="isUnbounded"/> every graph change. Called by the worker only.
     /// </summary>
     public void PublishRoute(FrozenSet<PropertyReference> route, bool isUnbounded) => _registration?.PublishRoute(route, isUnbounded);
 
-    /// <summary>Called by the worker when it takes the queued graph change, so that the next one is queued again.</summary>
-    public void OnGraphChangeTaken() => Volatile.Write(ref _isGraphChangePending, 0);
+    /// <summary>
+    /// Called by the worker when it takes the queued graph change, before it reads the graph, so that the next one is
+    /// queued again.
+    /// </summary>
+    public void OnGraphChangeTaken() => ReleaseGraphChange();
 
     /// <summary>
     /// Queues a graph change caused at <paramref name="chainDepth"/> unless one is queued, for a change that the dispatcher
@@ -50,12 +56,19 @@ internal sealed class AutomationChangeReceiver(AutomationInputQueue queue) : IAu
 
     void IAutomationChangeListener.OnGraphChanged(int chainDepth) => EnqueueGraphChange(chainDepth);
 
-    // A dropped graph change is made up for by the resynchronization of the drop, which resolves every path.
     private void EnqueueGraphChange(int chainDepth)
     {
         if (Interlocked.Exchange(ref _isGraphChangePending, 1) == 0 && !queue.TryEnqueue(new GraphChangedInput(chainDepth)))
         {
-            Volatile.Write(ref _isGraphChangePending, 0);
+            ReleaseGraphChange();
         }
+    }
+
+    private void ReleaseGraphChange()
+    {
+        // A full fence: with a plain store, a write that commits while the store is still buffered finds the flag set and
+        // queues nothing, while the worker reads the graph from before that write.
+        Interlocked.Exchange(ref _isGraphChangePending, 0);
+        Volatile.Read(ref _registration)?.OnGraphChangeReleased();
     }
 }

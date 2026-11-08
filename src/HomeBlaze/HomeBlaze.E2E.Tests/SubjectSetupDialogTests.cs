@@ -578,6 +578,32 @@ public class SubjectSetupDialogTests
     }
 
     [Fact]
+    public async Task WhenATypeIsPickedBeforeThePointerIsKnown_ThenTheNameFieldTakesTheFocus()
+    {
+        // Arrange - the dialog asks the browser for its pointer once it has rendered, and holding back the module
+        // it asks with lets the type be picked before the answer arrives, as a busy machine does by chance.
+        var page = await _fixture.CreatePageAsync();
+        var heldModuleRequest = new TaskCompletionSource<IRoute>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // The module is served under a fingerprinted name, such as "SubjectSetupDialog.m938w0l6zk.razor.js".
+        await page.RouteAsync(url => url.Contains("/SubjectSetupDialog."), route =>
+        {
+            heldModuleRequest.TrySetResult(route);
+            return Task.CompletedTask;
+        });
+
+        await OpenDialogAsync(page);
+        var moduleRequest = await heldModuleRequest.Task.WaitAsync(TimeSpan.FromMilliseconds(PageLoadTimeout));
+
+        // Act
+        await PickTypeAsync(page, "motor");
+        await moduleRequest.ContinueAsync();
+
+        // Assert
+        await Assertions.Expect(NameInput(page)).ToBeFocusedAsync(new() { Timeout = ElementVisibilityTimeout });
+    }
+
+    [Fact]
     public async Task WhenGoingBack_ThenTheSearchIsPreservedAndAnotherTypeGetsItsOwnForm()
     {
         // Arrange

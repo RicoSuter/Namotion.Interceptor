@@ -132,7 +132,7 @@ public class LlmAgentBaseTests
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount >= 1);
 
         // Assert
-        var lines = test.Agent.Requests[0].UserMessage.Split('\n');
+        var lines = test.Agent.Requests[0].UserMessage.ReplaceLineEndings("\n").Split('\n');
         var stateLines = lines.SkipWhile(line => line != "```jsonl").Skip(1).TakeWhile(line => line != "```").ToList();
         Assert.Equal(3, stateLines.Count);
         var subject = JsonDocument.Parse(stateLines[0]).RootElement;
