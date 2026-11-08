@@ -15,9 +15,9 @@ namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
 /// The order of the children of a folder or of the root of a storage that the tools let their clients read and change:
-/// GetOrder and the order in the metadata of the folder name only the children that the tools list, SetOrder needs write
-/// access to the metadata of the folder, and an order that names a child the tools do not list is refused as one naming
-/// a child that does not exist.
+/// GetOrder, the order in the metadata of the folder and its ChildOrder name only the children that the tools list,
+/// SetOrder needs write access to the metadata of the folder, and an order that names a child the tools do not list is
+/// refused as one naming a child that does not exist.
 /// </summary>
 internal static class AgentOrderAccess
 {
@@ -41,12 +41,12 @@ internal static class AgentOrderAccess
     }
 
     /// <summary>
-    /// Creates the value filter that leaves out of the order in the metadata of a folder or of the root of a storage the
-    /// names of the children that the tools do not list, as GetOrder does, so that get_property, browse and search name
-    /// no hidden child.
+    /// Creates the value filter that leaves out of the order in the metadata of a folder or of the root of a storage, and
+    /// out of its ChildOrder, the names of the children that the tools do not list, as GetOrder does, so that the tools
+    /// and page expressions name no hidden child.
     /// </summary>
-    public static IMcpValueFilter CreateMetadataOrderFilter(McpServerConfiguration configuration, Func<IInterceptorSubject> rootSubjectProvider)
-        => new MetadataOrderFilter(configuration, rootSubjectProvider);
+    public static IMcpValueFilter CreateOrderFilter(McpServerConfiguration configuration, Func<IInterceptorSubject> rootSubjectProvider)
+        => new OrderFilter(configuration, rootSubjectProvider);
 
     /// <summary>
     /// Gets why SetOrder of a folder or of the root of a storage is refused, or null when it is not: the access policy
@@ -134,11 +134,22 @@ internal static class AgentOrderAccess
     private static string GetToolPath(RegisteredSubject folder, McpServerConfiguration configuration, IInterceptorSubject root)
         => (root.TryGetRegisteredSubject() is { } registeredRoot ? configuration.TryGetSubjectPath(registeredRoot, folder) : null) ?? "/";
 
-    private sealed class MetadataOrderFilter(McpServerConfiguration configuration, Func<IInterceptorSubject> rootSubjectProvider) : IMcpValueFilter
+    private sealed class OrderFilter(McpServerConfiguration configuration, Func<IInterceptorSubject> rootSubjectProvider) : IMcpValueFilter
     {
         public object? Filter(RegisteredSubjectProperty member, object? value)
         {
-            if (value is not ImmutableDictionary<string, JsonElement> metadata || !IsOwnMetadataOfFolder(member) ||
+            if (member.IsAttribute || member.Parent.Subject is not IMetadataContainer)
+            {
+                return value;
+            }
+
+            if (value is ImmutableArray<string> { IsDefaultOrEmpty: false } childOrder && member.Name == nameof(IMetadataContainer.ChildOrder))
+            {
+                var listedChildNames = GetListedChildNames(member.Parent, configuration, rootSubjectProvider());
+                return childOrder.RemoveAll(name => !listedChildNames.Contains(name));
+            }
+
+            if (value is not ImmutableDictionary<string, JsonElement> metadata || !member.IsMetadata() ||
                 !metadata.TryGetValue(MetadataKeys.Order, out var order) || order.ValueKind != JsonValueKind.Array)
             {
                 return value;
@@ -151,8 +162,5 @@ internal static class AgentOrderAccess
                 .ToArray();
             return metadata.SetItem(MetadataKeys.Order, JsonSerializer.SerializeToElement(names));
         }
-
-        private static bool IsOwnMetadataOfFolder(RegisteredSubjectProperty member)
-            => !member.IsAttribute && member.Parent.Subject is IMetadataContainer && member.IsMetadata();
     }
 }

@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -416,6 +417,53 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         Assert.DoesNotContain("Agent", evaluated);
     }
 
+    [Fact]
+    public async Task WhenTheChildOrderOfAFolderNamesAnAgentOrAHiddenBranch_ThenTheToolsDoNotNameThem()
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        WriteFile("Secret/Valve.json", """{ "speed": 3 }""");
+        WriteFile("Agent.json", $$"""{ "$type": "{{typeof(ClaudeCliAgent).FullName}}" }""");
+        WriteFile(".metadata.json", """{ "order": ["Secret", "Agent", "Docs"] }""");
+        var (tools, storage, configuration) = await CreateToolsWithConfigurationAsync(
+            TestAccessPolicies.Create(HiddenSecretRole.Name, HiddenSecretRole));
+        var childOrder = storage.TryGetRegisteredSubject()!.TryGetProperty(nameof(FluentStorageContainer.ChildOrder))!;
+
+        // Act
+        var property = await CallAsync(tools["get_property"], new { path = "/Storage/ChildOrder" });
+        var browseResult = await CallAsync(tools["browse"], new { path = "/Storage", depth = 0, includeProperties = true, format = "json" });
+        var filtered = configuration.ApplyValueFilters(childOrder, childOrder.GetValue());
+
+        // Assert
+        Assert.Equal(["Secret", "Agent", "Docs"], storage.ChildOrder.ToArray());
+        Assert.True(property.TryGetProperty("error", out _));
+        Assert.False(property.TryGetProperty("value", out _));
+        Assert.False(browseResult.GetProperty("result").GetProperty("properties").TryGetProperty(nameof(FluentStorageContainer.ChildOrder), out _));
+        Assert.Equal(["Docs"], Assert.IsType<ImmutableArray<string>>(filtered).ToArray());
+    }
+
+    [Fact]
+    public async Task WhenAPageExpressionShowsTheChildOrderOfAFolder_ThenItLeavesOutAnAgentAndAHiddenBranch()
+    {
+        // Arrange
+        WriteFile("Docs/Readme.md", "# Readme");
+        WriteFile("Docs/Agent.json", $$"""{ "$type": "{{typeof(ClaudeCliAgent).FullName}}" }""");
+        WriteFile("Docs/.metadata.json", """{ "order": ["Agent", "Readme.md"] }""");
+        WriteFile("Secret/Valve.json", """{ "speed": 3 }""");
+        WriteFile("Agent.json", $$"""{ "$type": "{{typeof(ClaudeCliAgent).FullName}}" }""");
+        WriteFile(".metadata.json", """{ "order": ["Secret", "Agent", "Docs"] }""");
+        WriteFile("Probe.md", "Root: [{{ /Storage/ChildOrder }}] Docs: [{{ /Storage/Docs/ChildOrder }}]");
+        var (tools, storage) = await CreateToolsAsync(accessPolicy: TestAccessPolicies.Create(HiddenSecretRole.Name, HiddenSecretRole));
+
+        // Act
+        var result = await CallAsync(tools["invoke_query"], new { path = "/Storage/Probe.md", method = "ReadEvaluatedContent" });
+
+        // Assert
+        Assert.Equal(["Secret", "Agent", "Docs"], storage.ChildOrder.ToArray());
+        Assert.Equal(["Agent", "Readme.md"], ((VirtualFolder)storage.Children["Docs"]).ChildOrder.ToArray());
+        Assert.Equal("Root: [Docs] Docs: [Readme.md]", result.GetProperty("result").GetString());
+    }
+
     [Theory]
     [InlineData("Secret", false)]
     [InlineData("Agent", false)]
@@ -732,6 +780,13 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
     private async Task<(Dictionary<string, McpToolInfo> Tools, FluentStorageContainer Storage)> CreateToolsAsync(
         bool isAgent = false, IMcpAccessPolicy? accessPolicy = null)
     {
+        var (tools, storage, _) = await CreateToolsWithConfigurationAsync(accessPolicy ?? (isAgent ? TestAccessPolicies.Operator : TestAccessPolicies.Everything));
+        return (tools, storage);
+    }
+
+    private async Task<(Dictionary<string, McpToolInfo> Tools, FluentStorageContainer Storage, McpServerConfiguration Configuration)>
+        CreateToolsWithConfigurationAsync(IMcpAccessPolicy accessPolicy)
+    {
         var typeProvider = new TypeProvider();
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
         typeProvider.AddAssembly(typeof(MetadataSearchTestDevice).Assembly);
@@ -764,9 +819,8 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
 
         root = new AgentTestRoot(context) { Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage } };
         await storage.ConnectAsync(CancellationToken.None);
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(
-            serviceProvider, () => root, isReadOnly: false, accessPolicy ?? (isAgent ? TestAccessPolicies.Operator : TestAccessPolicies.Everything));
-        return (new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name), storage);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(serviceProvider, () => root, isReadOnly: false, accessPolicy);
+        return (new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name), storage, configuration);
     }
 
     private static async Task<JsonElement> CallAsync(McpToolInfo tool, object input) =>
