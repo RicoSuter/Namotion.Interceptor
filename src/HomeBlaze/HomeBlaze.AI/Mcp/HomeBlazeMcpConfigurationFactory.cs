@@ -36,9 +36,9 @@ internal static class HomeBlazeMcpConfigurationFactory
     /// the tools do not list, which is refused as a missing one, and for metadata that the policy does not allow to write.
     /// SearchMetadata of a storage and search_markdown leave out the metadata and notes of the subjects and properties that
     /// the tools do not list and those that the policy does not allow to read, also where only a hidden child in the order
-    /// of a folder matches. GetOrder of a folder, and the order in its metadata as the tools and page expressions show it,
-    /// name only the children that the tools list, SetOrder needs write access to the metadata of the folder, and an order
-    /// that names a child the tools do not list is refused as one naming a child that does not exist.
+    /// of a folder matches. GetOrder of a folder, and the order in its metadata and its ChildOrder as the tools and page
+    /// expressions show them, name only the children that the tools list, SetOrder needs write access to the metadata of the
+    /// folder, and an order that names a child the tools do not list is refused as one naming a child that does not exist.
     /// </summary>
     /// <param name="serviceProvider">Services; must contain <see cref="SubjectTypeRegistry"/> and <see cref="ILoggerFactory"/>.</param>
     /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
@@ -53,7 +53,6 @@ internal static class HomeBlazeMcpConfigurationFactory
         ArgumentNullException.ThrowIfNull(accessPolicy);
 
         var typeRegistry = serviceProvider.GetRequiredService<SubjectTypeRegistry>();
-        var pathProvider = new StateAttributePathProvider();
         var typeProviders = new IMcpTypeProvider[]
         {
             new SubjectAbstractionTypeProvider(),
@@ -66,7 +65,7 @@ internal static class HomeBlazeMcpConfigurationFactory
 
         var configuration = new McpServerConfiguration
         {
-            PathProvider = pathProvider,
+            PathProvider = new StateAttributePathProvider(),
             PathPrefix = PathPrefix,
             ExcludeTypes = excludeTypes,
             TypeProviders = typeProviders,
@@ -80,9 +79,9 @@ internal static class HomeBlazeMcpConfigurationFactory
             IsReadOnly = isReadOnly
         };
 
-        configuration.ValueFilters.Add(AgentOrderAccess.CreateMetadataOrderFilter(configuration, rootSubjectProvider));
+        configuration.ValueFilters.Add(AgentOrderAccess.CreateOrderFilter(configuration, rootSubjectProvider));
         configuration.SubjectEnrichers.Add(new HomeBlazeMcpSubjectEnricher(
-            typeProviders, isReadOnly, HomeBlazeMcpSubjectEnricher.CreatePageUrlGetter(serviceProvider, configuration, rootSubjectProvider), accessPolicy));
+            typeProviders, configuration, isReadOnly, HomeBlazeMcpSubjectEnricher.CreatePageUrlGetter(serviceProvider, configuration, rootSubjectProvider)));
 
         var invoker = new McpMethodInvoker(
             rootSubjectProvider,
@@ -98,7 +97,7 @@ internal static class HomeBlazeMcpConfigurationFactory
         configuration.ToolProviders.Add(new HomeBlazeMarkdownToolProvider(invoker, isReadOnly));
         configuration.ToolProviders.Add(new HomeBlazeMarkdownSearchToolProvider(rootSubjectProvider, configuration));
 
-        var context = new McpToolProviderContext(serviceProvider, rootSubjectProvider, pathProvider, isReadOnly, configuration);
+        var context = new McpToolProviderContext(serviceProvider, rootSubjectProvider, isReadOnly, configuration);
         foreach (var registration in serviceProvider.GetServices<McpToolProviderRegistration>())
         {
             configuration.ToolProviders.Add(registration.Create(context));

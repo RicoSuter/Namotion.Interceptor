@@ -1,12 +1,10 @@
 @* Shows what a role allows on one subject: whether the subject is readable, and each member against each action with the
-   rule that decided it. Compiles the role through the authorization service and never writes anything. *@
+   rule that decided it. Never writes anything. *@
 @using System.Text
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Metadata
 @using Namotion.Interceptor.Registry.Abstractions
 @using Namotion.Interceptor.Registry.Paths
-
-@implements IDisposable
 
 @inject AuthorizationService AuthorizationService
 @inject SubjectPathResolver PathResolver
@@ -20,13 +18,9 @@
         What the role allows on the chosen subject, its unsaved changes included, with the other roles it includes and the system rules.
     </MudText>
 
-    @if (_error is not null)
+    @if (_subject is null)
     {
-        <MudAlert Severity="Severity.Error" Dense="true" Class="mt-4" data-testid="role-preview-error">@_error</MudAlert>
-    }
-    else if (_subject is null)
-    {
-        @if (!string.IsNullOrWhiteSpace(_path))
+        @if (Result.Error is null && !string.IsNullOrWhiteSpace(_path))
         {
             <MudText Typo="Typo.body2" Class="mt-4" data-testid="role-preview-not-found">No subject has this path.</MudText>
         }
@@ -151,51 +145,28 @@
 
 @code {
     private string? _path;
-    private AuthorizationRole? _previewedRole;
-    private IReadOnlyList<string>? _previewedRoleNames;
-    private string? _error;
+    private AuthorizationResult _previewedResult;
     private IInterceptorSubject? _subject;
     private VisibilityDecision _subjectDecision;
     private string? _subjectText;
     private IReadOnlyList<MemberRow> _rows = [];
     private string? _selectedMember;
     private PermissionAction? _selectedAction;
-    private bool _isDisposed;
 
     /// <summary>
-    /// The role to preview; a new instance is compiled again, and so is the same one once the saved roles changed.
+    /// The preview of the role, see <see cref="AuthorizationService.PreviewPolicy"/>. While it has an error, which the editor
+    /// shows, no subject is shown.
     /// </summary>
     [Parameter, EditorRequired]
-    public AuthorizationRole Role { get; set; } = null!;
-
-    protected override void OnInitialized() => AuthorizationService.PoliciesChanged += OnPoliciesChanged;
+    public AuthorizationResult Result { get; set; }
 
     protected override void OnParametersSet()
     {
-        if (!ReferenceEquals(Role, _previewedRole))
+        if (Result != _previewedResult)
         {
             Update();
         }
     }
-
-    public void Dispose()
-    {
-        _isDisposed = true;
-        AuthorizationService.PoliciesChanged -= OnPoliciesChanged;
-    }
-
-    // An included role saved by another dialog, or a file reload, changes the decisions of the same edited role. Raised
-    // on the thread pool, also right after this component was disposed, and also for the roles previewed already, which
-    // then render nothing new.
-    private void OnPoliciesChanged() =>
-        _ = InvokeAsync(() =>
-        {
-            if (!_isDisposed && !ReferenceEquals(AuthorizationService.GetRoleNames(), _previewedRoleNames))
-            {
-                Update();
-                StateHasChanged();
-            }
-        });
 
     private static bool IsSubjectProperty(RegisteredSubjectProperty property) => property.CanContainSubjects;
 
@@ -222,21 +193,18 @@
 
     private void Update()
     {
-        _previewedRole = Role;
-
-        // Read before the policy, so that roles compiled in between are previewed again.
-        _previewedRoleNames = AuthorizationService.GetRoleNames();
-        var result = AuthorizationService.PreviewPolicy(Role);
-        _error = result.Error;
-        _subject = string.IsNullOrWhiteSpace(_path) ? null : PathResolver.ResolveSubject(_path.Trim(), PathStyle.Canonical);
+        _previewedResult = Result;
+        _subject = Result.Error is not null || string.IsNullOrWhiteSpace(_path)
+            ? null
+            : PathResolver.ResolveSubject(_path.Trim(), PathStyle.Canonical);
         _rows = [];
 
-        if (_error is not null || _subject?.TryGetRegisteredSubject() is not { } subject)
+        if (_subject?.TryGetRegisteredSubject() is not { } subject)
         {
             return;
         }
 
-        var policy = result.Policy;
+        var policy = Result.Policy;
         _subjectDecision = policy.ExplainVisibility(subject);
         _subjectText = DescribeSubject(_subjectDecision);
         _rows = CreateRows(subject, policy, AuthorizationService.PathProvider);
@@ -338,7 +306,7 @@
             cells[executeIndex] = execute with
             {
                 IsUnusable = true,
-                Explanation = $"{execute.Explanation} It cannot be used, as read is denied: {ExecuteWithoutRead.Reason}"
+                Explanation = $"{execute.Explanation} It cannot be used, as read is denied: A method is listed and run only when it is readable."
             };
         }
     }

@@ -301,7 +301,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
-    public async Task WhenTheRoleDoesNotCompile_ThenTheErrorIsShownInsteadOfTheMatrix()
+    public async Task WhenTheRoleDoesNotCompile_ThenTheErrorIsShownAboveTheTabsInsteadOfTheMatrix()
     {
         // Arrange
         var role = _graph.GetRole("Kitchen");
@@ -312,8 +312,9 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
         await ChoosePathAsync(component, "/Devices");
 
         // Assert
-        Assert.Contains("Ghost", component.Find("[data-testid='role-preview-error']").TextContent);
+        Assert.Contains("Ghost", Assert.Single(component.FindAll("[data-testid='role-edit-status']")).TextContent);
         Assert.Empty(component.FindAll("[data-testid='role-preview-matrix']"));
+        Assert.Empty(component.FindAll("[data-testid='role-preview-not-found']"));
     }
 
     [Fact]

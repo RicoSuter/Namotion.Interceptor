@@ -47,8 +47,8 @@ internal static class AgentWatchPaths
     /// <param name="normalizedWatchPaths">The watch paths, normalized with <see cref="Normalize"/>.</param>
     /// <param name="toolSource">Creates the tools that read the state.</param>
     /// <param name="accessPolicy">
-    /// The policy of the tools: the operator chose the paths, so not the agent's roles, but one that keeps the system
-    /// rules, such as that of the <c>Everything</c> role.
+    /// The policy of the tools, such as that of the agent's roles, so that a watched value never reaches a conversation
+    /// beyond what the agent may read.
     /// </param>
     /// <param name="cancellationToken">Cancels the fetch.</param>
     public static async Task<IReadOnlyList<AgentWatchedState>> FetchStateAsync(

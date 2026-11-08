@@ -14,11 +14,14 @@ internal static class TestAccessPolicies
     public static AuthorizationMcpAccessPolicy Operator { get; } = Create(BuiltInRoles.OperatorName);
 
     /// <summary>Compiles the policy of the built-in roles and <paramref name="customRoles"/> for <paramref name="roleName"/>.</summary>
-    public static AuthorizationMcpAccessPolicy Create(string roleName, params AuthorizationRole[] customRoles) =>
-        new(AuthorizationDefinition.Create(
+    public static AuthorizationMcpAccessPolicy Create(string roleName, params AuthorizationRole[] customRoles)
+    {
+        var policy = AuthorizationDefinition.Create(
             [.. BuiltInRoles.All, .. customRoles],
             SystemRules.Rules,
             AuthorizationActions.All,
             McpAuthorization.PathProvider,
-            new HomeBlazeMemberTagProvider()).Compile([roleName]));
+            new HomeBlazeMemberTagProvider()).Compile([roleName]);
+        return new(() => policy);
+    }
 }

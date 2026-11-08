@@ -369,7 +369,7 @@ namespace HomeBlaze.AI.Mcp
     }
     public sealed class AuthorizationMcpAccessPolicy : Namotion.Interceptor.Mcp.Abstractions.IMcpAccessPolicy
     {
-        public AuthorizationMcpAccessPolicy(Namotion.Interceptor.Authorization.AuthorizationPolicy policy, Microsoft.Extensions.Logging.ILogger? logger = null, string? clientName = null) { }
+        public AuthorizationMcpAccessPolicy(System.Func<Namotion.Interceptor.Authorization.AuthorizationPolicy> getPolicy) { }
         public Namotion.Interceptor.Authorization.AuthorizationPolicy Policy { get; }
         public bool IsAllowed(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, string action) { }
     }
@@ -416,10 +416,9 @@ namespace HomeBlaze.AI
     }
     public readonly struct McpToolProviderContext : System.IEquatable<HomeBlaze.AI.McpToolProviderContext>
     {
-        public McpToolProviderContext(System.IServiceProvider Services, System.Func<Namotion.Interceptor.IInterceptorSubject> RootSubjectProvider, Namotion.Interceptor.Registry.Paths.PathProviderBase PathProvider, bool IsReadOnly, Namotion.Interceptor.Mcp.McpServerConfiguration Configuration) { }
+        public McpToolProviderContext(System.IServiceProvider Services, System.Func<Namotion.Interceptor.IInterceptorSubject> RootSubjectProvider, bool IsReadOnly, Namotion.Interceptor.Mcp.McpServerConfiguration Configuration) { }
         public Namotion.Interceptor.Mcp.McpServerConfiguration Configuration { get; init; }
         public bool IsReadOnly { get; init; }
-        public Namotion.Interceptor.Registry.Paths.PathProviderBase PathProvider { get; init; }
         public System.Func<Namotion.Interceptor.IInterceptorSubject> RootSubjectProvider { get; init; }
         public System.IServiceProvider Services { get; init; }
     }
