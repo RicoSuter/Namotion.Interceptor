@@ -107,8 +107,9 @@ public static class ExpressionDisplay
 
     /// <summary>
     /// Applies a value map to a value: the text of the first case that matches, otherwise the text of the value. A name
-    /// that leads to no map, or to one none of whose members <paramref name="permissions"/> allow to read, gives
-    /// <c>Cannot resolve map: name</c>, and a map with a mistake gives its message.
+    /// that leads to no map, through a member <paramref name="permissions"/> do not allow to read, or to a map they do not
+    /// show or none of whose members they allow to read, gives <c>Cannot resolve map: name</c>, and a map with a mistake
+    /// gives its message.
     /// </summary>
     /// <param name="resolver">The resolver of the name of the map and of the paths of its cases.</param>
     /// <param name="scope">The subject the name resolves from, such as the page or the widget, like the <c>Map</c> of a widget.</param>
@@ -127,7 +128,7 @@ public static class ExpressionDisplay
         IInterceptorSubject? map;
         try
         {
-            map = resolver.ResolveScopedSubject(mapName, PathStyle.Canonical, scope);
+            map = resolver.ResolveScopedSubject(mapName, PathStyle.Canonical, scope, permissions);
         }
         catch
         {
@@ -150,12 +151,17 @@ public static class ExpressionDisplay
     }
 
     // A map that the caller may not reach reads as a missing one, so that neither its texts nor its existence are shown.
-    // It is reachable when a member of it may be read, as the permissions refuse a member below a hidden subject.
+    // It is reachable when it is shown and a member of it may be read: a member below a hidden subject may be readable.
     private static bool IsReadable(IInterceptorSubject map, IUserPermissions permissions)
     {
         if (map.TryGetRegisteredSubject() is not { } registered)
         {
             return true;
+        }
+
+        if (!permissions.CanShow(registered))
+        {
+            return false;
         }
 
         foreach (var property in registered.Properties)

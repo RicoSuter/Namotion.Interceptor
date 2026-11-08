@@ -202,6 +202,21 @@ public class MarkdownReadAccessTests
     }
 
     [Fact]
+    public async Task WhenTheMapIsNotShownAlthoughItsMembersAreReadable_ThenTheMapReadsAsMissing()
+    {
+        // Arrange
+        var (_, page) = await AddPageAsync("State: {{ meter/Power | map:busy }}");
+        var map = page.Children.Values.OfType<ValueMap>().Single();
+        var permissions = new ReadablePermissions(_ => true, subject => !ReferenceEquals(subject.Subject, map));
+
+        // Act
+        var evaluated = page.ReadEvaluatedContent(permissions);
+
+        // Assert
+        Assert.Equal("State: Cannot resolve map: busy", GetLastLine(evaluated));
+    }
+
+    [Fact]
     public async Task WhenTheReaderMayNotReadThePropertyThatHoldsABlock_ThenAPathThroughItRendersEmptyAlsoWhenTheBlockIsShown()
     {
         // Arrange
