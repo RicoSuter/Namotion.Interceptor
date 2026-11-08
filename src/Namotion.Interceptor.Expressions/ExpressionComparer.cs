@@ -2,12 +2,7 @@ using System.Globalization;
 
 namespace Namotion.Interceptor.Expressions;
 
-/// <summary>
-/// Compares two values that are not null: a boolean only for equality, an enum by its name without regard to case and
-/// only for equality, a text without regard to case for equality and ordinal for order, a date against ISO 8601 text,
-/// a duration against a duration, integers and decimals exactly, a float as a float, and NaN never. A null result means
-/// the pair has no order, so the comparison is unknown.
-/// </summary>
+/// <summary>Compares two values that are not null, as docs/expressions.md#comparisons describes; a null result means the pair has no order, so the comparison is unknown.</summary>
 internal static class ExpressionComparer
 {
     /// <summary>Compares two values that are not null.</summary>
