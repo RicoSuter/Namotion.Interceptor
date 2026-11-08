@@ -465,6 +465,7 @@ public class PolicyUserPermissionsTests
         var user = (await services.GetRequiredService<UserManager<ApplicationUser>>().FindByNameAsync(userName))!;
         // As after setting a password, without which the person may do nothing.
         user.MustChangePassword = false;
+        user.AllowsEmptyPassword = false;
         var principal = await services.GetRequiredService<IUserClaimsPrincipalFactory<ApplicationUser>>().CreateAsync(user);
         var authenticationState = (IHostEnvironmentAuthenticationStateProvider)services.GetRequiredService<AuthenticationStateProvider>();
         authenticationState.SetAuthenticationState(Task.FromResult(new AuthenticationState(principal)));

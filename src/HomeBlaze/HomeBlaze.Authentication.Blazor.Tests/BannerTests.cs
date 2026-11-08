@@ -13,8 +13,10 @@ public class BannerTests
     {
         // Arrange
         await using var host = await AuthenticationTestHost.StartAsync();
+        var added = await host.AdministrationAsAdmin.AddUserAsync("mom", null, [BuiltInRoles.EverythingName], CancellationToken.None);
+        Assert.True(added.Succeeded, added.Error);
         using var browser = host.CreateBrowser();
-        await host.SignInAsync(browser, AdminSeeding.AdminUserName);
+        await host.SignInAsync(browser, "mom");
 
         // Act
         var page = await GetPageAsync(browser);

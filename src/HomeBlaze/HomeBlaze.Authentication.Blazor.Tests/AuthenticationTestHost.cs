@@ -199,6 +199,7 @@ internal sealed class AuthenticationTestHost : IAsyncDisposable
             // As after setting a password, which every endpoint but the app and the password endpoint requires first.
             var user = (await userManager.FindByNameAsync(userName ?? AdminSeeding.AdminUserName))!;
             user.MustChangePassword = false;
+            user.AllowsEmptyPassword = false;
             await userManager.UpdateAsync(user);
             await userStore.RefreshUserAsync(user.Id, CancellationToken.None);
             await signInManager.SignInAsync(user, isPersistent: false);

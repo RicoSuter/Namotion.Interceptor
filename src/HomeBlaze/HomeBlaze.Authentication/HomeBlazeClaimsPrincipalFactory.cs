@@ -13,8 +13,8 @@ public static class HomeBlazeClaimTypes
 }
 
 /// <summary>
-/// Creates the principal of a signed-in person with their id, name, security stamp and the
-/// <see cref="HomeBlazeClaimTypes.MustChangePassword"/> claim, and no role claims: the roles are read from the user store
+/// Creates the principal of a signed-in person with their id, name, security stamp and, as
+/// <see cref="ApplicationUser.RequiresPasswordChange"/> decides, the <see cref="HomeBlazeClaimTypes.MustChangePassword"/> claim, and no role claims: the roles are read from the user store
 /// on every decision, and a change of roles keeps the security stamp, so role claims would go stale.
 /// </summary>
 public sealed class HomeBlazeClaimsPrincipalFactory : UserClaimsPrincipalFactory<ApplicationUser>
@@ -28,7 +28,7 @@ public sealed class HomeBlazeClaimsPrincipalFactory : UserClaimsPrincipalFactory
     protected override async Task<ClaimsIdentity> GenerateClaimsAsync(ApplicationUser user)
     {
         var identity = await base.GenerateClaimsAsync(user);
-        if (user.MustChangePassword)
+        if (user.RequiresPasswordChange())
         {
             identity.AddClaim(new Claim(HomeBlazeClaimTypes.MustChangePassword, "true"));
         }

@@ -694,6 +694,27 @@ public class UserStoreTests
     }
 
     [Fact]
+    public async Task WhenAUserAllowsAnEmptyPasswordButNeedNotChangeIt_ThenOnlyASessionThatMustChangeItIsAllowed()
+    {
+        // Arrange
+        await using var graph = await AuthenticationTestGraph.CreateAsync();
+        var userManager = graph.UserManager;
+        var admin = (await userManager.FindByIdAsync(graph.AdminUserId))!;
+        admin.MustChangePassword = false;
+        Assert.True((await userManager.UpdateAsync(admin)).Succeeded);
+        await graph.UserStore.RefreshUserAsync(graph.AdminUserId, CancellationToken.None);
+        var stamp = await graph.GetSecurityStampAsync(graph.AdminUserId);
+
+        // Act
+        var isConfinedSessionAllowed = graph.UserStore.IsSessionAllowed(graph.AdminUserId, stamp, sessionMustChangePassword: true);
+        var isFreeSessionAllowed = graph.UserStore.IsSessionAllowed(graph.AdminUserId, stamp, sessionMustChangePassword: false);
+
+        // Assert
+        Assert.True(isConfinedSessionAllowed);
+        Assert.False(isFreeSessionAllowed);
+    }
+
+    [Fact]
     public async Task WhenTheAdminNoLongerAllowsAnEmptyPassword_ThenRefreshingTheUserClaimsTheAdministrator()
     {
         // Arrange

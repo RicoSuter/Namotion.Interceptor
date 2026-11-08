@@ -4,6 +4,7 @@ using HomeBlaze.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Time.Testing;
 using Namotion.Interceptor.Testing;
 using Xunit;
 using static HomeBlaze.Authentication.Blazor.Tests.AccountTestForms;
@@ -313,6 +314,33 @@ public class SignInEndpointTests
         // Assert
         Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(response));
         Assert.Equal(HttpStatusCode.Forbidden, (await browser.GetAsync("/protected")).StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenTheSessionOfAnEmptyPasswordIsCheckedAgainstTheStoredStamp_ThenItMustStillChangeThePassword()
+    {
+        // Arrange
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        await using var host = await AuthenticationTestHost.StartAsync(time);
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            var admin = (await userManager.FindByNameAsync(AdminSeeding.AdminUserName))!;
+            admin.MustChangePassword = false;
+            Assert.True((await userManager.UpdateAsync(admin)).Succeeded);
+        }
+
+        await host.UserStore.RefreshUserAsync(host.UserStore.GetUserId(AdminSeeding.AdminUserName)!, CancellationToken.None);
+        using var browser = host.CreateBrowser();
+        Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(await SignInAsync(browser, AdminSeeding.AdminUserName, string.Empty)));
+
+        // Act
+        time.Advance(TimeSpan.FromMinutes(6));
+        var response = await browser.GetAsync("/protected");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.True(browser.HasSessionCookie);
     }
 
     [Fact]

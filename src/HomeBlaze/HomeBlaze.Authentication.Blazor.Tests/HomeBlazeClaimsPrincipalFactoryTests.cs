@@ -59,11 +59,31 @@ public class HomeBlazeClaimsPrincipalFactoryTests
         var factory = scope.ServiceProvider.GetRequiredService<IUserClaimsPrincipalFactory<ApplicationUser>>();
         var admin = (await userManager.FindByNameAsync(AdminSeeding.AdminUserName))!;
         admin.MustChangePassword = false;
+        admin.AllowsEmptyPassword = false;
 
         // Act
         var principal = await factory.CreateAsync(admin);
 
         // Assert
         Assert.Null(principal.FindFirst(HomeBlazeClaimTypes.MustChangePassword));
+    }
+
+    [Fact]
+    public async Task WhenTheUserAllowsAnEmptyPasswordWithoutTheStoredFlag_ThenThePrincipalMustChangeThePassword()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        await using var scope = host.Services.CreateAsyncScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var factory = scope.ServiceProvider.GetRequiredService<IUserClaimsPrincipalFactory<ApplicationUser>>();
+        var admin = (await userManager.FindByNameAsync(AdminSeeding.AdminUserName))!;
+        admin.MustChangePassword = false;
+
+        // Act
+        var principal = await factory.CreateAsync(admin);
+
+        // Assert
+        Assert.True(admin.AllowsEmptyPassword);
+        Assert.Equal("true", principal.FindFirst(HomeBlazeClaimTypes.MustChangePassword)?.Value);
     }
 }

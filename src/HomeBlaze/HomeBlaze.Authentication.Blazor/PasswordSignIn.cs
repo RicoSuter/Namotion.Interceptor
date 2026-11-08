@@ -58,7 +58,7 @@ internal sealed class PasswordSignIn(
     }
 
     // Only the seeded or reset administrator, until they set a password. The session carries the claim that they must
-    // change their password, so that nothing but setting it is open to them.
+    // change their password, see ApplicationUser.RequiresPasswordChange, so that nothing but setting it is open to them.
     private async Task<bool> SignInWithEmptyPasswordAsync(HttpContext context, ApplicationUser user, bool wasLockedOut)
     {
         if (!user.AllowsEmptyPassword || user.PasswordHash is not null || wasLockedOut)
@@ -68,9 +68,6 @@ internal sealed class PasswordSignIn(
             return false;
         }
 
-        // In memory only, for the claim: an empty password confines the session even where the stored flag is false,
-        // such as in a database edited by hand.
-        user.MustChangePassword = true;
         await signInManager.SignInAsync(user, isPersistent: false);
         await SignedInAsync(context, user);
         return true;

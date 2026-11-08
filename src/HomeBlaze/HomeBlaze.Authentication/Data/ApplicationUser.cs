@@ -28,6 +28,12 @@ public class ApplicationUser : IdentityUser
     /// <summary>The time of the last successful sign-in.</summary>
     public DateTimeOffset? LastLogin { get; set; }
 
+    /// <summary>
+    /// Whether a session of the user may do nothing but set a password: the user must change it, or signs in with an empty
+    /// one, which confines the session even where <see cref="MustChangePassword"/> is false, such as in a database edited by hand.
+    /// </summary>
+    public bool RequiresPasswordChange() => MustChangePassword || AllowsEmptyPassword;
+
     /// <summary>Whether an administrator locked the user, unlike a lockout after failed sign-ins, which ends by itself.</summary>
     public bool IsLockedByAdministrator() => IsAdministratorLockoutEnd(LockoutEnd);
 
