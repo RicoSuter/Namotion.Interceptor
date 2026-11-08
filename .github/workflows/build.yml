@@ -83,8 +83,12 @@ jobs:
               - 'src/HomeBlaze/Namotion.Devices.Luxtronik*/**'
 
   test:
-    timeout-minutes: 15
-    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
 
@@ -98,15 +102,28 @@ jobs:
 
       - name: Run tests (excluding integration tests)
         run: |
+          $coverageArguments = @()
+          if ('${{ runner.os }}' -eq 'Linux') {
+            $coverageArguments = @('--collect:XPlat Code Coverage', '--', 'DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura')
+          }
           dotnet test src/Namotion.Interceptor.slnx `
             --configuration Release `
             --no-build `
             --filter "Category!=Integration" `
+            --logger trx `
             --results-directory ./TestResults `
-            --collect:"XPlat Code Coverage" `
-            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+            @coverageArguments
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-${{ matrix.os }}
+          path: 'TestResults/**/*.trx'
+          if-no-files-found: warn
 
       - name: Upload raw coverage file
+        if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:
           name: cobertura-coverage
@@ -114,9 +131,11 @@ jobs:
           if-no-files-found: error
 
       - name: Install ReportGenerator
+        if: runner.os == 'Linux'
         run: dotnet tool install --global dotnet-reportgenerator-globaltool
 
       - name: Generate HTML coverage report
+        if: runner.os == 'Linux'
         run: |
           reportgenerator `
             -reports:"**/TestResults/**/coverage.cobertura.xml" `
@@ -124,6 +143,7 @@ jobs:
             -reporttypes:Html
 
       - name: Upload HTML coverage report
+        if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:
           name: html-coverage-report
