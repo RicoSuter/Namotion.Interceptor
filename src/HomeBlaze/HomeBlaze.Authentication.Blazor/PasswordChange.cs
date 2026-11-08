@@ -42,8 +42,8 @@ internal sealed class PasswordChange(
     public async Task<(PasswordChangeOutcome Outcome, IReadOnlyList<string> Errors)> ChangeAsync(
         HttpContext context, string currentPassword, string newPassword, string confirmPassword)
     {
-        // The cookie is checked against the stored stamp only every few minutes, so a session that a reset or a lock
-        // ended would otherwise still set the first password of a reset user.
+        // The session check of the request reads the store, which a change made another way, such as a restored database,
+        // may not have reached yet, so the stamp and the lock are checked against the database before anything is stored.
         var user = await signInManager.ValidateSecurityStampAsync(context.User);
         if (user is null || user.IsLockedByAdministrator())
         {

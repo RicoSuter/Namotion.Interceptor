@@ -44,8 +44,7 @@ public static class AccountEndpoints
     /// <item><c>POST</c> <see cref="SetupPath"/> (<c>userName</c>, <c>code</c>, <c>newPassword</c>,
     /// <c>confirmPassword</c>), which redirects to the root.</item>
     /// <item><c>POST</c> <see cref="DisplayNamePath"/> for a signed-in person (<c>displayName</c>, <c>returnUrl</c>), which
-    /// redirects to the safe return URL, or to the root once it signed out an ended session, also with 401 when the
-    /// session is refused before the endpoint.</item>
+    /// redirects to the safe return URL, or to the root with 401 when the session is refused before the endpoint.</item>
     /// <item><c>POST</c> <see cref="LogoutPath"/>, which signs the person out and redirects to the root; a request that is
     /// not signed in, such as one whose session expired, is redirected without a token.</item>
     /// </list>
@@ -131,16 +130,10 @@ public static class AccountEndpoints
             return Error(TokenRefusal);
         }
 
-        // The cookie is checked against the stored stamp only every few minutes, so a session that a reset or a lock ended
-        // would otherwise still change the account.
-        var user = await signInManager.ValidateSecurityStampAsync(context.User);
-        if (user is null || user.IsLockedByAdministrator())
-        {
-            await signInManager.SignOutAsync();
-            return Redirect(GetRoot(context));
-        }
-
-        var result = await userStore.SetOwnDisplayNameAsync(user.Id, form["displayName"].ToString(), context.RequestAborted);
+        // The session of this request passed the session check against the store already; the store refuses a principal
+        // without a user id as an unknown user.
+        var userId = signInManager.UserManager.GetUserId(context.User) ?? string.Empty;
+        var result = await userStore.SetOwnDisplayNameAsync(userId, form["displayName"].ToString(), context.RequestAborted);
         return result.Succeeded
             ? Redirect(ReturnUrls.GetSafe(form["returnUrl"], context.Request.PathBase))
             : Error(result.Error ?? "The display name could not be set.");

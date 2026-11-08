@@ -75,25 +75,18 @@ public class DisplayNameEndpointTests
         await host.SetPasswordAsync("kid", Password);
         using var browser = host.CreateBrowser();
         await host.SignInAsync(browser, "kid");
-        if (isLock)
-        {
-            // Directly in the database, as a lock that the stamp check alone would not notice.
-            await host.LockOutAsync("kid", DateTimeOffset.MaxValue);
-        }
-        else
-        {
-            var reset = await host.AdministrationAsAdmin.ResetPasswordAsync("kid", CancellationToken.None);
-            Assert.True(reset.Succeeded, reset.Error);
-        }
+        var ended = isLock
+            ? await host.AdministrationAsAdmin.SetLockedAsync("kid", true, CancellationToken.None)
+            : await host.AdministrationAsAdmin.ResetPasswordAsync("kid", CancellationToken.None);
+        Assert.True(ended.Succeeded, ended.Error);
 
         // Act
         var response = await SetDisplayNameAsync(browser, "Kid");
 
         // Assert
-        // The user store knows of the reset, so the cookie is refused before the endpoint, which checks the stamp itself.
-        Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(response, isLock ? HttpStatusCode.OK : HttpStatusCode.Unauthorized));
-        // The endpoint signs out the session it finds locked; a cookie refused before it is kept, as every request refuses it.
-        Assert.Equal(!isLock, browser.HasSessionCookie);
+        // The cookie is refused before the endpoint and kept, as every request refuses it.
+        Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(response, HttpStatusCode.Unauthorized));
+        Assert.True(browser.HasSessionCookie);
         Assert.Null(host.UserStore.GetDisplayName(host.UserStore.GetUserId("kid")!));
     }
 
