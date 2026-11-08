@@ -35,7 +35,12 @@ public class PlaywrightFixture : IAsyncLifetime
     /// <summary>
     /// The services of the server under test, for tests that change the object graph while a page is open.
     /// </summary>
-    public IServiceProvider ServerServices => _factory?.ServerServices ?? throw new InvalidOperationException("Server not started");
+    public IServiceProvider ServerServices => _factory?.Services ?? throw new InvalidOperationException("Server not started");
+
+    /// <summary>
+    /// The number of hosts of the application that the fixture started.
+    /// </summary>
+    public int StartedHostCount => _factory?.StartedHostCount ?? throw new InvalidOperationException("Server not started");
 
     /// <summary>
     /// The warnings and errors that the server under test logs.
@@ -46,14 +51,14 @@ public class PlaywrightFixture : IAsyncLifetime
     {
         // Start the test server with Kestrel. It learns the test subjects and the widget before it loads anything.
         _factory = new WebTestingHostFactory<App>([typeof(ControlsTestSubject), typeof(ControlsTestWidget), typeof(HistoryValuesSubject), typeof(LiveValuesSubject), typeof(LiveGridSubject), typeof(LiveGridWidget)]);
-        // Force server to start by accessing ServerAddress which calls EnsureServer
+        // Accessing the address starts the server
         var address = _factory.ServerAddress;
         Console.WriteLine($"Test server started at: {address}");
 
         // The root subject is loaded by a background service, so the server serves requests before the
         // object graph behind them exists. The UI waits that window out on its own, but the wait would
         // otherwise land inside the first test's own timeout instead of here.
-        var rootManager = _factory.ServerServices.GetRequiredService<RootManager>();
+        var rootManager = _factory.Services.GetRequiredService<RootManager>();
         try
         {
             await rootManager.RootLoaded.WaitAsync(TimeSpan.FromSeconds(60));
@@ -72,7 +77,7 @@ public class PlaywrightFixture : IAsyncLifetime
 
         // Registered once for the whole run, so that every test sees the same types. Resolving a qualified
         // name adds the type to the registry.
-        var typeRegistry = _factory.ServerServices.GetRequiredService<SubjectTypeRegistry>();
+        var typeRegistry = _factory.Services.GetRequiredService<SubjectTypeRegistry>();
         if (typeRegistry.ResolveType(typeof(PlainConfigurableSubject).AssemblyQualifiedName!) is null
             || typeRegistry.ResolveType(typeof(ControlsTestSubject).AssemblyQualifiedName!) is null)
         {

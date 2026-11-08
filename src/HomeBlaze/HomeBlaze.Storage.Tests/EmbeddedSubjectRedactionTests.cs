@@ -13,8 +13,10 @@ public class EmbeddedSubjectRedactionTests
 {
     private static readonly HashSet<MarkdownBlock> NoLayoutBlocks = [];
 
-    [Fact]
-    public void WhenTheSubjectOfABlockIsNoLongerRegistered_ThenEveryArgumentAndJsonValueIsRedacted()
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public void WhenTheSubjectOfABlockIsNoLongerRegistered_ThenEveryArgumentAndJsonValueIsRedacted(string lineEnding)
     {
         // Arrange: the subject that a reload detached, which tells no configuration property anymore.
         var device = new EmbeddedSecretDevice { Host = "detached-host", Password = "detached-secret" };
@@ -24,7 +26,7 @@ public class EmbeddedSubjectRedactionTests
             { "Host": "json-host", "Password": "json-secret" }
             ```
             ::
-            """;
+            """.ReplaceLineEndings(lineEnding);
 
         // Act
         var result = EmbeddedSubjectRedaction.Redact(
@@ -35,7 +37,7 @@ public class EmbeddedSubjectRedactionTests
         Assert.DoesNotContain("json-secret", result);
         Assert.DoesNotContain("detached-host", result);
         Assert.DoesNotContain("json-host", result);
-        Assert.Contains("#gateway Host=*** Password=***\n", result);
+        Assert.Contains("#gateway Host=*** Password=***" + lineEnding, result);
     }
 
     [Fact]

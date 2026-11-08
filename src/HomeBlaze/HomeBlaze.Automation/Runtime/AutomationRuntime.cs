@@ -5,8 +5,9 @@ using Namotion.Interceptor;
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// The worker of one automation. Callbacks on writing threads only enqueue: a change of a watched property and a change
-/// of a property that holds subjects (coalesced), both routed by <see cref="AutomationChangeDispatcher"/>, and a tick
+/// The worker of one automation. Callbacks on writing threads only enqueue: a change of a watched property and a graph
+/// change (coalesced), a change of a property that holds subjects or a property added at run time, both routed by
+/// <see cref="AutomationChangeDispatcher"/>, and a tick
 /// (coalesced) from <see cref="WakeTimer"/>, which the worker sets after every input to when the engine is due next and
 /// stops while nothing is due. The worker processes one input at a time with
 /// <see cref="AutomationEngine"/>, so no rule runs inside a property setter.
@@ -224,9 +225,11 @@ internal sealed class AutomationRuntime
 
     private void ClearPendingFlag(AutomationInput input)
     {
+        // A full fence, as for the graph change: with a plain store, a timer that fires while the store is still buffered
+        // finds the flag set and queues no tick, while this tick reads the clock from before the instant it was due.
         if (input is TickInput)
         {
-            Volatile.Write(ref _isTickPending, 0);
+            Interlocked.Exchange(ref _isTickPending, 0);
         }
         else if (input is GraphChangedInput)
         {
