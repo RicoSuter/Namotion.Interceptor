@@ -36,8 +36,8 @@ internal sealed class PropertyTriggerEngine(
     // that the clock was set back.
     private DateTimeOffset _derivedAt = DateTimeOffset.MinValue;
 
-    // The triggers whose properties, and the rules whose Only if properties, the last refresh resolved differently, which
-    // a graph change evaluates.
+    // The triggers whose properties, and the rules whose Only if properties, a refresh resolved differently since they
+    // were last evaluated, so that a resolution outside a graph change loses no difference.
     private readonly HashSet<CompiledPropertyTrigger> _resolvedDifferently = [];
     private readonly HashSet<CompiledRule> _onlyIfResolvedDifferently = [];
     private FrozenSet<PropertyReference> _watched = FrozenSet<PropertyReference>.Empty;
@@ -145,9 +145,12 @@ internal sealed class PropertyTriggerEngine(
     private static DateTimeOffset? Earliest(DateTimeOffset? current, DateTimeOffset? candidate) =>
         candidate is { } instant && (current is null || instant < current) ? instant : current;
 
+    /// <summary>Whether a <see cref="Refresh"/> resolved properties differently that were not evaluated yet.</summary>
+    public bool HasResolvedDifferently => _resolvedDifferently.Count > 0 || _onlyIfResolvedDifferently.Count > 0;
+
     /// <summary>
-    /// Evaluates the triggers whose properties the last <see cref="Refresh"/> resolved differently and requests the runs
-    /// of the pending triggers whose properties or Only if properties it resolved differently.
+    /// Evaluates the triggers whose properties a <see cref="Refresh"/> resolved differently since the last evaluation and
+    /// requests the runs of the pending triggers whose properties or Only if properties it resolved differently.
     /// </summary>
     public IReadOnlyList<RunRequest> EvaluateResolvedDifferently(IReadOnlyList<CompiledRule> rules)
     {
@@ -267,7 +270,6 @@ internal sealed class PropertyTriggerEngine(
     /// </summary>
     public void Refresh(IReadOnlyList<CompiledRule> rules, IReadOnlyList<CompiledPropertyTrigger> activating, ISubjectPathRecorder route)
     {
-        ForgetResolvedDifferently();
         _pending.Clear();
         var now = timeProvider.GetUtcNow();
         foreach (var rule in rules)

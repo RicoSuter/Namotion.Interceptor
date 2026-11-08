@@ -8,7 +8,8 @@ namespace HomeBlaze.Automation.Runtime;
 /// The property and event triggers of the rules of an automation: subscribes the triggers of rules that became active
 /// and queues the activation of their property triggers, resolves every path of the active rules again when they may lead
 /// elsewhere, and turns the inputs of the worker into run requests. The paths are always resolved all at once, into one
-/// graph route of <see cref="GraphRoutes"/>, so that the route of a path that is no longer resolved leaves it. Used by the
+/// graph route of <see cref="GraphRoutes"/>, so that the route of a path that is no longer resolved leaves it, and every
+/// resolution that finds other properties has them evaluated, in the same input or in one queued for it. Used by the
 /// worker only.
 /// </summary>
 internal sealed class AutomationTriggers
@@ -84,7 +85,7 @@ internal sealed class AutomationTriggers
         bool evaluateAll)
     {
         var changed = _propertyTriggers.Apply(changes);
-        var requests = new List<RunRequest>(evaluateAll ? ResolveAndEvaluateAll(rules) : _propertyTriggers.ObserveReaders(rules, changed));
+        var requests = new List<RunRequest>(evaluateAll ? EvaluateAll(rules) : _propertyTriggers.ObserveReaders(rules, changed));
         var activated = ActivateTriggers([.. activations.SelectMany(activation => activation.Rules)], rules);
         if (activated.Count == 0)
         {
@@ -141,6 +142,7 @@ internal sealed class AutomationTriggers
         TickInput => _propertyTriggers.OnTick(rules),
         EventInput subjectEvent => _eventTriggers.OnEvent(subjectEvent),
         GraphChangedInput => OnGraphChanged(rules),
+        ResolvedDifferentlyInput => _propertyTriggers.EvaluateResolvedDifferently(rules),
         ActivationInput activation => ActivateTriggers(activation.Rules, rules),
         PendingRecheckInput => _propertyTriggers.RequestPendingRuns(rules),
         _ => []
@@ -149,16 +151,16 @@ internal sealed class AutomationTriggers
     /// <summary>
     /// Resolves every path again, unless the structure of the graph is as it was at the last resolution, see
     /// <see cref="GraphRoutes.NeedsResolving"/>, such as after a write of the same children, and evaluates the triggers
-    /// whose properties changed; requests the runs of the pending triggers whose properties or Only if properties changed.
+    /// whose properties changed, also those an earlier resolution found and no input evaluated yet; requests the runs of
+    /// the pending triggers whose properties or Only if properties changed.
     /// </summary>
     public IReadOnlyList<RunRequest> OnGraphChanged(IReadOnlyList<CompiledRule> rules)
     {
-        if (!_routes.NeedsResolving())
+        if (_routes.NeedsResolving())
         {
-            return [];
+            ResolveOnly(rules, []);
         }
 
-        Resolve(rules, []);
         return _propertyTriggers.EvaluateResolvedDifferently(rules);
     }
 
@@ -211,16 +213,27 @@ internal sealed class AutomationTriggers
         return _propertyTriggers.Activate(triggers);
     }
 
-    private IReadOnlyList<RunRequest> ResolveAndEvaluateAll(IReadOnlyList<CompiledRule> rules)
+    private IReadOnlyList<RunRequest> EvaluateAll(IReadOnlyList<CompiledRule> rules)
     {
-        Resolve(rules, []);
+        ResolveOnly(rules, []);
         return _propertyTriggers.EvaluateAll(rules);
+    }
+
+    // Resolves every path and queues the evaluation of the triggers and Only if resolved differently, for a caller that
+    // does not evaluate them itself.
+    private void Resolve(IReadOnlyList<CompiledRule> rules, IReadOnlyList<CompiledPropertyTrigger> activating)
+    {
+        ResolveOnly(rules, activating);
+        if (_propertyTriggers.HasResolvedDifferently)
+        {
+            _queue.TryEnqueue(new ResolvedDifferentlyInput(AutomationInputQueue.CausedChainDepth));
+        }
     }
 
     // Resolves every path of the active rules into one graph route: the sources of the event triggers, which subscribe
     // again where their source changed, and the properties of the property triggers, of those about to be activated and
     // of Only if of the rules with a pending trigger, which are published as the watched set.
-    private void Resolve(IReadOnlyList<CompiledRule> rules, IReadOnlyList<CompiledPropertyTrigger> activating)
+    private void ResolveOnly(IReadOnlyList<CompiledRule> rules, IReadOnlyList<CompiledPropertyTrigger> activating)
     {
         var route = _routes.BeginRoute();
         _eventTriggers.Bind(rules, route);

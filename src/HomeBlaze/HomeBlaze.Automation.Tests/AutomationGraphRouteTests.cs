@@ -239,6 +239,132 @@ public class AutomationGraphRouteTests
         Assert.Equal(1, host.Blinds.CloseCount);
     }
 
+    // The writes run on the worker, between the input that resolved the paths and its publication, so that the change of
+    // the watched property is processed before the graph change: the resolution of that input is the first to see the
+    // new sensor.
+    [Fact]
+    public async Task WhenAStructuralChangeIsFirstSeenWhileATriggerStopsPending_ThenTheTriggerItLeadsElsewhereIsEvaluated()
+    {
+        // Arrange
+        var holder = new TestSensorHolder { Sensor = new TestSensor { Gust = 1 } };
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("gusts", On("Gusts", When("/Holder/Sensor/Gust > 8"), Invoke("/Blinds/Close"))),
+            ("rain", Create("Rain", AutomationRuleMode.On, [When("/Weather/Rain > 1")], [Invoke("/Blinds/Open")], onlyIf: "/Weather/Power > 100"))));
+        host.Graph.Add("Holder", holder);
+        await host.FlushAsync();
+        host.Weather.Rain = 2;
+        await host.FlushAsync();
+        var routes = host.Automation.Runtime!.Engine.Routes;
+        routes.BeforePublication = () =>
+        {
+            routes.BeforePublication = null;
+            host.Weather.Rain = 0;
+            holder.Sensor = new TestSensor { Gust = 9 };
+        };
+
+        // Act
+        host.Graph.Add("Other", new TestSensor());
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(0, host.Blinds.OpenCount);
+    }
+
+    // A trigger that becomes pending has every pending run requested again; one that stops pending does not, so only the
+    // resolution of that input sees the new sensor of Only if.
+    [Fact]
+    public async Task WhenAStructuralChangeIsFirstSeenWhileATriggerStopsPending_ThenAPendingRuleWhoseOnlyIfLeadsElsewhereRunsAgain()
+    {
+        // Arrange
+        var holder = new TestSensorHolder { Sensor = new TestSensor { Power = 0 } };
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("gusts", Create("Gusts", AutomationRuleMode.On, [When("/Weather/Gust > 1")], [Invoke("/Blinds/Close")], onlyIf: "/Holder/Sensor/Power > 5")),
+            ("rain", Create("Rain", AutomationRuleMode.On, [When("/Weather/Rain > 1")], [Invoke("/Blinds/Open")], onlyIf: "/Weather/Power > 100"))));
+        host.Graph.Add("Holder", holder);
+        await host.FlushAsync();
+        host.Weather.Gust = 2;
+        host.Weather.Rain = 2;
+        await host.FlushAsync();
+        var routes = host.Automation.Runtime!.Engine.Routes;
+        routes.BeforePublication = () =>
+        {
+            routes.BeforePublication = null;
+            host.Weather.Rain = 0;
+            holder.Sensor = new TestSensor { Power = 9 };
+        };
+
+        // Act
+        host.Graph.Add("Other", new TestSensor());
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(0, host.Blinds.OpenCount);
+    }
+
+    [Fact]
+    public async Task WhenAStructuralChangeIsFirstSeenWhileAStateChangeActivatesRules_ThenAnActiveTriggerItLeadsElsewhereIsEvaluated()
+    {
+        // Arrange
+        var holder = new TestSensorHolder { Sensor = new TestSensor { Gust = 1 } };
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Day", "Night"];
+            automation.InitialState = "Day";
+            automation.Rules = Keyed(
+                ("gusts", On("Gusts", When("/Holder/Sensor/Gust > 8"), Invoke("/Blinds/Close"))),
+                ("toNight", Create("To night", AutomationRuleMode.On, [When("/Weather/Rain > 1")], [Enter("Night")], inState: "Day")),
+                ("night", Create("Night", AutomationRuleMode.On, [When("/Weather/Power > 0")], [Invoke("/Blinds/Open")], inState: "Night")));
+        });
+        host.Graph.Add("Holder", holder);
+        await host.FlushAsync();
+        var routes = host.Automation.Runtime!.Engine.Routes;
+        routes.BeforePublication = () =>
+        {
+            routes.BeforePublication = null;
+            host.Weather.Rain = 2;
+            holder.Sensor = new TestSensor { Gust = 9 };
+        };
+
+        // Act
+        host.Graph.Add("Other", new TestSensor());
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal("Night", host.Automation.CurrentState);
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(0, host.Blinds.OpenCount);
+    }
+
+    // The route published before the resolution has every property that can change its result, so a change off the route
+    // during the resolution needs no second resolution.
+    [Fact]
+    public async Task WhenAStructuralChangeOffTheRouteCommitsWhileThePathsAreResolved_ThenThePathsAreNotResolvedAgain()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(Rule("/Weather/Gust > 8"));
+        var holder = new TestSensorHolder();
+        host.Graph.Add("Holder", holder);
+        await host.FlushAsync();
+        var routes = host.Automation.Runtime!.Engine.Routes;
+        var resolutions = 0;
+        routes.BeforePublication = () =>
+        {
+            if (++resolutions == 1)
+            {
+                holder.Sensor = new TestSensor();
+            }
+        };
+
+        // Act
+        host.Graph.Add("Other", new TestSensor());
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, resolutions);
+    }
+
     [Fact]
     public async Task WhenAPathLeadsAboveTheAutomationAndItsParent_ThenEveryStructuralChangeReachesTheAutomation()
     {

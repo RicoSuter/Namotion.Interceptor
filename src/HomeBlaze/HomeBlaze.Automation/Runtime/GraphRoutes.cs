@@ -18,8 +18,9 @@ namespace HomeBlaze.Automation.Runtime;
 /// since the last publication and again after the publication. The paths are those of the current structure only when
 /// both reads return the same even number and the location was resolved at it as well, in this pass or in an earlier one
 /// at the same number: then a graph change finds nothing to resolve while the version stays that number, see
-/// <see cref="NeedsResolving"/>. A change committed while the paths were resolved, which the route published only
-/// afterwards may not have routed, queues a graph change.
+/// <see cref="NeedsResolving"/>. A change committed while the paths were resolved is routed by the route published before
+/// them when the union did not change, since every property that can change a result is on it; when the union changed,
+/// a graph change is queued, so that a change of a property only the new route has is not lost.
 /// </remarks>
 internal sealed class GraphRoutes
 {
@@ -60,9 +61,7 @@ internal sealed class GraphRoutes
 
     public SubjectPathResolver Resolver { get; }
 
-    // White-box test hooks: the route of the paths of the rules, and the route of the canonical path of the automation.
-    internal GraphRouteBuilder RulesRoute => _rules;
-
+    // White-box test hook: the route of the canonical path of the automation.
     internal GraphRouteBuilder LocationRoute => _location;
 
     // White-box test hook: runs on the worker before a publication, where a test commits a change after the paths were
@@ -101,9 +100,9 @@ internal sealed class GraphRoutes
 
     /// <summary>
     /// Publishes the union of the route of the paths of the rules and of the location, when a path was resolved since the
-    /// last publication and the union changed. A structure change while they were resolved may not be routed by the union
-    /// published now, and the paths may not be those of the structure now, so a graph change is queued then, in the chain
-    /// of the input that resolved them.
+    /// last publication and the union changed. A structure change while they were resolved may not be routed by a union
+    /// that changed and is published only now, so a graph change is queued then, in the chain of the input that resolved
+    /// them.
     /// </summary>
     public void Publish(int chainDepth)
     {
@@ -113,24 +112,27 @@ internal sealed class GraphRoutes
         }
 
         BeforePublication?.Invoke();
-        if (TryEndUnion(out var route, out var isUnbounded))
+        var hasChanged = TryEndUnion(out var route, out var isUnbounded);
+        if (hasChanged)
         {
             _changes?.PublishRoute(route, isUnbounded);
         }
 
-        BindVersion(chainDepth);
+        BindVersion(hasChanged, chainDepth);
     }
 
-    // Reads the version after the publication, so that a change committed before it is either routed by the route
-    // published now or seen here. A pass that resolved the paths of the rules alone leaves the location bound only while
-    // the version is the one it was resolved at.
-    private void BindVersion(int chainDepth)
+    // Reads the version after the publication, behind the full fence that the registry requires between its reads and
+    // the second read of the version, so that a change committed before it is either routed by the route published or
+    // seen here. A pass that resolved the paths of the rules alone leaves the location bound only while the version is
+    // the one it was resolved at.
+    private void BindVersion(bool hasRouteChanged, int chainDepth)
     {
+        Interlocked.MemoryBarrier();
         var version = _getStructureVersion();
         var isCurrent = version >= 0 && version == _resolvedSince && version % 2 == 0;
         _boundVersion = isCurrent && (_hasResolvedLocation || _boundVersion == version) ? version : -1;
         _hasResolvedLocation = false;
-        if (!isCurrent && version >= 0)
+        if (hasRouteChanged && !isCurrent && version >= 0)
         {
             _changes?.RequestGraphChange(chainDepth);
         }
