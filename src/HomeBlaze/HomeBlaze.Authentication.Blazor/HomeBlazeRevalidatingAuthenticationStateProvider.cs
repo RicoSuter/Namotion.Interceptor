@@ -106,7 +106,10 @@ internal sealed partial class HomeBlazeRevalidatingAuthenticationStateProvider :
         }
 
         // The store may have changed the person after the check but before the state was stored, when its revalidation
-        // still saw the earlier state; the fence pairs with the release of the store's gate before it raises the change.
+        // still read the earlier state, so this revalidation checks again and replaces the state just raised. The full
+        // fence orders storing the state before reading the store; it pairs with the interlocked lock acquisition inside
+        // SemaphoreSlim.Release, which the store passes between publishing the change and raising it, so that at least
+        // one of the two revalidations sees both the change and this state.
         Interlocked.MemoryBarrier();
         _lastRevalidation = RevalidateAsync(userId: null);
     }
