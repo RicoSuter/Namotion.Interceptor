@@ -11,30 +11,43 @@ namespace HomeBlaze.Automation.Runtime;
 /// Announces a property that is added to a subject at run time, such as a dynamic property or an attribute, to the
 /// automations of a context as a graph change, since a path that led nowhere or through an [InlinePaths] child may lead
 /// to it now. The properties a subject is attached with by the write of a property that holds subjects, such as its
-/// methods and attributes, are announced by the change of that write instead. Added to the context with the first
-/// registration of <see cref="Dispatcher"/> for it and kept, since a service cannot be removed from a context; it does
-/// nothing while the dispatcher routes no changes of the context. Runs on the writing thread after the registry
-/// registered the property and only enqueues.
+/// methods and attributes, are announced by the change of that write instead. One per context, added with the first
+/// registration of a dispatcher for it and kept, since a service cannot be removed from a context; it serves the routes
+/// of every dispatcher that routes the changes of the context and does nothing while none does. Runs on the writing
+/// thread after the registry registered the property and only enqueues.
 /// </summary>
 // Before the method properties are added, so that the subject they are added to is known to be attaching.
 [RunsAfter(typeof(SubjectRegistry), typeof(SubjectPathResolver))]
 [RunsBefore(typeof(MethodPropertyInitializer))]
-internal sealed class PropertyAttachNotifier(AutomationChangeDispatcher dispatcher) : ILifecycleHandler, IPropertyLifecycleHandler
+internal sealed class PropertyAttachNotifier : ILifecycleHandler, IPropertyLifecycleHandler
 {
     // The subject that the write on this thread attaches through a property, until the change of that write is routed or
     // another subject attaches.
     [ThreadStatic]
     private static AttachingSubject? _attaching;
 
-    private AutomationChangeDispatcher.ChangeSource? _source;
+    private readonly Lock _lock = new();
+    private AutomationChangeDispatcher.ChangeSource[] _sources = [];
 
-    public AutomationChangeDispatcher Dispatcher { get; } = dispatcher;
-
-    /// <summary>The routes of the change stream of the context, or null while none are; set by the dispatcher under its lock.</summary>
-    internal AutomationChangeDispatcher.ChangeSource? Source
+    /// <summary>Announces added properties to the routes from now on. Called by the dispatcher under its lock.</summary>
+    public void AddSource(AutomationChangeDispatcher.ChangeSource source)
     {
-        get => Volatile.Read(ref _source);
-        set => Volatile.Write(ref _source, value);
+        lock (_lock)
+        {
+            if (Array.IndexOf(_sources, source) < 0)
+            {
+                Volatile.Write(ref _sources, [.. _sources, source]);
+            }
+        }
+    }
+
+    /// <summary>Stops announcing added properties to the routes. Called by the dispatcher under its lock.</summary>
+    public void RemoveSource(AutomationChangeDispatcher.ChangeSource source)
+    {
+        lock (_lock)
+        {
+            Volatile.Write(ref _sources, Array.FindAll(_sources, candidate => !ReferenceEquals(candidate, source)));
+        }
     }
 
     /// <summary>Ends the attach of the subject on this thread, once the change of the write that attached it is routed.</summary>
@@ -42,7 +55,7 @@ internal sealed class PropertyAttachNotifier(AutomationChangeDispatcher dispatch
 
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
-        if (!change.IsContextAttach || Source is not { } source)
+        if (!change.IsContextAttach || Volatile.Read(ref _sources).Length == 0)
         {
             return;
         }
@@ -54,14 +67,20 @@ internal sealed class PropertyAttachNotifier(AutomationChangeDispatcher dispatch
         }
         else
         {
-            (_attaching ??= new AttachingSubject()).Set(change.Subject, source.Id);
+            (_attaching ??= new AttachingSubject()).Set(change.Subject);
         }
     }
 
     public void AttachProperty(SubjectPropertyLifecycleChange change)
     {
         // Any other property is attached only with its subject.
-        if (Source is { } source && change.Property.Metadata.IsDynamic && _attaching?.Is(change.Subject, source.Id) != true)
+        var sources = Volatile.Read(ref _sources);
+        if (sources.Length == 0 || !change.Property.Metadata.IsDynamic || _attaching?.Is(change.Subject) == true)
+        {
+            return;
+        }
+
+        foreach (var source in sources)
         {
             source.OnPropertyAdded();
         }
@@ -76,9 +95,9 @@ internal sealed class PropertyAttachNotifier(AutomationChangeDispatcher dispatch
     private sealed class AttachingSubject
     {
         private WeakReference<IInterceptorSubject>? _subject;
-        private long _sourceId;
+        private bool _isSet;
 
-        public void Set(IInterceptorSubject subject, long sourceId)
+        public void Set(IInterceptorSubject subject)
         {
             if (_subject is null)
             {
@@ -89,12 +108,12 @@ internal sealed class PropertyAttachNotifier(AutomationChangeDispatcher dispatch
                 _subject.SetTarget(subject);
             }
 
-            _sourceId = sourceId;
+            _isSet = true;
         }
 
-        public void Clear() => _sourceId = 0;
+        public void Clear() => _isSet = false;
 
-        public bool Is(IInterceptorSubject subject, long sourceId) =>
-            _sourceId == sourceId && _subject is not null && _subject.TryGetTarget(out var target) && ReferenceEquals(target, subject);
+        public bool Is(IInterceptorSubject subject) =>
+            _isSet && _subject is not null && _subject.TryGetTarget(out var target) && ReferenceEquals(target, subject);
     }
 }

@@ -3,7 +3,9 @@ using System.Collections.Frozen;
 using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
 using Namotion.Interceptor;
+using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Automation.Tests.Runtime;
 
@@ -124,6 +126,39 @@ public class AutomationChangeDispatcherTests
         Assert.Equal(1, graphChangesBeforeTheRelease);
         Assert.Equal(2, first.GraphChanges);
         Assert.Equal(2, second.GraphChanges);
+    }
+
+    [Fact]
+    public void WhenSeveralDispatchersRouteAContext_ThenOneNotifierAnnouncesAnAddedPropertyToTheListenersOfEach()
+    {
+        // Arrange
+        var (graph, weather) = CreateGraph();
+        var first = new RecordingListener();
+        var second = new RecordingListener();
+        using var firstRegistration = new AutomationChangeDispatcher().Register(graph.Context, first);
+        using var secondRegistration = new AutomationChangeDispatcher().Register(graph.Context, second);
+
+        // Act
+        weather.TryGetRegisteredSubject()!.AddProperty<double?>("Wind", _ => 10);
+
+        // Assert
+        Assert.Single(graph.Context.GetServices<IPropertyLifecycleHandler>().OfType<PropertyAttachNotifier>());
+        Assert.Equal(1, first.GraphChanges);
+        Assert.Equal(1, second.GraphChanges);
+    }
+
+    [Fact]
+    public void WhenNoDispatcherIsRegistered_ThenEveryCallerSharesOne()
+    {
+        // Arrange
+        var services = new ServiceCollection().BuildServiceProvider();
+
+        // Act
+        var first = AutomationChangeDispatcher.From(services);
+        var second = AutomationChangeDispatcher.From(services);
+
+        // Assert
+        Assert.Same(first, second);
     }
 
     [Fact]

@@ -21,9 +21,12 @@ internal sealed class AutomationChangeDispatcher
     private readonly Lock _lock = new();
     private readonly Dictionary<PropertyChangeInterceptor, ChangeSource> _sources = [];
 
-    /// <summary>Gets the registered dispatcher, or a dispatcher of its own for a caller when none is registered.</summary>
+    // Shared, so that callers without a registered dispatcher subscribe each change stream once.
+    private static readonly AutomationChangeDispatcher Fallback = new();
+
+    /// <summary>Gets the registered dispatcher, or one dispatcher shared by every caller when none is registered.</summary>
     public static AutomationChangeDispatcher From(IServiceProvider serviceProvider) =>
-        serviceProvider.GetService<AutomationChangeDispatcher>() ?? new AutomationChangeDispatcher();
+        serviceProvider.GetService<AutomationChangeDispatcher>() ?? Fallback;
 
     // White-box test hook: the number of change streams with a subscription.
     internal int SourceCount
@@ -93,14 +96,21 @@ internal sealed class AutomationChangeDispatcher
         return owner;
     }
 
-    // Added once per dispatcher and context, since a service cannot be removed from a context.
-    private PropertyAttachNotifier GetNotifier(IInterceptorSubjectContext context)
+    // Added once per context, since a service cannot be removed from a context.
+    private static PropertyAttachNotifier GetNotifier(IInterceptorSubjectContext context)
     {
-        context.TryAddService<IPropertyLifecycleHandler>(
-            () => new PropertyAttachNotifier(this), handler => handler is PropertyAttachNotifier notifier && notifier.Dispatcher == this);
+        if (context.TryAddService<IPropertyLifecycleHandler>(
+            () => new PropertyAttachNotifier(), handler => handler is PropertyAttachNotifier))
+        {
+            // A writer publishes a property and then reads the handlers, and the worker publishes the handler and then
+            // resolves the paths: the fence on every processor pairs with the writer's half, so that the writer sees the
+            // handler or the worker sees the property.
+            Interlocked.MemoryBarrierProcessWide();
+        }
+
         foreach (var handler in context.GetServices<IPropertyLifecycleHandler>())
         {
-            if (handler is PropertyAttachNotifier notifier && notifier.Dispatcher == this)
+            if (handler is PropertyAttachNotifier notifier)
             {
                 return notifier;
             }
@@ -204,12 +214,7 @@ internal sealed class AutomationChangeDispatcher
         // The release count read before every listener was given a graph change, or -1.
         private long _notifiedAt = -1;
 
-        private static long _lastId;
-
         public PropertyChangeInterceptor Interceptor { get; } = interceptor;
-
-        /// <summary>Tells these routes apart from earlier and later ones; never 0.</summary>
-        public long Id { get; } = Interlocked.Increment(ref _lastId);
 
         public IDisposable? Subscription { get; set; }
 
@@ -233,16 +238,15 @@ internal sealed class AutomationChangeDispatcher
             if (!_notifiers.Contains(notifier))
             {
                 _notifiers.Add(notifier);
+                notifier.AddSource(this);
             }
-
-            notifier.Source = this;
         }
 
         public void ReleaseNotifiers()
         {
             foreach (var notifier in _notifiers)
             {
-                notifier.Source = null;
+                notifier.RemoveSource(this);
             }
 
             _notifiers.Clear();
