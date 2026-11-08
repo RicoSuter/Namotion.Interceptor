@@ -38,6 +38,29 @@ public class SetupEndpointTests
     }
 
     [Fact]
+    public async Task WhenTheLastSaveOfThePasswordFails_ThenNothingIsStoredAndThePersonIsSignedInToSetIt()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        var added = await host.AdministrationAsAdmin.AddUserAsync("mom", null, [BuiltInRoles.ReaderName], CancellationToken.None);
+        Assert.True(added.Succeeded, added.Error);
+        using var browser = host.CreateBrowser();
+        host.FailingUserValidator.IsRefusing = true;
+        var redeemed = await RedeemSetupCodeAsync(browser, "mom", added.SetupCode!);
+        var hadPassword = await HasPasswordAsync(host, "mom");
+        host.FailingUserValidator.IsRefusing = false;
+
+        // Act
+        var response = await SetPasswordAsync(browser, Password);
+
+        // Assert
+        Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(redeemed));
+        Assert.False(hadPassword);
+        Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(response));
+        Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync("/protected")).StatusCode);
+    }
+
+    [Fact]
     public async Task WhenTheUserNameIsTypedWithUpperCaseLetters_ThenTheSetupCodeOfTheLowerCaseUserIsRedeemed()
     {
         // Arrange

@@ -171,6 +171,8 @@ internal sealed class AuthenticationTestHost : IAsyncDisposable
 
         builder.Services.AddSingleton<CountingPasswordHasher>();
         builder.Services.AddSingleton<IPasswordHasher<ApplicationUser>>(services => services.GetRequiredService<CountingPasswordHasher>());
+        builder.Services.AddSingleton<FailingUserValidator>();
+        builder.Services.AddSingleton<IUserValidator<ApplicationUser>>(services => services.GetRequiredService<FailingUserValidator>());
         builder.AddDefaultHealthChecks();
 
         var application = builder.Build();
@@ -240,6 +242,9 @@ internal sealed class AuthenticationTestHost : IAsyncDisposable
 
     /// <summary>Creates a client of the test server, which follows no redirect.</summary>
     public HttpClient CreateClient() => _application.GetTestClient();
+
+    /// <summary>The validator that fails storing a user once their first password is set, see <see cref="Blazor.Tests.FailingUserValidator"/>.</summary>
+    public FailingUserValidator FailingUserValidator => Services.GetRequiredService<FailingUserValidator>();
 
     /// <summary>How often a password was verified against a hash, a stored or a dummy one.</summary>
     public int PasswordVerificationCount => Services.GetRequiredService<CountingPasswordHasher>().VerificationCount;

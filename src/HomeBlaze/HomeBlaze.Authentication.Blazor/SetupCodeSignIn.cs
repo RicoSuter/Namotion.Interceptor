@@ -23,6 +23,7 @@ internal enum SetupCodeOutcome
 /// request.
 /// </summary>
 internal sealed class SetupCodeSignIn(
+    AuthenticationDbContext database,
     UserManager<ApplicationUser> userManager,
     SignInManager<ApplicationUser> signInManager,
     UserStore userStore,
@@ -83,7 +84,7 @@ internal sealed class SetupCodeSignIn(
     {
         var result = await userManager.HasPasswordAsync(user)
             ? IdentityResult.Failed(new IdentityError { Code = "HasPassword", Description = "The user has a password." })
-            : await PasswordChange.AddPasswordAsync(userManager, user, newPassword);
+            : await PasswordChange.AddPasswordAsync(database, userManager, user, newPassword);
         if (result.Succeeded)
         {
             AuthenticationEvents.PasswordChanged(logger, user.UserName ?? user.Id);

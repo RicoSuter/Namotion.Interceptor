@@ -289,6 +289,28 @@ public class PasswordEndpointTests
     }
 
     [Fact]
+    public async Task WhenTheLastSaveOfAFirstPasswordFails_ThenNothingIsStoredAndTheSessionCanSetItAgain()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        using var browser = host.CreateBrowser();
+        await SignInAsync(browser, AdminSeeding.AdminUserName, string.Empty);
+        host.FailingUserValidator.IsRefusing = true;
+        var refused = await SetPasswordAsync(browser, Password);
+        var hadPassword = await HasPasswordAsync(host, AdminSeeding.AdminUserName);
+        host.FailingUserValidator.IsRefusing = false;
+
+        // Act
+        var response = await SetPasswordAsync(browser, Password);
+
+        // Assert
+        Assert.Equal([FailingUserValidator.Error], await TestBrowser.GetAccountErrorsAsync(refused));
+        Assert.False(hadPassword);
+        Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(response));
+        Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync("/protected")).StatusCode);
+    }
+
+    [Fact]
     public async Task WhenAUserWithoutAPasswordIsLockedByAnAdministrator_ThenTheyCannotSetAPassword()
     {
         // Arrange

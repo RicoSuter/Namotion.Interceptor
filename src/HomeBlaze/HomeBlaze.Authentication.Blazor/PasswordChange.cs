@@ -23,6 +23,7 @@ internal enum PasswordChangeOutcome
 /// sessions. Scoped per request.
 /// </summary>
 internal sealed class PasswordChange(
+    AuthenticationDbContext database,
     UserManager<ApplicationUser> userManager,
     SignInManager<ApplicationUser> signInManager,
     UserStore userStore,
@@ -63,7 +64,7 @@ internal sealed class PasswordChange(
             return (PasswordChangeOutcome.Refused, [MismatchError]);
         }
 
-        var result = await StorePasswordAsync(userManager, user, hasPassword, currentPassword, newPassword);
+        var result = await StorePasswordAsync(database, userManager, user, hasPassword, currentPassword, newPassword);
         if (!result.Succeeded)
         {
             return await RefuseAsync(context, user, result);
@@ -77,26 +78,41 @@ internal sealed class PasswordChange(
 
     /// <summary>
     /// Adds <paramref name="newPassword"/> to <paramref name="user"/>, who has none, clears the required password change
-    /// and the empty password, and renews the security stamp, which ends the other sessions of the user.
+    /// and the empty password, and renews the security stamp, which ends the other sessions of the user. When it fails,
+    /// nothing is stored and <paramref name="user"/> is reloaded as stored.
     /// </summary>
-    public static Task<IdentityResult> AddPasswordAsync(UserManager<ApplicationUser> userManager, ApplicationUser user, string newPassword) =>
-        StorePasswordAsync(userManager, user, hasPassword: false, currentPassword: string.Empty, newPassword);
+    public static Task<IdentityResult> AddPasswordAsync(
+        AuthenticationDbContext database, UserManager<ApplicationUser> userManager, ApplicationUser user, string newPassword) =>
+        StorePasswordAsync(database, userManager, user, hasPassword: false, currentPassword: string.Empty, newPassword);
 
+    // Two saves, so in one transaction: a password stored without the second would be refused to the person and end their
+    // session at the next stamp check.
     private static async Task<IdentityResult> StorePasswordAsync(
-        UserManager<ApplicationUser> userManager, ApplicationUser user, bool hasPassword, string currentPassword, string newPassword)
+        AuthenticationDbContext database, UserManager<ApplicationUser> userManager, ApplicationUser user, bool hasPassword,
+        string currentPassword, string newPassword)
     {
+        await using var transaction = await database.Database.BeginTransactionAsync();
         var result = hasPassword
             ? await userManager.ChangePasswordAsync(user, currentPassword, newPassword)
             : await userManager.AddPasswordAsync(user, newPassword);
-        if (!result.Succeeded)
+        if (result.Succeeded)
         {
+            user.MustChangePassword = false;
+            user.AllowsEmptyPassword = false;
+            // Also stores both flags, and ends the other sessions of the user.
+            result = await userManager.UpdateSecurityStampAsync(user);
+        }
+
+        if (result.Succeeded)
+        {
+            await transaction.CommitAsync();
             return result;
         }
 
-        user.MustChangePassword = false;
-        user.AllowsEmptyPassword = false;
-        // Also stores both flags, and ends the other sessions of the user.
-        return await userManager.UpdateSecurityStampAsync(user);
+        await transaction.RollbackAsync();
+        // The failed steps changed the user in memory, such as its stamp, which a session signed in with it would carry.
+        await database.Entry(user).ReloadAsync();
+        return result;
     }
 
     // A wrong current password counts as a failed sign-in. The lockout it starts is refused as one found before the
