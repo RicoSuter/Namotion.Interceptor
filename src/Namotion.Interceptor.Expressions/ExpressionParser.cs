@@ -339,33 +339,43 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
     }
 
     // Reads one number and its unit from the front of the text, and fails unless the unit is smaller than the previous one.
-    // A part beyond the range of TimeSpan counts as OutOfRangeTicks, so that the parts add up without overflow and the
-    // duration stays out of range with either sign.
+    // A part beyond the range of TimeSpan, an amount with more digits than a decimal holds included, counts as
+    // OutOfRangeTicks, so that the parts add up without overflow and the duration stays out of range with either sign.
     private static bool TryReadDurationPart(ref ReadOnlySpan<char> rest, int previousRank, out int rank, out decimal ticks)
     {
         rank = -1;
         ticks = 0;
-        var numberLength = 0;
-        while (numberLength < rest.Length && (char.IsAsciiDigit(rest[numberLength]) || rest[numberLength] == '.'))
-        {
-            numberLength++;
-        }
-
-        if (numberLength == 0 ||
-            !decimal.TryParse(rest[..numberLength], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var amount))
+        if (!TryReadAmount(ref rest, out var amount, out var isInRange) ||
+            !TryReadUnit(rest, out rank, out var unitLength, out var ticksPerUnit) ||
+            rank >= previousRank)
         {
             return false;
         }
 
-        var remaining = rest[numberLength..];
-        if (!TryReadUnit(remaining, out rank, out var unitLength, out var ticksPerUnit) || rank >= previousRank)
-        {
-            return false;
-        }
-
-        ticks = amount < OutOfRangeTicks / ticksPerUnit ? amount * ticksPerUnit : OutOfRangeTicks;
-        rest = remaining[unitLength..];
+        ticks = isInRange && amount < OutOfRangeTicks / ticksPerUnit ? amount * ticksPerUnit : OutOfRangeTicks;
+        rest = rest[unitLength..];
         return true;
+    }
+
+    // Reads the digits and the decimal point from the front of the text, and fails for no digit or a second point. An
+    // amount with more digits than a decimal holds is out of range.
+    private static bool TryReadAmount(ref ReadOnlySpan<char> rest, out decimal amount, out bool isInRange)
+    {
+        var length = 0;
+        var pointCount = 0;
+        while (length < rest.Length && (char.IsAsciiDigit(rest[length]) || rest[length] == '.'))
+        {
+            if (rest[length] == '.')
+            {
+                pointCount++;
+            }
+
+            length++;
+        }
+
+        isInRange = decimal.TryParse(rest[..length], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out amount);
+        rest = rest[length..];
+        return length > pointCount && pointCount <= 1;
     }
 
     // "ms" before "m", so that milliseconds are not read as minutes.

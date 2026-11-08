@@ -13,6 +13,16 @@ public class ParsedExpressionParseTests
         return expression;
     }
 
+    private static ParsedExpression Parse(string text, bool declaresClockAndEvent)
+    {
+        var isParsed = declaresClockAndEvent
+            ? ParsedExpression.TryParse(text, '/', ClockAndEventVariables, out var expression, out var error)
+            : ParsedExpression.TryParse(text, '/', out expression, out error);
+        Assert.True(isParsed, error);
+        Assert.NotNull(expression);
+        return expression;
+    }
+
     [Theory]
     [InlineData("subject.IsOn", "subject", "IsOn")]
     [InlineData("subject.Device.IsOn", "subject", "Device.IsOn")]
@@ -235,6 +245,10 @@ public class ParsedExpressionParseTests
     [InlineData("Interval > 10675199d2h48m5.4775808s", "duration out of range '10675199d2h48m5.4775808s' at position 11")]
     [InlineData("Interval > 99999999999999999999999999d", "duration out of range '99999999999999999999999999d' at position 11")]
     [InlineData("Interval > -99999999999999999999999999d9999999999999999999999999h", "duration out of range '-99999999999999999999999999d9999999999999999999999999h' at position 11")]
+    [InlineData("Interval > 999999999999999999999999999999d", "duration out of range '999999999999999999999999999999d' at position 11")]
+    [InlineData("Interval > 1h999999999999999999999999999999.5s", "duration out of range '1h999999999999999999999999999999.5s' at position 11")]
+    [InlineData("Interval > 999999999999999999999999999999x", "invalid duration '999999999999999999999999999999x' at position 11")]
+    [InlineData("Interval > 999999999999999999999999999999.5.5s", "invalid duration '999999999999999999999999999999.5.5s' at position 11")]
     [InlineData("x < 1e999", "number out of range '1e999' at position 4")]
     [InlineData("x < -1e999", "number out of range '-1e999' at position 4")]
     [InlineData("a- b", "put a space before '-' at position 1")]
@@ -419,15 +433,14 @@ public class ParsedExpressionParseTests
     [InlineData("Event/State", true)]
     public void WhenNameIsNoDeclaredVariable_ThenThePathIsResolvedAsAPath(string text, bool declaresClockAndEvent)
     {
-        // Act
-        var isParsed = declaresClockAndEvent
-            ? ParsedExpression.TryParse(text, '/', ClockAndEventVariables, out var expression, out var error)
-            : ParsedExpression.TryParse(text, '/', out expression, out error);
+        // Arrange
+        var expression = Parse(text, declaresClockAndEvent);
         var context = new RecordingContext();
-        expression!.Evaluate(ref context);
+
+        // Act
+        expression.Evaluate(ref context);
 
         // Assert
-        Assert.True(isParsed, error);
         Assert.Null(context.Variable);
         Assert.False(expression.TryGetVariable(expression.Paths[0], out _, out _));
         string[] expectedVariables = declaresClockAndEvent ? [.. ClockAndEventVariables] : ["value", "subject"];
@@ -466,13 +479,10 @@ public class ParsedExpressionParseTests
     public void WhenBareWordFollowsAComparison_ThenItIsAPathOnlyWhenItIsADeclaredVariable(string text, bool declaresClockAndEvent, string[] expectedPaths)
     {
         // Act
-        var isParsed = declaresClockAndEvent
-            ? ParsedExpression.TryParse(text, '/', ClockAndEventVariables, out var expression, out var error)
-            : ParsedExpression.TryParse(text, '/', out expression, out error);
+        var expression = Parse(text, declaresClockAndEvent);
 
         // Assert
-        Assert.True(isParsed, error);
-        Assert.Equal(expectedPaths, expression!.Paths.ToArray());
+        Assert.Equal(expectedPaths, expression.Paths.ToArray());
     }
 
     [Fact]
@@ -505,6 +515,24 @@ public class ParsedExpressionParseTests
         Assert.Equal("variables", parseException.ParamName);
         var templateException = Assert.Throws<ArgumentException>(() => TextTemplate.TryParse("a {{ b }}", separator, [.. variables], out _, out _));
         Assert.Equal("variables", templateException.ParamName);
+    }
+
+    [Theory]
+    [InlineData("Temperature > 20", null, 20d)]
+    [InlineData("0.1 <= Temperature", 0.1, null)]
+    [InlineData("Temperature == 1e3", null, 1000d)]
+    [InlineData("Temperature == -5", null, -5d)]
+    [InlineData("Temperature == '2026-11-06'", null, null)]
+    [InlineData("Temperature > Limit", null, null)]
+    public void WhenComparisonHasANumberLiteral_ThenItHoldsTheDoubleOfTheLiteral(string text, double? expectedLeft, double? expectedRight)
+    {
+        // Act
+        Assert.True(ParsedExpression.TryParse(text, '/', out var expression, out var error), error);
+
+        // Assert
+        var comparison = Assert.IsType<ComparisonNode>(expression.Body);
+        Assert.Equal(expectedLeft, comparison.LeftLiteral.Number);
+        Assert.Equal(expectedRight, comparison.RightLiteral.Number);
     }
 
     [Fact]

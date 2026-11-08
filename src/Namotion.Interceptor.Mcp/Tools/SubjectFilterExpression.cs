@@ -93,7 +93,7 @@ internal sealed class SubjectFilterExpression
         foreach (var path in parsed.Paths)
         {
             var memberPath = path;
-            if (ExpressionVariables.TryGetVariable(path, pathSeparator, out var variable, out var variableMemberPath))
+            if (parsed.TryGetVariable(path, out var variable, out var variableMemberPath))
             {
                 if (variable == ExpressionVariables.Value)
                 {
@@ -139,28 +139,13 @@ internal sealed class SubjectFilterExpression
             return ErrorPrefix + $"a path starts at the subject and cannot start with '{pathSeparator}'";
         }
 
-        if (HasParentSegment(memberPath, pathSeparator))
-        {
-            return ErrorPrefix + "a path starts at the subject and cannot go up with '..'";
-        }
-
-        if (FindOperatorSymbol(memberPath, pathSeparator) is { } symbol)
-        {
-            return ErrorPrefix + $"put spaces around '{symbol}' in '{path}'";
-        }
-
-        return memberPath[^1] == ']'
-            ? ErrorPrefix + $"a path ends at a property, not at an entry such as '{path}'"
-            : null;
-    }
-
-    // A property name holds no '+', '*' or '/', so one outside the brackets of an index is an operator without the spaces
-    // around it, which makes it part of the path.
-    private static char? FindOperatorSymbol(string memberPath, char pathSeparator)
-    {
+        // Everything inside the brackets of an index belongs to its key, so only the characters outside them are read.
+        var segmentStart = 0;
         var depth = 0;
-        foreach (var character in memberPath)
+        for (var index = 0; index <= memberPath.Length; index++)
         {
+            // The end of the path closes its last segment like a separator does.
+            var character = index < memberPath.Length ? memberPath[index] : pathSeparator;
             if (character == '[')
             {
                 depth++;
@@ -169,48 +154,25 @@ internal sealed class SubjectFilterExpression
             {
                 depth--;
             }
-            else if (depth == 0 && character is '+' or '*' or '/' && character != pathSeparator)
+            else if (depth == 0 && character == pathSeparator)
             {
-                return character;
+                if (memberPath.AsSpan(segmentStart, index - segmentStart) is "..")
+                {
+                    return ErrorPrefix + "a path starts at the subject and cannot go up with '..'";
+                }
+
+                segmentStart = index + 1;
+            }
+            else if (depth == 0 && character is '+' or '*' or '/')
+            {
+                // A property name holds none of these, so it is an operator without the spaces around it.
+                return ErrorPrefix + $"put spaces around '{character}' in '{path}'";
             }
         }
 
-        return null;
-    }
-
-    private static bool HasParentSegment(string memberPath, char pathSeparator)
-    {
-        var segmentStart = 0;
-        var depth = 0;
-        for (var index = 0; index <= memberPath.Length; index++)
-        {
-            if (index < memberPath.Length)
-            {
-                var character = memberPath[index];
-                if (character == '[')
-                {
-                    depth++;
-                }
-                else if (character == ']' && depth > 0)
-                {
-                    depth--;
-                }
-
-                if (character != pathSeparator || depth > 0)
-                {
-                    continue;
-                }
-            }
-
-            if (memberPath.AsSpan(segmentStart, index - segmentStart) is "..")
-            {
-                return true;
-            }
-
-            segmentStart = index + 1;
-        }
-
-        return false;
+        return memberPath[^1] == ']'
+            ? ErrorPrefix + $"a path ends at a property, not at an entry such as '{path}'"
+            : null;
     }
 
     private readonly struct FilterContext(RegisteredSubject subject, PathProviderBase pathProvider, McpSubjectReadability readability)
