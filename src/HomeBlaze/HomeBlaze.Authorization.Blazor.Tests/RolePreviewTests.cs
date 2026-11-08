@@ -123,8 +123,8 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
 
         // Assert
         const string expected =
-            "Denied by kitchen: deny paths /Devices/*; members Temperature; actions write. " +
-            "It overrides kitchen: allow any member; actions read, write.";
+            "Denied by kitchen: deny write · paths: /Devices/* · members: Temperature. " +
+            "It overrides kitchen: allow read, write.";
         Assert.Equal($"Temperature, write: {expected}", component.Find("[data-testid='role-preview-explanation']").TextContent.Trim());
         Assert.Contains(component.FindComponents<MudTooltip>(), tooltip => tooltip.Instance.Text == expected);
     }
@@ -142,8 +142,8 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
 
         // Assert
         Assert.Equal(
-            "Password, read: Denied by a system rule: deny tags secret; actions read, history. " +
-            "It overrides kitchen: allow any member; actions read.",
+            "Password, read: Denied by a system rule: deny read, history · tags: secret. " +
+            "It overrides kitchen: allow read.",
             component.Find("[data-testid='role-preview-explanation']").TextContent.Trim());
     }
 
@@ -160,8 +160,8 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
 
         // Assert
         Assert.Equal(
-            "Temperature, read: Denied by system: deny members Temperature; actions read. " +
-            "It overrides system: allow any member; actions read.",
+            "Temperature, read: Denied by system: deny read · members: Temperature. " +
+            "It overrides system: allow read.",
             component.Find("[data-testid='role-preview-explanation']").TextContent.Trim());
     }
 
@@ -391,11 +391,11 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
         // Assert
         var first = component.Find("[data-testid='role-preview-deny-0']");
         Assert.Equal("2", first.GetAttribute("data-count"));
-        Assert.Equal("Deny rule 1 (deny paths /Devices/*; members Temperature, Start; actions write, execute) matches 2 members of this subject.", first.TextContent.Trim());
+        Assert.Equal("Deny rule 1 (deny write, execute · paths: /Devices/* · members: Temperature, Start) matches 2 members of this subject.", first.TextContent.Trim());
         var second = component.Find("[data-testid='role-preview-deny-1']");
         Assert.Equal("0", second.GetAttribute("data-count"));
         Assert.Equal("false", second.GetAttribute("data-matches-nothing"));
-        Assert.Equal("Deny rule 2 (deny paths /Devices/Child/Temperature; actions read) matches no member of this subject.", second.TextContent.Trim());
+        Assert.Equal("Deny rule 2 (deny read · paths: /Devices/Child/Temperature) matches no member of this subject.", second.TextContent.Trim());
         // Execute applies to methods alone, as in the matrix.
         Assert.Equal("1", component.Find("[data-testid='role-preview-deny-2']").GetAttribute("data-count"));
     }
@@ -418,7 +418,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
         Assert.Equal("0", hint.GetAttribute("data-count"));
         Assert.Equal("true", hint.GetAttribute("data-matches-nothing"));
         Assert.Contains("mud-alert-text-warning", hint.ClassName);
-        Assert.Equal("Deny rule 1 (deny paths /Kitchen/**; actions read) matches nothing: no member of any subject, so it denies nothing.", hint.TextContent.Trim());
+        Assert.Equal("Deny rule 1 (deny read · paths: /Kitchen/**) matches nothing: no member of any subject, so it denies nothing.", hint.TextContent.Trim());
     }
 
     private IRenderedComponent<RoleEditComponent> RenderEditor(Role role) =>

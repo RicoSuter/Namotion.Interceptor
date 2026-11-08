@@ -324,14 +324,14 @@ The table has a row per member: the properties, then the methods, then the attri
 
 Hovering over a cell shows its explanation, and clicking it shows the explanation below the table, starting with the member and the action. An explanation names the role and the rule that decided:
 
-- "Allowed by reader: allow any member; actions read, history."
-- "Denied by light-operator: deny paths /Devices/Bedroom/**; types ILightbulb; actions execute. It overrides light-operator: allow types ILightbulb; members TurnOn, TurnOff, Toggle, SetBrightness; actions execute."
-- "Denied by a system rule: deny tags secret; actions read, write, history. It overrides reader: allow any member; actions read, history."
+- "Allowed by reader: allow read, history."
+- "Denied by light-operator: deny execute · paths: /Devices/Bedroom/** · types: ILightbulb. It overrides light-operator: allow execute · types: ILightbulb · members: TurnOn, TurnOff, Toggle, SetBrightness."
+- "Denied by a system rule: deny read, write, history · tags: secret. It overrides reader: allow read, history."
 - "No role allows it."
 
 A method that can be executed but not read cannot be used, so its tick under "execute" is yellow, screen readers announce it as "allowed, cannot be used", and its explanation ends with "It cannot be used, as read is denied: A method is listed and run only when it is readable."
 
-For the role `light-operator` above and a light in the bedroom, the row `TurnOn` shows a tick under "read" and a cross under "execute". Clicking the cross shows "TurnOn, execute:" followed by the second explanation: the deny rule for the bedroom removes what the allow rule for the lights granted. For a light in the kitchen the same cell is a tick with "Allowed by LightOperator: allow types ILightbulb; members TurnOn, TurnOff, Toggle, SetBrightness; actions execute.".
+For the role `light-operator` above and a light in the bedroom, the row `TurnOn` shows a tick under "read" and a cross under "execute". Clicking the cross shows "TurnOn, execute:" followed by the second explanation: the deny rule for the bedroom removes what the allow rule for the lights granted. For a light in the kitchen the same cell is a tick with "Allowed by light-operator: allow execute · types: ILightbulb · members: TurnOn, TurnOff, Toggle, SetBrightness.".
 
 ---
 

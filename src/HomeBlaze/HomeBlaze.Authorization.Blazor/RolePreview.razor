@@ -3,7 +3,6 @@
    Shows nothing to a viewer who may not administer the roles of the authorization, as it lists the members of any
    subject whatever the viewer may read. *@
 @using HomeBlaze.Authorization.Abstractions
-@using System.Text
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Metadata
 @using Namotion.Interceptor.Registry.Abstractions
@@ -309,7 +308,7 @@
 
     private static string DescribeDenyMatch(int index, PermissionRule rule, int count, bool matchesNothing)
     {
-        var name = $"Deny rule {index + 1} ({FormatRule("deny", rule)})";
+        var name = $"Deny rule {index + 1} (deny {rule})";
         if (matchesNothing)
         {
             return $"{name} matches nothing: no member of any subject, so it denies nothing.";
@@ -424,51 +423,25 @@
 
     /// <summary>
     /// Gets a decision as text, for example
-    /// <c>Denied by Kitchen: deny paths /Devices; actions write. It overrides Reader: allow any member; actions read, write.</c>
+    /// <c>Denied by Kitchen: deny write · paths: /Devices. It overrides Reader: allow read, write.</c>
     /// </summary>
     internal static string Explain(PermissionDecision decision)
     {
         if (decision.DeniedByRule is { } deniedByRule)
         {
             var denier = decision.IsDeniedBySystem ? "a system rule" : decision.DeniedBy?.Name;
-            var text = $"Denied by {denier}: {FormatRule("deny", deniedByRule)}.";
+            var text = $"Denied by {denier}: deny {deniedByRule}.";
             return decision.AllowedBy is { } allowedBy && decision.AllowedByRule is { } allowedByRule
-                ? $"{text} It overrides {allowedBy.Name}: {FormatRule("allow", allowedByRule)}."
+                ? $"{text} It overrides {allowedBy.Name}: allow {allowedByRule}."
                 : text;
         }
 
         if (decision.AllowedBy is { } allower && decision.AllowedByRule is { } allowingRule)
         {
-            return $"Allowed by {allower.Name}: {FormatRule("allow", allowingRule)}.";
+            return $"Allowed by {allower.Name}: allow {allowingRule}.";
         }
 
         return "No role allows it.";
-    }
-
-    /// <summary>Gets a rule as text, for example <c>deny paths /Devices/Bedroom; types ILight; actions write, execute</c>.</summary>
-    internal static string FormatRule(string kind, PermissionRule rule)
-    {
-        var builder = new StringBuilder(kind);
-        var hasSelector = false;
-        AppendSelector(builder, "paths", rule.Paths, ref hasSelector);
-        AppendSelector(builder, "types", rule.Types, ref hasSelector);
-        AppendSelector(builder, "members", rule.Members, ref hasSelector);
-        AppendSelector(builder, "tags", rule.Tags, ref hasSelector);
-        if (!hasSelector)
-        {
-            builder.Append(" any member;");
-        }
-
-        return builder.Append(" actions ").AppendJoin(", ", rule.Actions.Select(action => action.Name)).ToString();
-    }
-
-    private static void AppendSelector(StringBuilder builder, string name, IReadOnlyList<string> values, ref bool hasSelector)
-    {
-        if (values.Count > 0)
-        {
-            builder.Append(' ').Append(name).Append(' ').AppendJoin(", ", values).Append(';');
-            hasSelector = true;
-        }
     }
 
     // A member as listed, by the name the matrix shows it with.
