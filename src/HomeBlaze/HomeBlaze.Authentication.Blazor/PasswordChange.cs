@@ -70,8 +70,18 @@ internal sealed class PasswordChange(
             return await RefuseAsync(user, result);
         }
 
+        // The store first, so that it holds the new stamp before the cookie that carries it is issued. The password is
+        // committed, so a failure here fails no request: the store refuses the new cookie until it reloads the user.
+        try
+        {
+            await userStore.RefreshUserAsync(user.Id, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "The password of user {UserId} was stored, but the user could not be reloaded.", user.Id);
+        }
+
         await signInManager.RefreshSignInAsync(user);
-        await userStore.RefreshUserAsync(user.Id, CancellationToken.None);
         AuthenticationEvents.PasswordChanged(logger, user.UserName ?? user.Id);
         return (PasswordChangeOutcome.Changed, []);
     }
