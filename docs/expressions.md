@@ -8,10 +8,10 @@ The `Namotion.Interceptor.Expressions` package is a small language to select, co
 
 ```text
 Temperature > 20 and not (Mode == Away)
-Charging {{ subject/ChargingPower }} kW
+Charging {{ subject.ChargingPower }} kW
 ```
 
-The paths of these samples use `/` as the separator.
+The paths of these samples use `.` as the separator, as the [registry](registry.md#path-syntax) does by default.
 
 The package has no opinion on where values come from. The host resolves paths and variables, applies pipes and turns results into text; the language decides how to parse an expression, how to combine and compare values, and what is unknown. The [MCP server](mcp.md#filtering-by-value) is one host: its `search` tool filters subjects with it.
 
@@ -31,7 +31,7 @@ operand    := literal | path | '(' or ')'
 literal    := number | duration | "text" | 'text' | true | false | null
 ```
 
-- **Keywords** (`and`, `or`, `not`, `true`, `false`, `null`) are read without regard to case. `and`, `or` and `not` end at white space, an opening parenthesis or the end of the text, so a path such as `note/Text` is not `not`; `true`, `false` and `null` are whole tokens.
+- **Keywords** (`and`, `or`, `not`, `true`, `false`, `null`) are read without regard to case. `and`, `or` and `not` end at white space, an opening parenthesis or the end of the text, so a path such as `note.Text` is not `not`; `true`, `false` and `null` are whole tokens.
 - **Equality** is `==`. A single `=` is an error with the hint `use '==' for equality`.
 - **Both sides** of a comparison may be paths, such as `Power > MaximumPower`.
 - **Bare operands**: an operand without a comparison is a condition. It is true only when its value is the boolean `true`. Any other value is false, and a missing value is unknown. So when `Device` holds a subject, `Device` is false and `not Device` is true; test for a missing value with `Device == null` instead.
@@ -63,12 +63,12 @@ By default two names are variables with a meaning the host gives them:
 A host that gives other names a meaning declares its variables when it parses, and they replace the default ones:
 
 ```csharp
-ParsedExpression.TryParse(text, '/', ["subject", "now"], out var expression, out var error);
+ParsedExpression.TryParse(text, '.', ["subject", "now"], out var expression, out var error);
 ```
 
-`TextTemplate.TryParse` takes them the same way. A variable is a word of letters, digits and underscores that starts with a letter, holds no path separator and is no keyword such as `and` or `null`, and is declared once; `TryParse` throws an `ArgumentException` for another name. A name is a variable only for the host that declares it: with the default variables, `now/Ticks` is a path whose first segment is named `now`, and a bare `now` after a comparison operator is text.
+`TextTemplate.TryParse` takes them the same way. A variable is a word of letters, digits and underscores that starts with a letter, holds no path separator and is no keyword such as `and` or `null`, and is declared once; `TryParse` throws an `ArgumentException` for another name. A name is a variable only for the host that declares it: with the default variables, `now.Ticks` is a path whose first segment is named `now`, and a bare `now` after a comparison operator is text.
 
-A path that starts with a variable, such as `subject/Power`, is resolved with `IExpressionContext.ResolveVariable`; every other path with `ResolvePath`. `ParsedExpression.TryGetVariable` splits the first segment off a path of the expression, with the rest as the member path, and `ExpressionVariables.TryGetVariable` does the same with the default variables. A host binds the variables it has a meaning for. An expression that uses a variable the host does not bind is the host's error to report: check `ParsedExpression.Paths` before evaluating and refuse the expression, as the MCP `where` filter does for `value`. At run time an unbound variable resolves to `ExpressionValue.Missing`.
+A path that starts with a variable, such as `subject.Power`, is resolved with `IExpressionContext.ResolveVariable`; every other path with `ResolvePath`. `ParsedExpression.TryGetVariable` splits the first segment off a path of the expression, with the rest as the member path, and `ExpressionVariables.TryGetVariable` does the same with the default variables. A host binds the variables it has a meaning for. An expression that uses a variable the host does not bind is the host's error to report: check `ParsedExpression.Paths` before evaluating and refuse the expression, as the MCP `where` filter does for `value`. At run time an unbound variable resolves to `ExpressionValue.Missing`.
 
 ## Truth and missing values
 
