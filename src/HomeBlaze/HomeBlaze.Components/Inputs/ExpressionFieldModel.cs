@@ -102,9 +102,8 @@ internal sealed class ExpressionFieldModel
     /// <summary>The row as the user sees it: the pending edit when there is one, otherwise the row of the text.</summary>
     public ExpressionRow GetDisplayRow(int index) => _pending[index]?.Row ?? _rows[index];
 
-    public string? GetPathError(int index) => _pending[index]?.PathError;
-
-    public string? GetValueError(int index) => _pending[index]?.ValueError;
+    /// <summary>The pending edit of the row with its errors, or null when the row is the one of the text.</summary>
+    public PendingRow? GetPendingRow(int index) => _pending[index];
 
     /// <summary>
     /// Takes an edited row. A typed value that is not one token is written as text in quotes, so that it cannot change
@@ -277,5 +276,6 @@ internal sealed class ExpressionFieldModel
         return pending;
     }
 
-    private sealed record PendingRow(ExpressionRow Row, string? PathError, string? ValueError);
+    /// <summary>An edit of a row that is not part of <see cref="Text"/>, with the error of its path or value when it is invalid.</summary>
+    public sealed record PendingRow(ExpressionRow Row, string? PathError, string? ValueError);
 }

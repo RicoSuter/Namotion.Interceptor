@@ -249,7 +249,7 @@ public class ExpressionFieldModelTests
         model.SetRow(0, new ExpressionRow(string.Empty, "/a/B", "==", typed));
 
         // Assert
-        Assert.Contains(errorPart, model.GetValueError(0));
+        Assert.Contains(errorPart, model.GetPendingRow(0)?.ValueError);
         Assert.Equal("/a/B == 1", model.Text);
         Assert.Equal(typed, model.GetDisplayRow(0).Value);
         Assert.True(model.HasPendingRow);
@@ -273,7 +273,7 @@ public class ExpressionFieldModelTests
         model.SetRow(0, new ExpressionRow(string.Empty, typed, "==", "1"));
 
         // Assert
-        Assert.StartsWith("Not a valid path", model.GetPathError(0));
+        Assert.StartsWith("Not a valid path", model.GetPendingRow(0)?.PathError);
         Assert.Equal("/a/B == 1", model.Text);
         Assert.Equal("/a/B", model.Rows[0].Path);
         Assert.Equal(typed, model.GetDisplayRow(0).Path);
@@ -293,7 +293,7 @@ public class ExpressionFieldModelTests
         model.SetRow(0, new ExpressionRow(string.Empty, typed, "==", "1"));
 
         // Assert
-        Assert.Null(model.GetPathError(0));
+        Assert.Null(model.GetPendingRow(0)?.PathError);
         Assert.True(model.HasPendingRow);
         Assert.Equal("/a/B == 1", model.Text);
         Assert.Equal(typed, model.GetDisplayRow(0).Path);
@@ -311,7 +311,7 @@ public class ExpressionFieldModelTests
         model.AddRow();
 
         // Assert
-        Assert.StartsWith("Not a valid path", model.GetPathError(1));
+        Assert.StartsWith("Not a valid path", model.GetPendingRow(1)?.PathError);
         Assert.Equal("/c d", model.GetDisplayRow(1).Path);
         Assert.Equal("/a/B == 3 and /c/D == 2 and  == ", model.Text);
         Assert.True(model.HasPendingRow);
@@ -328,7 +328,7 @@ public class ExpressionFieldModelTests
         model.SetRow(0, new ExpressionRow(string.Empty, "/a/C", "==", "1"));
 
         // Assert
-        Assert.Null(model.GetPathError(0));
+        Assert.Null(model.GetPendingRow(0)?.PathError);
         Assert.False(model.HasPendingRow);
         Assert.Equal("/a/C == 1", model.Text);
     }
