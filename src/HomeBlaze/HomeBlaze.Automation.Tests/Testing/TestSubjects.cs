@@ -86,3 +86,70 @@ public sealed record TestPressEvent : DeviceEvent
 {
     public required string Gesture { get; init; }
 }
+
+/// <summary>A room whose devices are held by key, by position, by reference and as an event source.</summary>
+[InterceptorSubject]
+public partial class TestRoom
+{
+    public TestRoom()
+    {
+        Devices = new Dictionary<string, TestSensor>();
+        Items = [];
+    }
+
+    [State]
+    public partial int Level { get; set; }
+
+    public partial Dictionary<string, TestSensor> Devices { get; set; }
+
+    public partial List<TestSensor> Items { get; set; }
+
+    public partial TestSensor? Sensor { get; set; }
+
+    public partial TestButton? Button { get; set; }
+}
+
+/// <summary>A folder whose children are addressed by their key alone, as storage folders are.</summary>
+[InterceptorSubject]
+public partial class TestFolder
+{
+    public TestFolder()
+    {
+        Children = new Dictionary<string, IInterceptorSubject>();
+    }
+
+    [State]
+    public partial int Level { get; set; }
+
+    [InlinePaths]
+    public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
+
+    public void Add(string name, IInterceptorSubject subject) =>
+        Children = new Dictionary<string, IInterceptorSubject>(Children) { [name] = subject };
+
+    public void Remove(string name)
+    {
+        var children = new Dictionary<string, IInterceptorSubject>(Children);
+        children.Remove(name);
+        Children = children;
+    }
+}
+
+/// <summary>A holder whose operation replaces its sensor, a structural change on the route of a rule that reads the sensor.</summary>
+[InterceptorSubject]
+public partial class TestReplacer
+{
+    private int _replacements;
+
+    public partial TestSensor? Sensor { get; set; }
+
+    public int Replacements => Volatile.Read(ref _replacements);
+
+    /// <summary>Replaces the sensor by one whose gust is high when the current one is low, and low otherwise.</summary>
+    [Operation]
+    public void Replace()
+    {
+        Interlocked.Increment(ref _replacements);
+        Sensor = new TestSensor { Gust = Sensor?.Gust > 8 ? 1 : 9 };
+    }
+}

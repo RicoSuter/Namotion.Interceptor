@@ -22,7 +22,8 @@ internal sealed class PropertyTriggerEngine(
     TimeProvider timeProvider,
     ILogger logger,
     Func<string> getAutomationName,
-    Action<FrozenSet<PropertyReference>> publishWatched)
+    Action<FrozenSet<PropertyReference>> publishWatched,
+    GraphRoutes? routes = null)
 {
     private readonly ObservedValues _values = new();
     private readonly List<CompiledPropertyTrigger> _pending = [];
@@ -283,10 +284,12 @@ internal sealed class PropertyTriggerEngine(
         {
             trigger.State.Deactivate();
             trigger.Dependencies = [];
+            trigger.DependencyRoute.Clear();
             trigger.NextCheckAt = null;
         }
 
         rule.OnlyIfDependencies = [];
+        rule.OnlyIfRoute.Clear();
     }
 
     // A change queued while its property was watched may arrive after it no longer is; kept, it would hide the current
@@ -419,7 +422,7 @@ internal sealed class PropertyTriggerEngine(
     private bool ResolveOnlyIfDependencies(CompiledRule rule)
     {
         var previous = rule.OnlyIfDependencies;
-        rule.OnlyIfDependencies = Resolve(rule.OnlyIfPropertyPaths, rule.Rule);
+        rule.OnlyIfDependencies = Resolve(rule.OnlyIfPropertyPaths, rule.Rule, rule.OnlyIfRoute);
         return !rule.OnlyIfDependencies.AsSpan().SequenceEqual(previous);
     }
 
@@ -472,21 +475,24 @@ internal sealed class PropertyTriggerEngine(
     private bool ResolveDependencies(CompiledPropertyTrigger trigger)
     {
         var previous = trigger.Dependencies;
-        trigger.Dependencies = Resolve(trigger.PropertyPaths, trigger.Rule.Rule);
+        trigger.Dependencies = Resolve(trigger.PropertyPaths, trigger.Rule.Rule, trigger.DependencyRoute);
         return !trigger.Dependencies.AsSpan().SequenceEqual(previous);
     }
 
-    private PropertyReference[] Resolve(IReadOnlyList<string> paths, AutomationRule rule)
+    // Stores the graph route of the resolution in the slot.
+    private PropertyReference[] Resolve(IReadOnlyList<string> paths, AutomationRule rule, GraphRouteSlot route)
     {
+        var recorder = routes?.BeginRoute();
         var resolved = new List<PropertyReference>(paths.Count);
         foreach (var path in paths)
         {
-            if (AutomationPaths.ResolveProperty(resolver, path, rule) is { } property)
+            if (AutomationPaths.ResolveProperty(resolver, path, rule, recorder) is { } property)
             {
                 resolved.Add(property.Reference);
             }
         }
 
+        routes?.EndRoute(route);
         return [.. resolved];
     }
 

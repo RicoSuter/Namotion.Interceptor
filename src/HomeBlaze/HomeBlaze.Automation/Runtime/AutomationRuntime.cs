@@ -22,6 +22,7 @@ internal sealed class AutomationRuntime
     private readonly AutomationInputQueue _queue = new();
     private readonly AutomationEngine _engine;
     private readonly AutomationChangeReceiver _changes;
+    private readonly GraphRoutes _routes;
     private CheckpointLocation _location;
     private int _isTickPending;
     private WakeTimer? _wakeTimer;
@@ -34,8 +35,12 @@ internal sealed class AutomationRuntime
         _location = location;
         _keeper = new AutomationStateKeeper(location.Store);
         _changes = new AutomationChangeReceiver(_queue);
-        _engine = new AutomationEngine(automation, _queue, _keeper, logger, _changes);
+        _routes = new GraphRoutes(automation);
+        _engine = new AutomationEngine(automation, _queue, _keeper, logger, _changes, _routes);
     }
+
+    // White-box test hook: the graph routes of the stored resolutions.
+    internal GraphRoutes Routes => _routes;
 
     /// <summary>The checkpoint of the automation: where it started, or where it moved to later. Changed by the worker only.</summary>
     public CheckpointLocation Location
@@ -191,7 +196,9 @@ internal sealed class AutomationRuntime
     // the new one; once moved, further checks find nothing to do.
     private void FollowPath()
     {
-        if (!Location.HasMoved(_automation))
+        var hasMoved = Location.HasMoved(_automation, _routes.BeginRoute());
+        _routes.EndRoute(_routes.Location);
+        if (!hasMoved)
         {
             return;
         }

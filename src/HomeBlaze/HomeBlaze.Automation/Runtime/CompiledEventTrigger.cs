@@ -20,6 +20,9 @@ internal sealed class CompiledEventTrigger(CompiledRule rule, int index, Subject
 
     public IInterceptorSubject? Source { get; set; }
 
+    /// <summary>The graph route of the last resolution of the path of <see cref="Source"/>.</summary>
+    public GraphRouteSlot SourceRoute { get; } = new();
+
     public EventTriggerSubscription? Subscription { get; set; }
 
     /// <summary>Why the trigger receives no events, or null while it is subscribed.</summary>
@@ -53,6 +56,7 @@ internal sealed class CompiledEventTrigger(CompiledRule rule, int index, Subject
         subscription.Trigger = target;
         target.Subscription = subscription;
         target.Source = Source;
+        SourceRoute.MoveTo(target.SourceRoute);
         target.SourceError = SourceError;
         Subscription = null;
     }
