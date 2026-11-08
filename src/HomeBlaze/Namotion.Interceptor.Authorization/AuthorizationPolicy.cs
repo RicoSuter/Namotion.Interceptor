@@ -83,7 +83,7 @@ public sealed class AuthorizationPolicy
         var allowed = FindMatch(_allow, bit, isDeny: false, ref context);
         var denied = FindMatch(_deny, bit, isDeny: true, ref context);
         context.ReturnRentedState();
-        return new PermissionDecision(allowed is not null && denied is null, allowed?.Role, allowed?.Rule, denied?.Role, denied?.Rule);
+        return new PermissionDecision(allowed, denied);
     }
 
     /// <summary>Answers <see cref="IsVisible(RegisteredSubject)"/> and, when the subject is hidden, says why.</summary>
