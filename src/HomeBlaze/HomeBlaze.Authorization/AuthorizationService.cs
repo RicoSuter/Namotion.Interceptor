@@ -77,10 +77,9 @@ public sealed class AuthorizationService : IDisposable
         _pathProvider = pathProvider;
         _logger = logger;
 
-        _pathPatterns = new PathPatterns(_registry, pathProvider);
-        context.AddService(_pathPatterns);
         _graphObserver = new GraphObserver(Invalidate);
         context.AddService(_graphObserver);
+        _pathPatterns = new PathPatterns(_registry, pathProvider, _graphObserver);
         _subscription = context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(OnPropertyChanged);
@@ -90,10 +89,11 @@ public sealed class AuthorizationService : IDisposable
 
     /// <summary>
     /// Changes after every change of the graph that can change whether a subject is shown, see
-    /// <see cref="AuthorizationPolicy.IsVisible(RegisteredSubject)"/>: a subject attached or detached, a reference to a
-    /// subject added or removed, a kept subject moved to another key or position, a property or attribute added at run
-    /// time, and a value of metadata, which decides whether the paths spell an attribute of metadata. A decision about
-    /// subjects made after reading it stays valid while it is unchanged; read it before the graph.
+    /// <see cref="AuthorizationPolicy.IsVisible(RegisteredSubject)"/>, or whether a member is readable, as a path pattern
+    /// resolves differently: a subject attached or detached, a reference to a subject added or removed, a kept subject
+    /// moved to another key or position, a property or attribute added or removed, and a value of metadata, which decides
+    /// whether the paths spell an attribute of metadata. A decision about subjects or members made after reading it stays
+    /// valid while it is unchanged; read it before the graph.
     /// </summary>
     public long GraphVersion => _graphObserver.GraphVersion;
 
