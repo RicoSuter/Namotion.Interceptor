@@ -79,19 +79,12 @@ public sealed class RoleStore : IRoleStore
     /// </summary>
     internal event Action<string, string>? RoleRenamed;
 
-    /// <summary>
-    /// Gets the name of the built-in role or stored custom role named <paramref name="name"/>, or null when there is none.
-    /// </summary>
-    public string? GetRoleName(string name)
+    /// <summary>Whether a built-in role or a stored custom role is named <paramref name="name"/>, compared ordinally.</summary>
+    public bool RoleExists(string name)
     {
         ArgumentNullException.ThrowIfNull(name);
 
-        if (BuiltInRoles.All.FirstOrDefault(role => string.Equals(role.Name, name, StringComparison.Ordinal)) is { } builtIn)
-        {
-            return builtIn.Name;
-        }
-
-        return _roles.TryGetValue(name, out var stored) ? stored.Role.Name : null;
+        return BuiltInRoles.All.Any(role => string.Equals(role.Name, name, StringComparison.Ordinal)) || _roles.ContainsKey(name);
     }
 
     /// <summary>Loads the custom roles from the database and projects them.</summary>

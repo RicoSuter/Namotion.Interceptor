@@ -23,7 +23,6 @@ public sealed class UserStore : IMcpClientAccess
     private const string BlankRoleRefusal = "A role name cannot be empty.";
 
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly RoleStore _roleStore;
     private readonly AuthorizationProjection _projection;
     private readonly AuthorizationChangeGate _gate;
     private readonly TimeProvider _timeProvider;
@@ -54,7 +53,6 @@ public sealed class UserStore : IMcpClientAccess
         ArgumentNullException.ThrowIfNull(timeProvider);
 
         _scopeFactory = scopeFactory;
-        _roleStore = roleStore;
         _projection = projection;
         _gate = gate;
         _timeProvider = timeProvider;
@@ -415,9 +413,9 @@ public sealed class UserStore : IMcpClientAccess
 
     private static (UserChangeResult Result, string? ChangedUserId) Refused(string error) => (new UserChangeResult(false, error), null);
 
-    // The names as the roles define them, so that the state matches what the database returns; ordered like a load.
-    private ReadOnlyCollection<string> GetDefinedRoleNames(IEnumerable<string> roles) =>
-        Array.AsReadOnly(roles.Select(role => _roleStore.GetRoleName(role) ?? role).Order(StringComparer.Ordinal).ToArray());
+    // Ordered like a load, so that the state matches what the database returns.
+    private static ReadOnlyCollection<string> GetDefinedRoleNames(IEnumerable<string> roles) =>
+        Array.AsReadOnly(roles.Order(StringComparer.Ordinal).ToArray());
 
     private IReadOnlyCollection<string> GetRolesByName(string userName) =>
         _state.ByName.TryGetValue(userName, out var user) ? user.Roles : [];

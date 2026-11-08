@@ -204,7 +204,7 @@ internal sealed class UserChangeRules(
     {
         foreach (var role in roles)
         {
-            if (roleStore.GetRoleName(role) is null)
+            if (!roleStore.RoleExists(role))
             {
                 return $"Unknown role: {role}";
             }
