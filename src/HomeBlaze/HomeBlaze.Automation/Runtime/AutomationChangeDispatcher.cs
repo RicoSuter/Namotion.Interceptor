@@ -49,14 +49,14 @@ internal sealed class AutomationChangeDispatcher
     public Registration Register(IInterceptorSubjectContext context, IAutomationChangeListener listener)
     {
         var interceptor = context.GetService<PropertyChangeInterceptor>();
-        var attachRouter = PropertyAttachRouter.Of(FindOwner(context, interceptor), this);
+        var attachRouter = PropertyAttachRouter.Of(FindOwner(context, interceptor));
         lock (_lock)
         {
             if (!_sources.TryGetValue(interceptor, out var source))
             {
                 source = new ChangeSource(interceptor, attachRouter);
                 source.Subscription = interceptor.Subscribe(source);
-                attachRouter.SetSource(source);
+                attachRouter.Add(source);
                 _sources.Add(interceptor, source);
             }
 
@@ -126,7 +126,7 @@ internal sealed class AutomationChangeDispatcher
             if (source.IsEmpty)
             {
                 _sources.Remove(source.Interceptor);
-                source.AttachRouter.SetSource(null);
+                source.AttachRouter.Remove(source);
                 subscription = source.Subscription;
             }
         }
@@ -419,34 +419,54 @@ internal sealed class AutomationChangeDispatcher
     }
 
     /// <summary>
-    /// Routes the attach of a property through the holder index of the change stream of its context, see
-    /// <see cref="ChangeSource.OnPropertyAttached"/>. Added to the context once per dispatcher, since a context has no way
-    /// to remove a service, and routes nothing while the dispatcher has no listener for the context. Called on writing
-    /// threads, within the attach of the property, so it only looks up and enqueues.
+    /// Routes the attach of a property through the holder index of every change stream of its context that a dispatcher
+    /// has listeners for, see <see cref="ChangeSource.OnPropertyAttached"/>. Added to the context once, shared by every
+    /// dispatcher, since a context has no way to remove a service; it routes nothing while no dispatcher has a listener for
+    /// the context. Called on writing threads, within the attach of the property, so it only looks up and enqueues.
     /// </summary>
     // After the registry, which raises the structure version for a property added at run time: the worker resolves its
     // paths again only when the version it reads differs from the one it resolved at.
     [RunsAfter(typeof(SubjectRegistry))]
-    internal sealed class PropertyAttachRouter(AutomationChangeDispatcher dispatcher) : IPropertyLifecycleHandler
+    internal sealed class PropertyAttachRouter : IPropertyLifecycleHandler
     {
-        private ChangeSource? _source;
+        private readonly Lock _lock = new();
+        private ChangeSource[] _sources = [];
 
-        public AutomationChangeDispatcher Dispatcher { get; } = dispatcher;
+        // White-box test hook: the number of change streams the router routes to.
+        internal int SourceCount => Volatile.Read(ref _sources).Length;
 
-        /// <summary>Sets the change stream of the context, or null once the dispatcher has no listener for it. Called under the lock of the dispatcher.</summary>
-        public void SetSource(ChangeSource? source) => Volatile.Write(ref _source, source);
-
-        /// <summary>Gets the router of the dispatcher in the context, adding it when the context has none.</summary>
-        public static PropertyAttachRouter Of(IInterceptorSubjectContext context, AutomationChangeDispatcher dispatcher)
+        /// <summary>Gets the router of the context, adding it when the context has none.</summary>
+        public static PropertyAttachRouter Of(IInterceptorSubjectContext context)
         {
-            context.TryAddService<IPropertyLifecycleHandler>(() => new PropertyAttachRouter(dispatcher), handler => IsOf(handler, dispatcher));
-            return (PropertyAttachRouter)context.GetServices<IPropertyLifecycleHandler>().First(handler => IsOf(handler, dispatcher));
+            context.TryAddService<IPropertyLifecycleHandler>(() => new PropertyAttachRouter(), handler => handler is PropertyAttachRouter);
+            return context.GetServices<IPropertyLifecycleHandler>().OfType<PropertyAttachRouter>().First();
         }
 
-        private static bool IsOf(IPropertyLifecycleHandler handler, AutomationChangeDispatcher dispatcher) =>
-            handler is PropertyAttachRouter router && ReferenceEquals(router.Dispatcher, dispatcher);
+        /// <summary>Routes to the change stream from now on. Thread-safe, as dispatchers of one context share the router.</summary>
+        public void Add(ChangeSource source)
+        {
+            lock (_lock)
+            {
+                Volatile.Write(ref _sources, [.. _sources, source]);
+            }
+        }
 
-        public void AttachProperty(SubjectPropertyLifecycleChange change) => Volatile.Read(ref _source)?.OnPropertyAttached(change.Property);
+        /// <summary>Routes to the change stream no longer, once the dispatcher has no listener for it. Thread-safe.</summary>
+        public void Remove(ChangeSource source)
+        {
+            lock (_lock)
+            {
+                Volatile.Write(ref _sources, [.. _sources.Where(candidate => !ReferenceEquals(candidate, source))]);
+            }
+        }
+
+        public void AttachProperty(SubjectPropertyLifecycleChange change)
+        {
+            foreach (var source in Volatile.Read(ref _sources))
+            {
+                source.OnPropertyAttached(change.Property);
+            }
+        }
 
         public void DetachProperty(SubjectPropertyLifecycleChange change)
         {

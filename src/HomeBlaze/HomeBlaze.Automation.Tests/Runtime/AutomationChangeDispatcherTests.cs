@@ -3,6 +3,8 @@ using System.Collections.Frozen;
 using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Automation.Tests.Runtime;
 
@@ -174,6 +176,34 @@ public class AutomationChangeDispatcherTests
         Assert.Equal(1, staying.GraphChanges);
         Assert.False(dispatcher.IsRoutedAsGraphChange(graph.Context, leaving, SensorOf(holder)));
         Assert.True(dispatcher.IsRoutedAsGraphChange(graph.Context, staying, SensorOf(holder)));
+    }
+
+    [Fact]
+    public void WhenSeveralDispatchersServeOneContext_ThenTheContextHasOneAttachRouterThatRoutesToEachOfThem()
+    {
+        // Arrange
+        var (graph, weather) = CreateGraph();
+        var first = new RecordingListener();
+        var second = new RecordingListener();
+        var firstRegistration = new AutomationChangeDispatcher().Register(graph.Context, first);
+        var secondRegistration = new AutomationChangeDispatcher().Register(graph.Context, second);
+        var missing = new PropertyReference(weather, "Wind");
+        firstRegistration.PublishRoute(Watch(missing), isUnbounded: false);
+        secondRegistration.PublishRoute(Watch(missing), isUnbounded: false);
+
+        // Act
+        ((IInterceptorSubject)weather).TryGetRegisteredSubject()!.AddProperty("Wind", typeof(double?), _ => null, null);
+        var routers = graph.Context.GetServices<IPropertyLifecycleHandler>().OfType<AutomationChangeDispatcher.PropertyAttachRouter>().ToList();
+        var sourcesWhileRegistered = routers.Sum(router => router.SourceCount);
+        firstRegistration.Dispose();
+        secondRegistration.Dispose();
+
+        // Assert
+        Assert.Equal(1, first.GraphChanges);
+        Assert.Equal(1, second.GraphChanges);
+        var router = Assert.Single(routers);
+        Assert.Equal(2, sourcesWhileRegistered);
+        Assert.Equal(0, router.SourceCount);
     }
 
     [Fact]
