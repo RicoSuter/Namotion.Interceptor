@@ -28,9 +28,10 @@ internal static class SessionValidation
             var validateSecurityStamp = options.Events.OnValidatePrincipal;
             options.Events.OnValidatePrincipal = context =>
             {
-                // Rejecting keeps the cookie, which the store refuses on every request anyway: the store is empty while the
-                // users load at startup, and holds a new stamp before the browser stored the cookie that carries it. The
-                // database is not touched before it is ready.
+                // Rejecting keeps the cookie, which an ended session presents in vain on every request: a parallel request
+                // right after a password change carries the old stamp until the browser stored the new cookie. Until the
+                // database is ready, only the requests that AuthenticationUnavailableMiddleware lets through, such as
+                // static assets and the health endpoints, get here, and the users may not be loaded yet.
                 if (!context.HttpContext.RequestServices.GetRequiredService<AuthenticationDatabase>().IsReady || !IsAllowedByStore(context))
                 {
                     context.RejectPrincipal();
