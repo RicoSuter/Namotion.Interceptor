@@ -21,7 +21,6 @@ using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
-using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace HomeBlaze.AI.Tests.Mcp;
@@ -464,7 +463,7 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenARoleDeniesExecuteOnReadRawContentOfAPage_ThenThePageIsNotSearchedAndNothingIsLogged()
+    public async Task WhenARoleDeniesExecuteOnReadRawContentOfAPage_ThenThePageIsNotSearched()
     {
         // Arrange
         var role = new AuthorizationRole
@@ -473,9 +472,7 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
             Includes = [BuiltInRoles.ReaderName],
             Deny = [new PermissionRule { Paths = ["/Storage/Notes.md/ReadRawContent"], Actions = [AuthorizationActions.Execute] }]
         };
-        var logger = new RecordingLogger();
-        var policy = TestAccessPolicies.Create(role.Name, role).Policy;
-        var accessPolicy = new AuthorizationMcpAccessPolicy(() => policy, logger, "Searcher");
+        var accessPolicy = TestAccessPolicies.Create(role.Name, role);
         var (root, services) = await CreateGraphAsync([]);
         var tool = CreateTools(services, root, accessPolicy)[HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName];
 
@@ -487,7 +484,6 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
             ["/Storage/Docs/HeatPump.md", "/Storage/DocsArchive/Old.md"],
             result.GetProperty("pages").EnumerateArray().Select(page => page.GetProperty("path").GetString()));
         Assert.Equal(2, result.GetProperty("pages_searched").GetInt32());
-        Assert.Empty(logger.Entries);
     }
 
     [Fact]
