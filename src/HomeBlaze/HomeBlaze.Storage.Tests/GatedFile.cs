@@ -98,9 +98,13 @@ public partial class GatedFile : IStorageFile
             throw failure;
         }
 
-        await using var stream = await ReadAsync(cancellationToken);
-        using var reader = new StreamReader(stream);
-        var content = await reader.ReadToEndAsync(cancellationToken);
+        string content;
+        // The gate simulates work after reading; an open disk stream would prevent concurrent edits on Windows.
+        await using (var stream = await ReadAsync(cancellationToken))
+        using (var reader = new StreamReader(stream))
+        {
+            content = await reader.ReadToEndAsync(cancellationToken);
+        }
 
         if (Interlocked.Exchange(ref _nextLoadCallback, null) is { } callback)
         {
