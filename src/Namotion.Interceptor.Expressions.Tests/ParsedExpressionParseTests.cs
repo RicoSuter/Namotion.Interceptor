@@ -13,6 +13,16 @@ public class ParsedExpressionParseTests
         return expression;
     }
 
+    private static ParsedExpression Parse(string text, bool declaresClockAndEvent)
+    {
+        var isParsed = declaresClockAndEvent
+            ? ParsedExpression.TryParse(text, '/', ClockAndEventVariables, out var expression, out var error)
+            : ParsedExpression.TryParse(text, '/', out expression, out error);
+        Assert.True(isParsed, error);
+        Assert.NotNull(expression);
+        return expression;
+    }
+
     [Theory]
     [InlineData("subject.IsOn", "subject", "IsOn")]
     [InlineData("subject.Device.IsOn", "subject", "Device.IsOn")]
@@ -423,15 +433,14 @@ public class ParsedExpressionParseTests
     [InlineData("Event/State", true)]
     public void WhenNameIsNoDeclaredVariable_ThenThePathIsResolvedAsAPath(string text, bool declaresClockAndEvent)
     {
-        // Act
-        var isParsed = declaresClockAndEvent
-            ? ParsedExpression.TryParse(text, '/', ClockAndEventVariables, out var expression, out var error)
-            : ParsedExpression.TryParse(text, '/', out expression, out error);
+        // Arrange
+        var expression = Parse(text, declaresClockAndEvent);
         var context = new RecordingContext();
-        expression!.Evaluate(ref context);
+
+        // Act
+        expression.Evaluate(ref context);
 
         // Assert
-        Assert.True(isParsed, error);
         Assert.Null(context.Variable);
         Assert.False(expression.TryGetVariable(expression.Paths[0], out _, out _));
         string[] expectedVariables = declaresClockAndEvent ? [.. ClockAndEventVariables] : ["value", "subject"];
@@ -470,13 +479,10 @@ public class ParsedExpressionParseTests
     public void WhenBareWordFollowsAComparison_ThenItIsAPathOnlyWhenItIsADeclaredVariable(string text, bool declaresClockAndEvent, string[] expectedPaths)
     {
         // Act
-        var isParsed = declaresClockAndEvent
-            ? ParsedExpression.TryParse(text, '/', ClockAndEventVariables, out var expression, out var error)
-            : ParsedExpression.TryParse(text, '/', out expression, out error);
+        var expression = Parse(text, declaresClockAndEvent);
 
         // Assert
-        Assert.True(isParsed, error);
-        Assert.Equal(expectedPaths, expression!.Paths.ToArray());
+        Assert.Equal(expectedPaths, expression.Paths.ToArray());
     }
 
     [Fact]
