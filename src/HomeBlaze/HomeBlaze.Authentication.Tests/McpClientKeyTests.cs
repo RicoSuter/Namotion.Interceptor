@@ -75,7 +75,7 @@ public class McpClientKeyTests
     {
         // Arrange
         await using var graph = await AuthenticationTestGraph.CreateAsync();
-        var access = (IMcpClientAccess)graph.UserStore;
+        var access = graph.UserStore;
 
         // Act
         var requiresKey = access.RequiresKey;
@@ -84,7 +84,7 @@ public class McpClientKeyTests
         // Assert
         Assert.False(requiresKey);
         Assert.False(verifies);
-        Assert.Equal([BuiltInRoles.ReaderName], access.Roles);
+        Assert.Equal([BuiltInRoles.ReaderName], ((IMcpClientAccess)access).Roles);
         Assert.False(graph.Authorization.Users[NameRules.McpUserName].HasKey);
     }
 
@@ -93,7 +93,7 @@ public class McpClientKeyTests
     {
         // Arrange
         await using var graph = await AuthenticationTestGraph.CreateAsync();
-        var access = (IMcpClientAccess)graph.UserStore;
+        var access = graph.UserStore;
         var changed = new List<string>();
         graph.UserStore.UserChanged += changed.Add;
 
@@ -117,7 +117,7 @@ public class McpClientKeyTests
     {
         // Arrange
         await using var graph = await AuthenticationTestGraph.CreateAsync();
-        var access = (IMcpClientAccess)graph.UserStore;
+        var access = graph.UserStore;
         var administration = graph.AdministrationAs(graph.AdminUserId);
         var created = await administration.CreateMcpKeyAsync(CancellationToken.None);
 
@@ -140,7 +140,7 @@ public class McpClientKeyTests
         await using var graph = await AuthenticationTestGraph.CreateAsync();
         var mcp = (await graph.UserManager.FindByNameAsync(NameRules.McpUserName))!;
         var key = await McpClientKey.CreateAsync(graph.UserManager, mcp);
-        var access = (IMcpClientAccess)graph.UserStore;
+        var access = graph.UserStore;
         var requiredBeforeLoad = access.RequiresKey;
 
         // Act
@@ -158,13 +158,13 @@ public class McpClientKeyTests
     {
         // Arrange
         await using var graph = await AuthenticationTestGraph.CreateAsync();
-        var access = (IMcpClientAccess)graph.UserStore;
+        var access = graph.UserStore;
 
         // Act
         await graph.AdministrationAs(graph.AdminUserId).SetRolesAsync(NameRules.McpUserName, [BuiltInRoles.OperatorName], CancellationToken.None);
 
         // Assert
-        Assert.Equal([BuiltInRoles.OperatorName], access.Roles);
+        Assert.Equal([BuiltInRoles.OperatorName], ((IMcpClientAccess)access).Roles);
     }
 
     [Fact]
@@ -187,7 +187,7 @@ public class McpClientKeyTests
         Assert.Equal("Only a full administrator can manage the key of the built-in user 'mcp'.", create.Error);
         Assert.False(revoke.Succeeded);
         Assert.Equal("Only a full administrator can manage the key of the built-in user 'mcp'.", revoke.Error);
-        Assert.True(((IMcpClientAccess)graph.UserStore).Verify(created.McpKey!));
+        Assert.True(graph.UserStore.Verify(created.McpKey!));
     }
 
     [Fact]
@@ -204,7 +204,7 @@ public class McpClientKeyTests
         // Assert
         Assert.Equal(UserStore.ActorRefusal, create.Error);
         Assert.Equal(UserStore.ActorRefusal, revoke.Error);
-        Assert.False(((IMcpClientAccess)graph.UserStore).RequiresKey);
+        Assert.False(graph.UserStore.RequiresKey);
     }
 
     [Fact]
@@ -220,7 +220,7 @@ public class McpClientKeyTests
         // Assert
         Assert.False(result.Succeeded);
         Assert.Equal("You are not allowed to manage the user 'mcp'.", result.Error);
-        Assert.False(((IMcpClientAccess)graph.UserStore).RequiresKey);
+        Assert.False(graph.UserStore.RequiresKey);
     }
 
     [Fact]
@@ -229,7 +229,7 @@ public class McpClientKeyTests
         // Arrange
         await using var graph = await AuthenticationTestGraph.CreateAsync();
         var administration = graph.AdministrationAs(graph.AdminUserId);
-        var access = (IMcpClientAccess)graph.UserStore;
+        var access = graph.UserStore;
 
         // Act
         var key = await graph.Authorization.Users[NameRules.McpUserName].CreateKeyAsync(administration, CancellationToken.None);
@@ -258,7 +258,7 @@ public class McpClientKeyTests
         var revoke = await Assert.ThrowsAsync<InvalidOperationException>(() => user.RevokeKeyAsync(administration, CancellationToken.None));
         Assert.Equal("Only the built-in user 'mcp' has a key.", create.Message);
         Assert.Equal("Only the built-in user 'mcp' has a key.", revoke.Message);
-        Assert.False(((IMcpClientAccess)graph.UserStore).RequiresKey);
+        Assert.False(graph.UserStore.RequiresKey);
     }
 
     private static async Task<string?> GetStoredHashAsync(AuthenticationTestGraph graph)

@@ -11,7 +11,7 @@ namespace HomeBlaze.Authentication;
 /// <see cref="AuthorizationSubject.Users"/>. Users change only through an <see cref="IUserAdministration"/> of
 /// <see cref="CreateAdministration"/>; a change runs one at a time with the changes of roles, through the
 /// <see cref="AuthorizationChangeGate"/>, and is committed before the projection changes. As
-/// <see cref="IMcpClientAccess"/>, gives the roles of the built-in user <see cref="NameRules.McpUserName"/> and checks its
+/// <see cref="IMcpClientAccess"/>, gives the roles of the built-in user <see cref="NameRules.McpUserName"/>; checks its
 /// key against the hash held in memory, refreshed on every load and change of the key. Thread-safe.
 /// </summary>
 public sealed class UserStore : IMcpClientAccess
@@ -84,10 +84,10 @@ public sealed class UserStore : IMcpClientAccess
     /// <inheritdoc />
     IReadOnlyCollection<string> IMcpClientAccess.Roles => McpRoles;
 
-    /// <inheritdoc />
+    /// <summary>Whether the built-in user <see cref="NameRules.McpUserName"/> has a key, which clients must then present.</summary>
     public bool RequiresKey => _state.McpKeyHash is not null;
 
-    /// <inheritdoc />
+    /// <summary>Whether <paramref name="presentedKey"/> is the key of the built-in user <see cref="NameRules.McpUserName"/>, compared in constant time; false when there is no key.</summary>
     public bool Verify(string presentedKey)
     {
         ArgumentNullException.ThrowIfNull(presentedKey);

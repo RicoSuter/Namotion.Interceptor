@@ -11,7 +11,7 @@ namespace HomeBlaze.Authentication.Blazor;
 /// <see cref="AuthenticationDatabase"/> is ready, as whether a key exists is not known before. It grants nothing: what a
 /// client may do is decided by the policy of that user's roles.
 /// </summary>
-internal sealed class McpClientKeyMiddleware(RequestDelegate next, IMcpClientAccess access, AuthenticationDatabase database)
+internal sealed class McpClientKeyMiddleware(RequestDelegate next, UserStore userStore, AuthenticationDatabase database)
 {
     private const string BearerPrefix = "Bearer ";
 
@@ -30,11 +30,11 @@ internal sealed class McpClientKeyMiddleware(RequestDelegate next, IMcpClientAcc
             return Task.CompletedTask;
         }
 
-        if (access.RequiresKey)
+        if (userStore.RequiresKey)
         {
             var authorization = context.Request.Headers.Authorization.ToString();
             if (!authorization.StartsWith(BearerPrefix, StringComparison.OrdinalIgnoreCase) ||
-                !access.Verify(authorization[BearerPrefix.Length..].Trim()))
+                !userStore.Verify(authorization[BearerPrefix.Length..].Trim()))
             {
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 context.Response.Headers.WWWAuthenticate = "Bearer";

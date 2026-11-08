@@ -1,10 +1,8 @@
 using System.Net;
-using HomeBlaze.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Testing;
 using Xunit;
 
@@ -76,26 +74,18 @@ public class ReadinessTests
     public async Task WhenTheDatabaseIsNotReady_ThenTheMcpKeyCheckRefusesWithoutCallingTheEndpoint()
     {
         // Arrange
-        var database = new AuthenticationDatabase("unused.db", () => throw new NotSupportedException(), NullLogger<AuthenticationDatabase>.Instance);
+        await using var host = await AuthenticationTestHost.StartAsync(rootType: typeof(NeverLoadingStorageRoot), waitForStartup: false);
         var isEndpointCalled = false;
-        var middleware = new McpClientKeyMiddleware(_ => { isEndpointCalled = true; return Task.CompletedTask; }, new KeylessMcpClientAccess(), database);
+        var middleware = new McpClientKeyMiddleware(_ => { isEndpointCalled = true; return Task.CompletedTask; }, host.UserStore, host.Database);
         var context = new DefaultHttpContext();
 
         // Act
         await middleware.InvokeAsync(context);
 
         // Assert
+        Assert.False(host.Database.IsReady);
         Assert.Equal(StatusCodes.Status503ServiceUnavailable, context.Response.StatusCode);
         Assert.Equal("no-store", context.Response.Headers.CacheControl.ToString());
         Assert.False(isEndpointCalled);
-    }
-
-    private sealed class KeylessMcpClientAccess : IMcpClientAccess
-    {
-        public IReadOnlyCollection<string> Roles => [BuiltInRoles.ReaderName];
-
-        public bool RequiresKey => false;
-
-        public bool Verify(string presentedKey) => false;
     }
 }
