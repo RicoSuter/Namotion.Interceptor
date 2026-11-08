@@ -475,7 +475,7 @@ public partial class Motor
 | `Icon` | MudBlazor icon name | `"Speed"`, `"Stop"` |
 | `Position` | Sort position in operations list | `1`, `2`, `3` |
 | `RequiresConfirmation` | Show confirmation dialog before executing | `true` |
-| `Purpose` | What the operation is for. `OperationPurpose.Delete` makes it the subject's Delete button in the browser instead of an operation button | `OperationPurpose.Delete` |
+| `Purpose` | What the operation is for. `OperationPurpose.Delete` makes it the subject's Delete button in the browser and `OperationPurpose.Edit` its Edit button instead of an operation button | `OperationPurpose.Delete` |
 
 **Key points:**
 - Operations appear as buttons in the subject's property panel, grouped by [category](#categories)
@@ -487,6 +487,7 @@ public partial class Motor
 - Confirmation is inherited: an implementation of an interface operation or an override of a base class operation that requires confirmation requires it too, also with its own `[Operation]`, and a `[Query]` in its place becomes an operation that requires confirmation
 - Do not require confirmation for safety actions such as an emergency stop; agents must be able to call them
 - An operation with `Purpose = OperationPurpose.Delete` deletes or removes the subject. The subject browser shows it as the Delete button of the subject's pane, asks for confirmation before it runs it, whether or not it sets `RequiresConfirmation`, and leaves it out of the operation buttons. The confirmation asks "Delete '<name>'?", followed by the operation's `Description` when it has one, so the description should read as a sentence and can name a consequence of the delete. The button is disabled while the operation's `IsEnabled` attribute is false. Agents see it as an ordinary operation, so `RequiresConfirmation` still decides whether they may call it. It must take no parameter that requires input, otherwise the purpose is ignored. `Purpose` comes from the `[Operation]` attribute of the method itself and, unlike `RequiresConfirmation`, is not inherited: an override or implementation with its own `[Operation]` has only the purpose it sets itself. A subject stored in a file of a storage gets a `Delete` operation from the storage, which requires confirmation, unless it has a delete operation of its own, and so does a folder of a storage, which is enabled only while the folder is empty
+- An operation with `Purpose = OperationPurpose.Edit` saves what the subject's [Edit component](#edit-components) edits, which it takes as its parameters. The subject browser shows the Edit button to a person who may run it while its `IsEnabled` attribute is not false, the button opens the Edit component, and the component saves by running it through `TryInvokeAsync`, see [Permissions](#permissions). It is left out of the operation buttons. Use it for a subject whose Edit component changes other members than `[Configuration]` properties, which the generic editor and its Edit button require
 
 **Where a method is offered:**
 
@@ -1732,7 +1733,7 @@ The page author sees the sidebar with a width of 200 pixels at the left and the 
 
 ### Edit Components
 
-Edit components provide configuration forms:
+Edit components provide configuration forms. The Edit button and the save of an Edit component require that the person may administer every `[Configuration]` property of the subject, so a subject without any has no Edit button, unless the component saves through an [edit operation](#operations):
 
 ```razor
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Motor))]
