@@ -27,6 +27,9 @@ internal sealed partial class TestBrowser : IDisposable
     /// <summary>Whether the session cookie is set.</summary>
     public bool HasSessionCookie => _cookies.GetCookies(_baseAddress)[SessionCookieName] is not null;
 
+    /// <summary>The value of the session cookie, or null when it is not set.</summary>
+    public string? SessionCookieValue => _cookies.GetCookies(_baseAddress)[SessionCookieName]?.Value;
+
     public Task<HttpResponseMessage> GetAsync(string path) => _client.GetAsync(path);
 
     public Task<HttpResponseMessage> PostAsync(string path, IReadOnlyDictionary<string, string> fields) =>

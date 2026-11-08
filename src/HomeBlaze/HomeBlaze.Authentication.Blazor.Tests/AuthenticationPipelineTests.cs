@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
 namespace HomeBlaze.Authentication.Blazor.Tests;
@@ -121,6 +122,60 @@ public class AuthenticationPipelineTests
         // Assert
         Assert.Equal(HttpStatusCode.Redirect, refused.StatusCode);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenARequestCarriesTheCookieFromBeforeAPasswordChangeAfterTheStampInterval_ThenItIsRefusedAndNoCookieIsDeleted()
+    {
+        // Arrange
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        await using var host = await AuthenticationTestHost.StartAsync(time);
+        var added = await host.AdministrationAsAdmin.AddUserAsync("kid", null, [BuiltInRoles.ReaderName], CancellationToken.None);
+        Assert.True(added.Succeeded, added.Error);
+        await host.SetPasswordAsync("kid", AccountTestForms.Password);
+        using var browser = host.CreateBrowser();
+        Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(await AccountTestForms.SignInAsync(browser, "kid", AccountTestForms.Password)));
+        var oldCookie = browser.SessionCookieValue;
+        time.Advance(TimeSpan.FromMinutes(6));
+        var changed = await AccountTestForms.SetPasswordAsync(browser, "another correct horse", currentPassword: AccountTestForms.Password);
+        Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(changed));
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/protected");
+        request.Headers.Add("Cookie", $"{TestBrowser.SessionCookieName}={oldCookie}");
+
+        // Act
+        var response = await host.CreateClient().SendAsync(request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.False(response.Headers.TryGetValues("Set-Cookie", out var setCookies) &&
+            setCookies.Any(setCookie => setCookie.StartsWith(TestBrowser.SessionCookieName + "=", StringComparison.Ordinal)));
+        Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync("/protected")).StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenTheStoredStampChangedOutsideTheStoreAndTheIntervalPassed_ThenTheStampCheckRefusesTheSessionAndKeepsTheCookie()
+    {
+        // Arrange
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        await using var host = await AuthenticationTestHost.StartAsync(time);
+        var added = await host.AdministrationAsAdmin.AddUserAsync("kid", null, [BuiltInRoles.ReaderName], CancellationToken.None);
+        Assert.True(added.Succeeded, added.Error);
+        using var browser = host.CreateBrowser();
+        await host.SignInAsync(browser, "kid");
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            Assert.True((await userManager.UpdateSecurityStampAsync((await userManager.FindByNameAsync("kid"))!)).Succeeded);
+        }
+
+        time.Advance(TimeSpan.FromMinutes(6));
+
+        // Act
+        var response = await browser.GetAsync("/protected");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.True(browser.HasSessionCookie);
     }
 
     [Fact]
