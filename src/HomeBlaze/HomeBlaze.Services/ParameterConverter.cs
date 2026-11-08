@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Services.Display;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Services;
@@ -328,6 +329,73 @@ public static class ParameterConverter
         }
         catch
         {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Tries to convert a value that is not text input, such as the result of an expression, to the target type: a value
+    /// of the type as it is, a text or an enum to an enum by the name of a defined member or by the number of one as text,
+    /// a number to another number type (rounded for an integral type), and any value to a text as pages write it raw.
+    /// </summary>
+    public static bool TryConvertValue(object value, Type targetType, out object? converted)
+    {
+        var type = Nullable.GetUnderlyingType(targetType) ?? targetType;
+        if (type.IsInstanceOfType(value))
+        {
+            converted = value;
+            return true;
+        }
+
+        if (type.IsEnum)
+        {
+            return TryConvertEnumValue(value, type, out converted);
+        }
+
+        if (type == typeof(string))
+        {
+            converted = RawValueFormatter.Format(value);
+            return true;
+        }
+
+        if (IsNumber(type) && IsNumber(value.GetType()))
+        {
+            return TryChangeNumberType(value, type, out converted);
+        }
+
+        converted = null;
+        return false;
+    }
+
+    private static bool TryConvertEnumValue(object value, Type type, out object? converted)
+    {
+        var name = value is string or Enum ? value.ToString() : null;
+        if (name is not null && Enum.TryParse(type, name, ignoreCase: true, out var parsed) && NamesMembers(parsed))
+        {
+            converted = parsed;
+            return true;
+        }
+
+        converted = null;
+        return false;
+    }
+
+    // A number that names no member, such as 7 for an enum of three members, formats as that number; a combination of
+    // flags formats as the names of its members.
+    private static bool NamesMembers(object value) => value.ToString() is { Length: > 0 } text && !char.IsAsciiDigit(text[0]) && text[0] != '-';
+
+    private static bool IsNumber(Type type) => !type.IsEnum && Type.GetTypeCode(type) is >= TypeCode.SByte and <= TypeCode.Decimal;
+
+    private static bool TryChangeNumberType(object value, Type type, out object? converted)
+    {
+        try
+        {
+            converted = Convert.ChangeType(value, type, CultureInfo.InvariantCulture);
+            return true;
+        }
+        catch (OverflowException)
+        {
+            converted = null;
             return false;
         }
     }
