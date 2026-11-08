@@ -169,7 +169,7 @@ internal sealed class PermissionsTestGraph : IAsyncDisposable
         File.Delete(AdminSeeding.MarkerPath(_databasePath));
     }
 
-    private IUserAdministration AdministrationAsAdmin => UserStore.CreateAdministration(UserStore.GetUserId(AdminSeeding.AdminUserName));
+    private IUserAdministration AdministrationAsAdmin => new UserAdministration(UserStore, () => UserStore.GetUserId(AdminSeeding.AdminUserName));
 
     private async Task InitializeAsync(IReadOnlyCollection<string>? roles, IReadOnlyCollection<AuthorizationRole> customRoles, IReadOnlyCollection<string>? anonymousRoles)
     {

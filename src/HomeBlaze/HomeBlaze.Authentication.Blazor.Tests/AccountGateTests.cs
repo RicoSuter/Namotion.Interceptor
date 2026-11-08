@@ -122,7 +122,7 @@ public sealed class AccountGateTests : AccountComponentsTestContext
         var graph = await UseGraphAsync(roles: null);
         var gate = RenderGate();
         await gate.WaitForAssertionAsync(() => Assert.NotEmpty(gate.FindAll("[data-testid=sign-in-dialog]")));
-        var administration = graph.UserStore.CreateAdministration(graph.UserStore.GetUserId(AdminSeeding.AdminUserName));
+        var administration = new UserAdministration(graph.UserStore, () => graph.UserStore.GetUserId(AdminSeeding.AdminUserName));
 
         // Act
         var granted = await administration.SetRolesAsync(NameRules.AnonymousUserName, [BuiltInRoles.ReaderName], CancellationToken.None);

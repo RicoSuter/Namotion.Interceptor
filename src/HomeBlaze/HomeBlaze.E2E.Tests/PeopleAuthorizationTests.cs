@@ -221,7 +221,7 @@ public class PeopleAuthorizationTests
             await Assertions.Expect(dialog.Page.GetByTestId("one-time-secret-value")).Not.ToBeEmptyAsync(new() { Timeout = Timeout });
             Assert.Equal(new[] { BuiltInRoles.ReaderName }, userStore.GetRoles(userStore.GetUserId(addedName)!));
 
-            var managerAdministration = userStore.CreateAdministration(userStore.GetUserId(managerName));
+            var managerAdministration = new UserAdministration(userStore, () => userStore.GetUserId(managerName));
             var refused = await managerAdministration.AddUserAsync(TestNames.Create("refused"), null, [BuiltInRoles.OperatorName], CancellationToken.None);
             Assert.False(refused.Succeeded);
         }

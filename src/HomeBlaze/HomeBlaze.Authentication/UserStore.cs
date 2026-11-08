@@ -8,11 +8,11 @@ namespace HomeBlaze.Authentication;
 
 /// <summary>
 /// Stores the users, including the built-in users, in the authentication database and projects them into
-/// <see cref="AuthorizationSubject.Users"/>. Users change only through an <see cref="IUserAdministration"/> of
-/// <see cref="CreateAdministration"/>; a change runs one at a time with the changes of roles, through the
-/// <see cref="AuthorizationChangeGate"/>, and is committed before the projection changes. As
-/// <see cref="IMcpClientAccess"/>, gives the roles of the built-in user <see cref="NameRules.McpUserName"/>; checks its
-/// key against the hash held in memory, refreshed on every load and change of the key. Thread-safe.
+/// <see cref="AuthorizationSubject.Users"/>. Users change only through a <see cref="UserAdministration"/>; a change runs
+/// one at a time with the changes of roles, through the <see cref="AuthorizationChangeGate"/>, and is committed before
+/// the projection changes. As <see cref="IMcpClientAccess"/>, gives the roles of the built-in user
+/// <see cref="NameRules.McpUserName"/>; checks its key against the hash held in memory, refreshed on every load and change
+/// of the key. Thread-safe.
 /// </summary>
 public sealed class UserStore : IMcpClientAccess
 {
@@ -178,12 +178,6 @@ public sealed class UserStore : IMcpClientAccess
 
     /// <summary>Gets the role names of every user, including the built-in users, each labeled with the user name.</summary>
     public IEnumerable<PrincipalRoleSet> GetAllRoleSets() => _state.RoleSets;
-
-    /// <summary>
-    /// Creates the administration of the person with <paramref name="actingUserId"/>; null, for nobody signed in, gives
-    /// one that refuses every change.
-    /// </summary>
-    public IUserAdministration CreateAdministration(string? actingUserId) => UserAdministration.Create(this, actingUserId);
 
     /// <summary>Gets the role names of every user who is a person, not a built-in user, and whether an administrator locked them.</summary>
     public IReadOnlyCollection<PersonRoleSet> GetPersonRoleSets() =>

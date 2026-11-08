@@ -17,16 +17,6 @@ public partial class WidgetOperationGuardTests
         // The source editor component, not a subject.
         ("HomeBlaze.Storage.Blazor/Files/MarkdownTextDialog.razor", "CreateAsync"),
 
-        // The user administration of the circuit, which acts as the person signed in and is checked by the user store.
-        ("HomeBlaze.Authentication.Blazor/CurrentUserAdministration.cs", "AddUserAsync"),
-        ("HomeBlaze.Authentication.Blazor/CurrentUserAdministration.cs", "RemoveAsync"),
-        ("HomeBlaze.Authentication.Blazor/CurrentUserAdministration.cs", "ResetPasswordAsync"),
-        ("HomeBlaze.Authentication.Blazor/CurrentUserAdministration.cs", "SetLockedAsync"),
-        ("HomeBlaze.Authentication.Blazor/CurrentUserAdministration.cs", "SetRolesAsync"),
-        ("HomeBlaze.Authentication.Blazor/CurrentUserAdministration.cs", "SetDisplayNameAsync"),
-        ("HomeBlaze.Authentication.Blazor/CurrentUserAdministration.cs", "CreateMcpKeyAsync"),
-        ("HomeBlaze.Authentication.Blazor/CurrentUserAdministration.cs", "RevokeMcpKeyAsync"),
-
         // The memory editor of an agent and the structure editor of a page, not subjects, which check the viewer themselves.
         ("HomeBlaze.AI.Blazor/AgentMemoryTab.razor", "DeleteAsync"),
         ("HomeBlaze.Components/SubjectComponent.razor", "DeleteAsync"),

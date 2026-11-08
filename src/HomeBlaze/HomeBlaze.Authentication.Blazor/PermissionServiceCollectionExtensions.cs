@@ -14,7 +14,10 @@ internal static class PermissionServiceCollectionExtensions
         services.AddScoped<AuthenticationStateProvider, HomeBlazeRevalidatingAuthenticationStateProvider>();
         services.AddScoped<CurrentUser>();
         services.AddScoped<IUserPermissions, PolicyUserPermissions>();
-        services.AddScoped<IUserAdministration, CurrentUserAdministration>();
+        // Every call acts as the person signed in at that moment, so that a circuit signed out meanwhile, by the person or
+        // by revalidation, refuses every change.
+        services.AddScoped<IUserAdministration>(serviceProvider =>
+            new UserAdministration(serviceProvider.GetRequiredService<UserStore>(), serviceProvider.GetRequiredService<CurrentUser>().GetPersonUserId));
         services.AddSingleton<IRequestUserPermissionsFactory, RequestUserPermissionsFactory>();
     }
 }

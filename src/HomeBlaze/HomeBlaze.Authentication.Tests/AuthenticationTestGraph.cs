@@ -244,7 +244,7 @@ internal sealed class AuthenticationTestGraph : IAsyncDisposable
     }
 
     /// <summary>Gets the user administration of the user with <paramref name="userId"/>; null for nobody signed in.</summary>
-    public IUserAdministration AdministrationAs(string? userId) => UserStore.CreateAdministration(userId);
+    public IUserAdministration AdministrationAs(string? userId) => new UserAdministration(UserStore, () => userId);
 
     /// <summary>Gets the stored security stamp of the user with <paramref name="userId"/>.</summary>
     public async Task<string?> GetSecurityStampAsync(string userId)

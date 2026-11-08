@@ -56,7 +56,7 @@ public class PolicyUserPermissionsTests
         // Arrange
         await using var graph = await PermissionsTestGraph.CreateAsync(roles: [BuiltInRoles.EverythingName]);
         var temperature = graph.Device.TryGetRegisteredSubject()!.TryGetProperty("Temperature")!;
-        var administration = new CurrentUserAdministration(graph.UserStore, graph.CurrentUser);
+        var administration = new UserAdministration(graph.UserStore, graph.CurrentUser.GetPersonUserId);
         Assert.True(graph.Permissions.CanRead(temperature));
 
         // Act

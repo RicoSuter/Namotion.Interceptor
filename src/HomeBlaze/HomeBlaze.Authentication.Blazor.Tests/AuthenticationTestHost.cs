@@ -238,7 +238,7 @@ internal sealed class AuthenticationTestHost : IAsyncDisposable
 
     /// <summary>The user administration of the seeded <c>admin</c>, a full administrator.</summary>
     public IUserAdministration AdministrationAsAdmin =>
-        UserStore.CreateAdministration(UserStore.GetUserId(AdminSeeding.AdminUserName));
+        new UserAdministration(UserStore, () => UserStore.GetUserId(AdminSeeding.AdminUserName));
 
     /// <summary>Creates a client of the test server, which follows no redirect.</summary>
     public HttpClient CreateClient() => _application.GetTestClient();

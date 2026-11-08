@@ -202,7 +202,7 @@ public class PlaywrightFixture : IAsyncLifetime
         var userStore = ServerServices.GetRequiredService<UserStore>();
         var adminId = userStore.GetUserId(AdminSeeding.AdminUserName)
             ?? throw new InvalidOperationException("The seeded administrator does not exist");
-        return userStore.CreateAdministration(adminId);
+        return new UserAdministration(userStore, () => adminId);
     }
 
     /// <summary>
