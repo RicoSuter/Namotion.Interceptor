@@ -51,6 +51,39 @@ public class UserDelegationTests
     }
 
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void WhenAPersonResetsTheirOwnPassword_ThenItIsRefusedWithAPointerToTheAccountDialog(bool isFullAdministrator)
+    {
+        // Arrange
+        var actor = Actor(isFullAdministrator ? Closure(BuiltInRoles.EverythingName) : ManagerClosure, "me");
+
+        // Act
+        var refusal = UserDelegation.GetRefusal(actor, Target("me", [isFullAdministrator ? BuiltInRoles.EverythingName : "usermanager"]), UserAction.Reset, null, null);
+
+        // Assert
+        Assert.Equal(UserDelegation.OwnPasswordResetRefusal, refusal);
+    }
+
+    [Theory]
+    [InlineData(nameof(UserAction.Remove))]
+    [InlineData(nameof(UserAction.Lock))]
+    [InlineData(nameof(UserAction.SetRoles))]
+    public void WhenAFullAdministratorChangesTheirOwnAccountOtherwise_ThenTheDelegationRulesDoNotRefuseIt(string actionName)
+    {
+        // Arrange
+        var action = Enum.Parse<UserAction>(actionName);
+
+        // Act
+        var refusal = UserDelegation.GetRefusal(
+            Actor(Closure(BuiltInRoles.EverythingName), "me"), Target("me", [BuiltInRoles.EverythingName]), action,
+            action == UserAction.SetRoles ? [BuiltInRoles.ReaderName] : null, action == UserAction.SetRoles ? Closure(BuiltInRoles.ReaderName) : null);
+
+        // Assert
+        Assert.Null(refusal);
+    }
+
+    [Theory]
     [InlineData(nameof(UserAction.Remove))]
     [InlineData(nameof(UserAction.Lock))]
     [InlineData(nameof(UserAction.Unlock))]

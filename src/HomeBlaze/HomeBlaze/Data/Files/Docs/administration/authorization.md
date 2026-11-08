@@ -91,7 +91,7 @@ Users are managed with operations in the subject browser. Select the `Authorizat
 | "Add User" of the `Authorization` subject | Adds a user with a name, see [Names](#names), an optional email address and roles, and shows their [setup code](#setup-codes). A name with uppercase letters is refused, not lowercased; `anonymous` and `mcp` are taken |
 | "Set Roles" | Replaces the roles of the user. Open sessions switch to the new roles at once |
 | "Set Display Name" | Sets the [display name](#display-names) of the user, or removes it when empty. Their sessions keep going |
-| "Reset Password" | Removes the password, ends the sessions of the user and shows a new setup code |
+| "Reset Password" | Removes the password, ends the sessions of the user and shows a new setup code. Nobody resets their own password, full administrators included: the reset would end the session before the code is shown. Change your own password in the Account dialog instead |
 | "Lock", "Unlock" | A locked user cannot sign in and their sessions end |
 | "Remove" | Removes the user and ends their sessions |
 | "Create Key", "Revoke Key" of `mcp` | Create and remove the key of the external MCP endpoint, see [Anonymous and MCP](#anonymous-and-mcp) |
@@ -121,7 +121,7 @@ A person sets their own display name in the Account dialog; this needs no `admin
 A person without `everything` can manage users when a role gives them `administer` on the users, see [the user manager recipe](#user-manager). Every change they make is also checked:
 
 - they assign and remove only roles they hold, counting the roles those include,
-- they cannot change their own roles, and cannot remove, lock or reset themselves,
+- they cannot change their own roles, and cannot remove or lock themselves; nobody, a full administrator included, resets their own password,
 - they cannot change, remove, lock or reset a user who holds a role they do not hold,
 - they never touch the built-in users,
 - the user they unlock, reset or give roles, and the roles they assign, hold each of their roles with deny rules; locking, removing and taking roles away are exempt within limits, see [Roles With Deny Rules](#roles-with-deny-rules).

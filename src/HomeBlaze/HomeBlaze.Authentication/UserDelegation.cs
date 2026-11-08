@@ -36,8 +36,9 @@ internal enum UserAction
 }
 
 /// <summary>
-/// The rules for a person who manages users without being a full administrator: they assign and remove only roles they
-/// hold, never change their own roles, never act on a user holding a role they do not hold, and never touch built-in users.
+/// The rules for a person who manages users: nobody resets their own password. A person who is not a full administrator
+/// also assigns and removes only roles they hold, never changes their own account, never acts on a user holding a role
+/// they do not hold, and never touches built-in users.
 /// Every person, full administrators included, follows <see cref="RoleDelegation"/>: the user they act on and the roles
 /// they assign hold each of their roles with deny rules, except for a change that only takes access away: locking,
 /// removing, or changing the roles to none or to a subset of the role closure the user holds that keeps the roles with
@@ -45,6 +46,9 @@ internal enum UserAction
 /// </summary>
 internal static class UserDelegation
 {
+    /// <summary>The refusal of resetting one's own password, which everybody gets.</summary>
+    public const string OwnPasswordResetRefusal = "You cannot reset your own password. Change it in the user menu under Account > Change your password.";
+
     /// <summary>Gets why <paramref name="actor"/> may not do <paramref name="action"/> on <paramref name="target"/>, or null.</summary>
     /// <param name="actor">The person who changes the user.</param>
     /// <param name="target">The user, with the roles they hold before the change; a user to add holds none.</param>
@@ -59,17 +63,25 @@ internal static class UserDelegation
             ArgumentNullException.ThrowIfNull(newRoleClosure);
         }
 
-        if (actor.IsFullAdministrator)
+        var isOwnAccount = string.Equals(actor.UserId, target.UserId, StringComparison.Ordinal);
+        // The reset would end the session of the person before its setup code is shown, leaving them with neither.
+        if (isOwnAccount && action == UserAction.Reset)
         {
-            return GetDenyRulesRefusal(actor, target, action, newRoleClosure);
+            return OwnPasswordResetRefusal;
         }
 
+        return (actor.IsFullAdministrator ? null : GetManagerRefusal(actor, target, action, newRoles, isOwnAccount))
+            ?? GetDenyRulesRefusal(actor, target, action, newRoleClosure);
+    }
+
+    private static string? GetManagerRefusal(UserActor actor, UserTarget target, UserAction action, IReadOnlyCollection<string>? newRoles, bool isOwnAccount)
+    {
         if (target.IsBuiltIn)
         {
             return "Only a full administrator can change the built-in users.";
         }
 
-        if (string.Equals(actor.UserId, target.UserId, StringComparison.Ordinal))
+        if (isOwnAccount)
         {
             return action == UserAction.SetRoles ? "You cannot change your own roles." : "You cannot do this to your own account.";
         }
@@ -89,7 +101,7 @@ internal static class UserDelegation
             }
         }
 
-        return GetDenyRulesRefusal(actor, target, action, newRoleClosure);
+        return null;
     }
 
     private static string? GetDenyRulesRefusal(UserActor actor, UserTarget target, UserAction action, IReadOnlySet<string>? newRoleClosure)

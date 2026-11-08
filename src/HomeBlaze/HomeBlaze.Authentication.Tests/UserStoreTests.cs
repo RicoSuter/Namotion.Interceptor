@@ -170,6 +170,24 @@ public class UserStoreTests
     }
 
     [Fact]
+    public async Task WhenAFullAdministratorResetsTheirOwnPassword_ThenItIsRefusedAndNothingChanges()
+    {
+        // Arrange
+        await using var graph = await AuthenticationTestGraph.CreateAsync();
+        var changedUserIds = new List<string>();
+        graph.UserStore.UserChanged += changedUserIds.Add;
+
+        // Act
+        var result = await graph.AdministrationAs(graph.AdminUserId).ResetPasswordAsync(AdminSeeding.AdminUserName, CancellationToken.None);
+
+        // Assert
+        Assert.False(result.Succeeded);
+        Assert.Equal(UserDelegation.OwnPasswordResetRefusal, result.Error);
+        Assert.Null(result.SetupCode);
+        Assert.Empty(changedUserIds);
+    }
+
+    [Fact]
     public async Task WhenAnUnknownRoleIsAssigned_ThenItIsRefused()
     {
         // Arrange
