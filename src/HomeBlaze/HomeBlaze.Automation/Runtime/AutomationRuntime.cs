@@ -35,7 +35,7 @@ internal sealed class AutomationRuntime
         _location = location;
         _keeper = new AutomationStateKeeper(location.Store);
         _changes = new AutomationChangeReceiver(_queue);
-        _routes = new GraphRoutes(automation);
+        _routes = new GraphRoutes(automation, _changes);
         _engine = new AutomationEngine(automation, _queue, _keeper, logger, _changes, _routes);
     }
 
@@ -122,6 +122,7 @@ internal sealed class AutomationRuntime
 
             // A move between the start and the registration queued no graph change.
             FollowPath();
+            _routes.Publish();
             _engine.RefreshRuleStatuses();
             using var wakeTimer = new WakeTimer(_automation.TimeProvider, () => EnqueueOnce(ref _isTickPending, TickInput.Instance));
             _wakeTimer = wakeTimer;
@@ -166,6 +167,7 @@ internal sealed class AutomationRuntime
             _engine.ReportUnexpectedError(exception);
         }
 
+        _routes.Publish();
         _engine.RefreshRuleStatuses();
     }
 
