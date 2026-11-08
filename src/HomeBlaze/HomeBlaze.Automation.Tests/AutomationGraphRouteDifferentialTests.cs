@@ -4,16 +4,17 @@ using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
 namespace HomeBlaze.Automation.Tests;
 
 /// <summary>
-/// Applies random sequences of structural changes with fixed seeds and checks after each batch that every automation,
-/// which resolves its paths again only on a change on its graph route, is bound exactly as resolving every path of every
-/// automation again would bind it: the properties of its triggers, its watched set, the sources of its event triggers
-/// and its checkpoint path. A batch of several changes lets the later ones race with the workers that resolve the paths
-/// after the earlier ones.
+/// Applies random sequences of structural and configuration changes with fixed seeds and checks after each batch that
+/// every automation, which resolves its paths again only on a change on its graph route, is bound exactly as resolving
+/// every path of every automation again would bind it: the properties of its triggers, its watched set, the sources of
+/// its event triggers and its checkpoint path. A batch of several changes lets the later ones race with the workers that
+/// resolve the paths after the earlier ones.
 /// </summary>
 public class AutomationGraphRouteDifferentialTests
 {
@@ -38,6 +39,11 @@ public class AutomationGraphRouteDifferentialTests
                 log.Add($"{step}: {world.ApplyRandomChange()}");
             }
 
+            if (world.Random.Next(4) == 0)
+            {
+                log.Add($"{step}: {await world.ApplyRandomConfigurationChangeAsync()}");
+            }
+
             await world.FlushAsync();
 
             // Assert
@@ -51,8 +57,11 @@ public class AutomationGraphRouteDifferentialTests
     /// <summary>
     /// Rooms at <c>/R0</c> to <c>/R2</c> with sensors by key, by position and by reference and a button, folders
     /// <c>/F0</c>, <c>/F0/F2</c> and <c>/F1</c> of [InlinePaths] with a level, an unrelated holder, a rule host, four
-    /// automations with the same rules, placed in the folders and the root, and one in <c>/F0/F2</c> with absolute paths
-    /// only, whose checkpoint path changes when its folder moves, besides the automation of the host.
+    /// automations with the same rules and the states Day and Night, placed in the folders and the root, and one in
+    /// <c>/F0/F2</c> with absolute paths only, whose checkpoint path changes when its folder moves, besides the automation
+    /// of the host. The rules of the four automations read absolute paths, paths relative to the rule and to the automation,
+    /// a rearm expression and an Only if, subscribe to events of the automation and of a sibling of its container, and
+    /// change the state with the level of a room.
     /// </summary>
     private sealed class RandomWorld : IAsyncDisposable
     {
@@ -65,6 +74,7 @@ public class AutomationGraphRouteDifferentialTests
         private readonly TestRuleHost _ruleHost = new();
         private readonly List<Automation> _automations = [];
         private readonly Dictionary<Automation, List<int>> _containers = [];
+        private readonly List<(TestSensor Sensor, RegisteredSubjectProperty Wind)> _winds = [];
 
         private RandomWorld(AutomationTestHost host, int seed)
         {
@@ -84,7 +94,7 @@ public class AutomationGraphRouteDifferentialTests
             return world;
         }
 
-        public string ApplyRandomChange() => Random.Next(14) switch
+        public string ApplyRandomChange() => Random.Next(15) switch
         {
             0 => ChangeDevices(),
             1 => ChangeItems(),
@@ -98,8 +108,25 @@ public class AutomationGraphRouteDifferentialTests
             10 => ChangeLevel(),
             11 => MoveFolder(),
             12 => AddDynamicHolder(),
+            13 => SetWind(),
             _ => ChangeUnrelated()
         };
+
+        /// <summary>Changes the configuration or the state of one of the four automations and waits until it applied the change.</summary>
+        public async Task<string> ApplyRandomConfigurationChangeAsync()
+        {
+            var automation = _automations[Random.Next(4)];
+            var description = Random.Next(4) switch
+            {
+                0 => ToggleEnabled(automation),
+                1 => ToggleMode(automation),
+                2 => SaveCopies(automation),
+                _ => Reset(automation)
+            };
+
+            await automation.FlushAsync();
+            return description;
+        }
 
         public async Task FlushAsync()
         {
@@ -213,7 +240,14 @@ public class AutomationGraphRouteDifferentialTests
             {
                 var container = index == 3 ? -1 : index;
                 var automation = await _host.AddAutomationAsync(
-                    "A" + index, automation => automation.Rules = CreateRules(index == 3), automation => AddTo(container, automation));
+                    "A" + index,
+                    automation =>
+                    {
+                        automation.States = ["Day", "Night"];
+                        automation.InitialState = "Day";
+                        automation.Rules = CreateRules(index == 3);
+                    },
+                    automation => AddTo(container, automation));
                 _automations.Add(automation);
                 _containers[automation] = [container];
             }
@@ -238,7 +272,14 @@ public class AutomationGraphRouteDifferentialTests
                 ("level", On("Level", When("../../Level > 5 and ../Enabled == true"), Invoke("/Blinds/Close"))),
                 ("dynamic", On("Dynamic", When("/R0/Sensor/Wind > 5"), Invoke("/Blinds/Close"))),
                 ("press", Create("Press", AutomationRuleMode.On, [OnEvent("/R1/Button", "TestPressEvent")], [Invoke("/Blinds/Close")])),
-                ("guarded", Create("Guarded", AutomationRuleMode.On, [When("/R2/Devices[d1]/Gust > 5")], [Invoke("/Blinds/Close")], onlyIf: "/R0/Items[0]/Power > 5")));
+                ("guarded", Create("Guarded", AutomationRuleMode.On, [When("/R2/Devices[d1]/Gust > 5")], [Invoke("/Blinds/Close")], onlyIf: "/R0/Items[0]/Power > 5")),
+                ("self", On("Self", When("./RunCount > 100 or RunCount > 100"), Invoke("/Blinds/Close"))),
+                ("rearm", On("Rearm", When("/R1/Sensor/Gust > 5", rearm: "/R2/Sensor/Rain < 3"), Invoke("/Blinds/Close"))),
+                ("entered", Create("Entered", AutomationRuleMode.On, [OnEvent("..", "AutomationStateChangedEvent")], [Invoke("/Blinds/Close")])),
+                ("sibling", Create("Sibling", AutomationRuleMode.On, [OnEvent("../../Button", "TestPressEvent")], [Invoke("/Blinds/Close")])),
+                ("night", Create("Night", AutomationRuleMode.On, [When("/R0/Devices[d1]/Rain > 5")], [Invoke("/Blinds/Close")], inState: "Night")),
+                ("toNight", Create("To night", AutomationRuleMode.On, [When("/R2/Level > 4")], [Enter("Night")], inState: "Day")),
+                ("toDay", Create("To day", AutomationRuleMode.On, [When("/R2/Level <= 4")], [Enter("Day")], inState: "Night")));
             if (readsAboveItsFolder)
             {
                 rules["above"] = On("Above", When("../../../Level > 5"), Invoke("/Blinds/Close"));
@@ -394,6 +435,7 @@ public class AutomationGraphRouteDifferentialTests
             return $"move {automation.Name} to {target}, in [{string.Join(", ", containers)}]";
         }
 
+        // A property added at run time with a value, or with none, which publishes no change.
         private string AddDynamicProperty()
         {
             if (PickRoom()?.Sensor is not { } sensor ||
@@ -403,9 +445,62 @@ public class AutomationGraphRouteDifferentialTests
                 return "no sensor for wind";
             }
 
-            var wind = Random.Next(10);
-            registered.AddProperty("Wind", typeof(double), _ => (double)wind, null);
-            return $"wind {wind}";
+            var wind = Random.Next(2) == 0 ? null : (double?)Random.Next(10);
+            var property = registered.AddProperty("Wind", typeof(double?), _ => wind, (_, value) => wind = (double?)value);
+            _winds.Add((sensor, property));
+            return $"wind {wind?.ToString() ?? "null"}";
+        }
+
+        private string SetWind()
+        {
+            if (_winds.Count == 0)
+            {
+                return "no wind to set";
+            }
+
+            var (_, wind) = _winds[Random.Next(_winds.Count)];
+            var value = Random.Next(10);
+            wind.SetValue((double)value);
+            return $"set wind {value}";
+        }
+
+        private static string ToggleEnabled(Automation automation)
+        {
+            automation.Enabled = !automation.Enabled;
+            automation.ApplyConfigurationAsync(CancellationToken.None).GetAwaiter().GetResult();
+            return $"{automation.Name} enabled {automation.Enabled}";
+        }
+
+        private string ToggleMode(Automation automation)
+        {
+            var rule = automation.Rules.Values.ElementAt(Random.Next(automation.Rules.Count));
+            rule.Mode = rule.Mode == AutomationRuleMode.On ? AutomationRuleMode.Off : AutomationRuleMode.On;
+            automation.ApplyConfigurationAsync(CancellationToken.None).GetAwaiter().GetResult();
+            return $"{automation.Name} rule {rule.Name} {rule.Mode}";
+        }
+
+        // A Save replaces the rule instances, so that paths relative to a rule start at another subject.
+        private static string SaveCopies(Automation automation)
+        {
+            automation.Rules = automation.Rules.ToDictionary(
+                rule => rule.Key,
+                rule => new AutomationRule
+                {
+                    Name = rule.Value.Name,
+                    Mode = rule.Value.Mode,
+                    InState = rule.Value.InState,
+                    Triggers = [.. rule.Value.Triggers],
+                    OnlyIf = rule.Value.OnlyIf,
+                    Actions = [.. rule.Value.Actions]
+                });
+            automation.ApplyConfigurationAsync(CancellationToken.None).GetAwaiter().GetResult();
+            return $"{automation.Name} saved copies";
+        }
+
+        private static string Reset(Automation automation)
+        {
+            automation.ResetState();
+            return $"{automation.Name} reset";
         }
 
         // Moves the inner folder between the outer ones, also when an automation is in it.
