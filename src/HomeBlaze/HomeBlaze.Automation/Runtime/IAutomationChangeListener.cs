@@ -1,5 +1,3 @@
-using Namotion.Interceptor;
-
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
@@ -12,8 +10,8 @@ internal interface IAutomationChangeListener
     void OnWatchedPropertyChanged(PropertyChangedInput input);
 
     /// <summary>
-    /// The <paramref name="property"/> on the graph route of the listener changed, or for a listener with an unbounded
-    /// graph route a property that holds subjects, caused at <paramref name="chainDepth"/>.
+    /// A property on the graph route of the listener changed, or for a listener with an unbounded graph route a property
+    /// that holds subjects, caused at <paramref name="chainDepth"/>.
     /// </summary>
-    void OnGraphChanged(PropertyReference property, int chainDepth);
+    void OnGraphChanged(int chainDepth);
 }

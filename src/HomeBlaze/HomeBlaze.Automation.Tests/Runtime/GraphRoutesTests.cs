@@ -1,3 +1,4 @@
+using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
 using Namotion.Interceptor;
@@ -20,12 +21,12 @@ public class GraphRoutesTests
         await using var fixture = await RouteFixture.CreateAsync();
 
         // Act
-        var (property, route) = fixture.ResolveProperty(path);
+        var (property, route, isUnbounded) = fixture.ResolveProperty(path);
 
         // Assert
         Assert.NotNull(property);
-        Assert.Equal([fixture.RoomName, fixture.RootChildren, new PropertyReference(fixture.Room, holder)], route.Properties);
-        Assert.False(route.IsUnbounded);
+        Assert.Equal([fixture.RoomName, fixture.RootChildren, new PropertyReference(fixture.Room, holder)], route);
+        Assert.False(isUnbounded);
     }
 
     [Fact]
@@ -35,11 +36,11 @@ public class GraphRoutesTests
         await using var fixture = await RouteFixture.CreateAsync();
 
         // Act
-        var (property, route) = fixture.ResolveProperty("/Room/Devices[missing]/Gust");
+        var (property, route, _) = fixture.ResolveProperty("/Room/Devices[missing]/Gust");
 
         // Assert
         Assert.Null(property);
-        Assert.Equal([fixture.RoomName, fixture.RootChildren, new PropertyReference(fixture.Room, nameof(TestRoom.Devices))], route.Properties);
+        Assert.Equal([fixture.RoomName, fixture.RootChildren, new PropertyReference(fixture.Room, nameof(TestRoom.Devices))], route);
     }
 
     [Fact]
@@ -49,12 +50,12 @@ public class GraphRoutesTests
         await using var fixture = await RouteFixture.CreateAsync();
 
         // Act
-        var (property, route) = fixture.ResolveProperty("/Room/Sensor/Wind");
+        var (property, route, isUnbounded) = fixture.ResolveProperty("/Room/Sensor/Wind");
 
         // Assert
         Assert.Null(property);
-        Assert.Contains(new PropertyReference(fixture.Room.Sensor!, "Wind"), route.Properties);
-        Assert.False(route.IsUnbounded);
+        Assert.Contains(new PropertyReference(fixture.Room.Sensor!, "Wind"), route);
+        Assert.False(isUnbounded);
     }
 
     [Fact]
@@ -64,14 +65,14 @@ public class GraphRoutesTests
         await using var fixture = await RouteFixture.CreateAsync();
 
         // Act
-        var (property, route) = fixture.ResolveProperty("../../Level");
+        var (property, route, isUnbounded) = fixture.ResolveProperty("../../Level");
 
         // Assert
         Assert.NotNull(property);
         Assert.Equal(
             [new PropertyReference(fixture.Automation, nameof(Automation.Rules)), new PropertyReference(fixture.Folder, nameof(TestFolder.Children))],
-            route.Properties);
-        Assert.False(route.IsUnbounded);
+            route);
+        Assert.False(isUnbounded);
     }
 
     [Theory]
@@ -83,10 +84,30 @@ public class GraphRoutesTests
         await using var fixture = await RouteFixture.CreateAsync();
 
         // Act
-        var (_, route) = fixture.ResolveProperty(path);
+        var (_, _, isUnbounded) = fixture.ResolveProperty(path);
 
         // Assert
-        Assert.True(route.IsUnbounded);
+        Assert.True(isUnbounded);
+    }
+
+    [Fact]
+    public async Task WhenAPathLeadsUpFromARuleWithSeveralParents_ThenTheRouteHasItsHoldersAndIsBounded()
+    {
+        // Arrange
+        await using var fixture = await RouteFixture.CreateAsync();
+        var otherHost = new TestRuleHost();
+        fixture.Host.Graph.Add("OtherHost", otherHost);
+        otherHost.Rules = new Dictionary<string, AutomationRule> { ["copy"] = fixture.Rule };
+
+        // Act
+        var (property, route, isUnbounded) = fixture.ResolveProperty("../Enabled");
+
+        // Assert
+        Assert.Null(property);
+        Assert.Equal(
+            [new PropertyReference(fixture.Automation, nameof(Automation.Rules)), new PropertyReference(otherHost, nameof(TestRuleHost.Rules))],
+            route);
+        Assert.False(isUnbounded);
     }
 
     [Fact]
@@ -97,41 +118,45 @@ public class GraphRoutesTests
         var routes = new GraphRoutes(fixture.Host.Graph.Resolver, null, () => -1, null);
 
         // Act
-        var builder = routes.BeginRoute();
-        routes.ResolveProperty("../Enabled", fixture.Rule, builder);
+        var route = routes.BeginRoute();
+        AutomationPaths.ResolveProperty(fixture.Host.Graph.Resolver, "../Enabled", fixture.Rule, route);
 
         // Assert
-        Assert.True(builder.ToRoute(GraphRoute.Empty).IsUnbounded);
+        Assert.True(route.IsUnbounded);
     }
 
     [Fact]
-    public async Task WhenTheLocationIsRecorded_ThenTheRouteHasTheHoldersOfTheAutomationAndOfItsAncestors()
+    public async Task WhenTheLocationIsResolved_ThenTheRouteHasTheHoldersOfTheAutomationAndOfItsAncestors()
     {
         // Arrange
         await using var fixture = await RouteFixture.CreateAsync();
 
         // Act
-        fixture.Routes.RecordLocation(fixture.Automation);
+        var path = fixture.Routes.ResolveLocation(fixture.Automation);
 
         // Assert
-        Assert.Equal([new PropertyReference(fixture.Folder, nameof(TestFolder.Children)), fixture.RootChildren], fixture.Routes.Location.Properties);
-        Assert.False(fixture.Routes.Location.IsUnbounded);
+        Assert.Equal("/Folder/Automation", path);
+        Assert.Equal([new PropertyReference(fixture.Folder, nameof(TestFolder.Children)), fixture.RootChildren], fixture.Routes.LocationRoute.Properties);
+        Assert.False(fixture.Routes.LocationRoute.IsUnbounded);
     }
 
     [Fact]
-    public async Task WhenARouteIsResolvedAgainUnchanged_ThenItIsTheSameInstance()
+    public async Task WhenTheStructureIsAsItWasAtTheLastPublication_ThenNothingNeedsResolving()
     {
         // Arrange
         await using var fixture = await RouteFixture.CreateAsync();
-        var (_, first) = fixture.ResolveProperty("/Room/Sensor/Gust");
+        var needsResolvingBefore = fixture.Routes.NeedsResolving();
+        fixture.ResolveProperty("/Room/Sensor/Gust");
+        fixture.Routes.Publish(0);
+        var needsResolvingAfterResolving = fixture.Routes.NeedsResolving();
 
         // Act
-        var builder = fixture.Routes.BeginRoute();
-        fixture.Routes.ResolveProperty("/Room/Sensor/Gust", fixture.Rule, builder);
-        var second = builder.ToRoute(first);
+        fixture.Room.Sensor = new TestSensor();
 
         // Assert
-        Assert.Same(first, second);
+        Assert.True(needsResolvingBefore);
+        Assert.False(needsResolvingAfterResolving);
+        Assert.True(fixture.Routes.NeedsResolving());
     }
 
     /// <summary>
@@ -177,11 +202,11 @@ public class GraphRoutesTests
 
         public static async Task<RouteFixture> CreateAsync() => new(await AutomationTestHost.StartAsync(_ => { }));
 
-        public (RegisteredSubjectProperty? Property, GraphRoute Route) ResolveProperty(string path)
+        public (RegisteredSubjectProperty? Property, PropertyReference[] Route, bool IsUnbounded) ResolveProperty(string path)
         {
-            var builder = Routes.BeginRoute();
-            var property = Routes.ResolveProperty(path, Rule, builder);
-            return (property, builder.ToRoute(GraphRoute.Empty));
+            var route = Routes.BeginRoute();
+            var property = AutomationPaths.ResolveProperty(Host.Graph.Resolver, path, Rule, route);
+            return (property, route.Properties.ToArray(), route.IsUnbounded);
         }
 
         public ValueTask DisposeAsync() => Host.DisposeAsync();

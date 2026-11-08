@@ -25,12 +25,15 @@ public class AutomationTriggersTests
         rule.IsActivated = true;
         triggers.Activate([rule], [rule]);
         triggers.GetRequests(new ActivationInput([rule], 0), [rule]);
+        routes.Publish(0);
         triggers.OnGraphChanged([rule]);
+        routes.Publish(0);
         var publishesAfterTheFirstGraphChange = publishes;
 
         // Act
         graph.Root.Children = new Dictionary<string, IInterceptorSubject>(graph.Root.Children);
         triggers.OnGraphChanged([rule]);
+        routes.Publish(0);
         var publishesAfterTheSameChildren = publishes;
         graph.Add("Blinds", new TestBlinds());
         triggers.OnGraphChanged([rule]);

@@ -9,8 +9,9 @@ namespace HomeBlaze.Automation.Runtime;
 /// change (coalesced), both routed by <see cref="AutomationChangeDispatcher"/>, and a tick (coalesced) from
 /// <see cref="WakeTimer"/>, which the worker sets after every input to when the engine is due next and stops while nothing
 /// is due. A graph change is routed only for a property on the graph route that the worker publishes after every input
-/// that resolved paths, see <see cref="GraphRoutes"/>, or when the automation or one of its rules gains a parent. The
-/// worker processes one input at a time with <see cref="AutomationEngine"/>, so no rule runs inside a property setter.
+/// that resolved paths, see <see cref="GraphRoutes"/>, or when the automation or one of its rules gains a parent, and
+/// resolves every path again unless the structure of the graph is as it was at the last resolution. The worker processes
+/// one input at a time with <see cref="AutomationEngine"/>, so no rule runs inside a property setter.
 /// </summary>
 internal sealed class AutomationRuntime
 {
@@ -175,7 +176,7 @@ internal sealed class AutomationRuntime
             case ResetStateInput:
                 _engine.ResetState();
                 return Task.CompletedTask;
-            case GraphChangedInput when _engine.MayHaveMoved:
+            case GraphChangedInput when _engine.NeedsResolving:
                 FollowPath();
                 break;
         }
@@ -206,14 +207,14 @@ internal sealed class AutomationRuntime
     // moved, further checks find nothing to do.
     private void FollowPath()
     {
-        _engine.RecordLocation();
-        if (!Location.HasMoved(_automation))
+        var path = _engine.ResolveLocation();
+        if (!Location.HasMoved(path))
         {
             return;
         }
 
         var previous = Location;
-        Location = CheckpointLocation.Of(_automation, _logger);
+        Location = CheckpointLocation.Of(_automation, path, _logger);
         _keeper.UseStore(Location.Store);
 
         // Without a path at the start there was no checkpoint to keep, so the first path is where the automation starts.
@@ -246,7 +247,7 @@ internal sealed class AutomationRuntime
         }
         else if (input is GraphChangedInput)
         {
-            _engine.TakeGraphChanges();
+            _changes.OnGraphChangeTaken();
         }
     }
 

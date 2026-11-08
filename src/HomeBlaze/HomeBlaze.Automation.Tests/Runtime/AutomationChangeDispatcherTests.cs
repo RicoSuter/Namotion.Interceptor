@@ -371,6 +371,6 @@ public class AutomationChangeDispatcherTests
 
         public void OnWatchedPropertyChanged(PropertyChangedInput input) => _changes.Enqueue(input);
 
-        public void OnGraphChanged(PropertyReference property, int chainDepth) => _graphChainDepths.Enqueue(chainDepth);
+        public void OnGraphChanged(int chainDepth) => _graphChainDepths.Enqueue(chainDepth);
     }
 }

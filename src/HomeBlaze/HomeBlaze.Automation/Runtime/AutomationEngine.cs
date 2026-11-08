@@ -51,7 +51,7 @@ internal sealed class AutomationEngine : IRuleRunHost
 
     public string Name => _automation.Title ?? "Automation";
 
-    // White-box test hooks: the applied rules and the graph routes of their paths.
+    // White-box test hooks: the applied rules and the graph route of the automation.
     internal IReadOnlyList<CompiledRule> Rules => _snapshot.Rules;
 
     internal GraphRoutes Routes => _routes;
@@ -164,17 +164,14 @@ internal sealed class AutomationEngine : IRuleRunHost
 
     private static DateTimeOffset? Earliest(DateTimeOffset? first, DateTimeOffset? second) => first is null || second < first ? second : first;
 
-    /// <summary>Takes the properties of the graph changes, when the worker takes a graph change.</summary>
-    public void TakeGraphChanges() => _routes.TakeGraphChanges();
+    /// <summary>Whether the paths may resolve differently than at the last resolution, see <see cref="GraphRoutes.NeedsResolving"/>.</summary>
+    public bool NeedsResolving => _routes.NeedsResolving();
 
-    /// <summary>Whether the graph changes taken last may have moved the automation.</summary>
-    public bool MayHaveMoved => _routes.NeedsResolving(_routes.Location, _routes.LocationVersion);
-
-    /// <summary>Records the graph route of the checkpoint path, before the worker reads the path.</summary>
-    public void RecordLocation() => _routes.RecordLocation(_automation);
+    /// <summary>Resolves the canonical path of the automation and records its graph route.</summary>
+    public string? ResolveLocation() => _routes.ResolveLocation(_automation);
 
     /// <summary>Publishes the graph route of the rules and of the checkpoint path, see <see cref="GraphRoutes.Publish"/>.</summary>
-    public void PublishRoutes(int chainDepth) => _routes.Publish(_snapshot.Rules, chainDepth);
+    public void PublishRoutes(int chainDepth) => _routes.Publish(chainDepth);
 
     /// <summary>
     /// Runs the requests of an input of the triggers: a property change, a tick, which also writes the runs that are due,

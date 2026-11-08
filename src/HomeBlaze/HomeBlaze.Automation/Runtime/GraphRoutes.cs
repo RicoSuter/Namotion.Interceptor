@@ -1,6 +1,5 @@
 using System.Collections.Frozen;
 using HomeBlaze.Abstractions;
-using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Services;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -8,27 +7,29 @@ using Namotion.Interceptor.Registry.Abstractions;
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// The graph routes of the paths that the worker of an automation resolves ahead of time: resolves them with the resolver,
-/// which records their routes into a <see cref="GraphRouteBuilder"/>, and builds the union that the worker publishes, so
-/// that a graph change reaches the automation only when it can change one of them. On a graph change, only the paths
-/// whose routes have a changed property are resolved again, see <see cref="NeedsResolving"/>. Used by the worker only.
+/// The graph route of an automation: the union of the routes that the resolver records while the worker resolves the
+/// paths of the active rules and the canonical path of the automation, published so that a graph change reaches the
+/// automation only when it can change one of them. The paths of the rules are resolved all at once, into one route that
+/// replaces the one recorded before, so that the route of a path that is no longer resolved leaves the union. Used by the
+/// worker only.
 /// </summary>
 /// <remarks>
-/// A change that commits while paths are resolved is not routed by a route published only afterwards. The structure
-/// version of the registry, read before the first resolution and again after the publication, tells whether such a change
-/// may have happened, so that the worker resolves the paths again.
+/// The structure version of the registry, which is odd while a change is in progress, is read before the first resolution
+/// since the last publication and again after the publication. The paths are those of the current structure only when
+/// both reads return the same even number: then a graph change finds nothing to resolve while the version stays that
+/// number, see <see cref="NeedsResolving"/>. Otherwise a change committed while the paths were resolved, which the route
+/// published only afterwards may not have routed, so a graph change is queued.
 /// </remarks>
 internal sealed class GraphRoutes
 {
     private readonly Func<long> _getStructureVersion;
     private readonly AutomationChangeReceiver? _changes;
-    private readonly GraphRouteBuilder _builder;
+    private readonly GraphRouteBuilder _rules;
+    private readonly GraphRouteBuilder _location;
     private readonly HashSet<PropertyReference> _union = [];
-    private readonly HashSet<PropertyReference> _changed = [];
-    private bool _isFullChange = true;
-    private bool _isUnionUnbounded;
     private bool _hasResolved;
     private long _resolvedSince;
+    private long _boundVersion = -1;
 
     // Unbounded until the first publication, as the dispatcher registers a listener.
     private FrozenSet<PropertyReference> _published = FrozenSet<PropertyReference>.Empty;
@@ -42,7 +43,8 @@ internal sealed class GraphRoutes
     public GraphRoutes(SubjectPathResolver resolver, IInterceptorSubject? automation, Func<long> getStructureVersion, AutomationChangeReceiver? changes)
     {
         Resolver = resolver;
-        _builder = new GraphRouteBuilder(automation);
+        _rules = new GraphRouteBuilder(automation);
+        _location = new GraphRouteBuilder(automation);
         _getStructureVersion = getStructureVersion;
         _changes = changes;
     }
@@ -56,92 +58,51 @@ internal sealed class GraphRoutes
 
     public SubjectPathResolver Resolver { get; }
 
-    /// <summary>The route of the canonical path of the automation, which tells when it moved.</summary>
-    public GraphRoute Location { get; private set; } = GraphRoute.Empty;
+    // White-box test hooks: the route of the paths of the rules, and the route of the canonical path of the automation.
+    internal GraphRouteBuilder RulesRoute => _rules;
 
-    /// <summary>The structure version that the route of the location was recorded at, see <see cref="GraphRouteBuilder.ResolvedAt"/>.</summary>
-    public long LocationVersion { get; private set; } = -1;
+    internal GraphRouteBuilder LocationRoute => _location;
 
     // White-box test hook: runs on the worker before a publication, where a test commits a change after the paths were
     // resolved and before the route that has its property is published.
     internal Action? BeforePublication { get; set; }
 
-    /// <summary>Starts the route of a resolution, which <see cref="GraphRouteBuilder.ToRoute"/> completes.</summary>
-    public GraphRouteBuilder BeginRoute()
+    /// <summary>
+    /// Whether the paths may resolve differently than at the last publication: the structure of the graph changed since
+    /// the paths were resolved, a change was in progress then, or there is no registry.
+    /// </summary>
+    public bool NeedsResolving()
     {
         var version = _getStructureVersion();
-        if (!_hasResolved)
-        {
-            _hasResolved = true;
-            _resolvedSince = version;
-        }
-
-        _builder.Clear(version);
-        return _builder;
+        return version < 0 || version != _boundVersion;
     }
 
     /// <summary>
-    /// Takes the properties of the graph changes queued since the last graph change that the worker took, or that every
-    /// path may be affected; without a receiver, every path may be.
+    /// Starts the resolution of every path of the rules, whose route replaces the one recorded before. Every path is
+    /// resolved with the returned recorder before the worker publishes.
     /// </summary>
-    public void TakeGraphChanges()
+    public GraphRouteBuilder BeginRoute()
     {
-        _changed.Clear();
-        _isFullChange = _changes?.TakeGraphChanges(_changed) ?? true;
+        NoteResolution();
+        _rules.Clear();
+        return _rules;
+    }
+
+    /// <summary>Resolves the canonical path of the automation and records its route, which replaces the one recorded before.</summary>
+    public string? ResolveLocation(Automation automation)
+    {
+        NoteResolution();
+        _location.Clear();
+        return Resolver.GetPath(automation, PathStyle.Canonical, _location);
     }
 
     /// <summary>
-    /// Whether a path with the route, resolved at the structure version <paramref name="resolvedAt"/>, may resolve
-    /// differently after the graph changes taken last: its route has a changed property or is unbounded, or the change
-    /// may affect every path, and the structure of the graph changed since it was resolved.
+    /// Publishes the union of the route of the paths of the rules and of the location, when a path was resolved since the
+    /// last publication and the union changed. A structure change while they were resolved may not be routed by the union
+    /// published now, and the paths may not be those of the structure now, so a graph change is queued then, in the chain
+    /// of the input that resolved them.
     /// </summary>
-    public bool NeedsResolving(GraphRoute route, long resolvedAt)
-    {
-        if (resolvedAt >= 0 && resolvedAt == _getStructureVersion())
-        {
-            return false;
-        }
-
-        if (_isFullChange || route.IsUnbounded)
-        {
-            return true;
-        }
-
-        foreach (var property in route.Properties)
-        {
-            if (_changed.Contains(property))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>Resolves the property as <see cref="AutomationPaths.ResolveProperty"/> does and adds its route.</summary>
-    public RegisteredSubjectProperty? ResolveProperty(string path, AutomationRule rule, GraphRouteBuilder route) =>
-        AutomationPaths.ResolveProperty(Resolver, path, rule, route);
-
-    /// <summary>Resolves the subject as <see cref="AutomationPaths.ResolveSubject"/> does and adds its route.</summary>
-    public IInterceptorSubject? ResolveSubject(string path, AutomationRule rule, GraphRouteBuilder route) =>
-        AutomationPaths.ResolveSubject(Resolver, path, rule, route);
-
-    /// <summary>Records the route of the canonical path of the automation, before its path is read.</summary>
-    public void RecordLocation(Automation automation)
-    {
-        var route = BeginRoute();
-        Resolver.GetPath(automation, PathStyle.Canonical, route);
-        Location = route.ToRoute(Location);
-        LocationVersion = route.ResolvedAt;
-    }
-
-    /// <summary>
-    /// Publishes the union of the routes of the paths that the rules resolved ahead of time and of the location, when a
-    /// path was resolved since the last publication and the union changed. A structure change while they were resolved may
-    /// not be routed by the union published now, so a graph change is queued then, in the chain of the input that resolved
-    /// them.
-    /// </summary>
-    public void Publish(IReadOnlyList<CompiledRule> rules, int chainDepth)
+    public void Publish(int chainDepth)
     {
         if (!_hasResolved)
         {
@@ -149,35 +110,41 @@ internal sealed class GraphRoutes
         }
 
         BeforePublication?.Invoke();
-        BeginUnion();
-        AutomationTriggers.AddRoutes(rules, this);
-        if (!TryEndUnion(out var route, out var isUnbounded) || _changes is null)
+        if (TryEndUnion(out var route, out var isUnbounded))
         {
+            _changes?.PublishRoute(route, isUnbounded);
+        }
+
+        BindVersion(chainDepth);
+    }
+
+    // Reads the version after the publication, so that a change committed before it is either routed by the route
+    // published now or seen here.
+    private void BindVersion(int chainDepth)
+    {
+        var version = _getStructureVersion();
+        if (version >= 0 && version == _resolvedSince && version % 2 == 0)
+        {
+            _boundVersion = version;
             return;
         }
 
-        _changes.PublishRoute(route, isUnbounded);
-        if (HasStructureChangedSinceResolving())
+        _boundVersion = -1;
+        if (version >= 0)
         {
-            _changes.RequestGraphChange(chainDepth);
+            _changes?.RequestGraphChange(chainDepth);
         }
     }
 
-    /// <summary>Adds a route to the union that <see cref="Publish"/> builds.</summary>
-    public void Add(GraphRoute route)
+    // Reads the version before the resolution reads the graph, so that a change that commits during the resolution is
+    // seen as one that happened since.
+    private void NoteResolution()
     {
-        _isUnionUnbounded |= route.IsUnbounded;
-        foreach (var property in route.Properties)
+        if (!_hasResolved)
         {
-            _union.Add(property);
+            _hasResolved = true;
+            _resolvedSince = _getStructureVersion();
         }
-    }
-
-    private void BeginUnion()
-    {
-        _union.Clear();
-        _isUnionUnbounded = false;
-        Add(Location);
     }
 
     // Gets whether the union differs from the last one published, with the route to publish and whether it is unbounded.
@@ -185,7 +152,10 @@ internal sealed class GraphRoutes
     private bool TryEndUnion(out FrozenSet<PropertyReference> route, out bool isUnbounded)
     {
         _hasResolved = false;
-        isUnbounded = _isUnionUnbounded;
+        _union.Clear();
+        AddToUnion(_location.Properties);
+        AddToUnion(_rules.Properties);
+        isUnbounded = _location.IsUnbounded || _rules.IsUnbounded;
         if (_isPublishedUnbounded == isUnbounded && _published.Count == _union.Count && IsSubsetOf(_union, _published))
         {
             route = _published;
@@ -198,12 +168,12 @@ internal sealed class GraphRoutes
         return true;
     }
 
-    // Whether the structure of the graph may have changed since the first resolution before the publication, read after
-    // the publication.
-    private bool HasStructureChangedSinceResolving()
+    private void AddToUnion(ReadOnlySpan<PropertyReference> properties)
     {
-        var version = _getStructureVersion();
-        return version >= 0 && (version != _resolvedSince || version % 2 != 0);
+        foreach (var property in properties)
+        {
+            _union.Add(property);
+        }
     }
 
     private static bool IsSubsetOf(HashSet<PropertyReference> properties, FrozenSet<PropertyReference> set)

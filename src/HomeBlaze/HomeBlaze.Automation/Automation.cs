@@ -262,7 +262,7 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
     // longer holds this automation at the path it started with, so that the path resolves to what took its place.
     private void OnWorkerEnded(AutomationRuntime runtime)
     {
-        if (_isDetached || runtime.Location.HasMoved(this))
+        if (_isDetached || runtime.Location.HasMoved(PathResolver.GetPath(this, PathStyle.Canonical)))
         {
             runtime.Location.DeleteIfOrphaned(this, _logger);
         }

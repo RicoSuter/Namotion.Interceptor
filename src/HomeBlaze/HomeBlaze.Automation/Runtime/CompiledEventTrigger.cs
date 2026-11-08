@@ -20,11 +20,11 @@ internal sealed class CompiledEventTrigger(CompiledRule rule, int index, Subject
 
     public IInterceptorSubject? Source { get; set; }
 
-    /// <summary>The graph route of the path of the source when it was last resolved.</summary>
-    public GraphRoute SourceRoute { get; set; } = GraphRoute.Empty;
-
-    /// <summary>The structure version that <see cref="SourceRoute"/> was recorded at, see <see cref="GraphRouteBuilder.ResolvedAt"/>.</summary>
-    public long SourceRouteVersion { get; set; } = -1;
+    /// <summary>
+    /// Whether <see cref="Source"/> and <see cref="SourceError"/> are those of the last binding of the active rule: the
+    /// trigger subscribed to its source, or found none or none with its event. Cleared when the rule is deactivated.
+    /// </summary>
+    public bool IsBound { get; set; }
 
     public EventTriggerSubscription? Subscription { get; set; }
 
@@ -59,10 +59,10 @@ internal sealed class CompiledEventTrigger(CompiledRule rule, int index, Subject
         subscription.Trigger = target;
         target.Subscription = subscription;
         target.Source = Source;
-        target.SourceRoute = SourceRoute;
-        target.SourceRouteVersion = SourceRouteVersion;
         target.SourceError = SourceError;
+        target.IsBound = true;
         Subscription = null;
+        IsBound = false;
     }
 
     public string Description => $"trigger {Index + 1} ({Configuration.EventType} of {Configuration.SubjectPath})";

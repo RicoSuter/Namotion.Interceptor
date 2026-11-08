@@ -6,18 +6,21 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// The property and event triggers of the rules of an automation: subscribes the triggers of rules that became active
-/// and queues the activation of their property triggers, binds them again when paths may lead elsewhere, and turns the
-/// inputs of the worker into run requests. Used by the worker only.
+/// and queues the activation of their property triggers, resolves every path of the active rules again when they may lead
+/// elsewhere, and turns the inputs of the worker into run requests. The paths are always resolved all at once, into one
+/// graph route of <see cref="GraphRoutes"/>, so that the route of a path that is no longer resolved leaves it. Used by the
+/// worker only.
 /// </summary>
 internal sealed class AutomationTriggers
 {
+    private readonly GraphRoutes _routes;
     private readonly AutomationInputQueue _queue;
     private readonly PropertyTriggerEngine _propertyTriggers;
     private readonly EventTriggerEngine _eventTriggers;
 
     /// <summary>
-    /// Creates the triggers, which resolve their paths with <paramref name="routes"/>, and whose property triggers publish
-    /// their watched set to <paramref name="publishWatched"/>.
+    /// Creates the triggers, which record the routes of their paths with <paramref name="routes"/>, and whose property
+    /// triggers publish their watched set to <paramref name="publishWatched"/>.
     /// </summary>
     public AutomationTriggers(
         GraphRoutes routes,
@@ -27,9 +30,10 @@ internal sealed class AutomationTriggers
         Func<string> getAutomationName,
         Action<FrozenSet<PropertyReference>> publishWatched)
     {
+        _routes = routes;
         _queue = queue;
-        _propertyTriggers = new PropertyTriggerEngine(routes, timeProvider, logger, getAutomationName, publishWatched);
-        _eventTriggers = new EventTriggerEngine(routes, timeProvider, queue);
+        _propertyTriggers = new PropertyTriggerEngine(routes.Resolver, timeProvider, logger, getAutomationName, publishWatched);
+        _eventTriggers = new EventTriggerEngine(routes.Resolver, timeProvider, queue);
     }
 
     /// <summary>
@@ -38,12 +42,7 @@ internal sealed class AutomationTriggers
     /// </summary>
     public void Activate(IReadOnlyList<CompiledRule> activated, IReadOnlyList<CompiledRule> rules)
     {
-        foreach (var rule in activated)
-        {
-            _eventTriggers.Activate(rule);
-        }
-
-        _propertyTriggers.Refresh(rules);
+        Resolve(rules, []);
         if (activated.Count > 0)
         {
             _queue.TryEnqueue(new ActivationInput(activated, AutomationInputQueue.CausedChainDepth));
@@ -51,15 +50,15 @@ internal sealed class AutomationTriggers
     }
 
     /// <summary>
-    /// Makes up for the inputs dropped from a feedback chain: binds the paths again after a dropped graph change, observes
-    /// the dropped changes and activates the rules of the dropped activations. Returns the runs they request, which must
-    /// not execute.
+    /// Makes up for the inputs dropped from a feedback chain: resolves the paths again after a dropped graph change,
+    /// observes the dropped changes and activates the rules of the dropped activations. Returns the runs they request,
+    /// which must not execute.
     /// </summary>
     public IReadOnlyList<RunRequest> MakeUpForChain(IReadOnlyList<CompiledRule> rules, DroppedInputs dropped)
     {
         if (dropped.HasGraphChange)
         {
-            Rebind(rules);
+            Resolve(rules, []);
         }
 
         return MakeUpFor(rules, dropped.Changes.Where(DroppedInputs.IsChainDrop), dropped.Activations.Where(DroppedInputs.IsChainDrop), evaluateAll: false);
@@ -74,9 +73,9 @@ internal sealed class AutomationTriggers
 
     /// <summary>
     /// Makes up for dropped inputs: observes the dropped changes that are newer than the observed values, then evaluates
-    /// every active property trigger after binding the paths again (<paramref name="evaluateAll"/>) or only those that read
-    /// a changed property, and activates the rules of the dropped activations that are still activated. Returns the runs
-    /// they request in rule order.
+    /// every active property trigger after resolving the paths again (<paramref name="evaluateAll"/>) or only those that
+    /// read a changed property, and activates the rules of the dropped activations that are still activated. Returns the
+    /// runs they request in rule order.
     /// </summary>
     private IReadOnlyList<RunRequest> MakeUpFor(
         IReadOnlyList<CompiledRule> rules,
@@ -85,8 +84,8 @@ internal sealed class AutomationTriggers
         bool evaluateAll)
     {
         var changed = _propertyTriggers.Apply(changes);
-        var requests = new List<RunRequest>(evaluateAll ? RebindAndEvaluateAll(rules) : _propertyTriggers.ObserveReaders(rules, changed));
-        var activated = _propertyTriggers.Activate([.. activations.SelectMany(activation => activation.Rules)], rules);
+        var requests = new List<RunRequest>(evaluateAll ? ResolveAndEvaluateAll(rules) : _propertyTriggers.ObserveReaders(rules, changed));
+        var activated = ActivateTriggers([.. activations.SelectMany(activation => activation.Rules)], rules);
         if (activated.Count == 0)
         {
             return requests;
@@ -133,46 +132,7 @@ internal sealed class AutomationTriggers
     }
 
     /// <summary>Resolves the paths of the active rules again, such as after their rule instances changed.</summary>
-    public void Rebind(IReadOnlyList<CompiledRule> rules)
-    {
-        _propertyTriggers.Refresh(rules);
-        _eventTriggers.Rebind(rules, onlyChanged: false);
-    }
-
-    /// <summary>
-    /// Adds the graph routes of the paths resolved ahead of time to the union of <paramref name="routes"/>: those of the
-    /// active property triggers, of Only if of rules with a pending trigger and of the event triggers of activated rules.
-    /// </summary>
-    public static void AddRoutes(IReadOnlyList<CompiledRule> rules, GraphRoutes routes)
-    {
-        foreach (var rule in rules)
-        {
-            if (!rule.IsActivated)
-            {
-                continue;
-            }
-
-            var hasPending = false;
-            foreach (var trigger in rule.PropertyTriggers)
-            {
-                if (trigger.State.Phase != TriggerPhase.Inactive)
-                {
-                    routes.Add(trigger.Route);
-                    hasPending |= trigger.State.Phase == TriggerPhase.Pending;
-                }
-            }
-
-            if (hasPending)
-            {
-                routes.Add(rule.OnlyIfRoute);
-            }
-
-            foreach (var trigger in rule.EventTriggers)
-            {
-                routes.Add(trigger.SourceRoute);
-            }
-        }
-    }
+    public void Rebind(IReadOnlyList<CompiledRule> rules) => Resolve(rules, []);
 
     /// <summary>Turns an input of the worker into the run requests of the triggers, in rule order; none for any other input.</summary>
     public IReadOnlyList<RunRequest> GetRequests(AutomationInput input, IReadOnlyList<CompiledRule> rules) => input switch
@@ -181,26 +141,25 @@ internal sealed class AutomationTriggers
         TickInput => _propertyTriggers.OnTick(rules),
         EventInput subjectEvent => _eventTriggers.OnEvent(subjectEvent),
         GraphChangedInput => OnGraphChanged(rules),
-        ActivationInput activation => _propertyTriggers.Activate(activation.Rules, rules),
+        ActivationInput activation => ActivateTriggers(activation.Rules, rules),
         PendingRecheckInput => _propertyTriggers.RequestPendingRuns(rules),
         _ => []
     };
 
     /// <summary>
-    /// Resolves again the paths that the graph changes taken last may lead elsewhere now, see
-    /// <see cref="GraphRoutes.NeedsResolving"/>, such as none for a write of the same children, and evaluates the triggers
-    /// whose properties changed.
+    /// Resolves every path again, unless the structure of the graph is as it was at the last resolution, see
+    /// <see cref="GraphRoutes.NeedsResolving"/>, such as after a write of the same children, and evaluates the triggers
+    /// whose properties changed; requests the runs of the pending triggers whose properties or Only if properties changed.
     /// </summary>
     public IReadOnlyList<RunRequest> OnGraphChanged(IReadOnlyList<CompiledRule> rules)
     {
-        _eventTriggers.Rebind(rules, onlyChanged: true);
-        return _propertyTriggers.OnGraphChanged(rules, evaluateAll: false);
-    }
+        if (!_routes.NeedsResolving())
+        {
+            return [];
+        }
 
-    private IReadOnlyList<RunRequest> RebindAndEvaluateAll(IReadOnlyList<CompiledRule> rules)
-    {
-        _eventTriggers.Rebind(rules, onlyChanged: false);
-        return _propertyTriggers.OnGraphChanged(rules, evaluateAll: true);
+        Resolve(rules, []);
+        return _propertyTriggers.EvaluateResolvedDifferently(rules);
     }
 
     /// <summary>Queues a request of the runs of every pending property trigger, such as after a state change skipped them.</summary>
@@ -213,12 +172,21 @@ internal sealed class AutomationTriggers
     public bool HasPending => _propertyTriggers.HasPending;
 
     /// <summary>
-    /// Keeps track of the pending property triggers after the requests were dispatched. Returns whether a trigger became
-    /// pending, whose Only if is to be checked again in a later input: a property it reads may have changed before it was
-    /// watched.
+    /// Keeps track of the pending property triggers after the requests were dispatched, and resolves every path again
+    /// when they changed, so that Only if of a rule whose trigger became pending is watched and Only if of a rule whose
+    /// trigger is no longer pending is not. Returns whether a trigger became pending, whose Only if is to be checked again
+    /// in a later input: a property it reads may have changed before it was watched.
     /// </summary>
-    public bool TrackPending(IReadOnlyList<CompiledRule> rules, IReadOnlyList<RunRequest> requests) =>
-        _propertyTriggers.TrackPending(rules, requests);
+    public bool TrackPending(IReadOnlyList<CompiledRule> rules, IReadOnlyList<RunRequest> requests)
+    {
+        var hasAdded = _propertyTriggers.TrackPending(requests, out var hasChanged);
+        if (hasChanged)
+        {
+            Resolve(rules, []);
+        }
+
+        return hasAdded;
+    }
 
     /// <summary>The position of the rule in rule order; the number of rules for a rule that is not one of them.</summary>
     public static int IndexOf(IReadOnlyList<CompiledRule> rules, CompiledRule rule)
@@ -232,5 +200,30 @@ internal sealed class AutomationTriggers
         }
 
         return rules.Count;
+    }
+
+    // Activates the inactive property triggers of the rules that are still activated, after resolving every path with
+    // theirs, and returns the runs they request at once.
+    private IReadOnlyList<RunRequest> ActivateTriggers(IReadOnlyList<CompiledRule> activated, IReadOnlyList<CompiledRule> rules)
+    {
+        var triggers = PropertyTriggerEngine.GetInactiveTriggers(activated, rules);
+        Resolve(rules, triggers);
+        return _propertyTriggers.Activate(triggers);
+    }
+
+    private IReadOnlyList<RunRequest> ResolveAndEvaluateAll(IReadOnlyList<CompiledRule> rules)
+    {
+        Resolve(rules, []);
+        return _propertyTriggers.EvaluateAll(rules);
+    }
+
+    // Resolves every path of the active rules into one graph route: the sources of the event triggers, which subscribe
+    // again where their source changed, and the properties of the property triggers, of those about to be activated and
+    // of Only if of the rules with a pending trigger, which are published as the watched set.
+    private void Resolve(IReadOnlyList<CompiledRule> rules, IReadOnlyList<CompiledPropertyTrigger> activating)
+    {
+        var route = _routes.BeginRoute();
+        _eventTriggers.Bind(rules, route);
+        _propertyTriggers.Refresh(rules, activating, route);
     }
 }

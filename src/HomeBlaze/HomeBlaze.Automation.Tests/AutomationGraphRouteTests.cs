@@ -49,33 +49,6 @@ public class AutomationGraphRouteTests
     }
 
     [Fact]
-    public async Task WhenAPropertyOnTheRouteOfOneTriggerChanges_ThenOnlyThatTriggerIsResolvedAgain()
-    {
-        // Arrange
-        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
-            ("first", On("First", When("/First/Sensor/Gust > 8"), Invoke("/Blinds/Close"))),
-            ("second", On("Second", When("/Second/Sensor/Gust > 8"), Invoke("/Blinds/Open")))));
-        var first = new TestSensorHolder { Sensor = new TestSensor() };
-        host.Graph.Add("First", first);
-        host.Graph.Add("Second", new TestSensorHolder { Sensor = new TestSensor() });
-        await host.FlushAsync();
-        var rules = host.Automation.Runtime!.Engine.Rules;
-        var firstTrigger = rules.First(rule => rule.Key == "first").PropertyTriggers[0];
-        var secondTrigger = rules.First(rule => rule.Key == "second").PropertyTriggers[0];
-        var firstVersion = firstTrigger.RouteVersion;
-        var secondVersion = secondTrigger.RouteVersion;
-
-        // Act
-        first.Sensor = new TestSensor { Gust = 9 };
-        await host.FlushAsync();
-
-        // Assert
-        Assert.NotEqual(firstVersion, firstTrigger.RouteVersion);
-        Assert.Equal(secondVersion, secondTrigger.RouteVersion);
-        Assert.Equal(1, host.Blinds.CloseCount);
-    }
-
-    [Fact]
     public async Task WhenTheMissingEntryOfAnUnresolvedPathIsAdded_ThenThePathResolves()
     {
         // Arrange
@@ -287,10 +260,10 @@ public class AutomationGraphRouteTests
 
         public void OnWatchedPropertyChanged(PropertyChangedInput input) => inner.OnWatchedPropertyChanged(input);
 
-        public void OnGraphChanged(PropertyReference property, int chainDepth)
+        public void OnGraphChanged(int chainDepth)
         {
             _graphChanges.Enqueue(chainDepth);
-            inner.OnGraphChanged(property, chainDepth);
+            inner.OnGraphChanged(chainDepth);
         }
     }
 }

@@ -8,43 +8,16 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// The event triggers of active rules: subscribes to their sources, follows a source that the graph replaces, and turns
-/// a received event that passes its filter into a run request. Resolves the path of each source with its graph route.
-/// Used by the worker only; a subscription only enqueues.
+/// a received event that passes its filter into a run request. Used by the worker only; a subscription only enqueues.
 /// </summary>
-internal sealed class EventTriggerEngine(GraphRoutes routes, TimeProvider timeProvider, AutomationInputQueue queue)
+internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvider timeProvider, AutomationInputQueue queue)
 {
-    /// <summary>Subscribes the triggers of the rule, except one that a Save carried over and whose path still leads to its source.</summary>
-    public void Activate(CompiledRule rule)
-    {
-        foreach (var trigger in rule.EventTriggers)
-        {
-            var source = ResolveSource(trigger);
-            if (trigger.Subscription is not null && ReferenceEquals(source, trigger.Source))
-            {
-                continue;
-            }
-
-            Unsubscribe(trigger);
-            Subscribe(trigger, source);
-        }
-    }
-
-    public static void Deactivate(CompiledRule rule)
-    {
-        foreach (var trigger in rule.EventTriggers)
-        {
-            Unsubscribe(trigger);
-            trigger.SourceRoute = GraphRoute.Empty;
-            trigger.SourceRouteVersion = -1;
-        }
-    }
-
     /// <summary>
-    /// Subscribes the triggers of the active rules again whose path now leads to another subject; with
-    /// <paramref name="onlyChanged"/>, resolves only the paths that the graph changes taken last may lead elsewhere now,
-    /// see <see cref="GraphRoutes.NeedsResolving"/>.
+    /// Resolves the source of every trigger of the active rules, recording the routes with <paramref name="route"/>, and
+    /// subscribes the triggers that are not bound yet and those whose path leads to another subject now; a trigger that a
+    /// Save carried over keeps its subscription while its path still leads to its source.
     /// </summary>
-    public void Rebind(IReadOnlyList<CompiledRule> rules, bool onlyChanged)
+    public void Bind(IReadOnlyList<CompiledRule> rules, ISubjectPathRecorder route)
     {
         foreach (var rule in rules)
         {
@@ -55,18 +28,24 @@ internal sealed class EventTriggerEngine(GraphRoutes routes, TimeProvider timePr
 
             foreach (var trigger in rule.EventTriggers)
             {
-                if (onlyChanged && !routes.NeedsResolving(trigger.SourceRoute, trigger.SourceRouteVersion))
+                var source = AutomationPaths.ResolveSubject(resolver, trigger.Configuration.SubjectPath, rule.Rule, route);
+                if (trigger.IsBound && ReferenceEquals(source, trigger.Source))
                 {
                     continue;
                 }
 
-                var source = ResolveSource(trigger);
-                if (!ReferenceEquals(source, trigger.Source))
-                {
-                    Unsubscribe(trigger);
-                    Subscribe(trigger, source);
-                }
+                Unsubscribe(trigger);
+                Subscribe(trigger, source);
             }
+        }
+    }
+
+    public static void Deactivate(CompiledRule rule)
+    {
+        foreach (var trigger in rule.EventTriggers)
+        {
+            Unsubscribe(trigger);
+            trigger.IsBound = false;
         }
     }
 
@@ -88,17 +67,8 @@ internal sealed class EventTriggerEngine(GraphRoutes routes, TimeProvider timePr
 
     private bool Passes(CompiledEventTrigger trigger, ParsedExpression filter, CapturedEvent captured)
     {
-        var evaluation = new AutomationEvaluation(routes.Resolver, trigger.Rule.Rule, timeProvider.GetUtcNow(), timeProvider.LocalTimeZone, captured);
+        var evaluation = new AutomationEvaluation(resolver, trigger.Rule.Rule, timeProvider.GetUtcNow(), timeProvider.LocalTimeZone, captured);
         return evaluation.EvaluateCondition(filter) == true;
-    }
-
-    private IInterceptorSubject? ResolveSource(CompiledEventTrigger trigger)
-    {
-        var route = routes.BeginRoute();
-        var source = routes.ResolveSubject(trigger.Configuration.SubjectPath, trigger.Rule.Rule, route);
-        trigger.SourceRoute = route.ToRoute(trigger.SourceRoute);
-        trigger.SourceRouteVersion = route.ResolvedAt;
-        return source;
     }
 
     /// <summary>Resolves the source of the trigger and the type of its event; returns why the trigger receives no events, or null.</summary>
@@ -125,6 +95,7 @@ internal sealed class EventTriggerEngine(GraphRoutes routes, TimeProvider timePr
         var error = CheckSource(trigger.Configuration, source, out var eventType);
         trigger.Source = source;
         trigger.SourceError = error;
+        trigger.IsBound = true;
         if (source is null || eventType is null)
         {
             return;
