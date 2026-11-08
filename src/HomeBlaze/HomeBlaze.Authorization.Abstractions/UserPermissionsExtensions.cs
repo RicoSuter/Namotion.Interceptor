@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
@@ -34,6 +35,27 @@ public static class UserPermissionsExtensions
     /// <param name="methodName">The name of the C# method, such as <c>nameof(Device.TurnOnAsync)</c>.</param>
     public static bool CanInvoke(this IUserPermissions permissions, IInterceptorSubject subject, string methodName) =>
         subject.TryGetMethodMember(methodName) is { } member && permissions.CanInvoke(member);
+
+    /// <summary>
+    /// Gets the method of the member when the user may run it from a user interface: the member holds a method that is
+    /// not excluded from user interfaces, and <see cref="IUserPermissions.CanInvoke"/> allows the member.
+    /// </summary>
+    /// <param name="permissions">The permissions of the person who runs the method.</param>
+    /// <param name="member">The member that holds the method.</param>
+    /// <param name="method">The method, or null when the user may not run it.</param>
+    public static bool TryGetInvocableMethod(
+        this IUserPermissions permissions, RegisteredSubjectProperty member, [NotNullWhen(true)] out MethodMetadata? method)
+    {
+        // A method excluded from user interfaces is meant for agents only, such as one that skips the checks of the UI.
+        if (member.GetValue() is MethodMetadata candidate && !candidate.IsExcludedFrom(ExclusionTarget.UserInterface) && permissions.CanInvoke(member))
+        {
+            method = candidate;
+            return true;
+        }
+
+        method = null;
+        return false;
+    }
 
     /// <summary>
     /// Runs a method of the subject when the user may; see
@@ -77,8 +99,7 @@ public static class UserPermissionsExtensions
         IServiceProvider? serviceProvider,
         CancellationToken cancellationToken)
     {
-        // A method excluded from user interfaces is meant for agents only, such as one that skips the checks of the UI.
-        if (member.GetValue() is not MethodMetadata method || method.IsExcludedFrom(ExclusionTarget.UserInterface) || !permissions.CanInvoke(member))
+        if (!permissions.TryGetInvocableMethod(member, out var method))
         {
             return new PermittedOperationResult(PermittedOperationOutcome.Denied, null, null);
         }

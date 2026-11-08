@@ -162,9 +162,9 @@ public static class OperationInvoker
             return new OperationInvocationResult(OperationOutcome.Canceled, null, null);
         }
 
-        // A method excluded from user interfaces is meant for agents only, such as one that skips the checks of the UI, so
-        // a button configured with its path does not run it either.
-        if (member.GetValue() is not MethodMetadata method || method.IsExcludedFrom(ExclusionTarget.UserInterface) || !permissions.CanInvoke(member))
+        // Checked before the prompt as well, so that nobody is asked for what they may not run, such as a method meant for
+        // agents only that a button is configured with.
+        if (!permissions.TryGetInvocableMethod(member, out var method))
         {
             return await DenyAsync(dialogService, null);
         }
