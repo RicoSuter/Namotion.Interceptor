@@ -115,8 +115,7 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
             metadata["$interfaces"] = interfaces;
         }
 
-        var methods = subject.GetAllMethods(ExclusionTarget.Agents)
-            .Where(method => IsReadable(subject, method))
+        var methods = McpMethodInvoker.GetReadableMethods(subject, _configuration)
             .Select(method => method.PropertyName)
             .ToArray();
 
@@ -140,9 +139,6 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
             metadata["$icon"] = iconProvider.IconName;
         }
     }
-
-    private bool IsReadable(RegisteredSubject subject, MethodMetadata method)
-        => subject.TryGetProperty(method.PropertyName) is { } property && _configuration.IsAllowed(property, McpAccessActions.Read);
 
     // A title or icon that is a registered member, such as a derived title, is shown only when the policy allows to read it.
     private bool IsReadable(RegisteredSubject subject, string memberName)
