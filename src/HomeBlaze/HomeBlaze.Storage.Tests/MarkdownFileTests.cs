@@ -16,7 +16,6 @@ using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Storage.Tests;
 
-[Trait("Category", "Portability")]
 public class MarkdownFileTests
 {
     [Fact]

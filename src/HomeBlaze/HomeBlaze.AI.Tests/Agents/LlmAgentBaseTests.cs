@@ -15,7 +15,6 @@ using Xunit;
 
 namespace HomeBlaze.AI.Tests.Agents;
 
-[Trait("Category", "Portability")]
 public class LlmAgentBaseTests
 {
     private static Task<AgentTestContext<FakeAgent>> StartAsync(Action<FakeAgent>? configure = null) =>

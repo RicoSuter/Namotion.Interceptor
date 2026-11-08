@@ -284,7 +284,6 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
     }
 
     [Fact]
-    [Trait("Category", "Portability")]
     public async Task WhenFileIsDeletedWhileItsSubjectLoads_ThenNextPassRemovesIt()
     {
         // Arrange

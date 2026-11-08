@@ -1891,7 +1891,6 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
-    [Trait("Category", "Portability")]
     public async Task WhenFileChangesWhileItsSubjectLoads_ThenNextPassReloadsIt()
     {
         // Arrange

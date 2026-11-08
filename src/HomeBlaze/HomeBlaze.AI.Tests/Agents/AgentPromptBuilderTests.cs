@@ -5,7 +5,6 @@ using Xunit;
 
 namespace HomeBlaze.AI.Tests.Agents;
 
-[Trait("Category", "Portability")]
 public class AgentPromptBuilderTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 10, 14, 30, 0, TimeSpan.Zero);
