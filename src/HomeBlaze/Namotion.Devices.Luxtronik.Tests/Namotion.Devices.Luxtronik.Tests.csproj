@@ -8,6 +8,7 @@
   <ItemGroup>
     <PackageReference Include="FluentModbus" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="bunit" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="SonarAnalyzer.CSharp" PrivateAssets="all" />
     <PackageReference Include="PublicApiGenerator" />
@@ -25,8 +26,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Namotion.Devices.Luxtronik\Namotion.Devices.Luxtronik.csproj" />
+    <ProjectReference Include="..\Namotion.Devices.Luxtronik.HomeBlaze\Namotion.Devices.Luxtronik.HomeBlaze.csproj" />
+    <ProjectReference Include="..\HomeBlaze.Services\HomeBlaze.Services.csproj" />
     <ProjectReference Include="..\..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />
     <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\HomeBlaze.Components.Tests\Access\TestUserPermissions.cs" Link="Access\TestUserPermissions.cs" />
   </ItemGroup>
 
 </Project>

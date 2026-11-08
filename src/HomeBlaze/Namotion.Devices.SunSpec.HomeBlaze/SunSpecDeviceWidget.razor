@@ -51,11 +51,16 @@
         _ => Severity.Info
     };
 
-    // The first power or battery value of a logical device, found through its capabilities.
-    private static string? GetMainValue(SunSpecLogicalDevice logicalDevice)
+    // The first power or battery value of a logical device, found through the capabilities of the models the viewer is shown.
+    private string? GetMainValue(SunSpecLogicalDevice logicalDevice)
     {
         foreach (var model in logicalDevice.Models)
         {
+            if (!Permissions.CanShow(model))
+            {
+                continue;
+            }
+
             if (model is IPowerMeter { MeasuredPower: { } power })
             {
                 return $"{power:F0} W";

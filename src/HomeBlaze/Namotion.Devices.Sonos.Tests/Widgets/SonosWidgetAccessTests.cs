@@ -335,7 +335,7 @@ public sealed class SonosWidgetAccessTests : BunitContext, IAsyncLifetime
         // Assert
         Assert.Contains(roomName, shownMarkup, StringComparison.Ordinal);
         Assert.DoesNotContain(roomName, hidden.Markup, StringComparison.Ordinal);
-        Assert.Equal(["0", "0"], hidden.FindAll(".mud-typography-h5").Select(count => count.TextContent.Trim()));
+        Assert.Equal(["0", "0"], hidden.FindAll(".mud-typography-h5").Select(value => value.TextContent.Trim()));
     }
 
     [Fact]
@@ -366,6 +366,20 @@ public sealed class SonosWidgetAccessTests : BunitContext, IAsyncLifetime
         // Assert
         Assert.Empty(rendered.FindAll("[data-testid=sonos-night-mode]"));
         Assert.Empty(rendered.FindAll("[data-testid=sonos-speech-enhancement]"));
+    }
+
+    [Fact]
+    public void WhenAPlayerIsHidden_ThenTheEditComponentDoesNotCountIt()
+    {
+        // Arrange
+        var system = _connected!.System;
+        _permissions.CannotShow.Add(Player);
+
+        // Act
+        var rendered = Render<SonosSystemEditComponent>(parameters => parameters.Add(component => component.Subject, system));
+
+        // Assert
+        Assert.Contains("Rooms: 0", rendered.Markup, StringComparison.Ordinal);
     }
 
     private static void AttachContext(SonosSystem system)

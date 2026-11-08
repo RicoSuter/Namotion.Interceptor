@@ -1,6 +1,7 @@
 @using Namotion.Interceptor
 
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(EcowittGateway))]
+@inherits PermissionsComponentBase
 @implements ISubjectComponent
 
 <MudPaper Class="pa-4">
@@ -20,50 +21,50 @@
         <MudDivider />
 
         <MudStack Row="true" Spacing="4">
-            @if (GatewaySubject?.OutdoorSensor != null)
+            @if (Shown(GatewaySubject?.OutdoorSensor) is { } outdoorSensor)
             {
                 <MudStack>
                     <MudText Typo="Typo.caption">Temperature</MudText>
-                    <MudText Typo="Typo.h5">@(GatewaySubject.OutdoorSensor.Temperature?.ToString("F1") ?? "\u2014") °C</MudText>
+                    <MudText Typo="Typo.h5">@(outdoorSensor.Temperature?.ToString("F1") ?? "\u2014") °C</MudText>
                 </MudStack>
 
                 <MudStack>
                     <MudText Typo="Typo.caption">Humidity</MudText>
-                    <MudText Typo="Typo.h5">@((GatewaySubject.OutdoorSensor.Humidity * 100)?.ToString("F0") ?? "\u2014") %</MudText>
+                    <MudText Typo="Typo.h5">@((outdoorSensor.Humidity * 100)?.ToString("F0") ?? "\u2014") %</MudText>
                 </MudStack>
 
-                @if (GatewaySubject.OutdoorSensor.WindSpeed != null)
+                @if (outdoorSensor.WindSpeed != null)
                 {
                     <MudStack>
                         <MudText Typo="Typo.caption">Wind</MudText>
-                        <MudText Typo="Typo.h5">@(GatewaySubject.OutdoorSensor.WindSpeed?.ToString("F1") ?? "\u2014") m/s</MudText>
+                        <MudText Typo="Typo.h5">@(outdoorSensor.WindSpeed?.ToString("F1") ?? "\u2014") m/s</MudText>
                     </MudStack>
                 }
             }
 
-            @if (GatewaySubject?.RainGauge?.RainRate > 0)
+            @if (Shown(GatewaySubject?.RainGauge) is { RainRate: > 0 } rainGauge)
             {
                 <MudStack>
                     <MudText Typo="Typo.caption">Rain</MudText>
-                    <MudText Typo="Typo.h5">@GatewaySubject.RainGauge.RainRate?.ToString("F1") mm/h</MudText>
+                    <MudText Typo="Typo.h5">@rainGauge.RainRate?.ToString("F1") mm/h</MudText>
                 </MudStack>
             }
         </MudStack>
 
         <MudStack Row="true" Spacing="4">
-            @if (GatewaySubject?.ChannelSensors.Length > 0)
+            @if (GatewaySubject?.ChannelSensors.Count(sensor => Permissions.CanShow(sensor)) is > 0 and var channelCount)
             {
                 <MudStack>
                     <MudText Typo="Typo.caption">Channels</MudText>
-                    <MudText Typo="Typo.h5">@GatewaySubject.ChannelSensors.Length</MudText>
+                    <MudText Typo="Typo.h5">@channelCount</MudText>
                 </MudStack>
             }
 
-            @if (GatewaySubject?.IndoorSensor != null)
+            @if (Shown(GatewaySubject?.IndoorSensor) is { } indoorSensor)
             {
                 <MudStack>
                     <MudText Typo="Typo.caption">Indoor</MudText>
-                    <MudText Typo="Typo.h5">@(GatewaySubject.IndoorSensor.Temperature?.ToString("F1") ?? "\u2014") °C</MudText>
+                    <MudText Typo="Typo.h5">@(indoorSensor.Temperature?.ToString("F1") ?? "\u2014") °C</MudText>
                 </MudStack>
             }
         </MudStack>
@@ -87,4 +88,9 @@
     public IInterceptorSubject? Subject { get; set; }
 
     private EcowittGateway? GatewaySubject => Subject as EcowittGateway;
+
+    // A sensor the roles hide renders as absent.
+    private TSensor? Shown<TSensor>(TSensor? sensor)
+        where TSensor : class, IInterceptorSubject =>
+        sensor is not null && Permissions.CanShow(sensor) ? sensor : null;
 }

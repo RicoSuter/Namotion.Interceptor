@@ -7,6 +7,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="bunit" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="SonarAnalyzer.CSharp" PrivateAssets="all" />
     <PackageReference Include="PublicApiGenerator" />
@@ -20,9 +21,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Namotion.Services.Pushover\Namotion.Services.Pushover.csproj" />
+    <ProjectReference Include="..\Namotion.Services.Pushover.HomeBlaze\Namotion.Services.Pushover.HomeBlaze.csproj" />
     <ProjectReference Include="..\HomeBlaze.Services\HomeBlaze.Services.csproj" />
     <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\HomeBlaze.Components.Tests\Access\TestUserPermissions.cs" Link="Access\TestUserPermissions.cs" />
   </ItemGroup>
 
 </Project>

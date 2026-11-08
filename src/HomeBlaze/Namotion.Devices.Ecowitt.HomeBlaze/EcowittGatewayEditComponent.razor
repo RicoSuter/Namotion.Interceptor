@@ -2,6 +2,7 @@
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(EcowittGateway))]
 @implements ISubjectEditComponent
+@inject IUserPermissions Permissions
 
 <MudForm>
     <MudTextField @bind-Value="_name"
@@ -131,26 +132,27 @@
         if (GatewaySubject == null)
             return [];
 
-        if (GatewaySubject.RainGauge != null)
+        // A sensor the roles hide is not listed.
+        if (IsShown(GatewaySubject.RainGauge))
             keys.Add("rain");
-        if (GatewaySubject.PiezoRainGauge != null)
+        if (IsShown(GatewaySubject.PiezoRainGauge))
             keys.Add("piezo");
-        if (GatewaySubject.LightningSensor != null)
+        if (IsShown(GatewaySubject.LightningSensor))
             keys.Add("lightning");
 
-        foreach (var ch in GatewaySubject.ChannelSensors)
+        foreach (var ch in GatewaySubject.ChannelSensors.Where(IsShown))
             keys.Add($"ch:{ch.Channel}");
-        foreach (var s in GatewaySubject.SoilMoistureSensors)
+        foreach (var s in GatewaySubject.SoilMoistureSensors.Where(IsShown))
             keys.Add($"soil:{s.Channel}");
-        foreach (var l in GatewaySubject.LeafWetnessSensors)
+        foreach (var l in GatewaySubject.LeafWetnessSensors.Where(IsShown))
             keys.Add($"leaf:{l.Channel}");
-        foreach (var t in GatewaySubject.TemperatureSensors)
+        foreach (var t in GatewaySubject.TemperatureSensors.Where(IsShown))
             keys.Add($"temp:{t.Channel}");
-        foreach (var p in GatewaySubject.Pm25Sensors)
+        foreach (var p in GatewaySubject.Pm25Sensors.Where(IsShown))
             keys.Add($"pm25:{p.Channel}");
-        foreach (var c in GatewaySubject.Co2Sensors)
+        foreach (var c in GatewaySubject.Co2Sensors.Where(IsShown))
             keys.Add($"co2:{c.Channel}");
-        foreach (var l in GatewaySubject.LeakSensors)
+        foreach (var l in GatewaySubject.LeakSensors.Where(IsShown))
             keys.Add($"leak:{l.Channel}");
 
         // Also include currently hidden ones so they show in the list
@@ -162,6 +164,8 @@
 
         return keys.ToArray();
     }
+
+    private bool IsShown(IInterceptorSubject? sensor) => sensor is not null && Permissions.CanShow(sensor);
 
     private void ToggleSensor(string key, bool hidden)
     {

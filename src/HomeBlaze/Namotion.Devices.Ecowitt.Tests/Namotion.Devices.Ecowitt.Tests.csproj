@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="bunit" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="PublicApiGenerator" />
     <PackageReference Include="Verify.Xunit" />
@@ -15,8 +16,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Namotion.Devices.Ecowitt\Namotion.Devices.Ecowitt.csproj" />
+    <ProjectReference Include="..\Namotion.Devices.Ecowitt.HomeBlaze\Namotion.Devices.Ecowitt.HomeBlaze.csproj" />
+    <ProjectReference Include="..\HomeBlaze.Services\HomeBlaze.Services.csproj" />
     <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\HomeBlaze.Components.Tests\Access\TestUserPermissions.cs" Link="Access\TestUserPermissions.cs" />
   </ItemGroup>
 
 </Project>
