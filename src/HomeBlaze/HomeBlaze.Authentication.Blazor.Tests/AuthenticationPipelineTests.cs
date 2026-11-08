@@ -266,6 +266,54 @@ public class AuthenticationPipelineTests
     }
 
     [Fact]
+    public async Task WhenTheStampCheckRefusesACookiePastHalfItsLifetime_ThenItIsNotRenewedAndLaterRequestsAreRefused()
+    {
+        // Arrange
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        await using var host = await AuthenticationTestHost.StartAsync(time);
+        var added = await host.AdministrationAsAdmin.AddUserAsync("kid", null, [BuiltInRoles.ReaderName], CancellationToken.None);
+        Assert.True(added.Succeeded, added.Error);
+        using var browser = host.CreateBrowser();
+        await host.SignInAsync(browser, "kid");
+        var cookie = browser.SessionCookieValue;
+        // The store keeps the old stamp, so only the stamp check against the database refuses the session.
+        await host.ChangeSecurityStampAsync("kid");
+        time.Advance(TimeSpan.FromDays(8));
+
+        // Act
+        var refused = await browser.GetAsync("/protected");
+        var later = await browser.GetAsync("/protected");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Redirect, refused.StatusCode);
+        Assert.False(refused.Headers.TryGetValues("Set-Cookie", out var setCookies) &&
+            setCookies.Any(setCookie => setCookie.StartsWith(TestBrowser.SessionCookieName + "=", StringComparison.Ordinal)));
+        Assert.Equal(cookie, browser.SessionCookieValue);
+        Assert.Equal(HttpStatusCode.Redirect, later.StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenARequestWithARefusedCookieSignsIn_ThenItsNewCookieIsWritten()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        var added = await host.AdministrationAsAdmin.AddUserAsync("kid", null, [BuiltInRoles.ReaderName], CancellationToken.None);
+        Assert.True(added.Succeeded, added.Error);
+        using var browser = host.CreateBrowser();
+        await host.SignInAsync(browser, "kid");
+        var refusedCookie = browser.SessionCookieValue;
+        await host.SetPasswordAsync("kid", AccountTestForms.Password);
+        Assert.Equal(HttpStatusCode.Redirect, (await browser.GetAsync("/protected")).StatusCode);
+
+        // Act
+        await host.SignInAsync(browser, "kid");
+
+        // Assert
+        Assert.NotEqual(refusedCookie, browser.SessionCookieValue);
+        Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync("/protected")).StatusCode);
+    }
+
+    [Fact]
     public async Task WhenAnUnauthenticatedVisitorRequestsAProtectedEndpoint_ThenTheyAreRedirectedToTheAppWithTheReturnUrl()
     {
         // Arrange

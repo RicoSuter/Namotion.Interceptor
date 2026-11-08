@@ -17,11 +17,15 @@ namespace HomeBlaze.Authentication.Blazor;
 /// stored security stamp every 5 minutes, see <see cref="SessionStampValidator"/>. A refused session is treated as not
 /// signed in for that request only, and its cookie is kept; when it carries another stamp than the store holds for a person,
 /// the store reloads that person, see <see cref="UserStore.RequestStampReload"/>. A renewal of the cookie, by the stamp check or the sliding
-/// expiration, is not written when the store no longer allows its session as the response starts.
+/// expiration, is not written for a refused session, nor when the store no longer allows its session as the response starts.
 /// </summary>
 internal static class SessionValidation
 {
     private static readonly object RenewedPrincipalKey = new();
+
+    // Stored under RenewedPrincipalKey when the principal of the request was rejected: the cookie handler requests the
+    // sliding renewal before the principal is validated and writes it even when the principal is rejected.
+    private static readonly object RejectedPrincipal = new();
 
     /// <summary>Adds the checks to the Identity application cookie; call it after <c>AddIdentityCookies</c>.</summary>
     public static void AddSessionValidation(this IServiceCollection services)
@@ -40,6 +44,7 @@ internal static class SessionValidation
                 if (!context.HttpContext.RequestServices.GetRequiredService<AuthenticationDatabase>().IsReady || !IsAllowedByStore(context))
                 {
                     context.RejectPrincipal();
+                    context.HttpContext.Items[RenewedPrincipalKey] = RejectedPrincipal;
                     return Task.CompletedTask;
                 }
 
@@ -71,7 +76,11 @@ internal static class SessionValidation
     private static async Task ValidateAsync(CookieValidatePrincipalContext context, Func<CookieValidatePrincipalContext, Task> validateSecurityStamp)
     {
         await validateSecurityStamp(context);
-        if (context.ShouldRenew && context.Principal is not null)
+        if (context.Principal is null)
+        {
+            context.HttpContext.Items[RenewedPrincipalKey] = RejectedPrincipal;
+        }
+        else if (context.ShouldRenew)
         {
             context.HttpContext.Items[RenewedPrincipalKey] = context.Principal;
         }
@@ -124,7 +133,8 @@ internal static class SessionValidation
 
         public void AppendResponseCookie(HttpContext context, string key, string? value, CookieOptions options)
         {
-            if (context.Items.TryGetValue(RenewedPrincipalKey, out var renewed) && renewed is ClaimsPrincipal principal && !IsAllowedByStore(context, principal))
+            if (context.Items.TryGetValue(RenewedPrincipalKey, out var renewed) &&
+                (ReferenceEquals(renewed, RejectedPrincipal) || renewed is ClaimsPrincipal principal && !IsAllowedByStore(context, principal)))
             {
                 return;
             }
