@@ -19,6 +19,7 @@
     var canSave = currentRole is not null && Permissions.CanInvokeEditOperation(currentRole);
     var shownSaveError = _saveError ?? (currentRole is null && _name is not null ? GetChangedMessage(_name) : null);
     var canAdministerRoles = Permissions.CanAdministerRoles(_authorization);
+    var usedByAgents = GetCountedRole(currentRole, role).UsedByAgents;
     <div class="role-edit" data-testid="role-edit">
         @if (checks.Preview.Error is { } error)
         {
@@ -33,7 +34,7 @@
             <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2" data-testid="role-edit-save-error">@saveError</MudAlert>
         }
         <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="role-edit-used-by">
-            Used by @role.UsedByAgents @(role.UsedByAgents == 1 ? "agent" : "agents")
+            Used by @usedByAgents @(usedByAgents == 1 ? "agent" : "agents")
         </MudText>
 
         @* Kept alive, so that switching tabs keeps the text typed into a rule and the subject chosen for the preview. A tab
@@ -247,10 +248,12 @@
         _wasValid = IsValid;
         AuthorizationService.PoliciesChanged += OnPoliciesChanged;
 
-        // The filter runs inside each write of the graph; the rest runs off it, which every other writer waits for.
+        // The filter runs inside each write of the graph; the rest runs off it, which every other writer waits for. Any
+        // role counts, as the store replaces the role subjects and the count of the new subject may be written before
+        // this component knows it.
         _usedBySubscription = ((IInterceptorSubject)role).Context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
-            .Where(change => ReferenceEquals(change.Property.Subject, role) && change.Property.Name == nameof(Role.UsedByAgents))
+            .Where(static change => change.Property.Subject is Role && change.Property.Name == nameof(Role.UsedByAgents))
             .ObserveOn(Scheduler.Default)
             .Subscribe(_ => Refresh(), _ => { });
     }
@@ -338,6 +341,12 @@
 
         return null;
     }
+
+    // The subject whose agent count is shown: the current one, else the one that holds the role now, as the count goes
+    // by name, else the opened one.
+    private Role GetCountedRole(Role? currentRole, Role openedRole) =>
+        currentRole ??
+        (_authorization is not null && _name is not null && _authorization.Roles.TryGetValue(_name, out var role) ? role : openedRole);
 
     private static string GetChangedMessage(string name) => $"The role '{name}' changed since you opened it.";
 

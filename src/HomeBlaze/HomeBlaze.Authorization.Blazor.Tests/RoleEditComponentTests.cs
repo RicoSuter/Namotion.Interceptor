@@ -384,6 +384,44 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     }
 
     [Fact]
+    public async Task WhenAnotherRoleChangedAndThenAnAgentStartsUsingTheRole_ThenTheCountFollowsTheNewSubjectOfTheRole()
+    {
+        // Arrange: the store replaces every role subject on each change.
+        var opened = Graph.GetRole("kitchen");
+        var component = RenderEditor(opened);
+        Graph.SetRole("garden", includes: [BuiltInRoles.ReaderName]);
+        Assert.NotSame(opened, Graph.GetRole("kitchen"));
+
+        // Act
+        Graph.Service.SetPrincipalRoles(new object(), ["kitchen"]);
+
+        // Assert
+        await component.WaitForAssertionAsync(
+            () => Assert.Equal("Used by 1 agent", component.Find("[data-testid='role-edit-used-by']").TextContent.Trim()),
+            TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
+    public async Task WhenTheRoleWasSavedAndThenAnAgentStartsUsingIt_ThenTheCountFollowsTheSavedSubject()
+    {
+        // Arrange
+        var opened = Graph.GetRole("kitchen");
+        var component = RenderEditor(opened);
+        await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
+        await SetActionAsync(component, 0, "read", true);
+        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+        Assert.NotSame(opened, Graph.GetRole("kitchen"));
+
+        // Act
+        Graph.Service.SetPrincipalRoles(new object(), ["kitchen"]);
+
+        // Assert
+        await component.WaitForAssertionAsync(
+            () => Assert.Equal("Used by 1 agent", component.Find("[data-testid='role-edit-used-by']").TextContent.Trim()),
+            TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
     public async Task WhenTheRoleIsEdited_ThenTheEditedRoleHasTheUnsavedState()
     {
         // Arrange
