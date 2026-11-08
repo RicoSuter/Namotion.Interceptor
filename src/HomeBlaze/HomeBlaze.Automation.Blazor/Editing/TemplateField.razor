@@ -1,6 +1,6 @@
 @implements IDisposable
 @inject IDialogService DialogService
-@inject TimeProvider TimeProvider
+@inject PreviewTicker Ticker
 
 <div data-testid="automation-template-field">
     <MudTextField T="string" Label="@Label" Value="@_text" ValueChanged="SetValueAsync" Immediate="true"
@@ -21,8 +21,8 @@
     private string? _rendered;
     private string? _evaluatedText;
     private RuleExpressions? _evaluatedExpressions;
-    private bool _hasTemplate;
-    private PreviewTicker? _ticker;
+    private Func<string?>? _render;
+    private IDisposable? _tick;
 
     private static readonly Func<IInterceptorSubject, bool> NoSubject = _ => false;
 
@@ -48,15 +48,16 @@
         }
 
         Refresh();
-        _ticker ??= new PreviewTicker(TimeProvider, InvokeAsync, RefreshPreviewAsync);
     }
+
+    protected override void OnInitialized() => _tick = Ticker.Subscribe(InvokeAsync, RefreshPreviewAsync);
 
     // Each tick renders the template again with the current values.
     private Task RefreshPreviewAsync()
     {
-        if (_hasTemplate && _evaluatedText is { } text && _evaluatedExpressions is { } expressions)
+        if (_render is { } render)
         {
-            var rendered = expressions.RenderTemplate(text);
+            var rendered = render();
             if (rendered != _rendered)
             {
                 _rendered = rendered;
@@ -67,9 +68,9 @@
         return Task.CompletedTask;
     }
 
-    public void Dispose() => _ticker?.Dispose();
+    public void Dispose() => _tick?.Dispose();
 
-    // Evaluated when the text or the expressions change, not on every render of the editor.
+    // Validated and parsed when the text or the expressions change, not on every render of the editor or every tick.
     private void Refresh()
     {
         var text = _text ?? string.Empty;
@@ -81,8 +82,8 @@
         _evaluatedText = text;
         _evaluatedExpressions = Expressions;
         _error = ArgumentFields.Validate(text, typeof(string), IsRequired, Expressions);
-        _hasTemplate = _error is null && text.Contains("{{", StringComparison.Ordinal);
-        _rendered = _hasTemplate ? Expressions.RenderTemplate(text) : null;
+        _render = _error is null && text.Contains("{{", StringComparison.Ordinal) ? Expressions.Template(text) : null;
+        _rendered = _render?.Invoke();
     }
 
     private Task SetValueAsync(string? value)

@@ -10,25 +10,21 @@ internal static class ExpressionArithmetic
         // An instant or a duration has no number kind, so it skips the classification of the numbers.
         if (left is DateTimeOffset or TimeSpan or DateTime)
         {
-            return ApplyToNonNumbers(arithmeticOperator, left, right);
+            return ApplyToTimes(arithmeticOperator, left, right);
         }
 
         var leftKind = ExpressionComparer.GetNumberKind(left);
-        var rightKind = ExpressionComparer.GetNumberKind(right);
-        if (leftKind != NumberKind.None && rightKind != NumberKind.None)
+        if (leftKind != NumberKind.None)
         {
-            return ApplyToNumbers(arithmeticOperator, left, right, leftKind | rightKind);
+            var rightKind = ExpressionComparer.GetNumberKind(right);
+            if (rightKind != NumberKind.None)
+            {
+                return ApplyToNumbers(arithmeticOperator, left, right, leftKind | rightKind);
+            }
         }
 
-        return ApplyToNonNumbers(arithmeticOperator, left, right);
+        return ApplyToTimes(arithmeticOperator, left, right);
     }
-
-    private static object? ApplyToNonNumbers(ArithmeticOperator arithmeticOperator, object left, object right) => arithmeticOperator switch
-    {
-        ArithmeticOperator.Add => ApplyToTimes(isSubtraction: false, left, right),
-        ArithmeticOperator.Subtract => ApplyToTimes(isSubtraction: true, left, right),
-        _ => null
-    };
 
     /// <summary>Negates a value that is not null.</summary>
     /// <returns>The number or duration with the other sign, or null for another value or a result out of range.</returns>
@@ -75,9 +71,10 @@ internal static class ExpressionArithmetic
         _ => left / right
     };
 
-    // Decimal arithmetic rounds instead of failing when a result has too many digits. It did not round when a sum keeps
-    // the larger scale of its operands, a product has the sum of their scales, and a quotient times the divisor gives the
-    // dividend back.
+    // Decimal arithmetic rounds instead of failing when a result has too many digits: a sum keeps the larger scale of its
+    // operands and a product the sum of their scales unless the digits do not fit, and then the last decimal places are
+    // dropped. A result with fewer places is exact only when the dropped digits were all zero. A quotient is exact when
+    // it times the divisor gives the dividend back.
     private static bool TryComputeExactly(ArithmeticOperator arithmeticOperator, decimal left, decimal right, out decimal result)
     {
         result = 0;
@@ -87,13 +84,13 @@ internal static class ExpressionArithmetic
             {
                 case ArithmeticOperator.Add:
                     result = left + right;
-                    return result.Scale == Math.Max(left.Scale, right.Scale);
+                    return result.Scale == Math.Max(left.Scale, right.Scale) || IsSumExact(left, right, result.Scale);
                 case ArithmeticOperator.Subtract:
                     result = left - right;
-                    return result.Scale == Math.Max(left.Scale, right.Scale);
+                    return result.Scale == Math.Max(left.Scale, right.Scale) || IsSumExact(left, -right, result.Scale);
                 case ArithmeticOperator.Multiply:
                     result = left * right;
-                    return result.Scale == left.Scale + right.Scale;
+                    return result.Scale == left.Scale + right.Scale || IsProductExact(left, right, left.Scale + right.Scale - result.Scale);
                 default:
                     if (right == 0)
                     {
@@ -111,8 +108,56 @@ internal static class ExpressionArithmetic
         }
     }
 
-    private static object? ApplyToTimes(bool isSubtraction, object left, object right)
+    // The digits of the exact sum below the scale of the result are those of the operands below it, added up. Each
+    // remainder is exact and smaller than one unit of that scale, so the test runs on small numbers that never round.
+    private static bool IsSumExact(decimal left, decimal right, byte resultScale)
     {
+        var unit = new decimal(1, 0, 0, false, resultScale);
+        return (left % unit + right % unit) % unit == 0;
+    }
+
+    // The exact product is the product of the mantissas, divided by ten once per dropped digit. It has no remainder when
+    // the mantissas together hold as many factors of two and as many factors of five as digits were dropped.
+    private static bool IsProductExact(decimal left, decimal right, int droppedDigits)
+    {
+        var leftMantissa = GetMantissa(left);
+        var rightMantissa = GetMantissa(right);
+        if (leftMantissa == 0 || rightMantissa == 0)
+        {
+            return true;
+        }
+
+        return (int)UInt128.TrailingZeroCount(leftMantissa) + (int)UInt128.TrailingZeroCount(rightMantissa) >= droppedDigits &&
+            CountFactorsOfFive(leftMantissa) + CountFactorsOfFive(rightMantissa) >= droppedDigits;
+    }
+
+    private static UInt128 GetMantissa(decimal value)
+    {
+        Span<int> bits = stackalloc int[4];
+        _ = decimal.GetBits(value, bits);
+        return new UInt128((uint)bits[2], ((ulong)(uint)bits[1] << 32) | (uint)bits[0]);
+    }
+
+    private static int CountFactorsOfFive(UInt128 mantissa)
+    {
+        var count = 0;
+        while (mantissa % 5 == 0)
+        {
+            mantissa /= 5;
+            count++;
+        }
+
+        return count;
+    }
+
+    private static object? ApplyToTimes(ArithmeticOperator arithmeticOperator, object left, object right)
+    {
+        if (arithmeticOperator is ArithmeticOperator.Multiply or ArithmeticOperator.Divide)
+        {
+            return null;
+        }
+
+        var isSubtraction = arithmeticOperator == ArithmeticOperator.Subtract;
         try
         {
             return ExpressionComparer.TryGetInstant(left, out var instant)

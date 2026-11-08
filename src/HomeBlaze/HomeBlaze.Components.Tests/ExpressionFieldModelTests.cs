@@ -171,7 +171,6 @@ public class ExpressionFieldModelTests
     {
         // Act
         var model = new ExpressionFieldModel(text);
-        model.Load(text);
 
         // Assert
         Assert.Equal(text, model.Text);
@@ -250,7 +249,7 @@ public class ExpressionFieldModelTests
         model.SetRow(0, new ExpressionRow(string.Empty, "/a/B", "==", typed));
 
         // Assert
-        Assert.Contains(errorPart, model.GetValueError(0));
+        Assert.Contains(errorPart, model.GetPendingRow(0)?.ValueError);
         Assert.Equal("/a/B == 1", model.Text);
         Assert.Equal(typed, model.GetDisplayRow(0).Value);
         Assert.True(model.HasPendingRow);
@@ -274,7 +273,7 @@ public class ExpressionFieldModelTests
         model.SetRow(0, new ExpressionRow(string.Empty, typed, "==", "1"));
 
         // Assert
-        Assert.StartsWith("Not a valid path", model.GetPathError(0));
+        Assert.StartsWith("Not a valid path", model.GetPendingRow(0)?.PathError);
         Assert.Equal("/a/B == 1", model.Text);
         Assert.Equal("/a/B", model.Rows[0].Path);
         Assert.Equal(typed, model.GetDisplayRow(0).Path);
@@ -294,7 +293,7 @@ public class ExpressionFieldModelTests
         model.SetRow(0, new ExpressionRow(string.Empty, typed, "==", "1"));
 
         // Assert
-        Assert.Null(model.GetPathError(0));
+        Assert.Null(model.GetPendingRow(0)?.PathError);
         Assert.True(model.HasPendingRow);
         Assert.Equal("/a/B == 1", model.Text);
         Assert.Equal(typed, model.GetDisplayRow(0).Path);
@@ -312,7 +311,7 @@ public class ExpressionFieldModelTests
         model.AddRow();
 
         // Assert
-        Assert.StartsWith("Not a valid path", model.GetPathError(1));
+        Assert.StartsWith("Not a valid path", model.GetPendingRow(1)?.PathError);
         Assert.Equal("/c d", model.GetDisplayRow(1).Path);
         Assert.Equal("/a/B == 3 and /c/D == 2 and  == ", model.Text);
         Assert.True(model.HasPendingRow);
@@ -329,7 +328,7 @@ public class ExpressionFieldModelTests
         model.SetRow(0, new ExpressionRow(string.Empty, "/a/C", "==", "1"));
 
         // Assert
-        Assert.Null(model.GetPathError(0));
+        Assert.Null(model.GetPendingRow(0)?.PathError);
         Assert.False(model.HasPendingRow);
         Assert.Equal("/a/C == 1", model.Text);
     }
@@ -349,20 +348,90 @@ public class ExpressionFieldModelTests
         Assert.Equal("/c/D == 2", model.Text);
     }
 
-    [Fact]
-    public void WhenARowIsStillBeingFilledIn_ThenItIsKeptAsItIs()
+    [Theory]
+    [InlineData("/c/D", "")]
+    [InlineData("", "2")]
+    [InlineData("", "")]
+    public void WhenARowIsStillBeingFilledIn_ThenItIsKeptInTheTextAndCountsAsPending(string path, string value)
     {
         // Arrange
         var model = new ExpressionFieldModel("/a/B == 1");
 
         // Act
         model.AddRow();
-        model.SetRow(1, new ExpressionRow("and", "/c/D", "==", string.Empty));
+        model.SetRow(1, new ExpressionRow("and", path, "==", value));
+
+        // Assert
+        Assert.True(model.HasPendingRow);
+        Assert.Equal($"/a/B == 1 and {path} == {value}", model.Text);
+        Assert.Equal(new ExpressionRow("and", path, "==", value), model.Rows[1]);
+    }
+
+    [Fact]
+    public void WhenAnUnfinishedRowIsCompleted_ThenNothingIsPending()
+    {
+        // Arrange
+        var model = new ExpressionFieldModel("/a/B == 1");
+        model.AddRow();
+
+        // Act
+        model.SetRow(1, new ExpressionRow("and", "/c/D", ">", "2"));
 
         // Assert
         Assert.False(model.HasPendingRow);
-        Assert.Equal(2, model.Rows.Count);
-        Assert.Equal("/c/D", model.Rows[1].Path);
+        Assert.Equal("/a/B == 1 and /c/D > 2", model.Text);
+    }
+
+    [Fact]
+    public void WhenAnEditOfARowDoesNotChangeTheText_ThenSetRowSaysSo()
+    {
+        // Arrange
+        var model = new ExpressionFieldModel("/a/B == 1");
+
+        // Act
+        var isUnfinishedPathChange = model.SetRow(0, new ExpressionRow(string.Empty, "/a/", "==", "1"));
+        var isInvalidValueChange = model.SetRow(0, new ExpressionRow(string.Empty, "/a/B", "==", "1,5"));
+        var isSameRowChange = model.SetRow(0, new ExpressionRow(string.Empty, "/a/B", "==", "1"));
+        var isAppliedChange = model.SetRow(0, new ExpressionRow(string.Empty, "/a/C", "==", "1"));
+
+        // Assert
+        Assert.False(isUnfinishedPathChange);
+        Assert.False(isInvalidValueChange);
+        Assert.False(isSameRowChange);
+        Assert.True(isAppliedChange);
+        Assert.Equal("/a/C == 1", model.Text);
+    }
+
+    [Theory]
+    [InlineData("Sibling/Value")]
+    [InlineData("Devices[x]/IsOn")]
+    [InlineData("-Sibling/Value")]
+    [InlineData("N/A")]
+    public void WhenTheOperatorOfARowWithALoadedBarePathValueChanges_ThenTheValueIsWrittenAsItIs(string value)
+    {
+        // Arrange
+        var model = new ExpressionFieldModel($"/a/B == {value}");
+
+        // Act
+        model.SetRow(0, model.Rows[0] with { Operator = "!=" });
+
+        // Assert
+        Assert.False(model.HasPendingRow);
+        Assert.Equal($"/a/B != {value}", model.Text);
+    }
+
+    [Fact]
+    public void WhenALoadedRowIsAppliedAgain_ThenItsValueIsWrittenAsItIs()
+    {
+        // Arrange
+        var model = new ExpressionFieldModel("/a/B == Sibling/Value and /c/D == N/A");
+
+        // Act
+        model.SetRow(0, model.Rows[0]);
+        model.SetRow(1, model.Rows[1] with { Combinator = "or" });
+
+        // Assert
+        Assert.Equal("/a/B == Sibling/Value or /c/D == N/A", model.Text);
     }
 
     private static void AssertTextParsesToTheRows(ExpressionFieldModel model)

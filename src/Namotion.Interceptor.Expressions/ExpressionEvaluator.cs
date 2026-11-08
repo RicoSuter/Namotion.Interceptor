@@ -143,7 +143,7 @@ internal static class ExpressionEvaluator
             return null;
         }
 
-        if (ExpressionComparer.Compare(left, node.LeftInstant, right, node.RightInstant, node.IsEquality) is not { } order)
+        if (ExpressionComparer.Compare(left, node.LeftLiteral, right, node.RightLiteral, node.IsEquality) is not { } order)
         {
             return null;
         }

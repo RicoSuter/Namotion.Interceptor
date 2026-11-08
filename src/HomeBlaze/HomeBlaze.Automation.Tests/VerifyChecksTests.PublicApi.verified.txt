@@ -98,9 +98,13 @@ namespace HomeBlaze.Automation
     }
     public static class AutomationPreview
     {
+        public static HomeBlaze.Automation.AutomationExpressionPreview Evaluate(HomeBlaze.Automation.Automation automation, string? ruleKey, Namotion.Interceptor.Expressions.ParsedExpression expression, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone = null) { }
         public static HomeBlaze.Automation.AutomationExpressionPreview Evaluate(HomeBlaze.Automation.Automation automation, string? ruleKey, string? expression, bool allowsEvent, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone = null) { }
+        public static HomeBlaze.Automation.AutomationExpressionPreview Render(HomeBlaze.Automation.Automation automation, string? ruleKey, Namotion.Interceptor.Expressions.TextTemplate template) { }
         public static HomeBlaze.Automation.AutomationExpressionPreview Render(HomeBlaze.Automation.Automation automation, string? ruleKey, string? template, bool allowsEvent) { }
         public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveTarget(HomeBlaze.Automation.Automation automation, string? ruleKey, string? path) { }
+        public static bool TryParseExpression(string? expression, bool allowsEvent, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Expressions.ParsedExpression? parsed, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
+        public static bool TryParseTemplate(string? template, bool allowsEvent, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Expressions.TextTemplate? parsed, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
     }
     [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
     [Namotion.Interceptor.Attributes.InterceptorSubject]

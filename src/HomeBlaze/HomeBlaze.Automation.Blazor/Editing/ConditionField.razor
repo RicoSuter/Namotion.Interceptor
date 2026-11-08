@@ -1,6 +1,6 @@
 @implements IDisposable
 
-@* An ExpressionField that tells the editor while a row holds an unapplied invalid edit, and stops doing so when it goes away. *@
+@* An ExpressionField that tells the editor while a row holds an unfinished or invalid edit, and stops doing so when it goes away. *@
 <ExpressionField Value="@Value" ValueChanged="ValueChanged" Label="@Label" Lead="@Lead" Validate="@Validate" Preview="@Preview" Hints="@Hints"
                  Fields="@Fields" Variables="@AutomationValidator.Variables" TestId="@TestId" HasPendingRowChanged="@ReportPending" />
 
@@ -19,7 +19,7 @@
 
     [Parameter] public Func<string, string?>? Validate { get; set; }
 
-    [Parameter] public Func<string, ExpressionPreview?>? Preview { get; set; }
+    [Parameter] public Func<string, Func<ExpressionPreview>?>? Preview { get; set; }
 
     [Parameter] public Func<string, IReadOnlyList<string>>? Hints { get; set; }
 

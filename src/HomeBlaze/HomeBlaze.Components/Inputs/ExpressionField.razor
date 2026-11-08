@@ -1,24 +1,24 @@
 @using System.Collections.Immutable
 @implements IDisposable
-@inject TimeProvider TimeProvider
+@inject PreviewTicker Ticker
 @* One field for every condition: simple rows of path, comparison and value with the current value of each row, or
    the expression as text. The stored value is always the expression text. *@
 
-<div class="expression-field" data-testid="@TestId">
+<div class="expression-field" data-testid="@_testIds.Field">
     <div class="d-flex align-center gap-2 mb-1">
         <MudText Typo="Typo.subtitle2">@Label</MudText>
         <MudSpacer />
         <MudButtonGroup Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined" OverrideStyles="false">
             <MudButton Size="Size.Small" Color="Color.Primary" Variant="@(_model.IsAdvanced ? Variant.Outlined : Variant.Filled)"
-                       Disabled="@(!_model.CanShowSimple)" OnClick="ShowSimple" data-testid="@($"{TestId}-simple")">Simple</MudButton>
+                       Disabled="@(!_model.CanShowSimple)" OnClick="ShowSimple" data-testid="@_testIds.Simple">Simple</MudButton>
             <MudButton Size="Size.Small" Color="Color.Primary" Variant="@(_model.IsAdvanced ? Variant.Filled : Variant.Outlined)"
-                       OnClick="ShowAdvancedAsync" data-testid="@($"{TestId}-advanced")">Advanced</MudButton>
+                       OnClick="ShowAdvancedAsync" data-testid="@_testIds.Advanced">Advanced</MudButton>
         </MudButtonGroup>
     </div>
     @if (_model.IsAdvanced)
     {
         <MudTextField T="string" Label="Expression" Value="@_model.Text" ValueChanged="SetTextAsync" Immediate="true" Lines="2"
-                      Variant="Variant.Outlined" data-testid="@($"{TestId}-text")" />
+                      Variant="Variant.Outlined" data-testid="@_testIds.Text" />
     }
     else
     {
@@ -26,10 +26,11 @@
             @for (var index = 0; index < _model.Rows.Count; index++)
             {
                 var rowIndex = index;
-                var row = _model.GetDisplayRow(rowIndex);
-                var pathError = _model.GetPathError(rowIndex);
-                var valueError = _model.GetValueError(rowIndex);
-                <div class="d-flex flex-wrap align-center gap-2" data-testid="@($"{TestId}-row")">
+                var pending = _model.GetPendingRow(rowIndex);
+                var row = pending?.Row ?? _model.Rows[rowIndex];
+                var pathError = pending?.PathError;
+                var valueError = pending?.ValueError;
+                <div class="d-flex flex-wrap align-center gap-2" data-testid="@_testIds.Row">
                     <div style="width: 64px;">
                         @if (rowIndex == 0)
                         {
@@ -60,11 +61,11 @@
                         }
                     </div>
                     <div style="width: 130px;">
-                        <MudSelect T="string" Label="Operator" Dense="true" Value="@row.Operator" ToStringFunc="@GetOperatorText"
-                                   ValueChanged="@(value => SetRowAsync(rowIndex, row with { Operator = value ?? ExpressionRows.Operators[0] }))">
-                            @foreach (var comparison in ExpressionRows.Operators)
+                        <MudSelect T="string" Label="Operator" Dense="true" Value="@row.Operator" ToStringFunc="@ExpressionRows.GetOperatorLabel"
+                                   ValueChanged="@(value => SetRowAsync(rowIndex, row with { Operator = value ?? ExpressionRows.Operators[0].Symbol }))">
+                            @foreach (var (symbol, label) in ExpressionRows.Operators)
                             {
-                                <MudSelectItem Value="@comparison">@GetOperatorText(comparison)</MudSelectItem>
+                                <MudSelectItem Value="@symbol">@label</MudSelectItem>
                             }
                         </MudSelect>
                     </div>
@@ -72,33 +73,34 @@
                         <MudTextField T="string" Label="Value" Value="@row.Value" Error="@(valueError is not null)" ErrorText="@valueError"
                                       ValueChanged="@(value => SetRowAsync(rowIndex, row with { Value = value ?? string.Empty }))" />
                     </div>
-                    <MudText Typo="Typo.caption" Class="mud-text-secondary" data-testid="@($"{TestId}-row-now")">@GetRowText(rowIndex)</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary" data-testid="@_testIds.RowNow">@GetRowText(rowIndex)</MudText>
                     <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" aria-label="Remove condition"
                                    OnClick="@(() => RemoveRowAsync(rowIndex))" />
                 </div>
             }
         </MudStack>
-        <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddRowAsync" data-testid="@($"{TestId}-add-row")">Condition</MudButton>
+        <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddRowAsync" data-testid="@_testIds.AddRow">Condition</MudButton>
     }
     @if (_preview.Error is { } error)
     {
-        <MudText Typo="Typo.caption" Color="Color.Error" data-testid="@($"{TestId}-error")">@error</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Error" data-testid="@_testIds.Error">@error</MudText>
     }
     @foreach (var hint in _preview.Hints)
     {
-        <MudText Typo="Typo.caption" Color="Color.Warning" data-testid="@($"{TestId}-hint")">@hint</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Warning" data-testid="@_testIds.Hint">@hint</MudText>
     }
     @if (_preview.ResultText is { } resultText)
     {
-        <MudText Typo="Typo.caption" data-testid="@($"{TestId}-result")">Result now: @resultText</MudText>
+        <MudText Typo="Typo.caption" data-testid="@_testIds.Result">Result now: @resultText</MudText>
     }
 </div>
 
 @code {
     private readonly ExpressionFieldModel _model = new(null);
     private readonly ExpressionFieldPreview _preview = new();
-    private PreviewTicker? _ticker;
+    private IDisposable? _tick;
     private bool _hasPendingRow;
+    private TestIds _testIds = new("expression-field");
 
     [Parameter] public string? Value { get; set; }
 
@@ -112,8 +114,13 @@
     /// <summary>Gets the error of an expression that is not empty, or null when it is valid.</summary>
     [Parameter] public Func<string, string?>? Validate { get; set; }
 
-    /// <summary>Evaluates an expression or a path with the current values, or returns null when it cannot; without it, no values are shown.</summary>
-    [Parameter] public Func<string, ExpressionPreview?>? Preview { get; set; }
+    /// <summary>
+    /// Prepares an expression or a path for evaluation: returns a function that evaluates it with the current values each
+    /// time it is called, or null when it cannot be evaluated. Called for the valid expression, the path and the condition
+    /// of each row and the paths of the hints whenever the text, the rows, the variables or one of the delegate parameters
+    /// changes, so pass delegates that keep their identity across renders. Without it, no values are shown.
+    /// </summary>
+    [Parameter] public Func<string, Func<ExpressionPreview>?>? Preview { get; set; }
 
     /// <summary>Gets the hints of the host for a valid expression, which the field shows as warnings; asked again only when the text changes.</summary>
     [Parameter] public Func<string, IReadOnlyList<string>>? Hints { get; set; }
@@ -123,7 +130,8 @@
 
     /// <summary>
     /// Raised with true while a row holds an edit that is not part of <see cref="Value"/>, because it is invalid or not
-    /// finished, and with false when none does. A host blocks saving while it is true.
+    /// finished, or a row of <see cref="Value"/> has no path or no value yet, and with false when none does. A host blocks
+    /// saving while it is true.
     /// </summary>
     [Parameter] public EventCallback<bool> HasPendingRowChanged { get; set; }
 
@@ -134,13 +142,18 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        if (TestId != _testIds.Field)
+        {
+            _testIds = new TestIds(TestId);
+        }
+
         _model.Variables = Variables;
         _model.SetValue(Value);
 
         Refresh();
         if (Preview is not null)
         {
-            _ticker ??= new PreviewTicker(TimeProvider, InvokeAsync, RefreshValuesAsync);
+            _tick ??= Ticker.Subscribe(InvokeAsync, RefreshValuesAsync);
         }
 
         await NotifyPendingAsync();
@@ -149,7 +162,7 @@
     // Each tick reads the current values of the rows and the result again.
     private Task RefreshValuesAsync()
     {
-        if (_preview.RefreshValues(_model.Rows))
+        if (_preview.RefreshValues())
         {
             StateHasChanged();
         }
@@ -157,7 +170,7 @@
         return Task.CompletedTask;
     }
 
-    public void Dispose() => _ticker?.Dispose();
+    public void Dispose() => _tick?.Dispose();
 
     private void ShowSimple()
     {
@@ -175,32 +188,34 @@
 
     private Task SetTextAsync(string? text)
     {
+        var previous = _model.Text;
         _model.Load(text);
-        return EmitAsync();
+        return EmitAsync(_model.Text != previous);
     }
 
-    private Task SetRowAsync(int index, ExpressionRow row)
-    {
-        _model.SetRow(index, row);
-        return EmitAsync();
-    }
+    private Task SetRowAsync(int index, ExpressionRow row) => EmitAsync(_model.SetRow(index, row));
 
     private Task AddRowAsync()
     {
         _model.AddRow();
-        return EmitAsync();
+        return EmitAsync(isTextChanged: true);
     }
 
     private Task RemoveRowAsync(int index)
     {
         _model.RemoveRow(index);
-        return EmitAsync();
+        return EmitAsync(isTextChanged: true);
     }
 
-    private async Task EmitAsync()
+    // An edit that stays pending leaves the text as it is, and the owner is not told about a value that did not change.
+    private async Task EmitAsync(bool isTextChanged)
     {
         Refresh();
-        await ValueChanged.InvokeAsync(_model.Text);
+        if (isTextChanged)
+        {
+            await ValueChanged.InvokeAsync(_model.Text);
+        }
+
         await NotifyPendingAsync();
     }
 
@@ -213,20 +228,33 @@
         }
     }
 
-    private void Refresh() => _preview.Update(_model.Text, _model.Rows, _model.PathSeparator, _model.Variables, Validate, Preview, Hints);
+    private void Refresh() => _preview.Update(_model.Text, _model.Rows, _model.Variables, Validate, Preview, Hints);
 
     private string GetRowText(int index) => index < _preview.RowTexts.Count ? _preview.RowTexts[index] : string.Empty;
 
-    private static string GetOperatorText(string? comparison) => comparison switch
+    // The field renders on every keystroke, so the test ids are built once per TestId rather than per render.
+    private sealed class TestIds(string field)
     {
-        "==" => "equals",
-        "!=" => "is not",
-        "<" => "is below",
-        "<=" => "at most",
-        ">" => "is above",
-        ">=" => "at least",
-        _ => comparison ?? string.Empty
-    };
+        public string Field { get; } = field;
+
+        public string Simple { get; } = $"{field}-simple";
+
+        public string Advanced { get; } = $"{field}-advanced";
+
+        public string Text { get; } = $"{field}-text";
+
+        public string Row { get; } = $"{field}-row";
+
+        public string RowNow { get; } = $"{field}-row-now";
+
+        public string AddRow { get; } = $"{field}-add-row";
+
+        public string Error { get; } = $"{field}-error";
+
+        public string Hint { get; } = $"{field}-hint";
+
+        public string Result { get; } = $"{field}-result";
+    }
 
     private static Task<IEnumerable<string>> SearchFieldsAsync(IReadOnlyList<string> fields, string? text) =>
         Task.FromResult(string.IsNullOrWhiteSpace(text)

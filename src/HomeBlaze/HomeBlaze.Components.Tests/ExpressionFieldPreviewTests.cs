@@ -12,7 +12,11 @@ public class ExpressionFieldPreviewTests
     {
         public int Validations { get; private set; }
 
-        public int Previews { get; private set; }
+        /// <summary>How often an expression or a path was prepared.</summary>
+        public int Preparations { get; private set; }
+
+        /// <summary>How often a prepared expression or path was evaluated.</summary>
+        public int Evaluations { get; private set; }
 
         public double Gust { get; set; } = 9;
 
@@ -22,9 +26,15 @@ public class ExpressionFieldPreviewTests
             return text.Contains('(') ? "expected ')'" : null;
         }
 
-        public ExpressionPreview? Preview(string text)
+        public Func<ExpressionPreview>? Preview(string text)
         {
-            Previews++;
+            Preparations++;
+            return text.Contains('(') ? null : () => Evaluate(text);
+        }
+
+        private ExpressionPreview Evaluate(string text)
+        {
+            Evaluations++;
             return text == "/Weather/Gust" ? new ExpressionPreview(null, Gust, Gust.ToString("0.#")) : new ExpressionPreview(Gust > 8, null, null);
         }
     }
@@ -41,14 +51,14 @@ public class ExpressionFieldPreviewTests
         // Arrange
         var host = new Host();
         var preview = new ExpressionFieldPreview();
-        preview.Update("/Weather/Gust > 8", Rows("/Weather/Gust > 8"), '/', Variables, host.Validate, host.Preview);
-        var (validations, previews) = (host.Validations, host.Previews);
+        preview.Update("/Weather/Gust > 8", Rows("/Weather/Gust > 8"), Variables, host.Validate, host.Preview);
+        var (validations, preparations, evaluations) = (host.Validations, host.Preparations, host.Evaluations);
 
         // Act
-        preview.Update("/Weather/Gust > 8", Rows("/Weather/Gust > 8"), '/', Variables, host.Validate, host.Preview);
+        preview.Update("/Weather/Gust > 8", Rows("/Weather/Gust > 8"), Variables, host.Validate, host.Preview);
 
         // Assert
-        Assert.Equal((validations, previews), (host.Validations, host.Previews));
+        Assert.Equal((validations, preparations, evaluations), (host.Validations, host.Preparations, host.Evaluations));
         Assert.Equal("true", preview.ResultText);
         Assert.Equal(["now 9, true"], preview.RowTexts.ToArray());
     }
@@ -59,14 +69,15 @@ public class ExpressionFieldPreviewTests
         // Arrange
         var host = new Host();
         var preview = new ExpressionFieldPreview();
-        preview.Update("/Weather/Gust > 8", Rows("/Weather/Gust > 8"), '/', Variables, host.Validate, host.Preview);
-        var validations = host.Validations;
+        preview.Update("/Weather/Gust > 8", Rows("/Weather/Gust > 8"), Variables, host.Validate, host.Preview);
+        var (validations, preparations) = (host.Validations, host.Preparations);
 
         // Act
-        preview.Update("(/Weather/Gust > 8", [], '/', Variables, host.Validate, host.Preview);
+        preview.Update("(/Weather/Gust > 8", [], Variables, host.Validate, host.Preview);
 
         // Assert
         Assert.Equal(validations + 1, host.Validations);
+        Assert.Equal(preparations, host.Preparations);
         Assert.Equal("expected ')'", preview.Error);
         Assert.Null(preview.ResultText);
         Assert.Empty(preview.RowTexts);
@@ -78,14 +89,13 @@ public class ExpressionFieldPreviewTests
         // Arrange
         var host = new Host();
         var preview = new ExpressionFieldPreview();
-        var rows = Rows("/Weather/Gust > 8");
-        preview.Update("/Weather/Gust > 8", rows, '/', Variables, host.Validate, host.Preview);
+        preview.Update("/Weather/Gust > 8", Rows("/Weather/Gust > 8"), Variables, host.Validate, host.Preview);
         var validations = host.Validations;
 
         // Act
-        var isUnchanged = !preview.RefreshValues(rows);
+        var isUnchanged = !preview.RefreshValues();
         host.Gust = 5;
-        var isChanged = preview.RefreshValues(rows);
+        var isChanged = preview.RefreshValues();
 
         // Assert
         Assert.True(isUnchanged);
@@ -96,6 +106,39 @@ public class ExpressionFieldPreviewTests
     }
 
     [Fact]
+    public void WhenTheValuesAreRefreshed_ThenTheExpressionsArePreparedOnceAndOnlyEvaluatedAgain()
+    {
+        // Arrange
+        var host = new Host();
+        var preview = new ExpressionFieldPreview();
+        preview.Update("/Weather/Gust > 8", Rows("/Weather/Gust > 8"), Variables, host.Validate, host.Preview);
+        var (preparations, evaluations) = (host.Preparations, host.Evaluations);
+
+        // Act
+        preview.RefreshValues();
+        preview.RefreshValues();
+
+        // Assert
+        Assert.Equal(3, preparations);
+        Assert.Equal(preparations, host.Preparations);
+        Assert.Equal(evaluations * 3, host.Evaluations);
+    }
+
+    [Fact]
+    public void WhenARowHasNoValueYet_ThenItsTextShowsTheValueWithoutAResult()
+    {
+        // Arrange
+        var host = new Host();
+        var preview = new ExpressionFieldPreview();
+
+        // Act
+        preview.Update("/Weather/Gust > ", [new ExpressionRow(string.Empty, "/Weather/Gust", ">", string.Empty)], Variables, host.Validate, host.Preview);
+
+        // Assert
+        Assert.Equal(["now 9"], preview.RowTexts.ToArray());
+    }
+
+    [Fact]
     public void WhenThereIsNoPreview_ThenOnlyTheErrorAndTheCaseHintsAreShown()
     {
         // Arrange
@@ -103,13 +146,13 @@ public class ExpressionFieldPreviewTests
         var preview = new ExpressionFieldPreview();
 
         // Act
-        preview.Update("/a > Now", Rows("/a > Now"), '/', Variables, host.Validate, preview: null);
+        preview.Update("/a > Now", Rows("/a > Now"), Variables, host.Validate, preview: null);
 
         // Assert
         Assert.Null(preview.ResultText);
         Assert.Equal([string.Empty], preview.RowTexts.ToArray());
         Assert.Single(preview.Hints);
-        Assert.False(preview.RefreshValues(Rows("/a > Now")));
+        Assert.False(preview.RefreshValues());
     }
 
     [Fact]
@@ -126,13 +169,32 @@ public class ExpressionFieldPreviewTests
         }
 
         // Act
-        preview.Update("/a == Now", Rows("/a == Now"), '/', Variables, host.Validate, host.Preview, GetHints);
-        preview.RefreshValues(Rows("/a == Now"));
-        preview.Update("/a == Now", Rows("/a == Now"), '/', Variables, host.Validate, host.Preview, GetHints);
+        preview.Update("/a == Now", Rows("/a == Now"), Variables, host.Validate, host.Preview, GetHints);
+        preview.RefreshValues();
+        preview.Update("/a == Now", Rows("/a == Now"), Variables, host.Validate, host.Preview, GetHints);
 
         // Assert
         Assert.Equal(1, hintCount);
         Assert.Equal("Use >=", preview.Hints[0]);
         Assert.Equal(2, preview.Hints.Count);
+    }
+
+    [Fact]
+    public void WhenTheValueAHintDependsOnChanges_ThenTheRefreshReportsTheChangedHints()
+    {
+        // Arrange
+        object? limit = null;
+        var preview = new ExpressionFieldPreview();
+        preview.Update("/Weather/Gust > Limit", Rows("/Weather/Gust > Limit"), Variables, validate: null, _ => () => new ExpressionPreview(null, limit, null));
+        var hintsWithoutValue = preview.Hints;
+
+        // Act
+        limit = 8.0;
+        var isChanged = preview.RefreshValues();
+
+        // Assert
+        Assert.Empty(hintsWithoutValue);
+        Assert.True(isChanged);
+        Assert.Contains("never equals", Assert.Single(preview.Hints));
     }
 }

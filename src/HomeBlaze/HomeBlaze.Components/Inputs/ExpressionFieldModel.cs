@@ -20,11 +20,8 @@ internal sealed class ExpressionFieldModel
     public ExpressionFieldModel(string? text)
     {
         Load(text);
-        IsAdvanced = !CanShowSimple;
         _ownerValue = Text;
     }
-
-    public char PathSeparator { get; } = '/';
 
     /// <summary>The variables the host declares; default stands for <c>value</c> and <c>subject</c>.</summary>
     public ImmutableArray<string> Variables
@@ -43,8 +40,13 @@ internal sealed class ExpressionFieldModel
     /// <summary>The rows as they are written in <see cref="Text"/>.</summary>
     public IReadOnlyList<ExpressionRow> Rows => _rows;
 
-    /// <summary>Whether a row holds an edit that is not part of <see cref="Text"/>, because it is invalid or not finished.</summary>
-    public bool HasPendingRow => _pending.Exists(pending => pending is not null);
+    /// <summary>
+    /// Whether a row holds an edit that is not part of <see cref="Text"/>, because it is invalid or not finished, or a
+    /// row of the text has no path or no value yet.
+    /// </summary>
+    public bool HasPendingRow =>
+        _pending.Exists(static pending => pending is not null) ||
+        _rows.Exists(static row => row.Path.Length == 0 || row.Value.Length == 0);
 
     /// <summary>
     /// Takes the value of the owner of the field and loads it only when it differs from both the value the owner passed
@@ -72,7 +74,7 @@ internal sealed class ExpressionFieldModel
         Text = text ?? string.Empty;
         CanShowSimple = ExpressionRows.TryParse(Text, out var rows);
         _rows = [.. rows];
-        _pending = [.. _rows.Select(_ => (PendingRow?)null)];
+        _pending = CreatePending(_rows.Count);
         if (!CanShowSimple)
         {
             IsAdvanced = true;
@@ -82,7 +84,7 @@ internal sealed class ExpressionFieldModel
     public void ShowAdvanced()
     {
         IsAdvanced = true;
-        _pending = [.. _rows.Select(_ => (PendingRow?)null)];
+        _pending = CreatePending(_rows.Count);
     }
 
     /// <summary>Shows the rows; false when the text does not have the simple form.</summary>
@@ -100,28 +102,36 @@ internal sealed class ExpressionFieldModel
     /// <summary>The row as the user sees it: the pending edit when there is one, otherwise the row of the text.</summary>
     public ExpressionRow GetDisplayRow(int index) => _pending[index]?.Row ?? _rows[index];
 
-    public string? GetPathError(int index) => _pending[index]?.PathError;
-
-    public string? GetValueError(int index) => _pending[index]?.ValueError;
+    /// <summary>The pending edit of the row with its errors, or null when the row is the one of the text.</summary>
+    public PendingRow? GetPendingRow(int index) => _pending[index];
 
     /// <summary>
     /// Takes an edited row. A typed value that is not one token is written as text in quotes, so that it cannot change
-    /// the structure of the expression. A path or value that cannot be written as typed stays a pending edit of the row,
-    /// with its error when it is invalid, until a later edit of the row is valid: <see cref="Text"/> does not change.
-    /// A path that is not finished, such as a lone separator, is pending without an error.
+    /// the structure of the expression; a value the row already has is written as it is. A path or value that cannot be
+    /// written as typed stays a pending edit of the row, with its error when it is invalid, until a later edit of the row
+    /// is valid: <see cref="Text"/> does not change. A path that is not finished, such as a lone separator, is pending
+    /// without an error. An applied edit that changes the row writes every row again, so the white space and the case of
+    /// the combinators of the other rows take their written form; their meaning stays the same.
     /// </summary>
-    public void SetRow(int index, ExpressionRow row)
+    /// <returns>Whether <see cref="Text"/> changed.</returns>
+    public bool SetRow(int index, ExpressionRow row)
     {
-        var check = Check(row);
-        if (check.IsApplicable)
+        var pending = Check(row, _rows[index], out var applied);
+        if (pending is not null)
         {
-            _rows[index] = check.Row;
-            _pending[index] = null;
-            Emit();
-            return;
+            _pending[index] = pending;
+            return false;
         }
 
-        _pending[index] = new PendingRow(row, check.PathError, check.ValueError);
+        var isChanged = applied != _rows[index];
+        _rows[index] = applied;
+        _pending[index] = null;
+        if (isChanged)
+        {
+            Emit();
+        }
+
+        return isChanged;
     }
 
     public void AddRow()
@@ -151,25 +161,39 @@ internal sealed class ExpressionFieldModel
         CanShowSimple = true;
     }
 
-    private RowCheck Check(ExpressionRow row)
+    // Null when the row can be written into the text as the applied row. Only a value that differs from the one the text
+    // holds is normalized: a loaded bare path such as Sibling/Value is a valid relative lookup, and quoting it when another
+    // part of the row changes would turn a comparison against a live value into a comparison against text.
+    private PendingRow? Check(ExpressionRow row, ExpressionRow current, out ExpressionRow applied)
     {
+        applied = row;
         var path = row.Path.Trim();
         if (path.Length > 0 && !IsFinishedPath(path))
         {
-            return new RowCheck(false, row, IsUnfinishedPath(path) ? null : $"Not a valid path: {path}", null);
+            return new PendingRow(row, IsUnfinishedPath(path) ? null : $"Not a valid path: {path}", null);
         }
 
-        var (value, valueError) = NormalizeValue(row.Value.Trim());
-        return valueError is null
-            ? new RowCheck(true, row with { Path = path, Value = value }, null, null)
-            : new RowCheck(false, row, null, valueError);
+        var value = row.Value.Trim();
+        if (value != current.Value)
+        {
+            var (normalized, valueError) = NormalizeValue(value);
+            if (valueError is not null)
+            {
+                return new PendingRow(row, null, valueError);
+            }
+
+            value = normalized;
+        }
+
+        applied = row with { Path = path, Value = value };
+        return null;
     }
 
     private bool IsFinishedPath(string path) =>
         !IsUnfinishedPath(path) && IsSingleToken(path) && ExpressionRows.IsPath(path) && ParsesText($"{path} == 1");
 
     private bool IsUnfinishedPath(string path) =>
-        path.EndsWith(PathSeparator) || path is "." or ".." || path.Count(c => c == '[') > path.Count(c => c == ']');
+        path.EndsWith(ExpressionRows.PathSeparator) || path is "." or ".." || path.Count(c => c == '[') > path.Count(c => c == ']');
 
     private (string Value, string? Error) NormalizeValue(string value)
     {
@@ -203,7 +227,7 @@ internal sealed class ExpressionFieldModel
 
     // A token with the path separator or an index is a path lookup unless it starts like a path.
     private bool IsPathLikeText(string value) =>
-        (value.Contains(PathSeparator) || value.Contains('[')) &&
+        (value.Contains(ExpressionRows.PathSeparator) || value.Contains('[')) &&
         !double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _) &&
         !StartsLikePath(value);
 
@@ -211,8 +235,8 @@ internal sealed class ExpressionFieldModel
     private bool StartsLikePath(string value)
     {
         var path = value.StartsWith('-') ? value[1..] : value;
-        return path.StartsWith(PathSeparator) || path.StartsWith("." + PathSeparator) || path.StartsWith(".." + PathSeparator) ||
-            (ParsedExpression.TryParse(path, PathSeparator, Variables, out var expression, out _) &&
+        return path.StartsWith(ExpressionRows.PathSeparator) || path.StartsWith("./") || path.StartsWith("../") ||
+            (ParsedExpression.TryParse(path, ExpressionRows.PathSeparator, Variables, out var expression, out _) &&
              expression.SinglePath is { } singlePath &&
              expression.TryGetVariable(singlePath, out _, out _));
     }
@@ -230,7 +254,7 @@ internal sealed class ExpressionFieldModel
 
     private bool Parses(string operand) => ParsesText($"x == {operand}");
 
-    private bool ParsesText(string text) => ParsedExpression.TryParse(text, PathSeparator, Variables, out _, out _);
+    private bool ParsesText(string text) => ParsedExpression.TryParse(text, ExpressionRows.PathSeparator, Variables, out _, out _);
 
     private static bool StartsLikeNumber(string value) =>
         char.IsDigit(value[0]) || (value[0] is '-' or '+' or '.' && value.Length > 1);
@@ -242,7 +266,17 @@ internal sealed class ExpressionFieldModel
     private static bool IsSingleToken(string text) =>
         ExpressionTokens.Split(text) is [var token] && token == text;
 
-    private sealed record PendingRow(ExpressionRow Row, string? PathError, string? ValueError);
+    private static List<PendingRow?> CreatePending(int count)
+    {
+        var pending = new List<PendingRow?>(count);
+        for (var index = 0; index < count; index++)
+        {
+            pending.Add(null);
+        }
 
-    private sealed record RowCheck(bool IsApplicable, ExpressionRow Row, string? PathError, string? ValueError);
+        return pending;
+    }
+
+    /// <summary>An edit of a row that is not part of <see cref="Text"/>, with the error of its path or value when it is invalid.</summary>
+    public sealed record PendingRow(ExpressionRow Row, string? PathError, string? ValueError);
 }

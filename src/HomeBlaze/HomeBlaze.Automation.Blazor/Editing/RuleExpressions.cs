@@ -1,5 +1,6 @@
 using HomeBlaze.Components.Abstractions.TimeZones;
 using HomeBlaze.Components.Inputs;
+using Namotion.Interceptor.Expressions;
 
 namespace HomeBlaze.Automation.Blazor.Editing;
 
@@ -24,14 +25,23 @@ public sealed class RuleExpressions(Automation automation, string ruleKey, bool 
 
     public string? ValidateTemplate(string text) => AutomationValidator.ValidateTemplate(text, allowsEvent);
 
-    /// <summary>The value and the result of an expression with the current values, or null when it is invalid.</summary>
-    public ExpressionPreview? Preview(string text)
-    {
-        var preview = AutomationPreview.Evaluate(automation, ruleKey, text, allowsEvent, timeZone);
-        return preview.Error is null ? new ExpressionPreview(preview.Result, preview.Value, preview.Text) : null;
-    }
+    /// <summary>
+    /// Prepares an expression for its preview: the function gives the value and the result with the current values each
+    /// time it is called. Null when the expression is invalid.
+    /// </summary>
+    public Func<ExpressionPreview>? Preview(string text) =>
+        AutomationPreview.TryParseExpression(text, allowsEvent, out var parsed, out _) ? () => Evaluate(parsed) : null;
 
-    /// <summary>The template rendered with the current values, or null when it is invalid.</summary>
-    public string? RenderTemplate(string text) =>
-        AutomationPreview.Render(automation, ruleKey, text, allowsEvent) is { Error: null } preview ? preview.Text : null;
+    /// <summary>
+    /// Prepares a template for its preview: the function renders it with the current values each time it is called.
+    /// Null when the template is invalid.
+    /// </summary>
+    public Func<string?>? Template(string text) =>
+        AutomationPreview.TryParseTemplate(text, allowsEvent, out var parsed, out _) ? () => AutomationPreview.Render(automation, ruleKey, parsed).Text : null;
+
+    private ExpressionPreview Evaluate(ParsedExpression parsed)
+    {
+        var preview = AutomationPreview.Evaluate(automation, ruleKey, parsed, timeZone);
+        return new ExpressionPreview(preview.Result, preview.Value, preview.Text);
+    }
 }

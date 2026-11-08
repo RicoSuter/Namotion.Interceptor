@@ -1822,7 +1822,7 @@ namespace HomeBlaze.Components.Inputs
         [Microsoft.AspNetCore.Components.Parameter]
         public string Lead { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public System.Func<string, HomeBlaze.Components.Inputs.ExpressionPreview?>? Preview { get; set; }
+        public System.Func<string, System.Func<HomeBlaze.Components.Inputs.ExpressionPreview>?>? Preview { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string TestId { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -1846,8 +1846,9 @@ namespace HomeBlaze.Components.Inputs
     }
     public sealed class PreviewTicker : System.IDisposable
     {
-        public PreviewTicker(System.TimeProvider timeProvider, System.Func<System.Func<System.Threading.Tasks.Task>, System.Threading.Tasks.Task> invokeAsync, System.Func<System.Threading.Tasks.Task> tick) { }
+        public PreviewTicker(System.TimeProvider timeProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Components.Inputs.PreviewTicker> logger) { }
         public void Dispose() { }
+        public System.IDisposable Subscribe(System.Func<System.Func<System.Threading.Tasks.Task>, System.Threading.Tasks.Task> invokeAsync, System.Func<System.Threading.Tasks.Task> tick) { }
     }
     public class SubjectPathField : Microsoft.AspNetCore.Components.ComponentBase
     {
