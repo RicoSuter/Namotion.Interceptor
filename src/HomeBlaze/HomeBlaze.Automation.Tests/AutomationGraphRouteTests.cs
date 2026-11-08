@@ -86,6 +86,25 @@ public class AutomationGraphRouteTests
         Assert.Equal(1, host.Blinds.CloseCount);
     }
 
+    [Fact]
+    public async Task WhenAWatchedPropertyChanges_ThenNoPathIsResolved()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(Rule("/Weather/Gust > 8"));
+        var resolutions = 0;
+        host.Automation.Runtime!.Engine.Routes.BeforePublication = () => resolutions++;
+
+        // Act
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        host.Weather.Gust = 0;
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(0, resolutions);
+    }
+
     // A property added with a null value publishes no change, so the attach of the property is what routes a graph change.
     [Fact]
     public async Task WhenAPropertyIsAddedAtRunTimeWithANullValue_ThenAPathToItResolvesAndTheValueIsWatched()
