@@ -511,6 +511,24 @@ public class ParsedExpressionParseTests
         Assert.Equal("variables", templateException.ParamName);
     }
 
+    [Theory]
+    [InlineData("Temperature > 20", null, 20d)]
+    [InlineData("0.1 <= Temperature", 0.1, null)]
+    [InlineData("Temperature == 1e3", null, 1000d)]
+    [InlineData("Temperature == -5", null, -5d)]
+    [InlineData("Temperature == '2026-11-06'", null, null)]
+    [InlineData("Temperature > Limit", null, null)]
+    public void WhenComparisonHasANumberLiteral_ThenItHoldsTheDoubleOfTheLiteral(string text, double? expectedLeft, double? expectedRight)
+    {
+        // Act
+        Assert.True(ParsedExpression.TryParse(text, '/', out var expression, out var error), error);
+
+        // Assert
+        var comparison = Assert.IsType<ComparisonNode>(expression.Body);
+        Assert.Equal(expectedLeft, comparison.LeftLiteral.Number);
+        Assert.Equal(expectedRight, comparison.RightLiteral.Number);
+    }
+
     [Fact]
     public void WhenVariablesAreNotInitialized_ThenParsingThrows()
     {
