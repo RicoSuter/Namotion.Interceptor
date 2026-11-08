@@ -13,7 +13,7 @@
 @{
     // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var property = Property;
-    var value = property?.GetValue();
+    var value = property is null ? null : Permissions.GetValue(property);
     var isOn = value as bool? ?? false;
     // A pending toggle shows the state it goes to, boxed only then, and is read back from the property when it ends.
     var shown = _pending is { } target ? target : value;
@@ -173,7 +173,7 @@ else
         _tileClickCallback = EventCallback.Factory.Create<MouseEventArgs>(this, ToggleFromTileAsync);
     }
 
-    private Task ToggleFromTileAsync() => ToggleAsync(!(Property?.GetValue() as bool? ?? false));
+    private Task ToggleFromTileAsync() => ToggleAsync(!(Property is { } property && Permissions.GetValue(property) is true));
 
     private async Task ToggleAsync(bool requested)
     {
@@ -200,7 +200,7 @@ else
             _pending = null;
 
             // The switch keeps the state the user gave it, and only a new key makes it show the property again.
-            if ((property.GetValue() as bool? ?? false) != requested)
+            if ((Permissions.GetValue(property) as bool? ?? false) != requested)
             {
                 _resetKey = new object();
             }

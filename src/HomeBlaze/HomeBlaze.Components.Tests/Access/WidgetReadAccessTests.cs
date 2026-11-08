@@ -168,6 +168,29 @@ public sealed partial class WidgetReadAccessTests : BunitContext, IAsyncLifetime
         Assert.Contains(Text, rendered.Markup);
     }
 
+    [Theory]
+    [InlineData(typeof(Gauge), nameof(AccessTestDevice.Level), 0.8)]
+    [InlineData(typeof(Progress), nameof(AccessTestDevice.Level), 0.8)]
+    [InlineData(typeof(Slider), nameof(AccessTestDevice.Level), 0.8)]
+    [InlineData(typeof(Switch), nameof(AccessTestDevice.Flag), false)]
+    [InlineData(typeof(Select), nameof(AccessTestDevice.Mode), AccessTestMode.Off)]
+    public void WhenTheUserIsShownAValueOtherwiseThanItIs_ThenTheWidgetRendersTheShownValue(Type widgetType, string member, object shownValue)
+    {
+        // Arrange
+        var path = WidgetTestGraph.PathOf(member);
+        var property = _graph.GetProperty(member);
+        _permissions.ShownValues[property] = shownValue;
+        var shown = RenderBound(widgetType, path);
+        _permissions.ShownValues.Clear();
+
+        // Act
+        property.SetValue(shownValue);
+        var actual = RenderBound(widgetType, path);
+
+        // Assert
+        Assert.Equal(actual, shown);
+    }
+
     [Fact]
     public void WhenTheLabelOfAWidgetReadsAPropertyTheUserMayNotRead_ThenItsValueNeverRenders()
     {

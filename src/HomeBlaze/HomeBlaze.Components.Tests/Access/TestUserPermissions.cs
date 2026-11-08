@@ -41,9 +41,14 @@ public sealed class TestUserPermissions : IUserPermissions
     /// </summary>
     public HashSet<string> RolesWithDenyRules { get; init; } = [];
 
+    /// <summary>The members whose value the viewer is shown otherwise than it is, each with the value shown.</summary>
+    public Dictionary<RegisteredSubjectProperty, object?> ShownValues { get; init; } = [];
+
     public event Action? Changed;
 
     public bool CanRead(RegisteredSubjectProperty member) => !CannotRead.Contains(member);
+
+    public object? GetValue(RegisteredSubjectProperty member) => ShownValues.TryGetValue(member, out var value) ? value : member.GetValue();
 
     public bool CanWrite(RegisteredSubjectProperty member) => !CannotWrite.Contains(member);
 

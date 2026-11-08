@@ -18,7 +18,7 @@
 }
 else
 {
-    var value = property?.GetValue();
+    var value = property is null ? null : Permissions.GetValue(property);
     var canWrite = isNumber && PropertyWriter.IsWritable(property!, value);
     var isDenied = canWrite && !PropertyWriter.MayWrite(Permissions, property!);
     var label = ValueReader.GetLabel(property, Label, Path);
@@ -156,7 +156,7 @@ else
         Writer.TryWrite(property, SliderMath.ToPropertyValue(sliderValue, range, step, scale, property.Type));
 
         // The slider keeps the position the user gave it, and only a new key makes it show the property again.
-        if (Math.Abs(SliderMath.ToSliderValue(property.GetValue(), range, scale) - sliderValue) > step * scale / 2)
+        if (Math.Abs(SliderMath.ToSliderValue(Permissions.GetValue(property), range, scale) - sliderValue) > step * scale / 2)
         {
             _resetKey = new object();
         }
