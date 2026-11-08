@@ -14,10 +14,16 @@ internal static class PermissionServiceCollectionExtensions
         services.AddScoped<AuthenticationStateProvider, HomeBlazeRevalidatingAuthenticationStateProvider>();
         services.AddScoped<CurrentUser>();
         services.AddScoped<IUserPermissions, PolicyUserPermissions>();
-        // Every call acts as the person signed in at that moment, so that a circuit signed out meanwhile, by the person or
-        // by revalidation, refuses every change.
-        services.AddScoped<IUserAdministration>(serviceProvider =>
-            new UserAdministration(serviceProvider.GetRequiredService<UserStore>(), serviceProvider.GetRequiredService<CurrentUser>().GetPersonUserId));
+        services.AddScoped<IUserAdministration>(serviceProvider => CreateUserAdministration(
+            serviceProvider.GetRequiredService<UserStore>(), serviceProvider.GetRequiredService<CurrentUser>()));
         services.AddSingleton<IRequestUserPermissionsFactory, RequestUserPermissionsFactory>();
     }
+
+    /// <summary>
+    /// Creates the user administration of a circuit: every call acts as the person signed in at that moment, so that a
+    /// circuit signed out meanwhile, by the person or by revalidation, refuses every change, as it does while the person
+    /// must change their password.
+    /// </summary>
+    internal static UserAdministration CreateUserAdministration(UserStore userStore, CurrentUser currentUser) =>
+        new(userStore, () => currentUser.UserId is { } userId && !userStore.RequiresPasswordChange(userId) ? userId : null);
 }

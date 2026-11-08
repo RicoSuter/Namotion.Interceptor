@@ -55,7 +55,7 @@ public sealed class AccountGateTests : AccountComponentsTestContext
     {
         // Arrange
         var graph = await UseGraphAsync(roles: [BuiltInRoles.EverythingName]);
-        graph.SignInTestUser(mustChangePassword: true);
+        await graph.SignInTestUserAsync(mustChangePassword: true);
 
         // Act
         var gate = RenderGate();
@@ -156,7 +156,7 @@ public sealed class AccountGateTests : AccountComponentsTestContext
         await gate.WaitForAssertionAsync(() => Assert.NotEmpty(gate.FindAll("[data-testid=app]")));
 
         // Act
-        graph.SignInTestUser(mustChangePassword: true);
+        await graph.SignInTestUserAsync(mustChangePassword: true);
 
         // Assert
         await gate.WaitForAssertionAsync(() =>
@@ -166,7 +166,7 @@ public sealed class AccountGateTests : AccountComponentsTestContext
         });
 
         // Act
-        graph.SignInTestUser(mustChangePassword: false);
+        await graph.SignInTestUserAsync(mustChangePassword: false);
 
         // Assert
         await gate.WaitForAssertionAsync(() =>
@@ -223,7 +223,7 @@ public sealed class AccountGateTests : AccountComponentsTestContext
 
         // Act
         authorization.Failure = completesAfterTheGateAllowed ? new OperationCanceledException() : new InvalidOperationException("failed");
-        graph.SignInTestUser(mustChangePassword: false);
+        await graph.SignInTestUserAsync(mustChangePassword: false);
 
         // Assert
         await gate.WaitForAssertionAsync(() => Assert.Empty(gate.FindAll("[data-testid=app]")));

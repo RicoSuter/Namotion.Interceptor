@@ -6,12 +6,11 @@ namespace HomeBlaze.Authentication.Blazor;
 /// <summary>Who a principal is to the policy: a signed-in person, a visitor who is not signed in, or not known yet.</summary>
 internal sealed class UserIdentity
 {
-    private UserIdentity(string? userId, bool isSignedIn, bool isKnown, bool mustChangePassword = false)
+    private UserIdentity(string? userId, bool isSignedIn, bool isKnown)
     {
         UserId = userId;
         IsSignedIn = isSignedIn;
         IsKnown = isKnown;
-        MustChangePassword = mustChangePassword;
     }
 
     /// <summary>The identity while the authentication state is not known; it holds no roles.</summary>
@@ -25,8 +24,11 @@ internal sealed class UserIdentity
 
     public bool IsSignedIn { get; }
 
-    /// <summary>Whether the signed-in person must change their password before they may see or do anything.</summary>
-    public bool MustChangePassword { get; }
+    /// <summary>
+    /// True for every signed-in person, as only the <see cref="UserStore"/> knows whether they must change their password;
+    /// <see cref="RequiresPasswordChange"/> asks it.
+    /// </summary>
+    public bool MustChangePassword => IsSignedIn;
 
     private bool IsKnown { get; }
 
@@ -34,16 +36,20 @@ internal sealed class UserIdentity
 
     public static UserIdentity From(ClaimsPrincipal principal, string userIdClaimType) =>
         principal.Identity?.IsAuthenticated == true
-            ? new UserIdentity(
-                principal.FindFirstValue(userIdClaimType),
-                isSignedIn: true,
-                isKnown: true,
-                mustChangePassword: principal.HasClaim(claim => claim.Type == HomeBlazeClaimTypes.MustChangePassword))
+            ? new UserIdentity(principal.FindFirstValue(userIdClaimType), isSignedIn: true, isKnown: true)
             : SignedOut;
+
+    /// <summary>
+    /// Whether the signed-in person must change their password before they may see or do anything, as
+    /// <see cref="UserStore.RequiresPasswordChange"/> says now; also true for a signed-in principal that names no user.
+    /// False for a visitor and while unknown, who hold the roles of <see cref="GetRoles"/>.
+    /// </summary>
+    public bool RequiresPasswordChange(UserStore userStore) =>
+        IsSignedIn && (UserId is null || userStore.RequiresPasswordChange(UserId));
 
     /// <summary>Gets the roles, the kind and whether the person must change their password, which the policy is decided from.</summary>
     public (IReadOnlyCollection<string> Roles, PrincipalKind Kind, bool MustChangePassword) GetPolicyInputs(UserStore userStore) =>
-        (GetRoles(userStore), Kind, MustChangePassword);
+        (GetRoles(userStore), Kind, RequiresPasswordChange(userStore));
 
     /// <summary>
     /// Gets the roles as stored now: those the person acts with (see <see cref="UserStore.GetRoles"/>), those of

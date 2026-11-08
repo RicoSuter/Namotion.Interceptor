@@ -41,10 +41,9 @@ internal static class SessionValidation
 
         var services = context.HttpContext.RequestServices;
         var claimTypes = services.GetRequiredService<IOptions<IdentityOptions>>().Value.ClaimsIdentity;
-        var identity = UserIdentity.From(principal, claimTypes.UserIdClaimType);
+        var userId = principal.FindFirstValue(claimTypes.UserIdClaimType);
         var securityStamp = principal.FindFirstValue(claimTypes.SecurityStampClaimType);
-        if (identity.UserId is { } userId &&
-            services.GetRequiredService<UserStore>().IsSessionAllowed(userId, securityStamp, identity.MustChangePassword))
+        if (userId is not null && services.GetRequiredService<UserStore>().IsSessionAllowed(userId, securityStamp))
         {
             return;
         }

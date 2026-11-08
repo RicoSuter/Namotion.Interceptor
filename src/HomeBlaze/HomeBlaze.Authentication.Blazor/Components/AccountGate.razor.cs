@@ -7,16 +7,19 @@ using Microsoft.AspNetCore.Components.Endpoints;
 using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.AspNetCore.Components.Routing;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.Options;
 
 namespace HomeBlaze.Authentication.Blazor.Components;
 
 /// <summary>
 /// The one gate of the app: renders <see cref="ChildContent"/>, the router of the app, only to a person who passes
-/// <see cref="HomeBlazeAccessRequirement"/> and need not change their password. Anybody else gets only the frame of
+/// <see cref="HomeBlazeAccessRequirement"/> and need not change their password, as the <see cref="UserStore"/> holds now.
+/// Anybody else gets only the frame of
 /// <see cref="ShellLayout"/> with the dialog that signs them in, redeems their setup code on
 /// <see cref="AccountEndpoints.SetupPath"/>, or sets their password; nothing while the authentication state is not known.
-/// It decides again when the authentication state, the roles of the person or of <c>anonymous</c>, or the policies change.
+/// It decides again when the authentication state, the person or <c>anonymous</c> in the store, or the policies change.
 /// A static page that allows anonymous access itself, such as the error page, passes, as no circuit opens for it.
 /// </summary>
 public sealed partial class AccountGate : ComponentBase, IDisposable
@@ -38,6 +41,12 @@ public sealed partial class AccountGate : ComponentBase, IDisposable
 
     [Inject]
     private IUserPermissions Permissions { get; set; } = default!;
+
+    [Inject]
+    private UserStore UserStore { get; set; } = default!;
+
+    [Inject]
+    private IOptions<IdentityOptions> IdentityOptions { get; set; } = default!;
 
     [Inject]
     private RequestTransport Transport { get; set; } = default!;
@@ -163,7 +172,7 @@ public sealed partial class AccountGate : ComponentBase, IDisposable
         }
 
         var user = (await AuthenticationState).User;
-        if (user.Identity?.IsAuthenticated == true && user.HasClaim(claim => claim.Type == HomeBlazeClaimTypes.MustChangePassword))
+        if (UserIdentity.From(user, IdentityOptions.Value.ClaimsIdentity.UserIdClaimType).RequiresPasswordChange(UserStore))
         {
             _returnUrl = Navigation.GetPathAndQuery();
             return AccountGateOutcome.SetPassword;

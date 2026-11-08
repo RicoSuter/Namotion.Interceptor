@@ -34,7 +34,10 @@ internal sealed record UserEntry
     /// <summary>The security stamp as stored; it must follow every change of the stored one, or the sessions of the user are refused.</summary>
     public string? SecurityStamp { get; init; }
 
-    /// <summary>Whether a session of the user may do nothing but set a password, as <see cref="ApplicationUser.RequiresPasswordChange"/> decides.</summary>
+    /// <summary>
+    /// Whether a session of the user may do nothing but set a password: the user must change it, or signs in with an empty
+    /// one, which confines the session even where <see cref="MustChangePassword"/> is false, such as in a database edited by hand.
+    /// </summary>
     public bool RequiresPasswordChange => MustChangePassword || AllowsEmptyPassword;
 
     public bool IsLockedOut(DateTimeOffset now) => LockoutEnd > now;

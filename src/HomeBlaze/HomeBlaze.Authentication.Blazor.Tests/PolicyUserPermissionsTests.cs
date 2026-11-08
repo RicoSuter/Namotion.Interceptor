@@ -56,11 +56,11 @@ public class PolicyUserPermissionsTests
         // Arrange
         await using var graph = await PermissionsTestGraph.CreateAsync(roles: [BuiltInRoles.EverythingName]);
         var temperature = graph.Device.TryGetRegisteredSubject()!.TryGetProperty("Temperature")!;
-        var administration = new UserAdministration(graph.UserStore, graph.CurrentUser.GetPersonUserId);
+        var administration = PermissionServiceCollectionExtensions.CreateUserAdministration(graph.UserStore, graph.CurrentUser);
         Assert.True(graph.Permissions.CanRead(temperature));
 
         // Act
-        graph.SignInTestUser(mustChangePassword: true);
+        await graph.SignInTestUserAsync(mustChangePassword: true);
         await AsyncTestHelpers.WaitUntilAsync(() => !graph.Permissions.CanRead(temperature));
         var added = await administration.AddUserAsync("kid", null, [BuiltInRoles.ReaderName], CancellationToken.None);
 
@@ -467,10 +467,13 @@ public class PolicyUserPermissionsTests
     // Sets the authentication state of the circuit scope to the principal of the user named userName, as the circuit does.
     private static async Task<IHostEnvironmentAuthenticationStateProvider> SignInAsync(IServiceProvider services, string userName)
     {
-        var user = (await services.GetRequiredService<UserManager<ApplicationUser>>().FindByNameAsync(userName))!;
+        var userManager = services.GetRequiredService<UserManager<ApplicationUser>>();
+        var user = (await userManager.FindByNameAsync(userName))!;
         // As after setting a password, without which the person may do nothing.
         user.MustChangePassword = false;
         user.AllowsEmptyPassword = false;
+        Assert.True((await userManager.UpdateAsync(user)).Succeeded);
+        await services.GetRequiredService<UserStore>().RefreshUserAsync(user.Id, CancellationToken.None);
         var principal = await services.GetRequiredService<IUserClaimsPrincipalFactory<ApplicationUser>>().CreateAsync(user);
         var authenticationState = (IHostEnvironmentAuthenticationStateProvider)services.GetRequiredService<AuthenticationStateProvider>();
         authenticationState.SetAuthenticationState(Task.FromResult(new AuthenticationState(principal)));

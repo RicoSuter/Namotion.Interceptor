@@ -67,20 +67,16 @@ internal sealed class SetupCodeSignIn(
         }
 
         AuthenticationEvents.SetupCodeRedeemed(logger, user.UserName ?? user.Id);
-        if (!await StorePasswordAsync(user, newPassword))
-        {
-            // Signed in with the required password change, as the code is spent: they set the password in the app.
-            // In memory only: the stored flag is already true for every user that holds a code, and a persisted write would need a stamp renewal.
-            user.MustChangePassword = true;
-        }
-
+        // When storing fails, the user still must change their password, as every user that holds a code must: they are
+        // signed in, as the code is spent, and set the password in the app.
+        await StorePasswordAsync(user, newPassword);
         await signInManager.SignInAsync(user, isPersistent: false);
         await userStore.RecordSignInAsync(user.Id, CancellationToken.None);
         AuthenticationEvents.SignInSucceeded(logger, user.UserName ?? user.Id, SignInRefusals.GetRemoteAddress(context));
         return (SetupCodeOutcome.SignedIn, []);
     }
 
-    private async Task<bool> StorePasswordAsync(ApplicationUser user, string newPassword)
+    private async Task StorePasswordAsync(ApplicationUser user, string newPassword)
     {
         var result = await userManager.HasPasswordAsync(user)
             ? IdentityResult.Failed(new IdentityError { Code = "HasPassword", Description = "The user has a password." })
@@ -88,13 +84,12 @@ internal sealed class SetupCodeSignIn(
         if (result.Succeeded)
         {
             AuthenticationEvents.PasswordChanged(logger, user.UserName ?? user.Id);
-            return true;
+            return;
         }
 
         logger.LogWarning(
             "Could not {Step} of user {UserId}: {Errors}", "store the password chosen with the setup code", user.Id,
             string.Join(", ", result.Errors.Select(error => error.Code)));
-        return false;
     }
 
     private async Task<IReadOnlyList<string>> GetPolicyErrorsAsync(string newPassword)

@@ -122,14 +122,13 @@ public sealed class UserStore : IMcpClientAccess
 
     /// <summary>
     /// Whether a session of the user with <paramref name="userId"/> may go on, as the store knows without reading the
-    /// database: the user exists, no administrator locked them, the session carries their security stamp as stored now,
-    /// see <paramref name="securityStamp"/>, and they need not change their password, as after a reset or while they sign
-    /// in with an empty one, unless the session is one that must change it, see <paramref name="sessionMustChangePassword"/>.
+    /// database: the user exists, is a person, no administrator locked them, and the session carries their security stamp
+    /// as stored now. A session of a person who must change their password goes on, confined by
+    /// <see cref="RequiresPasswordChange"/>.
     /// </summary>
     /// <param name="userId">The id of the user of the session.</param>
     /// <param name="securityStamp">The security stamp the session carries, or null when it carries none.</param>
-    /// <param name="sessionMustChangePassword">Whether the session is one that must change the password.</param>
-    public bool IsSessionAllowed(string userId, string? securityStamp, bool sessionMustChangePassword)
+    public bool IsSessionAllowed(string userId, string? securityStamp)
     {
         ArgumentNullException.ThrowIfNull(userId);
 
@@ -138,8 +137,18 @@ public sealed class UserStore : IMcpClientAccess
             return false;
         }
 
-        return string.Equals(securityStamp, user.SecurityStamp, StringComparison.Ordinal) &&
-            (sessionMustChangePassword || !user.RequiresPasswordChange);
+        return string.Equals(securityStamp, user.SecurityStamp, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Whether the person with <paramref name="userId"/> may do nothing but set a password: they must change it, as after
+    /// a reset or a setup code, or sign in with an empty one. True for a user the store does not know.
+    /// </summary>
+    public bool RequiresPasswordChange(string userId)
+    {
+        ArgumentNullException.ThrowIfNull(userId);
+
+        return !_state.ById.TryGetValue(userId, out var user) || user.RequiresPasswordChange;
     }
 
     /// <summary>Gets the id of the user named <paramref name="userName"/>, or null.</summary>

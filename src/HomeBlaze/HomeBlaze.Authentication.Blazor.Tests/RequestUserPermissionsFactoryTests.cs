@@ -37,9 +37,10 @@ public class RequestUserPermissionsFactoryTests
         await using var graph = await PermissionsTestGraph.CreateAsync(roles: [BuiltInRoles.EverythingName]);
         var temperature = graph.Device.TryGetRegisteredSubject()!.TryGetProperty("Temperature")!;
         var factory = graph.Services.GetRequiredService<IRequestUserPermissionsFactory>();
+        await graph.SetMustChangePasswordAsync(true);
 
         // Act
-        var permissions = factory.Create(graph.CreateTestUserPrincipal(mustChangePassword: true));
+        var permissions = factory.Create(graph.CreateTestUserPrincipal());
 
         // Assert
         Assert.False(permissions.CanRead(temperature));

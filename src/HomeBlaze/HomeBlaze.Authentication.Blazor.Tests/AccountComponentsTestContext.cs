@@ -9,6 +9,8 @@ using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.AspNetCore.Components.Infrastructure;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.AspNetCore.Components.Rendering;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.DependencyInjection;
 using MudBlazor;
 using MudBlazor.Services;
@@ -60,6 +62,8 @@ public abstract class AccountComponentsTestContext : BunitContext, IAsyncLifetim
         Services.AddSingleton(_graph.Services.GetRequiredService<IAuthorizationService>());
         Services.AddSingleton(_graph.Services.GetRequiredService<AccountPasswords>());
         Services.AddSingleton(_graph.AuthenticationStateProvider);
+        Services.AddSingleton(_graph.UserStore);
+        Services.AddSingleton(_graph.Services.GetRequiredService<IOptions<IdentityOptions>>());
         return _graph;
     }
 

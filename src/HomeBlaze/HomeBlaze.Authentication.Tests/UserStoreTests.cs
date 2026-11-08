@@ -282,9 +282,9 @@ public class UserStoreTests
         Assert.True((await administration.SetLockedAsync("mom", false, CancellationToken.None)).Succeeded);
 
         // Act
-        var isOldSessionAllowed = graph.UserStore.IsSessionAllowed(momId, stampBefore, sessionMustChangePassword: true);
-        var isNewSessionAllowed = graph.UserStore.IsSessionAllowed(momId, await graph.GetSecurityStampAsync(momId), sessionMustChangePassword: true);
-        var isSessionWithoutStampAllowed = graph.UserStore.IsSessionAllowed(momId, null, sessionMustChangePassword: true);
+        var isOldSessionAllowed = graph.UserStore.IsSessionAllowed(momId, stampBefore);
+        var isNewSessionAllowed = graph.UserStore.IsSessionAllowed(momId, await graph.GetSecurityStampAsync(momId));
+        var isSessionWithoutStampAllowed = graph.UserStore.IsSessionAllowed(momId, null);
 
         // Assert
         Assert.False(isOldSessionAllowed);
@@ -694,7 +694,7 @@ public class UserStoreTests
     }
 
     [Fact]
-    public async Task WhenAUserAllowsAnEmptyPasswordButNeedNotChangeIt_ThenOnlyASessionThatMustChangeItIsAllowed()
+    public async Task WhenAUserAllowsAnEmptyPasswordButNeedNotChangeIt_ThenTheirSessionGoesOnButMustChangeIt()
     {
         // Arrange
         await using var graph = await AuthenticationTestGraph.CreateAsync();
@@ -706,12 +706,32 @@ public class UserStoreTests
         var stamp = await graph.GetSecurityStampAsync(graph.AdminUserId);
 
         // Act
-        var isConfinedSessionAllowed = graph.UserStore.IsSessionAllowed(graph.AdminUserId, stamp, sessionMustChangePassword: true);
-        var isFreeSessionAllowed = graph.UserStore.IsSessionAllowed(graph.AdminUserId, stamp, sessionMustChangePassword: false);
+        var isSessionAllowed = graph.UserStore.IsSessionAllowed(graph.AdminUserId, stamp);
+        var requiresPasswordChange = graph.UserStore.RequiresPasswordChange(graph.AdminUserId);
 
         // Assert
-        Assert.True(isConfinedSessionAllowed);
-        Assert.False(isFreeSessionAllowed);
+        Assert.True(isSessionAllowed);
+        Assert.True(requiresPasswordChange);
+    }
+
+    [Fact]
+    public async Task WhenAPersonSetsTheirPasswordOrIsUnknown_ThenOnlyTheUnknownOneMustChangeIt()
+    {
+        // Arrange
+        await using var graph = await AuthenticationTestGraph.CreateAsync();
+        await graph.AddUserAsync("mom", [BuiltInRoles.ReaderName]);
+        var momId = graph.UserStore.GetUserId("mom")!;
+        var requiredBefore = graph.UserStore.RequiresPasswordChange(momId);
+
+        // Act
+        await graph.SetPasswordAsync("mom", "Correct-Horse-1");
+        var requiredAfter = graph.UserStore.RequiresPasswordChange(momId);
+        var requiredOfUnknown = graph.UserStore.RequiresPasswordChange("unknown");
+
+        // Assert
+        Assert.True(requiredBefore);
+        Assert.False(requiredAfter);
+        Assert.True(requiredOfUnknown);
     }
 
     [Fact]

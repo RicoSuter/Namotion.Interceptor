@@ -20,7 +20,10 @@ internal sealed class FailingUserValidator : IUserValidator<ApplicationUser>
     }
 
     public Task<IdentityResult> ValidateAsync(UserManager<ApplicationUser> manager, ApplicationUser user) =>
-        Task.FromResult(IsRefusing && user.PasswordHash is not null && !user.RequiresPasswordChange()
+        Task.FromResult(IsRefusing && HasChosenPassword(user)
             ? IdentityResult.Failed(new IdentityError { Code = nameof(FailingUserValidator), Description = Error })
             : IdentityResult.Success);
+
+    private static bool HasChosenPassword(ApplicationUser user) =>
+        user.PasswordHash is not null && !user.MustChangePassword && !user.AllowsEmptyPassword;
 }

@@ -190,9 +190,12 @@ public class RevalidationTests
             Assert.True(added.Succeeded, added.Error);
 
             var scope = host.Services.CreateAsyncScope();
-            var user = (await scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>().FindByNameAsync(userName))!;
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            var user = (await userManager.FindByNameAsync(userName))!;
             // As after setting a password, without which the person may do nothing.
             user.MustChangePassword = false;
+            Assert.True((await userManager.UpdateAsync(user)).Succeeded);
+            await host.UserStore.RefreshUserAsync(user.Id, CancellationToken.None);
             var principal = await scope.ServiceProvider.GetRequiredService<IUserClaimsPrincipalFactory<ApplicationUser>>().CreateAsync(user);
             var provider = (HomeBlazeRevalidatingAuthenticationStateProvider)scope.ServiceProvider.GetRequiredService<AuthenticationStateProvider>();
             provider.SetAuthenticationState(Task.FromResult(new AuthenticationState(principal)));

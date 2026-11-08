@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using HomeBlaze.AI.Mcp;
+using HomeBlaze.Authentication.Data;
 using HomeBlaze.Authorization;
 using HomeBlaze.Services.Lifecycle;
 using Microsoft.AspNetCore.Components.Authorization;
@@ -152,11 +153,33 @@ internal sealed class PermissionsTestGraph : IAsyncDisposable
     public void SignOut() => _authenticationState.SetPrincipal(new ClaimsPrincipal(new ClaimsIdentity()));
 
     /// <summary>
-    /// Signs the person <see cref="TestUserName"/> in as the viewer, with the claim that they must change their password
-    /// when <paramref name="mustChangePassword"/>.
+    /// Stores whether the person <see cref="TestUserName"/> must change their password, as a reset or setting it does,
+    /// and signs them in as the viewer.
     /// </summary>
-    public void SignInTestUser(bool mustChangePassword = false) =>
-        _authenticationState.SetPrincipal(CreateTestUserPrincipal(UserStore.GetUserId(TestUserName)!, mustChangePassword));
+    public async Task SignInTestUserAsync(bool mustChangePassword = false)
+    {
+        await SetMustChangePasswordAsync(mustChangePassword);
+        _authenticationState.SetPrincipal(CreateTestUserPrincipal());
+    }
+
+    /// <summary>
+    /// Stores whether the person <see cref="TestUserName"/> must change their password, without changing their security
+    /// stamp, and reloads them into the store.
+    /// </summary>
+    public async Task SetMustChangePasswordAsync(bool mustChangePassword)
+    {
+        string userId;
+        await using (var scope = _services.CreateAsyncScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            var user = (await userManager.FindByNameAsync(TestUserName))!;
+            user.MustChangePassword = mustChangePassword;
+            Assert.True((await userManager.UpdateAsync(user)).Succeeded);
+            userId = user.Id;
+        }
+
+        await UserStore.RefreshUserAsync(userId, CancellationToken.None);
+    }
 
     public async ValueTask DisposeAsync()
     {
@@ -197,7 +220,9 @@ internal sealed class PermissionsTestGraph : IAsyncDisposable
         if (roles is not null)
         {
             await AddUserAsync(TestUserName, roles);
-            _authenticationState.SetPrincipal(CreateTestUserPrincipal(UserStore.GetUserId(TestUserName)!, mustChangePassword: false));
+            // As after setting a password, without which the person may do nothing.
+            await SetMustChangePasswordAsync(false);
+            _authenticationState.SetPrincipal(CreateTestUserPrincipal());
         }
 
         _currentUser = new CurrentUser(
@@ -206,19 +231,10 @@ internal sealed class PermissionsTestGraph : IAsyncDisposable
     }
 
     /// <summary>Creates the principal of the test user, as a request that the user signed in with authenticates it.</summary>
-    public ClaimsPrincipal CreateTestUserPrincipal(bool mustChangePassword = false) =>
-        CreateTestUserPrincipal(UserStore.GetUserId(TestUserName)!, mustChangePassword);
-
-    private static ClaimsPrincipal CreateTestUserPrincipal(string userId, bool mustChangePassword)
-    {
-        List<Claim> claims = [new Claim(ClaimTypes.NameIdentifier, userId), new Claim(ClaimTypes.Name, TestUserName)];
-        if (mustChangePassword)
-        {
-            claims.Add(new Claim(HomeBlazeClaimTypes.MustChangePassword, "true"));
-        }
-
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, authenticationType: "Test"));
-    }
+    public ClaimsPrincipal CreateTestUserPrincipal() =>
+        new(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, UserStore.GetUserId(TestUserName)!), new Claim(ClaimTypes.Name, TestUserName)],
+            authenticationType: "Test"));
 
     /// <summary>The authentication state of a circuit, which a test sets; not signed in until then.</summary>
     private sealed class TestAuthenticationStateProvider : AuthenticationStateProvider

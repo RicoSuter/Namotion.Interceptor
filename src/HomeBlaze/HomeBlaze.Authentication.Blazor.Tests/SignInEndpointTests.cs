@@ -344,6 +344,31 @@ public class SignInEndpointTests
     }
 
     [Fact]
+    public async Task WhenTheStoredUserMustChangeTheirPasswordWhileSignedIn_ThenTheSessionIsConfinedAtOnceAndKept()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        using var browser = host.CreateBrowser();
+        await host.SignInAsync(browser, AdminSeeding.AdminUserName);
+        Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync("/protected")).StatusCode);
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            var admin = (await userManager.FindByNameAsync(AdminSeeding.AdminUserName))!;
+            admin.MustChangePassword = true;
+            Assert.True((await userManager.UpdateAsync(admin)).Succeeded);
+        }
+
+        // Act
+        await host.UserStore.RefreshUserAsync(host.UserStore.GetUserId(AdminSeeding.AdminUserName)!, CancellationToken.None);
+        var response = await browser.GetAsync("/protected");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.True(browser.HasSessionCookie);
+    }
+
+    [Fact]
     public async Task WhenTheAdminHasAPasswordButStillAllowsAnEmptyOne_ThenAnEmptyPasswordIsRefused()
     {
         // Arrange

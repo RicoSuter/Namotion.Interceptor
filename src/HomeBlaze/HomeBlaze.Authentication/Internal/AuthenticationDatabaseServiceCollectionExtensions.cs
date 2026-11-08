@@ -41,7 +41,9 @@ internal static class AuthenticationDatabaseServiceCollectionExtensions
             .AddEntityFrameworkStores<AuthenticationDbContext>()
             .AddSignInManager()
             .AddDefaultTokenProviders()
-            .AddClaimsPrincipalFactory<HomeBlazeClaimsPrincipalFactory>();
+            // In place of the factory that AddRoles registers, which adds role claims: the roles are read from the user
+            // store on every decision, and a change of roles keeps the security stamp, so role claims would go stale.
+            .AddClaimsPrincipalFactory<UserClaimsPrincipalFactory<ApplicationUser>>();
     }
 
     private static void ConfigureDatabase(IServiceProvider serviceProvider, DbContextOptionsBuilder options) =>
