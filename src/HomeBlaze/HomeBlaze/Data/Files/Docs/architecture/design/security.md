@@ -103,7 +103,7 @@ The generic editor of a subject, its Edit button (`EditPermissions.CanEdit`) and
 
 - A rule on a derived property applies to that property, even when it is computed from properties the policy does not allow to read.
 - The raw source of a page (`ReadRawContent`, and `ReadEvaluatedContent` outside its expressions) includes the non-secret configuration values of its blocks, whatever the roles allow on their subjects.
-- The history of a path that does not resolve is not available, except with `AllowAllMcpAccessPolicy`, which queries every path as requested.
+- The history of a path that does not resolve is not available, whatever the access policy, so the history of a removed device is not available to agents and `/mcp` clients.
 - A subject whose only members other than attributes are secrets is empty for every policy and hidden from every agent and `/mcp` client.
 - A started OPC UA server (`HomeBlaze.OpcUa`) is an anonymous read-write gateway over what it exposes and ignores roles. Starting it needs only `execute` of **Start**, no `administer`; **Start** requires confirmation, so agents and `/mcp` clients cannot start it, while a person whose roles allow `execute` on it can.
 - `RoleStore` does not check who changes a role: the operations that call it, through which the role dialog saves as well, require a full administrator. Code that calls it directly, such as a plugin, is trusted.

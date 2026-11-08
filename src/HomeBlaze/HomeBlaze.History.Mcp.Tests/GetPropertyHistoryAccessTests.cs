@@ -147,24 +147,24 @@ public class GetPropertyHistoryAccessTests
     }
 
     [Fact]
-    public async Task WhenThePolicyAllowsAll_ThenAnUnresolvedPathIsQueried()
+    public async Task WhenThePolicyAllowsAll_ThenAResolvedPathIsQueried()
     {
         // Arrange
         var graph = CreateGraph(AllowAllMcpAccessPolicy.Instance);
 
         // Act
-        var json = await InvokeAsync(graph, "/Missing/Value");
+        var json = await InvokeAsync(graph, "/Child/Power");
 
         // Assert
-        Assert.False(json.GetProperty("series").GetProperty("/Missing/Value").TryGetProperty("error", out _));
-        Assert.Equal(["/Missing/Value"], graph.Store.QueriedPaths);
+        Assert.False(json.GetProperty("series").GetProperty("/Child/Power").TryGetProperty("error", out _));
+        Assert.Equal(["/Child/Power"], graph.Store.QueriedPaths);
     }
 
     [Fact]
-    public async Task WhenThePolicyAllowsEveryActionButIsNotTheAllowAllPolicy_ThenAnUnresolvedPathIsNotFoundWithoutAQuery()
+    public async Task WhenThePolicyAllowsAll_ThenAnUnresolvedPathIsNotFoundWithoutAQuery()
     {
         // Arrange
-        var graph = CreateGraph(new EveryActionAccessPolicy());
+        var graph = CreateGraph(AllowAllMcpAccessPolicy.Instance);
 
         // Act
         var json = await InvokeAsync(graph, "/Missing/Value");
@@ -197,11 +197,6 @@ public class GetPropertyHistoryAccessTests
             .WithService<IPropertyLifecycleHandler>(
                 () => new PropertyAttributeInitializer(),
                 handler => handler is PropertyAttributeInitializer);
-
-    private sealed class EveryActionAccessPolicy : IMcpAccessPolicy
-    {
-        public bool IsAllowed(RegisteredSubjectProperty member, string action) => true;
-    }
 
     private static AuthorizationMcpAccessPolicy CreatePolicy(string roleName, params AuthorizationRole[] customRoles)
     {
