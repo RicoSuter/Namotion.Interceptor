@@ -60,11 +60,11 @@
                         }
                     </div>
                     <div style="width: 130px;">
-                        <MudSelect T="string" Label="Operator" Dense="true" Value="@row.Operator" ToStringFunc="@GetOperatorText"
-                                   ValueChanged="@(value => SetRowAsync(rowIndex, row with { Operator = value ?? ExpressionRows.Operators[0] }))">
-                            @foreach (var comparison in ExpressionRows.Operators)
+                        <MudSelect T="string" Label="Operator" Dense="true" Value="@row.Operator" ToStringFunc="@ExpressionRows.GetOperatorLabel"
+                                   ValueChanged="@(value => SetRowAsync(rowIndex, row with { Operator = value ?? ExpressionRows.Operators[0].Symbol }))">
+                            @foreach (var (symbol, label) in ExpressionRows.Operators)
                             {
-                                <MudSelectItem Value="@comparison">@GetOperatorText(comparison)</MudSelectItem>
+                                <MudSelectItem Value="@symbol">@label</MudSelectItem>
                             }
                         </MudSelect>
                     </div>
@@ -213,20 +213,9 @@
         }
     }
 
-    private void Refresh() => _preview.Update(_model.Text, _model.Rows, _model.PathSeparator, _model.Variables, Validate, Preview, Hints);
+    private void Refresh() => _preview.Update(_model.Text, _model.Rows, _model.Variables, Validate, Preview, Hints);
 
     private string GetRowText(int index) => index < _preview.RowTexts.Count ? _preview.RowTexts[index] : string.Empty;
-
-    private static string GetOperatorText(string? comparison) => comparison switch
-    {
-        "==" => "equals",
-        "!=" => "is not",
-        "<" => "is below",
-        "<=" => "at most",
-        ">" => "is above",
-        ">=" => "at least",
-        _ => comparison ?? string.Empty
-    };
 
     private static Task<IEnumerable<string>> SearchFieldsAsync(IReadOnlyList<string> fields, string? text) =>
         Task.FromResult(string.IsNullOrWhiteSpace(text)

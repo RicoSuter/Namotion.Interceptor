@@ -23,8 +23,6 @@ internal sealed class ExpressionFieldModel
         _ownerValue = Text;
     }
 
-    public char PathSeparator { get; } = '/';
-
     /// <summary>The variables the host declares; default stands for <c>value</c> and <c>subject</c>.</summary>
     public ImmutableArray<string> Variables
     {
@@ -183,7 +181,7 @@ internal sealed class ExpressionFieldModel
         !IsUnfinishedPath(path) && IsSingleToken(path) && ExpressionRows.IsPath(path) && ParsesText($"{path} == 1");
 
     private bool IsUnfinishedPath(string path) =>
-        path.EndsWith(PathSeparator) || path is "." or ".." || path.Count(c => c == '[') > path.Count(c => c == ']');
+        path.EndsWith(ExpressionRows.PathSeparator) || path is "." or ".." || path.Count(c => c == '[') > path.Count(c => c == ']');
 
     private (string Value, string? Error) NormalizeValue(string value)
     {
@@ -217,7 +215,7 @@ internal sealed class ExpressionFieldModel
 
     // A token with the path separator or an index is a path lookup unless it starts like a path.
     private bool IsPathLikeText(string value) =>
-        (value.Contains(PathSeparator) || value.Contains('[')) &&
+        (value.Contains(ExpressionRows.PathSeparator) || value.Contains('[')) &&
         !double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _) &&
         !StartsLikePath(value);
 
@@ -225,8 +223,8 @@ internal sealed class ExpressionFieldModel
     private bool StartsLikePath(string value)
     {
         var path = value.StartsWith('-') ? value[1..] : value;
-        return path.StartsWith(PathSeparator) || path.StartsWith("." + PathSeparator) || path.StartsWith(".." + PathSeparator) ||
-            (ParsedExpression.TryParse(path, PathSeparator, Variables, out var expression, out _) &&
+        return path.StartsWith(ExpressionRows.PathSeparator) || path.StartsWith("./") || path.StartsWith("../") ||
+            (ParsedExpression.TryParse(path, ExpressionRows.PathSeparator, Variables, out var expression, out _) &&
              expression.SinglePath is { } singlePath &&
              expression.TryGetVariable(singlePath, out _, out _));
     }
@@ -244,7 +242,7 @@ internal sealed class ExpressionFieldModel
 
     private bool Parses(string operand) => ParsesText($"x == {operand}");
 
-    private bool ParsesText(string text) => ParsedExpression.TryParse(text, PathSeparator, Variables, out _, out _);
+    private bool ParsesText(string text) => ParsedExpression.TryParse(text, ExpressionRows.PathSeparator, Variables, out _, out _);
 
     private static bool StartsLikeNumber(string value) =>
         char.IsDigit(value[0]) || (value[0] is '-' or '+' or '.' && value.Length > 1);

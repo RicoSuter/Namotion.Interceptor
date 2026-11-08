@@ -1,4 +1,5 @@
 using System.Text;
+using HomeBlaze.Services.Display;
 
 namespace HomeBlaze.Components.Inputs;
 
@@ -9,13 +10,18 @@ namespace HomeBlaze.Components.Inputs;
 /// </summary>
 internal static class ExpressionRows
 {
-    public static readonly IReadOnlyList<string> Operators = ["==", "!=", "<", "<=", ">", ">="];
+    /// <summary>The character between the segments of a path, as the expressions of the host write it.</summary>
+    public const char PathSeparator = ExpressionDisplay.PathSeparator;
+
+    /// <summary>The comparison operators of a row, each with the label the editor shows for it.</summary>
+    public static readonly IReadOnlyList<(string Symbol, string Label)> Operators =
+        [("==", "equals"), ("!=", "is not"), ("<", "is below"), ("<=", "at most"), (">", "is above"), (">=", "at least")];
 
     public static readonly IReadOnlyList<string> Combinators = ["and", "or"];
 
-    private static readonly string[] Keywords = ["and", "or", "not", "true", "false", "null"];
+    public static readonly IReadOnlyList<string> ArithmeticSymbols = ["+", "-", "*", "/"];
 
-    private static readonly string[] ArithmeticSymbols = ["+", "-", "*", "/"];
+    private static readonly string[] Keywords = ["and", "or", "not", "true", "false", "null"];
 
     // The characters that end a token of the expression parser, so that a token holding one outside brackets is no path or value.
     private static readonly char[] Delimiters = ['(', ')', '"', '\'', '|', '&', '=', '!', '<', '>'];
@@ -66,8 +72,35 @@ internal static class ExpressionRows
 
     public static bool IsKeyword(string token) => Keywords.Contains(token, StringComparer.OrdinalIgnoreCase);
 
+    public static bool IsOperator(string token)
+    {
+        foreach (var (symbol, _) in Operators)
+        {
+            if (symbol == token)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The label of the operator, or the symbol itself when it is no operator of a row.</summary>
+    public static string GetOperatorLabel(string? symbol)
+    {
+        foreach (var (operatorSymbol, label) in Operators)
+        {
+            if (operatorSymbol == symbol)
+            {
+                return label;
+            }
+        }
+
+        return symbol ?? string.Empty;
+    }
+
     private static bool IsCondition(ExpressionRow row) =>
-        Operators.Contains(row.Operator) && IsPath(row.Path) && IsOperand(row.Value);
+        IsOperator(row.Operator) && IsPath(row.Path) && IsOperand(row.Value);
 
     public static bool IsOperand(string token) =>
         IsQuoted(token) || (IsPlainToken(token) && !IsStructuralKeyword(token));

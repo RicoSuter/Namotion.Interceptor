@@ -12,7 +12,6 @@ internal sealed class ExpressionFieldPreview
 {
     private string? _text;
     private IReadOnlyList<ExpressionRow> _rows = [];
-    private char _pathSeparator;
     private ImmutableArray<string> _variables;
     private Func<string, string?>? _validate;
     private Func<string, ExpressionPreview?>? _preview;
@@ -33,13 +32,12 @@ internal sealed class ExpressionFieldPreview
     public void Update(
         string text,
         IReadOnlyList<ExpressionRow> rows,
-        char pathSeparator,
         ImmutableArray<string> variables,
         Func<string, string?>? validate,
         Func<string, ExpressionPreview?>? preview,
         Func<string, IReadOnlyList<string>>? getHints = null)
     {
-        if (_text == text && _pathSeparator == pathSeparator && _variables == variables && Equals(_validate, validate) &&
+        if (_text == text && _variables == variables && Equals(_validate, validate) &&
             Equals(_preview, preview) && Equals(_getHints, getHints) && _rows.SequenceEqual(rows))
         {
             return;
@@ -47,7 +45,6 @@ internal sealed class ExpressionFieldPreview
 
         _text = text;
         _rows = [.. rows];
-        _pathSeparator = pathSeparator;
         _variables = variables;
         _validate = validate;
         _preview = preview;
@@ -75,7 +72,7 @@ internal sealed class ExpressionFieldPreview
     {
         var text = _text ?? string.Empty;
         var preview = _preview;
-        var bareWordHints = ExpressionHints.GetBareWordHints(text, _pathSeparator, _variables, path => preview?.Invoke(path)?.Value);
+        var bareWordHints = ExpressionHints.GetBareWordHints(text, _variables, path => preview?.Invoke(path)?.Value);
         Hints = _hostHints.Count == 0 ? bareWordHints : [.. _hostHints, .. bareWordHints];
         ResultText = !string.IsNullOrWhiteSpace(text) && Error is null && preview?.Invoke(text) is { } result ? FormatResult(result.Result) : null;
         RowTexts = [.. _rows.Select(DescribeRow)];
