@@ -211,17 +211,10 @@ internal sealed class McpMethodInvoker
     /// Gets the methods of the subject that are offered to agents and that the access policy of the configuration allows
     /// to read, ordered by position.
     /// </summary>
-    public IEnumerable<MethodMetadata> GetReadableMethods(RegisteredSubject subject) =>
-        GetReadableMethods(subject, _configuration.AccessPolicy);
-
-    /// <summary>
-    /// Gets the methods of the subject that are offered to agents and that <paramref name="accessPolicy"/> allows to
-    /// read, ordered by position; every method offered to agents without a policy.
-    /// </summary>
-    internal static IEnumerable<MethodMetadata> GetReadableMethods(RegisteredSubject subject, IMcpAccessPolicy? accessPolicy)
+    public IEnumerable<MethodMetadata> GetReadableMethods(RegisteredSubject subject)
     {
         var methods = subject.GetAllMethods(ExclusionTarget.Agents);
-        return accessPolicy is null
+        return _configuration.AccessPolicy is not { } accessPolicy
             ? methods
             : methods.Where(method =>
                 subject.TryGetProperty(method.PropertyName) is { } property && accessPolicy.IsAllowed(property, McpAccessActions.Read));

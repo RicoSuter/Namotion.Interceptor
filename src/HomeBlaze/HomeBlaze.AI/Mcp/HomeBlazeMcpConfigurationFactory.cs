@@ -81,7 +81,7 @@ internal static class HomeBlazeMcpConfigurationFactory
 
         configuration.ValueFilters.Add(AgentOrderAccess.CreateOrderFilter(configuration, rootSubjectProvider));
         configuration.SubjectEnrichers.Add(new HomeBlazeMcpSubjectEnricher(
-            typeProviders, isReadOnly, HomeBlazeMcpSubjectEnricher.CreatePageUrlGetter(serviceProvider, configuration, rootSubjectProvider), accessPolicy));
+            typeProviders, configuration, isReadOnly, HomeBlazeMcpSubjectEnricher.CreatePageUrlGetter(serviceProvider, configuration, rootSubjectProvider)));
 
         var invoker = new McpMethodInvoker(
             rootSubjectProvider,
