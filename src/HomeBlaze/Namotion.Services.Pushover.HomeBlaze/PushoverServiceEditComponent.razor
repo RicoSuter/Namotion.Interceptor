@@ -1,5 +1,6 @@
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(PushoverService))]
 @implements ISubjectEditComponent
+@inject IUserPermissions Permissions
 
 <MudForm>
     <MudTextField @bind-Value="_name"
@@ -63,7 +64,7 @@
 
     public bool IsValid =>
         (HasStoredApplicationToken || !string.IsNullOrWhiteSpace(_applicationToken)) &&
-        _targets.Count > 0 &&
+        (_targets.Count > 0 || GetHiddenTargets().Any()) &&
         _targets.All(target => !string.IsNullOrWhiteSpace(target.Name) && (HasStoredUserKey(target) || !string.IsNullOrWhiteSpace(target.UserKey)));
 
     public bool IsDirty { get; private set; }
@@ -79,7 +80,9 @@
         }
 
         _name = Service.Name;
-        foreach (var (key, target) in Service.Targets)
+
+        // A target the roles hide is not listed, and a save keeps it as it is.
+        foreach (var (key, target) in Service.Targets.Where(pair => Permissions.CanShow(pair.Value)))
         {
             _targets.Add(new TargetInput { Key = key, Name = target.Name });
         }
@@ -118,7 +121,7 @@
         }
 
         // Existing targets are kept as instances, so their state survives.
-        var targets = new Dictionary<string, PushoverTarget>();
+        var targets = GetHiddenTargets().ToDictionary();
         foreach (var input in _targets)
         {
             var key = input.Key ?? PushoverService.CreateTargetKey(input.Name, targets.Keys.Concat(Service.Targets.Keys).ToArray());
@@ -142,6 +145,9 @@
         IsDirtyChanged?.Invoke(false);
         return Task.CompletedTask;
     }
+
+    private IEnumerable<KeyValuePair<string, PushoverTarget>> GetHiddenTargets() =>
+        Service?.Targets.Where(pair => !Permissions.CanShow(pair.Value)) ?? [];
 
     // An input whose key is no longer in Service.Targets, for example after an external edit of the configuration,
     // is a new target and needs its user key again.
