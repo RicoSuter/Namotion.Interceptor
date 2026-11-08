@@ -171,7 +171,6 @@ public class ExpressionFieldModelTests
     {
         // Act
         var model = new ExpressionFieldModel(text);
-        model.Load(text);
 
         // Assert
         Assert.Equal(text, model.Text);
@@ -363,6 +362,38 @@ public class ExpressionFieldModelTests
         Assert.False(model.HasPendingRow);
         Assert.Equal(2, model.Rows.Count);
         Assert.Equal("/c/D", model.Rows[1].Path);
+    }
+
+    [Theory]
+    [InlineData("Sibling/Value")]
+    [InlineData("Devices[x]/IsOn")]
+    [InlineData("-Sibling/Value")]
+    [InlineData("N/A")]
+    public void WhenTheOperatorOfARowWithALoadedBarePathValueChanges_ThenTheValueIsWrittenAsItIs(string value)
+    {
+        // Arrange
+        var model = new ExpressionFieldModel($"/a/B == {value}");
+
+        // Act
+        model.SetRow(0, model.Rows[0] with { Operator = "!=" });
+
+        // Assert
+        Assert.False(model.HasPendingRow);
+        Assert.Equal($"/a/B != {value}", model.Text);
+    }
+
+    [Fact]
+    public void WhenALoadedRowIsAppliedAgain_ThenItsValueIsWrittenAsItIs()
+    {
+        // Arrange
+        var model = new ExpressionFieldModel("/a/B == Sibling/Value and /c/D == N/A");
+
+        // Act
+        model.SetRow(0, model.Rows[0]);
+        model.SetRow(1, model.Rows[1] with { Combinator = "or" });
+
+        // Assert
+        Assert.Equal("/a/B == Sibling/Value or /c/D == N/A", model.Text);
     }
 
     private static void AssertTextParsesToTheRows(ExpressionFieldModel model)
