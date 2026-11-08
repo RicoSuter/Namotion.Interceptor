@@ -37,6 +37,9 @@ internal sealed class AuthenticationTestHost : IAsyncDisposable
 
     public const string HubPath = "/_blazor";
 
+    /// <summary>Answers once <see cref="RequestHold"/> releases it, see <see cref="Hold"/>.</summary>
+    public const string HoldPath = "/test/hold";
+
     private const string SignInPath = "/test/sign-in";
 
     public const string AuthorizationFileContent = """
@@ -172,6 +175,7 @@ internal sealed class AuthenticationTestHost : IAsyncDisposable
         builder.Services.AddSingleton<CountingPasswordHasher>();
         builder.Services.AddSingleton<IPasswordHasher<ApplicationUser>>(services => services.GetRequiredService<CountingPasswordHasher>());
         builder.Services.AddSingleton<FailingUserValidator>();
+        builder.Services.AddSingleton<RequestHold>();
         builder.Services.AddSingleton<IUserValidator<ApplicationUser>>(services => services.GetRequiredService<FailingUserValidator>());
         builder.AddDefaultHealthChecks();
 
@@ -194,6 +198,11 @@ internal sealed class AuthenticationTestHost : IAsyncDisposable
             .WithHomeBlazeAccountGate();
         application.MapHomeBlazeAccountEndpoints();
         application.MapPost(McpPath, () => "mcp").AllowAnonymous();
+        application.MapGet(HoldPath, async (RequestHold hold) =>
+        {
+            await hold.HoldAsync();
+            return "held";
+        }).AllowAnonymous();
         application.MapGet(EchoPath, (HttpContext context) =>
             $"{context.Request.Scheme}|{context.Request.Host}|{context.Connection.RemoteIpAddress}|{context.Request.PathBase}").AllowAnonymous();
         application.MapPost(SignInPath, async (string? userName, UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, UserStore userStore) =>
@@ -245,6 +254,9 @@ internal sealed class AuthenticationTestHost : IAsyncDisposable
 
     /// <summary>The validator that fails storing a user once their first password is set, see <see cref="Blazor.Tests.FailingUserValidator"/>.</summary>
     public FailingUserValidator FailingUserValidator => Services.GetRequiredService<FailingUserValidator>();
+
+    /// <summary>Holds the requests to <see cref="HoldPath"/>.</summary>
+    public RequestHold Hold => Services.GetRequiredService<RequestHold>();
 
     /// <summary>How often a password was verified against a hash, a stored or a dummy one.</summary>
     public int PasswordVerificationCount => Services.GetRequiredService<CountingPasswordHasher>().VerificationCount;

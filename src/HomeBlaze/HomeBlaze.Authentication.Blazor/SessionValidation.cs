@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using HomeBlaze.Authentication.Data;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -14,10 +15,13 @@ namespace HomeBlaze.Authentication.Blazor;
 /// security stamp included, see <see cref="UserStore.IsSessionAllowed"/>, so that an endpoint outside the app does not
 /// serve a session that a removal, a lock, a reset or a password change made through the store ended, and against the
 /// stored security stamp every 5 minutes, see <see cref="SessionStampValidator"/>. A refused session is treated as not
-/// signed in for that request only, and its cookie is kept.
+/// signed in for that request only, and its cookie is kept. A renewal of the cookie, by the stamp check or the sliding
+/// expiration, is not written when the store no longer allows its session as the response starts.
 /// </summary>
 internal static class SessionValidation
 {
+    private static readonly object RenewedPrincipalKey = new();
+
     /// <summary>Adds the checks to the Identity application cookie; call it after <c>AddIdentityCookies</c>.</summary>
     public static void AddSessionValidation(this IServiceCollection services)
     {
@@ -38,23 +42,69 @@ internal static class SessionValidation
                     return Task.CompletedTask;
                 }
 
-                return validateSecurityStamp(context);
+                return ValidateAsync(context, validateSecurityStamp);
             };
+
+            var checkSlidingExpiration = options.Events.OnCheckSlidingExpiration;
+            options.Events.OnCheckSlidingExpiration = async context =>
+            {
+                await checkSlidingExpiration(context);
+                if (context.ShouldRenew)
+                {
+                    context.HttpContext.Items[RenewedPrincipalKey] = context.Principal;
+                }
+            };
+
+            // A sign-in writes a cookie of its own, which carries the stamp it was built with, in place of the renewal.
+            var signingIn = options.Events.OnSigningIn;
+            options.Events.OnSigningIn = context =>
+            {
+                context.HttpContext.Items.Remove(RenewedPrincipalKey);
+                return signingIn(context);
+            };
+
+            options.CookieManager = new RenewalCheckingCookieManager(options.CookieManager ?? new ChunkingCookieManager());
         });
     }
 
-    private static bool IsAllowedByStore(CookieValidatePrincipalContext context)
+    private static async Task ValidateAsync(CookieValidatePrincipalContext context, Func<CookieValidatePrincipalContext, Task> validateSecurityStamp)
     {
-        if (context.Principal is not { } principal)
+        await validateSecurityStamp(context);
+        if (context.ShouldRenew && context.Principal is not null)
         {
-            return true;
+            context.HttpContext.Items[RenewedPrincipalKey] = context.Principal;
         }
+    }
 
-        var services = context.HttpContext.RequestServices;
+    private static bool IsAllowedByStore(CookieValidatePrincipalContext context) =>
+        context.Principal is not { } principal || IsAllowedByStore(context.HttpContext, principal);
+
+    private static bool IsAllowedByStore(HttpContext context, ClaimsPrincipal principal)
+    {
+        var services = context.RequestServices;
         var claimTypes = services.GetRequiredService<IOptions<IdentityOptions>>().Value.ClaimsIdentity;
         var userId = principal.FindFirstValue(claimTypes.UserIdClaimType);
         return userId is not null &&
             services.GetRequiredService<UserStore>().IsSessionAllowed(userId, principal.FindFirstValue(claimTypes.SecurityStampClaimType));
+    }
+
+    // The cookie handler writes a renewed cookie only as the response starts, which can be after a password change that a
+    // request accepted before it did not see; its cookie with the old stamp would then replace the new cookie in the browser.
+    private sealed class RenewalCheckingCookieManager(ICookieManager inner) : ICookieManager
+    {
+        public string? GetRequestCookie(HttpContext context, string key) => inner.GetRequestCookie(context, key);
+
+        public void AppendResponseCookie(HttpContext context, string key, string? value, CookieOptions options)
+        {
+            if (context.Items.TryGetValue(RenewedPrincipalKey, out var renewed) && renewed is ClaimsPrincipal principal && !IsAllowedByStore(context, principal))
+            {
+                return;
+            }
+
+            inner.AppendResponseCookie(context, key, value, options);
+        }
+
+        public void DeleteCookie(HttpContext context, string key, CookieOptions options) => inner.DeleteCookie(context, key, options);
     }
 }
 
