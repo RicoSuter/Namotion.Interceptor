@@ -131,8 +131,10 @@ public class PlaywrightFixture : IAsyncLifetime
         await AsyncTestHelpers.WaitUntilAsync(
             () => GetRoot().Children.Values.OfType<Authorization.Authorization>().Any(
                 authorization => authorization.Users.ContainsKey(AdminSeeding.AdminUserName)),
-            TimeSpan.FromSeconds(60),
-            message: "The Authorization subject did not show the users before the tests started");
+            () => "The Authorization subject did not show the users before the tests started: " +
+                string.Join(", ", GetRoot().Children.Select(child => $"{child.Key}={child.Value.GetType().Name}" +
+                    (child.Value is Authorization.Authorization authorization ? $"[{string.Join(",", authorization.Users.Keys)}]" : ""))),
+            TimeSpan.FromSeconds(60));
 
         if (ClaimsAdministrator)
         {
