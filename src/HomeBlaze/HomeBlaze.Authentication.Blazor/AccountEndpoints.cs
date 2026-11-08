@@ -40,11 +40,12 @@ public static class AccountEndpoints
     /// which redirects to the safe return URL, see <see cref="ReturnUrls.GetSafe"/>.</item>
     /// <item><c>POST</c> <see cref="PasswordPath"/> for a signed-in person (<c>currentPassword</c>, <c>newPassword</c>,
     /// <c>confirmPassword</c>, <c>returnUrl</c>), which redirects to the safe return URL, or to the root once it signed
-    /// out an ended session.</item>
+    /// out an ended session, also with 401 when the session is refused before the endpoint.</item>
     /// <item><c>POST</c> <see cref="SetupPath"/> (<c>userName</c>, <c>code</c>, <c>newPassword</c>,
     /// <c>confirmPassword</c>), which redirects to the root.</item>
     /// <item><c>POST</c> <see cref="DisplayNamePath"/> for a signed-in person (<c>displayName</c>, <c>returnUrl</c>), which
-    /// redirects to the safe return URL, or to the root once it signed out an ended session.</item>
+    /// redirects to the safe return URL, or to the root once it signed out an ended session, also with 401 when the
+    /// session is refused before the endpoint.</item>
     /// <item><c>POST</c> <see cref="LogoutPath"/>, which signs the person out and redirects to the root; a request that is
     /// not signed in, such as one whose session expired, is redirected without a token.</item>
     /// </list>
@@ -173,6 +174,22 @@ public static class AccountEndpoints
         }
 
         return await context.Request.ReadFormAsync(context.RequestAborted);
+    }
+
+    /// <summary>
+    /// Answers a request to <see cref="PasswordPath"/> or <see cref="DisplayNamePath"/> that has no session, such as one whose
+    /// cookie was refused, with <paramref name="statusCode"/> and the root to load, where the app signs in again, and
+    /// returns true; returns false for any other request.
+    /// </summary>
+    internal static async Task<bool> TryAnswerWithoutSessionAsync(HttpContext context, int statusCode)
+    {
+        if (!context.Request.Path.Equals(PasswordPath) && !context.Request.Path.Equals(DisplayNamePath))
+        {
+            return false;
+        }
+
+        await TypedResults.Json(new AccountRedirect(GetRoot(context)), AccountJsonContext.Default.AccountRedirect, statusCode: statusCode).ExecuteAsync(context);
+        return true;
     }
 
     private static string GetRoot(HttpContext context) => ReturnUrls.GetSafe(returnUrl: null, context.Request.PathBase);

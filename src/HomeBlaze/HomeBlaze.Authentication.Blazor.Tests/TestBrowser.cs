@@ -56,10 +56,13 @@ internal sealed partial class TestBrowser : IDisposable
         return await _client.SendAsync(request);
     }
 
-    /// <summary>Gets the page to load of the answer of an account endpoint, which must succeed.</summary>
-    public static async Task<string> GetAccountRedirectAsync(HttpResponseMessage response)
+    /// <summary>
+    /// Gets the page to load of the answer of an account endpoint, which must have <paramref name="expectedStatus"/>: it
+    /// succeeds unless the session is refused before the endpoint, which answers 401.
+    /// </summary>
+    public static async Task<string> GetAccountRedirectAsync(HttpResponseMessage response, HttpStatusCode expectedStatus = HttpStatusCode.OK)
     {
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(expectedStatus, response.StatusCode);
         using var answer = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         return answer.RootElement.GetProperty("redirect").GetString()!;
     }

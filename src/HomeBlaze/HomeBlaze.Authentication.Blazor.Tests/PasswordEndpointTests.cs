@@ -78,7 +78,8 @@ public class PasswordEndpointTests
         Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync("/protected")).StatusCode);
 
         // The user store holds the new stamp, so the old session is refused before the endpoint.
-        Assert.Equal(HttpStatusCode.Unauthorized, (await SetPasswordAsync(otherBrowser, "a password of the attacker", currentPassword: AnotherPassword)).StatusCode);
+        Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(
+            await SetPasswordAsync(otherBrowser, "a password of the attacker", currentPassword: AnotherPassword), HttpStatusCode.Unauthorized));
         Assert.False(otherBrowser.HasSessionCookie);
 
         using var oldPasswordBrowser = host.CreateBrowser();
@@ -142,7 +143,7 @@ public class PasswordEndpointTests
     }
 
     [Fact]
-    public async Task WhenAVisitorWhoIsNotSignedInPostsAPassword_ThenTheyGet401InsteadOfARedirect()
+    public async Task WhenAVisitorWhoIsNotSignedInPostsAPassword_ThenTheyGet401WithTheRootToLoad()
     {
         // Arrange
         await using var host = await AuthenticationTestHost.StartAsync();
@@ -152,7 +153,7 @@ public class PasswordEndpointTests
         var response = await SetPasswordAsync(browser, Password);
 
         // Assert
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(response, HttpStatusCode.Unauthorized));
     }
 
     [Fact]
@@ -284,7 +285,7 @@ public class PasswordEndpointTests
         var response = await SetPasswordAsync(browser, "a password of the attacker");
 
         // Assert
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(response, HttpStatusCode.Unauthorized));
         Assert.False(browser.HasSessionCookie);
         Assert.False(await HasPasswordAsync(host, "kid"));
     }

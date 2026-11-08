@@ -144,18 +144,18 @@ public static class AuthenticationWebExtensions
     }
 
     // The dialogs post with fetch and read the answer, which a redirect to the app would replace with its page.
-    private static Task RedirectOrAnswerAsync(RedirectContext<CookieAuthenticationOptions> context, int statusCode)
+    private static async Task RedirectOrAnswerAsync(RedirectContext<CookieAuthenticationOptions> context, int statusCode)
     {
-        if (context.Request.Headers.Accept.Any(accept => accept?.Contains("application/json", StringComparison.OrdinalIgnoreCase) == true))
+        if (!context.Request.Headers.Accept.Any(accept => accept?.Contains("application/json", StringComparison.OrdinalIgnoreCase) == true))
+        {
+            context.Response.Redirect(context.RedirectUri);
+            return;
+        }
+
+        if (statusCode != StatusCodes.Status401Unauthorized || !await AccountEndpoints.TryAnswerWithoutSessionAsync(context.HttpContext, statusCode))
         {
             context.Response.StatusCode = statusCode;
         }
-        else
-        {
-            context.Response.Redirect(context.RedirectUri);
-        }
-
-        return Task.CompletedTask;
     }
 
     // Without a trusted proxy no forwarded header is applied, as any client could send one to spoof its address,

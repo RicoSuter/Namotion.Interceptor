@@ -91,21 +91,14 @@ public class DisplayNameEndpointTests
 
         // Assert
         // The user store knows of the reset, so the cookie is refused before the endpoint, which checks the stamp itself.
-        if (isLock)
-        {
-            Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(response));
-        }
-        else
-        {
-            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        }
+        Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(response, isLock ? HttpStatusCode.OK : HttpStatusCode.Unauthorized));
 
         Assert.False(browser.HasSessionCookie);
         Assert.Null(host.UserStore.GetDisplayName(host.UserStore.GetUserId("kid")!));
     }
 
     [Fact]
-    public async Task WhenAVisitorWhoIsNotSignedInPostsADisplayName_ThenTheyGet401()
+    public async Task WhenAVisitorWhoIsNotSignedInPostsADisplayName_ThenTheyGet401WithTheRootToLoad()
     {
         // Arrange
         await using var host = await AuthenticationTestHost.StartAsync();
@@ -115,7 +108,7 @@ public class DisplayNameEndpointTests
         var response = await SetDisplayNameAsync(browser, "Admin");
 
         // Assert
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(response, HttpStatusCode.Unauthorized));
         Assert.Null(host.GetUser(AdminSeeding.AdminUserName).DisplayName);
     }
 
