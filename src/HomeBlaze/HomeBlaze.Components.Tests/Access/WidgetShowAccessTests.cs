@@ -4,6 +4,7 @@ using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Components.Abstractions.Attributes;
 using HomeBlaze.Services.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor.Registry;
 using Xunit;
 
 namespace HomeBlaze.Components.Tests.Access;
@@ -175,6 +176,28 @@ public sealed partial class WidgetShowAccessTests : BunitContext, IAsyncLifetime
 
         // Assert
         Assert.Contains("Process:", shown);
+        Assert.DoesNotContain("Process:", hidden);
+        Assert.Contains("Uptime", hidden);
+    }
+
+    [Fact]
+    public void WhenValuesOfAHostSystemAreNotReadable_ThenTheHostSystemWidgetDoesNotShowThem()
+    {
+        // Arrange
+        var host = _graph.CreateSubject<HostSystem>();
+        host.Name = "Basement Server";
+        _graph.Device.Widget = host;
+        var shown = _graph.RenderWidget(host).Markup;
+        _permissions.CannotRead.Add(host.TryGetRegisteredProperty(nameof(HostSystem.Title))!);
+        _permissions.CannotRead.Add(host.TryGetRegisteredProperty(nameof(HostSystem.Process))!);
+
+        // Act
+        var hidden = _graph.RenderWidget(host).Markup;
+
+        // Assert
+        Assert.Contains("Basement Server", shown);
+        Assert.Contains("Process:", shown);
+        Assert.DoesNotContain("Basement Server", hidden);
         Assert.DoesNotContain("Process:", hidden);
         Assert.Contains("Uptime", hidden);
     }
