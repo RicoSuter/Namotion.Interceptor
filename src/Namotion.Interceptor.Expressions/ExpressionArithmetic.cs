@@ -7,6 +7,12 @@ internal static class ExpressionArithmetic
     /// <returns>The result, or null when the values have no arithmetic or the result is out of range.</returns>
     public static object? Apply(ArithmeticOperator arithmeticOperator, object left, object right)
     {
+        // An instant or a duration has no number kind, so it skips the classification of the numbers.
+        if (left is DateTimeOffset or TimeSpan or DateTime)
+        {
+            return ApplyToTimes(arithmeticOperator, left, right);
+        }
+
         var leftKind = ExpressionComparer.GetNumberKind(left);
         if (leftKind != NumberKind.None)
         {
