@@ -15,7 +15,8 @@ namespace HomeBlaze.Authentication.Blazor;
 /// security stamp included, see <see cref="UserStore.IsSessionAllowed"/>, so that an endpoint outside the app does not
 /// serve a session that a removal, a lock, a reset or a password change made through the store ended, and against the
 /// stored security stamp every 5 minutes, see <see cref="SessionStampValidator"/>. A refused session is treated as not
-/// signed in for that request only, and its cookie is kept. A renewal of the cookie, by the stamp check or the sliding
+/// signed in for that request only, and its cookie is kept; when it carries another stamp than the store holds for a person,
+/// the store reloads that person, see <see cref="UserStore.RequestStampReload"/>. A renewal of the cookie, by the stamp check or the sliding
 /// expiration, is not written when the store no longer allows its session as the response starts.
 /// </summary>
 internal static class SessionValidation
@@ -76,16 +77,43 @@ internal static class SessionValidation
         }
     }
 
-    private static bool IsAllowedByStore(CookieValidatePrincipalContext context) =>
-        context.Principal is not { } principal || IsAllowedByStore(context.HttpContext, principal);
+    // A refused stamp of a person the store knows may be one the store missed, such as after a reload that failed once a
+    // password change was committed, so the store reloads the user for the requests to come.
+    private static bool IsAllowedByStore(CookieValidatePrincipalContext context)
+    {
+        if (context.Principal is not { } principal)
+        {
+            return true;
+        }
+
+        var (userStore, userId, securityStamp) = GetSession(context.HttpContext, principal);
+        if (userId is null)
+        {
+            return false;
+        }
+
+        if (userStore.IsSessionAllowed(userId, securityStamp))
+        {
+            return true;
+        }
+
+        _ = userStore.RequestStampReload(userId, securityStamp);
+        return false;
+    }
 
     private static bool IsAllowedByStore(HttpContext context, ClaimsPrincipal principal)
     {
+        var (userStore, userId, securityStamp) = GetSession(context, principal);
+        return userId is not null && userStore.IsSessionAllowed(userId, securityStamp);
+    }
+
+    private static (UserStore UserStore, string? UserId, string? SecurityStamp) GetSession(HttpContext context, ClaimsPrincipal principal)
+    {
         var services = context.RequestServices;
         var claimTypes = services.GetRequiredService<IOptions<IdentityOptions>>().Value.ClaimsIdentity;
-        var userId = principal.FindFirstValue(claimTypes.UserIdClaimType);
-        return userId is not null &&
-            services.GetRequiredService<UserStore>().IsSessionAllowed(userId, principal.FindFirstValue(claimTypes.SecurityStampClaimType));
+        return (services.GetRequiredService<UserStore>(),
+            principal.FindFirstValue(claimTypes.UserIdClaimType),
+            principal.FindFirstValue(claimTypes.SecurityStampClaimType));
     }
 
     // The cookie handler writes a renewed cookie only as the response starts, which can be after a password change that a

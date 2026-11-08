@@ -2,12 +2,14 @@ using System.Net;
 using System.Net.Http.Headers;
 using HomeBlaze.Authentication.Data;
 using HomeBlaze.Authorization;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace HomeBlaze.Authentication.Blazor.Tests;
@@ -150,6 +152,35 @@ public class AuthenticationPipelineTests
         Assert.False(response.Headers.TryGetValues("Set-Cookie", out var setCookies) &&
             setCookies.Any(setCookie => setCookie.StartsWith(TestBrowser.SessionCookieName + "=", StringComparison.Ordinal)));
         Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync("/protected")).StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenACookieCarriesAStampTheStoreMissed_ThenTheStoreReloadsTheUserAndALaterRequestIsServed()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        var added = await host.AdministrationAsAdmin.AddUserAsync("kid", null, [BuiltInRoles.ReaderName], CancellationToken.None);
+        Assert.True(added.Succeeded, added.Error);
+        using var browser = host.CreateBrowser();
+        await host.SignInAsync(browser, "kid");
+        // As a password change whose reload of the store failed after the commit, which signed the browser in again.
+        await host.ChangeSecurityStampAsync("kid");
+        var (cookie, newStamp) = await CreateSessionCookieAsync(host, "kid");
+        var userId = host.UserStore.GetUserId("kid")!;
+        using var refusedRequest = new HttpRequestMessage(HttpMethod.Get, "/protected");
+        refusedRequest.Headers.Add("Cookie", cookie);
+
+        // Act
+        var refused = await host.CreateClient().SendAsync(refusedRequest);
+        await AsyncTestHelpers.WaitUntilAsync(() => host.UserStore.IsSessionAllowed(userId, newStamp));
+        using var laterRequest = new HttpRequestMessage(HttpMethod.Get, "/protected");
+        laterRequest.Headers.Add("Cookie", cookie);
+        var served = await host.CreateClient().SendAsync(laterRequest);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Redirect, refused.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, served.StatusCode);
+        Assert.Equal(HttpStatusCode.Redirect, (await browser.GetAsync("/protected")).StatusCode);
     }
 
     [Fact]
@@ -674,5 +705,18 @@ public class AuthenticationPipelineTests
 
         await host.UserStore.RefreshUserAsync(host.UserStore.GetUserId(userName)!, CancellationToken.None);
         return previous;
+    }
+
+    // A session cookie of the user named userName, as signing in issues it now, with the stamp stored now; returns it as a Cookie header value with that stamp.
+    private static async Task<(string Cookie, string SecurityStamp)> CreateSessionCookieAsync(AuthenticationTestHost host, string userName)
+    {
+        await using var scope = host.Services.CreateAsyncScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var user = (await userManager.FindByNameAsync(userName))!;
+        var principal = await scope.ServiceProvider.GetRequiredService<IUserClaimsPrincipalFactory<ApplicationUser>>().CreateAsync(user);
+        var options = host.Services.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>().Get(IdentityConstants.ApplicationScheme);
+        var now = DateTimeOffset.UtcNow;
+        var ticket = new AuthenticationTicket(principal, new AuthenticationProperties { IssuedUtc = now, ExpiresUtc = now.Add(options.ExpireTimeSpan) }, IdentityConstants.ApplicationScheme);
+        return ($"{TestBrowser.SessionCookieName}={options.TicketDataFormat.Protect(ticket)}", user.SecurityStamp!);
     }
 }

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using HomeBlaze.Authentication.Internal;
 using HomeBlaze.Authorization;
@@ -20,11 +21,17 @@ public sealed class UserStore : IMcpClientAccess
 
     internal const string OwnAccountRefusal = "Only a signed-in person with an active account can change their account.";
 
+    /// <summary>How long after a reload of a user that <see cref="RequestStampReload"/> started it starts no other.</summary>
+    public static readonly TimeSpan StampReloadInterval = TimeSpan.FromSeconds(5);
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly AuthorizationProjection _projection;
     private readonly AuthorizationChangeGate _gate;
     private readonly TimeProvider _timeProvider;
     private readonly UserChangeRules _rules;
+
+    // The timestamp of the latest reload requested by RequestStampReload, by user id.
+    private readonly ConcurrentDictionary<string, long> _stampReloadTimestamps = new(StringComparer.Ordinal);
 
     // Replaced as a whole under _gate, never changed in place, so it is read without the gate.
     private volatile UserState _state = UserState.Empty;
@@ -139,6 +146,34 @@ public sealed class UserStore : IMcpClientAccess
     }
 
     /// <summary>
+    /// Starts reloading the user with <paramref name="userId"/> from the database in the background when a session carries
+    /// <paramref name="securityStamp"/> and the store holds another stamp for a person it lets sign in, so that a stamp the
+    /// store missed, such as after a reload that failed once a password change was committed, reaches it. At most one
+    /// reload per user starts within <see cref="StampReloadInterval"/>. The store keeps refusing the session until the
+    /// reload completed, keeps what it held when the reload fails, and raises <see cref="UserChanged"/> only when the stamp
+    /// changed.
+    /// </summary>
+    /// <returns>The reload that started, or a completed task when none started.</returns>
+    public Task RequestStampReload(string userId, string? securityStamp)
+    {
+        ArgumentNullException.ThrowIfNull(userId);
+
+        if (securityStamp is null || !_state.ById.TryGetValue(userId, out var user) || !HoldsOtherStampOfPerson(user, securityStamp))
+        {
+            return Task.CompletedTask;
+        }
+
+        var now = _timeProvider.GetTimestamp();
+        var isClaimed = _stampReloadTimestamps.TryGetValue(userId, out var last)
+            ? _timeProvider.GetElapsedTime(last, now) >= StampReloadInterval && _stampReloadTimestamps.TryUpdate(userId, now, last)
+            : _stampReloadTimestamps.TryAdd(userId, now);
+
+        // Off the request: the database is read synchronously by its provider.
+        return isClaimed ? Task.Run(() => ReloadStampAsync(userId)) : Task.CompletedTask;
+    }
+
+
+    /// <summary>
     /// Whether the person with <paramref name="userId"/> may do nothing but set a password: they must change it, as after
     /// a reset or a setup code, or sign in with an empty one. True for a user the store does not know.
     /// </summary>
@@ -195,7 +230,7 @@ public sealed class UserStore : IMcpClientAccess
     /// </summary>
     /// <remarks>Pass a token that a client disconnect does not cancel: a canceled call leaves the store without the sign-in.</remarks>
     public Task RecordSignInAsync(string userId, CancellationToken cancellationToken) =>
-        RefreshUserCoreAsync(userId, _timeProvider.GetUtcNow(), cancellationToken);
+        RefreshUserCoreAsync(userId, _timeProvider.GetUtcNow(), onlyWhenStampChanged: false, cancellationToken);
 
     /// <summary>
     /// Reloads the lockout, the required password change, whether an empty password is allowed, the last sign-in and the
@@ -207,9 +242,24 @@ public sealed class UserStore : IMcpClientAccess
     /// such as the old security stamp.
     /// </remarks>
     public Task RefreshUserAsync(string userId, CancellationToken cancellationToken) =>
-        RefreshUserCoreAsync(userId, signInTime: null, cancellationToken);
+        RefreshUserCoreAsync(userId, signInTime: null, onlyWhenStampChanged: false, cancellationToken);
 
-    private async Task RefreshUserCoreAsync(string userId, DateTimeOffset? signInTime, CancellationToken cancellationToken)
+    private static bool HoldsOtherStampOfPerson(UserEntry user, string securityStamp) =>
+        !user.IsBuiltIn && !user.IsLockedByAdministrator && !string.Equals(securityStamp, user.SecurityStamp, StringComparison.Ordinal);
+
+    private async Task ReloadStampAsync(string userId)
+    {
+        try
+        {
+            await RefreshUserCoreAsync(userId, signInTime: null, onlyWhenStampChanged: true, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            EventLog.StampReloadFailed(userId, exception);
+        }
+    }
+
+    private async Task RefreshUserCoreAsync(string userId, DateTimeOffset? signInTime, bool onlyWhenStampChanged, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(userId);
 
@@ -219,7 +269,8 @@ public sealed class UserStore : IMcpClientAccess
         {
             var state = _state;
             if (state.ById.TryGetValue(userId, out var user) &&
-                await UserDatabase.RefreshUserAsync(_scopeFactory, user, signInTime, cancellationToken) is { } refreshed)
+                await UserDatabase.RefreshUserAsync(_scopeFactory, user, signInTime, cancellationToken) is { } refreshed &&
+                (!onlyWhenStampChanged || !string.Equals(refreshed.SecurityStamp, user.SecurityStamp, StringComparison.Ordinal)))
             {
                 Publish(state.With(refreshed));
                 isChanged = true;

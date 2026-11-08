@@ -170,6 +170,67 @@ public class UserStoreTests
     }
 
     [Fact]
+    public async Task WhenASessionCarriesAStampTheStoreMissed_ThenARequestedReloadLetsItGoOnAndEndsTheOlderSessions()
+    {
+        // Arrange
+        await using var graph = await AuthenticationTestGraph.CreateAsync();
+        await graph.AddUserAsync("mom", [BuiltInRoles.ReaderName]);
+        var momId = graph.UserStore.GetUserId("mom")!;
+        var oldStamp = await graph.GetSecurityStampAsync(momId);
+        // As a password change whose reload of the store failed after the commit.
+        Assert.True((await graph.UserManager.UpdateSecurityStampAsync((await graph.UserManager.FindByIdAsync(momId))!)).Succeeded);
+        var newStamp = await graph.GetSecurityStampAsync(momId);
+        var isNewSessionAllowedBefore = graph.UserStore.IsSessionAllowed(momId, newStamp);
+
+        // Act
+        await graph.UserStore.RequestStampReload(momId, newStamp);
+
+        // Assert
+        Assert.False(isNewSessionAllowedBefore);
+        Assert.True(graph.UserStore.IsSessionAllowed(momId, newStamp));
+        Assert.False(graph.UserStore.IsSessionAllowed(momId, oldStamp));
+    }
+
+    [Fact]
+    public async Task WhenAReloadOfTheUserStartedWithinTheInterval_ThenNoOtherStartsUntilItPassed()
+    {
+        // Arrange
+        await using var graph = await AuthenticationTestGraph.CreateAsync();
+        await graph.AddUserAsync("mom", [BuiltInRoles.ReaderName]);
+        var momId = graph.UserStore.GetUserId("mom")!;
+        await graph.UserStore.RequestStampReload(momId, "a stamp the store does not hold");
+        Assert.True((await graph.UserManager.UpdateSecurityStampAsync((await graph.UserManager.FindByIdAsync(momId))!)).Succeeded);
+        var newStamp = await graph.GetSecurityStampAsync(momId);
+
+        // Act
+        await graph.UserStore.RequestStampReload(momId, newStamp);
+        var isAllowedWithinTheInterval = graph.UserStore.IsSessionAllowed(momId, newStamp);
+        graph.Time.Advance(TimeSpan.FromMinutes(1));
+        await graph.UserStore.RequestStampReload(momId, newStamp);
+
+        // Assert
+        Assert.False(isAllowedWithinTheInterval);
+        Assert.True(graph.UserStore.IsSessionAllowed(momId, newStamp));
+    }
+
+    [Fact]
+    public async Task WhenTheSessionCarriesTheStoredStamp_ThenNoReloadStarts()
+    {
+        // Arrange
+        await using var graph = await AuthenticationTestGraph.CreateAsync();
+        await graph.AddUserAsync("mom", [BuiltInRoles.ReaderName]);
+        var momId = graph.UserStore.GetUserId("mom")!;
+        var storedStamp = await graph.GetSecurityStampAsync(momId);
+        Assert.True((await graph.UserManager.UpdateSecurityStampAsync((await graph.UserManager.FindByIdAsync(momId))!)).Succeeded);
+
+        // Act
+        await graph.UserStore.RequestStampReload(momId, storedStamp);
+
+        // Assert
+        Assert.True(graph.UserStore.IsSessionAllowed(momId, storedStamp));
+    }
+
+    [Fact]
     public async Task WhenAFullAdministratorResetsTheirOwnPassword_ThenItIsRefusedAndNothingChanges()
     {
         // Arrange

@@ -71,7 +71,8 @@ internal sealed class PasswordChange(
         }
 
         // The store first, so that it holds the new stamp before the cookie that carries it is issued. The password is
-        // committed, so a failure here fails no request: the store refuses the new cookie until it reloads the user.
+        // committed, so a failure here fails no request: the store refuses the new cookie until it reloads the user, which
+        // the first request with that cookie starts, see UserStore.RequestStampReload.
         try
         {
             await userStore.RefreshUserAsync(user.Id, CancellationToken.None);

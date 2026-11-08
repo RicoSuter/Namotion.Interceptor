@@ -83,6 +83,11 @@ internal sealed partial class AuthenticationEventLog(ILogger logger)
 
     public void RoleRenamedHandlerFailed(Exception exception) => LogRoleRenamedHandlerFailed(logger, exception);
 
+    public void StampReloadFailed(string userId, Exception exception) => LogStampReloadFailed(logger, userId, exception);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "User {UserId} could not be reloaded after a session carried another security stamp; the session stays refused.")]
+    private static partial void LogStampReloadFailed(ILogger logger, string userId, Exception exception);
+
     [LoggerMessage(Level = LogLevel.Error, Message = "The users could not take the new name of a renamed role; the rename stays committed.")]
     private static partial void LogRoleRenamedHandlerFailed(ILogger logger, Exception exception);
 
