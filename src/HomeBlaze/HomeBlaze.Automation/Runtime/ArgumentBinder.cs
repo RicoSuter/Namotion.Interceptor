@@ -187,7 +187,7 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
     private bool TryEvaluate(string name, string text, Type type, out object? value, [NotNullWhen(false)] out string? error)
     {
         value = null;
-        if (!AutomationExpressionCheck.TryParseExpression(text, allowsEvent, out var expression, out var parseError))
+        if (!AutomationExpressionCheck.TryParseExpression(text, allowsEvent, out var expression, out var parseError, "value"))
         {
             error = $"The argument '{name}' is invalid: {parseError}";
             return false;

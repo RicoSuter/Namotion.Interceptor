@@ -26,6 +26,9 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
     /// <summary>The paths that led to no value while the expression is unknown.</summary>
     public IReadOnlyList<string> MissingPaths { get; private set; } = [];
 
+    /// <summary>Whether the expression was already true when the trigger became active and the trigger has neither fired nor rearmed since.</summary>
+    public bool WasTrueAtActivation { get; private set; }
+
     public bool IsUnknown => UnknownSince is not null;
 
     /// <summary>Increases with every change of the state, so that a status is formatted again only after one.</summary>
@@ -103,14 +106,19 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
         PendingSince = null;
         UnknownSince = null;
         MissingPaths = [];
+        WasTrueAtActivation = false;
     }
 
-    private TriggerPhase GetBaselinePhase(bool? value) => value switch
+    private TriggerPhase GetBaselinePhase(bool? value)
     {
-        true => hasRearm ? TriggerPhase.WaitingToRearm : TriggerPhase.WaitingForFalse,
-        false => TriggerPhase.Armed,
-        null => TriggerPhase.AwaitingBaseline
-    };
+        WasTrueAtActivation = value == true;
+        return value switch
+        {
+            true => hasRearm ? TriggerPhase.WaitingToRearm : TriggerPhase.WaitingForFalse,
+            false => TriggerPhase.Armed,
+            null => TriggerPhase.AwaitingBaseline
+        };
+    }
 
     private bool SetBaseline(TriggerObservation observation, DateTimeOffset now)
     {
@@ -175,6 +183,7 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
         }
 
         Phase = observation.Value == true ? TriggerPhase.RearmedWhileTrue : TriggerPhase.Armed;
+        WasTrueAtActivation = false;
         return false;
     }
 
@@ -183,6 +192,7 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
         if (value == false)
         {
             Phase = TriggerPhase.Armed;
+            WasTrueAtActivation = false;
         }
 
         return false;
@@ -203,6 +213,7 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
         Phase = TriggerPhase.Pending;
         PendingSince = now;
         HoldStartedAt = null;
+        WasTrueAtActivation = false;
         return true;
     }
 

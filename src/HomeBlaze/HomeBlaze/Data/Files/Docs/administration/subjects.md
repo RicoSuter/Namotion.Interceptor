@@ -173,5 +173,6 @@ The demo includes pre-configured motors in the `demo/` folder:
 
 - [Paths](paths.md): referencing subjects and properties
 - [Markdown Pages](pages.md): building interactive pages
+- [Automations](automation.md): rules that react to properties and events
 - [Building Subjects](../development/building-subjects.md): authoring subject types in C#
 - [Storage Design](../architecture/design/storage.md): storage architecture

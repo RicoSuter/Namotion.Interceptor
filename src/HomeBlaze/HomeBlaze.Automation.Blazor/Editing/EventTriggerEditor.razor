@@ -1,0 +1,123 @@
+@using Namotion.Interceptor.Expressions
+@using Namotion.Interceptor.Registry.Abstractions
+
+<MudPaper Outlined="true" Class="pa-3" data-testid="automation-event-trigger">
+    <div class="d-flex align-center">
+        <MudText Typo="Typo.overline">Event</MudText>
+        <MudSpacer />
+        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" aria-label="Remove trigger" OnClick="@(() => Removed.InvokeAsync())" />
+    </div>
+    <div class="d-flex flex-wrap align-center gap-2">
+        <div style="flex: 2 1 260px; min-width: 0;">
+            @if (IsOwn)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">From</MudText>
+                <MudText Typo="Typo.body1" data-testid="automation-event-source">This automation</MudText>
+            }
+            else
+            {
+                <SubjectPathField Label="From" Value="@_trigger.SubjectPath" ValueChanged="SetSourceAsync" CanSelectProperty="@NoProperty" CanSelectSubject="@HasEvents" />
+            }
+        </div>
+        @if (IsOwn)
+        {
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => SetSourceAsync(string.Empty))"
+                       data-testid="automation-event-other">Another subject</MudButton>
+        }
+        else
+        {
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => SetSourceAsync(AutomationEvents.OwnAutomationPath))"
+                       data-testid="automation-event-own">This automation</MudButton>
+        }
+        <div style="flex: 1 1 200px;">
+            <MudSelect T="string" Label="Event" Value="@_trigger.EventType" ValueChanged="SetEventTypeAsync" ToStringFunc="@AutomationEventNames.Humanize"
+                       data-testid="automation-event-type">
+                @foreach (var eventName in _eventNames)
+                {
+                    <MudSelectItem Value="@eventName">@AutomationEventNames.Humanize(eventName)</MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+    </div>
+    @if (IsOwn)
+    {
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+            The state changes of this automation, with event/PreviousState, event/NewState and event/Timestamp. Restoring the state after a restart raises no event.
+        </MudText>
+    }
+    <div class="mt-2">
+        <ConditionField Label="Only events where" Value="@_trigger.Filter" ValueChanged="SetFilterAsync"
+                        Fields="_fields" Validate="@RuleExpressions.ValidateFilter" TestId="automation-event-filter" />
+    </div>
+    <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1">
+        Every matching event counts, also two identical ones in a row. Events from before the rule became active are never replayed.
+    </MudText>
+</MudPaper>
+
+@code {
+    private SubjectEventTrigger _trigger = null!;
+    private string? _chosenEventType;
+    private IReadOnlyList<string> _eventNames = [];
+    private IReadOnlyList<string> _fields = [];
+
+    [Parameter, EditorRequired] public SubjectEventTrigger Trigger { get; set; } = null!;
+
+    [Parameter, EditorRequired] public Automation Automation { get; set; } = null!;
+
+    [Parameter, EditorRequired] public string RuleKey { get; set; } = string.Empty;
+
+    [Parameter] public EventCallback<AutomationTrigger> TriggerChanged { get; set; }
+
+    [Parameter] public EventCallback Removed { get; set; }
+
+    private static readonly Func<RegisteredSubjectProperty, bool> NoProperty = _ => false;
+
+    private bool IsOwn => _trigger.SubjectPath == AutomationEvents.OwnAutomationPath;
+
+    // The component renders again after each edit, before its parent passes the new trigger down. A stale value in that
+    // render would make the filter field reload its text and lose a row that is not finished.
+    protected override void OnParametersSet()
+    {
+        _trigger = Trigger;
+        _chosenEventType ??= Trigger.EventType;
+        Refresh();
+    }
+
+    private void Refresh()
+    {
+        var eventTypes = GetEventTypes(_trigger.SubjectPath);
+        _eventNames = [.. eventTypes.Select(type => type.Name)];
+        var eventType = eventTypes.FirstOrDefault(type => type.Name == _trigger.EventType);
+        _fields = eventType is null
+            ? []
+            : [.. AutomationEvents.GetPayloadFields(eventType).Select(field => $"event/{field}")];
+    }
+
+    private Task UpdateAsync(SubjectEventTrigger trigger)
+    {
+        _trigger = trigger;
+        Refresh();
+        return TriggerChanged.InvokeAsync(trigger);
+    }
+
+    // A source that is being typed leads nowhere or to other subjects for a while, so the event type that was chosen last is
+    // kept until the source publishes it.
+    private Task SetSourceAsync(string? path)
+    {
+        var eventType = AutomationEventNames.Choose(_chosenEventType ?? string.Empty, _trigger.EventType, [.. GetEventTypes(path).Select(type => type.Name)]);
+        return UpdateAsync(_trigger with { SubjectPath = path ?? string.Empty, EventType = eventType });
+    }
+
+    private Task SetEventTypeAsync(string? eventType)
+    {
+        _chosenEventType = eventType ?? string.Empty;
+        return UpdateAsync(_trigger with { EventType = _chosenEventType });
+    }
+
+    private Task SetFilterAsync(string? filter) => UpdateAsync(_trigger with { Filter = filter });
+
+    private IReadOnlyList<Type> GetEventTypes(string? path) =>
+        AutomationEvents.ResolveSource(Automation, RuleKey, path) is { } source ? AutomationEvents.GetEventTypes(source.GetType()) : [];
+
+    private static bool HasEvents(IInterceptorSubject subject) => AutomationEvents.GetEventTypes(subject.GetType()).Count > 0;
+}

@@ -1,0 +1,450 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.Automation.Blazor.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace HomeBlaze.Automation.Blazor
+{
+    [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Edit, typeof(HomeBlaze.Automation.Automation?))]
+    public class AutomationEditComponent : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, HomeBlaze.Components.Abstractions.ISubjectEditComponent, System.IDisposable
+    {
+        public AutomationEditComponent() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool IsCreating { get; set; }
+        public bool IsDirty { get; }
+        public bool IsValid { get; }
+        public string PreferredDialogSize { get; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
+        public event System.Action<bool>? IsDirtyChanged;
+        public event System.Action<bool>? IsValidChanged;
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override void OnAfterRender(bool firstRender) { }
+        protected override void OnInitialized() { }
+        public System.Threading.Tasks.Task SaveAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Page, typeof(HomeBlaze.Automation.Automation))]
+    public class AutomationPage : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, System.IDisposable
+    {
+        public AutomationPage() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override void OnAfterRender(bool firstRender) { }
+    }
+    [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Automation.Automation))]
+    public class AutomationWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
+    {
+        public AutomationWidget() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class RuleTestDialog : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public RuleTestDialog() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string EvaluatedAt { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.AutomationRuleTestResult Result { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.AutomationRule Rule { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnParametersSet() { }
+    }
+    public class _Imports
+    {
+        public _Imports() { }
+        protected void Execute() { }
+    }
+}
+namespace HomeBlaze.Automation.Blazor.Diagram
+{
+    public class StateDiagram : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable
+    {
+        public StateDiagram() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? CurrentDetail { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? CurrentState { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Blazor.Diagram.StateDiagramLayout Layout { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string> RuleClicked { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? SelectedState { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string> StateClicked { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
+        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
+    }
+    public sealed class StateDiagramEdge : System.IEquatable<HomeBlaze.Automation.Blazor.Diagram.StateDiagramEdge>
+    {
+        public StateDiagramEdge(string RuleKey, string Label, string? Detail, string? From, string To, string PathData, double LabelX, double LabelY, string FullLabel) { }
+        public string? Detail { get; init; }
+        public string? From { get; init; }
+        public string FullLabel { get; init; }
+        public string Label { get; init; }
+        public double LabelX { get; init; }
+        public double LabelY { get; init; }
+        public string PathData { get; init; }
+        public string RuleKey { get; init; }
+        public string To { get; init; }
+    }
+    public sealed class StateDiagramLayout
+    {
+        public const int MaxEdges = 40;
+        public const double NodeHeight = 64D;
+        public const double NodeWidth = 150D;
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Diagram.StateDiagramEdge> Edges { get; }
+        public double Height { get; }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Diagram.StateDiagramNode> Nodes { get; }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Diagram.StateDiagramRule> OtherRules { get; }
+        public double Width { get; }
+        public static HomeBlaze.Automation.Blazor.Diagram.StateDiagramLayout Create(System.Collections.Generic.IReadOnlyList<string> states, string? initialState, System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Diagram.StateDiagramRule> rules) { }
+    }
+    public sealed class StateDiagramNode : System.IEquatable<HomeBlaze.Automation.Blazor.Diagram.StateDiagramNode>
+    {
+        public StateDiagramNode(string? State, bool IsInitial, double X, double Y) { }
+        public bool IsInitial { get; init; }
+        public string? State { get; init; }
+        public double X { get; init; }
+        public double Y { get; init; }
+    }
+    public sealed class StateDiagramRule : System.IEquatable<HomeBlaze.Automation.Blazor.Diagram.StateDiagramRule>
+    {
+        public StateDiagramRule(string Key, string Name, string? InState, string? TargetState, int ActionCount) { }
+        public int ActionCount { get; init; }
+        public string? InState { get; init; }
+        public string Key { get; init; }
+        public string Name { get; init; }
+        public string? TargetState { get; init; }
+        public static HomeBlaze.Automation.Blazor.Diagram.StateDiagramRule From(HomeBlaze.Automation.Blazor.Editing.RuleDraft rule) { }
+        public static HomeBlaze.Automation.Blazor.Diagram.StateDiagramRule From(string key, HomeBlaze.Automation.AutomationRule rule) { }
+    }
+    public class StateDiagramText : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public StateDiagramText() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment? ChildContent { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Fill { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string FontSize { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? FontWeight { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string X { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Y { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+}
+namespace HomeBlaze.Automation.Blazor.Editing
+{
+    public class ActionEditor : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    {
+        public ActionEditor() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Automation Automation { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public int Count { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Blazor.Editing.RuleExpressions Expressions { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public int Index { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<int> Moved { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback Removed { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string RuleKey { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<string> States { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback TargetChanged { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.AutomationAction Value { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<HomeBlaze.Automation.AutomationAction> ValueChanged { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override void OnInitialized() { }
+        protected override void OnParametersSet() { }
+    }
+    public sealed class AutomationDraft
+    {
+        public AutomationDraft() { }
+        public bool Enabled { get; set; }
+        public string? InitialState { get; set; }
+        public int InputErrorVersion { get; }
+        public string? Name { get; set; }
+        public System.Collections.Generic.List<HomeBlaze.Automation.Blazor.Editing.RuleDraft> Rules { get; }
+        public System.Collections.Generic.List<string> States { get; }
+        public HomeBlaze.Automation.Blazor.Editing.RuleDraft AddRule() { }
+        public string AddState() { }
+        public void ApplyTo(HomeBlaze.Automation.Automation automation) { }
+        public HomeBlaze.Automation.Blazor.Editing.RuleDraft? FindRule(string? key) { }
+        public void MoveRule(HomeBlaze.Automation.Blazor.Editing.RuleDraft rule, int offset) { }
+        public void RemoveRule(HomeBlaze.Automation.Blazor.Editing.RuleDraft rule) { }
+        public bool RemoveState(string state) { }
+        public bool RenameState(string state, string newName) { }
+        public void SetInputError(string inputId, HomeBlaze.Automation.AutomationValidationError? error) { }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.AutomationValidationError> Validate() { }
+        public static HomeBlaze.Automation.Blazor.Editing.AutomationDraft From(HomeBlaze.Automation.Automation automation) { }
+    }
+    public class ConditionField : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    {
+        public ConditionField() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<string>? Fields { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Func<string, System.Collections.Generic.IReadOnlyList<string>>? Hints { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Label { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Lead { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Func<string, System.Func<HomeBlaze.Components.Inputs.ExpressionPreview>?>? Preview { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string TestId { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Func<string, string?>? Validate { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Value { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string?> ValueChanged { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override void OnInitialized() { }
+    }
+    public sealed class DraftItem<T>
+        where T :  class
+    {
+        public DraftItem(T value) { }
+        public bool IsOperationChanged { get; set; }
+        public T Value { get; set; }
+    }
+    public class DurationField : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    {
+        public DurationField() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Blazor.Editing.AutomationDraft Draft { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? HelperText { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Label { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool MustBePositive { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? RuleKey { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Style { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.TimeSpan? Value { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<System.TimeSpan?> ValueChanged { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override void OnParametersSet() { }
+    }
+    public class EventTriggerEditor : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public EventTriggerEditor() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Automation Automation { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback Removed { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string RuleKey { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.SubjectEventTrigger Trigger { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<HomeBlaze.Automation.AutomationTrigger> TriggerChanged { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnParametersSet() { }
+    }
+    public class GeneralTab : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public GeneralTab() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback Changed { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Blazor.Editing.AutomationDraft Draft { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class OnlyIfEditor : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public OnlyIfEditor() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback Changed { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Blazor.Editing.AutomationDraft Draft { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Blazor.Editing.RuleExpressions Expressions { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.DateTimeOffset? LastTriggeredAt { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Blazor.Editing.RuleDraft Rule { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnParametersSet() { }
+    }
+    public class PropertyTriggerEditor : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public PropertyTriggerEditor() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Blazor.Editing.AutomationDraft Draft { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Blazor.Editing.RuleExpressions Expressions { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback Removed { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string RuleKey { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.PropertyTrigger Trigger { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<HomeBlaze.Automation.AutomationTrigger> TriggerChanged { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnParametersSet() { }
+    }
+    public sealed class RuleDraft
+    {
+        public System.Collections.Generic.List<HomeBlaze.Automation.Blazor.Editing.DraftItem<HomeBlaze.Automation.AutomationAction>> Actions { get; }
+        public bool AllowsEvent { get; }
+        public string DisplayName { get; }
+        public string? InState { get; set; }
+        public string Key { get; }
+        public HomeBlaze.Automation.AutomationRuleMode Mode { get; set; }
+        public string? Name { get; set; }
+        public string? OnlyIf { get; set; }
+        public System.Collections.Generic.IEnumerable<string> TargetStates { get; }
+        public System.Collections.Generic.IEnumerable<string> Texts { get; }
+        public System.Collections.Generic.List<HomeBlaze.Automation.Blazor.Editing.DraftItem<HomeBlaze.Automation.AutomationTrigger>> Triggers { get; }
+        public void AddCallOperation() { }
+        public void AddChangeState(string targetState) { }
+        public void AddSetProperty() { }
+        public void AddTrigger(HomeBlaze.Automation.AutomationTrigger trigger) { }
+        public void MoveAction(HomeBlaze.Automation.Blazor.Editing.DraftItem<HomeBlaze.Automation.AutomationAction> action, int offset) { }
+        public HomeBlaze.Automation.AutomationRule ToRule(System.Func<string, HomeBlaze.Abstractions.Metadata.MethodMetadata?> getMethod) { }
+        public static HomeBlaze.Automation.Blazor.Editing.RuleDraft Create(string key, string name) { }
+        public static HomeBlaze.Automation.Blazor.Editing.RuleDraft From(string key, HomeBlaze.Automation.AutomationRule rule) { }
+    }
+    public class RuleEditor : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public RuleEditor() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Automation Automation { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback Changed { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Blazor.Editing.AutomationDraft Draft { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.AutomationValidationError> Errors { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback InputChanged { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<HomeBlaze.Automation.Blazor.Editing.RuleDraft> Removed { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Blazor.Editing.RuleDraft Rule { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnParametersSet() { }
+    }
+    public sealed class RuleExpressions
+    {
+        public RuleExpressions(HomeBlaze.Automation.Automation automation, string ruleKey, bool allowsEvent, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone = null) { }
+        public bool AllowsEvent { get; }
+        public HomeBlaze.Automation.Automation Automation { get; }
+        public System.Func<HomeBlaze.Components.Inputs.ExpressionPreview>? Preview(string text) { }
+        public System.Func<string?>? Template(string text) { }
+        public string? Validate(string text) { }
+        public string? ValidateTemplate(string text) { }
+        public static System.Collections.Generic.IReadOnlyList<string> GetConditionHints(string text) { }
+        public static string? ValidateFilter(string text) { }
+    }
+    public class RulesTab : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public RulesTab() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Automation Automation { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback Changed { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Blazor.Editing.AutomationDraft Draft { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.AutomationValidationError> Errors { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback InputChanged { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? SelectedRuleKey { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string?> SelectedRuleKeyChanged { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class StatesTab : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    {
+        public StatesTab() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Automation Automation { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback Changed { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Blazor.Editing.AutomationDraft Draft { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback InputChanged { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string> RuleOpened { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override void OnInitialized() { }
+    }
+    public class TemplateField : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    {
+        public TemplateField() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Blazor.Editing.RuleExpressions Expressions { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool IsRequired { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Label { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Value { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string?> ValueChanged { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override void OnInitialized() { }
+        protected override void OnParametersSet() { }
+    }
+}
