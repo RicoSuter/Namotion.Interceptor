@@ -491,6 +491,14 @@ public class ParsedExpressionEvaluationTests
     [InlineData("Hundred / 0.3", typeof(double), "333.33333333333337")]
     [InlineData("10 / 4", typeof(decimal), "2.5")]
     [InlineData("Max + Max", typeof(double), "1.5845632502852868E+29")]
+    // A result that fits only with fewer decimal places stays a decimal when it is exact
+    [InlineData("Wide * 10", typeof(decimal), "123456789012345678901.23456789")]
+    [InlineData("Edge + 0.5", typeof(decimal), "7922816251426433759354395034")]
+    [InlineData("Edge - -0.5", typeof(decimal), "7922816251426433759354395034")]
+    [InlineData("Edge * 10", typeof(decimal), "79228162514264337593543950335")]
+    [InlineData("Edge / 0.5", typeof(decimal), "15845632502852867518708790067")]
+    [InlineData("Edge + 0.02", typeof(double), "7.922816251426434E+27")]
+    [InlineData("Edge * 11", typeof(double), "8.715097876569078E+28")]
     [InlineData("Tiny * Tiny", typeof(double), "1E-40")]
     [InlineData("Ratio + 0", typeof(float), "0.1")]
     [InlineData("Ratio * 3", typeof(float), "0.3")]
@@ -636,6 +644,8 @@ public class ParsedExpressionEvaluationTests
         ["Big"] = 9007199254740993L,
         ["Price"] = 0.1m,
         ["Max"] = decimal.MaxValue,
+        ["Wide"] = 12345678901234567890.123456789m,
+        ["Edge"] = 7922816251426433759354395033.5m,
         ["Tiny"] = 1e-20m,
         ["Hundred"] = 100,
         ["Seven"] = 7,
