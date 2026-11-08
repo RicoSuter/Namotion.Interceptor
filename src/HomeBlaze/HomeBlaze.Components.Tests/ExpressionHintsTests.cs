@@ -8,11 +8,13 @@ public class ExpressionHintsTests
 {
     private static readonly ImmutableArray<string> Variables = ["now", "time", "event", "subject", "value"];
 
-    [Fact]
-    public void WhenABareWordDiffersFromAVariableOnlyInCase_ThenTheHintNamesTheVariable()
+    [Theory]
+    [InlineData("/Door/OpenedAt > Now")]
+    [InlineData("(/a > Now)")]
+    public void WhenABareWordDiffersFromAVariableOnlyInCase_ThenTheHintNamesTheVariable(string text)
     {
         // Act
-        var hints = ExpressionHints.GetBareWordHints("/Door/OpenedAt > Now", Variables, readValue: null);
+        var hints = ExpressionHints.GetBareWordHints(text, Variables, readValue: null);
 
         // Assert
         Assert.Equal(["'Now' is read as the text \"Now\". The variable is written in lowercase: now."], hints.ToArray());
@@ -62,10 +64,26 @@ public class ExpressionHintsTests
     public void WhenAPathStartsWithAVariableInAnotherCase_ThenTheHintNamesTheVariable(string text, string word)
     {
         // Act
-        var hints = ExpressionHints.GetBareWordHints(text, Variables, readValue: null);
+        var withoutValues = ExpressionHints.GetBareWordHints(text, Variables, readValue: null);
+        var withoutValueAtThePath = ExpressionHints.GetBareWordHints(text, Variables, _ => null);
 
         // Assert
-        Assert.Equal([$"'{word}' is not the variable {word.ToLowerInvariant()}: variables are written in lowercase."], hints.ToArray());
+        Assert.Equal([$"'{word}' is not the variable {word.ToLowerInvariant()}: variables are written in lowercase."], withoutValues.ToArray());
+        Assert.Equal(withoutValues, withoutValueAtThePath);
+    }
+
+    [Theory]
+    [InlineData("Value > 5", "Value")]
+    [InlineData("Subject/Name == 'x'", "Subject/Name")]
+    [InlineData("/a > -Time", "Time")]
+    [InlineData("-Now/Offset > 5m", "Now/Offset")]
+    public void WhenAPathThatStartsWithAVariableInAnotherCaseLeadsToAValue_ThenThereIsNoHint(string text, string path)
+    {
+        // Act
+        var hints = ExpressionHints.GetBareWordHints(text, Variables, read => read == path ? 1 : null);
+
+        // Assert
+        Assert.Empty(hints);
     }
 
     [Fact]
@@ -84,7 +102,6 @@ public class ExpressionHintsTests
         // Assert
         Assert.Single(hints);
         Assert.Equal(["/Weather/Temperature"], readPaths);
-        Assert.Equal(["'Now' is read as the text \"Now\". The variable is written in lowercase: now."], ExpressionHints.GetBareWordHints("(/a > Now)", Variables, readValue: null).ToArray());
     }
 
     [Fact]

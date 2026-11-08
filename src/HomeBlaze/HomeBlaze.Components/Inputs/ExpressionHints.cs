@@ -6,37 +6,68 @@ namespace HomeBlaze.Components.Inputs;
 /// Warns about a bare word right of a comparison, which the grammar reads as text, as in <c>x &gt; Now</c>: a word that
 /// differs from a variable the host declares only in case, and a word compared with a value that is a number, a date, a duration or a
 /// boolean, which a text never equals. A word compared with a text or an enum, as in <c>Mode == Away</c>, is meant as text.
+/// Also warns about a path that starts with a variable in another case, as in <c>Value &gt; 5</c>, while it leads to no
+/// value: a property with such a name is common, and a path that leads to one is meant as written.
 /// </summary>
 internal static class ExpressionHints
 {
     private const char PathSeparator = ExpressionRows.PathSeparator;
 
+    /// <summary>Finds the hints of the expression; a hint with a path is shown while its condition holds for the current value of the path.</summary>
     /// <param name="text">The expression.</param>
     /// <param name="variables">The variables the host declares for its expressions.</param>
-    /// <param name="readValue">Reads the current value of the path left of a comparison, or null when the host has no values.</param>
-    public static IReadOnlyList<string> GetBareWordHints(string? text, ImmutableArray<string> variables, Func<string, object?>? readValue)
+    public static IReadOnlyList<ExpressionHint> Find(string? text, ImmutableArray<string> variables)
     {
         var split = ExpressionTokens.Split(text);
-        if (split is null)
+        if (split is null || split.Count == 0)
         {
             return [];
         }
 
-        var tokens = split.Select(Unwrap).ToArray();
-        var hints = new List<string>();
+        var tokens = new string[split.Count];
+        for (var index = 0; index < tokens.Length; index++)
+        {
+            tokens[index] = Unwrap(split[index]);
+        }
+
+        List<ExpressionHint>? hints = null;
         for (var index = 0; index < tokens.Length; index++)
         {
             var isRightOfComparison = index >= 2 && ExpressionRows.IsOperator(tokens[index - 1]);
             var hint = isRightOfComparison && IsBareWord(tokens[index], variables) && !IsFollowedByArithmetic(tokens, index + 1)
-                ? GetTextHint(tokens[index - 2], tokens[index], variables, readValue)
+                ? GetTextHint(tokens[index - 2], tokens[index], variables)
                 : GetCaseHint(tokens[index], variables);
             if (hint is not null)
             {
-                hints.Add(hint);
+                (hints ??= []).Add(hint);
             }
         }
 
-        return hints;
+        return hints ?? [];
+    }
+
+    /// <summary>The hints as they are shown with the current values.</summary>
+    /// <param name="text">The expression.</param>
+    /// <param name="variables">The variables the host declares for its expressions.</param>
+    /// <param name="readValue">Reads the current value of a path, or null when the host has no values.</param>
+    public static IReadOnlyList<string> GetBareWordHints(string? text, ImmutableArray<string> variables, Func<string, object?>? readValue)
+    {
+        var hints = Find(text, variables);
+        if (hints.Count == 0)
+        {
+            return [];
+        }
+
+        var shown = new List<string>(hints.Count);
+        foreach (var hint in hints)
+        {
+            if (hint.IsShown(hint.Path is null ? null : readValue?.Invoke(hint.Path), readValue is not null))
+            {
+                shown.Add(hint.Text);
+            }
+        }
+
+        return shown;
     }
 
     // Parentheses around a condition are not part of its tokens.
@@ -49,22 +80,20 @@ internal static class ExpressionHints
         ExpressionRows.ArithmeticSymbols.Contains(tokens[index][..1]) &&
         (tokens[index].Length == 1 || tokens[index][1] == '(');
 
-    private static string? GetTextHint(string left, string word, ImmutableArray<string> variables, Func<string, object?>? readValue)
+    private static ExpressionHint GetTextHint(string left, string word, ImmutableArray<string> variables)
     {
         var variable = FindVariable(variables, word);
-        if (variable is not null)
-        {
-            return $"'{word}' is read as the text \"{word}\". The variable is written in lowercase: {variable}.";
-        }
-
-        return IsNeverText(readValue?.Invoke(left))
-            ? $"'{word}' is read as the text \"{word}\", which never equals the value of {left}. Write a path with '{PathSeparator}', or a number."
-            : null;
+        return variable is not null
+            ? new ExpressionHint($"'{word}' is read as the text \"{word}\". The variable is written in lowercase: {variable}.", null, ExpressionHintCondition.Always)
+            : new ExpressionHint(
+                $"'{word}' is read as the text \"{word}\", which never equals the value of {left}. Write a path with '{PathSeparator}', or a number.",
+                left,
+                ExpressionHintCondition.ValueIsNeverText);
     }
 
-    // Variables are case-sensitive, so a path that starts with one in another case is an ordinary path that does not exist.
-    // A leading minus negates the path after it.
-    private static string? GetCaseHint(string token, ImmutableArray<string> variables)
+    // Variables are case-sensitive, so a path that starts with one in another case is an ordinary path, which is a mistake
+    // when it leads to no value. A leading minus negates the path after it.
+    private static ExpressionHint? GetCaseHint(string token, ImmutableArray<string> variables)
     {
         var path = token.StartsWith('-') ? token[1..] : token;
         if (path.Length == 0 || path[0] is '"' or '\'')
@@ -76,7 +105,7 @@ internal static class ExpressionHints
         var segment = end < 0 ? path : path[..end];
         var variable = FindVariable(variables, segment);
         return variable is not null && variable != segment
-            ? $"'{segment}' is not the variable {variable}: variables are written in lowercase."
+            ? new ExpressionHint($"'{segment}' is not the variable {variable}: variables are written in lowercase.", path, ExpressionHintCondition.PathIsMissing)
             : null;
     }
 
@@ -100,7 +129,4 @@ internal static class ExpressionHints
 
         return null;
     }
-
-    private static bool IsNeverText(object? value) =>
-        value is bool or DateTime or DateTimeOffset or TimeSpan or byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal;
 }
