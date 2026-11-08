@@ -140,11 +140,11 @@ public class MethodPropertyInitializer : ILifecycleHandler
             [.. method.GetCustomAttributes<Attribute>()]);
     }
 
-    // The purpose maps to a control without an input dialog, so an operation that takes input has none.
+    // The Delete button runs its operation without an input dialog, so a delete operation that takes input has no purpose.
     private static OperationPurpose GetPurpose(OperationAttribute? attribute, MethodParameter[] parameters) =>
-        attribute is not null && !Array.Exists(parameters, parameter => parameter.RequiresInput)
-            ? attribute.Purpose
-            : OperationPurpose.None;
+        attribute is null ? OperationPurpose.None :
+        attribute.Purpose == OperationPurpose.Delete && Array.Exists(parameters, parameter => parameter.RequiresInput) ? OperationPurpose.None :
+        attribute.Purpose;
 
     private static void AddProvidedMethods(RegisteredSubject registeredSubject)
     {

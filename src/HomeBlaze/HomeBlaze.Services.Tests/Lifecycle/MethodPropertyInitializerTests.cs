@@ -948,6 +948,20 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
+    public void WhenAnOperationWithTheEditPurposeTakesInput_ThenItKeepsItsPurpose()
+    {
+        // Arrange
+        var registered = new PurposeMethodSubject(CreateContext()).TryGetRegisteredSubject()!;
+
+        // Act
+        var save = registered.TryGetProperty("Save")?.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.NotNull(save);
+        Assert.Equal(OperationPurpose.Edit, save.Purpose);
+    }
+
+    [Fact]
     public void WhenASubjectAttachesBelowMethodProviders_ThenOnlyTheNearestOneAddsMethodsAfterTheOwnOnes()
     {
         // Arrange
@@ -1414,6 +1428,11 @@ public partial class PurposeMethodSubject
 
     [Operation(Purpose = OperationPurpose.Delete, RequiresConfirmation = true)]
     public void Uninstall()
+    {
+    }
+
+    [Operation(Purpose = OperationPurpose.Edit)]
+    public void Save(string label)
     {
     }
 }

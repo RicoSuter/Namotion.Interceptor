@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services.Lifecycle;
 using HomeBlaze.Services.Tests.Lifecycle;
 using Namotion.Interceptor;
@@ -72,6 +73,66 @@ public class RegisteredSubjectMethodExtensionsTests
         // Assert
         Assert.Null(forUserInterface);
         Assert.Equal("Remove", forAgents?.Title);
+    }
+
+    [Fact]
+    public void WhenASubjectHasEditAndDeleteOperations_ThenGetEditOperationReturnsTheEditOperation()
+    {
+        // Arrange
+        var registered = new NoMethodsSubject(CreateContext()).TryGetRegisteredSubject()!;
+        AddOperation(registered, "Remove", OperationPurpose.Delete, position: 0);
+        AddOperation(registered, "Save", OperationPurpose.Edit, position: 1);
+
+        // Act
+        var editOperation = registered.GetEditOperation(ExclusionTarget.UserInterface);
+
+        // Assert
+        Assert.Equal("Save", editOperation?.Title);
+    }
+
+    [Fact]
+    public void WhenTheViewerMayInvokeTheEnabledEditOperation_ThenTheyMaySaveThroughIt()
+    {
+        // Arrange
+        var subject = new EditOperationTestSubject(CreateContext());
+
+        // Act
+        var canInvoke = UnrestrictedPermissions.Instance.CanInvokeEditOperation(subject);
+        var canInvokeWithoutPermissions = DenyAllPermissions.Instance.CanInvokeEditOperation(subject);
+
+        // Assert
+        Assert.True(canInvoke);
+        Assert.False(canInvokeWithoutPermissions);
+    }
+
+    [Fact]
+    public void WhenTheEditOperationIsDisabled_ThenNoViewerMaySaveThroughIt()
+    {
+        // Arrange
+        var subject = new EditOperationTestSubject(CreateContext()) { IsLocked = true };
+
+        // Act
+        var canInvoke = UnrestrictedPermissions.Instance.CanInvokeEditOperation(subject);
+
+        // Assert
+        Assert.False(canInvoke);
+    }
+
+    [Fact]
+    public void WhenTheEditOperationIsExcludedFromUserInterfacesOrMissing_ThenNoViewerMaySaveThroughIt()
+    {
+        // Arrange
+        var excluded = new NoMethodsSubject(CreateContext());
+        AddOperation(excluded.TryGetRegisteredSubject()!, "Save", OperationPurpose.Edit, position: 0, ExclusionTarget.UserInterface);
+        var withoutEditOperation = new MethodExtTestSubject(CreateContext());
+
+        // Act
+        var canInvokeExcluded = UnrestrictedPermissions.Instance.CanInvokeEditOperation(excluded);
+        var canInvokeMissing = UnrestrictedPermissions.Instance.CanInvokeEditOperation(withoutEditOperation);
+
+        // Assert
+        Assert.False(canInvokeExcluded);
+        Assert.False(canInvokeMissing);
     }
 
     [Fact]
@@ -265,6 +326,19 @@ public class RegisteredSubjectMethodExtensionsTests
         // Assert
         Assert.Equal(new[] { "Everywhere", "Not In User Interface" }, methods.Select(method => method.Title));
     }
+}
+
+[InterceptorSubject]
+public partial class EditOperationTestSubject
+{
+    public partial bool IsLocked { get; set; }
+
+    [Derived]
+    [PropertyAttribute("Save", KnownAttributes.IsEnabled)]
+    public bool IsSaveEnabled => !IsLocked;
+
+    [Operation(Title = "Save", Purpose = OperationPurpose.Edit)]
+    public void Save(string label) { }
 }
 
 [InterceptorSubject]

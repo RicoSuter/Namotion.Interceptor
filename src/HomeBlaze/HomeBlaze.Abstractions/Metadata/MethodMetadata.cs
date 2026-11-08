@@ -89,7 +89,7 @@ public class MethodMetadata
 
     /// <summary>
     /// What the operation is for, see <see cref="OperationPurpose"/>; <see cref="OperationPurpose.None"/> for a query and
-    /// for an operation with a parameter that requires input.
+    /// instead of <see cref="OperationPurpose.Delete"/> for an operation with a parameter that requires input.
     /// </summary>
     public OperationPurpose Purpose { get; init; }
 

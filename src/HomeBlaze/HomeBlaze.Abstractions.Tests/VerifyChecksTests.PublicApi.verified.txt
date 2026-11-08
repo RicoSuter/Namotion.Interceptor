@@ -72,6 +72,7 @@ namespace HomeBlaze.Abstractions.Attributes
     {
         None = 0,
         Delete = 1,
+        Edit = 2,
     }
     [System.AttributeUsage(System.AttributeTargets.Class, Inherited=false)]
     public sealed class PageLayoutAttribute : System.Attribute

@@ -129,8 +129,10 @@ namespace HomeBlaze.Services
     }
     public static class RegisteredSubjectMethodExtensions
     {
+        public static bool CanInvokeEditOperation(this HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, Namotion.Interceptor.IInterceptorSubject subject) { }
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetAllMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, HomeBlaze.Abstractions.Attributes.ExclusionTarget target, bool excludeMethodsWithPurpose = false) { }
         public static HomeBlaze.Abstractions.Metadata.MethodMetadata? GetDeleteOperation(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, HomeBlaze.Abstractions.Attributes.ExclusionTarget target) { }
+        public static HomeBlaze.Abstractions.Metadata.MethodMetadata? GetEditOperation(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, HomeBlaze.Abstractions.Attributes.ExclusionTarget target) { }
         public static string? GetMethodDisabledReason(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty methodProperty) { }
         public static bool IsMethodEnabled(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty methodProperty) { }
         public static HomeBlaze.Abstractions.Metadata.MethodMetadata? TryGetMethodMetadata(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
