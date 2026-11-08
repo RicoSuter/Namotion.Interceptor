@@ -152,9 +152,17 @@
             }
         }
 
+        // An input whose target was removed elsewhere keeps its key, so a key created for a new target avoids those as well.
+        var usedKeys = new HashSet<string>(currentTargets.Keys, StringComparer.Ordinal);
+        usedKeys.UnionWith(_targets.Select(input => input.Key).OfType<string>());
         foreach (var input in _targets.Where(input => input.Key is null || !currentTargets.ContainsKey(input.Key)))
         {
-            input.Key ??= PushoverService.CreateTargetKey(input.Name, targets.Keys.Concat(currentTargets.Keys).ToArray());
+            if (input.Key is null)
+            {
+                input.Key = PushoverService.CreateTargetKey(input.Name, usedKeys);
+                usedKeys.Add(input.Key);
+            }
+
             targets[input.Key] = Apply(input, new PushoverTarget());
         }
 

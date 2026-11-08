@@ -100,6 +100,27 @@ public sealed class PushoverServiceEditComponentAccessTests : BunitContext, IAsy
         Assert.Equal(["Alice", "Bob"], service.Targets.Keys);
     }
 
+    [Fact]
+    public async Task WhenAListedTargetWasRemovedElsewhereAndANewTargetGetsItsName_ThenTheSaveKeepsBothUnderDifferentKeys()
+    {
+        // Arrange
+        var service = CreateService("alice");
+        var rendered = Render<PushoverServiceEditComponent>(parameters => parameters.Add(component => component.Subject, service));
+        service.Targets = new Dictionary<string, PushoverTarget>();
+        await rendered.InvokeAsync(() => rendered.FindAll("button").Single(button => button.TextContent.Contains("Add Target")).Click());
+        var fields = rendered.FindAll("input");
+        await rendered.InvokeAsync(() => fields[3].Input("user-alice"));
+        await rendered.InvokeAsync(() => fields[4].Input("alice"));
+        await rendered.InvokeAsync(() => fields[5].Input("user-new"));
+
+        // Act
+        await rendered.InvokeAsync(() => rendered.Instance.SaveAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Equal(["alice", "alice-2"], service.Targets.Keys);
+        Assert.Equal(["user-alice", "user-new"], service.Targets.Values.Select(target => target.UserKey));
+    }
+
     private static PushoverService CreateService(params string[] targetKeys)
     {
         var (service, _) = PushoverTestFactory.CreateService(targetKeys);
