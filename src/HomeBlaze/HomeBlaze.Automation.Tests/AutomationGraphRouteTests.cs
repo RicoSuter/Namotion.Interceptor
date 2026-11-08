@@ -230,6 +230,38 @@ public class AutomationGraphRouteTests
         Assert.Equal(1, host.Blinds.CloseCount);
     }
 
+    // The write runs on the worker after the paths were resolved and before the union that has the new sensor holder is
+    // published, so that the dispatcher routes it by the union before, which does not have that holder.
+    [Fact]
+    public async Task WhenAPropertyOnlyTheNewRouteHasChangesBeforeTheRouteIsPublished_ThenThePathsAreResolvedAgain()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(Rule("/Room/Sensor/Gust > 8"));
+        host.Graph.Add("Room", new TestRoom { Sensor = new TestSensor { Gust = 3 } });
+        await host.FlushAsync();
+        var replacement = new TestRoom { Sensor = new TestSensor { Gust = 4 } };
+        var windy = new TestSensor { Gust = 9 };
+        var routes = Routes(host.Automation);
+        var sensorOfReplacement = new PropertyReference(replacement, nameof(TestRoom.Sensor));
+        var wasRoutedAtTheWrite = true;
+        routes.BeforePublication = () =>
+        {
+            routes.BeforePublication = null;
+            wasRoutedAtTheWrite = Registration(host.Automation).Route.Contains(sensorOfReplacement);
+            replacement.Sensor = windy;
+        };
+
+        // Act
+        host.Graph.Add("Room", replacement);
+        await host.FlushAsync();
+
+        // Assert
+        Assert.False(wasRoutedAtTheWrite);
+        var trigger = host.Automation.Runtime!.Engine.Rules[0].PropertyTriggers[0];
+        Assert.Equal([new PropertyReference(windy, nameof(TestSensor.Gust))], trigger.Dependencies);
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
     [Fact]
     public async Task WhenTheRulesAreDeactivated_ThenTheirRoutesLeaveThePublishedRoute()
     {

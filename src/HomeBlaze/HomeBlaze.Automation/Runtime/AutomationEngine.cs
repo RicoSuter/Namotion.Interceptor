@@ -57,6 +57,9 @@ internal sealed class AutomationEngine : IRuleRunHost
 
     public string? CurrentState => _automation.CurrentState;
 
+    // White-box test hook: the compiled rules applied last.
+    internal IReadOnlyList<CompiledRule> Rules => _snapshot.Rules;
+
     public bool RunUnlessAbandoned(Action write)
     {
         lock (_status)

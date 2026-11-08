@@ -35,7 +35,7 @@ internal sealed class AutomationRuntime
         _location = location;
         _keeper = new AutomationStateKeeper(location.Store);
         _changes = new AutomationChangeReceiver(_queue);
-        _routes = new GraphRoutes(automation, _changes);
+        _routes = GraphRoutes.For(automation, _changes);
         _engine = new AutomationEngine(automation, _queue, _keeper, logger, _changes, _routes);
     }
 
@@ -122,7 +122,7 @@ internal sealed class AutomationRuntime
 
             // A move between the start and the registration queued no graph change.
             FollowPath();
-            _routes.Publish();
+            _routes.Publish(AutomationInputQueue.CausedChainDepth);
             _engine.RefreshRuleStatuses();
             using var wakeTimer = new WakeTimer(_automation.TimeProvider, () => EnqueueOnce(ref _isTickPending, TickInput.Instance));
             _wakeTimer = wakeTimer;
@@ -167,9 +167,14 @@ internal sealed class AutomationRuntime
             _engine.ReportUnexpectedError(exception);
         }
 
-        _routes.Publish();
+        _routes.Publish(GetChainDepthOfMissedChange(input));
         _engine.RefreshRuleStatuses();
     }
+
+    // A graph change that the publication of the routes queues stands for a change of unknown depth during the input: one
+    // deeper than the input, or beyond the limit after a stopped feedback chain, so that it never continues that chain.
+    private static int GetChainDepthOfMissedChange(AutomationInput input) =>
+        input is ResynchronizeInput { Dropped.Faults.FeedbackChains: > 0 } ? AutomationInputQueue.MaxChainDepth + 1 : AutomationInputQueue.CausedChainDepth;
 
     private Task RouteAsync(AutomationInput input, CancellationToken cancellationToken)
     {
