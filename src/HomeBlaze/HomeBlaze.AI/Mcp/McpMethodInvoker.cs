@@ -203,15 +203,8 @@ internal sealed class McpMethodInvoker
     /// to read, ordered by position.
     /// </summary>
     public IEnumerable<MethodMetadata> GetReadableMethods(RegisteredSubject subject) =>
-        GetReadableMethods(subject, _configuration.AccessPolicy);
-
-    /// <summary>
-    /// Gets the methods of the subject that are offered to agents and that <paramref name="accessPolicy"/> allows to
-    /// read, ordered by position.
-    /// </summary>
-    internal static IEnumerable<MethodMetadata> GetReadableMethods(RegisteredSubject subject, IMcpAccessPolicy accessPolicy) =>
         subject.GetAllMethods(ExclusionTarget.Agents).Where(method =>
-            subject.TryGetProperty(method.PropertyName) is { } property && accessPolicy.IsAllowed(property, McpAccessActions.Read));
+            subject.TryGetProperty(method.PropertyName) is { } property && _configuration.IsAllowed(property, McpAccessActions.Read));
 
     private static string DescribeWrongKind(string methodName, MethodKind kind) => kind switch
     {

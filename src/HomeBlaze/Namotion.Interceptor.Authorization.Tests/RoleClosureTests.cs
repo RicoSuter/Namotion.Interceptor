@@ -6,6 +6,12 @@ public class RoleClosureTests
 {
     private static AuthorizationRole Role(string name, params string[] includes) => new() { Name = name, Includes = [.. includes] };
 
+    private static List<CompiledRole> Resolve(AuthorizationRole[] roles, params string[] roleNames)
+        => RoleClosure.Resolve(
+            RoleClosure.Index(roles).ToDictionary(
+                pair => pair.Key, pair => new CompiledRole(pair.Value, [], [], Error: null), StringComparer.Ordinal),
+            roleNames);
+
     [Fact]
     public void WhenRolesIncludeEachOtherInADiamond_ThenEveryRoleIsResolvedOnce()
     {
@@ -13,10 +19,10 @@ public class RoleClosureTests
         AuthorizationRole[] roles = [Role("Base"), Role("Left", "Base"), Role("Right", "Base"), Role("Top", "Left", "Right")];
 
         // Act
-        var closure = RoleClosure.Resolve(RoleClosure.Index(roles), ["Top"]);
+        var closure = Resolve(roles, "Top");
 
         // Assert
-        Assert.Equal(["Base", "Left", "Right", "Top"], closure.Select(role => role.Name));
+        Assert.Equal(["Base", "Left", "Right", "Top"], closure.Select(compiled => compiled.Role.Name));
     }
 
     [Fact]
@@ -26,7 +32,7 @@ public class RoleClosureTests
         AuthorizationRole[] roles = [Role("Reader"), Role("Agent", "READER")];
 
         // Act
-        var exception = Assert.Throws<AuthorizationException>(() => RoleClosure.Resolve(RoleClosure.Index(roles), ["Agent"]));
+        var exception = Assert.Throws<AuthorizationException>(() => Resolve(roles, "Agent"));
 
         // Assert
         Assert.Equal("Role 'Agent' includes 'READER', which is not defined.", exception.Message);
@@ -39,7 +45,7 @@ public class RoleClosureTests
         AuthorizationRole[] roles = [Role("Agent", "Missing")];
 
         // Act
-        var exception = Assert.Throws<AuthorizationException>(() => RoleClosure.Resolve(RoleClosure.Index(roles), ["Agent"]));
+        var exception = Assert.Throws<AuthorizationException>(() => Resolve(roles, "Agent"));
 
         // Assert
         Assert.Equal("Role 'Agent' includes 'Missing', which is not defined.", exception.Message);
@@ -52,7 +58,7 @@ public class RoleClosureTests
         AuthorizationRole[] roles = [Role("A", "B"), Role("B", "C"), Role("C", "A")];
 
         // Act
-        var exception = Assert.Throws<AuthorizationException>(() => RoleClosure.Resolve(RoleClosure.Index(roles), ["A"]));
+        var exception = Assert.Throws<AuthorizationException>(() => Resolve(roles, "A"));
 
         // Assert
         Assert.Equal("Role 'A' includes itself: A > B > C > A.", exception.Message);
@@ -65,7 +71,7 @@ public class RoleClosureTests
         AuthorizationRole[] roles = [Role("Reader"), Role("Reader")];
 
         // Act
-        var exception = Assert.Throws<AuthorizationException>(() => RoleClosure.Resolve(RoleClosure.Index(roles), ["Reader"]));
+        var exception = Assert.Throws<AuthorizationException>(() => Resolve(roles, "Reader"));
 
         // Assert
         Assert.Equal("Role 'Reader' is defined more than once.", exception.Message);
@@ -100,7 +106,7 @@ public class RoleClosureTests
         AuthorizationRole[] roles = [new AuthorizationRole { Name = "Agent", Includes = [null!] }];
 
         // Act
-        var exception = Assert.Throws<AuthorizationException>(() => RoleClosure.Resolve(RoleClosure.Index(roles), ["Agent"]));
+        var exception = Assert.Throws<AuthorizationException>(() => Resolve(roles, "Agent"));
 
         // Assert
         Assert.Equal("Role 'Agent' includes a role with no name.", exception.Message);
@@ -113,10 +119,10 @@ public class RoleClosureTests
         AuthorizationRole[] roles = [Role("Reader"), Role("Agent", "Reader")];
 
         // Act
-        var closure = RoleClosure.Resolve(RoleClosure.Index(roles), ["Reader", "Agent", "Reader"]);
+        var closure = Resolve(roles, "Reader", "Agent", "Reader");
 
         // Assert
-        Assert.Equal(["Reader", "Agent"], closure.Select(role => role.Name));
+        Assert.Equal(["Reader", "Agent"], closure.Select(compiled => compiled.Role.Name));
     }
 
     [Fact]
@@ -126,7 +132,7 @@ public class RoleClosureTests
         AuthorizationRole[] roles = [Role("Top", "A"), Role("A", "B"), Role("B", "A")];
 
         // Act
-        var exception = Assert.Throws<AuthorizationException>(() => RoleClosure.Resolve(RoleClosure.Index(roles), ["Top"]));
+        var exception = Assert.Throws<AuthorizationException>(() => Resolve(roles, "Top"));
 
         // Assert
         Assert.Equal("Role 'A' includes itself: A > B > A.", exception.Message);
@@ -139,7 +145,7 @@ public class RoleClosureTests
         var roles = Enumerable.Range(0, 70).Select(i => Role($"Role{i}", $"Role{i + 1}")).Append(Role("Role70")).ToArray();
 
         // Act
-        var exception = Assert.Throws<AuthorizationException>(() => RoleClosure.Resolve(RoleClosure.Index(roles), ["Role0"]));
+        var exception = Assert.Throws<AuthorizationException>(() => Resolve(roles, "Role0"));
 
         // Assert
         Assert.Equal("Role 'Role65' is nested more than 64 levels deep.", exception.Message);
@@ -152,7 +158,7 @@ public class RoleClosureTests
         var roles = CreateChain(65);
 
         // Act
-        var closure = RoleClosure.Resolve(RoleClosure.Index(roles), ["Role0"]);
+        var closure = Resolve(roles, "Role0");
 
         // Assert
         Assert.Equal(65, closure.Count);
@@ -165,7 +171,7 @@ public class RoleClosureTests
         var roles = CreateChain(66);
 
         // Act
-        var exception = Assert.Throws<AuthorizationException>(() => RoleClosure.Resolve(RoleClosure.Index(roles), ["Role0"]));
+        var exception = Assert.Throws<AuthorizationException>(() => Resolve(roles, "Role0"));
 
         // Assert
         Assert.Equal("Role 'Role65' is nested more than 64 levels deep.", exception.Message);

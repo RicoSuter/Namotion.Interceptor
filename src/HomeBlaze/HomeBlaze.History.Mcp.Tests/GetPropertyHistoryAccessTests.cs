@@ -203,13 +203,16 @@ public class GetPropertyHistoryAccessTests
         public bool IsAllowed(RegisteredSubjectProperty member, string action) => true;
     }
 
-    private static AuthorizationMcpAccessPolicy CreatePolicy(string roleName, params AuthorizationRole[] customRoles) =>
-        new(AuthorizationDefinition.Create(
+    private static AuthorizationMcpAccessPolicy CreatePolicy(string roleName, params AuthorizationRole[] customRoles)
+    {
+        var policy = AuthorizationDefinition.Create(
             [.. BuiltInRoles.All, .. customRoles],
             SystemRules.Rules,
             AuthorizationActions.All,
             new StateAttributePathProvider(),
-            new HomeBlazeMemberTagProvider()).Compile([roleName]));
+            new HomeBlazeMemberTagProvider()).Compile([roleName]);
+        return new(() => policy);
+    }
 
     private static async Task<JsonElement> InvokeAsync(Graph graph, string path)
     {

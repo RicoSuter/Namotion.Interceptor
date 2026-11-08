@@ -51,7 +51,6 @@ internal static class HomeBlazeMcpConfigurationFactory
         ArgumentNullException.ThrowIfNull(accessPolicy);
 
         var typeRegistry = serviceProvider.GetRequiredService<SubjectTypeRegistry>();
-        var pathProvider = new StateAttributePathProvider();
         var typeProviders = new IMcpTypeProvider[]
         {
             new SubjectAbstractionTypeProvider(),
@@ -64,7 +63,7 @@ internal static class HomeBlazeMcpConfigurationFactory
 
         var configuration = new McpServerConfiguration
         {
-            PathProvider = pathProvider,
+            PathProvider = new StateAttributePathProvider(),
             PathPrefix = PathPrefix,
             ExcludeTypes = excludeTypes,
             TypeProviders = typeProviders,
@@ -79,7 +78,7 @@ internal static class HomeBlazeMcpConfigurationFactory
 
         configuration.ValueFilters.Add(AgentOrderAccess.CreateOrderFilter(configuration, rootSubjectProvider));
         configuration.SubjectEnrichers.Add(new HomeBlazeMcpSubjectEnricher(
-            typeProviders, accessPolicy, HomeBlazeMcpSubjectEnricher.CreatePageUrlGetter(serviceProvider, configuration, rootSubjectProvider)));
+            typeProviders, configuration, HomeBlazeMcpSubjectEnricher.CreatePageUrlGetter(serviceProvider, configuration, rootSubjectProvider)));
 
         var invoker = new McpMethodInvoker(
             rootSubjectProvider,
@@ -94,7 +93,7 @@ internal static class HomeBlazeMcpConfigurationFactory
         configuration.ToolProviders.Add(new HomeBlazeMarkdownToolProvider(invoker));
         configuration.ToolProviders.Add(new HomeBlazeMarkdownSearchToolProvider(rootSubjectProvider, configuration));
 
-        var context = new McpToolProviderContext(serviceProvider, rootSubjectProvider, pathProvider, configuration);
+        var context = new McpToolProviderContext(serviceProvider, rootSubjectProvider, configuration);
         foreach (var registration in serviceProvider.GetServices<McpToolProviderRegistration>())
         {
             configuration.ToolProviders.Add(registration.Create(context));

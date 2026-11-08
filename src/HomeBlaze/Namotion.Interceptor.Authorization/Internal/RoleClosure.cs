@@ -33,9 +33,9 @@ internal static class RoleClosure
         return rolesByName;
     }
 
-    public static List<AuthorizationRole> Resolve(IReadOnlyDictionary<string, AuthorizationRole> rolesByName, IReadOnlyCollection<string> roleNames)
+    public static List<CompiledRole> Resolve(IReadOnlyDictionary<string, CompiledRole> rolesByName, IReadOnlyCollection<string> roleNames)
     {
-        var result = new List<AuthorizationRole>();
+        var result = new List<CompiledRole>();
         var visited = new HashSet<string>(StringComparer.Ordinal);
         var path = new List<string>();
         foreach (var name in roleNames)
@@ -46,7 +46,7 @@ internal static class RoleClosure
         return result;
     }
 
-    private static AuthorizationRole Lookup(string? name, IReadOnlyDictionary<string, AuthorizationRole> rolesByName, List<string> path)
+    private static CompiledRole Lookup(string? name, IReadOnlyDictionary<string, CompiledRole> rolesByName, List<string> path)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -74,12 +74,13 @@ internal static class RoleClosure
 
     private static void Visit(
         string? name,
-        IReadOnlyDictionary<string, AuthorizationRole> rolesByName,
-        List<AuthorizationRole> result,
+        IReadOnlyDictionary<string, CompiledRole> rolesByName,
+        List<CompiledRole> result,
         HashSet<string> visited,
         List<string> path)
     {
-        var role = Lookup(name, rolesByName, path);
+        var compiled = Lookup(name, rolesByName, path);
+        var role = compiled.Role;
 
         var cycleStart = path.FindIndex(entry => string.Equals(entry, role.Name, StringComparison.Ordinal));
         if (cycleStart >= 0)
@@ -109,6 +110,6 @@ internal static class RoleClosure
         }
 
         path.RemoveAt(path.Count - 1);
-        result.Add(role);
+        result.Add(compiled);
     }
 }

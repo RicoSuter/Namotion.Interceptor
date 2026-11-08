@@ -2,6 +2,7 @@ using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry.Abstractions;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
 using Namotion.Interceptor.Mcp;
@@ -15,22 +16,22 @@ namespace HomeBlaze.AI.Mcp;
 internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
 {
     private readonly Lazy<(HashSet<Type> Concrete, HashSet<Type> Interfaces)> _typeCache;
-    private readonly IMcpAccessPolicy _accessPolicy;
+    private readonly McpServerConfiguration _configuration;
     private readonly Func<IInterceptorSubject, string?>? _getPageUrl;
 
     /// <param name="typeProviders">The providers of the types named in <c>$type</c> and <c>$interfaces</c>.</param>
-    /// <param name="accessPolicy">Decides which methods <c>$methods</c> lists and whether <c>$title</c> and <c>$icon</c> are
-    /// given, when they are registered members: only those it allows to read.</param>
+    /// <param name="configuration">The configuration whose access policy decides which methods <c>$methods</c> lists and
+    /// whether <c>$title</c> and <c>$icon</c> are given, when they are registered members: only those it allows to read.</param>
     /// <param name="getPageUrl">Gets the address of the page of a subject, such as <c>/pages/House/Haus.md</c>, or null
     /// for a subject without a page of its own; null for no addresses.</param>
     public HomeBlazeMcpSubjectEnricher(
         IEnumerable<IMcpTypeProvider> typeProviders,
-        IMcpAccessPolicy accessPolicy,
+        McpServerConfiguration configuration,
         Func<IInterceptorSubject, string?>? getPageUrl = null)
     {
-        ArgumentNullException.ThrowIfNull(accessPolicy);
+        ArgumentNullException.ThrowIfNull(configuration);
+        _configuration = configuration;
         _getPageUrl = getPageUrl;
-        _accessPolicy = accessPolicy;
         _typeCache = new Lazy<(HashSet<Type>, HashSet<Type>)>(() =>
         {
             var allTypes = typeProviders.SelectMany(p => p.GetTypes()).ToList();
@@ -114,7 +115,8 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
             metadata["$interfaces"] = interfaces;
         }
 
-        var methods = McpMethodInvoker.GetReadableMethods(subject, _accessPolicy)
+        var methods = subject.GetAllMethods(ExclusionTarget.Agents)
+            .Where(method => IsReadable(subject, method))
             .Select(method => method.PropertyName)
             .ToArray();
 
@@ -139,8 +141,11 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
         }
     }
 
+    private bool IsReadable(RegisteredSubject subject, MethodMetadata method)
+        => subject.TryGetProperty(method.PropertyName) is { } property && _configuration.IsAllowed(property, McpAccessActions.Read);
+
     // A title or icon that is a registered member, such as a derived title, is shown only when the policy allows to read it.
     private bool IsReadable(RegisteredSubject subject, string memberName)
         => subject.TryGetProperty(memberName) is not { } member ||
-            _accessPolicy.IsAllowed(member, McpAccessActions.Read);
+            _configuration.IsAllowed(member, McpAccessActions.Read);
 }

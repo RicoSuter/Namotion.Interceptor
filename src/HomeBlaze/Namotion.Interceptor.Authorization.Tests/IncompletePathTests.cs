@@ -177,7 +177,7 @@ public class IncompletePathTests
         // Assert
         Assert.False(canReadBefore);
         Assert.Empty(kitchen.Parents);
-        Assert.Equal(new VisibilityDecision(isVisible: false, hasReadableMember: true, deniedProperty: null), decisionAfter);
+        Assert.Equal(new VisibilityDecision(isVisible: false, hasReadableMember: false, deniedProperty: null), decisionAfter);
     }
 
     [Fact]

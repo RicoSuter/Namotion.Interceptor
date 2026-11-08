@@ -17,7 +17,6 @@ using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Authorization;
@@ -63,15 +62,13 @@ public sealed class AgentRolesTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task WhenAReaderAgentInvokesAnOperation_ThenItIsRefusedAndLoggedWithTheAgentAndTheMethodPath()
+    public async Task WhenAReaderAgentInvokesAnOperation_ThenItIsRefused()
     {
         // Arrange
         var graph = await CreateGraphAsync("# Notes");
-        var logger = new RecordingLogger();
         string? error = null;
-        var agent = new FakeAgent(graph.AgentServices, logger)
+        var agent = new FakeAgent(graph.AgentServices)
         {
-            Name = "Watcher",
             Roles = [BuiltInRoles.ReaderName],
             AllowedTools = [HomeBlazeMcpToolProvider.InvokeOperationToolName],
             Handler = async (request, _, cancellationToken) =>
@@ -92,23 +89,17 @@ public sealed class AgentRolesTests : IAsyncLifetime
         // Assert
         Assert.Equal("Operation 'ReplaceContent' is not permitted. The access policy does not allow it.", error);
         Assert.Equal("# Notes", await File.ReadAllTextAsync(Path.Combine(_directory.FullName, "Notes.md")));
-        Assert.Contains(logger.Entries, entry =>
-            entry.Level == LogLevel.Debug &&
-            entry.Message.Contains("Watcher", StringComparison.Ordinal) &&
-            entry.Message.Contains("/Storage/Notes.md/ReplaceContent", StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task WhenAReaderAgentSetsAState_ThenTheWriteIsRefusedWithoutALog()
+    public async Task WhenAReaderAgentSetsAState_ThenTheWriteIsRefused()
     {
         // Arrange
-        var logger = new RecordingLogger();
         string? setPropertyResult = null;
         await using var test = await AgentTestContext<FakeAgent>.StartAsync(
-            services => new FakeAgent(services, logger),
+            services => new FakeAgent(services),
             agent =>
             {
-                agent.Name = "Watcher";
                 agent.Roles = [BuiltInRoles.ReaderName];
                 agent.AllowedTools = ["get_property", "set_property"];
                 agent.Handler = async (request, _, cancellationToken) =>
@@ -127,7 +118,6 @@ public sealed class AgentRolesTests : IAsyncLifetime
         // Assert
         Assert.Contains(RefusalSentence, setPropertyResult);
         Assert.Equal(20, test.Root.Temperature);
-        Assert.DoesNotContain(logger.Entries, entry => entry.Message.Contains("/Temperature", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -291,7 +281,7 @@ public sealed class AgentRolesTests : IAsyncLifetime
         };
         await AttachAndWaitForStartAsync(graph, agent);
         var offeredToolNames = graph.AgentServices.ToolSource
-            .CreateTools(McpAuthorization.GetAccessPolicy(graph.Services, [BuiltInRoles.OperatorName]))
+            .CreateTools(McpAuthorization.GetAccessPolicy(graph.Services.GetRequiredService<AuthorizationService>(), [BuiltInRoles.OperatorName]))
             .Select(tool => tool.Name)
             .ToArray();
 

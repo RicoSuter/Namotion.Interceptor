@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using System.Collections.Immutable;
+using System.Runtime.InteropServices;
 using Namotion.Interceptor.Authorization.Internal;
 using Namotion.Interceptor.Registry.Paths;
 
@@ -12,23 +13,20 @@ namespace Namotion.Interceptor.Authorization;
 /// </summary>
 public sealed class AuthorizationDefinition
 {
-    private readonly FrozenDictionary<string, AuthorizationRole> _rolesByName;
-    private readonly FrozenDictionary<string, CompiledRole> _compiledRoles;
+    private readonly FrozenDictionary<string, CompiledRole> _rolesByName;
     private readonly CompiledRule[] _systemDeny;
     private readonly FrozenDictionary<string, ulong> _actionBits;
     private readonly IMemberTagProvider _tagProvider;
     private readonly PathProviderBase _pathProvider;
 
     private AuthorizationDefinition(
-        FrozenDictionary<string, AuthorizationRole> rolesByName,
-        FrozenDictionary<string, CompiledRole> compiledRoles,
+        FrozenDictionary<string, CompiledRole> rolesByName,
         CompiledRule[] systemDeny,
         FrozenDictionary<string, ulong> actionBits,
         IMemberTagProvider tagProvider,
         PathProviderBase pathProvider)
     {
         _rolesByName = rolesByName;
-        _compiledRoles = compiledRoles;
         _systemDeny = systemDeny;
         _actionBits = actionBits;
         _tagProvider = tagProvider;
@@ -70,14 +68,13 @@ public sealed class AuthorizationDefinition
         ImmutableArray<PermissionRule> systemDenyRuleArray = systemDenyRules is ImmutableArray<PermissionRule> { IsDefault: true } ? [] : [.. systemDenyRules];
         var systemDeny = PolicyCompiler.CompileRules(role: null, systemDenyRuleArray, actionBits, pathProvider, hasTagProvider);
 
-        var compiledRoles = new Dictionary<string, CompiledRole>(StringComparer.Ordinal);
-        foreach (var role in roles)
+        var compiledRoles = new Dictionary<string, CompiledRole>(rolesByName.Count, StringComparer.Ordinal);
+        foreach (var role in rolesByName.Values)
         {
-            compiledRoles[role.Name] = CompileRole(role, actionBits, pathProvider, hasTagProvider);
+            compiledRoles.Add(role.Name, CompileRole(role, actionBits, pathProvider, hasTagProvider));
         }
 
         return new AuthorizationDefinition(
-            rolesByName.ToFrozenDictionary(StringComparer.Ordinal),
             compiledRoles.ToFrozenDictionary(StringComparer.Ordinal),
             systemDeny,
             actionBits,
@@ -103,22 +100,25 @@ public sealed class AuthorizationDefinition
         ArgumentNullException.ThrowIfNull(roleNames);
 
         var closure = RoleClosure.Resolve(_rolesByName, roleNames);
+        var roles = new AuthorizationRole[closure.Count];
         var allow = new List<CompiledRule>();
         var deny = new List<CompiledRule>();
-        foreach (var role in closure)
+        for (var i = 0; i < closure.Count; i++)
         {
-            var compiled = _compiledRoles[role.Name];
+            var compiled = closure[i];
             if (compiled.Error is not null)
             {
                 throw new AuthorizationException(compiled.Error);
             }
 
+            roles[i] = compiled.Role;
             allow.AddRange(compiled.Allow);
             deny.AddRange(compiled.Deny);
         }
 
         deny.AddRange(_systemDeny);
-        return new AuthorizationPolicy([.. closure], [.. allow], [.. deny], _actionBits, _tagProvider, _pathProvider);
+        return new AuthorizationPolicy(
+            ImmutableCollectionsMarshal.AsImmutableArray(roles), [.. allow], [.. deny], _actionBits, _tagProvider, _pathProvider);
     }
 
     private static CompiledRole CompileRole(
@@ -127,16 +127,14 @@ public sealed class AuthorizationDefinition
         try
         {
             return new CompiledRole(
+                role,
                 PolicyCompiler.CompileRules(role, role.Allow, actionBits, pathProvider, hasTagProvider),
                 PolicyCompiler.CompileRules(role, role.Deny, actionBits, pathProvider, hasTagProvider),
                 Error: null);
         }
         catch (AuthorizationException exception)
         {
-            return new CompiledRole([], [], exception.Message);
+            return new CompiledRole(role, [], [], exception.Message);
         }
     }
-
-    // The error is kept as a message and thrown as a new exception each time, so concurrent compilations never share one instance.
-    private sealed record CompiledRole(CompiledRule[] Allow, CompiledRule[] Deny, string? Error);
 }

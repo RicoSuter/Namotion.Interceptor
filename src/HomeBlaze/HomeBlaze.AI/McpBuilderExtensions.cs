@@ -6,7 +6,6 @@ using Namotion.Interceptor;
 using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Extensions;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace HomeBlaze.AI;
 
@@ -16,7 +15,6 @@ namespace HomeBlaze.AI;
 /// </summary>
 /// <param name="Services">The services of the tools.</param>
 /// <param name="RootSubjectProvider">Resolves the root subject when a tool runs.</param>
-/// <param name="PathProvider">Resolves and builds the paths of the tools.</param>
 /// <param name="Configuration">
 /// The configuration the provider is added to, whose access policy decides per member and action; resolve paths with
 /// its <c>TryGetReadableProperty</c> and <c>TryGetReadableSubject</c> and check actions with its <c>IsAllowed</c>.
@@ -24,7 +22,6 @@ namespace HomeBlaze.AI;
 public readonly record struct McpToolProviderContext(
     IServiceProvider Services,
     Func<IInterceptorSubject> RootSubjectProvider,
-    PathProviderBase PathProvider,
     McpServerConfiguration Configuration);
 
 /// <summary>
@@ -64,8 +61,8 @@ public static class McpBuilderExtensions
     {
         var access = serviceProvider.GetService<IMcpClientAccess>();
         var accessPolicy = access is null
-            ? new AuthorizationMcpAccessPolicy(AuthorizationPolicy.DenyAll)
-            : McpAuthorization.GetAccessPolicy(serviceProvider, access.Roles);
+            ? new AuthorizationMcpAccessPolicy(() => AuthorizationPolicy.DenyAll)
+            : McpAuthorization.GetAccessPolicy(serviceProvider.GetRequiredService<AuthorizationService>(), access.Roles);
         return HomeBlazeMcpConfigurationFactory.Create(serviceProvider, rootSubjectProvider, accessPolicy);
     }
 }

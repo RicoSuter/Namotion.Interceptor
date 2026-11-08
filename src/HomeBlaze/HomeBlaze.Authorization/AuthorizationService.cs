@@ -133,9 +133,7 @@ public sealed class AuthorizationService : IDisposable
     /// Gets the policy of a principal holding only <paramref name="editedRole"/>, compiled like <see cref="GetPolicy(IReadOnlyCollection{string})"/>, with the system rules of
     /// agents and MCP clients (<see cref="PrincipalKind.NonHuman"/>), and with
     /// <paramref name="editedRole"/> in place of the saved custom role of the same name, or added when none
-    /// is saved. Neither policies nor statuses change. Only the last previewed instance is kept: previewing it again
-    /// gives the same result without compiling it again, as long as the roles did not change and no other instance was
-    /// previewed since.
+    /// is saved. Neither policies nor statuses change.
     /// </summary>
     /// <returns>
     /// The policy and no error, or <see cref="AuthorizationPolicy.DenyAll"/> and the status the role would have once saved:

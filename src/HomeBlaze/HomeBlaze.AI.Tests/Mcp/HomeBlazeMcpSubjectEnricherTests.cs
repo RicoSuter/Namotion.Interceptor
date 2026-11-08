@@ -64,7 +64,7 @@ public class HomeBlazeMcpSubjectEnricherTests
             Includes = [BuiltInRoles.OperatorName],
             Deny = deniesTitle ? [new PermissionRule { Members = [nameof(TitledTestDevice.Title)], Actions = [PermissionAction.Read] }] : []
         };
-        var enricher = new HomeBlazeMcpSubjectEnricher([], TestAccessPolicies.Create(role.Name, role));
+        var enricher = new HomeBlazeMcpSubjectEnricher([], CreateConfiguration(TestAccessPolicies.Create(role.Name, role)));
 
         // Act
         var enrichments = enricher.GetSubjectEnrichments(device.TryGetRegisteredSubject()!);
@@ -83,7 +83,7 @@ public class HomeBlazeMcpSubjectEnricherTests
 
         var typeProvider = new TestTypeProvider(
             new McpTypeInfo(typeof(TestThing).FullName!, "Test", IsInterface: false, Type: typeof(TestThing)));
-        var enricher = new HomeBlazeMcpSubjectEnricher([typeProvider], AllowAllMcpAccessPolicy.Instance);
+        var enricher = new HomeBlazeMcpSubjectEnricher([typeProvider], CreateConfiguration());
 
         // Act
         var enrichments = enricher.GetSubjectEnrichments(registered);
@@ -101,7 +101,7 @@ public class HomeBlazeMcpSubjectEnricherTests
         var registered = thing.TryGetRegisteredSubject()!;
 
         // No type providers — nothing is "known"
-        var enricher = new HomeBlazeMcpSubjectEnricher([], AllowAllMcpAccessPolicy.Instance);
+        var enricher = new HomeBlazeMcpSubjectEnricher([], CreateConfiguration());
 
         // Act
         var enrichments = enricher.GetSubjectEnrichments(registered);
@@ -117,7 +117,7 @@ public class HomeBlazeMcpSubjectEnricherTests
         var context = CreateContext();
         var thing = new TestThing(context) { Name = "My Thing", Temperature = 20m };
         var other = new TestThing(context) { Name = "Other", Temperature = 20m };
-        var enricher = new HomeBlazeMcpSubjectEnricher([], AllowAllMcpAccessPolicy.Instance,
+        var enricher = new HomeBlazeMcpSubjectEnricher([], CreateConfiguration(),
             subject => ReferenceEquals(subject, thing) ? "/pages/House/Thing.md" : null);
 
         // Act
@@ -201,7 +201,7 @@ public class HomeBlazeMcpSubjectEnricherTests
         var typeProvider = new TestTypeProvider(
             new McpTypeInfo(typeof(HomeBlaze.Abstractions.ITitleProvider).FullName!, "Title", IsInterface: true,
                 Type: typeof(HomeBlaze.Abstractions.ITitleProvider)));
-        var enricher = new HomeBlazeMcpSubjectEnricher([typeProvider], AllowAllMcpAccessPolicy.Instance);
+        var enricher = new HomeBlazeMcpSubjectEnricher([typeProvider], CreateConfiguration());
 
         // Act
         var enrichments = enricher.GetSubjectEnrichments(registered);
@@ -224,7 +224,7 @@ public class HomeBlazeMcpSubjectEnricherTests
         var typeProvider = new TestTypeProvider(
             new McpTypeInfo("IUnrelatedInterface", "Unrelated", IsInterface: true,
                 Type: typeof(ITestSensorInterface)));
-        var enricher = new HomeBlazeMcpSubjectEnricher([typeProvider], AllowAllMcpAccessPolicy.Instance);
+        var enricher = new HomeBlazeMcpSubjectEnricher([typeProvider], CreateConfiguration());
 
         // Act
         var enrichments = enricher.GetSubjectEnrichments(registered);
@@ -347,18 +347,21 @@ public class HomeBlazeMcpSubjectEnricherTests
 
     private static HomeBlazeMcpSubjectEnricher CreatePageEnricher(HolderGraph graph, IMcpAccessPolicy accessPolicy)
     {
-        var configuration = new McpServerConfiguration { PathProvider = new StateAttributePathProvider(), AccessPolicy = accessPolicy };
+        var configuration = CreateConfiguration(accessPolicy);
         var getPageUrl = HomeBlazeMcpSubjectEnricher.CreatePageUrlGetter(
             _ => true, new SubjectPathResolver(() => graph.Root), configuration, () => graph.Root);
-        return new HomeBlazeMcpSubjectEnricher([], accessPolicy, getPageUrl);
+        return new HomeBlazeMcpSubjectEnricher([], configuration, getPageUrl);
     }
 
     private sealed record HolderGraph(TestHolder Root, TestHolder Folder, TestHolder Device);
 
     private static HomeBlazeMcpSubjectEnricher CreateEnricher()
     {
-        return new HomeBlazeMcpSubjectEnricher([], AllowAllMcpAccessPolicy.Instance);
+        return new HomeBlazeMcpSubjectEnricher([], CreateConfiguration());
     }
+
+    private static McpServerConfiguration CreateConfiguration(IMcpAccessPolicy? accessPolicy = null) =>
+        new() { PathProvider = new StateAttributePathProvider(), AccessPolicy = accessPolicy ?? AllowAllMcpAccessPolicy.Instance };
 
     private class TestTypeProvider : IMcpTypeProvider
     {

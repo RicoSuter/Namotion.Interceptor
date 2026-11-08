@@ -70,9 +70,6 @@ internal sealed class McpPageReadAccess
         return _configuration.ValueFilters.Count > 0 ? _configuration.ApplyValueFilters(member, value) : value;
     }
 
-    private bool IsAllowed(RegisteredSubjectProperty member, string action) =>
-        AuthorizationMcpAccessPolicy.IsAllowedWithoutLogging(_configuration.AccessPolicy, member, action);
-
     private sealed class Permissions(McpPageReadAccess access, IInterceptorSubject root) : IUserPermissions
     {
         private readonly McpPageReadAccess _access = access;
@@ -108,7 +105,7 @@ internal sealed class McpPageReadAccess
         public bool CanAdminister(RegisteredSubjectProperty member) => false;
 
         public bool CanReadHistory(RegisteredSubjectProperty member) =>
-            CanRead(member) && _access.IsAllowed(member, AuthorizationActions.History.Name);
+            CanRead(member) && _access._configuration.IsAllowed(member, AuthorizationActions.History.Name);
 
         public bool CanShow(RegisteredSubject subject) =>
             GetCached(_canShow, subject, static (access, shown, root) => access.CanShow(shown, root));

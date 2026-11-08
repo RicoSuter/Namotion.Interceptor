@@ -89,14 +89,13 @@ internal sealed class MarkdownSearchSourceFinder
     }
 
     // As invoke_query would call ReadRawContent: the page is readable at its path, and its method readable and executable.
-    // The execute check is not logged, as it runs for every page of every search rather than for a call the client made.
     private bool IsPageReadable(RegisteredSubject root, RegisteredSubject page, string path)
     {
         var readable = path == _configuration.PathPrefix ? root : _configuration.TryGetReadableSubject(root, path);
         return ReferenceEquals(readable, page) &&
             page.TryGetProperty(nameof(MarkdownFile.ReadRawContent)) is { } method &&
             _configuration.IsAllowed(method, McpAccessActions.Read) &&
-            AuthorizationMcpAccessPolicy.IsAllowedWithoutLogging(_configuration.AccessPolicy, method, AuthorizationActions.Execute.Name);
+            _configuration.IsAllowed(method, AuthorizationActions.Execute.Name);
     }
 
     // Sort is not stable, so a page comes before the notes of its own subject by a rule of its own.

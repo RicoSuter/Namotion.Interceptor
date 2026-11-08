@@ -326,7 +326,7 @@ public class AgentOperationAccessTests
     private static Dictionary<string, McpToolInfo> CreateTools(IServiceProvider services, AgentTestRoot root, bool isAgent)
     {
         var configuration = isAgent
-            ? HomeBlazeMcpConfigurationFactory.Create(services, () => root, McpAuthorization.GetAccessPolicy(services, [BuiltInRoles.OperatorName]))
+            ? HomeBlazeMcpConfigurationFactory.Create(services, () => root, McpAuthorization.GetAccessPolicy(services.GetRequiredService<AuthorizationService>(), [BuiltInRoles.OperatorName]))
             : McpBuilderExtensions.CreateServerConfiguration(services, () => root);
         return new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }

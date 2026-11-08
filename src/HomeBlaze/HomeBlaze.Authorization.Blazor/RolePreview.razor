@@ -1,15 +1,13 @@
 @* Shows what a role allows a kind of principal on one subject: whether the subject is readable, each member against each
-   action with the rule that decided it, and how many members each deny rule of the role matches. Compiles the role
-   through the authorization service and never writes anything. Shows nothing to a viewer who may not administer the
-   roles of the authorization, as it lists the members of any subject whatever the viewer may read. *@
+   action with the rule that decided it, and how many members each deny rule of the role matches. Never writes anything.
+   Shows nothing to a viewer who may not administer the roles of the authorization, as it lists the members of any
+   subject whatever the viewer may read. *@
 @using HomeBlaze.Authorization.Abstractions
 @using System.Text
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Metadata
 @using Namotion.Interceptor.Registry.Abstractions
 @using Namotion.Interceptor.Registry.Paths
-
-@implements IDisposable
 
 @inject AuthorizationService AuthorizationService
 @inject SubjectPathResolver PathResolver
@@ -37,13 +35,13 @@
         system rules of the chosen kind of principal.
     </MudText>
 
-    @if (_error is not null)
+    @if (_isRefused)
     {
-        <MudAlert Severity="Severity.Error" Dense="true" Class="mt-4" data-testid="role-preview-error">@_error</MudAlert>
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mt-4" data-testid="role-preview-refusal">@NotAllowedMessage</MudAlert>
     }
     else if (_subject is null)
     {
-        @if (!string.IsNullOrWhiteSpace(_path))
+        @if (Result.Error is null && !string.IsNullOrWhiteSpace(_path))
         {
             <MudText Typo="Typo.body2" Class="mt-4" data-testid="role-preview-not-found">No subject has this path.</MudText>
         }
@@ -187,11 +185,12 @@
         (PrincipalKind.Anonymous, "Anonymous")
     ];
 
+    private const string NotAllowedMessage = "Only a full administrator can preview roles.";
+
     private string? _path;
+    private AuthorizationResult _previewedResult;
     private AuthorizationRole? _previewedRole;
-    private PrincipalKind _previewedKind;
-    private IReadOnlyList<string>? _previewedRoleNames;
-    private string? _error;
+    private bool _isRefused;
     private IInterceptorSubject? _subject;
     private VisibilityDecision _subjectDecision;
     private string? _subjectText;
@@ -199,56 +198,37 @@
     private IReadOnlyList<DenyMatch> _denyMatches = [];
     private string? _selectedMember;
     private PermissionAction? _selectedAction;
-    private bool _isDisposed;
 
     /// <summary>
-    /// The role to preview; a new instance is compiled again, and so is the same one once the saved roles changed.
+    /// The preview of the role, see <see cref="AuthorizationService.PreviewPolicy(AuthorizationRole, PrincipalKind)"/>. While
+    /// it has an error, which the editor shows, no subject is shown.
     /// </summary>
+    [Parameter, EditorRequired]
+    public AuthorizationResult Result { get; set; }
+
+    /// <summary>The role the preview was compiled from, whose deny rules are matched against the members of the subject.</summary>
     [Parameter, EditorRequired]
     public AuthorizationRole Role { get; set; } = null!;
 
-    /// <summary>The kind of principal whose system rules the role is previewed with.</summary>
+    /// <summary>The kind of principal whose system rules <see cref="Result"/> was compiled with.</summary>
     [Parameter]
     public PrincipalKind Kind { get; set; } = PrincipalKind.Person;
-
-    private const string NotAllowedMessage = "Only a full administrator can preview roles.";
 
     /// <summary>The authorization that holds the roles; the preview shows nothing unless the viewer may administer its roles.</summary>
     [Parameter]
     public Authorization? Authorization { get; set; }
 
-    /// <summary>Raised with the kind chosen in the preview.</summary>
+    /// <summary>Raised with the kind chosen in the preview, for which the parent passes the preview compiled with it.</summary>
     [Parameter]
     public EventCallback<PrincipalKind> KindChanged { get; set; }
 
-    protected override void OnInitialized() => AuthorizationService.PoliciesChanged += OnPoliciesChanged;
-
     protected override void OnParametersSet()
     {
-        if (!ReferenceEquals(Role, _previewedRole) || Kind != _previewedKind)
+        if (Result != _previewedResult || !ReferenceEquals(Role, _previewedRole))
         {
             Update();
         }
     }
-
-    public void Dispose()
-    {
-        _isDisposed = true;
-        AuthorizationService.PoliciesChanged -= OnPoliciesChanged;
-    }
-
-    // An included role saved by another dialog, or a file reload, changes the decisions of the same edited role. Raised
-    // on the thread pool, also right after this component was disposed, and also for the roles previewed already, which
-    // then render nothing new.
-    private void OnPoliciesChanged() =>
-        _ = InvokeAsync(() =>
-        {
-            if (!_isDisposed && !ReferenceEquals(AuthorizationService.GetRoleNames(), _previewedRoleNames))
-            {
-                Update();
-                StateHasChanged();
-            }
-        });
 
     private static bool IsSubjectProperty(RegisteredSubjectProperty property) => property.CanContainSubjects;
 
@@ -265,7 +245,6 @@
     private async Task OnKindChangedAsync(PrincipalKind kind)
     {
         Kind = kind;
-        Update();
         await KindChanged.InvokeAsync(kind);
     }
 
@@ -283,31 +262,23 @@
 
     private void Update()
     {
+        _previewedResult = Result;
         _previewedRole = Role;
-        _previewedKind = Kind;
         _rows = [];
         _denyMatches = [];
 
         // Checked on every update, as a path can still arrive from a page whose viewer lost the permission.
-        if (!Permissions.CanAdministerRoles(Authorization))
-        {
-            _error = NotAllowedMessage;
-            _subject = null;
-            return;
-        }
+        _isRefused = !Permissions.CanAdministerRoles(Authorization);
+        _subject = _isRefused || Result.Error is not null || string.IsNullOrWhiteSpace(_path)
+            ? null
+            : PathResolver.ResolveSubject(_path.Trim(), PathStyle.Canonical);
 
-        // Read before the policy, so that roles compiled in between are previewed again.
-        _previewedRoleNames = AuthorizationService.GetRoleNames();
-        var result = AuthorizationService.PreviewPolicy(Role, Kind);
-        _error = result.Error;
-        _subject = string.IsNullOrWhiteSpace(_path) ? null : PathResolver.ResolveSubject(_path.Trim(), PathStyle.Canonical);
-
-        if (_error is not null || _subject?.TryGetRegisteredSubject() is not { } subject)
+        if (_subject?.TryGetRegisteredSubject() is not { } subject)
         {
             return;
         }
 
-        var policy = result.Policy;
+        var policy = Result.Policy;
         var members = GetMembers(subject);
         _subjectDecision = policy.ExplainVisibility(subject);
         _subjectText = DescribeSubject(_subjectDecision);
@@ -446,7 +417,7 @@
             cells[executeIndex] = execute with
             {
                 IsUnusable = true,
-                Explanation = $"{execute.Explanation} It cannot be used, as read is denied: {ExecuteWithoutRead.Reason}"
+                Explanation = $"{execute.Explanation} It cannot be used, as read is denied: A method is listed and run only when it is readable."
             };
         }
     }
