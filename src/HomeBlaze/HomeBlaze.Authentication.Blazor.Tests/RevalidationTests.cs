@@ -120,6 +120,61 @@ public class RevalidationTests
     }
 
     [Fact]
+    public async Task WhenAReconnectSetsAPrincipalWhoseSessionEnded_ThenTheCircuitStaysSignedOutAndNoSubscriberSeesThePrincipal()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        await using var circuit = await SignedInCircuit.StartAsync(host, UserName);
+        await circuit.Provider.LastRevalidation;
+        await host.ChangeSecurityStampAsync(UserName);
+        await host.UserStore.RefreshUserAsync(host.UserStore.GetUserId(UserName)!, CancellationToken.None);
+        await circuit.Provider.LastRevalidation;
+        Assert.False((await circuit.Provider.GetAuthenticationStateAsync()).User.Identity?.IsAuthenticated);
+        var currentUser = circuit.Services.GetRequiredService<CurrentUser>();
+        var delivered = new List<ClaimsPrincipal>();
+        circuit.Provider.AuthenticationStateChanged += state => delivered.Add(state.Result.User);
+
+        // Act
+        ((IHostEnvironmentAuthenticationStateProvider)circuit.Provider).SetAuthenticationState(Task.FromResult(new AuthenticationState(circuit.Principal)));
+        await circuit.Provider.LastRevalidation;
+
+        // Assert
+        Assert.False((await circuit.Provider.GetAuthenticationStateAsync()).User.Identity?.IsAuthenticated);
+        Assert.All(delivered, principal => Assert.False(principal.Identity?.IsAuthenticated));
+        Assert.Null(currentUser.UserId);
+    }
+
+    [Fact]
+    public async Task WhenTheFirstStateIsStale_ThenEverySubscriberEndsOnTheAnonymousState()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        ClaimsPrincipal stalePrincipal;
+        await using (var signedIn = await SignedInCircuit.StartAsync(host, UserName))
+        {
+            stalePrincipal = signedIn.Principal;
+        }
+
+        await host.ChangeSecurityStampAsync(UserName);
+        await host.UserStore.RefreshUserAsync(host.UserStore.GetUserId(UserName)!, CancellationToken.None);
+        await using var scope = host.Services.CreateAsyncScope();
+        var provider = (HomeBlazeRevalidatingAuthenticationStateProvider)scope.ServiceProvider.GetRequiredService<AuthenticationStateProvider>();
+        var currentUser = scope.ServiceProvider.GetRequiredService<CurrentUser>();
+        var delivered = new List<ClaimsPrincipal>();
+        provider.AuthenticationStateChanged += state => delivered.Add(state.Result.User);
+
+        // Act
+        ((IHostEnvironmentAuthenticationStateProvider)provider).SetAuthenticationState(Task.FromResult(new AuthenticationState(stalePrincipal)));
+        await provider.LastRevalidation;
+
+        // Assert
+        Assert.False((await provider.GetAuthenticationStateAsync()).User.Identity?.IsAuthenticated);
+        Assert.NotEmpty(delivered);
+        Assert.All(delivered, principal => Assert.False(principal.Identity?.IsAuthenticated));
+        Assert.Null(currentUser.UserId);
+    }
+
+    [Fact]
     public async Task WhenACircuitStartsWithAStaleSecurityStamp_ThenItIsSignedOutWithoutWaitingForTheInterval()
     {
         // Arrange
@@ -132,7 +187,7 @@ public class RevalidationTests
         var provider = (HomeBlazeRevalidatingAuthenticationStateProvider)newCircuitScope.ServiceProvider.GetRequiredService<AuthenticationStateProvider>();
 
         // Act
-        provider.SetAuthenticationState(Task.FromResult(new AuthenticationState(stalePrincipal)));
+        ((IHostEnvironmentAuthenticationStateProvider)provider).SetAuthenticationState(Task.FromResult(new AuthenticationState(stalePrincipal)));
         await provider.LastRevalidation;
 
         // Assert
@@ -216,7 +271,7 @@ public class RevalidationTests
             await host.UserStore.RefreshUserAsync(user.Id, CancellationToken.None);
             var principal = await scope.ServiceProvider.GetRequiredService<IUserClaimsPrincipalFactory<ApplicationUser>>().CreateAsync(user);
             var provider = (HomeBlazeRevalidatingAuthenticationStateProvider)scope.ServiceProvider.GetRequiredService<AuthenticationStateProvider>();
-            provider.SetAuthenticationState(Task.FromResult(new AuthenticationState(principal)));
+            ((IHostEnvironmentAuthenticationStateProvider)provider).SetAuthenticationState(Task.FromResult(new AuthenticationState(principal)));
             return new SignedInCircuit(scope, provider, principal);
         }
 

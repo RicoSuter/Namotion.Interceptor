@@ -11,18 +11,23 @@ namespace HomeBlaze.Authentication.Blazor;
 
 /// <summary>
 /// The authentication state of a circuit, which becomes anonymous once the session of the person ends: checked against
-/// the <see cref="UserStore"/> in memory, see <see cref="UserStore.IsSessionAllowed"/>, when the state is first set and at
-/// once when the store changes the person, and against the security stamp in the database every five minutes, which
-/// catches a change made another way, such as by restoring the database.
+/// the <see cref="UserStore"/> in memory, see <see cref="UserStore.IsSessionAllowed"/>, whenever the host sets a state,
+/// such as when the circuit starts or reconnects, before the state is stored and raised, and at once when the store
+/// changes the person, and against the security stamp in the database every five minutes, which catches a change made
+/// another way, such as by restoring the database.
 /// </summary>
-internal sealed partial class HomeBlazeRevalidatingAuthenticationStateProvider : RevalidatingServerAuthenticationStateProvider
+/// <remarks>
+/// Only a state set through <see cref="IHostEnvironmentAuthenticationStateProvider"/>, as the host sets it, is checked;
+/// <see cref="ServerAuthenticationStateProvider.SetAuthenticationState"/> called on this class directly is not.
+/// </remarks>
+internal sealed partial class HomeBlazeRevalidatingAuthenticationStateProvider : RevalidatingServerAuthenticationStateProvider, IHostEnvironmentAuthenticationStateProvider
 {
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IOptions<IdentityOptions> _identityOptions;
     private readonly UserStore _userStore;
     private readonly ILogger _logger;
     private volatile bool _isDisposed;
-    private int _isStateSet;
     private volatile Task _lastRevalidation = Task.CompletedTask;
 
     public HomeBlazeRevalidatingAuthenticationStateProvider(
@@ -41,10 +46,9 @@ internal sealed partial class HomeBlazeRevalidatingAuthenticationStateProvider :
         _userStore = userStore;
         _logger = loggerFactory.CreateLogger<HomeBlazeRevalidatingAuthenticationStateProvider>();
         _userStore.UserChanged += OnUserChanged;
-        AuthenticationStateChanged += OnAuthenticationStateChanged;
     }
 
-    /// <summary>The revalidation started by the latest change of a user, or by the first state set.</summary>
+    /// <summary>The revalidation started by the latest change of a user, or by the latest state the host set.</summary>
     internal Task LastRevalidation => _lastRevalidation;
 
     /// <inheritdoc />
@@ -82,23 +86,53 @@ internal sealed partial class HomeBlazeRevalidatingAuthenticationStateProvider :
         {
             _isDisposed = true;
             _userStore.UserChanged -= OnUserChanged;
-            AuthenticationStateChanged -= OnAuthenticationStateChanged;
         }
 
         base.Dispose(disposing);
     }
 
+    /// <inheritdoc />
+    void IHostEnvironmentAuthenticationStateProvider.SetAuthenticationState(Task<AuthenticationState> authenticationStateTask)
+    {
+        ArgumentNullException.ThrowIfNull(authenticationStateTask);
+
+        if (!authenticationStateTask.IsCompletedSuccessfully)
+        {
+            SetAuthenticationState(CheckAsync(authenticationStateTask));
+        }
+        else
+        {
+            SetAuthenticationState(IsAllowedByStore(authenticationStateTask.Result.User) ? authenticationStateTask : Task.FromResult(CreateAnonymousState()));
+        }
+
+        // The store may have changed the person after the check but before the state was stored, when its revalidation
+        // still saw the earlier state; the fence pairs with the release of the store's gate before it raises the change.
+        Interlocked.MemoryBarrier();
+        _lastRevalidation = RevalidateAsync(userId: null);
+    }
+
     // Raised by the store outside its gate; the check runs in the background so that the store is not held up.
     private void OnUserChanged(string userId) => _lastRevalidation = RevalidateAsync(userId);
 
-    // A change of the person between the request that carried the cookie and the start of the circuit raised no change
-    // for this circuit, so the first state is checked as well.
-    private void OnAuthenticationStateChanged(Task<AuthenticationState> state)
+    private async Task<AuthenticationState> CheckAsync(Task<AuthenticationState> authenticationStateTask)
     {
-        if (Interlocked.Exchange(ref _isStateSet, 1) == 0)
+        var state = await authenticationStateTask;
+        return IsAllowedByStore(state.User) ? state : CreateAnonymousState();
+    }
+
+    private static AuthenticationState CreateAnonymousState() => new(new ClaimsPrincipal(new ClaimsIdentity()));
+
+    // Whether the store lets the session of principal go on; a principal who is not signed in has no session to end.
+    private bool IsAllowedByStore(ClaimsPrincipal principal)
+    {
+        if (principal.Identity?.IsAuthenticated != true)
         {
-            _lastRevalidation = RevalidateAsync(userId: null);
+            return true;
         }
+
+        var claimTypes = _identityOptions.Value.ClaimsIdentity;
+        return principal.FindFirstValue(claimTypes.UserIdClaimType) is { } userId &&
+            _userStore.IsSessionAllowed(userId, principal.FindFirstValue(claimTypes.SecurityStampClaimType));
     }
 
     // Checks the state of the circuit against the store when it names the user with userId, or any user when it is null.
@@ -119,16 +153,13 @@ internal sealed partial class HomeBlazeRevalidatingAuthenticationStateProvider :
         try
         {
             var principal = (await state).User;
-            var claimTypes = _identityOptions.Value.ClaimsIdentity;
-            var principalUserId = principal.FindFirstValue(claimTypes.UserIdClaimType);
-            if (principal.Identity?.IsAuthenticated != true ||
-                (userId is not null && !string.Equals(principalUserId, userId, StringComparison.Ordinal)))
+            if (userId is not null &&
+                !string.Equals(principal.FindFirstValue(_identityOptions.Value.ClaimsIdentity.UserIdClaimType), userId, StringComparison.Ordinal))
             {
                 return;
             }
 
-            isValid = principalUserId is not null &&
-                _userStore.IsSessionAllowed(principalUserId, principal.FindFirstValue(claimTypes.SecurityStampClaimType));
+            isValid = IsAllowedByStore(principal);
         }
         catch (Exception exception)
         {
@@ -139,7 +170,7 @@ internal sealed partial class HomeBlazeRevalidatingAuthenticationStateProvider :
         // A state set meanwhile, such as by another sign-in, is kept: only the state that was checked is replaced.
         if (!isValid && !_isDisposed && ReferenceEquals(state, GetAuthenticationStateAsync()))
         {
-            SetAuthenticationState(Task.FromResult(new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity()))));
+            SetAuthenticationState(Task.FromResult(CreateAnonymousState()));
         }
     }
 

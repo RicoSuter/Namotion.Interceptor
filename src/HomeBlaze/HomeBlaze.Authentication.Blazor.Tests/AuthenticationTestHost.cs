@@ -300,6 +300,17 @@ internal sealed class AuthenticationTestHost : IAsyncDisposable
         Assert.True((await userManager.SetLockoutEndDateAsync(user, lockoutEnd)).Succeeded);
     }
 
+    /// <summary>
+    /// Renews the security stamp of the user named <paramref name="userName"/> directly in the database, as a change made
+    /// without the store does, without reloading the users.
+    /// </summary>
+    public async Task ChangeSecurityStampAsync(string userName)
+    {
+        await using var scope = Services.CreateAsyncScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        Assert.True((await userManager.UpdateSecurityStampAsync((await userManager.FindByNameAsync(userName))!)).Succeeded);
+    }
+
     /// <summary>The user named <paramref name="userName"/> as the graph shows it.</summary>
     public User GetUser(string userName) => AuthorizationSubjects.Single().Users[userName];
 
