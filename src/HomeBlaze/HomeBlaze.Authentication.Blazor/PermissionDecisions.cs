@@ -122,7 +122,7 @@ internal sealed class PermissionDecisions : IUserPermissions
     /// children the principal is shown.
     /// </summary>
     public object? GetValue(RegisteredSubjectProperty member) =>
-        ChildOrdering.FilterOrderInMetadata(
+        ChildOrdering.FilterOrder(
             member,
             member.GetValue(),
             this,

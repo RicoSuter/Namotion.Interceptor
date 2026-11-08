@@ -110,20 +110,30 @@ public static class ChildOrdering
 
     /// <summary>
     /// Gets the value of <paramref name="member"/> as a reader who is listed only some children is shown it: when the
-    /// member holds the metadata of a container, its order without the names that
-    /// <paramref name="getListedNames"/> does not return for the container; any other value as it is.
+    /// member holds the metadata of a container, its order, or the <see cref="IMetadataContainer.ChildOrder"/> of a
+    /// container, without the names that <paramref name="getListedNames"/> does not return for the container; any other
+    /// value as it is.
     /// </summary>
     /// <param name="member">The member the value was read from.</param>
     /// <param name="value">The value of the member.</param>
     /// <param name="state">Passed to <paramref name="getListedNames"/>.</param>
     /// <param name="getListedNames">Gets the names of the children of the container the reader is listed, called only
     /// for a value that has an order.</param>
-    public static object? FilterOrderInMetadata<TState>(
+    public static object? FilterOrder<TState>(
         RegisteredSubjectProperty member, object? value, TState state, Func<TState, RegisteredSubject, IReadOnlySet<string>> getListedNames)
     {
+        if (member.IsAttribute || member.Parent.Subject is not IMetadataContainer)
+        {
+            return value;
+        }
+
+        if (value is ImmutableArray<string> { IsDefaultOrEmpty: false } childOrder && member.Name == nameof(IMetadataContainer.ChildOrder))
+        {
+            var listedChildNames = getListedNames(state, member.Parent);
+            return childOrder.RemoveAll(name => !listedChildNames.Contains(name));
+        }
+
         if (value is not ImmutableDictionary<string, JsonElement> metadata ||
-            member.IsAttribute ||
-            member.Parent.Subject is not IMetadataContainer ||
             !member.IsMetadata() ||
             !metadata.TryGetValue(MetadataKeys.Order, out var order) ||
             order.ValueKind != JsonValueKind.Array)

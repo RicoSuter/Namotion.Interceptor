@@ -16,7 +16,8 @@ public partial class PermissionsTestFolder : IMetadataContainer
     public PermissionsTestFolder()
     {
         Children = new Dictionary<string, IInterceptorSubject>();
+        ChildOrder = [];
     }
 
-    public ImmutableArray<string> ChildOrder => [];
+    public partial ImmutableArray<string> ChildOrder { get; set; }
 }

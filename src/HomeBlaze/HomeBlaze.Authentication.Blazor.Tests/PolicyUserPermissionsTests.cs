@@ -510,4 +510,31 @@ public class PolicyUserPermissionsTests
         Assert.Equal(["Docs"], shown[MetadataKeys.Order].EnumerateArray().Select(name => name.GetString()));
         Assert.Equal(2, values[MetadataKeys.Order].GetArrayLength());
     }
+
+    [Fact]
+    public async Task WhenTheChildOrderOfAFolderNamesAChildThePersonIsNotShown_ThenTheValueTheyAreShownLeavesItOut()
+    {
+        // Arrange
+        var role = new AuthorizationRole
+        {
+            Name = "nosecret",
+            Includes = [BuiltInRoles.ReaderName],
+            Deny = [new PermissionRule { Paths = ["/Folder/Secret/**"], Actions = [PermissionAction.Read] }]
+        };
+        await using var graph = await PermissionsTestGraph.CreateAsync(roles: [role.Name], customRoles: [role]);
+        var folder = new PermissionsTestFolder
+        {
+            Children = new Dictionary<string, IInterceptorSubject> { ["Docs"] = new PermissionsTestDevice(), ["Secret"] = new PermissionsTestDevice() },
+            ChildOrder = ["Secret", "Docs"]
+        };
+        graph.Root.Children = new Dictionary<string, IInterceptorSubject>(graph.Root.Children) { ["Folder"] = folder };
+        var childOrder = folder.TryGetRegisteredSubject()!.TryGetProperty(nameof(PermissionsTestFolder.ChildOrder))!;
+
+        // Act
+        var shown = (ImmutableArray<string>)((IUserPermissions)graph.Permissions).GetValue(childOrder)!;
+
+        // Assert
+        Assert.Equal<string>(["Docs"], shown);
+        Assert.Equal<string>(["Secret", "Docs"], folder.ChildOrder);
+    }
 }
