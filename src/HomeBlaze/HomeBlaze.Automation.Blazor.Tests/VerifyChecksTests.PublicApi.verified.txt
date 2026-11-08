@@ -181,6 +181,7 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public Microsoft.AspNetCore.Components.EventCallback<HomeBlaze.Automation.AutomationAction> ValueChanged { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public void Dispose() { }
+        protected override void OnInitialized() { }
         protected override void OnParametersSet() { }
     }
     public sealed class AutomationDraft
@@ -216,7 +217,7 @@ namespace HomeBlaze.Automation.Blazor.Editing
         [Microsoft.AspNetCore.Components.Parameter]
         public string Lead { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public System.Func<string, HomeBlaze.Components.Inputs.ExpressionPreview?>? Preview { get; set; }
+        public System.Func<string, System.Func<HomeBlaze.Components.Inputs.ExpressionPreview>?>? Preview { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string TestId { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -380,8 +381,8 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public RuleExpressions(HomeBlaze.Automation.Automation automation, string ruleKey, bool allowsEvent, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone = null) { }
         public bool AllowsEvent { get; }
         public HomeBlaze.Automation.Automation Automation { get; }
-        public HomeBlaze.Components.Inputs.ExpressionPreview? Preview(string text) { }
-        public string? RenderTemplate(string text) { }
+        public System.Func<HomeBlaze.Components.Inputs.ExpressionPreview>? Preview(string text) { }
+        public System.Func<string?>? Template(string text) { }
         public string? Validate(string text) { }
         public string? ValidateTemplate(string text) { }
         public static System.Collections.Generic.IReadOnlyList<string> GetConditionHints(string text) { }
@@ -443,6 +444,7 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public Microsoft.AspNetCore.Components.EventCallback<string?> ValueChanged { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public void Dispose() { }
+        protected override void OnInitialized() { }
         protected override void OnParametersSet() { }
     }
 }

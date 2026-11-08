@@ -1,7 +1,9 @@
+using System.Diagnostics.CodeAnalysis;
 using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Components.Abstractions.TimeZones;
 using HomeBlaze.Services.Display;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Expressions;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Automation;
@@ -24,15 +26,18 @@ public static class AutomationPreview
     public static AutomationExpressionPreview Evaluate(
         Automation automation, string? ruleKey, string? expression, bool allowsEvent, ITimeZoneDisplay? timeZone = null)
     {
-        if (!AutomationExpressionCheck.TryParseExpression(expression, allowsEvent, out var parsed, out var error))
-        {
-            return new AutomationExpressionPreview { Error = error };
-        }
+        return TryParseExpression(expression, allowsEvent, out var parsed, out var error)
+            ? Evaluate(automation, ruleKey, parsed, timeZone)
+            : new AutomationExpressionPreview { Error = error };
+    }
 
+    /// <summary>Evaluates a parsed expression as <see cref="Evaluate(Automation, string?, string?, bool, ITimeZoneDisplay?)"/> does; it never has an error.</summary>
+    public static AutomationExpressionPreview Evaluate(Automation automation, string? ruleKey, ParsedExpression expression, ITimeZoneDisplay? timeZone = null)
+    {
         try
         {
             var evaluation = CreateEvaluation(automation, ruleKey);
-            var value = evaluation.Evaluate(parsed);
+            var value = evaluation.Evaluate(expression);
             return new AutomationExpressionPreview
             {
                 Result = value.Value as bool?,
@@ -47,20 +52,31 @@ public static class AutomationPreview
     }
 
     /// <summary>
+    /// Parses an expression once for <see cref="Evaluate(Automation, string?, ParsedExpression, ITimeZoneDisplay?)"/>, which
+    /// evaluates it again as the values change. The error says why the expression cannot be evaluated.
+    /// </summary>
+    public static bool TryParseExpression(
+        string? expression, bool allowsEvent, [NotNullWhen(true)] out ParsedExpression? parsed, [NotNullWhen(false)] out string? error) =>
+        AutomationExpressionCheck.TryParseExpression(expression, allowsEvent, out parsed, out error);
+
+    /// <summary>
     /// Renders the template with the current values in the server zone, which is where the runtime renders the texts it sends.
     /// A value that throws when it is read or shown makes the text say why instead.
     /// </summary>
     public static AutomationExpressionPreview Render(Automation automation, string? ruleKey, string? template, bool allowsEvent)
     {
-        if (!AutomationExpressionCheck.TryParseTemplate(template, allowsEvent, out var parsed, out var error))
-        {
-            return new AutomationExpressionPreview { Error = error };
-        }
+        return TryParseTemplate(template, allowsEvent, out var parsed, out var error)
+            ? Render(automation, ruleKey, parsed)
+            : new AutomationExpressionPreview { Error = error };
+    }
 
+    /// <summary>Renders a parsed template as <see cref="Render(Automation, string?, string?, bool)"/> does; it never has an error.</summary>
+    public static AutomationExpressionPreview Render(Automation automation, string? ruleKey, TextTemplate template)
+    {
         try
         {
             var evaluation = CreateEvaluation(automation, ruleKey);
-            var text = evaluation.Render(parsed);
+            var text = evaluation.Render(template);
             return new AutomationExpressionPreview { Value = text, Text = text };
         }
         catch (Exception exception)
@@ -68,6 +84,14 @@ public static class AutomationPreview
             return Unreadable(exception);
         }
     }
+
+    /// <summary>
+    /// Parses a template once for <see cref="Render(Automation, string?, TextTemplate)"/>, which renders it again as the
+    /// values change. The error says why the template cannot be rendered.
+    /// </summary>
+    public static bool TryParseTemplate(
+        string? template, bool allowsEvent, [NotNullWhen(true)] out TextTemplate? parsed, [NotNullWhen(false)] out string? error) =>
+        AutomationExpressionCheck.TryParseTemplate(template, allowsEvent, out parsed, out error);
 
     /// <summary>
     /// Resolves the property or operation an action targets, or null when the path leads nowhere. The result is metadata for

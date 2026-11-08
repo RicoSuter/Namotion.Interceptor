@@ -30,6 +30,31 @@ public class AutomationPreviewTests
     }
 
     [Fact]
+    public async Task WhenAParsedExpressionAndTemplateAreEvaluatedAgain_ThenTheyHaveTheCurrentValues()
+    {
+        // Arrange
+        await using var host = await StartAsync();
+        host.Weather.Gust = 9;
+        Assert.True(AutomationPreview.TryParseExpression("/Weather/Gust > 8", allowsEvent: false, out var expression, out var expressionError), expressionError);
+        Assert.True(AutomationPreview.TryParseTemplate("Gust {{ /Weather/Gust | raw }}", allowsEvent: false, out var template, out var templateError), templateError);
+
+        // Act
+        var before = AutomationPreview.Evaluate(host.Automation, "retract", expression);
+        var renderedBefore = AutomationPreview.Render(host.Automation, "retract", template);
+        host.Weather.Gust = 5;
+        var after = AutomationPreview.Evaluate(host.Automation, "retract", expression);
+        var renderedAfter = AutomationPreview.Render(host.Automation, "retract", template);
+
+        // Assert
+        Assert.True(before.Result);
+        Assert.False(after.Result);
+        Assert.Equal("Gust 9", renderedBefore.Text);
+        Assert.Equal("Gust 5", renderedAfter.Text);
+        Assert.False(AutomationPreview.TryParseExpression("/Weather/Gust >", allowsEvent: false, out _, out var error));
+        Assert.NotNull(error);
+    }
+
+    [Fact]
     public async Task WhenAValueIsMissing_ThenTheResultIsUnknown()
     {
         // Arrange

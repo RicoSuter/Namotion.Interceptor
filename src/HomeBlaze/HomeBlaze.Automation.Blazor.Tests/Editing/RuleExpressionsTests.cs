@@ -38,18 +38,24 @@ public class RuleExpressionsTests
 
         // Assert
         Assert.NotNull(valid);
-        Assert.True(valid.Result);
+        Assert.True(valid().Result);
         Assert.Null(invalid);
     }
 
     [Fact]
-    public void WhenATemplateIsRendered_ThenItHasItsText()
+    public void WhenATemplateIsPrepared_ThenItRendersItsTextOrIsNothingWhenInvalid()
     {
+        // Arrange
+        var expressions = TestAutomations.Expressions();
+
         // Act
-        var text = TestAutomations.Expressions().RenderTemplate("Sum {{ 1 + 2 | raw }}");
+        var valid = expressions.Template("Sum {{ 1 + 2 | raw }}");
+        var invalid = expressions.Template("Sum {{ 1 +");
 
         // Assert
-        Assert.Equal("Sum 3", text);
+        Assert.NotNull(valid);
+        Assert.Equal("Sum 3", valid());
+        Assert.Null(invalid);
     }
 
     [Fact]
@@ -64,13 +70,13 @@ public class RuleExpressionsTests
         var withViewerZone = new RuleExpressions(automation, "rule", allowsEvent: false, viewerZone);
 
         // Act
-        var relative = withViewerZone.Preview("./Name == Rule");
-        var viewer = withViewerZone.Preview("now");
-        var server = new RuleExpressions(automation, "rule", allowsEvent: false).Preview("now");
+        var relative = withViewerZone.Preview("./Name == Rule")?.Invoke();
+        var viewer = withViewerZone.Preview("now")?.Invoke();
+        var server = new RuleExpressions(automation, "rule", allowsEvent: false).Preview("now")?.Invoke();
 
         // Assert
         Assert.True(relative?.Result);
-        Assert.Equal("Rule", withViewerZone.RenderTemplate("{{ ./Name }}"));
+        Assert.Equal("Rule", withViewerZone.Template("{{ ./Name }}")?.Invoke());
         Assert.NotNull(viewer);
         Assert.NotNull(server);
         Assert.Contains("+05:00", viewer.Text);

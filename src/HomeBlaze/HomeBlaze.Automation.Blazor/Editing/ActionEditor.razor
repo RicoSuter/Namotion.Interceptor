@@ -1,7 +1,7 @@
 @using global::HomeBlaze.Abstractions.Metadata
 @using Namotion.Interceptor.Registry.Abstractions
 @implements IDisposable
-@inject TimeProvider TimeProvider
+@inject PreviewTicker Ticker
 
 <MudPaper Outlined="true" Class="pa-3" data-testid="automation-action">
     <div class="d-flex flex-wrap align-center gap-2">
@@ -59,7 +59,7 @@
     private AutomationAction? _checkedValue;
     private RuleExpressions? _checkedExpressions;
     private RegisteredSubjectProperty? _target;
-    private PreviewTicker? _ticker;
+    private IDisposable? _tick;
 
     [Parameter, EditorRequired] public AutomationAction Value { get; set; } = null!;
 
@@ -90,8 +90,9 @@
     {
         _value = Value;
         Refresh();
-        _ticker ??= new PreviewTicker(TimeProvider, InvokeAsync, CheckTargetAsync);
     }
+
+    protected override void OnInitialized() => _tick = Ticker.Subscribe(InvokeAsync, CheckTargetAsync);
 
     // Each tick resolves the target again, so that an operation or a property that appears after the action was typed shows
     // its inputs and errors. Only a changed target checks the inputs again.
@@ -108,7 +109,7 @@
         await TargetChanged.InvokeAsync();
     }
 
-    public void Dispose() => _ticker?.Dispose();
+    public void Dispose() => _tick?.Dispose();
 
     // The targets are resolved and the inputs checked when the action or the expressions change, not on every render of the editor.
     private void Refresh()

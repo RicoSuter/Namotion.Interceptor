@@ -19,7 +19,7 @@
 
     [Parameter] public Func<string, string?>? Validate { get; set; }
 
-    [Parameter] public Func<string, ExpressionPreview?>? Preview { get; set; }
+    [Parameter] public Func<string, Func<ExpressionPreview>?>? Preview { get; set; }
 
     [Parameter] public Func<string, IReadOnlyList<string>>? Hints { get; set; }
 
