@@ -23,20 +23,9 @@ internal static class AutomationPaths
     /// </summary>
     public static RegisteredSubjectProperty? ResolveProperty(SubjectPathResolver resolver, string path, IInterceptorSubject rule, ISubjectPathRecorder? recorder = null)
     {
+        // A secret or excluded property is one by its attributes, so no change makes it readable.
         var property = ResolveTarget(resolver, path, rule, recorder);
-        if (property is null)
-        {
-            return null;
-        }
-
-        if (property.IsDisplayable())
-        {
-            return property;
-        }
-
-        // Becomes readable by gaining its metadata, a change of the property itself.
-        recorder?.AddProperty(property.Reference);
-        return null;
+        return property is not null && property.IsDisplayable() ? property : null;
     }
 
     /// <summary>

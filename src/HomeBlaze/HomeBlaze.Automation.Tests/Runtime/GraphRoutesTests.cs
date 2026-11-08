@@ -59,6 +59,21 @@ public class GraphRoutesTests
     }
 
     [Fact]
+    public async Task WhenAPathEndsAtASecretProperty_ThenTheRouteHasOnlyItsHolders()
+    {
+        // Arrange
+        await using var fixture = await RouteFixture.CreateAsync();
+
+        // Act
+        var (property, route, isUnbounded) = fixture.ResolveProperty("/Room/Sensor/ApiKey");
+
+        // Assert
+        Assert.Null(property);
+        Assert.Equal([fixture.RoomName, fixture.RootChildren, new PropertyReference(fixture.Room, nameof(TestRoom.Sensor))], route);
+        Assert.False(isUnbounded);
+    }
+
+    [Fact]
     public async Task WhenAPathLeadsUpFromTheRuleAndTheAutomation_ThenTheRouteHasTheirHoldersAndIsBounded()
     {
         // Arrange
