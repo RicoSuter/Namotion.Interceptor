@@ -28,7 +28,7 @@ public class PropertyTriggerEngineTests
         var changeRequests = engine.OnPropertyChanged([rule], staleChange);
         var applied = engine.Apply([staleChange]);
         rule.IsActivated = true;
-        var activationRequests = Activate(engine, rule);
+        var activationRequests = engine.Activate([rule], [rule]);
 
         // Assert
         Assert.Empty(changeRequests);
@@ -50,7 +50,7 @@ public class PropertyTriggerEngineTests
         rule.IsActivated = true;
 
         // Act
-        Activate(engine, rule);
+        engine.Activate([rule], [rule]);
         engine.OnPropertyChanged([rule], new PropertyChangedInput(new PropertyReference(weather, nameof(TestSensor.Gust)), 3.0, 0, 0));
 
         // Assert
@@ -59,13 +59,5 @@ public class PropertyTriggerEngineTests
             "The trigger 1 (/Weather/Gust > 8) of rule Retract in automation Storm is unknown, missing /Weather/Gust.",
             "The trigger 1 (/Weather/Gust > 8) of rule Retract in automation Storm is known again."
         ], logger.Messages.ToArray());
-    }
-
-    // Resolves the paths of the rule with those of its triggers about to be activated, as the worker does, and activates them.
-    private static IReadOnlyList<RunRequest> Activate(PropertyTriggerEngine engine, CompiledRule rule)
-    {
-        var triggers = PropertyTriggerEngine.GetInactiveTriggers([rule], [rule]);
-        engine.Refresh([rule], triggers, new GraphRouteBuilder(null));
-        return engine.Activate(triggers);
     }
 }

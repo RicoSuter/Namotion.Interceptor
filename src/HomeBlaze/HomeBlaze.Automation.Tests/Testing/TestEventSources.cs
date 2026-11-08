@@ -20,7 +20,6 @@ public partial class TestButton : IObservable<TestPressEvent>, IObservable<TestT
     [State]
     public partial string? Name { get; set; }
 
-    [Operation]
     public void Press(string gesture) =>
         _presses.Publish(new TestPressEvent { Timestamp = DateTimeOffset.UnixEpoch, DeviceId = "button", Gesture = gesture });
 

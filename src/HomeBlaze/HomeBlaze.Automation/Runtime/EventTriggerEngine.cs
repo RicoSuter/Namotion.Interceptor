@@ -12,31 +12,18 @@ namespace HomeBlaze.Automation.Runtime;
 /// </summary>
 internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvider timeProvider, AutomationInputQueue queue)
 {
-    /// <summary>
-    /// Resolves the source of every trigger of the active rules, recording the routes with <paramref name="route"/>, and
-    /// subscribes the triggers that are not bound yet and those whose path leads to another subject now; a trigger that a
-    /// Save carried over keeps its subscription while its path still leads to its source.
-    /// </summary>
-    public void Bind(IReadOnlyList<CompiledRule> rules, ISubjectPathRecorder route)
+    /// <summary>Subscribes the triggers of the rule, except one that a Save carried over and whose path still leads to its source.</summary>
+    public void Activate(CompiledRule rule)
     {
-        foreach (var rule in rules)
+        foreach (var trigger in rule.EventTriggers)
         {
-            if (!rule.IsActivated)
+            if (trigger.Subscription is not null && ReferenceEquals(ResolveSource(trigger), trigger.Source))
             {
                 continue;
             }
 
-            foreach (var trigger in rule.EventTriggers)
-            {
-                var source = AutomationPaths.ResolveSubject(resolver, trigger.Configuration.SubjectPath, rule.Rule, route);
-                if (trigger.IsBound && ReferenceEquals(source, trigger.Source))
-                {
-                    continue;
-                }
-
-                Unsubscribe(trigger);
-                Subscribe(trigger, source);
-            }
+            Unsubscribe(trigger);
+            Subscribe(trigger);
         }
     }
 
@@ -45,7 +32,19 @@ internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvi
         foreach (var trigger in rule.EventTriggers)
         {
             Unsubscribe(trigger);
-            trigger.IsBound = false;
+        }
+    }
+
+    /// <summary>Subscribes the triggers of the active rules again whose path now leads to another subject.</summary>
+    public void Rebind(IReadOnlyList<CompiledRule> rules)
+    {
+        foreach (var trigger in rules.Where(rule => rule.IsActivated).SelectMany(rule => rule.EventTriggers))
+        {
+            if (!ReferenceEquals(ResolveSource(trigger), trigger.Source))
+            {
+                Unsubscribe(trigger);
+                Subscribe(trigger);
+            }
         }
     }
 
@@ -71,16 +70,15 @@ internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvi
         return evaluation.EvaluateCondition(filter) == true;
     }
 
+    private IInterceptorSubject? ResolveSource(CompiledEventTrigger trigger) =>
+        AutomationPaths.ResolveSubject(resolver, trigger.Configuration.SubjectPath, trigger.Rule.Rule);
+
     /// <summary>Resolves the source of the trigger and the type of its event; returns why the trigger receives no events, or null.</summary>
     public static string? FindSource(SubjectPathResolver resolver, CompiledEventTrigger trigger, out IInterceptorSubject? source, out Type? eventType)
     {
-        source = AutomationPaths.ResolveSubject(resolver, trigger.Configuration.SubjectPath, trigger.Rule.Rule);
-        return CheckSource(trigger.Configuration, source, out eventType);
-    }
-
-    private static string? CheckSource(SubjectEventTrigger configuration, IInterceptorSubject? source, out Type? eventType)
-    {
+        var configuration = trigger.Configuration;
         eventType = null;
+        source = AutomationPaths.ResolveSubject(resolver, configuration.SubjectPath, trigger.Rule.Rule);
         if (source is null)
         {
             return $"No subject at {configuration.SubjectPath}";
@@ -90,12 +88,11 @@ internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvi
         return eventType is null ? $"{configuration.SubjectPath} publishes no {configuration.EventType}" : null;
     }
 
-    private void Subscribe(CompiledEventTrigger trigger, IInterceptorSubject? source)
+    private void Subscribe(CompiledEventTrigger trigger)
     {
-        var error = CheckSource(trigger.Configuration, source, out var eventType);
+        var error = FindSource(resolver, trigger, out var source, out var eventType);
         trigger.Source = source;
         trigger.SourceError = error;
-        trigger.IsBound = true;
         if (source is null || eventType is null)
         {
             return;

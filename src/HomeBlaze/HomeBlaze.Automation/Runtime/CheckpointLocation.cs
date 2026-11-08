@@ -25,12 +25,9 @@ internal sealed class CheckpointLocation
     public AutomationCheckpointStore Store { get; }
 
     /// <summary>Gets the location at the current path of the automation.</summary>
-    public static CheckpointLocation Of(Automation automation, ILogger logger) =>
-        Of(automation, automation.PathResolver.GetPath(automation, PathStyle.Canonical), logger);
-
-    /// <summary>Gets the location at <paramref name="automationPath"/>, the current canonical path of the automation.</summary>
-    public static CheckpointLocation Of(Automation automation, string? automationPath, ILogger logger)
+    public static CheckpointLocation Of(Automation automation, ILogger logger)
     {
+        var automationPath = automation.PathResolver.GetPath(automation, PathStyle.Canonical);
         var dataDirectory = ((IInterceptorSubject)automation).Context.TryGetService<IDataDirectoryProvider>()?.DataDirectory;
         var filePath = AutomationCheckpointStore.GetFilePath(dataDirectory, automationPath);
         if (filePath is null)
@@ -42,12 +39,12 @@ internal sealed class CheckpointLocation
     }
 
     /// <summary>
-    /// Whether <paramref name="currentPath"/>, the current canonical path of the automation, is a path that is not
-    /// <see cref="AutomationPath"/>. While a subject is added to its new parent before it is removed from the old one, it
-    /// may still resolve to the old path; the removal brings the new one.
+    /// Whether the automation has a path that is not <see cref="AutomationPath"/>. While a subject is added to its new
+    /// parent before it is removed from the old one, it may still resolve to the old path; the removal brings the new one.
     /// </summary>
-    public bool HasMoved(string? currentPath) =>
-        currentPath is not null && !string.Equals(currentPath, AutomationPath, StringComparison.Ordinal);
+    public bool HasMoved(Automation automation) =>
+        automation.PathResolver.GetPath(automation, PathStyle.Canonical) is { } currentPath &&
+        !string.Equals(currentPath, AutomationPath, StringComparison.Ordinal);
 
     /// <summary>Deletes the file unless another automation has <see cref="AutomationPath"/> now; logs an I/O error.</summary>
     public void DeleteIfOrphaned(Automation automation, ILogger logger)

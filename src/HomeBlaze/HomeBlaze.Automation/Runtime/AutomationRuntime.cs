@@ -5,13 +5,11 @@ using Namotion.Interceptor;
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// The worker of one automation. Callbacks on writing threads only enqueue: a change of a watched property and a graph
-/// change (coalesced), both routed by <see cref="AutomationChangeDispatcher"/>, and a tick (coalesced) from
-/// <see cref="WakeTimer"/>, which the worker sets after every input to when the engine is due next and stops while nothing
-/// is due. A graph change is routed only for a property on the graph route that the worker publishes after every input
-/// that resolved paths, see <see cref="GraphRoutes"/>, or when the automation or one of its rules gains a parent, and
-/// resolves every path again unless the structure of the graph is as it was at the last resolution. The worker processes
-/// one input at a time with <see cref="AutomationEngine"/>, so no rule runs inside a property setter.
+/// The worker of one automation. Callbacks on writing threads only enqueue: a change of a watched property and a change
+/// of a property that holds subjects (coalesced), both routed by <see cref="AutomationChangeDispatcher"/>, and a tick
+/// (coalesced) from <see cref="WakeTimer"/>, which the worker sets after every input to when the engine is due next and
+/// stops while nothing is due. The worker processes one input at a time with
+/// <see cref="AutomationEngine"/>, so no rule runs inside a property setter.
 /// </summary>
 internal sealed class AutomationRuntime
 {
@@ -38,11 +36,6 @@ internal sealed class AutomationRuntime
         _changes = new AutomationChangeReceiver(_queue);
         _engine = new AutomationEngine(automation, _queue, _keeper, logger, _changes);
     }
-
-    // White-box test hooks: the engine and the change receiver of the worker.
-    internal AutomationEngine Engine => _engine;
-
-    internal AutomationChangeReceiver Changes => _changes;
 
     /// <summary>The checkpoint of the automation: where it started, or where it moved to later. Changed by the worker only.</summary>
     public CheckpointLocation Location
@@ -73,12 +66,6 @@ internal sealed class AutomationRuntime
     }
 
     public void RequestConfiguration() => _queue.TryEnqueue(ConfigurationChangedInput.Instance);
-
-    /// <summary>
-    /// Queues a graph change, since the automation or one of its rules gained a parent through a property that is not on
-    /// its graph route. Called on the writing thread.
-    /// </summary>
-    public void OnParentAdded() => _changes.RequestGraphChange(AutomationInputQueue.CausedChainDepth);
 
     /// <summary>Queues a reset; false when the queue is full or closed, or the reset continues a feedback chain beyond the limit.</summary>
     public bool RequestReset()
@@ -118,7 +105,6 @@ internal sealed class AutomationRuntime
 
             // A move between the start and the registration queued no graph change.
             FollowPath();
-            _engine.PublishRoutes(0);
             _engine.RefreshRuleStatuses();
             using var wakeTimer = new WakeTimer(_automation.TimeProvider, () => EnqueueOnce(ref _isTickPending, TickInput.Instance));
             _wakeTimer = wakeTimer;
@@ -163,7 +149,6 @@ internal sealed class AutomationRuntime
             _engine.ReportUnexpectedError(exception);
         }
 
-        _engine.PublishRoutes(input.ChainDepth);
         _engine.RefreshRuleStatuses();
     }
 
@@ -176,7 +161,7 @@ internal sealed class AutomationRuntime
             case ResetStateInput:
                 _engine.ResetState();
                 return Task.CompletedTask;
-            case GraphChangedInput when _engine.NeedsResolving:
+            case GraphChangedInput:
                 FollowPath();
                 break;
         }
@@ -199,22 +184,20 @@ internal sealed class AutomationRuntime
     }
 
     // The checkpoint belongs to the path, so an automation that moved, such as a file moved to another folder, starts
-    // again as a new automation at the new path, and the file at the old path is deleted. Checked on graph changes: the
-    // write that removes the automation from a parent or changes a parent of an ancestor has a property on the route of
-    // the location, and a parent that the automation gains queues one while the write that adds it runs. A move adds the
-    // automation to its new parent before it removes it from the old one: a check between the two writes may still see
-    // the old path, and a check after the second, which the coalesced graph change guarantees, sees the new one; once
-    // moved, further checks find nothing to do.
+    // again as a new automation at the new path, and the file at the old path is deleted. Checked on graph changes, which
+    // are queued after the write that moved it, and not on its own lifecycle changes, which come before that write took
+    // effect. A move adds the automation to its new parent before it removes it from the old one: a check between the two
+    // writes may still see the old path, and a check after the second, which the coalesced graph change guarantees, sees
+    // the new one; once moved, further checks find nothing to do.
     private void FollowPath()
     {
-        var path = _engine.ResolveLocation();
-        if (!Location.HasMoved(path))
+        if (!Location.HasMoved(_automation))
         {
             return;
         }
 
         var previous = Location;
-        Location = CheckpointLocation.Of(_automation, path, _logger);
+        Location = CheckpointLocation.Of(_automation, _logger);
         _keeper.UseStore(Location.Store);
 
         // Without a path at the start there was no checkpoint to keep, so the first path is where the automation starts.

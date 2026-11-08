@@ -20,12 +20,6 @@ internal sealed class CompiledEventTrigger(CompiledRule rule, int index, Subject
 
     public IInterceptorSubject? Source { get; set; }
 
-    /// <summary>
-    /// Whether <see cref="Source"/> and <see cref="SourceError"/> are those of the last binding of the active rule: the
-    /// trigger subscribed to its source, or found none or none with its event. Cleared when the rule is deactivated.
-    /// </summary>
-    public bool IsBound { get; set; }
-
     public EventTriggerSubscription? Subscription { get; set; }
 
     /// <summary>Why the trigger receives no events, or null while it is subscribed.</summary>
@@ -60,9 +54,7 @@ internal sealed class CompiledEventTrigger(CompiledRule rule, int index, Subject
         target.Subscription = subscription;
         target.Source = Source;
         target.SourceError = SourceError;
-        target.IsBound = true;
         Subscription = null;
-        IsBound = false;
     }
 
     public string Description => $"trigger {Index + 1} ({Configuration.EventType} of {Configuration.SubjectPath})";

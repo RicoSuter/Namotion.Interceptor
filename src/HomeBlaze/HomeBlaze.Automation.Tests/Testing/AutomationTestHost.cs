@@ -83,23 +83,12 @@ internal sealed class AutomationTestHost : IAsyncDisposable
     public Automation CreateAutomation(string name) =>
         new(Graph.Resolver, Clock, Authorizer, ServiceProvider, Logger) { Name = name };
 
-    /// <summary>
-    /// Attaches a new automation under <c>/key</c>, or with <paramref name="attach"/>, starts it and waits until it
-    /// processed its activation.
-    /// </summary>
-    public async Task<Automation> AddAutomationAsync(string key, Action<Automation> configure, Action<Automation>? attach = null)
+    /// <summary>Attaches a new automation under <c>/key</c>, starts it and waits until it processed its activation.</summary>
+    public async Task<Automation> AddAutomationAsync(string key, Action<Automation> configure)
     {
         var automation = CreateAutomation(key);
         configure(automation);
-        if (attach is null)
-        {
-            Graph.Add(key, automation);
-        }
-        else
-        {
-            attach(automation);
-        }
-
+        Graph.Add(key, automation);
         _automations.Add(automation);
         Automation = automation;
         Key = key;

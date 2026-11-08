@@ -12,17 +12,8 @@ internal abstract record AutomationInput(int ChainDepth);
 /// <summary>A watched property changed to <see cref="Value"/> in the commit with <see cref="Revision"/>.</summary>
 internal sealed record PropertyChangedInput(PropertyReference Property, object? Value, long Revision, int ChainDepth) : AutomationInput(ChainDepth);
 
-/// <summary>
-/// A property on the graph route of the automation changed, or the automation or one of its rules gained a parent, so
-/// that paths may now lead elsewhere.
-/// </summary>
+/// <summary>A property that holds subjects changed, so that paths may now lead elsewhere.</summary>
 internal sealed record GraphChangedInput(int ChainDepth) : AutomationInput(ChainDepth);
-
-/// <summary>
-/// A resolution of the paths outside a graph change, such as for a trigger that became pending, resolved the properties
-/// of a trigger or of Only if differently, which are evaluated in this input.
-/// </summary>
-internal sealed record ResolvedDifferentlyInput(int ChainDepth) : AutomationInput(ChainDepth);
 
 /// <summary>An event received by the subscription of an event trigger.</summary>
 internal sealed record EventInput(EventTriggerSubscription Subscription, CapturedEvent Event, int ChainDepth) : AutomationInput(ChainDepth);

@@ -1,9 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Automation;
 
@@ -13,7 +10,7 @@ namespace HomeBlaze.Automation;
 /// </summary>
 [ExcludeFromCreation]
 [InterceptorSubject]
-public partial class AutomationRule : IConfigurable, ITitleProvider, ILifecycleHandler
+public partial class AutomationRule : IConfigurable, ITitleProvider
 {
     public AutomationRule()
     {
@@ -78,25 +75,6 @@ public partial class AutomationRule : IConfigurable, ITitleProvider, ILifecycleH
     public string? Title => Name;
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-
-    // The paths that lead up from the rule depend on its parents, and the property that gains it is not on the graph route
-    // of the worker, so the gain is told to the automations that hold it.
-    void ILifecycleHandler.HandleLifecycleChange(SubjectLifecycleChange change)
-    {
-        if (!change.IsPropertyReferenceAdded || !ReferenceEquals(change.Subject, this) ||
-            ((IInterceptorSubject)this).TryGetRegisteredSubject() is not { } registered)
-        {
-            return;
-        }
-
-        foreach (var parent in registered.Parents)
-        {
-            if (parent.Property.Subject is Automation automation)
-            {
-                automation.OnParentAdded();
-            }
-        }
-    }
 
     /// <summary>Takes the run properties and the status of the instance that this one replaces.</summary>
     internal void CopyRuntimeStateFrom(AutomationRule other)

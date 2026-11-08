@@ -15,7 +15,6 @@ internal sealed class AutomationEngine : IRuleRunHost
     private readonly Automation _automation;
     private readonly AutomationStateKeeper _keeper;
     private readonly AutomationTriggers _triggers;
-    private readonly GraphRoutes _routes;
     private readonly RunDispatcher _dispatcher;
     private readonly StateTransitions _states;
     private readonly AutomationStatusReporter _status;
@@ -35,14 +34,13 @@ internal sealed class AutomationEngine : IRuleRunHost
     // Created once, since the worker publishes the rule statuses after every input.
     private readonly Action _publishRuleStatuses;
 
-    /// <summary>Creates the engine, whose triggers publish their watched set and graph route to <paramref name="changes"/>.</summary>
+    /// <summary>Creates the engine, whose property triggers publish their watched set to <paramref name="changes"/>.</summary>
     public AutomationEngine(Automation automation, AutomationInputQueue queue, AutomationStateKeeper keeper, ILogger logger, AutomationChangeReceiver changes)
     {
         _automation = automation;
         _keeper = keeper;
         _logger = logger;
-        _routes = GraphRoutes.For(automation, changes);
-        _triggers = new AutomationTriggers(_routes, automation.TimeProvider, queue, logger, () => Name, changes.PublishWatched);
+        _triggers = AutomationTriggers.For(automation, queue, logger, () => Name, changes.PublishWatched);
         _dispatcher = new RunDispatcher(this, automation, keeper, logger);
         _states = new StateTransitions(automation, keeper, automation.TimeProvider, logger);
         _status = new AutomationStatusReporter(automation, logger);
@@ -50,11 +48,6 @@ internal sealed class AutomationEngine : IRuleRunHost
     }
 
     public string Name => _automation.Title ?? "Automation";
-
-    // White-box test hooks: the applied rules and the graph route of the automation.
-    internal IReadOnlyList<CompiledRule> Rules => _snapshot.Rules;
-
-    internal GraphRoutes Routes => _routes;
 
     IInterceptorSubject IRuleRunHost.Automation => _automation;
 
@@ -164,15 +157,6 @@ internal sealed class AutomationEngine : IRuleRunHost
 
     private static DateTimeOffset? Earliest(DateTimeOffset? first, DateTimeOffset? second) => first is null || second < first ? second : first;
 
-    /// <summary>Whether the paths may resolve differently than at the last resolution, see <see cref="GraphRoutes.NeedsResolving"/>.</summary>
-    public bool NeedsResolving => _routes.NeedsResolving();
-
-    /// <summary>Resolves the canonical path of the automation and records its graph route.</summary>
-    public string? ResolveLocation() => _routes.ResolveLocation(_automation);
-
-    /// <summary>Publishes the graph route of the rules and of the checkpoint path, see <see cref="GraphRoutes.Publish"/>.</summary>
-    public void PublishRoutes(int chainDepth) => _routes.Publish(chainDepth);
-
     /// <summary>
     /// Runs the requests of an input of the triggers: a property change, a tick, which also writes the runs that are due,
     /// an event, a graph change, an activation or a recheck of the pending triggers.
@@ -252,26 +236,18 @@ internal sealed class AutomationEngine : IRuleRunHost
     public async Task ResynchronizeAsync(DroppedInputs dropped, CancellationToken cancellationToken)
     {
         _status.ReportFaults(dropped.Faults, _automation.TimeProvider.GetUtcNow());
-        _triggers.IsResynchronizing = true;
-        try
+        var stopped = _triggers.MakeUpForChain(_snapshot.Rules, dropped);
+        if (stopped.Count > 0)
         {
-            var stopped = _triggers.MakeUpForChain(_snapshot.Rules, dropped);
-            if (stopped.Count > 0)
-            {
-                _dispatcher.Skip(stopped, $"a feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped");
+            _dispatcher.Skip(stopped, $"a feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped");
 
-                // No recheck of their Only if follows, since a recheck would run them and continue the chain.
-                _triggers.StopChain(_snapshot.Rules, stopped);
-            }
-
-            if (dropped.HasOverload)
-            {
-                await DispatchAsync(_triggers.MakeUpForOverload(_snapshot.Rules, dropped), cancellationToken);
-            }
+            // No recheck of their Only if follows, since a recheck would run them and continue the chain.
+            _triggers.TrackPending(_snapshot.Rules, stopped);
         }
-        finally
+
+        if (dropped.HasOverload)
         {
-            _triggers.IsResynchronizing = false;
+            await DispatchAsync(_triggers.MakeUpForOverload(_snapshot.Rules, dropped), cancellationToken);
         }
     }
 
