@@ -61,7 +61,7 @@ public class StorageFileRequestHandlerTests
         Assert.Equal(PngContent, ReadBody(context));
         Assert.StartsWith("W/\"", response.Headers.ETag.ToString());
         Assert.Equal("Sat, 07 Nov 2026 08:30:00 GMT", response.Headers.LastModified.ToString());
-        Assert.Equal("no-cache", response.Headers.CacheControl.ToString());
+        Assert.Equal("private, no-cache", response.Headers.CacheControl.ToString());
         Assert.Equal("nosniff", response.Headers.XContentTypeOptions.ToString());
         Assert.Equal("sandbox", response.Headers.ContentSecurityPolicy.ToString());
     }
@@ -147,7 +147,7 @@ public class StorageFileRequestHandlerTests
         Assert.Equal(PngContent, ReadBody(context));
         Assert.False(response.Headers.ContainsKey("ETag"));
         Assert.False(response.Headers.ContainsKey("Last-Modified"));
-        Assert.Equal("no-cache", response.Headers.CacheControl.ToString());
+        Assert.Equal("private, no-cache", response.Headers.CacheControl.ToString());
         Assert.Equal("nosniff", response.Headers.XContentTypeOptions.ToString());
         Assert.Equal(1, storage.ReadCount);
     }

@@ -139,8 +139,9 @@ internal static class StorageFileRequestHandler
             headers.LastModified = new DateTimeOffset(DateTime.SpecifyKind(file.LastModified, DateTimeKind.Utc));
         }
 
-        // Revalidated on every view, so that a file that is replaced shows at once.
-        response.Headers.CacheControl = "no-cache";
+        // Revalidated on every view, so that a file that is replaced shows at once. Private, as whether the file is served
+        // depends on the user, so a shared cache must not keep it.
+        response.Headers.CacheControl = "private, no-cache";
 
         // A file opened on its own, such as an SVG with a script, must not run in the origin of the application.
         response.Headers.XContentTypeOptions = "nosniff";
