@@ -123,7 +123,8 @@
 
     /// <summary>
     /// Raised with true while a row holds an edit that is not part of <see cref="Value"/>, because it is invalid or not
-    /// finished, and with false when none does. A host blocks saving while it is true.
+    /// finished, or a row of <see cref="Value"/> has no path or no value yet, and with false when none does. A host blocks
+    /// saving while it is true.
     /// </summary>
     [Parameter] public EventCallback<bool> HasPendingRowChanged { get; set; }
 
@@ -175,32 +176,34 @@
 
     private Task SetTextAsync(string? text)
     {
+        var previous = _model.Text;
         _model.Load(text);
-        return EmitAsync();
+        return EmitAsync(_model.Text != previous);
     }
 
-    private Task SetRowAsync(int index, ExpressionRow row)
-    {
-        _model.SetRow(index, row);
-        return EmitAsync();
-    }
+    private Task SetRowAsync(int index, ExpressionRow row) => EmitAsync(_model.SetRow(index, row));
 
     private Task AddRowAsync()
     {
         _model.AddRow();
-        return EmitAsync();
+        return EmitAsync(isTextChanged: true);
     }
 
     private Task RemoveRowAsync(int index)
     {
         _model.RemoveRow(index);
-        return EmitAsync();
+        return EmitAsync(isTextChanged: true);
     }
 
-    private async Task EmitAsync()
+    // An edit that stays pending leaves the text as it is, and the owner is not told about a value that did not change.
+    private async Task EmitAsync(bool isTextChanged)
     {
         Refresh();
-        await ValueChanged.InvokeAsync(_model.Text);
+        if (isTextChanged)
+        {
+            await ValueChanged.InvokeAsync(_model.Text);
+        }
+
         await NotifyPendingAsync();
     }
 

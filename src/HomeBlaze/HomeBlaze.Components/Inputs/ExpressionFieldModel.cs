@@ -40,8 +40,13 @@ internal sealed class ExpressionFieldModel
     /// <summary>The rows as they are written in <see cref="Text"/>.</summary>
     public IReadOnlyList<ExpressionRow> Rows => _rows;
 
-    /// <summary>Whether a row holds an edit that is not part of <see cref="Text"/>, because it is invalid or not finished.</summary>
-    public bool HasPendingRow => _pending.Exists(pending => pending is not null);
+    /// <summary>
+    /// Whether a row holds an edit that is not part of <see cref="Text"/>, because it is invalid or not finished, or a
+    /// row of the text has no path or no value yet.
+    /// </summary>
+    public bool HasPendingRow =>
+        _pending.Exists(static pending => pending is not null) ||
+        _rows.Exists(static row => row.Path.Length == 0 || row.Value.Length == 0);
 
     /// <summary>
     /// Takes the value of the owner of the field and loads it only when it differs from both the value the owner passed
@@ -108,18 +113,25 @@ internal sealed class ExpressionFieldModel
     /// is valid: <see cref="Text"/> does not change. A path that is not finished, such as a lone separator, is pending
     /// without an error.
     /// </summary>
-    public void SetRow(int index, ExpressionRow row)
+    /// <returns>Whether <see cref="Text"/> changed.</returns>
+    public bool SetRow(int index, ExpressionRow row)
     {
         var pending = Check(row, _rows[index], out var applied);
-        if (pending is null)
+        if (pending is not null)
         {
-            _rows[index] = applied;
-            _pending[index] = null;
-            Emit();
-            return;
+            _pending[index] = pending;
+            return false;
         }
 
-        _pending[index] = pending;
+        var isChanged = applied != _rows[index];
+        _rows[index] = applied;
+        _pending[index] = null;
+        if (isChanged)
+        {
+            Emit();
+        }
+
+        return isChanged;
     }
 
     public void AddRow()
