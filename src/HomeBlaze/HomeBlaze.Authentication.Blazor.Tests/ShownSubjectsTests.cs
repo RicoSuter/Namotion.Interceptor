@@ -6,7 +6,10 @@ using Xunit;
 
 namespace HomeBlaze.Authentication.Blazor.Tests;
 
-/// <summary>Whether a subject is shown follows changes of the roles and of the graph, although the answers are remembered.</summary>
+/// <summary>
+/// Whether a subject is shown and whether a member may be read follow changes of the roles and of the graph, although the
+/// answers are remembered.
+/// </summary>
 public class ShownSubjectsTests
 {
     // Reads everything but what is below /Hidden.
@@ -107,5 +110,25 @@ public class ShownSubjectsTests
         // Assert
         Assert.False(shownBefore);
         Assert.True(graph.Permissions.CanShow(registeredDevice));
+    }
+
+    [Fact]
+    public async Task WhenAReadableMemberMovesBelowADeniedPath_ThenItIsNoLongerReadable()
+    {
+        // Arrange
+        await using var graph = await PermissionsTestGraph.CreateAsync(roles: [NoHiddenRole.Name], customRoles: [NoHiddenRole]);
+        var device = graph.Device;
+        var temperature = device.TryGetRegisteredSubject()!.TryGetProperty("Temperature")!;
+        var readableBefore = graph.Permissions.CanRead(temperature);
+
+        // Act
+        var children = new Dictionary<string, IInterceptorSubject>(graph.Root.Children);
+        children.Remove("Device");
+        children["Hidden"] = device;
+        graph.Root.Children = children;
+
+        // Assert
+        Assert.True(readableBefore);
+        Assert.False(graph.Permissions.CanRead(temperature));
     }
 }

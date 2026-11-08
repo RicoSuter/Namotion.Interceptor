@@ -24,7 +24,7 @@ internal sealed class PermissionDecisions : IUserPermissions
     private const string AddUserMemberName = "AddUser";
 
     // The render thread and the menu timer of a circuit.
-    private const int ShownMemoConcurrencyLevel = 2;
+    private const int MemoConcurrencyLevel = 2;
 
     private readonly AuthorizationService? _authorizationService;
 
@@ -37,11 +37,13 @@ internal sealed class PermissionDecisions : IUserPermissions
     private readonly bool _isPerson;
 
     // Replaced when the graph version changed; an older memo may still receive the answers of a reader that started
-    // before, which no reader of the newer version looks at.
-    private volatile ShownMemo? _shownMemo;
+    // before, which no reader of the newer version looks at. Read and written with Volatile.
+    private DecisionMemo<RegisteredSubject>? _shownMemo;
+    private DecisionMemo<RegisteredSubjectProperty>? _readMemo;
 
-    // The most subjects a memo answered for, which sizes the next one, so that it does not grow while it fills.
+    // The most answers a memo held, which sizes the next one, so that it does not grow while it fills.
     private int _shownCount;
+    private int _readCount;
 
     // Created when first needed: only a principal with roles with deny rules asks for the closure of other roles.
     private ConditionalWeakTable<IReadOnlyCollection<string>, IReadOnlyList<string>>? _missingRolesWithDenyRules;
@@ -53,7 +55,7 @@ internal sealed class PermissionDecisions : IUserPermissions
         IReadOnlySet<string> rolesWithDenyRules,
         bool isPerson,
         bool isFullAdministrator,
-        int shownCount)
+        PermissionDecisions? replaced)
     {
         _authorizationService = authorizationService;
         _policy = policy;
@@ -61,12 +63,16 @@ internal sealed class PermissionDecisions : IUserPermissions
         _rolesWithDenyRules = rolesWithDenyRules;
         _isPerson = isPerson;
         IsFullAdministrator = isFullAdministrator;
-        _shownCount = shownCount;
+        if (replaced is not null)
+        {
+            _shownCount = GetCount(Volatile.Read(ref replaced._shownMemo), ref replaced._shownCount);
+            _readCount = GetCount(Volatile.Read(ref replaced._readMemo), ref replaced._readCount);
+        }
     }
 
     /// <summary>Decisions that deny everything.</summary>
     public static PermissionDecisions DenyAll { get; } =
-        new(null, AuthorizationPolicy.DenyAll, new HashSet<string>(), new HashSet<string>(), isPerson: false, isFullAdministrator: false, shownCount: 0);
+        new(null, AuthorizationPolicy.DenyAll, new HashSet<string>(), new HashSet<string>(), isPerson: false, isFullAdministrator: false, replaced: null);
 
     /// <summary>Whether the principal is a full administrator, a person for whom <see cref="AuthorizationServiceRoleExtensions.IsFullAdministrator(AuthorizationService, IReadOnlyCollection{string})"/> holds.</summary>
     public bool IsFullAdministrator { get; }
@@ -89,7 +95,7 @@ internal sealed class PermissionDecisions : IUserPermissions
             authorizationService.GetRolesWithDenyRules(roleClosure),
             isPerson,
             isPerson && authorizationService.IsFullAdministrator(roles, roleClosure),
-            replaced?.GetShownCount() ?? 0);
+            replaced);
     }
 
     /// <summary>
@@ -192,8 +198,13 @@ internal sealed class PermissionDecisions : IUserPermissions
     /// Whether the member may be read: as the policy allows, or a member of a user the person may administer; never a
     /// member that its subject shares only with people who may act through its roles, see <see cref="IRoleScopedSubject"/>.
     /// </summary>
+    /// <remarks>Remembered per member until <see cref="AuthorizationService.GraphVersion"/> changes.</remarks>
     public bool CanRead(RegisteredSubjectProperty member) =>
-        IsSharedWithPrincipal(member) && (_policy.CanRead(member) || IsAdministeredUserMember(member));
+        // The scope roles of a subject are a value, which the graph version does not follow, so they are not remembered.
+        IsSharedWithPrincipal(member) &&
+        Remember(ref _readMemo, ref _readCount, member, static (decisions, readMember) => decisions.DecideCanRead(readMember));
+
+    private bool DecideCanRead(RegisteredSubjectProperty member) => _policy.CanRead(member) || IsAdministeredUserMember(member);
 
     /// <summary>Whether the member may be written: as the policy allows, within the scope of <see cref="IRoleScopedSubject"/>.</summary>
     public bool CanWrite(RegisteredSubjectProperty member) => IsSharedWithPrincipal(member) && _policy.CanWrite(member);
@@ -210,46 +221,52 @@ internal sealed class PermissionDecisions : IUserPermissions
     /// whose parent the policy shows through a readable property.
     /// </summary>
     /// <remarks>Remembered per subject until <see cref="AuthorizationService.GraphVersion"/> changes.</remarks>
-    public bool CanShow(RegisteredSubject subject)
+    public bool CanShow(RegisteredSubject subject) =>
+        Remember(ref _shownMemo, ref _shownCount, subject, static (decisions, shownSubject) => decisions.DecideCanShow(shownSubject));
+
+    private bool DecideCanShow(RegisteredSubject subject) => _policy.IsVisible(subject) || IsShownAdministeredUser(subject);
+
+    // Answers from the memo of the current graph version, deciding and remembering on a miss.
+    private bool Remember<TKey>(ref DecisionMemo<TKey>? memoField, ref int count, TKey key, Func<PermissionDecisions, TKey, bool> decide)
+        where TKey : class
     {
         if (_authorizationService is null)
         {
-            return DecideCanShow(subject);
+            return decide(this, key);
         }
 
         // Read before the graph, so that an answer decided while the graph changes is kept for the older version only.
         var graphVersion = _authorizationService.GraphVersion;
-        var memo = _shownMemo;
+        var memo = Volatile.Read(ref memoField);
         if (memo is null || memo.GraphVersion != graphVersion)
         {
-            var shownCount = GetShownCount();
+            var previousCount = GetCount(memo, ref count);
 
-            // With headroom, as a memo grows when the subjects of one of its locks exceed their share.
-            memo = new ShownMemo(graphVersion, shownCount + shownCount / 4);
-            _shownMemo = memo;
+            // With headroom, as a memo grows when the keys of one of its locks exceed their share.
+            memo = new DecisionMemo<TKey>(graphVersion, previousCount + previousCount / 4);
+            Volatile.Write(ref memoField, memo);
         }
 
-        if (memo.Answers.TryGetValue(subject, out var isShown))
+        if (memo.Answers.TryGetValue(key, out var answer))
         {
-            return isShown;
+            return answer;
         }
 
-        isShown = DecideCanShow(subject);
-        memo.Answers.TryAdd(subject, isShown);
-        return isShown;
+        answer = decide(this, key);
+        memo.Answers.TryAdd(key, answer);
+        return answer;
     }
 
-    private bool DecideCanShow(RegisteredSubject subject) => _policy.IsVisible(subject) || IsShownAdministeredUser(subject);
-
-    private int GetShownCount()
+    private static int GetCount<TKey>(DecisionMemo<TKey>? memo, ref int count)
+        where TKey : class
     {
-        if (_shownMemo is { } memo)
+        if (memo is not null)
         {
             // Unsynchronized on purpose: a lost update only misjudges the size of the next memo.
-            _shownCount = Math.Max(_shownCount, memo.Answers.Count);
+            count = Math.Max(count, memo.Answers.Count);
         }
 
-        return _shownCount;
+        return count;
     }
 
     /// <summary>
@@ -334,11 +351,12 @@ internal sealed class PermissionDecisions : IUserPermissions
     private static bool RequiresAdministration(RegisteredSubjectProperty member) =>
         member.Type == typeof(MethodMetadata) && member.GetValue() is MethodMetadata { RequiresAdministration: true };
 
-    private sealed class ShownMemo(long graphVersion, int capacity)
+    private sealed class DecisionMemo<TKey>(long graphVersion, int capacity)
+        where TKey : class
     {
         public long GraphVersion { get; } = graphVersion;
 
-        public ConcurrentDictionary<RegisteredSubject, bool> Answers { get; } =
-            new(ShownMemoConcurrencyLevel, capacity, ReferenceEqualityComparer.Instance);
+        public ConcurrentDictionary<TKey, bool> Answers { get; } =
+            new(MemoConcurrencyLevel, capacity, ReferenceEqualityComparer.Instance);
     }
 }

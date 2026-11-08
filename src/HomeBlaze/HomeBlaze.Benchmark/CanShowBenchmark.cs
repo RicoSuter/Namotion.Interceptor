@@ -32,7 +32,7 @@ public class CanShowBenchmark
 {
     private const int ChildCount = 5;
     private const int Depth = 5;
-    private const string ScopedRoleName = "Scoped";
+    private const string ScopedRoleName = "scoped";
 
     private AuthorizationService _authorizationService;
     private ShowFolder _root;
