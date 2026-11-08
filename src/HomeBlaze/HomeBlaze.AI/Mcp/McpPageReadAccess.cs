@@ -64,11 +64,7 @@ internal sealed class McpPageReadAccess
         (root.TryGetRegisteredSubject() is { } registeredRoot && _configuration.TryGetSubjectPath(registeredRoot, subject) is not null);
 
     // The value the tools return for the member, so that a page shows no more than get_property.
-    private object? GetValue(RegisteredSubjectProperty member)
-    {
-        var value = member.GetValue();
-        return _configuration.ValueFilters.Count > 0 ? _configuration.ApplyValueFilters(member, value) : value;
-    }
+    private object? GetValue(RegisteredSubjectProperty member) => _configuration.ApplyValueFilters(member, member.GetValue());
 
     private sealed class Permissions(McpPageReadAccess access, IInterceptorSubject root) : IUserPermissions
     {
