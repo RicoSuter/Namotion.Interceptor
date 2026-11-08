@@ -307,8 +307,7 @@ internal sealed class AutomationChangeDispatcher
                 }
             }
 
-            // Also for watchers of the property, since paths through it may lead elsewhere now. A listener with an unbounded
-            // route that has the property is notified twice, which its receiver coalesces.
+            // A listener with an unbounded route that has the property is notified twice, which its receiver coalesces.
             NotifyGraphChanged(routed, chainDepth);
             NotifyGraphChanged(unbounded, chainDepth);
         }
