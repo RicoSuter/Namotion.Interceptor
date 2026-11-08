@@ -28,11 +28,17 @@ public readonly struct ValueBinding(RegisteredSubjectProperty? property, object?
     /// <summary>Whether the binding has no property, no value and no subject, as for a path that leads nowhere.</summary>
     public bool IsEmpty => Property is null && Value is null && Subject is null;
 
-    /// <summary>Binds the value of a property, or the subject it references.</summary>
-    public static ValueBinding FromProperty(RegisteredSubjectProperty property) =>
-        property.IsSubjectReference
-            ? new ValueBinding(property, null, property.GetValue() as IInterceptorSubject)
-            : new ValueBinding(property, property.GetValue(), property.Subject);
+    /// <summary>
+    /// Binds the value of a property as the viewer is shown it, see <see cref="IUserPermissions.GetValue"/>, or the subject
+    /// it references. Whether the viewer may read the property is checked by the caller.
+    /// </summary>
+    public static ValueBinding FromProperty(RegisteredSubjectProperty property, IUserPermissions permissions)
+    {
+        var value = permissions.GetValue(property);
+        return property.IsSubjectReference
+            ? new ValueBinding(property, null, value as IInterceptorSubject)
+            : new ValueBinding(property, value, property.Subject);
+    }
 
     /// <summary>
     /// Binds the path of a widget: the value of the property it ends at, or the subject it leads to when it ends at no
@@ -52,7 +58,7 @@ public readonly struct ValueBinding(RegisteredSubjectProperty? property, object?
             if (resolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, from, permissions) is { } property)
             {
                 // Not resolved as a subject instead, which would follow a reference the viewer may not read.
-                return permissions.CanReadShown(property) ? FromProperty(property) : default;
+                return permissions.CanReadShown(property) ? FromProperty(property, permissions) : default;
             }
 
             return resolver.ResolveScopedSubject(path, PathStyle.Canonical, from, permissions) is { } subject && permissions.CanShow(subject)

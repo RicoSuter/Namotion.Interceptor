@@ -948,7 +948,7 @@
                 @foreach (var attribute in attributes)
                 {
                     <MudDivider />
-                    @RenderProperty(attribute, attribute.GetValue(), depth + 1)
+                    @RenderProperty(attribute, Permissions.GetValue(attribute), depth + 1)
                 }
             </div>
         }
@@ -1205,7 +1205,7 @@
                 // Read here also for a value that gets no row: the render records the read, so the pane is
                 // rendered again once the value is set. A property with metadata, or that a link leads to, gets its
                 // row also without a value, for its metadata icon and its highlight.
-                var value = property.GetValue();
+                var value = Permissions.GetValue(property);
                 if (value is null && !HasDetails(property) && property.Name != HighlightedProperty && Permissions.GetReadableMetadata(property) is null)
                 {
                     emptyValues ??= [];

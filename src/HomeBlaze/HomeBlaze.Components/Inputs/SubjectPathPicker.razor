@@ -674,12 +674,12 @@
         }
     }
 
-    // The value of a displayable property that the viewer may read, of a subject it may see, else null as for a path that
-    // leads nowhere.
+    // The value as the viewer is shown it of a displayable property that the viewer may read, of a subject it may see, else
+    // null as for a path that leads nowhere.
     private object? ResolveReadableValue(string path, IInterceptorSubject from) =>
         PathResolver.ResolveDisplayablePropertyFrom(path, PathStyle.Canonical, from) is { } property &&
         Permissions.CanRead(property) && Permissions.CanShow(property.Subject)
-            ? property.GetValue()
+            ? Permissions.GetValue(property)
             : null;
 
     private static List<TreeItemData<PathTreeItem>>? GetChildItems(ITreeItemData<PathTreeItem> context)

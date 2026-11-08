@@ -435,7 +435,7 @@ namespace HomeBlaze.Services.Display
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; }
         public object? Value { get; }
         public static HomeBlaze.Services.Display.ValueBinding FromPath(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject from, string? path, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions) { }
-        public static HomeBlaze.Services.Display.ValueBinding FromProperty(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public static HomeBlaze.Services.Display.ValueBinding FromProperty(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions) { }
     }
 }
 namespace HomeBlaze.Services.Lifecycle

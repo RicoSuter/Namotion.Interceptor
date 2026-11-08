@@ -59,7 +59,7 @@ public static class ValueReader
         ITimeZoneDisplay? timeZone,
         IUserPermissions permissions)
     {
-        var binding = property is not null && permissions.CanReadShown(property) ? ValueBinding.FromProperty(property) : default;
+        var binding = property is not null && permissions.CanReadShown(property) ? ValueBinding.FromProperty(property, permissions) : default;
         return ReadCore(binding, valueMap, mapError: null, resolver, timeZone, permissions);
     }
 
@@ -85,7 +85,7 @@ public static class ValueReader
         IUserPermissions permissions)
     {
         var property = string.IsNullOrEmpty(propertyName) ? null : subject.TryGetRegisteredProperty(propertyName);
-        var binding = property is not null && property.IsDisplayable() && permissions.CanReadShown(property) ? ValueBinding.FromProperty(property) : default;
+        var binding = property is not null && property.IsDisplayable() && permissions.CanReadShown(property) ? ValueBinding.FromProperty(property, permissions) : default;
         return ReadCore(binding, valueMap, mapError: null, resolver, timeZone, permissions);
     }
 
@@ -144,11 +144,12 @@ public static class ValueReader
     }
 
     /// <summary>
-    /// Reads the value at the path alone, for a widget that shows no text of it.
-    /// Null when the path is null, empty, leads nowhere or ends at a property the viewer may not read.
+    /// Reads the value at the path alone as the viewer is shown it, see <see cref="IUserPermissions.GetValue"/>, for a
+    /// widget that shows no text of it. Null when the path is null, empty, leads nowhere or ends at a property the viewer
+    /// may not read.
     /// </summary>
     public static object? ReadValue(SubjectPathResolver resolver, IInterceptorSubject widget, string? path, IUserPermissions permissions) =>
-        ResolveProperty(resolver, widget, path, permissions)?.GetValue();
+        ResolveProperty(resolver, widget, path, permissions) is { } property ? permissions.GetValue(property) : null;
 
     /// <summary>
     /// Gets the label of a value or a control: the given one, otherwise the title the property declares, otherwise its

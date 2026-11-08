@@ -39,7 +39,8 @@ public static class OperationInvoker
         return method.RequiresConfirmation ? OperationPrompt.Confirmation : OperationPrompt.None;
     }
 
-    // The values of the caller, completed with the readable properties the parameters name, converted to the parameter type.
+    // The values of the caller, completed with the readable properties the parameters name as the person is shown them,
+    // converted to the parameter type.
     private static IReadOnlyDictionary<string, object?>? GetInitialValues(
         MethodMetadata method, RegisteredSubjectProperty member, IUserPermissions permissions, IReadOnlyDictionary<string, object?>? initialValues)
     {
@@ -50,7 +51,7 @@ public static class OperationInvoker
                 initialValues?.ContainsKey(parameter.Name) == true ||
                 member.Parent.TryGetProperty(propertyName) is not { } property ||
                 !permissions.CanRead(property) ||
-                !TryConvert(property.GetValue(), parameter.Type, out var value))
+                !TryConvert(permissions.GetValue(property), parameter.Type, out var value))
             {
                 continue;
             }

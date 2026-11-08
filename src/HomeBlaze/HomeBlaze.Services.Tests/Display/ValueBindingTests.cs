@@ -1,3 +1,4 @@
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services.Display;
 using Namotion.Interceptor.Expressions;
 using HomeBlaze.Services.Lifecycle;
@@ -30,7 +31,7 @@ public class ValueBindingTests
         var property = charger.TryGetRegisteredProperty(nameof(BindingCharger.IsCharging))!;
 
         // Act
-        var binding = ValueBinding.FromProperty(property);
+        var binding = ValueBinding.FromProperty(property, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Same(property, binding.Property);
@@ -48,7 +49,7 @@ public class ValueBindingTests
         var property = charger.TryGetRegisteredProperty(nameof(BindingCharger.Session))!;
 
         // Act
-        var binding = ValueBinding.FromProperty(property);
+        var binding = ValueBinding.FromProperty(property, UnrestrictedPermissions.Instance);
         var fromResult = ValueBinding.FromExpressionValue(ExpressionValue.FromProperty(property, session));
 
         // Assert
@@ -66,7 +67,7 @@ public class ValueBindingTests
         var property = charger.TryGetRegisteredProperty(nameof(BindingCharger.Session))!;
 
         // Act
-        var binding = ValueBinding.FromProperty(property);
+        var binding = ValueBinding.FromProperty(property, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Null(binding.Subject);
