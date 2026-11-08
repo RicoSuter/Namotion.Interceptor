@@ -24,12 +24,12 @@ internal static class ExpressionArithmetic
     /// <returns>The number or duration with the other sign, or null for another value or a result out of range.</returns>
     public static object? Negate(object value) => value switch
     {
-        float single => float.IsFinite(single) ? -single + 0f : null,
-        double number => double.IsFinite(number) ? -number + 0d : null,
         TimeSpan duration => duration == TimeSpan.MinValue ? null : duration.Negate(),
-        _ when ExpressionComparer.GetNumberKind(value) != NumberKind.None => -Normalize(ExpressionComparer.ToDecimal(value)),
-        _ => null
+        _ => Apply(ArithmeticOperator.Subtract, DecimalZero, value)
     };
+
+    // Boxed once, so that a negation allocates only its result.
+    private static readonly object DecimalZero = 0m;
 
     // Adding zero turns a negative zero into zero, which a host would otherwise write as "-0". A result that is no finite
     // number, such as that of a division by zero, is missing like a result out of range.
