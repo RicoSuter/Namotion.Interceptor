@@ -70,16 +70,16 @@ internal static class SignInRefusals
     {
         if (user is { IsBuiltIn: false } && !wasLockedOut && await userManager.IsLockedOutAsync(user))
         {
-            await LogLockoutAsync(logger, userStore, context, user);
+            await LogLockoutAsync(logger, userStore, user);
         }
 
         AuthenticationEvents.SignInFailed(logger, user?.UserName ?? UnknownUserName, GetRemoteAddress(context));
     }
 
     /// <summary>Logs that <paramref name="user"/> is locked out now and shows it in <paramref name="userStore"/>.</summary>
-    public static async Task LogLockoutAsync(ILogger logger, UserStore userStore, HttpContext context, ApplicationUser user)
+    public static async Task LogLockoutAsync(ILogger logger, UserStore userStore, ApplicationUser user)
     {
         AuthenticationEvents.LockedOut(logger, user.UserName ?? user.Id);
-        await userStore.RefreshUserAsync(user.Id, context.RequestAborted);
+        await userStore.RefreshUserAsync(user.Id, CancellationToken.None);
     }
 }

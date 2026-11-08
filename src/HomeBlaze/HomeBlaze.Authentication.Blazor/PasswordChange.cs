@@ -67,11 +67,11 @@ internal sealed class PasswordChange(
         var result = await StorePasswordAsync(database, userManager, user, hasPassword, currentPassword, newPassword);
         if (!result.Succeeded)
         {
-            return await RefuseAsync(context, user, result);
+            return await RefuseAsync(user, result);
         }
 
         await signInManager.RefreshSignInAsync(user);
-        await userStore.RefreshUserAsync(user.Id, context.RequestAborted);
+        await userStore.RefreshUserAsync(user.Id, CancellationToken.None);
         AuthenticationEvents.PasswordChanged(logger, user.UserName ?? user.Id);
         return (PasswordChangeOutcome.Changed, []);
     }
@@ -117,7 +117,7 @@ internal sealed class PasswordChange(
 
     // A wrong current password counts as a failed sign-in. The lockout it starts is refused as one found before the
     // attempt, without signing out, as the failed sign-ins of anyone else may have counted towards it.
-    private async Task<(PasswordChangeOutcome Outcome, IReadOnlyList<string> Errors)> RefuseAsync(HttpContext context, ApplicationUser user, IdentityResult result)
+    private async Task<(PasswordChangeOutcome Outcome, IReadOnlyList<string> Errors)> RefuseAsync(ApplicationUser user, IdentityResult result)
     {
         IReadOnlyList<string> errors = [.. result.Errors.Select(error => error.Description)];
         if (!result.Errors.Any(error => error.Code == nameof(IdentityErrorDescriber.PasswordMismatch)))
@@ -134,7 +134,7 @@ internal sealed class PasswordChange(
 
         if (await userManager.IsLockedOutAsync(user))
         {
-            await SignInRefusals.LogLockoutAsync(logger, userStore, context, user);
+            await SignInRefusals.LogLockoutAsync(logger, userStore, user);
             return (PasswordChangeOutcome.Refused, [LockedOutError]);
         }
 

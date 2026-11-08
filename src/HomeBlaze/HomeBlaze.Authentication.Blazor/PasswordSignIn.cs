@@ -75,7 +75,7 @@ internal sealed class PasswordSignIn(
 
     private async Task SignedInAsync(HttpContext context, ApplicationUser user)
     {
-        await userStore.RecordSignInAsync(user.Id, context.RequestAborted);
+        await userStore.RecordSignInAsync(user.Id, CancellationToken.None);
         AuthenticationEvents.SignInSucceeded(logger, user.UserName ?? user.Id, SignInRefusals.GetRemoteAddress(context));
     }
 

@@ -75,7 +75,7 @@ internal sealed class SetupCodeSignIn(
         }
 
         await signInManager.SignInAsync(user, isPersistent: false);
-        await userStore.RecordSignInAsync(user.Id, context.RequestAborted);
+        await userStore.RecordSignInAsync(user.Id, CancellationToken.None);
         AuthenticationEvents.SignInSucceeded(logger, user.UserName ?? user.Id, SignInRefusals.GetRemoteAddress(context));
         return (SetupCodeOutcome.SignedIn, []);
     }

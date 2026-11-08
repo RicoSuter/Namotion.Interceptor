@@ -195,6 +195,7 @@ public sealed class UserStore : IMcpClientAccess
     /// Stores now as the last sign-in of the user with <paramref name="userId"/> and reloads what the sign-in changed, as
     /// <see cref="RefreshUserAsync"/> does. A refused write is logged, not thrown, as the person is signed in already.
     /// </summary>
+    /// <remarks>Pass a token that a client disconnect does not cancel: a canceled call leaves the store without the sign-in.</remarks>
     public Task RecordSignInAsync(string userId, CancellationToken cancellationToken) =>
         RefreshUserCoreAsync(userId, _timeProvider.GetUtcNow(), cancellationToken);
 
@@ -203,6 +204,10 @@ public sealed class UserStore : IMcpClientAccess
     /// security stamp of the user with <paramref name="userId"/>, after Identity changed them in the database, such as a
     /// lockout after failed sign-ins or a set password. Nothing changes for a user the store does not know.
     /// </summary>
+    /// <remarks>
+    /// Pass a token that a client disconnect does not cancel: a canceled call keeps what the store held before the write,
+    /// such as the old security stamp.
+    /// </remarks>
     public Task RefreshUserAsync(string userId, CancellationToken cancellationToken) =>
         RefreshUserCoreAsync(userId, signInTime: null, cancellationToken);
 
