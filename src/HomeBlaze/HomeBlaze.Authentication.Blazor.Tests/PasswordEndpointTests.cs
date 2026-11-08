@@ -156,7 +156,7 @@ public class PasswordEndpointTests
     }
 
     [Fact]
-    public async Task WhenTheCurrentPasswordIsWrongFiveTimes_ThenTheUserIsLockedOutAndSignedOut()
+    public async Task WhenTheCurrentPasswordIsWrongFiveTimes_ThenTheUserIsLockedOutAndTheSessionKept()
     {
         // Arrange
         await using var host = await AuthenticationTestHost.StartAsync();
@@ -170,11 +170,38 @@ public class PasswordEndpointTests
 
         // Act
         var lockedOut = await SetPasswordAsync(browser, AnotherPassword, currentPassword: "wrong password");
+        var afterLockout = await SetPasswordAsync(browser, AnotherPassword, currentPassword: Password);
 
         // Assert
-        Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(lockedOut));
-        Assert.False(browser.HasSessionCookie);
+        Assert.Equal([PasswordChange.LockedOutError], await TestBrowser.GetAccountErrorsAsync(lockedOut));
+        Assert.Equal([PasswordChange.LockedOutError], await TestBrowser.GetAccountErrorsAsync(afterLockout));
         Assert.True(host.GetUser(AdminSeeding.AdminUserName).IsLockedOut);
+        Assert.True(browser.HasSessionCookie);
+        Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync(BannersTestPage.Path)).StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenFailedSignInsElsewhereAndOneWrongCurrentPasswordStartTheLockout_ThenTheSessionIsKept()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        await host.SetPasswordAsync(AdminSeeding.AdminUserName, Password);
+        using var browser = host.CreateBrowser();
+        await SignInAsync(browser, AdminSeeding.AdminUserName, Password);
+        using var attacker = host.CreateBrowser();
+        for (var attempt = 0; attempt < 4; attempt++)
+        {
+            await SignInAsync(attacker, AdminSeeding.AdminUserName, "wrong password");
+        }
+
+        // Act
+        var response = await SetPasswordAsync(browser, AnotherPassword, currentPassword: "a typo");
+
+        // Assert
+        Assert.Equal([PasswordChange.LockedOutError], await TestBrowser.GetAccountErrorsAsync(response));
+        Assert.True(host.GetUser(AdminSeeding.AdminUserName).IsLockedOut);
+        Assert.True(browser.HasSessionCookie);
+        Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync(BannersTestPage.Path)).StatusCode);
     }
 
     [Fact]

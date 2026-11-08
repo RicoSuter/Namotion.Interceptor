@@ -99,7 +99,8 @@ internal sealed class PasswordChange(
         return await userManager.UpdateSecurityStampAsync(user);
     }
 
-    // A wrong current password counts as a failed sign-in, and the lockout it starts signs the person out.
+    // A wrong current password counts as a failed sign-in. The lockout it starts is refused as one found before the
+    // attempt, without signing out, as the failed sign-ins of anyone else may have counted towards it.
     private async Task<(PasswordChangeOutcome Outcome, IReadOnlyList<string> Errors)> RefuseAsync(HttpContext context, ApplicationUser user, IdentityResult result)
     {
         IReadOnlyList<string> errors = [.. result.Errors.Select(error => error.Description)];
@@ -118,7 +119,7 @@ internal sealed class PasswordChange(
         if (await userManager.IsLockedOutAsync(user))
         {
             await SignInRefusals.LogLockoutAsync(logger, userStore, context, user);
-            return await SignOutAsync();
+            return (PasswordChangeOutcome.Refused, [LockedOutError]);
         }
 
         return (PasswordChangeOutcome.Refused, errors);
