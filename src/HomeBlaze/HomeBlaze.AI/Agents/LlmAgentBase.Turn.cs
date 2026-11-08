@@ -76,9 +76,9 @@ public abstract partial class LlmAgentBase
 
     /// <summary>
     /// Gets the access policy of a turn from <paramref name="roles"/> and records why the roles cannot be used, which the
-    /// end of the turn reports in the status; the turn then runs with a policy that denies everything. Each tool call of the turn fetches the policy of the agent's current roles
-    /// again, cached per compiled snapshot, and decides with it for the whole call, so that a role removed or changed
-    /// while the turn runs applies from the next call.
+    /// end of the turn reports in the status; the turn then runs with a policy that denies everything. Each tool call of
+    /// the turn fetches the policy of the agent's current roles again, cached per compiled snapshot, and decides with it
+    /// for the whole call, so that a role removed or changed while the turn runs applies from the next call.
     /// </summary>
     private AuthorizationMcpAccessPolicy GetTurnAccessPolicy(List<string> roles)
     {
