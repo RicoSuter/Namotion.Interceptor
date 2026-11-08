@@ -29,8 +29,9 @@ internal static class SessionValidation
             options.Events.OnValidatePrincipal = context =>
             {
                 // Rejecting keeps the cookie, which the store refuses on every request anyway: the store is empty while the
-                // users load at startup, and holds a new stamp before the browser stored the cookie that carries it.
-                if (!IsAllowedByStore(context))
+                // users load at startup, and holds a new stamp before the browser stored the cookie that carries it. The
+                // database is not touched before it is ready.
+                if (!context.HttpContext.RequestServices.GetRequiredService<AuthenticationDatabase>().IsReady || !IsAllowedByStore(context))
                 {
                     context.RejectPrincipal();
                     return Task.CompletedTask;
