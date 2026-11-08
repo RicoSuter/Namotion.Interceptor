@@ -1,4 +1,5 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
@@ -62,7 +63,10 @@ public static class UserPermissionsExtensions
     /// as <see cref="PermittedOperationOutcome.Failed"/>.
     /// </summary>
     /// <param name="permissions">The permissions of the person who runs the method.</param>
-    /// <param name="member">The member that holds the method; <see cref="PermittedOperationOutcome.Denied"/> when it holds none.</param>
+    /// <param name="member">
+    /// The member that holds the method; <see cref="PermittedOperationOutcome.Denied"/> when it holds none, or one excluded
+    /// from user interfaces.
+    /// </param>
     /// <param name="parameters">The values of the parameters that require input, in their order.</param>
     /// <param name="serviceProvider">Resolves the parameters of the method that come from services.</param>
     /// <param name="cancellationToken">Passed to the method.</param>
@@ -73,7 +77,8 @@ public static class UserPermissionsExtensions
         IServiceProvider? serviceProvider,
         CancellationToken cancellationToken)
     {
-        if (member.GetValue() is not MethodMetadata method || !permissions.CanInvoke(member))
+        // A method excluded from user interfaces is meant for agents only, such as one that skips the checks of the UI.
+        if (member.GetValue() is not MethodMetadata method || method.IsExcludedFrom(ExclusionTarget.UserInterface) || !permissions.CanInvoke(member))
         {
             return new PermittedOperationResult(PermittedOperationOutcome.Denied, null, null);
         }

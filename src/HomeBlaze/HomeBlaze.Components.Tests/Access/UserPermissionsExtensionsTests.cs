@@ -61,6 +61,30 @@ public class UserPermissionsExtensionsTests
     }
 
     [Fact]
+    public async Task WhenTheMethodIsExcludedFromUserInterfaces_ThenItDoesNotRunAlthoughTheUserMayInvokeIt()
+    {
+        // Arrange
+        var invocationCount = 0;
+        var member = OperationTestGraph.CreateMember(new MethodMetadata(_ =>
+        {
+            invocationCount++;
+            return null;
+        })
+        {
+            ExcludedFrom = ExclusionTarget.UserInterface
+        });
+        var permissions = new TestUserPermissions();
+
+        // Act
+        var result = await permissions.TryInvokeAsync(member, null, ServiceProvider, CancellationToken.None);
+
+        // Assert
+        Assert.True(permissions.CanInvoke(member));
+        Assert.Equal(PermittedOperationOutcome.Denied, result.Outcome);
+        Assert.Equal(0, invocationCount);
+    }
+
+    [Fact]
     public async Task WhenNoPermissionsAreConfigured_ThenTheMethodDoesNotRun()
     {
         // Arrange
