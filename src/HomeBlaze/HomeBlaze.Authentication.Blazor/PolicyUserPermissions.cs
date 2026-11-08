@@ -15,7 +15,7 @@ namespace HomeBlaze.Authentication.Blazor;
 /// folder names only the children the person is shown. A person who must change their password is denied everything
 /// until they change it. Scoped per circuit; thread-safe.
 /// </summary>
-public sealed partial class PolicyUserPermissions : IUserPermissions, IDisposable
+internal sealed partial class PolicyUserPermissions : IUserPermissions, IDisposable
 {
     private readonly AuthorizationService _authorizationService;
     private readonly CurrentUser _currentUser;

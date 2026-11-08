@@ -16,7 +16,7 @@ namespace HomeBlaze.Authentication.Blazor;
 /// <see cref="PolicyUserPermissions"/> nor the user administration of the circuit lets them act until they change it.
 /// Scoped per circuit; thread-safe.
 /// </summary>
-public sealed class CurrentUser : IDisposable
+internal sealed class CurrentUser : IDisposable
 {
     private readonly AuthenticationStateProvider _authenticationStateProvider;
     private readonly UserStore _userStore;
