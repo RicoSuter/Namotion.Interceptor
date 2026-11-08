@@ -57,8 +57,8 @@ internal sealed class PasswordSignIn(
         return false;
     }
 
-    // Only the seeded or reset administrator, until they set a password. The session carries the claim that they must
-    // change their password, see ApplicationUser.RequiresPasswordChange, so that nothing but setting it is open to them.
+    // Only the seeded or reset administrator, until they set a password. The store confines the session to setting it, see
+    // UserStore.RequiresPasswordChange.
     private async Task<bool> SignInWithEmptyPasswordAsync(HttpContext context, ApplicationUser user, bool wasLockedOut)
     {
         if (!user.AllowsEmptyPassword || user.PasswordHash is not null || wasLockedOut)
