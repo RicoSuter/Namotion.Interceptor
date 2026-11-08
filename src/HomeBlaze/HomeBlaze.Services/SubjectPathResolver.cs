@@ -164,18 +164,10 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                     return null;
                 }
 
+                // Ambiguous with several parents, also when one of them loses its own parents, which writes no holder.
                 var parents = registered.Parents;
-                if (parents.Length > 1)
-                {
-                    // Ambiguous - multiple parents. Stays ambiguous when another parent is gained, so only the holders count.
-                    if (recorder != null)
-                        AddHolders(recorder, parents);
-
-                    return null;
-                }
-
                 recorder?.AddParentStep(current, parents);
-                if (parents.Length == 0)
+                if (parents.Length != 1)
                     return null;
 
                 current = parents[0].Property.Subject;
@@ -333,14 +325,6 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                 sb.Append(ch);
         }
         return sb.ToString();
-    }
-
-    private static void AddHolders(ISubjectPathRecorder recorder, ImmutableArray<SubjectPropertyParent> parents)
-    {
-        foreach (var parent in parents)
-        {
-            recorder.AddProperty(parent.Property.Reference);
-        }
     }
 
     private IInterceptorSubject? ResolveInternal(IInterceptorSubject baseSubject, string path, PathStyle style, ISubjectPathRecorder? recorder)

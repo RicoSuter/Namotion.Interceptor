@@ -105,8 +105,9 @@ public class GraphRoutesTests
         Assert.True(isUnbounded);
     }
 
+    // Detaching the other host above its Rules property gives the rule a single parent without a change of a holder.
     [Fact]
-    public async Task WhenAPathLeadsUpFromARuleWithSeveralParents_ThenTheRouteHasItsHoldersAndIsBounded()
+    public async Task WhenAPathLeadsUpFromARuleWithSeveralParents_ThenTheRouteHasItsHoldersAndIsUnbounded()
     {
         // Arrange
         await using var fixture = await RouteFixture.CreateAsync();
@@ -122,7 +123,7 @@ public class GraphRoutesTests
         Assert.Equal(
             [new PropertyReference(fixture.Automation, nameof(Automation.Rules)), new PropertyReference(otherHost, nameof(TestRuleHost.Rules))],
             route);
-        Assert.False(isUnbounded);
+        Assert.True(isUnbounded);
     }
 
     [Fact]

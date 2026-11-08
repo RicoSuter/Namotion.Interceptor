@@ -16,8 +16,9 @@ namespace HomeBlaze.Automation.Runtime;
 /// </summary>
 /// <remarks>
 /// A step up from a subject depends on its parents. The route has the properties that hold the subject, which lose it,
-/// but the property that gains it next is not known; the step is exact only for a subject that tells the worker when it
-/// gains a parent: the automation of the worker, and a rule whose only parent is that automation.
+/// but the property that gains it next is not known, and a subject with several parents loses one when an ancestor of
+/// that parent is detached, which writes no holder; the step is exact only for a subject with at most one parent that
+/// tells the worker when it gains a parent: the automation of the worker, and a rule whose only parent is that automation.
 /// </remarks>
 internal sealed class GraphRouteBuilder(IInterceptorSubject? automation) : ISubjectPathRecorder
 {
@@ -63,6 +64,11 @@ internal sealed class GraphRouteBuilder(IInterceptorSubject? automation) : ISubj
     private bool TellsParentGains(IInterceptorSubject subject, ImmutableArray<SubjectPropertyParent> parents)
     {
         if (automation is null)
+        {
+            return false;
+        }
+
+        if (parents.Length > 1)
         {
             return false;
         }

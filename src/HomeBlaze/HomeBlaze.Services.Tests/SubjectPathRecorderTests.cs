@@ -74,21 +74,28 @@ public class SubjectPathRecorderTests : SubjectPathResolverTestBase
         Assert.False(route.IsUnbounded);
     }
 
+    // The folder above one holder is detached, which writes no holder yet leaves the child with a single parent.
     [Fact]
-    public void WhenAPathLeadsUpFromASubjectWithSeveralParents_ThenTheRouteHasItsHoldersAndNoParentStep()
+    public void WhenAPathLeadsUpFromASubjectWithSeveralParents_ThenTheRouteHasAParentStepWithThem()
     {
         // Arrange
         var child = new TestContainer(Context) { Name = "Child" };
-        var root = new TestContainer(Context) { Name = "Root", Child = child, Children = new Dictionary<string, TestContainer> { ["copy"] = child } };
+        var folder = new TestContainer(Context) { Name = "Folder", Child = child };
+        var root = new TestContainer(Context) { Name = "Root", Child = folder, Children = new Dictionary<string, TestContainer> { ["copy"] = child } };
         RootManager.Root = root;
 
         // Act
-        var (subject, route) = ResolveSubject("..", child);
+        var (ambiguous, route) = ResolveSubject("..", child);
+        root.Child = null;
+        var (single, _) = ResolveSubject("..", child);
 
         // Assert
-        Assert.Null(subject);
-        Assert.Equal([Property(root, nameof(TestContainer.Child)), Property(root, nameof(TestContainer.Children))], route.Properties);
-        Assert.Empty(route.ParentSteps);
+        Assert.Null(ambiguous);
+        Assert.Same(root, single);
+        var step = Assert.Single(route.ParentSteps);
+        Assert.Same(child, step.Subject);
+        Assert.Equal([Property(folder, nameof(TestContainer.Child)), Property(root, nameof(TestContainer.Children))], step.Parents.Select(parent => parent.Property.Reference));
+        Assert.Empty(route.Properties);
         Assert.False(route.IsUnbounded);
     }
 
