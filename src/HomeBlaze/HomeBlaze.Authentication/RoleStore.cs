@@ -196,7 +196,7 @@ public sealed class RoleStore : IRoleStore
             var candidate = updated.Values.Select(entry => entry.Role).ToList();
             var people = _personRoleSets();
             var validationError = _authorizationService.ValidateRoles(current, candidate, GetPrincipalRoleSets())
-                ?? FullAdministrators.GetRemovalError(current, candidate, people, people);
+                ?? FullAdministrators.GetRemovalError(_authorizationService, current, candidate, people, people);
             if (validationError is not null)
             {
                 return new RoleChangeResult(false, validationError);
@@ -333,7 +333,7 @@ public sealed class RoleStore : IRoleStore
         }
 
         var people = _personRoleSets();
-        return FullAdministrators.GetRemovalError(current, candidate, people, renamedFrom is null ? people : Rename(people, renamedFrom, newName));
+        return FullAdministrators.GetRemovalError(_authorizationService, current, candidate, people, renamedFrom is null ? people : Rename(people, renamedFrom, newName));
     }
 
     private static List<PersonRoleSet> Rename(IReadOnlyCollection<PersonRoleSet> people, string oldName, string newName) =>

@@ -17,26 +17,7 @@ public static class AuthorizationServiceRoleExtensions
         ArgumentNullException.ThrowIfNull(service);
         ArgumentNullException.ThrowIfNull(roleNames);
 
-        var snapshot = service.GetSnapshot();
-        var closure = new HashSet<string>(StringComparer.Ordinal);
-        var pending = new Stack<string>(roleNames);
-        while (pending.TryPop(out var name))
-        {
-            if (string.IsNullOrWhiteSpace(name) || !closure.Add(name))
-            {
-                continue;
-            }
-
-            if (snapshot.TryGetIncludes(name) is { } includes)
-            {
-                foreach (var include in includes)
-                {
-                    pending.Push(include);
-                }
-            }
-        }
-
-        return closure;
+        return GetClosureIn(service.GetSnapshot(), roleNames);
     }
 
     /// <summary>
@@ -80,12 +61,54 @@ public static class AuthorizationServiceRoleExtensions
         ArgumentNullException.ThrowIfNull(service);
         ArgumentNullException.ThrowIfNull(roleClosure);
 
+        return IsFullAdministratorIn(service.GetSnapshot(), roleNames, roleClosure);
+    }
+
+    /// <summary>
+    /// Gets a test of whether a person holding the role names it is given is a full administrator, as
+    /// <see cref="IsFullAdministrator(AuthorizationService, IReadOnlyCollection{string})"/> decides, with
+    /// <paramref name="customRoles"/>, the complete set of custom roles, in place of the current ones. The roles are
+    /// compiled once per test, so a test is reused for every person of the same set of roles.
+    /// </summary>
+    public static Func<IReadOnlyCollection<string>, bool> GetFullAdministratorTest(this AuthorizationService service, IReadOnlyList<AuthorizationRole> customRoles)
+    {
+        ArgumentNullException.ThrowIfNull(service);
+        ArgumentNullException.ThrowIfNull(customRoles);
+
+        var snapshot = AuthorizationSnapshot.BuildCandidate(customRoles, service.PathProvider);
+        return roleNames => IsFullAdministratorIn(snapshot, roleNames, GetClosureIn(snapshot, roleNames));
+    }
+
+    private static HashSet<string> GetClosureIn(AuthorizationSnapshot snapshot, IReadOnlyCollection<string> roleNames)
+    {
+        var closure = new HashSet<string>(StringComparer.Ordinal);
+        var pending = new Stack<string>(roleNames);
+        while (pending.TryPop(out var name))
+        {
+            if (string.IsNullOrWhiteSpace(name) || !closure.Add(name))
+            {
+                continue;
+            }
+
+            if (snapshot.TryGetIncludes(name) is { } includes)
+            {
+                foreach (var include in includes)
+                {
+                    pending.Push(include);
+                }
+            }
+        }
+
+        return closure;
+    }
+
+    private static bool IsFullAdministratorIn(AuthorizationSnapshot snapshot, IReadOnlyCollection<string> roleNames, IReadOnlySet<string> roleClosure)
+    {
         if (!roleClosure.Contains(BuiltInRoles.EverythingName))
         {
             return false;
         }
 
-        var snapshot = service.GetSnapshot();
         foreach (var name in roleClosure)
         {
             if (snapshot.DeniesAdminister(name))

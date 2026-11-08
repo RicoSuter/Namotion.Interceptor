@@ -5,8 +5,9 @@ namespace HomeBlaze.Authentication.Internal;
 
 /// <summary>
 /// The rule that keeps a full administrator, a person whose roles reach <see cref="BuiltInRoles.EverythingName"/> through
-/// the includes of the custom roles, with no role in reach that denies <c>administer</c>, for changes of users and of roles
-/// alike.
+/// the includes of the custom roles, with no role in reach that denies <c>administer</c>, and whose roles are all known and
+/// compile, as <see cref="AuthorizationServiceRoleExtensions.IsFullAdministrator(AuthorizationService, IReadOnlyCollection{string})"/>
+/// decides, for changes of users and of roles alike.
 /// </summary>
 internal static class FullAdministrators
 {
@@ -19,13 +20,14 @@ internal static class FullAdministrators
     /// roles the same people, with a renamed role renamed in <paramref name="candidatePeople"/>.
     /// </summary>
     public static string? GetRemovalError(
-        IReadOnlyCollection<AuthorizationRole> currentRoles,
-        IReadOnlyCollection<AuthorizationRole> candidateRoles,
+        AuthorizationService service,
+        IReadOnlyList<AuthorizationRole> currentRoles,
+        IReadOnlyList<AuthorizationRole> candidateRoles,
         IReadOnlyCollection<PersonRoleSet> currentPeople,
         IReadOnlyCollection<PersonRoleSet> candidatePeople)
     {
-        var current = GetRolesByName(currentRoles);
-        var candidate = ReferenceEquals(candidateRoles, currentRoles) ? current : GetRolesByName(candidateRoles);
+        var current = service.GetFullAdministratorTest(currentRoles);
+        var candidate = ReferenceEquals(candidateRoles, currentRoles) ? current : service.GetFullAdministratorTest(candidateRoles);
         if (Holds(currentPeople, current, includeLocked: false))
         {
             return Holds(candidatePeople, candidate, includeLocked: false)
@@ -41,44 +43,6 @@ internal static class FullAdministrators
         return $"This change would leave no user with {BuiltInRoles.EverythingName} and no deny rule on {AuthorizationActions.Administer}; give another user {BuiltInRoles.EverythingName} without a role that denies {AuthorizationActions.Administer} first.";
     }
 
-    private static Dictionary<string, AuthorizationRole> GetRolesByName(IReadOnlyCollection<AuthorizationRole> customRoles)
-    {
-        var roles = new Dictionary<string, AuthorizationRole>(BuiltInRoles.All.Length + customRoles.Count, StringComparer.Ordinal);
-        foreach (var role in BuiltInRoles.All.Concat(customRoles))
-        {
-            roles[role.Name] = role;
-        }
-
-        return roles;
-    }
-
-    private static bool Holds(IReadOnlyCollection<PersonRoleSet> people, Dictionary<string, AuthorizationRole> roles, bool includeLocked) =>
-        people.Any(person => (includeLocked || !person.IsLockedByAdministrator) && IsFullAdministrator(person.RoleNames, roles));
-
-    private static bool IsFullAdministrator(IReadOnlyCollection<string> roleNames, Dictionary<string, AuthorizationRole> roles)
-    {
-        var holdsEverything = false;
-        var visited = new HashSet<string>(StringComparer.Ordinal);
-        var pending = new Stack<string>(roleNames);
-        while (pending.TryPop(out var name))
-        {
-            holdsEverything |= string.Equals(name, BuiltInRoles.EverythingName, StringComparison.Ordinal);
-            if (!visited.Add(name) || !roles.TryGetValue(name, out var role))
-            {
-                continue;
-            }
-
-            if (AuthorizationServiceRoleExtensions.DeniesAdminister(role))
-            {
-                return false;
-            }
-
-            foreach (var include in role.Includes)
-            {
-                pending.Push(include);
-            }
-        }
-
-        return holdsEverything;
-    }
+    private static bool Holds(IReadOnlyCollection<PersonRoleSet> people, Func<IReadOnlyCollection<string>, bool> isFullAdministrator, bool includeLocked) =>
+        people.Any(person => (includeLocked || !person.IsLockedByAdministrator) && isFullAdministrator(person.RoleNames));
 }

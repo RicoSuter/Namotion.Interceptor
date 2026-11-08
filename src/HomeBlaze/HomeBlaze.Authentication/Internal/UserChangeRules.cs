@@ -173,7 +173,7 @@ internal sealed class UserChangeRules(
         }
 
         var roles = roleStore.GetCustomRoles();
-        return FullAdministrators.GetRemovalError(roles, roles, state.PersonRoleSets, GetCandidatePeople(state, target, change));
+        return FullAdministrators.GetRemovalError(authorizationService, roles, roles, state.PersonRoleSets, GetCandidatePeople(state, target, change));
     }
 
     private static List<PersonRoleSet> GetCandidatePeople(UserState state, UserEntry target, UserChange change)
