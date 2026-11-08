@@ -112,7 +112,7 @@ public static class ChildOrdering
     /// Gets the value of <paramref name="member"/> as a reader who is listed only some children is shown it: when the
     /// member holds the metadata of a container, its order, or the <see cref="IMetadataContainer.ChildOrder"/> of a
     /// container, without the names that <paramref name="getListedNames"/> does not return for the container; any other
-    /// value as it is.
+    /// value, and one from which no name is removed, as it is.
     /// </summary>
     /// <param name="member">The member the value was read from.</param>
     /// <param name="value">The value of the member.</param>
@@ -142,11 +142,29 @@ public static class ChildOrdering
         }
 
         var listedNames = getListedNames(state, member.Parent);
+        if (AreAllListed(order, listedNames))
+        {
+            return value;
+        }
+
         var names = order.EnumerateArray()
             .Where(item => item.ValueKind == JsonValueKind.String && listedNames.Contains(item.GetString()!))
             .Select(item => item.GetString()!)
             .ToArray();
         return metadata.SetItem(MetadataKeys.Order, JsonSerializer.SerializeToElement(names));
+    }
+
+    private static bool AreAllListed(JsonElement order, IReadOnlySet<string> listedNames)
+    {
+        foreach (var item in order.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String || !listedNames.Contains(item.GetString()!))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static int GetDefaultRank(string name)
