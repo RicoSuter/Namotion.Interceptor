@@ -3,6 +3,10 @@ using System.Collections.Frozen;
 using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
 using Namotion.Interceptor;
+using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Automation.Tests.Runtime;
 
@@ -98,6 +102,104 @@ public class AutomationChangeDispatcherTests
         Assert.Equal(1, idle.GraphChanges);
         Assert.Single(watcher.Changes);
         Assert.Empty(idle.Changes);
+    }
+
+    [Fact]
+    public void WhenPropertiesAreAddedToAnAttachedSubject_ThenEachListenerIsNotifiedOnceUntilItReleasesTheGraphChange()
+    {
+        // Arrange
+        var (graph, weather) = CreateGraph();
+        var dispatcher = new AutomationChangeDispatcher();
+        var first = new RecordingListener();
+        var second = new RecordingListener();
+        using var firstRegistration = dispatcher.Register(graph.Context, first);
+        using var secondRegistration = dispatcher.Register(graph.Context, second);
+        var registered = weather.TryGetRegisteredSubject()!;
+
+        // Act
+        registered.AddProperty<double?>("Wind", _ => 10);
+        registered.AddProperty<double?>("Pressure", _ => null);
+        var graphChangesBeforeTheRelease = first.GraphChanges;
+        firstRegistration.OnGraphChangeReleased();
+        registered.AddProperty<double?>("Humidity", _ => 50);
+
+        // Assert
+        Assert.Equal(1, graphChangesBeforeTheRelease);
+        Assert.Equal(2, first.GraphChanges);
+        Assert.Equal(2, second.GraphChanges);
+    }
+
+    [Fact]
+    public void WhenSeveralDispatchersRouteAContext_ThenOneNotifierAnnouncesAnAddedPropertyToTheListenersOfEach()
+    {
+        // Arrange
+        var (graph, weather) = CreateGraph();
+        var first = new RecordingListener();
+        var second = new RecordingListener();
+        using var firstRegistration = new AutomationChangeDispatcher().Register(graph.Context, first);
+        using var secondRegistration = new AutomationChangeDispatcher().Register(graph.Context, second);
+
+        // Act
+        weather.TryGetRegisteredSubject()!.AddProperty<double?>("Wind", _ => 10);
+
+        // Assert
+        Assert.Single(graph.Context.GetServices<IPropertyLifecycleHandler>().OfType<PropertyAttachNotifier>());
+        Assert.Equal(1, first.GraphChanges);
+        Assert.Equal(1, second.GraphChanges);
+    }
+
+    [Fact]
+    public void WhenNoDispatcherIsRegistered_ThenEveryCallerSharesOne()
+    {
+        // Arrange
+        var services = new ServiceCollection().BuildServiceProvider();
+
+        // Act
+        var first = AutomationChangeDispatcher.From(services);
+        var second = AutomationChangeDispatcher.From(services);
+
+        // Assert
+        Assert.Same(first, second);
+    }
+
+    [Fact]
+    public void WhenALifecycleHandlerFailsTheAttachOfASubject_ThenAPropertyAddedToItAfterAnotherChangeIsAnnounced()
+    {
+        // Arrange
+        var (graph, _) = CreateGraph();
+        var holder = new TestSensorHolder();
+        graph.Add("Holder", holder);
+        var dispatcher = new AutomationChangeDispatcher();
+        var listener = new RecordingListener();
+        using var registration = dispatcher.Register(graph.Context, listener);
+        var garden = new TestSensor();
+        graph.Context.AddService<ILifecycleHandler>(new FailingAttachHandler(garden));
+        using var failed = new ManualResetEventSlim();
+        using var changed = new ManualResetEventSlim();
+        var graphChangesBeforeTheAdd = -1;
+        Exception? attachError = null;
+        var writer = new Thread(() =>
+        {
+            attachError = Record.Exception(() => graph.Add("Garden", garden));
+            failed.Set();
+            changed.Wait(TimeSpan.FromSeconds(30));
+            registration.OnGraphChangeReleased();
+            graphChangesBeforeTheAdd = listener.GraphChanges;
+
+            // Act
+            garden.TryGetRegisteredSubject()!.AddProperty<double?>("Wind", _ => 10);
+        });
+
+        // Act
+        writer.Start();
+        failed.Wait(TimeSpan.FromSeconds(30));
+        holder.Sensor = new TestSensor();
+        changed.Set();
+        writer.Join(TimeSpan.FromSeconds(30));
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(attachError);
+        Assert.Equal(graphChangesBeforeTheAdd + 1, listener.GraphChanges);
     }
 
     [Fact]
@@ -276,6 +378,18 @@ public class AutomationChangeDispatcherTests
     private static PropertyReference Rain(TestSensor weather) => new(weather, nameof(TestSensor.Rain));
 
     private static FrozenSet<PropertyReference> Watch(params PropertyReference[] properties) => properties.ToFrozenSet();
+
+    [RunsAfter(typeof(PropertyAttachNotifier))]
+    private sealed class FailingAttachHandler(IInterceptorSubject subject) : ILifecycleHandler
+    {
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (change.IsContextAttach && ReferenceEquals(change.Subject, subject))
+            {
+                throw new InvalidOperationException("The attach failed.");
+            }
+        }
+    }
 
     private sealed class RecordingListener : IAutomationChangeListener
     {

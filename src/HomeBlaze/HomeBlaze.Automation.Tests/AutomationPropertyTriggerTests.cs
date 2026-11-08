@@ -3,6 +3,7 @@ using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
@@ -367,6 +368,80 @@ public class AutomationPropertyTriggerTests
         Assert.Equal(1, sourcesWithOneAutomation);
         Assert.Equal(0, watchersOfGust);
         Assert.Equal(0, dispatcher.SourceCount);
+    }
+
+    [Fact]
+    public async Task WhenAPropertyThatARuleReadsIsAddedWithAValue_ThenTheRuleRuns()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", On("Retract", When("/Weather/Wind > 5"), Invoke("/Blinds/Close")))));
+        var statusWhileMissing = host.Rule("retract").Status;
+
+        // Act
+        host.Weather.TryGetRegisteredSubject()!.AddProperty<double?>("Wind", _ => 10);
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal("On: Unknown since 2026-11-06 12:00:00, missing /Weather/Wind", statusWhileMissing);
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenAPropertyThatARuleReadsIsAddedWithoutAValueAndWrittenLater_ThenTheRuleRuns()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", On("Retract", When("/Weather/Wind > 5"), Invoke("/Blinds/Close")))));
+        object? wind = null;
+        var property = host.Weather.TryGetRegisteredSubject()!.AddProperty(
+            "Wind", typeof(double?), _ => Volatile.Read(ref wind), (_, value) => Volatile.Write(ref wind, value));
+        await host.FlushAsync();
+        var runsWhileNull = host.Blinds.CloseCount;
+
+        // Act
+        property.SetValue(10.0);
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(0, runsWhileNull);
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenAnAttributeThatARuleReadsIsAdded_ThenTheRuleRuns()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", On("Retract", When("/Weather/Gust@Maximum > 5"), Invoke("/Blinds/Close")))));
+        var statusWhileMissing = host.Rule("retract").Status;
+
+        // Act
+        host.Weather.TryGetRegisteredProperty(nameof(TestSensor.Gust))!.AddAttribute<double?>("Maximum", _ => 10);
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal("On: Unknown since 2026-11-06 12:00:00, missing /Weather/Gust@Maximum", statusWhileMissing);
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenAPropertyIsAddedWithTheNameOfAChildThatAPathLedThrough_ThenThePathLeadsToTheProperty()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
+        host.Weather.Gust = 3;
+        await host.FlushAsync();
+        var statusThroughTheChild = host.Rule("retract").Status;
+
+        // Act
+        host.Graph.Root.TryGetRegisteredSubject()!.AddProperty<TestSensor>("Weather", _ => null);
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal("On: Armed", statusThroughTheChild);
+        Assert.Equal("On: Unknown since 2026-11-06 12:00:00, missing /Weather/Gust", host.Rule("retract").Status);
     }
 
     private sealed class CountingListener(IAutomationChangeListener inner) : IAutomationChangeListener

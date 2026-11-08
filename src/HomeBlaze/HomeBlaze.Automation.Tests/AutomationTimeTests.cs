@@ -146,4 +146,38 @@ public class AutomationTimeTests
             [DateTimeOffset.Parse(expectedFirst, CultureInfo.InvariantCulture), DateTimeOffset.Parse(expectedSecond, CultureInfo.InvariantCulture)],
             runs);
     }
+
+    [Fact]
+    public async Task WhenTheGraphChangesWhileAnElapsedTimePassesAndTheWorkerIsBusy_ThenTheRuleRunsOnceTheWorkerIsFree()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("stale", On("Stale", When("now - /Weather/LastUpdated > 20s"), Invoke("/Blinds/Close"))),
+            ("wait", On("Wait", When("/Weather/Power > 0"), Invoke("/Blinds/Wait")))));
+        host.Weather.LastUpdated = AutomationTestHost.Start;
+        await host.FlushAsync();
+
+        // Act
+        await host.ChangeTheGraphWhileBusyAsync(TimeSpan.FromSeconds(30));
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(AutomationTestHost.Start.AddSeconds(30), host.Rule("stale").LastTriggeredAt);
+    }
+
+    [Fact]
+    public async Task WhenTheGraphChangesWhileATimeOfDayPassesAndTheWorkerIsBusy_ThenTheRuleRunsOnceTheWorkerIsFree()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("noon", On("Noon", When("time > 12h0m20s"), Invoke("/Blinds/Close"))),
+            ("wait", On("Wait", When("/Weather/Power > 0"), Invoke("/Blinds/Wait")))));
+
+        // Act
+        await host.ChangeTheGraphWhileBusyAsync(TimeSpan.FromSeconds(30));
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(AutomationTestHost.Start.AddSeconds(30), host.Rule("noon").LastTriggeredAt);
+    }
 }

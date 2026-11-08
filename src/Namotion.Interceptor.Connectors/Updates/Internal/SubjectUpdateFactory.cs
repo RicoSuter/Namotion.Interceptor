@@ -273,7 +273,6 @@ internal static class SubjectUpdateFactory
             if (!builder.PathVisited.Add(current.Subject))
                 break;
 
-            // Read once: a concurrent detach replaces the snapshot, so a second read can be empty.
             var parents = current.Parents;
             if (parents.Length == 0)
                 break;

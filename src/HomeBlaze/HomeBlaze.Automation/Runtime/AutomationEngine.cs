@@ -401,7 +401,8 @@ internal sealed class AutomationEngine : IRuleRunHost
         }
     }
 
-    private void ActivateRules()
+    // Returns whether a pending property trigger began to be tracked.
+    private bool ActivateRules()
     {
         var pending = new List<CompiledRule>();
         foreach (var rule in _snapshot.Rules)
@@ -415,10 +416,10 @@ internal sealed class AutomationEngine : IRuleRunHost
             pending.Add(rule);
         }
 
-        _triggers.Activate(pending, _snapshot.Rules);
+        return _triggers.Activate(pending, _snapshot.Rules);
     }
 
-    private void ApplyScopeChange()
+    private bool ApplyScopeChange()
     {
         foreach (var rule in _snapshot.Rules)
         {
@@ -428,7 +429,7 @@ internal sealed class AutomationEngine : IRuleRunHost
             }
         }
 
-        ActivateRules();
+        return ActivateRules();
     }
 
     private static void Deactivate(CompiledRule rule)
@@ -470,8 +471,10 @@ internal sealed class AutomationEngine : IRuleRunHost
         {
             RunUnlessAbandoned(() =>
             {
-                PublishStateChanges();
-                hasNewPending = _triggers.TrackPending(_snapshot.Rules, requests);
+                // The activation of the entered state may track a trigger that became pending, which TrackPending then
+                // finds tracked already.
+                var tracksNewPending = PublishStateChanges();
+                hasNewPending = _triggers.TrackPending(_snapshot.Rules, requests) || tracksNewPending;
             });
         }
 
@@ -488,16 +491,18 @@ internal sealed class AutomationEngine : IRuleRunHost
         });
     }
 
-    // The rules of the entered state are activated first, so that they receive the event of entering it.
-    private void PublishStateChanges()
+    // The rules of the entered state are activated first, so that they receive the event of entering it. Returns whether
+    // a pending property trigger began to be tracked.
+    private bool PublishStateChanges()
     {
         if (!_states.HasPendingChanges)
         {
-            return;
+            return false;
         }
 
-        ApplyScopeChange();
+        var tracksNewPending = ApplyScopeChange();
         _states.PublishPendingChanges();
+        return tracksNewPending;
     }
 
     private bool HasStickyError => _hasConfigurationError || _hasCheckpointError || _runWriteError is not null;

@@ -149,7 +149,7 @@ dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile o
 
 When `--participant` is specified, only the named participant starts and the verification engine is skipped. Mutations run continuously with performance metrics.
 
-This isolates each side's CPU and throughput and stops one shared heap hiding which side grew, but it is not the mode for measuring memory: without the verification engine there are no cycles and no `cycles.csv`, and `HeapMB` in `performance-{participant}.csv` is sampled without forcing a collection, so it is not leak evidence. Split the run for throughput and attribution, and use a single-process run for the post-GC heap trend.
+This isolates each side's CPU and throughput and stops one shared heap hiding which side grew, but it is not the mode for measuring memory: without the verification engine there are no cycles and no `cycles.csv`, and `HeapMB` in `performance-{participant}.csv` is the heap after the most recent collection of any kind, not a forced one, so it is not leak evidence. Split the run for throughput and attribution, and use a single-process run for the post-GC heap trend.
 
 ### What to Look For
 
@@ -220,7 +220,7 @@ Cycle log files are created as `pending` and renamed to `pass` or `FAIL` on comp
 
 ### Performance Logs
 
-Performance metrics are written to `performance-{participant}.csv` per participant. Each file has a header row and one data row per reporting interval. Columns: Timestamp, Participant, Cycle, Received/s, Received-Average, Received-P50, Received-P90, Received-P95, Received-P99, Received-P999, Received-Max, Received-Processing, Published, Received, CPU%, ProcessMB, HeapMB, AllocationMB/s. HeapMB in performance logs is sampled at reporting time without forcing GC, so it fluctuates with allocation patterns and is not suitable for leak detection.
+Performance metrics are written to `performance-{participant}.csv` per participant. Each file has a header row and one data row per reporting interval. Columns: Timestamp, Participant, Cycle, Received/s, Received-Average, Received-P50, Received-P90, Received-P95, Received-P99, Received-P999, Received-Max, Received-Processing, Published, Received, CPU%, ProcessMB, HeapMB, AllocationMB/s. HeapMB in performance logs is the live heap after the most recent collection of any kind, which the profiler does not force, so it lags behind allocations, repeats while no collection runs and is not suitable for leak detection.
 
 ### Cycle Logs
 
