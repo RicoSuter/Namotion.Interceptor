@@ -51,6 +51,24 @@ public class RevalidationTests
     }
 
     [Fact]
+    public async Task WhenTheStoreLearnsOfAnAdministratorLockWithoutANewStamp_ThenTheCircuitBecomesUnauthenticated()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        await using var circuit = await SignedInCircuit.StartAsync(host, UserName);
+        await circuit.Provider.LastRevalidation;
+        await host.LockOutAsync(UserName, ApplicationUser.AdministratorLockoutEnd);
+
+        // Act
+        await host.UserStore.RefreshUserAsync(host.UserStore.GetUserId(UserName)!, CancellationToken.None);
+        await circuit.Provider.LastRevalidation;
+
+        // Assert
+        Assert.True(await circuit.Provider.ValidateAsync(circuit.Principal, CancellationToken.None));
+        Assert.False((await circuit.Provider.GetAuthenticationStateAsync()).User.Identity?.IsAuthenticated);
+    }
+
+    [Fact]
     public async Task WhenTheRolesOfTheUserChange_ThenTheCircuitStaysSignedInAndTheNewPolicyApplies()
     {
         // Arrange

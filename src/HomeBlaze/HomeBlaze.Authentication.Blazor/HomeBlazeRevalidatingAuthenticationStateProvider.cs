@@ -10,9 +10,10 @@ using Microsoft.Extensions.Options;
 namespace HomeBlaze.Authentication.Blazor;
 
 /// <summary>
-/// The authentication state of a circuit, which becomes anonymous once the security stamp of the person no longer
-/// matches the one they signed in with, or the person no longer exists: checked when the state is first set, every five
-/// minutes and at once when the <see cref="UserStore"/> changes the person.
+/// The authentication state of a circuit, which becomes anonymous once the session of the person ends: checked against
+/// the <see cref="UserStore"/> in memory, see <see cref="UserStore.IsSessionAllowed"/>, when the state is first set and at
+/// once when the store changes the person, and against the security stamp in the database every five minutes, which
+/// catches a change made another way, such as by restoring the database.
 /// </summary>
 public sealed partial class HomeBlazeRevalidatingAuthenticationStateProvider : RevalidatingServerAuthenticationStateProvider
 {
@@ -53,7 +54,7 @@ public sealed partial class HomeBlazeRevalidatingAuthenticationStateProvider : R
     protected override Task<bool> ValidateAuthenticationStateAsync(AuthenticationState authenticationState, CancellationToken cancellationToken) =>
         ValidateAsync(authenticationState.User, cancellationToken);
 
-    /// <summary>Whether <paramref name="principal"/> names an existing user whose security stamp it holds.</summary>
+    /// <summary>Whether <paramref name="principal"/> names a user in the database whose security stamp it holds.</summary>
     internal async Task<bool> ValidateAsync(ClaimsPrincipal principal, CancellationToken cancellationToken)
     {
         await using var scope = _scopeFactory.CreateAsyncScope();
@@ -90,8 +91,8 @@ public sealed partial class HomeBlazeRevalidatingAuthenticationStateProvider : R
     // Raised by the store outside its gate; the check runs in the background so that the store is not held up.
     private void OnUserChanged(string userId) => _lastRevalidation = RevalidateAsync(userId);
 
-    // The cookie a circuit starts with is checked against the stored stamp only every few minutes, so a new tab opened
-    // after a reset or a lock would otherwise keep the ended session until the interval passes.
+    // A change of the person between the request that carried the cookie and the start of the circuit raised no change
+    // for this circuit, so the first state is checked as well.
     private void OnAuthenticationStateChanged(Task<AuthenticationState> state)
     {
         if (Interlocked.Exchange(ref _isStateSet, 1) == 0)
@@ -100,7 +101,7 @@ public sealed partial class HomeBlazeRevalidatingAuthenticationStateProvider : R
         }
     }
 
-    // Revalidates the state of the circuit when it names the user with userId, or any user when it is null.
+    // Checks the state of the circuit against the store when it names the user with userId, or any user when it is null.
     private async Task RevalidateAsync(string? userId)
     {
         Task<AuthenticationState> state;
@@ -118,13 +119,16 @@ public sealed partial class HomeBlazeRevalidatingAuthenticationStateProvider : R
         try
         {
             var principal = (await state).User;
+            var claimTypes = _identityOptions.Value.ClaimsIdentity;
+            var principalUserId = principal.FindFirstValue(claimTypes.UserIdClaimType);
             if (principal.Identity?.IsAuthenticated != true ||
-                (userId is not null && !string.Equals(principal.FindFirstValue(_identityOptions.Value.ClaimsIdentity.UserIdClaimType), userId, StringComparison.Ordinal)))
+                (userId is not null && !string.Equals(principalUserId, userId, StringComparison.Ordinal)))
             {
                 return;
             }
 
-            isValid = await ValidateAsync(principal, CancellationToken.None);
+            isValid = principalUserId is not null &&
+                _userStore.IsSessionAllowed(principalUserId, principal.FindFirstValue(claimTypes.SecurityStampClaimType));
         }
         catch (Exception exception)
         {
