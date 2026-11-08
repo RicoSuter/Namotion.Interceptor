@@ -1104,12 +1104,23 @@ Use this for internal subjects that are part of a parent subject's implementatio
 
 Exclusion decides where a subject or a method is offered, and is no access control: an agent still reaches a subject of a type excluded from agents by its explicit path and calls its methods, and a path to a method excluded from the user interface that a person types into a widget, such as an operation button, still runs it. Code checks a subject with the extension `IsExcludedFrom(target)`, a type with `ExcludeFromAttribute.IsExcluded(type, target)`, and lists the methods for a target with `GetAllMethods(target)`.
 
-Use `UserInterface` on a method that gives an agent what a person does through other controls, as a folder does for the order that people change by dragging:
+Use `UserInterface` on a method that gives an agent what a person does through other controls, as a folder does for the order that people change by dragging. Like every query that shows other members, it takes the permissions of its caller and names only the children the caller is shown, see [Permissions](#permissions): none when they do not allow to read `Children`, else each child that `CanShow` allows:
 
 ```csharp
-[Query(Title = "Get Order", Description = "Gets the names of the children in the order in which they are shown.")]
+[Query(Title = "Get Order", Description = "Gets the names of the children that the caller may see, in the order in which they are shown.")]
 [ExcludeFrom(ExclusionTarget.UserInterface)]
-public string[] GetOrder() => ChildOrdering.GetShownNames(this);
+public string[] GetOrder([FromServices] IUserPermissions? permissions)
+{
+    if (permissions is null ||
+        this.TryGetRegisteredSubject()?.TryGetProperty(nameof(Children)) is not { } children ||
+        !permissions.CanRead(children))
+    {
+        return [];
+    }
+
+    var shown = Children;
+    return Array.FindAll(ChildOrdering.GetShownNames(this), name => shown.TryGetValue(name, out var child) && permissions.CanShow(child));
+}
 ```
 
 ### Page Layout Types
