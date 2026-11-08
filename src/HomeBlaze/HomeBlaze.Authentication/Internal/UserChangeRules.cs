@@ -19,7 +19,7 @@ internal sealed class UserChangeRules(
     AuthorizationProjection projection)
 {
     /// <summary>Gets why the acting person may not add a user named <paramref name="userName"/> holding <paramref name="roles"/>, or null.</summary>
-    public string? GetAddRefusal(UserState state, string actingUserId, string userName, string[] roles)
+    public string? GetAddRefusal(UserState state, string actingUserId, string userName, IReadOnlyCollection<string> roles)
     {
         if (GetActor(state, actingUserId) is not { } actor)
         {
@@ -61,8 +61,8 @@ internal sealed class UserChangeRules(
         var userTarget = new UserTarget(target.Id, target.IsBuiltIn, target.Roles, authorizationService.GetRoleClosure(target.Roles));
         var newRoleClosure = change.Roles is { } newRoles ? authorizationService.GetRoleClosure(newRoles) : null;
         return UserDelegation.GetRefusal(actor.Delegation, userTarget, change.Action, change.Roles, newRoleClosure)
-            ?? GetLastAdministratorRefusal(state, target, change)
-            ?? (change.Roles is { } roles ? GetRolesError(target.UserName, roles) : null);
+            ?? (change.Roles is { } roles ? GetRolesError(target.UserName, roles) : null)
+            ?? GetLastAdministratorRefusal(state, target, change);
     }
 
     /// <summary>
@@ -218,10 +218,15 @@ internal sealed class UserChangeRules(
         return state.ByName.ContainsKey(userName) ? $"A user named '{userName}' already exists." : null;
     }
 
-    private string? GetRolesError(string userName, string[] roles)
+    private string? GetRolesError(string userName, IReadOnlyCollection<string> roles)
     {
         foreach (var role in roles)
         {
+            if (string.IsNullOrWhiteSpace(role))
+            {
+                return "A role name cannot be empty.";
+            }
+
             if (!roleStore.RoleExists(role))
             {
                 return $"Unknown role: {role}";
@@ -229,7 +234,7 @@ internal sealed class UserChangeRules(
         }
 
         // A role set that does not compile would leave the user with nothing allowed.
-        return roles.Length > 0 && authorizationService.GetPolicy(roles, GetKind(userName)).Error is { } error ? error : null;
+        return roles.Count > 0 && authorizationService.GetPolicy(roles, GetKind(userName)).Error is { } error ? error : null;
     }
 
     private static PrincipalKind GetKind(string userName)

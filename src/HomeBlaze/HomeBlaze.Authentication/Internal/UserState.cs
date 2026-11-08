@@ -44,12 +44,25 @@ internal sealed record UserEntry
 
     public bool IsLockedByAdministrator => ApplicationUser.IsAdministratorLockoutEnd(LockoutEnd);
 
-    /// <summary>Gets the user as locked by an administrator, or unlocked.</summary>
-    public UserEntry WithAdministratorLock(bool isLocked) => this with { LockoutEnd = isLocked ? ApplicationUser.AdministratorLockoutEnd : null };
-
     /// <summary>Whether <paramref name="user"/> is the built-in user <see cref="NameRules.McpUserName"/>.</summary>
     public static bool IsMcpUser(UserEntry user) =>
         user.IsBuiltIn && string.Equals(user.UserName, NameRules.McpUserName, StringComparison.Ordinal);
+
+    /// <summary>Gets the user as stored in <paramref name="user"/>, holding <paramref name="roles"/>, which are normalized.</summary>
+    public static UserEntry From(ApplicationUser user, ReadOnlyCollection<string> roles) => new()
+    {
+        Id = user.Id,
+        UserName = user.UserName!,
+        DisplayName = user.DisplayName,
+        Email = user.Email,
+        Roles = roles,
+        LockoutEnd = user.LockoutEnd,
+        MustChangePassword = user.MustChangePassword,
+        AllowsEmptyPassword = user.AllowsEmptyPassword,
+        LastLogin = user.LastLogin,
+        IsBuiltIn = user.IsBuiltIn,
+        SecurityStamp = user.SecurityStamp
+    };
 
     public PersonRoleSet ToPersonRoleSet() => new(Roles, IsLockedByAdministrator);
 
@@ -114,16 +127,22 @@ internal sealed class UserState
             .ToArray());
 }
 
-/// <summary>A change of an existing user; <see cref="DisplayName"/> is normalized, see <see cref="NameRules.NormalizeDisplayName"/>.</summary>
-internal readonly record struct UserChange(UserAction Action, string[]? Roles = null, string? DisplayName = null)
+/// <summary>
+/// A change of an existing user; <see cref="Roles"/> are normalized, see <see cref="NormalizeRoles"/>, and
+/// <see cref="DisplayName"/> too, see <see cref="NameRules.NormalizeDisplayName"/>.
+/// </summary>
+internal readonly record struct UserChange(UserAction Action, ReadOnlyCollection<string>? Roles = null, string? DisplayName = null)
 {
     public static UserChange SetDisplayName(string? displayName) =>
         new(UserAction.SetDisplayName, DisplayName: NameRules.NormalizeDisplayName(displayName));
 
-    public static UserChange SetRoles(IReadOnlyCollection<string> roles)
+    public static UserChange SetRoles(IReadOnlyCollection<string> roles) => new(UserAction.SetRoles, Roles: NormalizeRoles(roles));
+
+    /// <summary>Gets <paramref name="roles"/> without duplicates, ordered like a load, so that the state matches what the database returns.</summary>
+    public static ReadOnlyCollection<string> NormalizeRoles(IReadOnlyCollection<string> roles)
     {
         ArgumentNullException.ThrowIfNull(roles);
 
-        return new UserChange(UserAction.SetRoles, Roles: [.. roles]);
+        return Array.AsReadOnly(roles.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray());
     }
 }

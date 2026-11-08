@@ -20,8 +20,6 @@ public sealed class UserStore : IMcpClientAccess
 
     internal const string OwnAccountRefusal = "Only a signed-in person with an active account can change their account.";
 
-    private const string BlankRoleRefusal = "A role name cannot be empty.";
-
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly AuthorizationProjection _projection;
     private readonly AuthorizationChangeGate _gate;
@@ -242,16 +240,10 @@ public sealed class UserStore : IMcpClientAccess
     internal Task<UserChangeResult> AddUserAsync(string actingUserId, string userName, string? email, IReadOnlyCollection<string> roles, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(userName);
-        ArgumentNullException.ThrowIfNull(roles);
-
-        if (roles.Any(string.IsNullOrWhiteSpace))
-        {
-            return Task.FromResult(new UserChangeResult(false, BlankRoleRefusal));
-        }
 
         var trimmedEmail = string.IsNullOrWhiteSpace(email) ? null : email.Trim();
-        string[] distinctRoles = [.. roles.Distinct(StringComparer.Ordinal)];
-        return RunAsync(token => AddUserCoreAsync(actingUserId, userName.Trim(), trimmedEmail, distinctRoles, token), cancellationToken);
+        var normalizedRoles = UserChange.NormalizeRoles(roles);
+        return RunAsync(token => AddUserCoreAsync(actingUserId, userName.Trim(), trimmedEmail, normalizedRoles, token), cancellationToken);
     }
 
     internal Task<UserChangeResult> ChangeUserAsync(string actingUserId, string userName, UserChange change, CancellationToken cancellationToken)
@@ -261,16 +253,6 @@ public sealed class UserStore : IMcpClientAccess
         if (NameRules.GetDisplayNameError(change.DisplayName) is { } displayNameError)
         {
             return Task.FromResult(new UserChangeResult(false, displayNameError));
-        }
-
-        if (change.Roles is { } roles)
-        {
-            if (roles.Any(string.IsNullOrWhiteSpace))
-            {
-                return Task.FromResult(new UserChangeResult(false, BlankRoleRefusal));
-            }
-
-            change = change with { Roles = [.. roles.Distinct(StringComparer.Ordinal)] };
         }
 
         return RunAsync(token => ChangeUserCoreAsync(actingUserId, userName, change, token), cancellationToken);
@@ -304,28 +286,24 @@ public sealed class UserStore : IMcpClientAccess
 
     // The caller holds _gate.
     private async Task<(UserChangeResult Result, string? ChangedUserId)> AddUserCoreAsync(
-        string actingUserId, string userName, string? email, string[] roles, CancellationToken cancellationToken)
+        string actingUserId, string userName, string? email, ReadOnlyCollection<string> roles, CancellationToken cancellationToken)
     {
         if (_rules.GetAddRefusal(_state, actingUserId, userName, roles) is { } refusal)
         {
             return Refused(refusal);
         }
 
-        var roleNames = GetDefinedRoleNames(roles);
-        var committed = await UserDatabase.AddUserAsync(_scopeFactory, userName, email, [.. roleNames], _timeProvider, cancellationToken);
+        var committed = await UserDatabase.AddUserAsync(_scopeFactory, userName, email, roles, _timeProvider, cancellationToken);
         if (committed.Error is not null)
         {
             return Refused(committed.Error);
         }
 
-        // Committed: the state is updated from what was written, without reading it back.
-        var user = new UserEntry
-        {
-            Id = committed.UserId!, UserName = userName, Email = email, Roles = roleNames, MustChangePassword = true, SecurityStamp = committed.SecurityStamp
-        };
+        // Committed: the state takes the user as written, without reading it back.
+        var user = committed.User!;
         var actor = GetActorName(_state, actingUserId);
         Publish(_state.With(user));
-        EventLog.UserAdded(userName, roleNames, actor);
+        EventLog.UserAdded(userName, roles, actor);
         return (new UserChangeResult(true, null, committed.SetupCode), user.Id);
     }
 
@@ -361,27 +339,15 @@ public sealed class UserStore : IMcpClientAccess
     private async Task<(UserChangeResult Result, string? ChangedUserId)> CommitChangeAsync(
         UserState state, UserEntry target, UserChange change, string actor, CancellationToken cancellationToken)
     {
-        var roleNames = change.Roles is { } roles ? GetDefinedRoleNames(roles) : null;
-        var committed = await UserDatabase.ChangeUserAsync(
-            _scopeFactory, target.Id, roleNames is null ? change : change with { Roles = [.. roleNames] }, _timeProvider, cancellationToken);
+        var committed = await UserDatabase.ChangeUserAsync(_scopeFactory, target, change, _timeProvider, cancellationToken);
         if (committed.Error is not null)
         {
             return Refused(committed.Error);
         }
 
-        // Committed: the state is updated from what was written, without reading it back.
-        var stamped = target with { SecurityStamp = committed.SecurityStamp };
-        Publish(change.Action switch
-        {
-            UserAction.Remove => state.Without(target.Id),
-            UserAction.Reset => state.With(stamped with { MustChangePassword = true, AllowsEmptyPassword = false }),
-            UserAction.Lock => state.With(stamped.WithAdministratorLock(true)),
-            UserAction.Unlock => state.With(stamped.WithAdministratorLock(false)),
-            UserAction.SetDisplayName => state.With(stamped with { DisplayName = change.DisplayName }),
-            _ => state.With(stamped with { Roles = roleNames! })
-        });
-
-        EventLog.UserChanged(target.UserName, change, roleNames, actor);
+        // Committed: the state takes the user as written, without reading it back.
+        Publish(committed.User is { } user ? state.With(user) : state.Without(target.Id));
+        EventLog.UserChanged(target.UserName, change, change.Roles, actor);
 
         return (new UserChangeResult(true, null, committed.SetupCode), target.Id);
     }
@@ -414,10 +380,6 @@ public sealed class UserStore : IMcpClientAccess
         state.ById.TryGetValue(actingUserId, out var actor) ? actor.UserName : actingUserId;
 
     private static (UserChangeResult Result, string? ChangedUserId) Refused(string error) => (new UserChangeResult(false, error), null);
-
-    // Ordered like a load, so that the state matches what the database returns.
-    private static ReadOnlyCollection<string> GetDefinedRoleNames(IEnumerable<string> roles) =>
-        Array.AsReadOnly(roles.Order(StringComparer.Ordinal).ToArray());
 
     private IReadOnlyCollection<string> GetRolesByName(string userName) =>
         _state.ByName.TryGetValue(userName, out var user) ? user.Roles : [];
