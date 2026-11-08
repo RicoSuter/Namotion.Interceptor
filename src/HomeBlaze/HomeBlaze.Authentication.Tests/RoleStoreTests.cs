@@ -27,7 +27,7 @@ public class RoleStoreTests
         // Arrange
         await using var graph = await AuthenticationTestGraph.CreateAsync();
         await graph.RoleStore.SaveRoleAsync(null, new AuthorizationRole { Name = "family", Includes = [BuiltInRoles.OperatorName] }, null, CancellationToken.None);
-        graph.AuthorizationService.SetPrincipalRoles(new object(), ["family", BuiltInRoles.EverythingName]);
+        graph.AddAgentPrincipal(["family", BuiltInRoles.EverythingName]);
 
         // Act
         var result = await graph.RoleStore.SaveRoleAsync(

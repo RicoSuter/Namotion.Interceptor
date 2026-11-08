@@ -238,12 +238,6 @@ public sealed class AuthorizationService : IDisposable
     }
 
     /// <summary>
-    /// Gets the role names of every principal recorded with <see cref="SetPrincipalRoles"/>, labeled with the
-    /// principal's title, or else its type name.
-    /// </summary>
-    public IReadOnlyList<PrincipalRoleSet> GetPrincipalRoleSets() => _principals.GetRoleSets();
-
-    /// <summary>
     /// Stops observing the graph. Policies already returned stay valid.
     /// </summary>
     public void Dispose()

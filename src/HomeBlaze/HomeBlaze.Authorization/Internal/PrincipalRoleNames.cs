@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
-using HomeBlaze.Abstractions;
 
 namespace HomeBlaze.Authorization.Internal;
 
@@ -22,19 +21,6 @@ internal sealed class PrincipalRoleNames
         {
             _principals[principal] = [.. roleNames];
         }
-    }
-
-    /// <summary>Gets the role names of every principal, labeled with its title or else its type name.</summary>
-    public List<PrincipalRoleSet> GetRoleSets()
-    {
-        var roleSets = new List<PrincipalRoleSet>(_principals.Count);
-        foreach (var (principal, roleNames) in _principals)
-        {
-            var label = (principal as ITitleProvider)?.Title ?? principal.GetType().Name;
-            roleSets.Add(new PrincipalRoleSet(label, roleNames));
-        }
-
-        return roleSets;
     }
 
     /// <summary>Counts the principals naming each role, a principal once per name.</summary>

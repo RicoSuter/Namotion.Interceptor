@@ -10,16 +10,15 @@ namespace HomeBlaze.Authentication;
 
 /// <summary>
 /// Stores custom roles in the authentication database and projects them into <see cref="AuthorizationSubject.Roles"/>.
-/// A change is validated against the roles of every principal (the users, those of every
-/// <see cref="IRoleNameReferences"/> and those recorded with <see cref="AuthorizationService.SetPrincipalRoles"/>) and
-/// committed before the projection changes. A change is also refused when it would leave no unlocked user holding
+/// A change is validated against the roles of every principal, the users and those of every
+/// <see cref="IRoleNameReferences"/>, and committed before the projection changes. A change is also refused when it would leave no unlocked user holding
 /// <see cref="BuiltInRoles.EverythingName"/> without a deny rule on <c>administer</c> while one does now. Changes run one at a time, together with the changes of
 /// users, through the <see cref="AuthorizationChangeGate"/>. Thread-safe.
 /// </summary>
 /// <remarks>
 /// A rename is validated as if every principal had the new name. Users hold their roles by database row, so the rename
-/// reaches them with the row; every other principal is renamed only through an <see cref="IRoleNameReferences"/>, so
-/// every principal recorded with <see cref="AuthorizationService.SetPrincipalRoles"/> must also be held by one.
+/// reaches them with the row. Every other principal, such as an agent, is validated and renamed only through an
+/// <see cref="IRoleNameReferences"/>, so it must be held by one.
 /// </remarks>
 public sealed class RoleStore : IRoleStore
 {
@@ -37,7 +36,7 @@ public sealed class RoleStore : IRoleStore
     private volatile Dictionary<string, (AuthorizationRole Role, string Stamp)> _roles = new(StringComparer.Ordinal);
 
     /// <param name="contextFactory">Creates a context of the authentication database per operation.</param>
-    /// <param name="authorizationService">Validates a change, and records the principals of agents.</param>
+    /// <param name="authorizationService">Validates a change.</param>
     /// <param name="references">The places outside the database that name roles.</param>
     /// <param name="userRoleSets">Gets the role names of every user.</param>
     /// <param name="personRoleSets">Gets the role names of every user who is a person, and whether they are locked out.</param>
@@ -451,6 +450,5 @@ public sealed class RoleStore : IRoleStore
         _references
             .SelectMany(references => references.GetRoleSets())
             .Concat(_userRoleSets())
-            .Concat(_authorizationService.GetPrincipalRoleSets())
             .ToList();
 }

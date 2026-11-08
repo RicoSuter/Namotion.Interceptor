@@ -106,23 +106,6 @@ public sealed class AuthorizationServiceTests : IDisposable
     }
 
     [Fact]
-    public void WhenPrincipalsAreRecorded_ThenTheirRoleSetsAreReturned()
-    {
-        // Arrange
-        var agent = new object();
-        _service.SetPrincipalRoles(agent, ["custom", BuiltInRoles.ReaderName]);
-        _service.SetPrincipalRoles(new object(), null);
-
-        // Act
-        var roleSets = _service.GetPrincipalRoleSets();
-
-        // Assert
-        var roleSet = Assert.Single(roleSets);
-        Assert.Equal("Object", roleSet.Principal);
-        Assert.Equal(["custom", BuiltInRoles.ReaderName], roleSet.RoleNames);
-    }
-
-    [Fact]
     public void WhenACustomRoleAllowsAMember_ThenThePolicyAllowsIt()
     {
         // Arrange
