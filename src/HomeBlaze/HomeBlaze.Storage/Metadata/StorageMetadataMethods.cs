@@ -53,11 +53,16 @@ internal static class StorageMetadataMethods
     public static MetadataSearchMatch[] Search(
         IInterceptorSubject storage, IInterceptorSubject start, string? tag, string? key, string? value, IUserPermissions permissions)
     {
+        // The search matches the stored metadata before the permissions are asked, then this matches what the reader is
+        // shown. Only right while value filters remove entries: for a filter that adds entries, pass no filters to the search.
         var matches = MetadataSearch.Search(
             storage,
             member => permissions.CanReadShown(member) &&
                 permissions.GetValue(member) is ImmutableDictionary<string, JsonElement> metadata &&
                 MetadataSearch.IsMatch(metadata, tag, key, value),
+            tag: tag,
+            key: key,
+            value: value,
             start: start,
             isPathMemberIncluded: permissions.CanReadShown);
         return [.. matches.Take(MaxSearchMetadataMatches)];

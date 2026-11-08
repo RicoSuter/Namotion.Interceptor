@@ -26,7 +26,8 @@ public static class MetadataSearch
     /// <paramref name="root"/> reaches is not found. The matches are ordered by path and then property, ordinal. A subject
     /// for which <paramref name="isExcluded"/> returns true, and every subject below it, is skipped, and so is metadata whose
     /// member, the dynamic property of a subject or the attribute of a property, <paramref name="isMetadataIncluded"/>
-    /// returns false for. That filter is required, so that a caller decides who may read the metadata it finds.
+    /// returns false for. That filter is required, so that a caller decides who may read the metadata it finds, and runs
+    /// only for metadata that matches.
     /// </summary>
     public static IReadOnlyList<MetadataSearchMatch> Search(
         IInterceptorSubject root, Func<RegisteredSubjectProperty, bool> isMetadataIncluded, string? tag = null, string? key = null,
@@ -41,8 +42,7 @@ public static class MetadataSearch
             string? subjectPath = null;
             foreach (var (member, propertyName, metadata) in GetMemberEntries(subject))
             {
-                if (isMetadataIncluded(member) &&
-                    IsMatch(metadata, tag, key, value) && (subjectPath ??= TryGetPath(subject, root, pathProvider)) is { } matchPath)
+                if (IsMatch(metadata, tag, key, value) && isMetadataIncluded(member) && (subjectPath ??= TryGetPath(subject, root, pathProvider)) is { } matchPath)
                 {
                     matches.Add(new MetadataSearchMatch(matchPath, propertyName));
                 }
