@@ -205,6 +205,10 @@ internal sealed class PermissionsTestGraph : IAsyncDisposable
         Permissions = new PolicyUserPermissions(AuthorizationService, _currentUser, _services.GetRequiredService<ILogger<PolicyUserPermissions>>());
     }
 
+    /// <summary>Creates the principal of the test user, as a request that the user signed in with authenticates it.</summary>
+    public ClaimsPrincipal CreateTestUserPrincipal(bool mustChangePassword = false) =>
+        CreateTestUserPrincipal(UserStore.GetUserId(TestUserName)!, mustChangePassword);
+
     private static ClaimsPrincipal CreateTestUserPrincipal(string userId, bool mustChangePassword)
     {
         List<Claim> claims = [new Claim(ClaimTypes.NameIdentifier, userId), new Claim(ClaimTypes.Name, TestUserName)];

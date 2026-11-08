@@ -41,6 +41,10 @@ internal sealed class UserIdentity
                 mustChangePassword: principal.HasClaim(claim => claim.Type == HomeBlazeClaimTypes.MustChangePassword))
             : SignedOut;
 
+    /// <summary>Gets the roles, the kind and whether the person must change their password, which the policy is decided from.</summary>
+    public (IReadOnlyCollection<string> Roles, PrincipalKind Kind, bool MustChangePassword) GetPolicyInputs(UserStore userStore) =>
+        (GetRoles(userStore), Kind, MustChangePassword);
+
     /// <summary>
     /// Gets the roles as stored now: those the person acts with (see <see cref="UserStore.GetRoles"/>), those of
     /// <see cref="NameRules.AnonymousUserName"/> for a visitor, and none while unknown.

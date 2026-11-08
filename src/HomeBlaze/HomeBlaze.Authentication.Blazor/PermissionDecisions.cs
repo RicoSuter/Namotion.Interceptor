@@ -3,7 +3,10 @@ using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Authorization;
+using HomeBlaze.Authorization.Abstractions;
+using HomeBlaze.Services.Metadata;
 using Namotion.Interceptor.Authorization;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using AuthorizationService = HomeBlaze.Authorization.AuthorizationService;
 using AuthorizationSubject = HomeBlaze.Authorization.Authorization;
@@ -12,9 +15,10 @@ namespace HomeBlaze.Authentication.Blazor;
 
 /// <summary>
 /// What a principal may see and do, decided with its compiled policy and the scope of administration: the single place of
-/// these rules for <see cref="PolicyUserPermissions"/>. Immutable.
+/// these rules for <see cref="PolicyUserPermissions"/> and for the permissions of a request outside a circuit, see
+/// <see cref="RequestUserPermissionsFactory"/>. Immutable, so its answers never change.
 /// </summary>
-internal sealed class PermissionDecisions
+internal sealed class PermissionDecisions : IUserPermissions
 {
     // The property name of Authorization.AddUserAsync, which method properties register without the suffix.
     private const string AddUserMemberName = "AddUser";
@@ -87,6 +91,45 @@ internal sealed class PermissionDecisions
             isPerson && authorizationService.IsFullAdministrator(roles, roleClosure),
             replaced?.GetShownCount() ?? 0);
     }
+
+    /// <summary>
+    /// Creates the decisions of a principal from the inputs of its policy: those of
+    /// <see cref="Create(AuthorizationService, IReadOnlyCollection{string}, PrincipalKind, PermissionDecisions?)"/>, and
+    /// <see cref="DenyAll"/> for a person who must change their password.
+    /// </summary>
+    public static PermissionDecisions Create(
+        AuthorizationService authorizationService,
+        (IReadOnlyCollection<string> Roles, PrincipalKind Kind, bool MustChangePassword) inputs,
+        PermissionDecisions? replaced = null) =>
+        inputs.MustChangePassword ? DenyAll : Create(authorizationService, inputs.Roles, inputs.Kind, replaced);
+
+    /// <summary>Never raised: the decisions do not change.</summary>
+    public event Action? Changed
+    {
+        add
+        {
+            // Nothing to subscribe to: the decisions never change.
+        }
+
+        remove
+        {
+            // Nothing was subscribed.
+        }
+    }
+
+    /// <summary>
+    /// Gets the value of the member as the principal is shown it: the order in the metadata of a folder names only the
+    /// children the principal is shown.
+    /// </summary>
+    public object? GetValue(RegisteredSubjectProperty member) =>
+        ChildOrdering.FilterOrderInMetadata(
+            member,
+            member.GetValue(),
+            this,
+            static (decisions, folder) => ChildOrdering.GetListedNames(
+                folder,
+                decisions,
+                static (shownDecisions, _, child) => child.Subject.TryGetRegisteredSubject() is { } registered && shownDecisions.CanShow(registered)));
 
     /// <summary>Whether the principal holds every role, counting the roles they include, or is a full administrator; false for an empty set.</summary>
     public bool HoldsAllRoles(IReadOnlyCollection<string> roles)

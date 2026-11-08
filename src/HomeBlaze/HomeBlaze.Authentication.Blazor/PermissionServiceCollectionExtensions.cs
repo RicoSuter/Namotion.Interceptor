@@ -15,5 +15,6 @@ internal static class PermissionServiceCollectionExtensions
         services.AddScoped<CurrentUser>();
         services.AddScoped<IUserPermissions, PolicyUserPermissions>();
         services.AddScoped<IUserAdministration, CurrentUserAdministration>();
+        services.AddSingleton<IRequestUserPermissionsFactory, RequestUserPermissionsFactory>();
     }
 }

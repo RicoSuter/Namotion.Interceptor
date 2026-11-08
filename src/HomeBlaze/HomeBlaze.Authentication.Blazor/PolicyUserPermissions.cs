@@ -1,7 +1,5 @@
 using HomeBlaze.Authorization.Abstractions;
-using HomeBlaze.Services.Metadata;
 using Microsoft.Extensions.Logging;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using AuthorizationService = HomeBlaze.Authorization.AuthorizationService;
 
@@ -50,15 +48,7 @@ public sealed partial class PolicyUserPermissions : IUserPermissions, IDisposabl
     public bool CanRead(RegisteredSubjectProperty member) => _decisions.CanRead(member);
 
     /// <inheritdoc />
-    public object? GetValue(RegisteredSubjectProperty member) =>
-        ChildOrdering.FilterOrderInMetadata(
-            member,
-            member.GetValue(),
-            _decisions,
-            static (decisions, folder) => ChildOrdering.GetListedNames(
-                folder,
-                decisions,
-                static (shownDecisions, _, child) => child.Subject.TryGetRegisteredSubject() is { } registered && shownDecisions.CanShow(registered)));
+    public object? GetValue(RegisteredSubjectProperty member) => _decisions.GetValue(member);
 
     /// <inheritdoc />
     public bool CanWrite(RegisteredSubjectProperty member) => _decisions.CanWrite(member);
@@ -118,10 +108,7 @@ public sealed partial class PolicyUserPermissions : IUserPermissions, IDisposabl
         {
             try
             {
-                var (roles, kind, mustChangePassword) = _currentUser.GetPolicyInputs();
-                _decisions = mustChangePassword
-                    ? PermissionDecisions.DenyAll
-                    : PermissionDecisions.Create(_authorizationService, roles, kind, _decisions);
+                _decisions = PermissionDecisions.Create(_authorizationService, _currentUser.GetPolicyInputs(), _decisions);
             }
             catch (Exception exception)
             {

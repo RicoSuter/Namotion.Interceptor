@@ -91,11 +91,8 @@ public sealed class CurrentUser : IDisposable
     /// Gets the roles and the kind of one identity, and whether that person must change their password, so that they never
     /// belong to different people.
     /// </summary>
-    internal (IReadOnlyCollection<string> Roles, PrincipalKind Kind, bool MustChangePassword) GetPolicyInputs()
-    {
-        var identity = _identity;
-        return (identity.GetRoles(_userStore), identity.Kind, identity.MustChangePassword);
-    }
+    internal (IReadOnlyCollection<string> Roles, PrincipalKind Kind, bool MustChangePassword) GetPolicyInputs() =>
+        _identity.GetPolicyInputs(_userStore);
 
     /// <summary>
     /// Gets the id of the signed-in person, or null when nobody is signed in, the state is not known, or the person must

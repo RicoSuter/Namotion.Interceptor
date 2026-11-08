@@ -16,6 +16,10 @@ namespace HomeBlaze.Authorization.Abstractions
         public System.Collections.Generic.IReadOnlyList<string> GetRolesWithDenyRulesMissingFrom(System.Collections.Generic.IReadOnlyCollection<string> roles) { }
         public bool HoldsAllRoles(System.Collections.Generic.IReadOnlyCollection<string> roles) { }
     }
+    public interface IRequestUserPermissionsFactory
+    {
+        HomeBlaze.Authorization.Abstractions.IUserPermissions Create(System.Security.Claims.ClaimsPrincipal user);
+    }
     public interface ISubjectEditPermission
     {
         bool CanEdit(HomeBlaze.Authorization.Abstractions.IUserPermissions permissions);
