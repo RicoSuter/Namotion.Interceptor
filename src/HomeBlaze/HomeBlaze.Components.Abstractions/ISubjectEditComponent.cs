@@ -32,16 +32,11 @@ public interface ISubjectEditComponent : ISubjectComponent
     event Action<bool>? IsDirtyChanged;
 
     /// <summary>
-    /// Saves the changes to the subject.
+    /// Saves the changes to the subject. For a subject with an operation whose purpose is
+    /// <see cref="HomeBlaze.Abstractions.Attributes.OperationPurpose.Edit"/>, it saves only by invoking that operation,
+    /// and the host does not persist the configuration that contains the subject afterwards.
     /// </summary>
     Task SaveAsync(CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Gets whether <see cref="SaveAsync"/> stores the changes of an existing subject itself, such as through a store of
-    /// its own, so that the host does not persist the configuration that contains the subject afterwards. False by
-    /// default. The host still checks that the viewer may administer the configuration of the subject before it saves.
-    /// </summary>
-    bool PersistsItself => false;
 
     /// <summary>
     /// Gets the preferred dialog size for this edit component.

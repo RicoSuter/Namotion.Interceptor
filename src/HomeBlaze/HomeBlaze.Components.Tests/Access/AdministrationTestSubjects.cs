@@ -75,23 +75,33 @@ public sealed class HostedDeviceEditComponent : ComponentBase, ISubjectEditCompo
     }
 }
 
-/// <summary>A device that <see cref="SelfPersistedDeviceEditComponent"/> edits and stores without the host.</summary>
+/// <summary>
+/// A device that <see cref="SelfPersistedDeviceEditComponent"/> edits and stores without the host: its edit operation puts
+/// a new device in its place, as a store that projects what it committed does.
+/// </summary>
 [InterceptorSubject]
 public partial class SelfPersistedDevice : IConfigurable
 {
     [Configuration]
     public partial string? Label { get; set; }
 
+    [Operation(Title = "Save", RequiresAdministration = true, Purpose = OperationPurpose.Edit)]
+    public void Save(string label)
+    {
+        var store = (AdministeredStore)this.GetParents().Single().Property.Subject;
+        store.SelfPersisted = new SelfPersistedDevice { Label = label };
+    }
+
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
-/// <summary>
-/// An edit component that persists itself: its save puts a new device in the place of the edited one, as a store that
-/// projects what it committed does.
-/// </summary>
+/// <summary>An edit component that saves "new" as the label through the edit operation of the device.</summary>
 [SubjectComponent(SubjectComponentType.Edit, typeof(SelfPersistedDevice))]
 public sealed class SelfPersistedDeviceEditComponent : ComponentBase, ISubjectEditComponent
 {
+    [Inject]
+    public IUserPermissions Permissions { get; set; } = null!;
+
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
@@ -101,8 +111,6 @@ public sealed class SelfPersistedDeviceEditComponent : ComponentBase, ISubjectEd
     public bool IsValid => true;
 
     public bool IsDirty => false;
-
-    public bool PersistsItself => true;
 
     public event Action<bool>? IsValidChanged
     {
@@ -119,12 +127,14 @@ public sealed class SelfPersistedDeviceEditComponent : ComponentBase, ISubjectEd
     /// <summary>The number of saves.</summary>
     public int SaveCount { get; private set; }
 
-    public Task SaveAsync(CancellationToken cancellationToken)
+    public async Task SaveAsync(CancellationToken cancellationToken)
     {
         SaveCount++;
-        var store = (AdministeredStore)Subject!.GetParents().Single().Property.Subject;
-        store.SelfPersisted = new SelfPersistedDevice { Label = "new" };
-        return Task.CompletedTask;
+        var result = await Permissions.TryInvokeAsync(Subject!, nameof(SelfPersistedDevice.Save), ["new"], null, cancellationToken);
+        if (result.Outcome != PermittedOperationOutcome.Completed)
+        {
+            throw new InvalidOperationException("The device was not saved.");
+        }
     }
 }
 
@@ -155,8 +165,6 @@ public sealed class OperationSavedDeviceEditComponent : ComponentBase, ISubjectE
     public bool IsValid => true;
 
     public bool IsDirty => false;
-
-    public bool PersistsItself => true;
 
     public event Action<bool>? IsValidChanged
     {

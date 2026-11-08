@@ -1,4 +1,5 @@
 @using HomeBlaze.Abstractions
+@using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Services
 
 @implements IAsyncDisposable
@@ -62,6 +63,10 @@
     private ISubjectComponent? _subjectComponent;
     private bool _isSubjectComponentRendered;
     private ISubjectEditComponent? _subscribedEditComponent;
+
+    // Read when the subject is set, as a save through the edit operation may replace the subject, which then has no
+    // registered operations anymore.
+    private bool _hasEditOperation;
     private ConfigurationPropertiesEditor? _propertiesEditor;
     private bool? _reportedIsValid;
     private Func<Task> _refreshIsValid = () => Task.CompletedTask;
@@ -84,6 +89,10 @@
             return ComponentRegistry.HasComponent(subjectType, SubjectComponentType.Edit) ? SubjectComponentType.Edit : null;
         }
     }
+
+    // The hosted Edit component of a subject with an edit operation saves by invoking it, which stores the changes, so the
+    // host persists nothing afterwards.
+    private bool SavesThroughEditOperation => _hasEditOperation && HostedComponentType == SubjectComponentType.Edit;
 
     // A null instance cannot stand for "not reported yet": a registered component that is not an
     // ISubjectComponent is reported as null and has nothing to apply.
@@ -110,6 +119,7 @@
         if (!ReferenceEquals(Subject, _editedSubject))
         {
             _editedSubject = Subject;
+            _hasEditOperation = Subject?.TryGetRegisteredSubject()?.GetEditOperation(ExclusionTarget.UserInterface) is not null;
 
             // The editor of the previous subject is replaced with the next render, and must not answer for the new one until then.
             SubscribeTo(null);
@@ -189,7 +199,7 @@
     /// </summary>
     /// <returns>
     /// True when the edits were applied and <see cref="TryPersistAsync"/> ran, which reports a failure of its own to
-    /// the user, or the hosted edit component saved and persists itself, see <see cref="ISubjectEditComponent.PersistsItself"/>.
+    /// the user, or the hosted Edit component saved through the edit operation of the subject, which persists the changes.
     /// False when the edits were not applied, which is reported to the user, and nothing was persisted:
     /// either the viewer may not save the editor, see <see cref="CanSave"/>, <see cref="ApplyChangesAsync"/> returned
     /// false, or the edit component failed while saving. Also false when the roles changed between the apply and the
@@ -220,8 +230,7 @@
             return false;
         }
 
-        // Such a save may replace the subject, which then is no longer in the graph for the persist to check.
-        if (_subjectComponent is ISubjectEditComponent { PersistsItself: true })
+        if (SavesThroughEditOperation)
         {
             Snackbar.Add("Configuration saved.", Severity.Info);
             return true;

@@ -196,7 +196,7 @@ public sealed class AdministrationGateTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
-    public async Task WhenAnEditComponentThatPersistsItselfReplacesItsSubject_ThenSavingSucceedsWithoutARefusalOrAHostWrite()
+    public async Task WhenAnEditOperationReplacesTheSubject_ThenSavingSucceedsWithoutARefusalOrAHostWrite()
     {
         // Arrange
         var edited = new SelfPersistedDevice { Label = "old" };
@@ -217,7 +217,7 @@ public sealed class AdministrationGateTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
-    public async Task WhenTheViewerMayNotAdministerTheConfigurationOfAnEditComponentThatPersistsItself_ThenItDoesNotSave()
+    public async Task WhenTheViewerMayNotAdministerTheConfigurationOfASubjectWithAnEditOperation_ThenItDoesNotSave()
     {
         // Arrange
         var edited = new SelfPersistedDevice { Label = "old" };

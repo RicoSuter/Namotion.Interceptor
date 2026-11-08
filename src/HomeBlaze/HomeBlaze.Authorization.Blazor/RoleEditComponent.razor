@@ -321,9 +321,6 @@
         role.Allow.SequenceEqual(rules.Allow) &&
         role.Deny.SequenceEqual(rules.Deny);
 
-    // The role store commits the change and replaces the roles, so the host has no configuration to persist.
-    bool ISubjectEditComponent.PersistsItself => true;
-
     // The host keeps the dialog open when the save fails, and shows the message besides the one in the dialog.
     async Task ISubjectEditComponent.SaveAsync(CancellationToken cancellationToken)
     {
