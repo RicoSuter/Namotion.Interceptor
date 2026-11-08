@@ -110,7 +110,8 @@ internal sealed class ExpressionFieldModel
     /// the structure of the expression; a value the row already has is written as it is. A path or value that cannot be
     /// written as typed stays a pending edit of the row, with its error when it is invalid, until a later edit of the row
     /// is valid: <see cref="Text"/> does not change. A path that is not finished, such as a lone separator, is pending
-    /// without an error.
+    /// without an error. An applied edit that changes the row writes every row again, so the white space and the case of
+    /// the combinators of the other rows take their written form; their meaning stays the same.
     /// </summary>
     /// <returns>Whether <see cref="Text"/> changed.</returns>
     public bool SetRow(int index, ExpressionRow row)

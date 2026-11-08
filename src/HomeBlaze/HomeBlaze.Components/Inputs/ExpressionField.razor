@@ -116,7 +116,9 @@
 
     /// <summary>
     /// Prepares an expression or a path for evaluation: returns a function that evaluates it with the current values each
-    /// time it is called, or null when it cannot be evaluated. Called once per text, not per evaluation; without it, no values are shown.
+    /// time it is called, or null when it cannot be evaluated. Called for the valid expression, the path and the condition
+    /// of each row and the paths of the hints whenever the text, the rows, the variables or one of the delegate parameters
+    /// changes, so pass delegates that keep their identity across renders. Without it, no values are shown.
     /// </summary>
     [Parameter] public Func<string, Func<ExpressionPreview>?>? Preview { get; set; }
 
