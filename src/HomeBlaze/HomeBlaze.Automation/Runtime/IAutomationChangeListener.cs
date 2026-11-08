@@ -9,6 +9,9 @@ internal interface IAutomationChangeListener
     /// <summary>A property in the watched set of the listener changed.</summary>
     void OnWatchedPropertyChanged(PropertyChangedInput input);
 
-    /// <summary>A property that holds subjects changed, caused at <paramref name="chainDepth"/>.</summary>
+    /// <summary>
+    /// A property on the graph route of the listener was attached or, holding subjects, changed, or for a listener with an
+    /// unbounded graph route any property that holds subjects changed, caused at <paramref name="chainDepth"/>.
+    /// </summary>
     void OnGraphChanged(int chainDepth);
 }

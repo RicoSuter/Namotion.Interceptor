@@ -3,6 +3,8 @@ using System.Collections.Frozen;
 using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Automation.Tests.Runtime;
 
@@ -98,6 +100,174 @@ public class AutomationChangeDispatcherTests
         Assert.Equal(1, idle.GraphChanges);
         Assert.Single(watcher.Changes);
         Assert.Empty(idle.Changes);
+    }
+
+    [Fact]
+    public void WhenAListenerPublishesARoute_ThenOnlyAChangeOfAPropertyOnItIsAGraphChange()
+    {
+        // Arrange
+        var (graph, _) = CreateGraph();
+        var holder = new TestSensorHolder();
+        graph.Add("Holder", holder);
+        var dispatcher = new AutomationChangeDispatcher();
+        var routed = new RecordingListener();
+        var unrouted = new RecordingListener();
+        using var routedRegistration = dispatcher.Register(graph.Context, routed);
+        using var unroutedRegistration = dispatcher.Register(graph.Context, unrouted);
+        routedRegistration.PublishRoute(Watch(SensorOf(holder)), isUnbounded: false);
+
+        // Act
+        graph.Add("Garden", new TestSensor());
+        var graphChangesAfterAnotherProperty = routed.GraphChanges;
+        holder.Sensor = new TestSensor();
+
+        // Assert
+        Assert.Equal(0, graphChangesAfterAnotherProperty);
+        Assert.Equal(1, routed.GraphChanges);
+        Assert.Equal(2, unrouted.GraphChanges);
+        Assert.True(dispatcher.IsRoutedAsGraphChange(graph.Context, routed, SensorOf(holder)));
+        Assert.False(dispatcher.IsRoutedAsGraphChange(graph.Context, routed, ChildrenOf(graph)));
+        Assert.True(dispatcher.IsRoutedAsGraphChange(graph.Context, unrouted, ChildrenOf(graph)));
+    }
+
+    // A route has properties that hold no subjects, such as one looked up while it was missing; their changes leave every
+    // path as it is.
+    [Fact]
+    public void WhenAPropertyOnARouteHoldsNoSubjects_ThenItsChangeIsNoGraphChange()
+    {
+        // Arrange
+        var (graph, weather) = CreateGraph();
+        var dispatcher = new AutomationChangeDispatcher();
+        var listener = new RecordingListener();
+        using var registration = dispatcher.Register(graph.Context, listener);
+        registration.PublishRoute(Watch(Gust(weather)), isUnbounded: false);
+
+        // Act
+        weather.Gust = 9;
+
+        // Assert
+        Assert.Equal(0, listener.GraphChanges);
+        Assert.False(dispatcher.IsRoutedAsGraphChange(graph.Context, listener, Gust(weather)));
+    }
+
+    [Fact]
+    public void WhenARouteIsUnbounded_ThenAChangeOfEveryPropertyThatHoldsSubjectsIsAGraphChange()
+    {
+        // Arrange
+        var (graph, weather) = CreateGraph();
+        var holder = new TestSensorHolder();
+        graph.Add("Holder", holder);
+        var dispatcher = new AutomationChangeDispatcher();
+        var listener = new RecordingListener();
+        using var registration = dispatcher.Register(graph.Context, listener);
+        registration.PublishRoute(Watch(Gust(weather)), isUnbounded: true);
+
+        // Act
+        weather.Gust = 9;
+        holder.Sensor = new TestSensor();
+        graph.Add("Garden", new TestSensor());
+
+        // Assert
+        Assert.Equal(2, listener.GraphChanges);
+        Assert.Empty(listener.Changes);
+    }
+
+    [Fact]
+    public void WhenAListenerWithARouteIsUnregistered_ThenItsRouteIsRemoved()
+    {
+        // Arrange
+        var (graph, weather) = CreateGraph();
+        var holder = new TestSensorHolder();
+        graph.Add("Holder", holder);
+        var dispatcher = new AutomationChangeDispatcher();
+        var leaving = new RecordingListener();
+        var staying = new RecordingListener();
+        var leavingRegistration = dispatcher.Register(graph.Context, leaving);
+        using var stayingRegistration = dispatcher.Register(graph.Context, staying);
+        leavingRegistration.PublishRoute(Watch(SensorOf(holder), Gust(weather)), isUnbounded: false);
+        stayingRegistration.PublishRoute(Watch(SensorOf(holder)), isUnbounded: false);
+
+        // Act
+        leavingRegistration.Dispose();
+        leavingRegistration.PublishRoute(Watch(Gust(weather)), isUnbounded: true);
+        holder.Sensor = new TestSensor();
+        graph.Add("Garden", new TestSensor());
+
+        // Assert
+        Assert.Equal(0, leaving.GraphChanges);
+        Assert.Equal(1, staying.GraphChanges);
+        Assert.False(dispatcher.IsRoutedAsGraphChange(graph.Context, leaving, SensorOf(holder)));
+        Assert.True(dispatcher.IsRoutedAsGraphChange(graph.Context, staying, SensorOf(holder)));
+    }
+
+    // A property added with a null value publishes no change, so its attach is what tells a listener that looked for it.
+    [Fact]
+    public void WhenAPropertyOnARouteIsAttached_ThenItIsAGraphChangeOnlyForTheListenersWhoseRouteHasIt()
+    {
+        // Arrange
+        var (graph, weather) = CreateGraph();
+        var dispatcher = new AutomationChangeDispatcher();
+        var routed = new RecordingListener();
+        var unbounded = new RecordingListener();
+        using var routedRegistration = dispatcher.Register(graph.Context, routed);
+        using var unboundedRegistration = dispatcher.Register(graph.Context, unbounded);
+        routedRegistration.PublishRoute(Watch(new PropertyReference(weather, "Wind")), isUnbounded: false);
+
+        // Act
+        ((IInterceptorSubject)weather).TryGetRegisteredSubject()!.AddProperty("Wind", typeof(double?), _ => null, null);
+
+        // Assert
+        Assert.Equal(1, routed.GraphChanges);
+        Assert.Equal(0, unbounded.GraphChanges);
+    }
+
+    [Fact]
+    public void WhenSeveralDispatchersServeOneContext_ThenTheContextHasOneAttachRouterThatRoutesToEachOfThem()
+    {
+        // Arrange
+        var (graph, weather) = CreateGraph();
+        var first = new RecordingListener();
+        var second = new RecordingListener();
+        var firstRegistration = new AutomationChangeDispatcher().Register(graph.Context, first);
+        var secondRegistration = new AutomationChangeDispatcher().Register(graph.Context, second);
+        var missing = new PropertyReference(weather, "Wind");
+        firstRegistration.PublishRoute(Watch(missing), isUnbounded: false);
+        secondRegistration.PublishRoute(Watch(missing), isUnbounded: false);
+
+        // Act
+        ((IInterceptorSubject)weather).TryGetRegisteredSubject()!.AddProperty("Wind", typeof(double?), _ => null, null);
+        var routers = graph.Context.GetServices<IPropertyLifecycleHandler>().OfType<AutomationChangeDispatcher.PropertyAttachRouter>().ToList();
+        var sourcesWhileRegistered = routers.Sum(router => router.SourceCount);
+        firstRegistration.Dispose();
+        secondRegistration.Dispose();
+
+        // Assert
+        Assert.Equal(1, first.GraphChanges);
+        Assert.Equal(1, second.GraphChanges);
+        var router = Assert.Single(routers);
+        Assert.Equal(2, sourcesWhileRegistered);
+        Assert.Equal(0, router.SourceCount);
+    }
+
+    [Fact]
+    public void WhenEveryRouteIsMadeUnbounded_ThenAPublishedRouteRoutesEveryGraphChangeAndNoAttach()
+    {
+        // Arrange
+        var (graph, weather) = CreateGraph();
+        var holder = new TestSensorHolder();
+        graph.Add("Holder", holder);
+        var dispatcher = new AutomationChangeDispatcher { MakesEveryRouteUnbounded = true };
+        var listener = new RecordingListener();
+        using var registration = dispatcher.Register(graph.Context, listener);
+        registration.PublishRoute(Watch(SensorOf(holder), new PropertyReference(weather, "Wind")), isUnbounded: false);
+
+        // Act
+        ((IInterceptorSubject)weather).TryGetRegisteredSubject()!.AddProperty("Wind", typeof(double?), _ => null, null);
+        graph.Add("Garden", new TestSensor());
+
+        // Assert
+        Assert.Equal(1, listener.GraphChanges);
+        Assert.True(dispatcher.IsRoutedAsGraphChange(graph.Context, listener, ChildrenOf(graph)));
     }
 
     [Fact]
@@ -250,6 +420,7 @@ public class AutomationChangeDispatcherTests
                 using var registration = dispatcher.Register(graph.Context, new RecordingListener());
                 registration.PublishWatched(Watch(Gust(weather)));
                 registration.PublishWatched(Watch(Gust(weather), Rain(weather)));
+                registration.PublishRoute(Watch(Rain(weather)), isUnbounded: false);
                 registration.PublishWatched(FrozenSet<PropertyReference>.Empty);
             }
         }, TaskCreationOptions.LongRunning));
@@ -274,6 +445,10 @@ public class AutomationChangeDispatcherTests
     private static PropertyReference Gust(TestSensor weather) => new(weather, nameof(TestSensor.Gust));
 
     private static PropertyReference Rain(TestSensor weather) => new(weather, nameof(TestSensor.Rain));
+
+    private static PropertyReference SensorOf(TestSensorHolder holder) => new(holder, nameof(TestSensorHolder.Sensor));
+
+    private static PropertyReference ChildrenOf(TestGraph graph) => new(graph.Root, nameof(TestRoot.Children));
 
     private static FrozenSet<PropertyReference> Watch(params PropertyReference[] properties) => properties.ToFrozenSet();
 
