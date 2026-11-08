@@ -224,9 +224,11 @@ internal sealed class AutomationRuntime
 
     private void ClearPendingFlag(AutomationInput input)
     {
+        // A full fence, as for the graph change: with a plain store, a timer that fires while the store is still buffered
+        // finds the flag set and queues no tick, while this tick reads the clock from before the instant it was due.
         if (input is TickInput)
         {
-            Volatile.Write(ref _isTickPending, 0);
+            Interlocked.Exchange(ref _isTickPending, 0);
         }
         else if (input is GraphChangedInput)
         {

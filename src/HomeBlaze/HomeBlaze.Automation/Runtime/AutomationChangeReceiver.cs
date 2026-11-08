@@ -27,8 +27,16 @@ internal sealed class AutomationChangeReceiver(AutomationInputQueue queue) : IAu
     /// <summary>Routes the changes of exactly these properties to the automation from now on. Called by the worker only.</summary>
     public void PublishWatched(FrozenSet<PropertyReference> watched) => _registration?.PublishWatched(watched);
 
-    /// <summary>Called by the worker when it takes the queued graph change, so that the next one is queued again.</summary>
-    public void OnGraphChangeTaken() => Volatile.Write(ref _isGraphChangePending, 0);
+    /// <summary>
+    /// Called by the worker when it takes the queued graph change, before it reads the graph, so that the next one is
+    /// queued again.
+    /// </summary>
+    public void OnGraphChangeTaken()
+    {
+        // A full fence: with a plain store, a write that commits while the store is still buffered finds the flag set and
+        // queues nothing, while the worker reads the graph from before that write.
+        Interlocked.Exchange(ref _isGraphChangePending, 0);
+    }
 
     void IAutomationChangeListener.OnWatchedPropertyChanged(PropertyChangedInput input) => queue.TryEnqueue(input);
 
