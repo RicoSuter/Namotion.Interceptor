@@ -44,7 +44,8 @@
 
         // Once per dialog, as the search walks the whole tree.
         var matches = MetadataSearch.Search(
-            root, Permissions.CanRead, tag: Tag, isExcluded: static subject => subject.IsExcludedFrom(ExclusionTarget.UserInterface));
+            root, Permissions.CanRead, tag: Tag, isExcluded: static subject => subject.IsExcludedFrom(ExclusionTarget.UserInterface),
+            isPathMemberIncluded: Permissions.CanReadShown);
         foreach (var match in matches)
         {
             // A subject detached since the search, a subject the viewer may not see, and a property that the browser does

@@ -55,6 +55,13 @@ public partial class EmptyHistoryStore : IHistoryStore
         ValueTask.FromResult<HistoryPoint?>(null);
 }
 
+/// <summary>A subject that holds another one in a property, so that a subject can have several parents.</summary>
+[InterceptorSubject]
+public partial class TagFilterHolder
+{
+    public partial IInterceptorSubject? Content { get; set; }
+}
+
 /// <summary>
 /// The navigation, the subject browser, the property panel and the tag filter show only the subjects, members and history
 /// the viewer may see.
@@ -376,6 +383,39 @@ public sealed partial class ReadSurfaceTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenTheFirstMemberThatHoldsATaggedSubjectIsNotReadable_ThenTheTagFilterListsItThroughAReadableOne()
+    {
+        // Arrange
+        var (first, _) = AddTaggedSubjectWithTwoHolders();
+        _permissions.CannotRead.Add(first.TryGetRegisteredSubject()!.TryGetProperty(nameof(TagFilterHolder.Content))!);
+        var provider = Render<MudDialogProvider>();
+
+        // Act
+        await provider.InvokeAsync(() => MetadataTagFilterDialog.ShowAsync(Services.GetRequiredService<IDialogService>(), Tag));
+
+        // Assert
+        var item = Assert.Single(provider.FindAll("[data-testid='metadata-tag-filter-item']")).TextContent;
+        Assert.Contains("/second/Content", item, StringComparison.Ordinal);
+        Assert.DoesNotContain("first", item, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WhenNoMemberThatHoldsATaggedSubjectIsReadable_ThenTheTagFilterDoesNotListIt()
+    {
+        // Arrange
+        var (first, second) = AddTaggedSubjectWithTwoHolders();
+        _permissions.CannotRead.Add(first.TryGetRegisteredSubject()!.TryGetProperty(nameof(TagFilterHolder.Content))!);
+        _permissions.CannotRead.Add(second.TryGetRegisteredSubject()!.TryGetProperty(nameof(TagFilterHolder.Content))!);
+        var provider = Render<MudDialogProvider>();
+
+        // Act
+        await provider.InvokeAsync(() => MetadataTagFilterDialog.ShowAsync(Services.GetRequiredService<IDialogService>(), Tag));
+
+        // Assert
+        Assert.Empty(provider.FindAll("[data-testid='metadata-tag-filter-item']"));
+    }
+
+    [Fact]
     public async Task WhenTheViewerMayWriteButNotReadTheMetadataOfASubject_ThenTheEditDialogShowsNoneOfIt()
     {
         // Arrange
@@ -423,6 +463,17 @@ public sealed partial class ReadSurfaceTests : BunitContext, IAsyncLifetime
 
     private static ImmutableDictionary<string, JsonElement> CreateLinkMetadata(string path) =>
         ImmutableDictionary<string, JsonElement>.Empty.Add(MetadataKeys.Links, JsonSerializer.SerializeToElement(new[] { new { path } }));
+
+    // A tagged subject held first by the holder "first", then by "second", both children of the storage.
+    private (TagFilterHolder First, TagFilterHolder Second) AddTaggedSubjectWithTwoHolders()
+    {
+        var tagged = new TagFilterHolder();
+        var first = new TagFilterHolder { Content = tagged };
+        var second = new TagFilterHolder { Content = tagged };
+        _graph.Storage.Children = new Dictionary<string, IInterceptorSubject>(_graph.Storage.Children) { ["first"] = first, ["second"] = second };
+        SetTag(tagged);
+        return (first, second);
+    }
 
     private static void SetTag(IInterceptorSubject subject) =>
         SetMetadata(subject, ImmutableDictionary<string, JsonElement>.Empty.Add(MetadataKeys.Tags, JsonSerializer.SerializeToElement(new[] { Tag })));
