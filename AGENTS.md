@@ -161,7 +161,7 @@ The library has specialized support for:
 - **Naming**: `When<Condition>_Then<ExpectedBehavior>` (e.g., `WhenDepthIsZero_ThenReturnsNoChildren`)
 - **Structure**: Explicit `// Arrange`, `// Act`, `// Assert` comments separating each phase (use `// Act & Assert` for exception tests)
 - **No hardcoded waits**: Use `AsyncTestHelpers.WaitUntilAsync(() => condition)` or event-based synchronization (`ManualResetEventSlim`, `CountdownEvent`) instead of `Task.Delay`/`Thread.Sleep`. Hardcoded delays are either too long (slow CI) or too short (flaky CI).
-- **Portability**: Mark platform-sensitive unit test methods or classes with `[Trait("Category", "Portability")]`. The portability CI matrix runs `dotnet test src/Namotion.Interceptor.slnx --filter "Category=Portability&Category!=Integration"` on Windows, Linux, and macOS; these tests also remain part of the normal unit suite.
+- **Portability**: Mark unit test methods or classes that cover behavior sensitive to environmental differences, such as operating systems, architectures, runtimes, or filesystems, with `[Trait("Category", "Portability")]`. The portability CI matrix runs `dotnet test src/Namotion.Interceptor.slnx --filter "Category=Portability"` on Windows, Linux, and macOS; these tests also remain part of the normal unit suite.
 
 ## Public API Tracking
 

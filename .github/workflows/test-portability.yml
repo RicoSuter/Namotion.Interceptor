@@ -1,4 +1,4 @@
-name: test portability
+name: Portability
 
 on:
   workflow_dispatch:
@@ -40,7 +40,7 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Run portability tests
-        run: dotnet test src/Namotion.Interceptor.slnx --configuration Release --filter "Category=Portability&Category!=Integration" --logger trx --results-directory TestResults
+        run: dotnet test src/Namotion.Interceptor.slnx --configuration Release --filter "Category=Portability" --logger trx --results-directory TestResults
 
       - name: Upload test results
         if: always()
