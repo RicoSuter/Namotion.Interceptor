@@ -16,7 +16,8 @@ namespace HomeBlaze.Authentication.Blazor;
 /// <summary>
 /// What a principal may see and do, decided with its compiled policy and the scope of administration: the single place of
 /// these rules for <see cref="PolicyUserPermissions"/> and for the permissions of a request outside a circuit, see
-/// <see cref="RequestUserPermissionsFactory"/>. Immutable, so its answers never change.
+/// <see cref="RequestUserPermissionsFactory"/>. Its policy and roles never change; the answers about subjects and members
+/// it remembers follow <see cref="AuthorizationService.GraphVersion"/>. Thread-safe.
 /// </summary>
 internal sealed class PermissionDecisions : IUserPermissions
 {
@@ -111,8 +112,8 @@ internal sealed class PermissionDecisions : IUserPermissions
     }
 
     /// <summary>
-    /// Gets the value of the member as the principal is shown it: the order in the metadata of a folder names only the
-    /// children the principal is shown through the member of the folder that holds them.
+    /// Gets the value of the member as the principal is shown it: the order in the metadata of a folder and its
+    /// <c>ChildOrder</c> name only the children the principal is shown through the member of the folder that holds them.
     /// </summary>
     public object? GetValue(RegisteredSubjectProperty member) =>
         ChildOrdering.FilterOrder(
