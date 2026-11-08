@@ -29,7 +29,7 @@ internal static class FullAdministrators
         {
             return AnyHoldsEverything(candidateRoles, unlockedRoleSets, rename)
                 ? null
-                : $"This change would leave no unlocked user with {BuiltInRoles.EverythingName} and no deny rule on {AuthorizationActions.Administer}; give another user {BuiltInRoles.EverythingName} first.";
+                : $"This change would leave no unlocked user with {BuiltInRoles.EverythingName} and no deny rule on {AuthorizationActions.Administer}; give another user {BuiltInRoles.EverythingName} without a role that denies {AuthorizationActions.Administer} first.";
         }
 
         var allRoleSets = personRoleSets.Select(person => person.RoleNames).ToList();
@@ -38,7 +38,7 @@ internal static class FullAdministrators
             return null;
         }
 
-        return $"This change would leave no user with {BuiltInRoles.EverythingName} and no deny rule on {AuthorizationActions.Administer}; give another user {BuiltInRoles.EverythingName} first.";
+        return $"This change would leave no user with {BuiltInRoles.EverythingName} and no deny rule on {AuthorizationActions.Administer}; give another user {BuiltInRoles.EverythingName} without a role that denies {AuthorizationActions.Administer} first.";
     }
 
     private static bool AnyHoldsEverything(

@@ -461,7 +461,7 @@ public class RoleStoreTests
         // Assert
         Assert.True(demoted.Succeeded, demoted.Error);
         Assert.False(result.Succeeded);
-        Assert.Equal("This change would leave no unlocked user with everything and no deny rule on administer; give another user everything first.", result.Error);
+        Assert.Equal("This change would leave no unlocked user with everything and no deny rule on administer; give another user everything without a role that denies administer first.", result.Error);
         Assert.Equal([BuiltInRoles.EverythingName], graph.Authorization.Roles["admins"].Includes);
     }
 
@@ -489,7 +489,7 @@ public class RoleStoreTests
         // Assert
         Assert.True(demoted.Succeeded, demoted.Error);
         Assert.False(result.Succeeded);
-        Assert.Equal("This change would leave no unlocked user with everything and no deny rule on administer; give another user everything first.", result.Error);
+        Assert.Equal("This change would leave no unlocked user with everything and no deny rule on administer; give another user everything without a role that denies administer first.", result.Error);
         Assert.Empty(graph.Authorization.Roles["admins"].Deny);
     }
 
@@ -535,7 +535,7 @@ public class RoleStoreTests
         Assert.True(demoted.Succeeded, demoted.Error);
         Assert.True(graph.Authorization.Users["boss"].IsLockedOut);
         Assert.False(result.Succeeded);
-        Assert.Equal("This change would leave no unlocked user with everything and no deny rule on administer; give another user everything first.", result.Error);
+        Assert.Equal("This change would leave no unlocked user with everything and no deny rule on administer; give another user everything without a role that denies administer first.", result.Error);
         Assert.Equal([BuiltInRoles.EverythingName], graph.Authorization.Roles["admins"].Includes);
     }
 

@@ -179,7 +179,7 @@ internal sealed class UserChangeRules(
             return null;
         }
 
-        return $"'{target.UserName}' is the last unlocked full administrator; give another user {BuiltInRoles.EverythingName} first.";
+        return $"'{target.UserName}' is the last unlocked full administrator; give another user {BuiltInRoles.EverythingName} without a role that denies {AuthorizationActions.Administer} first.";
     }
 
     private bool IsActiveFullAdministrator(UserEntry user) =>

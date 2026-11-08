@@ -5,7 +5,7 @@
 
 @inject UserStore UserStore
 
-@* Acting through no roles is open exactly to a full administrator, a person, not anonymous, who holds everything. *@
+@* Acting through no roles is open exactly to a full administrator, a person, not anonymous, who holds everything and no role that denies administer. *@
 @if (UserStore.IsSeededAdministratorUnclaimed && Permissions.CanActThrough([]))
 {
     <MudAlert Severity="Severity.Error" Class="mb-4" data-testid="banner-unclaimed-administrator">

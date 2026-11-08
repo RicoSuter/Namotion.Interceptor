@@ -36,7 +36,7 @@ public class UserStoreTests
         // Assert
         Assert.False(result.Succeeded);
         Assert.Contains("last", result.Error);
-        Assert.Equal("'admin' is the last unlocked full administrator; give another user everything first.", result.Error);
+        Assert.Equal("'admin' is the last unlocked full administrator; give another user everything without a role that denies administer first.", result.Error);
         Assert.Equal([BuiltInRoles.EverythingName], graph.UserStore.GetRoles(graph.AdminUserId));
     }
 
@@ -537,7 +537,7 @@ public class UserStoreTests
         // Arrange
         await using var graph = await AuthenticationTestGraph.CreateAsync();
         var administration = graph.AdministrationAs(graph.AdminUserId);
-        var expected = "'admin' is the last unlocked full administrator; give another user everything first.";
+        var expected = "'admin' is the last unlocked full administrator; give another user everything without a role that denies administer first.";
 
         // Act
         var removed = await administration.RemoveAsync("admin", CancellationToken.None);
@@ -562,7 +562,7 @@ public class UserStoreTests
         var result = await administration.SetRolesAsync("admin", [BuiltInRoles.OperatorName], CancellationToken.None);
 
         // Assert
-        Assert.Equal("'admin' is the last unlocked full administrator; give another user everything first.", result.Error);
+        Assert.Equal("'admin' is the last unlocked full administrator; give another user everything without a role that denies administer first.", result.Error);
     }
 
     [Fact]
@@ -577,7 +577,7 @@ public class UserStoreTests
         var result = await administration.SetRolesAsync("admin", [BuiltInRoles.EverythingName, NoAdministrationRole().Name], CancellationToken.None);
 
         // Assert
-        Assert.Equal("'admin' is the last unlocked full administrator; give another user everything first.", result.Error);
+        Assert.Equal("'admin' is the last unlocked full administrator; give another user everything without a role that denies administer first.", result.Error);
         Assert.Equal([BuiltInRoles.EverythingName], graph.UserStore.GetRoles(graph.AdminUserId));
     }
 
@@ -596,7 +596,7 @@ public class UserStoreTests
         var locked = await administration.SetLockedAsync("admin", true, CancellationToken.None);
 
         // Assert
-        var expected = "'admin' is the last unlocked full administrator; give another user everything first.";
+        var expected = "'admin' is the last unlocked full administrator; give another user everything without a role that denies administer first.";
         Assert.Equal(expected, demoted.Error);
         Assert.Equal(expected, removed.Error);
         Assert.Equal(expected, locked.Error);
