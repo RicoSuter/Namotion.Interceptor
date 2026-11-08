@@ -176,6 +176,7 @@ internal sealed class PropertyTriggerEngine(
     {
         _rebound.Clear();
         _reboundOnlyIfRules.Clear();
+        routes?.SetAwaitsGraphChange(false);
     }
 
     /// <summary>Requests the runs of every pending trigger, such as after a state change skipped them.</summary>
@@ -275,6 +276,8 @@ internal sealed class PropertyTriggerEngine(
             }
         }
 
+        // The next graph change evaluates them, whatever it changed.
+        routes?.SetAwaitsGraphChange(_rebound.Count > 0 || _reboundOnlyIfRules.Count > 0);
         PublishWatched(rules, []);
     }
 

@@ -32,6 +32,7 @@ internal sealed class GraphRoutes
 
     // Set when a property enters or leaves the union or the union becomes bounded or unbounded.
     private bool _hasUnionChanged;
+    private bool _awaitsGraphChange;
 
     // Unbounded until the first publication, as the dispatcher registers a listener.
     private FrozenSet<PropertyReference> _published = FrozenSet<PropertyReference>.Empty;
@@ -63,8 +64,8 @@ internal sealed class GraphRoutes
     // White-box test hook: the properties of the union of the stored routes.
     internal IReadOnlyCollection<PropertyReference> Union => _counts.Keys;
 
-    // White-box test hook: whether a stored route is unbounded.
-    internal bool IsUnbounded => _unboundedCount > 0;
+    // White-box test hook: whether the union is unbounded.
+    internal bool IsUnbounded => _unboundedCount > 0 || _awaitsGraphChange;
 
     // White-box test hook: the number of resolutions whose route was recorded.
     internal int ResolutionCount { get; private set; }
@@ -93,6 +94,19 @@ internal sealed class GraphRoutes
     public void EndRoute(GraphRouteSlot slot) => slot.Store(this, _builder.ToRoute(slot.Route));
 
     /// <summary>
+    /// Sets whether the worker holds results that the next graph change evaluates whatever it changed, such as triggers
+    /// that a refresh outside a graph change resolved differently; the union is unbounded while it does.
+    /// </summary>
+    public void SetAwaitsGraphChange(bool awaitsGraphChange)
+    {
+        if (awaitsGraphChange != _awaitsGraphChange)
+        {
+            _awaitsGraphChange = awaitsGraphChange;
+            _hasUnionChanged = true;
+        }
+    }
+
+    /// <summary>
     /// Publishes the union of the stored routes when it differs from the one published last, and queues a graph change
     /// caused at <paramref name="chainDepth"/> when the structure may have changed since the first resolution after the
     /// last publication; allocates nothing when the union did not change. Returns whether it published.
@@ -107,14 +121,19 @@ internal sealed class GraphRoutes
         }
 
         _hasUnionChanged = false;
-        var isUnbounded = _unboundedCount > 0;
-        if (IsPublished(isUnbounded))
+        var isUnbounded = IsUnbounded;
+        var hasPublishedProperties = HasPublishedProperties();
+        if (hasPublishedProperties && isUnbounded == _isPublishedUnbounded)
         {
             return false;
         }
 
         BeforePublication?.Invoke();
-        _published = _counts.Count == 0 ? FrozenSet<PropertyReference>.Empty : _counts.Keys.ToFrozenSet();
+        if (!hasPublishedProperties)
+        {
+            _published = _counts.Count == 0 ? FrozenSet<PropertyReference>.Empty : _counts.Keys.ToFrozenSet();
+        }
+
         _isPublishedUnbounded = isUnbounded;
         _hasPublished = true;
         _changes?.PublishRoute(_published, isUnbounded);
@@ -175,9 +194,9 @@ internal sealed class GraphRoutes
         }
     }
 
-    private bool IsPublished(bool isUnbounded)
+    private bool HasPublishedProperties()
     {
-        if (!_hasPublished || isUnbounded != _isPublishedUnbounded || _counts.Count != _published.Count)
+        if (!_hasPublished || _counts.Count != _published.Count)
         {
             return false;
         }

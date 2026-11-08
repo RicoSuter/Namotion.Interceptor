@@ -262,6 +262,33 @@ public class AutomationGraphRouteTests
         Assert.Equal(1, host.Blinds.CloseCount);
     }
 
+    // A Save hands the trigger to the new rule instance, which its relative path starts at now; the trigger is evaluated
+    // at the next graph change, whatever it changes, so the route is unbounded until then.
+    [Fact]
+    public async Task WhenASaveLeadsATriggerElsewhere_ThenTheNextGraphChangeOffItsRouteEvaluatesIt()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("rule", On("Calm", When("./Name == Gusty"), Invoke("/Blinds/Close")))));
+        var holder = new TestSensorHolder();
+        host.Graph.Add("Holder", holder);
+        await host.FlushAsync();
+        host.Automation.Rules = Keyed(("rule", On("Gusty", When("./Name == Gusty"), Invoke("/Blinds/Close"))));
+        await host.FlushAsync();
+        await host.Automation.ApplyConfigurationAsync(CancellationToken.None);
+        await host.FlushAsync();
+        var closesAfterTheSave = host.Blinds.CloseCount;
+
+        // Act
+        holder.Sensor = new TestSensor();
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(0, closesAfterTheSave);
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.False(Routes(host.Automation).IsUnbounded);
+    }
+
     [Fact]
     public async Task WhenTheRulesAreDeactivated_ThenTheirRoutesLeaveThePublishedRoute()
     {
