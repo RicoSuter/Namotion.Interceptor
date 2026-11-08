@@ -282,7 +282,7 @@ public class MarkdownReadAccessTests
 
         public bool CanAdminister(RegisteredSubjectProperty member) => true;
 
-        public bool CanReadHistory(RegisteredSubjectProperty member) => true;
+        public bool CanReadHistory(RegisteredSubjectProperty member) => canRead(member);
 
         public bool CanShow(RegisteredSubject subject) => canShow?.Invoke(subject) ?? true;
 

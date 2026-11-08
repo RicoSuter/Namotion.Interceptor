@@ -31,7 +31,7 @@ internal sealed class PropertyHistoryViewer : IPropertyHistoryViewer
     // which the dialog queries. Looking for a store would walk every known subject on every render of every widget, and
     // without a store the dialog shows an empty history.
     public bool CanShow(RegisteredSubjectProperty property) =>
-        property.HasHistory() && _permissions.CanRead(property) && _permissions.CanReadHistory(property) &&
+        property.HasHistory() && _permissions.CanReadHistory(property) &&
         _pathResolver.GetPath(property.Subject, PathStyle.Canonical) is not null;
 
     public async Task ShowAsync(RegisteredSubjectProperty property, string displayName)

@@ -31,7 +31,7 @@ public interface IUserPermissions
     /// </summary>
     bool CanAdminister(RegisteredSubjectProperty member);
 
-    /// <summary>Whether the user may read the recorded history of <paramref name="member"/>.</summary>
+    /// <summary>Whether the user may read the recorded history of <paramref name="member"/>, which requires <see cref="CanRead"/>.</summary>
     bool CanReadHistory(RegisteredSubjectProperty member);
 
     /// <summary>Whether the subject is shown: some member is readable and a readable chain of parents leads to a root.</summary>

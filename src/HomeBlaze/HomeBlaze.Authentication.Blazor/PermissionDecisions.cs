@@ -213,11 +213,11 @@ internal sealed class PermissionDecisions : IUserPermissions
     public bool CanWrite(RegisteredSubjectProperty member) => IsSharedWithPrincipal(member) && _policy.CanWrite(member);
 
     /// <summary>
-    /// Whether the history of the member may be read: as the policy allows, or a member of a user the person may
-    /// administer, within the scope of <see cref="IRoleScopedSubject"/>.
+    /// Whether the history of the member may be read: the member may be read, see <see cref="CanRead"/>, and the policy
+    /// allows its history, or it is a member of a user the person may administer.
     /// </summary>
     public bool CanReadHistory(RegisteredSubjectProperty member) =>
-        IsSharedWithPrincipal(member) && (_policy.IsAllowed(member, AuthorizationActions.History) || IsAdministeredUserMember(member));
+        CanRead(member) && (_policy.IsAllowed(member, AuthorizationActions.History) || IsAdministeredUserMember(member));
 
     /// <summary>
     /// Whether the subject may be shown: as the policy allows, or a user of whom the person may administer a member and
