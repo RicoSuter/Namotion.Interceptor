@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Authorization.Internal;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Authorization;
@@ -20,7 +19,7 @@ namespace HomeBlaze.Authorization;
 [SubjectIcon("Badge")]
 [ExcludeFromCreation]
 [InterceptorSubject]
-public partial class Role : ISubjectEditPermission, ITitleProvider, IIconProvider
+public partial class Role : ITitleProvider, IIconProvider
 {
     /// <summary>
     /// The names of the built-in or custom roles whose rules this role includes.
@@ -95,6 +94,16 @@ public partial class Role : ISubjectEditPermission, ITitleProvider, IIconProvide
     [PropertyAttribute("Delete", KnownAttributes.DisabledReason)]
     public string? DeleteDisabledReason => IsBuiltIn ? BuiltInRoleReason : null;
 
+    /// <summary>Whether <see cref="EditAsync"/> applies: not for a built-in role.</summary>
+    [Derived]
+    [PropertyAttribute("Edit", KnownAttributes.IsEnabled)]
+    public bool IsEditEnabled => !IsBuiltIn;
+
+    /// <summary>Why <see cref="EditAsync"/> does not apply, or null.</summary>
+    [Derived]
+    [PropertyAttribute("Edit", KnownAttributes.DisabledReason)]
+    public string? EditDisabledReason => IsBuiltIn ? BuiltInRoleReason : null;
+
     internal const string BuiltInRoleReason = "Built-in roles cannot be edited, renamed or deleted.";
 
     public Role()
@@ -154,8 +163,24 @@ public partial class Role : ISubjectEditPermission, ITitleProvider, IIconProvide
         RoleEdits.DeleteAsync(this, roleStore, cancellationToken);
 
     /// <summary>
-    /// The editor changes the rules of a custom role, which replaces <see cref="Authorization.Roles"/> that holds it; a
-    /// built-in role has no editor.
+    /// Saves the roles this role includes and its rules through the <see cref="IRoleStore"/>, with the stamp of the rules
+    /// this subject holds; the edit dialog of the role saves through this operation.
     /// </summary>
-    bool ISubjectEditPermission.CanEdit(IUserPermissions permissions) => !IsBuiltIn && permissions.CanAdministerHoldingMembers(this);
+    /// <param name="includes">The names of the roles whose rules the role includes.</param>
+    /// <param name="allow">The rules whose matches the role allows.</param>
+    /// <param name="deny">The rules whose matches the role denies.</param>
+    /// <param name="roleStore">The store that saves the role.</param>
+    /// <param name="cancellationToken">Cancels the save until it is committed.</param>
+    /// <exception cref="InvalidOperationException">
+    /// The role is built in, no <see cref="Authorization"/> holds this subject, because the role was changed, renamed or
+    /// deleted since, or the store refused the save.
+    /// </exception>
+    [Operation(Title = "Edit", Description = "Saves the roles this role includes and its allow and deny rules.", Icon = "Edit", RequiresAdministration = true, Purpose = OperationPurpose.Edit)]
+    public Task EditAsync(
+        IReadOnlyList<string> includes,
+        IReadOnlyList<PermissionRule> allow,
+        IReadOnlyList<PermissionRule> deny,
+        [FromServices] IRoleStore roleStore,
+        CancellationToken cancellationToken) =>
+        RoleEdits.EditAsync(this, includes, allow, deny, roleStore, cancellationToken);
 }

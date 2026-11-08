@@ -4,7 +4,7 @@ using Namotion.Interceptor.Registry;
 namespace HomeBlaze.Authorization.Internal;
 
 /// <summary>
-/// Adds, renames and deletes custom roles for the operations of <see cref="Authorization"/> and <see cref="Role"/>
+/// Adds, edits, renames and deletes custom roles for the operations of <see cref="Authorization"/> and <see cref="Role"/>
 /// through the <see cref="IRoleStore"/>, which validates each change, commits it and only then shows it in
 /// <see cref="Authorization.Roles"/>. A refusal is thrown as an <see cref="InvalidOperationException"/> with its reason.
 /// </summary>
@@ -45,15 +45,30 @@ internal static class RoleEdits
         ThrowIfRefusedOrIncomplete(result);
     }
 
+    public static async Task EditAsync(
+        Role role,
+        IReadOnlyList<string> includes,
+        IReadOnlyList<PermissionRule> allow,
+        IReadOnlyList<PermissionRule> deny,
+        IRoleStore roleStore,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(includes);
+        ArgumentNullException.ThrowIfNull(allow);
+        ArgumentNullException.ThrowIfNull(deny);
+        ArgumentNullException.ThrowIfNull(roleStore);
+
+        var (name, stamp) = GetHeldNameAndStamp(role, roleStore);
+        var editedRole = new AuthorizationRole { Name = name, Includes = [.. includes], Allow = [.. allow], Deny = [.. deny] };
+        var result = await roleStore.SaveRoleAsync(name, editedRole, stamp, cancellationToken);
+        ThrowIfRefusedOrIncomplete(result);
+    }
+
     public static async Task DeleteAsync(Role role, IRoleStore roleStore, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(roleStore);
 
-        var name = GetHeldName(role);
-        var stamp = roleStore.GetConcurrencyStamp(name);
-
-        // A role replaced before the stamp was read has newer rules than the ones shown, which the stamp would delete.
-        GetHeldName(role);
+        var (name, stamp) = GetHeldNameAndStamp(role, roleStore);
         var result = await roleStore.DeleteRoleAsync(name, stamp, cancellationToken);
         ThrowIfRefusedOrIncomplete(result);
     }
@@ -80,6 +95,17 @@ internal static class RoleEdits
         }
 
         return name;
+    }
+
+    // The stamp of the rules the role subject holds, which a change replaces with a new subject.
+    private static (string Name, string? Stamp) GetHeldNameAndStamp(Role role, IRoleStore roleStore)
+    {
+        var name = GetHeldName(role);
+        var stamp = roleStore.GetConcurrencyStamp(name);
+
+        // A role replaced before the stamp was read has newer rules than the ones shown, which the stamp would overwrite.
+        GetHeldName(role);
+        return (name, stamp);
     }
 
     // A committed change with a warning is reported as failed too, so that the person reads what was not completed.

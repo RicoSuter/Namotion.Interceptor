@@ -15,8 +15,8 @@ using Xunit;
 namespace HomeBlaze.Authorization.Blazor.Tests;
 
 /// <summary>
-/// The editor of a role is offered only to a viewer who may administer the roles, which it changes, and so is the preview
-/// of a role, which shows the members of any subject.
+/// The editor of a role is offered only to a viewer who may invoke its edit operation, through which it saves, and the
+/// preview of a role, which shows the members of any subject, only to a viewer who may administer the roles.
 /// </summary>
 public sealed class AdministrationEditGateTests : BunitContext, IAsyncLifetime
 {
@@ -56,18 +56,31 @@ public sealed class AdministrationEditGateTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
-    public void WhenTheViewerMayNotAdministerTheRoles_ThenARoleOffersNoEditor()
+    public void WhenTheViewerMayNotAdministerTheEditOperationOfARole_ThenTheRoleOffersThemNoEditor()
     {
         // Arrange
-        var role = (ISubjectEditPermission)_graph.GetRole("kitchen");
-        var canEditBefore = role.CanEdit(_permissions);
+        var role = _graph.GetRole("kitchen");
+        var canEditBefore = _permissions.CanInvokeEditOperation(role);
 
         // Act
-        _permissions.CannotAdminister.Add(GetMember(_graph.Authorization, nameof(Authorization.Roles)));
+        _permissions.CannotAdminister.Add(GetMember(role, "Edit"));
 
         // Assert
         Assert.True(canEditBefore);
-        Assert.False(role.CanEdit(_permissions));
+        Assert.False(_permissions.CanInvokeEditOperation(role));
+    }
+
+    [Fact]
+    public void WhenTheRoleIsBuiltIn_ThenItOffersNoEditor()
+    {
+        // Arrange
+        var role = _graph.Authorization.Roles[BuiltInRoles.ReaderName];
+
+        // Act
+        var canEdit = _permissions.CanInvokeEditOperation(role);
+
+        // Assert
+        Assert.False(canEdit);
     }
 
     [Fact]

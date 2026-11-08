@@ -237,6 +237,70 @@ public sealed class AdministrationGateTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenTheViewerMayInvokeTheEditOperationOfASubjectWithoutConfiguration_ThenTheEditPanelSavesThroughIt()
+    {
+        // Arrange
+        var edited = new OperationSavedDevice { Label = "old" };
+        _store.OperationSaved = edited;
+        var panel = RenderEditPanel(edited);
+        var editComponent = panel.FindComponent<OperationSavedDeviceEditComponent>().Instance;
+
+        // Act
+        var isSaved = await panel.InvokeAsync(() => panel.Instance.SaveAsync(CancellationToken.None));
+
+        // Assert
+        Assert.True(isSaved);
+        Assert.Equal(1, editComponent.SaveCount);
+        Assert.Equal("new", edited.Label);
+        Assert.DoesNotContain(Refusal, SnackbarMessages);
+        Assert.Empty(_store.WrittenSubjects);
+    }
+
+    [Fact]
+    public async Task WhenTheViewerMayNotInvokeTheEditOperationOfASubjectWithoutConfiguration_ThenTheEditPanelDoesNotSave()
+    {
+        // Arrange
+        var edited = new OperationSavedDevice { Label = "old" };
+        _store.OperationSaved = edited;
+        _permissions.CannotAdminister.Add(GetMember(edited, nameof(OperationSavedDevice.Save)));
+        var panel = RenderEditPanel(edited);
+        var editComponent = panel.FindComponent<OperationSavedDeviceEditComponent>().Instance;
+
+        // Act
+        var isSaved = await panel.InvokeAsync(() => panel.Instance.SaveAsync(CancellationToken.None));
+        var isApplied = await panel.InvokeAsync(() => panel.Instance.ApplyChangesAsync(CancellationToken.None));
+
+        // Assert
+        Assert.False(isSaved);
+        Assert.False(isApplied);
+        Assert.Equal(0, editComponent.SaveCount);
+        Assert.Equal("old", edited.Label);
+        Assert.Contains(Refusal, SnackbarMessages);
+    }
+
+    [Fact]
+    public async Task WhenAnEditComponentOfASubjectWithoutConfigurationHasNoEditOperation_ThenTheEditPanelDoesNotSave()
+    {
+        // Arrange
+        var edited = new UnconfiguredDevice { Label = "old" };
+        _store.Unconfigured = edited;
+        var panel = RenderEditPanel(edited);
+        var editComponent = panel.FindComponent<UnconfiguredDeviceEditComponent>().Instance;
+
+        // Act
+        var isSaved = await panel.InvokeAsync(() => panel.Instance.SaveAsync(CancellationToken.None));
+        var isApplied = await panel.InvokeAsync(() => panel.Instance.ApplyChangesAsync(CancellationToken.None));
+
+        // Assert
+        Assert.False(isSaved);
+        Assert.False(isApplied);
+        Assert.Equal(0, editComponent.SaveCount);
+        Assert.Equal("old", edited.Label);
+        Assert.Empty(_store.WrittenSubjects);
+        Assert.Contains(Refusal, SnackbarMessages);
+    }
+
+    [Fact]
     public void WhenTheCreateDialogHasNoMember_ThenItsCreateButtonIsDisabled()
     {
         // Arrange

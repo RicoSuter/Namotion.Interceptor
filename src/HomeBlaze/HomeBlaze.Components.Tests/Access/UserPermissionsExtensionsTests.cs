@@ -230,6 +230,19 @@ public class UserPermissionsExtensionsTests
     }
 
     [Fact]
+    public void WhenTheSubjectHasNoConfigurationMember_ThenItCannotBeConfigured()
+    {
+        // Arrange
+        var (store, _) = CreateStore();
+
+        // Act
+        var canConfigure = new TestUserPermissions().CanAdministerConfiguration(store);
+
+        // Assert
+        Assert.False(canConfigure);
+    }
+
+    [Fact]
     public void WhenTheSubjectHasNoParent_ThenItCannotBeDeleted()
     {
         // Arrange

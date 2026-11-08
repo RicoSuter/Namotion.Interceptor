@@ -130,6 +130,32 @@ public class SystemRulesTests
         }
     }
 
+    [Fact]
+    public void WhenAnAgentHoldsEverything_ThenTheEditOperationOfARoleIsDeniedEveryAction()
+    {
+        // Arrange
+        var policy = Compile(PrincipalKind.NonHuman, BuiltInRoles.EverythingName);
+        var edit = new Role(TestContext.Create()).TryGetRegisteredSubject()!.TryGetProperty("Edit")!;
+
+        // Act & Assert
+        foreach (var action in AuthorizationActions.All)
+        {
+            Assert.False(policy.IsAllowed(edit, action), action.Name);
+        }
+    }
+
+    [Fact]
+    public void WhenAPersonHoldsEverything_ThenTheEditOperationOfARoleIsAdministeredButNotExecuted()
+    {
+        // Arrange
+        var policy = Compile(PrincipalKind.Person, BuiltInRoles.EverythingName);
+        var edit = new Role(TestContext.Create()).TryGetRegisteredSubject()!.TryGetProperty("Edit")!;
+
+        // Act & Assert
+        Assert.True(policy.IsAllowed(edit, AuthorizationActions.Administer));
+        Assert.False(policy.IsAllowed(edit, AuthorizationActions.Execute));
+    }
+
     private static void AssertNotWrittenOrExecuted(AuthorizationPolicy policy, RegisteredSubject subject)
     {
         foreach (var member in subject.Properties)

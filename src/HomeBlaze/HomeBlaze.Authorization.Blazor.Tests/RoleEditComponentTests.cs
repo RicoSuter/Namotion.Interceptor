@@ -555,10 +555,31 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         // Assert
         Assert.False(saved);
         Assert.Empty(Graph.RoleStore.Saves);
+        Assert.Contains("not part of an Authorization subject", component.Find("[data-testid='role-edit-save-error']").TextContent);
     }
 
     [Fact]
-    public async Task WhenTheRoleIsSaved_ThenTheStoreReceivesItWithTheLoadedStamp()
+    public async Task WhenTheRoleChangedSinceTheEditorOpened_ThenSavingIsRefusedWithoutTheStoreAndKeepsTheEdits()
+    {
+        // Arrange: the store replaces every role subject on each change.
+        var component = RenderEditor(Graph.GetRole("kitchen"));
+        await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
+        await SetActionAsync(component, 0, "read", true);
+        Graph.SetRole("kitchen", includes: [BuiltInRoles.ReaderName]);
+
+        // Act
+        var saved = await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+
+        // Assert
+        Assert.False(saved);
+        Assert.Empty(Graph.RoleStore.Saves);
+        Assert.Contains("The role 'kitchen' changed since you opened it.", component.Find("[data-testid='role-edit-save-error']").TextContent);
+        Assert.True(component.Instance.IsDirty);
+        Assert.Equal([BuiltInRoles.ReaderName], Graph.GetRole("kitchen").Includes);
+    }
+
+    [Fact]
+    public async Task WhenTheRoleIsSaved_ThenTheStoreReceivesItUnderItsNameWithItsStamp()
     {
         // Arrange
         Graph.RoleStore.Stamp = "stamp-1";
@@ -608,7 +629,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     }
 
     [Fact]
-    public void WhenTheUserMayNotAdministerTheRolesOfTheAuthorization_ThenTheEditorIsReadOnly()
+    public void WhenTheViewerMayNotAdministerTheEditOperationOfTheRole_ThenTheEditorIsReadOnly()
     {
         // Arrange
         var role = Graph.SetRole(
@@ -616,23 +637,27 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
             includes: [BuiltInRoles.ReaderName],
             allow: [new PermissionRule { Paths = ["/Devices/**"], Actions = [PermissionAction.Read] }],
             deny: [new PermissionRule { Members = ["Secret*"], Actions = [PermissionAction.Write] }]);
-        Permissions.CannotAdminister.Add(Graph.Authorization.TryGetRegisteredSubject()!.TryGetProperty(nameof(Authorization.Roles))!);
+        Permissions.CannotAdminister.Add(GetEditOperationMember(role));
 
         // Act
         var component = RenderEditor(role);
 
-        // Assert
-        Assert.NotEmpty(component.FindAll("input"));
-        Assert.All(component.FindAll("input"), input => Assert.True(input.HasAttribute("disabled") || input.HasAttribute("readonly")));
-        Assert.All(component.FindAll("[data-testid='role-edit-tabs'] button[data-testid]"), button => Assert.True(button.HasAttribute("disabled")));
+        // Assert: the preview, which changes nothing, stays usable for a viewer who may administer the roles.
+        var editInputs = component.FindAll("input").Where(IsOutsideThePreview).ToList();
+        Assert.NotEmpty(editInputs);
+        Assert.All(editInputs, input => Assert.True(input.HasAttribute("disabled") || input.HasAttribute("readonly")));
+        Assert.All(
+            component.FindAll("[data-testid='role-edit-tabs'] button[data-testid]").Where(IsOutsideThePreview),
+            button => Assert.True(button.HasAttribute("disabled")));
     }
 
     [Fact]
-    public async Task WhenTheUserMayNotAdministerTheRolesOfTheAuthorization_ThenSavingIsRefusedWithoutTheStore()
+    public async Task WhenTheViewerMayNoLongerAdministerTheEditOperationOfTheRole_ThenSavingIsRefusedWithoutTheStore()
     {
         // Arrange
-        Permissions.CannotAdminister.Add(Graph.Authorization.TryGetRegisteredSubject()!.TryGetProperty(nameof(Authorization.Roles))!);
-        var component = RenderEditor(Graph.GetRole("kitchen"));
+        var role = Graph.GetRole("kitchen");
+        var component = RenderEditor(role);
+        Permissions.CannotAdminister.Add(GetEditOperationMember(role));
 
         // Act
         var saved = await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
@@ -644,7 +669,24 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     }
 
     [Fact]
-    public async Task WhenTheDialogSavesTwice_ThenTheSecondSaveUsesTheStampOfTheFirst()
+    public async Task WhenTheViewerMayAdministerTheEditOperationButNotTheRoles_ThenTheRoleIsSaved()
+    {
+        // Arrange
+        Permissions.CannotAdminister.Add(Graph.Authorization.TryGetRegisteredSubject()!.TryGetProperty(nameof(Authorization.Roles))!);
+        var component = RenderEditor(Graph.GetRole("kitchen"));
+        await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
+        await SetActionAsync(component, 0, "read", true);
+
+        // Act
+        var saved = await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+
+        // Assert
+        Assert.True(saved);
+        Assert.Equal([new PermissionRule { Actions = [PermissionAction.Read] }], Graph.GetRole("kitchen").Allow);
+    }
+
+    [Fact]
+    public async Task WhenTheDialogSavesTwice_ThenTheSecondSaveGoesThroughTheRoleTheFirstSaved()
     {
         // Arrange
         Graph.RoleStore.Stamp = "stamp-1";
@@ -662,4 +704,10 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         Assert.Equal(["stamp-1", "stamp-2"], Graph.RoleStore.Saves.Select(call => call.Stamp));
         Assert.Equal([new PermissionRule { Actions = [PermissionAction.Read, PermissionAction.Write] }], Graph.GetRole("kitchen").Allow);
     }
+
+    private static bool IsOutsideThePreview(AngleSharp.Dom.IElement element) =>
+        element.Closest("[data-testid^='role-preview']") is null;
+
+    private static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty GetEditOperationMember(Role role) =>
+        role.TryGetRegisteredSubject()!.TryGetProperty("Edit")!;
 }

@@ -406,7 +406,7 @@ else
             _subject.GetType(),
             SubjectComponentType.Edit);
 
-        return (hasEditComponent || _subject.HasConfigurationProperties()) && Permissions.CanEdit(_subject);
+        return (hasEditComponent || _subject.HasConfigurationProperties()) && Permissions.CanEdit(_subject, hasEditComponent);
     }
 
     private PageEditMode GetStartMode() =>

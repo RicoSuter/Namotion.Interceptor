@@ -191,14 +191,14 @@
     /// True when the edits were applied and <see cref="TryPersistAsync"/> ran, which reports a failure of its own to
     /// the user, or the hosted edit component saved and persists itself, see <see cref="ISubjectEditComponent.PersistsItself"/>.
     /// False when the edits were not applied, which is reported to the user, and nothing was persisted:
-    /// either the viewer may not administer every configuration member of the subject, which persisting writes,
-    /// <see cref="ApplyChangesAsync"/> returned false, or the edit component failed while saving. Also false when the
-    /// roles changed between the apply and the persist, so that <see cref="TryPersistAsync"/> refused.
+    /// either the viewer may not save the editor, see <see cref="CanSave"/>, <see cref="ApplyChangesAsync"/> returned
+    /// false, or the edit component failed while saving. Also false when the roles changed between the apply and the
+    /// persist, so that <see cref="TryPersistAsync"/> refused.
     /// </returns>
     public async Task<bool> SaveAsync(CancellationToken cancellationToken)
     {
         // Checked before anything is applied, so that no edit is applied that could not be persisted.
-        if (Subject is not { } subject || !Permissions.CanAdministerConfiguration(subject))
+        if (Subject is not { } subject || !CanSave(subject))
         {
             return Refuse();
         }
@@ -234,16 +234,16 @@
     /// Applies the buffered edits to the subject without persisting them.
     /// </summary>
     /// <returns>
-    /// False when there is no subject, the editor is not ready yet or not valid, the viewer may not administer a member
-    /// the edits change, which is reported to the user, or the generated properties editor could not convert or set one
-    /// of its values. The subject is unchanged then, except for a value that could not be set back after a setter
-    /// rejected a later one, see <see cref="EditedPropertyValues.Apply"/>.
+    /// False when there is no subject, the editor is not ready yet or not valid, the viewer may not save the editor or
+    /// administer a member the edits change, which is reported to the user, or the generated properties editor could not
+    /// convert or set one of its values. The subject is unchanged then, except for a value that could not be set back
+    /// after a setter rejected a later one, see <see cref="EditedPropertyValues.Apply"/>.
     /// </returns>
     /// <remarks>
     /// The generated properties editor asks for the members it changes, see <see cref="ConfigurationPropertiesEditor.ApplyChanges"/>.
-    /// A hosted edit component does not say which members it changes, so every configuration member of the subject is
-    /// asked for. While creating, the edits go to a subject that is not part of the graph yet and nothing is asked:
-    /// whoever attaches it checks that the viewer may create it.
+    /// A hosted edit component does not say which members it changes, so <see cref="CanSave"/> is asked. While creating,
+    /// the edits go to a subject that is not part of the graph yet and nothing is asked: whoever attaches it checks that
+    /// the viewer may create it.
     /// </remarks>
     public async Task<bool> ApplyChangesAsync(CancellationToken cancellationToken)
     {
@@ -251,7 +251,7 @@
 
         if (_subjectComponent is ISubjectEditComponent editComponent)
         {
-            if (ConfigurationPropertiesEditor.IsChecked(Subject, IsCreating) && !Permissions.CanAdministerConfiguration(Subject))
+            if (ConfigurationPropertiesEditor.IsChecked(Subject, IsCreating) && !CanSave(Subject))
             {
                 return Refuse();
             }
@@ -266,6 +266,17 @@
 
         return true;
     }
+
+    /// <summary>
+    /// Gets whether the viewer may save what the editor of the subject changes. A hosted edit component may save through
+    /// the edit operation of the subject, see <see cref="RegisteredSubjectMethodExtensions.CanInvokeEditOperation"/>,
+    /// which decides each save again, and one of a file checks the content it writes itself. Otherwise the viewer needs to
+    /// administer the configuration of the subject, see <see cref="UserPermissionsExtensions.CanAdministerConfiguration"/>,
+    /// which requires at least one configuration member.
+    /// </summary>
+    private bool CanSave(IInterceptorSubject subject) =>
+        (HostedComponentType is not null && (subject is IStorageFile || Permissions.CanInvokeEditOperation(subject))) ||
+        Permissions.CanAdministerConfiguration(subject);
 
     private bool Refuse()
     {
@@ -286,7 +297,8 @@
         var subject = Subject;
         if (subject == null) return false;
 
-        if (!Permissions.CanAdministerConfiguration(subject))
+        // A subject without configuration members has none of its own in the configuration that is written.
+        if (subject.HasConfigurationProperties() && !Permissions.CanAdministerConfiguration(subject))
         {
             return Refuse();
         }

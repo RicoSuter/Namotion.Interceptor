@@ -11,7 +11,7 @@ namespace HomeBlaze.Storage.Blazor
     public static class EditPermissions
     {
         public static bool CanAdministerFileContent(this HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, Namotion.Interceptor.IInterceptorSubject file) { }
-        public static bool CanEdit(this HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static bool CanEdit(this HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, Namotion.Interceptor.IInterceptorSubject subject, bool hasEditComponent) { }
     }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Storage.Internal.RenderExpression?))]
     public class RenderExpressionComponent : HomeBlaze.Components.Abstractions.PermissionsComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent

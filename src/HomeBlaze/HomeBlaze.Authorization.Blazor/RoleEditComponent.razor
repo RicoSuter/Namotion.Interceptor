@@ -9,13 +9,14 @@
 @using Namotion.Interceptor.Tracking
 
 @inject AuthorizationService AuthorizationService
-@inject IRoleStore RoleStore
 @inject IUserPermissions Permissions
+@inject IServiceProvider ServiceProvider
 @inject SubjectTypeCatalog TypeCatalog
 
 @if (Role is { } role)
 {
     var checks = GetChecks();
+    var canSave = _heldRole is { } heldRole && Permissions.CanInvokeEditOperation(heldRole);
     var canAdministerRoles = Permissions.CanAdministerRoles(_authorization);
     <div class="role-edit" data-testid="role-edit">
         @if (checks.Error is { } error)
@@ -52,7 +53,7 @@
                         }
                     </TabContent>
                     <ChildContent>
-                        <MudForm Disabled="@(!canAdministerRoles)">
+                        <MudForm Disabled="@(!canSave)">
                             <MudText Typo="Typo.body2" Class="mb-2">The roles whose rules this role has as well, built-in or custom.</MudText>
                             <div data-testid="role-edit-includes">
                                 <RoleSelector @bind-Selected="_includes" @bind-Selected:after="OnChanged" Excluded="@_excluded"
@@ -65,7 +66,7 @@
                 <MudTabPanel>
                     <TabContent>@RenderTabLabel("Allow", _allow, "allow")</TabContent>
                     <ChildContent>
-                        <MudForm Disabled="@(!canAdministerRoles)">
+                        <MudForm Disabled="@(!canSave)">
                             <MudText Typo="Typo.body2" Class="mb-2">
                                 What the role grants. A rule applies to a member when each of its selectors matches; an empty selector matches any.
                             </MudText>
@@ -77,7 +78,7 @@
                 <MudTabPanel>
                     <TabContent>@RenderTabLabel("Deny", _deny, "deny")</TabContent>
                     <ChildContent>
-                        <MudForm Disabled="@(!canAdministerRoles)">
+                        <MudForm Disabled="@(!canSave)">
                             <MudText Typo="Typo.body2" Class="mb-2">What the role takes away again, whichever role granted it.</MudText>
                             @RenderFieldHint()
                             @RenderRules(_deny, "deny", null)
@@ -170,7 +171,9 @@
 
     // Saving a role replaces Authorization.Roles, which keeps its subject while the role subjects are replaced.
     private Authorization? _authorization;
-    private string? _loadedStamp;
+
+    // The role subject whose rules the editor saves over, which the next save goes through; see SaveAsync.
+    private Role? _heldRole;
     private string? _saveError;
     private string[] _excluded = [];
     private IReadOnlyList<string> _includes = [];
@@ -231,15 +234,10 @@
             return;
         }
 
-        // The store replaces every role on a change, so this subject keeps the name and rules it was loaded with. A
-        // stamp read after the subject was replaced belongs to newer rules, so it is dropped and the save is refused.
+        // The store replaces every role on a change, so this subject keeps the name and rules it was loaded with, and
+        // its edit operation refuses to save over rules that changed since.
+        _heldRole = role;
         (_authorization, _name) = role.FindParent();
-        _loadedStamp = _name is null ? null : RoleStore.GetConcurrencyStamp(_name);
-        if (role.FindParent().Name is null)
-        {
-            _loadedStamp = null;
-        }
-
         _excluded = _name is null ? [] : [_name];
         // Normalized as the selector shows it, so saving without a change writes what was shown. Reading the role
         // names also writes the role's status and agent count.
@@ -266,16 +264,16 @@
     }
 
     /// <summary>
-    /// Saves the edited role through the role store with the stamp it was loaded with.
+    /// Saves the edited role by invoking the edit operation of the role, see <see cref="Role.EditAsync"/>, when the viewer may.
     /// </summary>
     /// <returns>
-    /// Whether the store saved it; when not, because the viewer may not administer the roles of the authorization or the store refused it,
-    /// the reason is shown and the edits are kept.
+    /// Whether the role was saved; when not, because the viewer may not invoke the edit operation, the role changed since it
+    /// was loaded or the store refused it, the reason is shown and the edits are kept.
     /// </returns>
     /// <exception cref="InvalidOperationException">The role has invalid rules, which the host does not save.</exception>
     public async Task<bool> SaveAsync(CancellationToken cancellationToken)
     {
-        if (Role is null || _name is not { } name)
+        if (_heldRole is not { } role)
         {
             return false;
         }
@@ -292,23 +290,41 @@
             throw new InvalidOperationException("The role has invalid rules and cannot be saved.");
         }
 
-        if (!Permissions.CanAdministerRoles(_authorization))
+        // The store replaces every role subject on a change, which leaves this one without its edit operation.
+        if (role.FindParent().Authorization is null && _name is not null)
         {
-            return ShowSaveError(NotFullAdministratorMessage);
+            return ShowSaveError($"The role '{_name}' changed since you opened it.");
         }
 
-        var result = await RoleStore.SaveRoleAsync(name, GetEditedRole(), _loadedStamp, cancellationToken);
-        if (!result.Succeeded)
+        var editedRole = GetEditedRole();
+        var invocation = await Permissions.TryInvokeAsync(
+            role, nameof(Role.EditAsync), [editedRole.Includes, editedRole.Allow, editedRole.Deny], ServiceProvider, cancellationToken);
+        switch (invocation.Outcome)
         {
-            return ShowSaveError(result.Error ?? "The role could not be saved.");
+            case PermittedOperationOutcome.Denied:
+                return ShowSaveError(NotFullAdministratorMessage);
+            case PermittedOperationOutcome.Failed:
+                return ShowSaveError(invocation.Exception?.Message ?? "The role could not be saved.");
         }
 
-        _loadedStamp = result.ConcurrencyStamp;
+        // The store replaced every role subject. A subject that holds other rules than the saved ones comes from a change
+        // made after this save, which the next save then refuses to overwrite.
+        if (_authorization is not null && _name is not null &&
+            _authorization.Roles.TryGetValue(_name, out var savedRole) && HasRules(savedRole, editedRole))
+        {
+            _heldRole = savedRole;
+        }
+
         _saveError = null;
         _isDirty = false;
         IsDirtyChanged?.Invoke(false);
         return true;
     }
+
+    private static bool HasRules(Role role, AuthorizationRole rules) =>
+        role.Includes.SequenceEqual(rules.Includes, StringComparer.Ordinal) &&
+        role.Allow.SequenceEqual(rules.Allow) &&
+        role.Deny.SequenceEqual(rules.Deny);
 
     // The role store commits the change and replaces the roles, so the host has no configuration to persist.
     bool ISubjectEditComponent.PersistsItself => true;

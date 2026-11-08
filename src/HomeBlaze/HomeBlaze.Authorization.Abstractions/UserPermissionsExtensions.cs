@@ -124,13 +124,10 @@ public static class UserPermissionsExtensions
         subject.TryGetRegisteredSubject()?.TryGetProperty(propertyName) is { } member && permissions.CanAdminister(member);
 
     /// <summary>
-    /// Gets whether the user may administer every configuration member of the subject: what an edit component or a write
-    /// of the whole configuration of the subject may change. True for a registered subject without configuration members.
+    /// Gets whether the user may administer the configuration of the subject: it has at least one configuration member, and
+    /// the user may administer every one of them, which the generic editor of the subject or a write of its whole
+    /// configuration may change. False for a subject without configuration members.
     /// </summary>
-    /// <remarks>
-    /// A subject without configuration members is allowed only because each of its edit components checks the members it
-    /// changes itself; an edit component of such a subject must gate its own writes.
-    /// </remarks>
     /// <param name="permissions">The permissions of the user.</param>
     /// <param name="subject">The subject to configure.</param>
     public static bool CanAdministerConfiguration(this IUserPermissions permissions, IInterceptorSubject subject)
@@ -140,15 +137,21 @@ public static class UserPermissionsExtensions
             return false;
         }
 
+        var hasConfiguration = false;
         foreach (var member in registered.Properties)
         {
-            if (member.TryGetAttribute(KnownAttributes.Configuration) is not null && !permissions.CanAdminister(member))
+            if (member.TryGetAttribute(KnownAttributes.Configuration) is not null)
             {
-                return false;
+                if (!permissions.CanAdminister(member))
+                {
+                    return false;
+                }
+
+                hasConfiguration = true;
             }
         }
 
-        return true;
+        return hasConfiguration;
     }
 
     /// <summary>

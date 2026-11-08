@@ -29,34 +29,22 @@ public static class EditPermissions
         file.TryGetRegisteredSubject()?.TryGetProperty(nameof(MarkdownFile.Content));
 
     /// <summary>
-    /// Gets whether the viewer may use the editor of the subject: change the content of a file, what an
-    /// <see cref="ISubjectEditPermission"/> decides, or administer some configuration member of any other subject. A
-    /// subject without configuration members can be edited by its edit component alone, which checks the members it
-    /// changes itself.
+    /// Gets whether the viewer may use the editor of the subject: change the content of a file, see
+    /// <see cref="CanAdministerFileContent"/>; for a subject with an edit component, save it through the edit operation of
+    /// the subject, see <see cref="RegisteredSubjectMethodExtensions.CanInvokeEditOperation"/>; or administer the
+    /// configuration of any other subject, see <see cref="UserPermissionsExtensions.CanAdministerConfiguration"/>, which
+    /// requires at least one configuration member.
     /// </summary>
-    public static bool CanEdit(this IUserPermissions permissions, IInterceptorSubject subject)
+    /// <param name="permissions">The permissions of the viewer.</param>
+    /// <param name="subject">The subject to edit.</param>
+    /// <param name="hasEditComponent">Whether the subject has an edit component, which alone saves through its edit operation.</param>
+    public static bool CanEdit(this IUserPermissions permissions, IInterceptorSubject subject, bool hasEditComponent)
     {
         if (subject is IStorageFile)
         {
             return permissions.CanAdministerFileContent(subject);
         }
 
-        if (subject is ISubjectEditPermission editPermission)
-        {
-            return editPermission.CanEdit(permissions);
-        }
-
-        var hasConfiguration = false;
-        foreach (var member in subject.GetConfigurationProperties())
-        {
-            if (permissions.CanAdminister(member))
-            {
-                return true;
-            }
-
-            hasConfiguration = true;
-        }
-
-        return !hasConfiguration;
+        return (hasEditComponent && permissions.CanInvokeEditOperation(subject)) || permissions.CanAdministerConfiguration(subject);
     }
 }

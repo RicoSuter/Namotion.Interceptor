@@ -1066,7 +1066,7 @@
             Subject.GetType(),
             SubjectComponentType.Edit);
 
-        return (hasEditComponent || ConfigurationPropertiesEditor.HasEditableProperties(Subject)) && Permissions.CanEdit(Subject);
+        return (hasEditComponent || ConfigurationPropertiesEditor.HasEditableProperties(Subject)) && Permissions.CanEdit(Subject, hasEditComponent);
     }
 
     private async Task OpenEditDialog()

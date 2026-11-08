@@ -45,7 +45,9 @@ public sealed class SubjectPaneGateTests : BunitContext, IAsyncLifetime
         Services.AddSingleton<IUserPermissions>(_permissions);
         Services.AddSingleton<ITimeZoneDisplay, TimeZoneDisplayService>();
         Services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
-        Services.AddSingleton(new SubjectComponentRegistry(new TypeProvider().AddAssembly(typeof(MarkdownFileEditComponent).Assembly)));
+        Services.AddSingleton(new SubjectComponentRegistry(new TypeProvider()
+            .AddAssembly(typeof(MarkdownFileEditComponent).Assembly)
+            .AddAssembly(typeof(SubjectPaneGateTests).Assembly)));
         Services.AddSingleton<PropertyRowLayoutService>();
         Services.AddSingleton<MetadataLinkResolver>();
         Services.AddSingleton<IHttpContextAccessor>(new HttpContextAccessor());
@@ -121,7 +123,7 @@ public sealed class SubjectPaneGateTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
-    public void WhenTheViewerMayAdministerAConfigurationMember_ThenThePaneShowsTheEditButton()
+    public void WhenTheViewerMayNotAdministerOneConfigurationMember_ThenThePaneShowsNoEditButton()
     {
         // Arrange
         _permissions.CannotAdminister.Add(GetMember(_graph.Door, nameof(TestDoor.IsOpen)));
@@ -130,7 +132,71 @@ public sealed class SubjectPaneGateTests : BunitContext, IAsyncLifetime
         var panel = RenderPanel(_graph.Door);
 
         // Assert
+        Assert.Empty(panel.FindAll("[data-testid='edit-subject-button']"));
+    }
+
+    [Fact]
+    public void WhenTheViewerMayAdministerEveryConfigurationMember_ThenThePaneShowsTheEditButton()
+    {
+        // Act
+        var panel = RenderPanel(_graph.Door);
+
+        // Assert
         Assert.Single(panel.FindAll("[data-testid='edit-subject-button']"));
+    }
+
+    [Fact]
+    public void WhenASubjectWithAnEditComponentHasNoConfigurationMemberAndNoEditOperation_ThenThePaneShowsNoEditButton()
+    {
+        // Arrange
+        var subject = AddToStorage(new UnconfiguredEditedSubject());
+
+        // Act
+        var panel = RenderPanel(subject);
+
+        // Assert
+        Assert.Empty(panel.FindAll("[data-testid='edit-subject-button']"));
+    }
+
+    [Fact]
+    public void WhenTheViewerMayInvokeTheEditOperationOfASubjectWithoutConfiguration_ThenThePaneShowsTheEditButton()
+    {
+        // Arrange
+        var subject = AddToStorage(new OperationSavedSubject());
+
+        // Act
+        var panel = RenderPanel(subject);
+
+        // Assert
+        Assert.Single(panel.FindAll("[data-testid='edit-subject-button']"));
+        Assert.DoesNotContain(panel.FindAll("button.subject-pane-method"), button => button.TextContent.Contains("Save", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void WhenTheViewerMayNotInvokeTheEditOperationOfASubjectWithoutConfiguration_ThenThePaneShowsNoEditButton()
+    {
+        // Arrange
+        var subject = AddToStorage(new OperationSavedSubject());
+        _permissions.CannotAdminister.Add(GetMember(subject, "Save"));
+
+        // Act
+        var panel = RenderPanel(subject);
+
+        // Assert
+        Assert.Empty(panel.FindAll("[data-testid='edit-subject-button']"));
+    }
+
+    [Fact]
+    public void WhenTheEditOperationOfASubjectWithoutConfigurationIsDisabled_ThenThePaneShowsNoEditButton()
+    {
+        // Arrange
+        var subject = AddToStorage(new OperationSavedSubject { IsLocked = true });
+
+        // Act
+        var panel = RenderPanel(subject);
+
+        // Assert
+        Assert.Empty(panel.FindAll("[data-testid='edit-subject-button']"));
     }
 
     [Fact]
@@ -239,6 +305,13 @@ public sealed class SubjectPaneGateTests : BunitContext, IAsyncLifetime
 
     private static RegisteredSubjectProperty GetMember(IInterceptorSubject subject, string name) =>
         subject.TryGetRegisteredSubject()!.TryGetProperty(name)!;
+
+    private TSubject AddToStorage<TSubject>(TSubject subject)
+        where TSubject : IInterceptorSubject
+    {
+        _graph.Storage.Children = new Dictionary<string, IInterceptorSubject>(_graph.Storage.Children) { ["edited"] = subject };
+        return subject;
+    }
 
     private IRenderedComponent<SubjectPropertyPanel> RenderPanel(IInterceptorSubject subject) =>
         Render<SubjectPropertyPanel>(parameters => parameters

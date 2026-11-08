@@ -47,8 +47,10 @@ public sealed class RoleOperationsTests
             Assert.Equal(builtInRole.Includes, role.Includes);
             Assert.Equal(builtInRole.Allow, role.Allow);
             Assert.Equal(builtInRole.Deny, role.Deny);
+            Assert.False(role.IsEditEnabled);
             Assert.False(role.IsRenameEnabled);
             Assert.False(role.IsDeleteEnabled);
+            Assert.Equal(BuiltInRoleReason, role.EditDisabledReason);
             Assert.Equal(BuiltInRoleReason, role.RenameDisabledReason);
             Assert.Equal(BuiltInRoleReason, role.DeleteDisabledReason);
         }
@@ -56,8 +58,10 @@ public sealed class RoleOperationsTests
         var kitchen = _authorization.Roles["kitchen"];
         Assert.False(kitchen.IsBuiltIn);
         Assert.Null(kitchen.Description);
+        Assert.True(kitchen.IsEditEnabled);
         Assert.True(kitchen.IsRenameEnabled);
         Assert.True(kitchen.IsDeleteEnabled);
+        Assert.Null(kitchen.EditDisabledReason);
         Assert.Null(kitchen.RenameDisabledReason);
         Assert.Null(kitchen.DeleteDisabledReason);
     }
@@ -86,30 +90,70 @@ public sealed class RoleOperationsTests
     }
 
     [Fact]
-    public async Task WhenABuiltInRoleIsRenamedOrDeleted_ThenBothThrowWithoutAskingTheStore()
+    public async Task WhenABuiltInRoleIsEditedRenamedOrDeleted_ThenEachThrowsWithoutAskingTheStore()
     {
         // Arrange
         var reader = _authorization.Roles[BuiltInRoles.ReaderName];
 
         // Act & Assert
+        var edit = await Assert.ThrowsAsync<InvalidOperationException>(() => reader.EditAsync([], [], [], _roleStore, CancellationToken.None));
         var rename = await Assert.ThrowsAsync<InvalidOperationException>(() => reader.RenameAsync("readers", _roleStore, CancellationToken.None));
         var delete = await Assert.ThrowsAsync<InvalidOperationException>(() => reader.DeleteAsync(_roleStore, CancellationToken.None));
+        Assert.Equal(BuiltInRoleReason, edit.Message);
         Assert.Equal(BuiltInRoleReason, rename.Message);
         Assert.Equal(BuiltInRoleReason, delete.Message);
+        Assert.Empty(_roleStore.Saves);
         Assert.Empty(_roleStore.Renames);
         Assert.Empty(_roleStore.Deletes);
     }
 
     [Fact]
-    public void WhenTheRoleIsBuiltIn_ThenNoViewerMayOpenItsEditor()
+    public void WhenTheRoleIsBuiltIn_ThenNoViewerMayInvokeItsEditOperation()
     {
         // Arrange
-        ISubjectEditPermission reader = _authorization.Roles[BuiltInRoles.ReaderName];
-        ISubjectEditPermission kitchen = _authorization.Roles["kitchen"];
+        var reader = _authorization.Roles[BuiltInRoles.ReaderName];
+        var kitchen = _authorization.Roles["kitchen"];
+
+        // Act
+        var canEditReader = UnrestrictedPermissions.Instance.CanInvokeEditOperation(reader);
+        var canEditKitchen = UnrestrictedPermissions.Instance.CanInvokeEditOperation(kitchen);
+
+        // Assert
+        Assert.False(canEditReader);
+        Assert.True(canEditKitchen);
+    }
+
+    [Fact]
+    public async Task WhenARoleIsEdited_ThenTheStoreSavesTheRulesUnderItsNameWithItsStamp()
+    {
+        // Arrange
+        var kitchen = _authorization.Roles["kitchen"];
+        var allow = new PermissionRule { Paths = ["/Devices/**"], Actions = [PermissionAction.Read] };
+        var deny = new PermissionRule { Members = ["Secret*"], Actions = [PermissionAction.Write] };
+
+        // Act
+        await kitchen.EditAsync([BuiltInRoles.ReaderName], [allow], [deny], _roleStore, CancellationToken.None);
+
+        // Assert
+        var (originalName, role, stamp) = Assert.Single(_roleStore.Saves);
+        Assert.Equal("kitchen", originalName);
+        Assert.Equal(RecordingRoleStore.GetStamp("kitchen"), stamp);
+        Assert.Equal(new AuthorizationRole { Name = "kitchen", Includes = [BuiltInRoles.ReaderName], Allow = [allow], Deny = [deny] }, role);
+        Assert.Equal([allow], _authorization.Roles["kitchen"].Allow);
+    }
+
+    [Fact]
+    public async Task WhenTheStoreRefusesTheEdit_ThenEditingThrowsItsErrorAndTheRoleStays()
+    {
+        // Arrange
+        _roleStore.Refusal = "The role 'kitchen' changed since you opened it.";
+        var kitchen = _authorization.Roles["kitchen"];
 
         // Act & Assert
-        Assert.False(reader.CanEdit(UnrestrictedPermissions.Instance));
-        Assert.True(kitchen.CanEdit(UnrestrictedPermissions.Instance));
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => kitchen.EditAsync([], [new PermissionRule { Actions = [PermissionAction.Read] }], [], _roleStore, CancellationToken.None));
+        Assert.Equal(_roleStore.Refusal, exception.Message);
+        Assert.Same(kitchen, _authorization.Roles["kitchen"]);
     }
 
     [Fact]
@@ -217,13 +261,17 @@ public sealed class RoleOperationsTests
     }
 
     [Fact]
-    public async Task WhenTheRoleWasReplacedSinceItWasShown_ThenRenamingAndDeletingItThrowWithoutAskingTheStore()
+    public async Task WhenTheRoleWasReplacedSinceItWasShown_ThenEditingRenamingAndDeletingItThrowWithoutAskingTheStore()
     {
         // Arrange: the store replaces every role on each change.
         var kitchen = _authorization.Roles["kitchen"];
         await _authorization.AddRoleAsync("pantry", _roleStore, CancellationToken.None);
+        _roleStore.Saves.Clear();
 
         // Act & Assert
+        var edit = await Assert.ThrowsAsync<InvalidOperationException>(() => kitchen.EditAsync([], [], [], _roleStore, CancellationToken.None));
+        Assert.Equal(DetachedMessage, edit.Message);
+        Assert.Empty(_roleStore.Saves);
         var rename = await Assert.ThrowsAsync<InvalidOperationException>(() => kitchen.RenameAsync("cellar", _roleStore, CancellationToken.None));
         var delete = await Assert.ThrowsAsync<InvalidOperationException>(() => kitchen.DeleteAsync(_roleStore, CancellationToken.None));
         Assert.Equal(DetachedMessage, rename.Message);
@@ -233,7 +281,7 @@ public sealed class RoleOperationsTests
     }
 
     [Fact]
-    public async Task WhenTheRoleIsReplacedWhileItsStampIsRead_ThenDeletingItThrowsWithoutAskingTheStore()
+    public async Task WhenTheRoleIsReplacedWhileItsStampIsRead_ThenEditingAndDeletingItThrowWithoutAskingTheStore()
     {
         // Arrange: the stamp then belongs to rules this subject does not have.
         var kitchen = _authorization.Roles["kitchen"];
@@ -241,8 +289,11 @@ public sealed class RoleOperationsTests
             [.. _authorization.Roles.Where(entry => !entry.Value.IsBuiltIn).Select(entry => new AuthorizationRole { Name = entry.Key })]);
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => kitchen.DeleteAsync(_roleStore, CancellationToken.None));
-        Assert.Equal(DetachedMessage, exception.Message);
+        var edit = await Assert.ThrowsAsync<InvalidOperationException>(() => kitchen.EditAsync([], [], [], _roleStore, CancellationToken.None));
+        var delete = await Assert.ThrowsAsync<InvalidOperationException>(() => kitchen.DeleteAsync(_roleStore, CancellationToken.None));
+        Assert.Equal(DetachedMessage, edit.Message);
+        Assert.Equal(DetachedMessage, delete.Message);
+        Assert.Empty(_roleStore.Saves);
         Assert.Empty(_roleStore.Deletes);
     }
 
@@ -293,16 +344,21 @@ public sealed class RoleOperationsTests
 
         // Act
         var addRole = authorization.TryGetProperty("AddRole")?.TryGetMethodMetadata();
+        var edit = kitchen.TryGetProperty("Edit")?.TryGetMethodMetadata();
         var rename = kitchen.TryGetProperty("Rename")?.TryGetMethodMetadata();
         var delete = kitchen.TryGetProperty("Delete")?.TryGetMethodMetadata();
 
         // Assert
         Assert.True(addRole!.RequiresAdministration);
+        Assert.True(edit!.RequiresAdministration);
         Assert.True(rename!.RequiresAdministration);
         Assert.True(delete!.RequiresAdministration);
         Assert.False(addRole.RequiresConfirmation);
+        Assert.False(edit.RequiresConfirmation);
         Assert.True(rename.RequiresConfirmation);
         Assert.True(delete.RequiresConfirmation);
+        Assert.Equal("Edit", edit.Title);
+        Assert.Equal("Edit", edit.Icon);
         Assert.Equal("Add Role", addRole.Title);
         Assert.Equal("Add", addRole.Icon);
         Assert.Equal("Rename", rename.Title);
@@ -328,6 +384,22 @@ public sealed class RoleOperationsTests
         Assert.DoesNotContain(kitchen.GetAllMethods(ExclusionTarget.UserInterface, excludeMethodsWithPurpose: true), method => method.PropertyName == "Delete");
     }
 
+    [Fact]
+    public void WhenTheEditOperationOfARoleIsLookedUp_ThenItIsTheRolesEditOperation()
+    {
+        // Arrange
+        var kitchen = _authorization.Roles["kitchen"].TryGetRegisteredSubject()!;
+
+        // Act
+        var editOperation = kitchen.GetEditOperation(ExclusionTarget.UserInterface);
+
+        // Assert
+        Assert.NotNull(editOperation);
+        Assert.Equal("Edit", editOperation.PropertyName);
+        Assert.Equal(OperationPurpose.Edit, editOperation.Purpose);
+        Assert.DoesNotContain(kitchen.GetAllMethods(ExclusionTarget.UserInterface, excludeMethodsWithPurpose: true), method => method.PropertyName == "Edit");
+    }
+
     // Records the changes and, unless told to refuse, applies them to the Authorization as the role store does: every
     // role gets a new subject.
     private sealed class RecordingRoleStore(Authorization authorization) : IRoleStore
@@ -347,7 +419,18 @@ public sealed class RoleOperationsTests
         public Task<RoleChangeResult> SaveRoleAsync(string? originalName, AuthorizationRole role, string? concurrencyStamp, CancellationToken cancellationToken)
         {
             Saves.Add((originalName, role, concurrencyStamp));
-            return Task.FromResult(Apply(roles => roles.Add(role)));
+            return Task.FromResult(Apply(roles =>
+            {
+                var index = originalName is null ? -1 : roles.FindIndex(existing => string.Equals(existing.Name, originalName, StringComparison.OrdinalIgnoreCase));
+                if (index >= 0)
+                {
+                    roles[index] = role;
+                }
+                else
+                {
+                    roles.Add(role);
+                }
+            }));
         }
 
         public Task<RoleChangeResult> RenameRoleAsync(string oldName, string newName, CancellationToken cancellationToken)
