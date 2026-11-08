@@ -72,6 +72,18 @@ internal sealed class AutomationRuntime
 
     public void RequestConfiguration() => _queue.TryEnqueue(ConfigurationChangedInput.Instance);
 
+    /// <summary>
+    /// Queues a graph change, since the automation or one of its rules gained a parent through a property that is not on
+    /// its graph route. Called on the writing thread.
+    /// </summary>
+    public void OnParentAdded() => _changes.RequestGraphChange(AutomationInputQueue.CausedChainDepth);
+
+    // White-box test hook: the receiver of the property changes of the automation.
+    internal AutomationChangeReceiver Changes => _changes;
+
+    // White-box test hook: the engine of the rules.
+    internal AutomationEngine Engine => _engine;
+
     /// <summary>Queues a reset; false when the queue is full or closed, or the reset continues a feedback chain beyond the limit.</summary>
     public bool RequestReset()
     {

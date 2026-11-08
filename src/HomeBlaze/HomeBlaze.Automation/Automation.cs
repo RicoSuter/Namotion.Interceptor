@@ -147,6 +147,8 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         }
     }
 
+    // A path that leads up from a rule, and the checkpoint path, depend on the parents of the automation, and the property
+    // that gains it is not on the graph route of the worker, so the gain is told to the worker here.
     void ILifecycleHandler.HandleLifecycleChange(SubjectLifecycleChange change)
     {
         if (!ReferenceEquals(change.Subject, this))
@@ -162,7 +164,18 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         {
             _isDetached = true;
         }
+
+        if (change.IsPropertyReferenceAdded)
+        {
+            OnParentAdded();
+        }
     }
+
+    /// <summary>Tells the worker that the automation or one of its rules gained a parent. Called on the writing thread.</summary>
+    internal void OnParentAdded() => Volatile.Read(ref _runtime)?.OnParentAdded();
+
+    // White-box test hook: the runtime of the current start.
+    internal AutomationRuntime? Runtime => Volatile.Read(ref _runtime);
 
     /// <summary>Completes once every input queued so far, and every input those caused, was processed, or the worker stopped.</summary>
     internal Task FlushAsync() => Volatile.Read(ref _runtime)?.FlushAsync() ?? Task.CompletedTask;
