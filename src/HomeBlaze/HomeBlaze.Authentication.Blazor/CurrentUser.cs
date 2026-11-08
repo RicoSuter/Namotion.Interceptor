@@ -94,16 +94,6 @@ internal sealed class CurrentUser : IDisposable
     internal (IReadOnlyCollection<string> Roles, PrincipalKind Kind, bool MustChangePassword) GetPolicyInputs() =>
         _identity.GetPolicyInputs(_userStore);
 
-    /// <summary>
-    /// Gets the id of the signed-in person, or null when nobody is signed in, the state is not known, or the person must
-    /// change their password.
-    /// </summary>
-    internal string? GetPersonUserId()
-    {
-        var identity = _identity;
-        return identity is { IsSignedIn: true, MustChangePassword: false } ? identity.UserId : null;
-    }
-
     private bool TryGetState([NotNullWhen(true)] out Task<AuthenticationState>? state)
     {
         try

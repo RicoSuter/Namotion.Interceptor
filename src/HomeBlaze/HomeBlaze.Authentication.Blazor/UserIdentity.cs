@@ -24,12 +24,6 @@ internal sealed class UserIdentity
 
     public bool IsSignedIn { get; }
 
-    /// <summary>
-    /// True for every signed-in person, as only the <see cref="UserStore"/> knows whether they must change their password;
-    /// <see cref="RequiresPasswordChange"/> asks it.
-    /// </summary>
-    public bool MustChangePassword => IsSignedIn;
-
     private bool IsKnown { get; }
 
     public PrincipalKind Kind => IsSignedIn ? PrincipalKind.Person : PrincipalKind.Anonymous;
