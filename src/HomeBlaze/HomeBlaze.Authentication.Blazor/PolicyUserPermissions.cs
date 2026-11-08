@@ -108,7 +108,7 @@ public sealed partial class PolicyUserPermissions : IUserPermissions, IDisposabl
         {
             try
             {
-                _decisions = PermissionDecisions.Create(_authorizationService, _currentUser.GetPolicyInputs(), _decisions);
+                _decisions = PermissionDecisions.Create(_authorizationService, _currentUser.GetPolicyInputs());
             }
             catch (Exception exception)
             {

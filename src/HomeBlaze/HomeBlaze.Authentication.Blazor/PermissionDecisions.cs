@@ -41,10 +41,6 @@ internal sealed class PermissionDecisions : IUserPermissions
     private DecisionMemo<RegisteredSubject>? _shownMemo;
     private DecisionMemo<RegisteredSubjectProperty>? _readMemo;
 
-    // The most answers a memo held, which sizes the next one, so that it does not grow while it fills.
-    private int _shownCount;
-    private int _readCount;
-
     // Created when first needed: only a principal with roles with deny rules asks for the closure of other roles.
     private ConditionalWeakTable<IReadOnlyCollection<string>, IReadOnlyList<string>>? _missingRolesWithDenyRules;
 
@@ -54,8 +50,7 @@ internal sealed class PermissionDecisions : IUserPermissions
         IReadOnlySet<string> roleClosure,
         IReadOnlySet<string> rolesWithDenyRules,
         bool isPerson,
-        bool isFullAdministrator,
-        PermissionDecisions? replaced)
+        bool isFullAdministrator)
     {
         _authorizationService = authorizationService;
         _policy = policy;
@@ -63,27 +58,21 @@ internal sealed class PermissionDecisions : IUserPermissions
         _rolesWithDenyRules = rolesWithDenyRules;
         _isPerson = isPerson;
         IsFullAdministrator = isFullAdministrator;
-        if (replaced is not null)
-        {
-            _shownCount = GetCount(Volatile.Read(ref replaced._shownMemo), ref replaced._shownCount);
-            _readCount = GetCount(Volatile.Read(ref replaced._readMemo), ref replaced._readCount);
-        }
     }
 
     /// <summary>Decisions that deny everything.</summary>
     public static PermissionDecisions DenyAll { get; } =
-        new(null, AuthorizationPolicy.DenyAll, new HashSet<string>(), new HashSet<string>(), isPerson: false, isFullAdministrator: false, replaced: null);
+        new(null, AuthorizationPolicy.DenyAll, new HashSet<string>(), new HashSet<string>(), isPerson: false, isFullAdministrator: false);
 
     /// <summary>Whether the principal is a full administrator, a person for whom <see cref="AuthorizationServiceRoleExtensions.IsFullAdministrator(AuthorizationService, IReadOnlyCollection{string})"/> holds.</summary>
     public bool IsFullAdministrator { get; }
 
     /// <summary>
     /// Creates the decisions of a principal of <paramref name="kind"/> holding <paramref name="roles"/>; they deny
-    /// everything when the roles do not compile. <paramref name="replaced"/>, the decisions they replace, sizes what
-    /// they remember.
+    /// everything when the roles do not compile.
     /// </summary>
     public static PermissionDecisions Create(
-        AuthorizationService authorizationService, IReadOnlyCollection<string> roles, PrincipalKind kind, PermissionDecisions? replaced = null)
+        AuthorizationService authorizationService, IReadOnlyCollection<string> roles, PrincipalKind kind)
     {
         var policy = authorizationService.GetPolicy(roles, kind).Policy;
         var roleClosure = authorizationService.GetRoleClosure(roles);
@@ -94,20 +83,18 @@ internal sealed class PermissionDecisions : IUserPermissions
             roleClosure,
             authorizationService.GetRolesWithDenyRules(roleClosure),
             isPerson,
-            isPerson && authorizationService.IsFullAdministrator(roles, roleClosure),
-            replaced);
+            isPerson && authorizationService.IsFullAdministrator(roles, roleClosure));
     }
 
     /// <summary>
     /// Creates the decisions of a principal from the inputs of its policy: those of
-    /// <see cref="Create(AuthorizationService, IReadOnlyCollection{string}, PrincipalKind, PermissionDecisions?)"/>, and
+    /// <see cref="Create(AuthorizationService, IReadOnlyCollection{string}, PrincipalKind)"/>, and
     /// <see cref="DenyAll"/> for a person who must change their password.
     /// </summary>
     public static PermissionDecisions Create(
         AuthorizationService authorizationService,
-        (IReadOnlyCollection<string> Roles, PrincipalKind Kind, bool MustChangePassword) inputs,
-        PermissionDecisions? replaced = null) =>
-        inputs.MustChangePassword ? DenyAll : Create(authorizationService, inputs.Roles, inputs.Kind, replaced);
+        (IReadOnlyCollection<string> Roles, PrincipalKind Kind, bool MustChangePassword) inputs) =>
+        inputs.MustChangePassword ? DenyAll : Create(authorizationService, inputs.Roles, inputs.Kind);
 
     /// <summary>Never raised: the decisions do not change.</summary>
     public event Action? Changed
@@ -205,7 +192,7 @@ internal sealed class PermissionDecisions : IUserPermissions
     public bool CanRead(RegisteredSubjectProperty member) =>
         // The scope roles of a subject are a value, which the graph version does not follow, so they are not remembered.
         IsSharedWithPrincipal(member) &&
-        Remember(ref _readMemo, ref _readCount, member, static (decisions, readMember) => decisions.DecideCanRead(readMember));
+        Remember(ref _readMemo, member, static (decisions, readMember) => decisions.DecideCanRead(readMember));
 
     private bool DecideCanRead(RegisteredSubjectProperty member) => _policy.CanRead(member) || IsAdministeredUserMember(member);
 
@@ -225,12 +212,12 @@ internal sealed class PermissionDecisions : IUserPermissions
     /// </summary>
     /// <remarks>Remembered per subject until <see cref="AuthorizationService.GraphVersion"/> changes.</remarks>
     public bool CanShow(RegisteredSubject subject) =>
-        Remember(ref _shownMemo, ref _shownCount, subject, static (decisions, shownSubject) => decisions.DecideCanShow(shownSubject));
+        Remember(ref _shownMemo, subject, static (decisions, shownSubject) => decisions.DecideCanShow(shownSubject));
 
     private bool DecideCanShow(RegisteredSubject subject) => _policy.IsVisible(subject) || IsShownAdministeredUser(subject);
 
     // Answers from the memo of the current graph version, deciding and remembering on a miss.
-    private bool Remember<TKey>(ref DecisionMemo<TKey>? memoField, ref int count, TKey key, Func<PermissionDecisions, TKey, bool> decide)
+    private bool Remember<TKey>(ref DecisionMemo<TKey>? memoField, TKey key, Func<PermissionDecisions, TKey, bool> decide)
         where TKey : class
     {
         if (_authorizationService is null)
@@ -243,10 +230,7 @@ internal sealed class PermissionDecisions : IUserPermissions
         var memo = Volatile.Read(ref memoField);
         if (memo is null || memo.GraphVersion != graphVersion)
         {
-            var previousCount = GetCount(memo, ref count);
-
-            // With headroom, as a memo grows when the keys of one of its locks exceed their share.
-            memo = new DecisionMemo<TKey>(graphVersion, previousCount + previousCount / 4);
+            memo = new DecisionMemo<TKey>(graphVersion);
             Volatile.Write(ref memoField, memo);
         }
 
@@ -258,18 +242,6 @@ internal sealed class PermissionDecisions : IUserPermissions
         answer = decide(this, key);
         memo.Answers.TryAdd(key, answer);
         return answer;
-    }
-
-    private static int GetCount<TKey>(DecisionMemo<TKey>? memo, ref int count)
-        where TKey : class
-    {
-        if (memo is not null)
-        {
-            // Unsynchronized on purpose: a lost update only misjudges the size of the next memo.
-            count = Math.Max(count, memo.Answers.Count);
-        }
-
-        return count;
     }
 
     /// <summary>
@@ -354,12 +326,15 @@ internal sealed class PermissionDecisions : IUserPermissions
     private static bool RequiresAdministration(RegisteredSubjectProperty member) =>
         member.Type == typeof(MethodMetadata) && member.GetValue() is MethodMetadata { RequiresAdministration: true };
 
-    private sealed class DecisionMemo<TKey>(long graphVersion, int capacity)
+    private sealed class DecisionMemo<TKey>(long graphVersion)
         where TKey : class
     {
+        // The default of ConcurrentDictionary; a memo grows as it fills.
+        private const int InitialCapacity = 31;
+
         public long GraphVersion { get; } = graphVersion;
 
         public ConcurrentDictionary<TKey, bool> Answers { get; } =
-            new(MemoConcurrencyLevel, capacity, ReferenceEqualityComparer.Instance);
+            new(MemoConcurrencyLevel, InitialCapacity, ReferenceEqualityComparer.Instance);
     }
 }

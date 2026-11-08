@@ -92,8 +92,7 @@ public class CanShowBenchmark
             throw new InvalidOperationException($"Expected 3906 subjects, found {_subjects.Length}.");
         }
 
-        // The role hides /Home/F1 and the 780 subjects below it. Counting with the kept decisions fills their memo, which
-        // sizes the memo of the decisions that replace them.
+        // The role hides /Home/F1 and the 780 subjects below it. Counting with the kept decisions fills their memo.
         var expectedShown = Role == "Everything" ? 3906 : 3906 - 781;
         if (CountShown(_decisions) is var shown && shown != expectedShown)
         {
@@ -114,7 +113,7 @@ public class CanShowBenchmark
     /// </summary>
     [Benchmark]
     public int CanShowEverySubjectWithNewDecisions() =>
-        CountShown(PermissionDecisions.Create(_authorizationService, _roles, PrincipalKind.Person, _decisions));
+        CountShown(PermissionDecisions.Create(_authorizationService, _roles, PrincipalKind.Person));
 
     private int CountShown(PermissionDecisions decisions)
     {
