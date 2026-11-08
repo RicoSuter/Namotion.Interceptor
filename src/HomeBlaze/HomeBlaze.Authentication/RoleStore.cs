@@ -11,9 +11,9 @@ namespace HomeBlaze.Authentication;
 /// <summary>
 /// Stores custom roles in the authentication database and projects them into <see cref="AuthorizationSubject.Roles"/>.
 /// A change is validated against the roles of every principal, the users and those of every
-/// <see cref="IRoleNameReferences"/>, and committed before the projection changes. A change is also refused when it would leave no unlocked user holding
-/// <see cref="BuiltInRoles.EverythingName"/> without a deny rule on <c>administer</c> while one does now. Changes run one at a time, together with the changes of
-/// users, through the <see cref="AuthorizationChangeGate"/>. Thread-safe.
+/// <see cref="IRoleNameReferences"/>, and committed before the projection changes. A change is also refused when it would
+/// take the last full administrator away, as for a change of users, see <see cref="FullAdministrators"/>. Changes run one
+/// at a time, together with the changes of users, through the <see cref="AuthorizationChangeGate"/>. Thread-safe.
 /// </summary>
 /// <remarks>
 /// A rename is validated as if every principal had the new name. Users hold their roles by database row, so the rename
@@ -85,6 +85,9 @@ public sealed class RoleStore : IRoleStore
 
         return BuiltInRoles.All.Any(role => string.Equals(role.Name, name, StringComparison.Ordinal)) || _roles.ContainsKey(name);
     }
+
+    /// <summary>Gets every stored custom role.</summary>
+    internal List<AuthorizationRole> GetCustomRoles() => [.. _roles.Values.Select(entry => entry.Role)];
 
     /// <summary>Loads the custom roles from the database and projects them.</summary>
     public async Task LoadAsync(CancellationToken cancellationToken)
@@ -191,8 +194,9 @@ public sealed class RoleStore : IRoleStore
             updated.Remove(name);
             var current = roles.Values.Select(entry => entry.Role).ToList();
             var candidate = updated.Values.Select(entry => entry.Role).ToList();
+            var people = _personRoleSets();
             var validationError = _authorizationService.ValidateRoles(current, candidate, GetPrincipalRoleSets())
-                ?? FullAdministrators.GetRemovalError(current, candidate, _personRoleSets(), rename: null);
+                ?? FullAdministrators.GetRemovalError(current, candidate, people, people);
             if (validationError is not null)
             {
                 return new RoleChangeResult(false, validationError);
@@ -323,9 +327,20 @@ public sealed class RoleStore : IRoleStore
         var error = renamedFrom is null
             ? _authorizationService.ValidateRoles(current, candidate, principalRoleSets)
             : _authorizationService.ValidateRoles(current, candidate, principalRoleSets, renamedFrom, newName);
-        return error ?? FullAdministrators.GetRemovalError(
-            current, candidate, _personRoleSets(), renamedFrom is null ? null : (renamedFrom, newName));
+        if (error is not null)
+        {
+            return error;
+        }
+
+        var people = _personRoleSets();
+        return FullAdministrators.GetRemovalError(current, candidate, people, renamedFrom is null ? people : Rename(people, renamedFrom, newName));
     }
+
+    private static List<PersonRoleSet> Rename(IReadOnlyCollection<PersonRoleSet> people, string oldName, string newName) =>
+        [.. people.Select(person => person with
+        {
+            RoleNames = [.. person.RoleNames.Select(name => string.Equals(name, oldName, StringComparison.Ordinal) ? newName : name)]
+        })];
 
     // The saved role and, for a rename, every other custom role whose includes name the old name, with the new name.
     private static List<(string? OriginalName, AuthorizationRole Role)> GetChanges(

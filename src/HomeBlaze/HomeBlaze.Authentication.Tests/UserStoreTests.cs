@@ -1,3 +1,4 @@
+using HomeBlaze.Authentication.Data;
 using HomeBlaze.Authorization;
 using Namotion.Interceptor.Authorization;
 using Xunit;
@@ -35,8 +36,7 @@ public class UserStoreTests
 
         // Assert
         Assert.False(result.Succeeded);
-        Assert.Contains("last", result.Error);
-        Assert.Equal("'admin' is the last unlocked full administrator; give another user everything without a role that denies administer first.", result.Error);
+        Assert.Equal("This change would leave no unlocked user with everything and no deny rule on administer; give another user everything without a role that denies administer first.", result.Error);
         Assert.Equal([BuiltInRoles.EverythingName], graph.UserStore.GetRoles(graph.AdminUserId));
     }
 
@@ -537,7 +537,7 @@ public class UserStoreTests
         // Arrange
         await using var graph = await AuthenticationTestGraph.CreateAsync();
         var administration = graph.AdministrationAs(graph.AdminUserId);
-        var expected = "'admin' is the last unlocked full administrator; give another user everything without a role that denies administer first.";
+        var expected = "This change would leave no unlocked user with everything and no deny rule on administer; give another user everything without a role that denies administer first.";
 
         // Act
         var removed = await administration.RemoveAsync("admin", CancellationToken.None);
@@ -562,7 +562,7 @@ public class UserStoreTests
         var result = await administration.SetRolesAsync("admin", [BuiltInRoles.OperatorName], CancellationToken.None);
 
         // Assert
-        Assert.Equal("'admin' is the last unlocked full administrator; give another user everything without a role that denies administer first.", result.Error);
+        Assert.Equal("This change would leave no unlocked user with everything and no deny rule on administer; give another user everything without a role that denies administer first.", result.Error);
     }
 
     [Fact]
@@ -577,7 +577,7 @@ public class UserStoreTests
         var result = await administration.SetRolesAsync("admin", [BuiltInRoles.EverythingName, NoAdministrationRole().Name], CancellationToken.None);
 
         // Assert
-        Assert.Equal("'admin' is the last unlocked full administrator; give another user everything without a role that denies administer first.", result.Error);
+        Assert.Equal("This change would leave no unlocked user with everything and no deny rule on administer; give another user everything without a role that denies administer first.", result.Error);
         Assert.Equal([BuiltInRoles.EverythingName], graph.UserStore.GetRoles(graph.AdminUserId));
     }
 
@@ -596,11 +596,52 @@ public class UserStoreTests
         var locked = await administration.SetLockedAsync("admin", true, CancellationToken.None);
 
         // Assert
-        var expected = "'admin' is the last unlocked full administrator; give another user everything without a role that denies administer first.";
+        var expected = "This change would leave no unlocked user with everything and no deny rule on administer; give another user everything without a role that denies administer first.";
         Assert.Equal(expected, demoted.Error);
         Assert.Equal(expected, removed.Error);
         Assert.Equal(expected, locked.Error);
         Assert.Equal([BuiltInRoles.EverythingName], graph.UserStore.GetRoles(graph.AdminUserId));
+    }
+
+    [Fact]
+    public async Task WhenOnlyALockedFullAdministratorIsLeft_ThenRemovingOrDemotingThemIsRefused()
+    {
+        // Arrange
+        await using var graph = await AuthenticationTestGraph.CreateAsync();
+        await SaveRoleAsync(graph, NoAdministrationRole());
+        await graph.AddUserAsync("manager", [BuiltInRoles.EverythingName, NoAdministrationRole().Name]);
+        await graph.SetLockoutEndAsync("admin", ApplicationUser.AdministratorLockoutEnd);
+        var administration = graph.AdministrationAs(graph.UserStore.GetUserId("manager"));
+
+        // Act
+        var demoted = await administration.SetRolesAsync("admin", [], CancellationToken.None);
+        var removed = await administration.RemoveAsync("admin", CancellationToken.None);
+
+        // Assert
+        var expected = "This change would leave no user with everything and no deny rule on administer; give another user everything without a role that denies administer first.";
+        Assert.Equal(expected, demoted.Error);
+        Assert.Equal(expected, removed.Error);
+        Assert.NotNull(graph.UserStore.GetUserId("admin"));
+    }
+
+    [Fact]
+    public async Task WhenAnotherLockedFullAdministratorIsLeft_ThenALockedOneCanBeRemoved()
+    {
+        // Arrange
+        await using var graph = await AuthenticationTestGraph.CreateAsync();
+        await SaveRoleAsync(graph, NoAdministrationRole());
+        await graph.AddUserAsync("boss", [BuiltInRoles.EverythingName]);
+        await graph.AddUserAsync("manager", [BuiltInRoles.EverythingName, NoAdministrationRole().Name]);
+        await graph.SetLockoutEndAsync("boss", ApplicationUser.AdministratorLockoutEnd);
+        await graph.SetLockoutEndAsync("admin", ApplicationUser.AdministratorLockoutEnd);
+        var administration = graph.AdministrationAs(graph.UserStore.GetUserId("manager"));
+
+        // Act
+        var removed = await administration.RemoveAsync("boss", CancellationToken.None);
+
+        // Assert
+        Assert.True(removed.Succeeded, removed.Error);
+        Assert.Null(graph.UserStore.GetUserId("boss"));
     }
 
     [Fact]

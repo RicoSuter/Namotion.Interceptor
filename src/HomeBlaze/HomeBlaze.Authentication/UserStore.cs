@@ -189,8 +189,7 @@ public sealed class UserStore : IMcpClientAccess
     public IEnumerable<PrincipalRoleSet> GetAllRoleSets() => _state.RoleSets;
 
     /// <summary>Gets the role names of every user who is a person, not a built-in user, and whether an administrator locked them.</summary>
-    public IReadOnlyCollection<PersonRoleSet> GetPersonRoleSets() =>
-        [.. _state.ById.Values.Where(user => !user.IsBuiltIn).Select(user => new PersonRoleSet(user.Roles, user.IsLockedByAdministrator))];
+    public IReadOnlyCollection<PersonRoleSet> GetPersonRoleSets() => _state.PersonRoleSets;
 
     /// <summary>
     /// Stores now as the last sign-in of the user with <paramref name="userId"/> and reloads what the sign-in changed, as

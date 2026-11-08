@@ -9,8 +9,8 @@ namespace HomeBlaze.Authentication.Internal;
 /// <summary>
 /// Decides whether an acting person may make a change of users: they must be a person with an active account whose
 /// policy allows <c>administer</c> on the members the change goes through (the operation, and the roles of the user it
-/// changes), the change must pass the delegation rules,
-/// never leave the installation without an unlocked full administrator, and assign only known roles that compile.
+/// changes), the change must pass the delegation rules, must not take the last full administrator away, see
+/// <see cref="FullAdministrators"/>, and must assign only known roles that compile.
 /// Every check denies when its input is missing. Called under the <see cref="AuthorizationChangeGate"/>.
 /// </summary>
 internal sealed class UserChangeRules(
@@ -61,7 +61,7 @@ internal sealed class UserChangeRules(
         var userTarget = new UserTarget(target.Id, target.IsBuiltIn, target.Roles, authorizationService.GetRoleClosure(target.Roles));
         var newRoleClosure = change.Roles is { } newRoles ? authorizationService.GetRoleClosure(newRoles) : null;
         return UserDelegation.GetRefusal(actor.Delegation, userTarget, change.Action, change.Roles, newRoleClosure)
-            ?? (RemovesFullAdministration(change) ? GetLastAdministratorRefusal(state, target) : null)
+            ?? GetLastAdministratorRefusal(state, target, change)
             ?? (change.Roles is { } roles ? GetRolesError(target.UserName, roles) : null);
     }
 
@@ -164,26 +164,44 @@ internal sealed class UserChangeRules(
         _ => nameof(User.SetRolesAsync)
     };
 
-    private bool RemovesFullAdministration(UserChange change) => change.Action switch
+    // Only removing, locking or setting the roles of a person can take a full administrator away.
+    private string? GetLastAdministratorRefusal(UserState state, UserEntry target, UserChange change)
     {
-        UserAction.Remove or UserAction.Lock => true,
-        UserAction.SetRoles => !authorizationService.IsFullAdministrator(change.Roles ?? []),
-        _ => false
-    };
-
-    private string? GetLastAdministratorRefusal(UserState state, UserEntry target)
-    {
-        if (!IsActiveFullAdministrator(target) ||
-            state.ById.Values.Any(user => user.Id != target.Id && IsActiveFullAdministrator(user)))
+        if (target.IsBuiltIn || change.Action is not (UserAction.Remove or UserAction.Lock or UserAction.SetRoles))
         {
             return null;
         }
 
-        return $"'{target.UserName}' is the last unlocked full administrator; give another user {BuiltInRoles.EverythingName} without a role that denies {AuthorizationActions.Administer} first.";
+        var roles = roleStore.GetCustomRoles();
+        return FullAdministrators.GetRemovalError(roles, roles, state.PersonRoleSets, GetCandidatePeople(state, target, change));
     }
 
-    private bool IsActiveFullAdministrator(UserEntry user) =>
-        !user.IsBuiltIn && !user.IsLockedByAdministrator && authorizationService.IsFullAdministrator(user.Roles);
+    private static List<PersonRoleSet> GetCandidatePeople(UserState state, UserEntry target, UserChange change)
+    {
+        var people = new List<PersonRoleSet>(state.PersonRoleSets.Length);
+        foreach (var user in state.ById.Values)
+        {
+            if (user.IsBuiltIn)
+            {
+                continue;
+            }
+
+            if (user.Id != target.Id)
+            {
+                people.Add(user.ToPersonRoleSet());
+            }
+            else if (change.Action == UserAction.Lock)
+            {
+                people.Add(new PersonRoleSet(user.Roles, IsLockedByAdministrator: true));
+            }
+            else if (change.Action == UserAction.SetRoles)
+            {
+                people.Add(new PersonRoleSet(change.Roles ?? [], user.IsLockedByAdministrator));
+            }
+        }
+
+        return people;
+    }
 
     private static string? GetUserNameError(UserState state, string userName)
     {

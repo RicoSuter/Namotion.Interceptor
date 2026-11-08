@@ -4,36 +4,36 @@ using Namotion.Interceptor.Authorization;
 namespace HomeBlaze.Authentication.Internal;
 
 /// <summary>
-/// Whether role sets reach <see cref="BuiltInRoles.EverythingName"/> through the includes of a given set of custom roles,
-/// with no role in reach that denies <c>administer</c>, as <see cref="AuthorizationServiceRoleExtensions.IsFullAdministrator(AuthorizationService, IReadOnlyCollection{string})"/>
-/// decides for the current roles.
+/// The rule that keeps a full administrator, a person whose roles reach <see cref="BuiltInRoles.EverythingName"/> through
+/// the includes of the custom roles, with no role in reach that denies <c>administer</c>, for changes of users and of roles
+/// alike.
 /// </summary>
 internal static class FullAdministrators
 {
     /// <summary>
-    /// Gets why replacing <paramref name="currentRoles"/> by <paramref name="candidateRoles"/>, each every custom role,
-    /// would take <see cref="BuiltInRoles.EverythingName"/> from the people of <paramref name="personRoleSets"/>, or
-    /// null. While an unlocked person holds it, a change must leave an unlocked person holding it; while only people an
-    /// administrator locked hold it, a change must leave someone holding it. Never refused when nobody
-    /// holds it now, so that a change can repair that state. <paramref name="rename"/> is the role the change renames in
-    /// every principal, or null.
+    /// Gets why replacing the custom roles <paramref name="currentRoles"/> by <paramref name="candidateRoles"/>, each every
+    /// custom role, and the people <paramref name="currentPeople"/> by <paramref name="candidatePeople"/>, would take the
+    /// last full administrator away, or null. While an unlocked full administrator exists, a change must leave one; while
+    /// only full administrators an administrator locked exist, a change must leave one of them. Never refused while none
+    /// exists, so that a change can repair that state. A change of users passes the same roles twice, and a change of
+    /// roles the same people, with a renamed role renamed in <paramref name="candidatePeople"/>.
     /// </summary>
     public static string? GetRemovalError(
-        IReadOnlyList<AuthorizationRole> currentRoles,
-        IReadOnlyList<AuthorizationRole> candidateRoles,
-        IReadOnlyCollection<PersonRoleSet> personRoleSets,
-        (string OldName, string NewName)? rename)
+        IReadOnlyCollection<AuthorizationRole> currentRoles,
+        IReadOnlyCollection<AuthorizationRole> candidateRoles,
+        IReadOnlyCollection<PersonRoleSet> currentPeople,
+        IReadOnlyCollection<PersonRoleSet> candidatePeople)
     {
-        var unlockedRoleSets = personRoleSets.Where(person => !person.IsLockedByAdministrator).Select(person => person.RoleNames).ToList();
-        if (AnyHoldsEverything(currentRoles, unlockedRoleSets, rename: null))
+        var current = GetRolesByName(currentRoles);
+        var candidate = ReferenceEquals(candidateRoles, currentRoles) ? current : GetRolesByName(candidateRoles);
+        if (Holds(currentPeople, current, includeLocked: false))
         {
-            return AnyHoldsEverything(candidateRoles, unlockedRoleSets, rename)
+            return Holds(candidatePeople, candidate, includeLocked: false)
                 ? null
                 : $"This change would leave no unlocked user with {BuiltInRoles.EverythingName} and no deny rule on {AuthorizationActions.Administer}; give another user {BuiltInRoles.EverythingName} without a role that denies {AuthorizationActions.Administer} first.";
         }
 
-        var allRoleSets = personRoleSets.Select(person => person.RoleNames).ToList();
-        if (!AnyHoldsEverything(currentRoles, allRoleSets, rename: null) || AnyHoldsEverything(candidateRoles, allRoleSets, rename))
+        if (!Holds(currentPeople, current, includeLocked: true) || Holds(candidatePeople, candidate, includeLocked: true))
         {
             return null;
         }
@@ -41,29 +41,25 @@ internal static class FullAdministrators
         return $"This change would leave no user with {BuiltInRoles.EverythingName} and no deny rule on {AuthorizationActions.Administer}; give another user {BuiltInRoles.EverythingName} without a role that denies {AuthorizationActions.Administer} first.";
     }
 
-    private static bool AnyHoldsEverything(
-        IReadOnlyList<AuthorizationRole> customRoles,
-        IReadOnlyCollection<IReadOnlyCollection<string>> roleSets,
-        (string OldName, string NewName)? rename)
+    private static Dictionary<string, AuthorizationRole> GetRolesByName(IReadOnlyCollection<AuthorizationRole> customRoles)
     {
-        var roles = new Dictionary<string, AuthorizationRole>(StringComparer.Ordinal);
+        var roles = new Dictionary<string, AuthorizationRole>(BuiltInRoles.All.Length + customRoles.Count, StringComparer.Ordinal);
         foreach (var role in BuiltInRoles.All.Concat(customRoles))
         {
             roles[role.Name] = role;
         }
 
-        return roleSets.Any(roleSet => HoldsEverything(roleSet, roles, rename));
+        return roles;
     }
 
-    private static bool HoldsEverything(
-        IReadOnlyCollection<string> roleNames,
-        Dictionary<string, AuthorizationRole> roles,
-        (string OldName, string NewName)? rename)
+    private static bool Holds(IReadOnlyCollection<PersonRoleSet> people, Dictionary<string, AuthorizationRole> roles, bool includeLocked) =>
+        people.Any(person => (includeLocked || !person.IsLockedByAdministrator) && IsFullAdministrator(person.RoleNames, roles));
+
+    private static bool IsFullAdministrator(IReadOnlyCollection<string> roleNames, Dictionary<string, AuthorizationRole> roles)
     {
         var holdsEverything = false;
         var visited = new HashSet<string>(StringComparer.Ordinal);
-        var pending = new Stack<string>(roleNames.Select(name =>
-            rename is { } renamed && string.Equals(name, renamed.OldName, StringComparison.Ordinal) ? renamed.NewName : name));
+        var pending = new Stack<string>(roleNames);
         while (pending.TryPop(out var name))
         {
             holdsEverything |= string.Equals(name, BuiltInRoles.EverythingName, StringComparison.Ordinal);

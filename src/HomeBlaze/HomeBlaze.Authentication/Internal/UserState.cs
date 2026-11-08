@@ -51,6 +51,8 @@ internal sealed record UserEntry
     public static bool IsMcpUser(UserEntry user) =>
         user.IsBuiltIn && string.Equals(user.UserName, NameRules.McpUserName, StringComparison.Ordinal);
 
+    public PersonRoleSet ToPersonRoleSet() => new(Roles, IsLockedByAdministrator);
+
     public UserSnapshot ToSnapshot(DateTimeOffset now, bool hasKey) =>
         new(UserName, Email, Roles, IsLockedOut(now), MustChangePassword, LastLogin, IsBuiltIn, hasKey, DisplayName);
 }
@@ -69,6 +71,7 @@ internal sealed class UserState
         ById = users.ToDictionary(user => user.Id, StringComparer.Ordinal);
         ByName = users.ToDictionary(user => user.UserName, StringComparer.Ordinal);
         RoleSets = [.. users.Select(user => new PrincipalRoleSet(user.UserName, user.Roles))];
+        PersonRoleSets = [.. users.Where(user => !user.IsBuiltIn).Select(user => user.ToPersonRoleSet())];
     }
 
     public Dictionary<string, UserEntry> ById { get; }
@@ -76,6 +79,9 @@ internal sealed class UserState
     public Dictionary<string, UserEntry> ByName { get; }
 
     public PrincipalRoleSet[] RoleSets { get; }
+
+    /// <summary>The role names of every user who is a person, not a built-in user, and whether an administrator locked them.</summary>
+    public PersonRoleSet[] PersonRoleSets { get; }
 
     /// <summary>Whether the seeded administrator <see cref="AdminSeeding.AdminUserName"/> signs in with an empty password.</summary>
     public bool IsSeededAdministratorUnclaimed =>
