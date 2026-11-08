@@ -177,7 +177,7 @@ flowchart TD
     J -->|no| L[Send]
 ```
 
-The echo and property-filter checks happen as each change is dequeued. The collapse and the supersession check happen at the flush. A zero buffer time has no flush: it skips the collapse and runs the supersession check on each change as it is dequeued, right before writing it. A transaction confirmation being written back passes the same checks, so it can still be dropped if a later commit superseded it.
+The echo and property-filter checks happen as each change is taken off the subscription: on the next flush tick when buffered, on dequeue at a zero buffer time. The collapse and the supersession check happen at the flush. A zero buffer time has no flush: it skips the collapse and runs the supersession check on each change as it is dequeued, right before writing it. A transaction confirmation being written back passes the same checks, so it can still be dropped if a later commit superseded it.
 
 Which commits count as superseding is not the same for every connector, and choosing wrongly loses data in both directions. Connectors talking to a remote source may not rank against a value that source sent; servers must. See `ChangeDeliveryRule` and [connector delivery](design/connector-delivery.md) for the condition that decides it.
 
@@ -686,7 +686,7 @@ Direction is stated once, from the subject tree's point of view, and means the s
 
 The three buffers answer three different questions, and reading which one is growing is how you tell them apart:
 
-- `OutboundChanges` growing means changes are produced faster than they flush.
+- `OutboundChanges` growing means changes are produced faster than they flush. Its depth does not count changes still in the subscription waiting for the next flush tick, so on a healthy processor it reads near zero and rises only while a write stays in flight across ticks.
 - `OutboundRetries` growing means the far end is rejecting writes.
 - `InboundBuffer` growing means an initial load is still in progress.
 

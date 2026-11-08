@@ -11,20 +11,20 @@ public class ChangeQueueProcessorThreadPoolTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
 
-    // How long the dequeue loop stays busy waiting for the flush. A flush that only a steal can start
-    // never runs while the global queue is flooded, so this bounds the failure, not the passing run.
-    private static readonly TimeSpan FlushStartTimeout = TimeSpan.FromSeconds(10);
+    // How long the write handler stays blocked waiting for the next drain. A drain that only a steal can
+    // start never runs while the global queue is flooded, so this bounds the failure, not the passing run.
+    private static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(10);
 
     [Fact]
-    public async Task WhenTheDequeueLoopStaysBusyWhileTheGlobalQueueIsBusy_ThenTheFlushStillDelivers()
+    public async Task WhenAWriteBlocksSynchronouslyWhileTheGlobalQueueIsBusy_ThenTheNextTickStillDrains()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
             .WithRegistry()
             .WithPropertyChangeSubscriptions();
         var person = new Person(context);
-        using var firstNameDelivered = new ManualResetEventSlim();
-        var flushRanWhileDequeueLoopWasBusy = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var laterChangeDrained = new ManualResetEventSlim();
+        var drainedWhileWriteBlocked = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         using var processor = new ChangeQueueProcessor(
             source: new object(),
             context: context,
@@ -32,20 +32,19 @@ public class ChangeQueueProcessorThreadPoolTests
             {
                 if (property.Name == nameof(Person.LastName))
                 {
-                    // Holds the dequeue loop's pool thread, so the flush has to run on another one.
-                    flushRanWhileDequeueLoopWasBusy.TrySetResult(firstNameDelivered.Wait(FlushStartTimeout));
+                    laterChangeDrained.Set();
                 }
 
                 return true;
             },
             writeHandler: (changes, _) =>
             {
-                foreach (var change in changes.Span)
+                if (changes.Span[0].Property.Name == nameof(Person.FirstName))
                 {
-                    if (change.Property.Name == nameof(Person.FirstName))
-                    {
-                        firstNameDelivered.Set();
-                    }
+                    // Written from here rather than by the test, whose continuation could queue behind this
+                    // thread. Then holds the thread the flush runs on, so the next drain needs another one.
+                    person.LastName = "second";
+                    drainedWhileWriteBlocked.TrySetResult(laterChangeDrained.Wait(DrainTimeout));
                 }
 
                 return ValueTask.CompletedTask;
@@ -55,25 +54,20 @@ public class ChangeQueueProcessorThreadPoolTests
             maxQueueDepth: null,
             logger: NullLogger.Instance);
 
-        // Captured by the processor's subscription before processing starts, so the loop reaches the
-        // blocking filter right after buffering the first change.
-        person.FirstName = "first";
-        person.LastName = "second";
-
         using var cancellation = new CancellationTokenSource();
-        Task processing;
-        bool flushRan;
+        var processing = processor.ProcessAsync(cancellation.Token);
+        bool drained;
         using (ThreadPoolGlobalQueueFlood.Start())
         {
             // Act
-            processing = processor.ProcessAsync(cancellation.Token);
-            flushRan = await flushRanWhileDequeueLoopWasBusy.Task.WaitAsync(TestTimeout);
+            person.FirstName = "first";
+            drained = await drainedWhileWriteBlocked.Task.WaitAsync(TestTimeout);
         }
 
         await cancellation.CancelAsync();
         await processing.WaitAsync(TestTimeout);
 
         // Assert
-        Assert.True(flushRan, "The flush should start on another pool thread while the dequeue loop is busy.");
+        Assert.True(drained, "The next tick should drain on another pool thread while the write blocks.");
     }
 }

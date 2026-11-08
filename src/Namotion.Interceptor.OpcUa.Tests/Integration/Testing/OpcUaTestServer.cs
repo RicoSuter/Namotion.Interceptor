@@ -22,7 +22,6 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
     private Action<IInterceptorSubjectContext, TRoot>? _initializeDefaults;
     private string _baseAddress = DefaultBaseAddress;
     private string _certificateStoreBasePath = "pki";
-    private TimeSpan _bufferTime = TimeSpan.FromMilliseconds(100);
     private int _disposed;
 
     public TRoot? Root { get; private set; }
@@ -38,14 +37,12 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
         Func<IInterceptorSubjectContext, TRoot> createRoot,
         Action<IInterceptorSubjectContext, TRoot>? initializeDefaults = null,
         string? baseAddress = null,
-        string? certificateStoreBasePath = null,
-        TimeSpan? bufferTime = null)
+        string? certificateStoreBasePath = null)
     {
         _createRoot = createRoot;
         _initializeDefaults = initializeDefaults;
         _baseAddress = baseAddress ?? DefaultBaseAddress;
         _certificateStoreBasePath = certificateStoreBasePath ?? "pki";
-        _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(100);
 
         return StartInternalAsync();
     }
@@ -98,7 +95,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
                     AutoAcceptUntrustedCertificates = true,
                     CertificateStoreBasePath = _certificateStoreBasePath,
 
-                    BufferTime = _bufferTime
+                    BufferTime = TimeSpan.FromMilliseconds(100)
                 };
             });
 
