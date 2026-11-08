@@ -52,7 +52,7 @@ public class AutomationServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void WhenNoChangeDispatcherIsRegistered_ThenTheAutomationHasOneOfItsOwn()
+    public void WhenNoChangeDispatcherIsRegistered_ThenTheAutomationUsesTheSharedOne()
     {
         // Arrange
         using var provider = new ServiceCollection().BuildServiceProvider();
@@ -62,7 +62,7 @@ public class AutomationServiceCollectionExtensionsTests
             new SubjectPathResolver(() => null), TimeProvider.System, new AllowAllAutomationAuthorizer(), provider, NullLogger<Automation>.Instance);
 
         // Assert
-        Assert.NotNull(automation.ChangeDispatcher);
+        Assert.Same(AutomationChangeDispatcher.From(provider), automation.ChangeDispatcher);
     }
 
     [Fact]

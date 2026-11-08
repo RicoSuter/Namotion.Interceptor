@@ -471,7 +471,8 @@ internal sealed class AutomationEngine : IRuleRunHost
         {
             RunUnlessAbandoned(() =>
             {
-                // TrackPending finds a trigger that the activation of the entered state began to track tracked already.
+                // The activation of the entered state may track a trigger that became pending, which TrackPending then
+                // finds tracked already.
                 var tracksNewPending = PublishStateChanges();
                 hasNewPending = _triggers.TrackPending(_snapshot.Rules, requests) || tracksNewPending;
             });
