@@ -1,11 +1,12 @@
 @using System.Runtime.CompilerServices
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(ExpansionPanels))]
 @implements ISubjectComponent
+@inherits PermissionsComponentBase
 
 @{
     // Read once per render and never kept: a reload assigns a new array.
     var layout = Subject as ExpansionPanels;
-    var panels = layout?.Panels ?? [];
+    var panels = GetShownPanels(layout);
 }
 
 <MudExpansionPanels MultiExpansion="@(layout?.Single != true)" data-testid="expansion-panels">
@@ -42,6 +43,21 @@
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
+
+    // A panel the roles hide is neither named nor rendered. The array of the layout is returned when every panel is shown.
+    private ExpansionPanel[] GetShownPanels(ExpansionPanels? layout)
+    {
+        var panels = layout?.Panels ?? [];
+        foreach (var panel in panels)
+        {
+            if (!Permissions.CanShow(panel))
+            {
+                return panels.Where(shown => Permissions.CanShow(shown)).ToArray();
+            }
+        }
+
+        return panels;
+    }
 
     private bool IsExpanded(ExpansionPanel panel) =>
         _expanded.TryGetValue(panel, out var expanded) ? expanded.Value : panel.Expanded;

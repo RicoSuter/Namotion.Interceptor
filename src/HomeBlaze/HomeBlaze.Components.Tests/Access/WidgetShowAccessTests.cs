@@ -118,6 +118,48 @@ public sealed partial class WidgetShowAccessTests : BunitContext, IAsyncLifetime
         Assert.Contains("Owner", hidden);
     }
 
+    [Fact]
+    public void WhenATabIsHidden_ThenTheTabLayoutDoesNotNameIt()
+    {
+        // Arrange
+        var layout = _graph.CreateSubject<TabLayout>();
+        var shownTab = _graph.CreateSubject<Tab>();
+        shownTab.Title = "Open tab";
+        var hiddenTab = _graph.CreateSubject<Tab>();
+        hiddenTab.Title = "Secret tab";
+        layout.Tabs = [shownTab, hiddenTab];
+        _graph.Device.Widget = layout;
+        _permissions.CannotShow.Add(hiddenTab);
+
+        // Act
+        var rendered = _graph.RenderWidget(layout);
+
+        // Assert
+        Assert.Contains("Open tab", rendered.Markup);
+        Assert.DoesNotContain("Secret tab", rendered.Markup);
+    }
+
+    [Fact]
+    public void WhenAnExpansionPanelIsHidden_ThenTheExpansionPanelsDoNotNameIt()
+    {
+        // Arrange
+        var layout = _graph.CreateSubject<ExpansionPanels>();
+        var shownPanel = _graph.CreateSubject<ExpansionPanel>();
+        shownPanel.Title = "Open panel";
+        var hiddenPanel = _graph.CreateSubject<ExpansionPanel>();
+        hiddenPanel.Title = "Secret panel";
+        layout.Panels = [shownPanel, hiddenPanel];
+        _graph.Device.Widget = layout;
+        _permissions.CannotShow.Add(hiddenPanel);
+
+        // Act
+        var rendered = _graph.RenderWidget(layout);
+
+        // Assert
+        Assert.Contains("Open panel", rendered.Markup);
+        Assert.DoesNotContain("Secret panel", rendered.Markup);
+    }
+
     private string RenderWithoutSubject() =>
         Render<SubjectComponent>(parameters => parameters
             .Add(component => component.Subject, null)

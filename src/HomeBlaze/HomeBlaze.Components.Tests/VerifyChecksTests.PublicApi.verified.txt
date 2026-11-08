@@ -1190,8 +1190,8 @@ namespace HomeBlaze.Components.Components
         protected override void Dispose(bool disposing) { }
         protected override void OnInitialized() { }
     }
-    [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Components.ExpansionPanels?))]
-    public class ExpansionPanelsWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
+    [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Components.ExpansionPanels))]
+    public class ExpansionPanelsWidget : HomeBlaze.Components.Abstractions.PermissionsComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
     {
         public ExpansionPanelsWidget() { }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -1487,6 +1487,7 @@ namespace HomeBlaze.Components.Components
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public System.Threading.Tasks.ValueTask DisposeAsync() { }
         protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
+        protected override void OnInitialized() { }
         protected override void OnParametersSet() { }
     }
     public class TileView : Microsoft.AspNetCore.Components.ComponentBase
