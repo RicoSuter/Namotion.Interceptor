@@ -165,7 +165,7 @@
     // The reload that adds a tab can render the layout before the selection learns the new tab, or after.
     private void OnSelectionChanged()
     {
-        if (ShowPendingTab(Layout?.Tabs ?? []))
+        if (ShowPendingTab(GetShownTabs()))
         {
             _ = InvokeAsync(StateHasChanged);
         }
