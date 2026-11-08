@@ -5,7 +5,6 @@ using ModelContextProtocol.Server;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Extensions;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace HomeBlaze.AI;
 
@@ -15,7 +14,6 @@ namespace HomeBlaze.AI;
 /// </summary>
 /// <param name="Services">The services of the tools.</param>
 /// <param name="RootSubjectProvider">Resolves the root subject when a tool runs.</param>
-/// <param name="PathProvider">Resolves and builds the paths of the tools.</param>
 /// <param name="IsReadOnly">Whether the tools may not change anything.</param>
 /// <param name="Configuration">
 /// The configuration the provider is added to, whose access policy decides per member and action; resolve paths with
@@ -24,7 +22,6 @@ namespace HomeBlaze.AI;
 public readonly record struct McpToolProviderContext(
     IServiceProvider Services,
     Func<IInterceptorSubject> RootSubjectProvider,
-    PathProviderBase PathProvider,
     bool IsReadOnly,
     McpServerConfiguration Configuration);
 
@@ -66,5 +63,6 @@ public static class McpBuilderExtensions
     internal static McpServerConfiguration CreateServerConfiguration(
         IServiceProvider serviceProvider, Func<IInterceptorSubject> rootSubjectProvider, bool isReadOnly)
         => HomeBlazeMcpConfigurationFactory.Create(
-            serviceProvider, rootSubjectProvider, isReadOnly, McpAuthorization.GetAccessPolicy(serviceProvider, McpAuthorization.EverythingRoleNames));
+            serviceProvider, rootSubjectProvider, isReadOnly, McpAuthorization.GetAccessPolicy(
+                serviceProvider.GetRequiredService<AuthorizationService>(), McpAuthorization.EverythingRoleNames));
 }

@@ -22,7 +22,6 @@ using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace HomeBlaze.AI.Tests.Mcp;
@@ -110,8 +109,7 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
             Includes = [BuiltInRoles.OperatorName],
             Deny = [new PermissionRule { Tags = [MemberTags.Metadata], Actions = [PermissionAction.Write] }]
         };
-        var logger = new RecordingLogger();
-        var accessPolicy = new AuthorizationMcpAccessPolicy(TestAccessPolicies.Create(role.Name, role).Policy, logger, "Writer");
+        var accessPolicy = TestAccessPolicies.Create(role.Name, role);
         var (tools, storage) = await CreateToolsAsync(accessPolicy: accessPolicy);
 
         // Act
@@ -128,7 +126,6 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         Assert.Null(pump.GetMetadata());
         Assert.Null(pump.TryGetRegisteredSubject()!.TryGetProperty("FileSize")!.GetMetadata());
         Assert.False(File.Exists(Path.Combine(_directory.FullName, "Docs", "Pump.metadata.json")));
-        Assert.Empty(logger.Entries);
     }
 
     [Fact]

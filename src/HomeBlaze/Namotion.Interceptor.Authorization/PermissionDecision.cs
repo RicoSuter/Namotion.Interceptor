@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Authorization.Internal;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Authorization;
@@ -9,22 +10,16 @@ namespace Namotion.Interceptor.Authorization;
 /// </summary>
 public readonly record struct PermissionDecision
 {
-    internal PermissionDecision(
-        bool isAllowed,
-        AuthorizationRole? allowedBy,
-        PermissionRule? allowedByRule,
-        AuthorizationRole? deniedBy,
-        PermissionRule? deniedByRule)
+    internal PermissionDecision(CompiledRule? allowed, CompiledRule? denied)
     {
-        IsAllowed = isAllowed;
-        AllowedBy = allowedBy;
-        AllowedByRule = allowedByRule;
-        DeniedBy = deniedBy;
-        DeniedByRule = deniedByRule;
+        AllowedBy = allowed?.Role;
+        AllowedByRule = allowed?.Rule;
+        DeniedBy = denied?.Role;
+        DeniedByRule = denied?.Rule;
     }
 
     /// <summary>Gets whether the action is allowed.</summary>
-    public bool IsAllowed { get; }
+    public bool IsAllowed => AllowedByRule is not null && DeniedByRule is null;
 
     /// <summary>Gets the role whose allow rule matched first, or null when none matched.</summary>
     public AuthorizationRole? AllowedBy { get; }
