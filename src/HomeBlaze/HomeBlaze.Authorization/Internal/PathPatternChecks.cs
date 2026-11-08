@@ -131,17 +131,13 @@ internal static class PathPatternChecks
     }
 
     /// <summary>
-    /// Gets the warning of one valid path pattern that names an entry below one of <paramref name="roots"/>, as
+    /// Gets the warning of one valid path pattern without a wildcard that names an entry below one of
+    /// <paramref name="roots"/>, as
     /// <see cref="GetWarning(AuthorizationRole, IReadOnlyDictionary{IInterceptorSubject, RegisteredSubject}, PathProviderBase, ref List{RegisteredSubject}?)"/>
     /// gives it for a role, or null.
     /// </summary>
     public static string? GetWarning(string pattern, List<RegisteredSubject> roots, PathProviderBase pathProvider)
     {
-        if (pattern.Contains('*'))
-        {
-            return null;
-        }
-
         // Left out when resolving fails, as for a role.
         try
         {
@@ -161,11 +157,6 @@ internal static class PathPatternChecks
     /// </summary>
     public static string? GetDenyWarning(string pattern, List<RegisteredSubject> roots, PathProviderBase pathProvider)
     {
-        if (pattern.Contains('*'))
-        {
-            return null;
-        }
-
         try
         {
             foreach (var root in roots)

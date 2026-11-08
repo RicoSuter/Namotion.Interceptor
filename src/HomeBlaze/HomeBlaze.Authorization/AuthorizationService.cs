@@ -168,7 +168,7 @@ public sealed class AuthorizationService : IDisposable
     {
         ArgumentNullException.ThrowIfNull(pattern);
 
-        return pattern.Contains('*') || ValidatePathPattern(pattern) is not null ? null : _pathPatterns.GetWarning(pattern);
+        return _pathPatterns.GetWarning(pattern);
     }
 
     /// <summary>
@@ -181,7 +181,7 @@ public sealed class AuthorizationService : IDisposable
     {
         ArgumentNullException.ThrowIfNull(pattern);
 
-        return pattern.Contains('*') || ValidatePathPattern(pattern) is not null ? null : _pathPatterns.GetDenyWarning(pattern);
+        return _pathPatterns.GetDenyWarning(pattern);
     }
 
     /// <summary>

@@ -57,14 +57,18 @@ internal sealed class PathPatterns
     }
 
     /// <summary>
-    /// Gets the warning of a valid path pattern, see <see cref="PathPatternChecks.GetWarning(string, List{RegisteredSubject}, PathProviderBase)"/>.
+    /// Gets the warning of a path pattern, see <see cref="PathPatternChecks.GetWarning(string, List{RegisteredSubject}, PathProviderBase)"/>,
+    /// or null when it has a wildcard or is invalid.
     /// </summary>
-    public string? GetWarning(string pattern) => GetCachedWarning(_warnings, pattern, PathPatternChecks.GetWarning);
+    public string? GetWarning(string pattern) =>
+        IsWarnable(pattern) ? GetCachedWarning(_warnings, pattern, PathPatternChecks.GetWarning) : null;
 
     /// <summary>
-    /// Gets the warning of a valid deny path pattern, see <see cref="PathPatternChecks.GetDenyWarning"/>.
+    /// Gets the warning of a deny path pattern, see <see cref="PathPatternChecks.GetDenyWarning"/>, or null when it has
+    /// a wildcard or is invalid.
     /// </summary>
-    public string? GetDenyWarning(string pattern) => GetCachedWarning(_denyWarnings, pattern, PathPatternChecks.GetDenyWarning);
+    public string? GetDenyWarning(string pattern) =>
+        IsWarnable(pattern) ? GetCachedWarning(_denyWarnings, pattern, PathPatternChecks.GetDenyWarning) : null;
 
     /// <summary>
     /// Gets whether a deny rule matches a member of a known subject, see <see cref="DenyRuleMatcher.Matches"/>, or null
@@ -106,6 +110,8 @@ internal sealed class PathPatterns
             return true;
         }
     }
+
+    private bool IsWarnable(string pattern) => !pattern.Contains('*') && Validate(pattern) is null;
 
     private string? GetCachedWarning(
         ConcurrentDictionary<string, (long GraphVersion, string? Warning)> warnings,
