@@ -130,7 +130,13 @@ public sealed partial class HistoryChartWidgetAccessTests : BunitContext, IAsync
     private string RenderChartWithoutStore(string path)
     {
         var chart = RenderChart(path);
-        chart.WaitForElement("[data-testid=history-chart-legend]", WaitTimeout);
+
+        // Until the widget knows that there is no store, it renders the view with the legend inside it.
+        chart.WaitForAssertion(() =>
+        {
+            Assert.Empty(chart.FindAll("[data-testid=history-chart-view]"));
+            Assert.NotEmpty(chart.FindAll("[data-testid=history-chart-legend]"));
+        }, WaitTimeout);
         return chart.Markup;
     }
 
