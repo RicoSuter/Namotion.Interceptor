@@ -50,7 +50,7 @@ public class DynamicPropertyWithWriteInterceptorTests
         var propertyCount = 50;
         var barrier = new Barrier(propertyCount);
 
-        // Act — add many properties concurrently. Dedicated threads, because every participant blocks in the barrier
+        // Act: add many properties concurrently. Dedicated threads, because every participant blocks in the barrier
         // until all have arrived, which on thread-pool workers holds them from the tests running alongside.
         var tasks = Enumerable.Range(0, propertyCount).Select(i => Task.Factory.StartNew(() =>
         {
