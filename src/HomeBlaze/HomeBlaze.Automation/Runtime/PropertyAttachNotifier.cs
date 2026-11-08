@@ -29,6 +29,17 @@ internal sealed class PropertyAttachNotifier(ISubjectRegistry? registry) : ILife
 
     private readonly Lock _lock = new();
     private AutomationChangeDispatcher.ChangeSource[] _sources = [];
+    private volatile bool _isPublished;
+
+    /// <summary>
+    /// Whether every context that falls back on the context of the notifier sees it; set by the dispatcher once, after
+    /// the publication was fenced on every processor.
+    /// </summary>
+    public bool IsPublished
+    {
+        get => _isPublished;
+        set => _isPublished = value;
+    }
 
     /// <summary>Announces added properties to the routes from now on. Called by the dispatcher under its lock.</summary>
     public void AddSource(AutomationChangeDispatcher.ChangeSource source)

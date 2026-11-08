@@ -25,6 +25,9 @@ internal sealed class AutomationChangeDispatcher
     // Shared, so that callers without a registered dispatcher subscribe each change stream once.
     private static readonly AutomationChangeDispatcher Fallback = new();
 
+    // Serializes the first publication of the notifier of a context across all dispatchers.
+    private static readonly Lock NotifierLock = new();
+
     /// <summary>Gets the registered dispatcher, or one dispatcher shared by every caller when none is registered.</summary>
     public static AutomationChangeDispatcher From(IServiceProvider serviceProvider) =>
         serviceProvider.GetService<AutomationChangeDispatcher>() ?? Fallback;
@@ -97,18 +100,36 @@ internal sealed class AutomationChangeDispatcher
         return owner;
     }
 
-    // Added once per context, since a service cannot be removed from a context.
+    // Added once per context, since a service cannot be removed from a context. A registrant goes on only once the
+    // notifier is published: every context that falls back on the owner sees it and the barrier ran.
     private static PropertyAttachNotifier GetNotifier(IInterceptorSubjectContext context)
     {
-        if (context.TryAddService<IPropertyLifecycleHandler>(
-            () => new PropertyAttachNotifier(context.TryGetService<ISubjectRegistry>()), handler => handler is PropertyAttachNotifier))
+        if (FindNotifier(context) is { IsPublished: true } published)
         {
-            // A writer publishes a property and then reads the handlers, and the worker publishes the handler and then
-            // resolves the paths: the fence on every processor pairs with the writer's half, so that the writer sees the
-            // handler or the worker sees the property.
-            Interlocked.MemoryBarrierProcessWide();
+            return published;
         }
 
+        lock (NotifierLock)
+        {
+            // Returns once the contexts that use the owner dropped the handler lists they cached without the notifier.
+            context.TryAddService<IPropertyLifecycleHandler>(
+                () => new PropertyAttachNotifier(context.TryGetService<ISubjectRegistry>()), handler => handler is PropertyAttachNotifier);
+            var notifier = FindNotifier(context) ?? throw new InvalidOperationException("The context did not keep the notifier of added properties.");
+            if (!notifier.IsPublished)
+            {
+                // A writer publishes a property and then reads the handlers, and the worker publishes the handler and then
+                // resolves the paths: the fence on every processor pairs with the writer's half, so that the writer sees
+                // the handler or the worker sees the property.
+                Interlocked.MemoryBarrierProcessWide();
+                notifier.IsPublished = true;
+            }
+
+            return notifier;
+        }
+    }
+
+    private static PropertyAttachNotifier? FindNotifier(IInterceptorSubjectContext context)
+    {
         foreach (var handler in context.GetServices<IPropertyLifecycleHandler>())
         {
             if (handler is PropertyAttachNotifier notifier)
@@ -117,7 +138,7 @@ internal sealed class AutomationChangeDispatcher
             }
         }
 
-        throw new InvalidOperationException("The context did not keep the notifier of added properties.");
+        return null;
     }
 
     // White-box test hook: the number of listeners that a change of the property in the context is routed to as a watched change.
