@@ -2,22 +2,17 @@ using System.Globalization;
 
 namespace Namotion.Interceptor.Expressions;
 
-/// <summary>
-/// Compares two values that are not null: a boolean only for equality, an enum by its name without regard to case and
-/// only for equality, a text without regard to case for equality and ordinal for order, a date against ISO 8601 text,
-/// a duration against a duration, integers and decimals exactly, a float as a float, and NaN never. A null result means
-/// the pair has no order, so the comparison is unknown.
-/// </summary>
+/// <summary>Compares two values that are not null, as docs/expressions.md#comparisons describes; a null result means the pair has no order, so the comparison is unknown.</summary>
 internal static class ExpressionComparer
 {
     /// <summary>Compares two values that are not null.</summary>
     /// <param name="left">The left value.</param>
-    /// <param name="leftInstant">The instant of the left operand when it is a text literal that is a date, otherwise null.</param>
+    /// <param name="leftLiteral">The conversions of the left operand when it is a literal, otherwise the default.</param>
     /// <param name="right">The right value.</param>
-    /// <param name="rightInstant">The instant of the right operand when it is a text literal that is a date, otherwise null.</param>
+    /// <param name="rightLiteral">The conversions of the right operand when it is a literal, otherwise the default.</param>
     /// <param name="isEquality">Whether the comparison is <c>==</c> or <c>!=</c>.</param>
     /// <returns>The order of the left value relative to the right one, or null when their types cannot be compared.</returns>
-    public static int? Compare(object left, DateTimeOffset? leftInstant, object right, DateTimeOffset? rightInstant, bool isEquality)
+    public static int? Compare(object left, in ConvertedLiteral leftLiteral, object right, in ConvertedLiteral rightLiteral, bool isEquality)
     {
         if (IsNaN(left) || IsNaN(right))
         {
@@ -25,17 +20,17 @@ internal static class ExpressionComparer
         }
 
         // The pairs below have the richer type on the left; the reverse order negates the result.
-        return CompareOrdered(left, right, rightInstant, isEquality) ?? -CompareOrdered(right, left, leftInstant, isEquality);
+        return CompareOrdered(left, leftLiteral, right, rightLiteral, isEquality) ?? -CompareOrdered(right, rightLiteral, left, leftLiteral, isEquality);
     }
 
-    private static int? CompareOrdered(object value, object other, DateTimeOffset? otherInstant, bool isEquality) => value switch
+    private static int? CompareOrdered(object value, in ConvertedLiteral literal, object other, in ConvertedLiteral otherLiteral, bool isEquality) => value switch
     {
         bool boolean => CompareBoolean(boolean, other, isEquality),
         Enum enumValue => CompareEnum(enumValue, other, isEquality),
         string text => CompareText(text, other, isEquality),
         TimeSpan duration => other is TimeSpan otherDuration ? duration.CompareTo(otherDuration) : null,
-        _ when TryGetInstant(value, out var instant) => CompareInstant(instant, other, otherInstant),
-        _ => CompareNumber(value, other)
+        _ when TryGetInstant(value, out var instant) => CompareInstant(instant, other, otherLiteral.Instant),
+        _ => CompareNumber(value, literal.Number, other, otherLiteral.Number)
     };
 
     private static int? CompareBoolean(bool boolean, object other, bool isEquality)
@@ -87,8 +82,9 @@ internal static class ExpressionComparer
     }
 
     // Widening a float would make 0.1f differ from the literal 0.1, so a float compares with a double or decimal as a
-    // float, and with an integer or another float as a double.
-    private static int? CompareNumber(object value, object other)
+    // float, and with an integer or another float as a double. A literal brings its double along, so a value compares
+    // with it without converting the literal again.
+    private static int? CompareNumber(object value, double? number, object other, double? otherNumber)
     {
         var kind = GetNumberKind(value);
         var otherKind = GetNumberKind(other);
@@ -99,11 +95,13 @@ internal static class ExpressionComparer
 
         return (kind | otherKind) switch
         {
-            NumberKind.Float | NumberKind.Double or NumberKind.Float | NumberKind.Decimal => ((float)ToDouble(value)).CompareTo((float)ToDouble(other)),
+            NumberKind.Float | NumberKind.Double or NumberKind.Float | NumberKind.Decimal => ((float)ToDouble(value, number)).CompareTo((float)ToDouble(other, otherNumber)),
             var kinds when IsExact(kinds) => ToDecimal(value).CompareTo(ToDecimal(other)),
-            _ => ToDouble(value).CompareTo(ToDouble(other))
+            _ => ToDouble(value, number).CompareTo(ToDouble(other, otherNumber))
         };
     }
+
+    private static double ToDouble(object value, double? converted) => converted ?? ToDouble(value);
 
     // The cached name of a defined value, so a comparison does not allocate; ToString only for flag combinations and
     // undefined values.

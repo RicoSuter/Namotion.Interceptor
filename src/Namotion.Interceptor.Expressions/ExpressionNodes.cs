@@ -77,15 +77,32 @@ internal sealed class ComparisonNode(ExpressionNode left, ComparisonOperator com
 
     public bool IsEquality => Operator is ComparisonOperator.Equal or ComparisonOperator.NotEqual;
 
-    /// <summary>The instant of a text literal on the left, parsed once, for the comparison with a date.</summary>
-    public DateTimeOffset? LeftInstant { get; } = TryParseInstant(left);
+    /// <summary>The conversions of a literal on the left, done once.</summary>
+    public ConvertedLiteral LeftLiteral { get; } = ConvertedLiteral.Create(left);
 
-    /// <summary>The instant of a text literal on the right, parsed once, for the comparison with a date.</summary>
-    public DateTimeOffset? RightInstant { get; } = TryParseInstant(right);
+    /// <summary>The conversions of a literal on the right, done once.</summary>
+    public ConvertedLiteral RightLiteral { get; } = ConvertedLiteral.Create(right);
+}
+
+/// <summary>The conversions of a literal operand of a comparison that would otherwise repeat at every evaluation.</summary>
+internal readonly struct ConvertedLiteral
+{
+    /// <summary>The instant of a text literal that is a date, for the comparison with a date; otherwise null.</summary>
+    public DateTimeOffset? Instant { get; private init; }
+
+    /// <summary>The double of a number literal, for the comparison with a double or a float; otherwise null.</summary>
+    public double? Number { get; private init; }
+
+    public static ConvertedLiteral Create(ExpressionNode node) => node switch
+    {
+        LiteralNode { Value: string text } => new ConvertedLiteral { Instant = TryParseInstant(text) },
+        LiteralNode { Value: decimal number } => new ConvertedLiteral { Number = (double)number },
+        LiteralNode { Value: double number } => new ConvertedLiteral { Number = number },
+        _ => default
+    };
 
     // A text without an offset is read as UTC.
-    private static DateTimeOffset? TryParseInstant(ExpressionNode node) =>
-        node is LiteralNode { Value: string text } &&
+    private static DateTimeOffset? TryParseInstant(string text) =>
         DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var instant)
             ? instant
             : null;
