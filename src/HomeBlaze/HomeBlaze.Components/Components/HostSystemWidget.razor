@@ -4,6 +4,7 @@
 @using HomeBlaze.Services.Display
 
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(HostSystem))]
+@inherits PermissionsComponentBase
 @implements ISubjectComponent
 
 @if (Subject is HostSystem host)
@@ -36,11 +37,14 @@
             <MudProgressLinear Value="@(ValueReader.GetProgressPercent(host.MemoryUsage, 0, 1) ?? 0)" Min="0" Max="100" Rounded="true" />
 
             <MudText Typo="Typo.caption">Uptime @FormatUptime(host.Uptime)</MudText>
-            <MudText Typo="Typo.caption">
-                Process: CPU @FormatPercent(host.Process.CpuUsage),
-                memory @FormatBytes(host.Process.WorkingSet),
-                allocations @FormatRate(host.Process.AllocationRate)
-            </MudText>
+            @if (Shown(host.Process) is { } process)
+            {
+                <MudText Typo="Typo.caption">
+                    Process: CPU @FormatPercent(process.CpuUsage),
+                    memory @FormatBytes(process.WorkingSet),
+                    allocations @FormatRate(process.AllocationRate)
+                </MudText>
+            }
         </MudStack>
     </MudPaper>
 }
@@ -48,6 +52,10 @@
 @code {
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
+
+    // A process the roles hide renders as absent.
+    private HostProcess? Shown(HostProcess? process) =>
+        process is not null && Permissions.CanShow(process) ? process : null;
 
     private static string FormatPercent(decimal? fraction) =>
         fraction is { } value ? StateUnitExtensions.FormatPercent(value) : ValueReader.MissingText;

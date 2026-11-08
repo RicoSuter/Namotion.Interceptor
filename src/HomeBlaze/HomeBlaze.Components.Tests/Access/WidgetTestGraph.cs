@@ -7,6 +7,8 @@ using HomeBlaze.Components.Controls;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Components;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using MudBlazor.Services;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
@@ -40,6 +42,7 @@ public sealed class WidgetTestGraph : IAsyncDisposable
         var subjectServices = new ServiceCollection();
         subjectServices.AddSingleton(Context);
         subjectServices.AddSingleton(PathResolver);
+        subjectServices.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         _subjectServices = subjectServices.BuildServiceProvider();
 
         RootManager = rootManager = new RootManager(

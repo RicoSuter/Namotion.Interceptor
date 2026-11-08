@@ -5,7 +5,6 @@ using HomeBlaze.Components.Abstractions.Attributes;
 using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
 using Xunit;
 
@@ -142,7 +141,7 @@ public sealed partial class WidgetReadAccessTests : BunitContext, IAsyncLifetime
     public void WhenTheUserMayNotSeeTheSubjectOfAWidget_ThenItRendersAsForNoSubject(Type widgetType)
     {
         // Arrange
-        var widget = CreateAnyWidget(widgetType);
+        var widget = _graph.CreateWidget(widgetType, WidgetTestGraph.PathOf(nameof(AccessTestDevice.Text)));
         _permissions.CannotShow.Add(widget);
 
         // Act
@@ -281,19 +280,6 @@ public sealed partial class WidgetReadAccessTests : BunitContext, IAsyncLifetime
         }
 
         return types;
-    }
-
-    // A host system needs a logger, which the graph does not offer to the factory of subjects.
-    private IInterceptorSubject CreateAnyWidget(Type widgetType)
-    {
-        if (widgetType != typeof(HostSystem))
-        {
-            return _graph.CreateWidget(widgetType, WidgetTestGraph.PathOf(nameof(AccessTestDevice.Text)));
-        }
-
-        var hostSystem = new HostSystem(NullLogger<HostSystem>.Instance);
-        _graph.Device.Widget = hostSystem;
-        return hostSystem;
     }
 
     private static WidgetBinding GetBinding(Type widgetType) =>

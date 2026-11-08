@@ -1277,7 +1277,7 @@ namespace HomeBlaze.Components.Components
         protected override void OnInitialized() { }
     }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Services.Diagnostics.HostSystem))]
-    public class HostSystemWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
+    public class HostSystemWidget : HomeBlaze.Components.Abstractions.PermissionsComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
     {
         public HostSystemWidget() { }
         [Microsoft.AspNetCore.Components.Parameter]

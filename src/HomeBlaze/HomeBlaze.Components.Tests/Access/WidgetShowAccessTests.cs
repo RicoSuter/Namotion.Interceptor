@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Bunit;
 using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Components.Abstractions.Attributes;
+using HomeBlaze.Services.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -158,6 +159,24 @@ public sealed partial class WidgetShowAccessTests : BunitContext, IAsyncLifetime
         // Assert
         Assert.Contains("Open panel", rendered.Markup);
         Assert.DoesNotContain("Secret panel", rendered.Markup);
+    }
+
+    [Fact]
+    public void WhenTheProcessOfAHostSystemIsHidden_ThenTheHostSystemWidgetDoesNotShowIt()
+    {
+        // Arrange
+        var host = _graph.CreateSubject<HostSystem>();
+        _graph.Device.Widget = host;
+        var shown = _graph.RenderWidget(host).Markup;
+        _permissions.CannotShow.Add(host.Process);
+
+        // Act
+        var hidden = _graph.RenderWidget(host).Markup;
+
+        // Assert
+        Assert.Contains("Process:", shown);
+        Assert.DoesNotContain("Process:", hidden);
+        Assert.Contains("Uptime", hidden);
     }
 
     private string RenderWithoutSubject() =>
