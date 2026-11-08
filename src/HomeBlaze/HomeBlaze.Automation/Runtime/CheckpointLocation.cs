@@ -45,7 +45,9 @@ internal sealed class CheckpointLocation
     /// may still resolve to the old path; the removal brings the new one.
     /// </summary>
     public bool HasMoved(Automation automation, ISubjectPathRecorder? recorder = null) =>
-        automation.PathResolver.GetPath(automation, PathStyle.Canonical, recorder) is { } currentPath &&
+        (recorder is null
+            ? automation.PathResolver.GetPath(automation, PathStyle.Canonical)
+            : automation.PathResolver.GetPath(automation, PathStyle.Canonical, recorder)) is { } currentPath &&
         !string.Equals(currentPath, AutomationPath, StringComparison.Ordinal);
 
     /// <summary>Deletes the file unless another automation has <see cref="AutomationPath"/> now; logs an I/O error.</summary>

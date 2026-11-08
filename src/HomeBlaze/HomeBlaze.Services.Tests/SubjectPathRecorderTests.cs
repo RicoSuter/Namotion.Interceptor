@@ -115,6 +115,36 @@ public class SubjectPathRecorderTests : SubjectPathResolverTestBase
         Assert.True(route.IsUnbounded);
     }
 
+    // The result is null whatever the graph is.
+    [Fact]
+    public void WhenAPathLeadsUpWithoutASubjectToStartAt_ThenTheRouteIsEmpty()
+    {
+        // Arrange
+        RootManager.Root = new TestContainer(Context) { Name = "Root" };
+
+        // Act
+        var (subject, route) = ResolveSubject("..");
+
+        // Assert
+        Assert.Null(subject);
+        Assert.Empty(route.Properties);
+        Assert.Empty(route.ParentSteps);
+        Assert.False(route.IsUnbounded);
+    }
+
+    [Fact]
+    public void WhenARecorderOverloadIsCalledWithoutARecorder_ThenItThrows()
+    {
+        // Arrange
+        var root = new TestContainer(Context) { Name = "Root" };
+        RootManager.Root = root;
+
+        // Act & Assert
+        Assert.Throws<ArgumentNullException>(() => Resolver.ResolveSubject("/", PathStyle.Canonical, null, null!));
+        Assert.Throws<ArgumentNullException>(() => Resolver.GetPaths(root, PathStyle.Canonical, null!));
+        Assert.Throws<ArgumentNullException>(() => Resolver.GetPath(root, PathStyle.Canonical, null!));
+    }
+
     [Fact]
     public void WhenAPathIndexesACollection_ThenTheRouteHasTheCollectionProperty()
     {

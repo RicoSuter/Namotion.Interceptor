@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Text;
 using HomeBlaze.Abstractions;
 using Namotion.Interceptor;
@@ -66,13 +67,24 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     public IInterceptorSubject? ResolveSubject(
         string path,
         PathStyle style,
-        IInterceptorSubject? relativeTo = null) => ResolveSubject(path, style, relativeTo, recorder: null);
+        IInterceptorSubject? relativeTo = null) => ResolveSubjectCore(path, style, relativeTo, recorder: null);
 
     /// <summary>
     /// Resolves a subject from a path as <see cref="ResolveSubject(string, PathStyle, IInterceptorSubject?)"/> does and
     /// reports the graph route of the resolution to <paramref name="recorder"/>, also for a result served from the cache.
     /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="recorder"/> is null.</exception>
     public IInterceptorSubject? ResolveSubject(
+        string path,
+        PathStyle style,
+        IInterceptorSubject? relativeTo,
+        ISubjectPathRecorder recorder)
+    {
+        ArgumentNullException.ThrowIfNull(recorder);
+        return ResolveSubjectCore(path, style, relativeTo, recorder);
+    }
+
+    private IInterceptorSubject? ResolveSubjectCore(
         string path,
         PathStyle style,
         IInterceptorSubject? relativeTo,
@@ -145,12 +157,10 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         // Parent navigation: ../... or ".." alone
         if (path.StartsWith("../") || path == "..")
         {
+            // Without a subject to start at, the result is null whatever the graph is, so the route is empty.
             var current = relativeTo;
             if (current == null)
-            {
-                recorder?.MarkUnbounded();
                 return null;
-            }
 
             var remaining = path;
             while (remaining.StartsWith("../") || remaining == "..")
@@ -197,14 +207,24 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     /// </summary>
     public IReadOnlyList<string> GetPaths(
         IInterceptorSubject subject,
-        PathStyle style) => GetPaths(subject, style, recorder: null);
+        PathStyle style) => GetPathsCore(subject, style, recorder: null);
 
     /// <summary>
     /// Gets all paths to the subject as <see cref="GetPaths(IInterceptorSubject, PathStyle)"/> does and reports the graph
     /// route of the paths to <paramref name="recorder"/>, also for paths served from the cache: a parent step of the
     /// subject, then the properties that hold the subject and its ancestors.
     /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="recorder"/> is null.</exception>
     public IReadOnlyList<string> GetPaths(
+        IInterceptorSubject subject,
+        PathStyle style,
+        ISubjectPathRecorder recorder)
+    {
+        ArgumentNullException.ThrowIfNull(recorder);
+        return GetPathsCore(subject, style, recorder);
+    }
+
+    private IReadOnlyList<string> GetPathsCore(
         IInterceptorSubject subject,
         PathStyle style,
         ISubjectPathRecorder? recorder)
@@ -243,20 +263,19 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     /// </summary>
     public string? GetPath(
         IInterceptorSubject subject,
-        PathStyle style) => GetPath(subject, style, recorder: null);
+        PathStyle style) => GetPath(GetPathsCore(subject, style, recorder: null));
 
     /// <summary>
     /// Gets the first path to the subject and reports the graph route of its paths to <paramref name="recorder"/>, see
-    /// <see cref="GetPaths(IInterceptorSubject, PathStyle, ISubjectPathRecorder?)"/>.
+    /// <see cref="GetPaths(IInterceptorSubject, PathStyle, ISubjectPathRecorder)"/>.
     /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="recorder"/> is null.</exception>
     public string? GetPath(
         IInterceptorSubject subject,
         PathStyle style,
-        ISubjectPathRecorder? recorder)
-    {
-        var paths = GetPaths(subject, style, recorder);
-        return paths.Count > 0 ? paths[0] : null;
-    }
+        ISubjectPathRecorder recorder) => GetPath(GetPaths(subject, style, recorder));
+
+    private static string? GetPath(IReadOnlyList<string> paths) => paths.Count > 0 ? paths[0] : null;
 
     /// <summary>
     /// Invalidates caches when subject graph changes and changes <see cref="PathsVersion"/>.
@@ -579,6 +598,8 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
 
         public void AddParentStep(IInterceptorSubject subject, ImmutableArray<SubjectPropertyParent> parents)
         {
+            // Only GetPaths records into a cached route, and it records one step; a second one would be lost here.
+            Debug.Assert(_parentStepSubject is null, "A cached route keeps one parent step.");
             _parentStepSubject = subject;
             _parentStepParents = parents;
         }

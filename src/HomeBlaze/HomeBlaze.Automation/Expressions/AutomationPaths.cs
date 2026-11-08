@@ -73,7 +73,9 @@ internal static class AutomationPaths
 
         try
         {
-            return resolver.ResolveSubject(path, PathStyle.Canonical, rule, recorder);
+            return recorder is null
+                ? resolver.ResolveSubject(path, PathStyle.Canonical, rule)
+                : resolver.ResolveSubject(path, PathStyle.Canonical, rule, recorder);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
