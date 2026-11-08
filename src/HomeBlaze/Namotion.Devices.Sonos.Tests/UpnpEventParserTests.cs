@@ -129,18 +129,21 @@ public class UpnpEventParserTests
         Assert.Equal(new GroupRenderingControlChange(35, false), change);
     }
 
-    [Fact]
-    public void WhenTopologyEvent_ThenZoneGroupStateIsReturned()
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public void WhenTopologyEvent_ThenZoneGroupStateIsReturned(string lineEnding)
     {
         // Arrange
-        var zoneGroupState = TestFixtures.Read("zone-group-state.xml");
-        var body = SonosEventBodies.Properties(("ZoneGroupState", zoneGroupState), ("ThirdPartyMediaServersX", "x"));
+        var zoneGroupState = TestFixtures.Read("zone-group-state.xml").ReplaceLineEndings(lineEnding);
+        var body = SonosEventBodies.Properties(("ZoneGroupState", zoneGroupState), ("ThirdPartyMediaServersX", "x"))
+            .ReplaceLineEndings(lineEnding);
 
         // Act
         var result = UpnpEventParser.ParseZoneGroupState(body);
 
         // Assert
-        Assert.Equal(zoneGroupState, result);
+        Assert.Equal(zoneGroupState.ReplaceLineEndings("\n"), result);
     }
 
     [Fact]

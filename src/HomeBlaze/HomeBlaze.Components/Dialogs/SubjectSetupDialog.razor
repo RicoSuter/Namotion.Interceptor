@@ -29,12 +29,12 @@
                        result, so the check must also be its Validation. Error and ErrorText still show the error of
                        a name that was kept from the previous type, which the new field has not validated yet. *@
                     <MudTextField T="string"
+                                  @ref="_nameField"
                                   Value="_subjectName"
                                   ValueChanged="OnNameChanged"
                                   Label="@nameOptions.Label"
                                   Required="true"
                                   Immediate="true"
-                                  AutoFocus="_hasFinePointer"
                                   Adornment="@(nameOptions.Suffix.Length > 0 ? Adornment.End : Adornment.None)"
                                   AdornmentText="@nameOptions.Suffix"
                                   Validation="@((Func<string?, string?>)ValidateName)"
@@ -120,6 +120,8 @@
     private IReadOnlyList<SubjectTypeDescriptor> _types = [];
     private SubjectTypePicker? _typePicker;
     private bool _isSearchFocusPending;
+    private MudTextField<string>? _nameField;
+    private bool _isNameFocusPending;
     private bool _hasFinePointer;
     private SubjectTypeDescriptor? _selectedType;
     private IInterceptorSubject? _createdSubject;
@@ -180,6 +182,7 @@
         }
 
         _nameError = ValidateName(_subjectName);
+        _isNameFocusPending = Options.NameField is not null;
         RefreshDialog();
     }
 
@@ -189,6 +192,7 @@
         _selectedType = null;
         _editPanel = null;
         _isEditPanelValid = false;
+        _isNameFocusPending = false;
         _isSearchFocusPending = _hasFinePointer;
         RefreshDialog();
     }
@@ -207,6 +211,14 @@
         {
             _isSearchFocusPending = false;
             await typePicker.FocusSearchAsync();
+        }
+
+        // A type picked while the pointer is still being queried renders the field before the pointer is known,
+        // so the focus waits for the pointer instead of the field's first render.
+        if (_isNameFocusPending && _hasFinePointer && _nameField is { } nameField)
+        {
+            _isNameFocusPending = false;
+            await nameField.FocusAsync();
         }
     }
 
