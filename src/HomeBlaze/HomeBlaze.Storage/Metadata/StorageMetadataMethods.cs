@@ -54,7 +54,8 @@ internal static class StorageMetadataMethods
         IInterceptorSubject storage, IInterceptorSubject start, string? tag, string? key, string? value, IUserPermissions permissions)
     {
         // The search matches the stored metadata before the permissions are asked, then this matches what the reader is
-        // shown. Only right while value filters remove entries: for a filter that adds entries, pass no filters to the search.
+        // shown. Only right while the shown value only leaves out entries, as IMcpValueFilter.Filter requires of the value
+        // filters behind it: for a filter that adds entries, pass no filters to the search.
         var matches = MetadataSearch.Search(
             storage,
             member => permissions.CanReadShown(member) &&
