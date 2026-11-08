@@ -148,15 +148,37 @@ public class GraphRoutesTests
         var needsResolvingBefore = fixture.Routes.NeedsResolving();
         fixture.ResolveProperty("/Room/Sensor/Gust");
         fixture.Routes.Publish(0);
-        var needsResolvingAfterResolving = fixture.Routes.NeedsResolving();
+        var needsResolvingAfterThePathsAlone = fixture.Routes.NeedsResolving();
+        fixture.Routes.ResolveLocation(fixture.Automation);
+        fixture.ResolveProperty("/Room/Sensor/Gust");
+        fixture.Routes.Publish(0);
+        var needsResolvingAfterThePathsAndTheLocation = fixture.Routes.NeedsResolving();
 
         // Act
         fixture.Room.Sensor = new TestSensor();
 
         // Assert
         Assert.True(needsResolvingBefore);
-        Assert.False(needsResolvingAfterResolving);
+        Assert.True(needsResolvingAfterThePathsAlone);
+        Assert.False(needsResolvingAfterThePathsAndTheLocation);
         Assert.True(fixture.Routes.NeedsResolving());
+    }
+
+    [Fact]
+    public async Task WhenThePathsAloneAreResolvedAgainAtTheSameStructure_ThenTheLocationStaysBound()
+    {
+        // Arrange
+        await using var fixture = await RouteFixture.CreateAsync();
+        fixture.Routes.ResolveLocation(fixture.Automation);
+        fixture.ResolveProperty("/Room/Sensor/Gust");
+        fixture.Routes.Publish(0);
+
+        // Act
+        fixture.ResolveProperty("/Room/Items[0]/Gust");
+        fixture.Routes.Publish(0);
+
+        // Assert
+        Assert.False(fixture.Routes.NeedsResolving());
     }
 
     /// <summary>

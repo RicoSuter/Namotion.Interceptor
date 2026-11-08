@@ -16,9 +16,10 @@ namespace HomeBlaze.Automation.Runtime;
 /// <remarks>
 /// The structure version of the registry, which is odd while a change is in progress, is read before the first resolution
 /// since the last publication and again after the publication. The paths are those of the current structure only when
-/// both reads return the same even number: then a graph change finds nothing to resolve while the version stays that
-/// number, see <see cref="NeedsResolving"/>. Otherwise a change committed while the paths were resolved, which the route
-/// published only afterwards may not have routed, so a graph change is queued.
+/// both reads return the same even number and the location was resolved at it as well, in this pass or in an earlier one
+/// at the same number: then a graph change finds nothing to resolve while the version stays that number, see
+/// <see cref="NeedsResolving"/>. A change committed while the paths were resolved, which the route published only
+/// afterwards may not have routed, queues a graph change.
 /// </remarks>
 internal sealed class GraphRoutes
 {
@@ -28,6 +29,7 @@ internal sealed class GraphRoutes
     private readonly GraphRouteBuilder _location;
     private readonly HashSet<PropertyReference> _union = [];
     private bool _hasResolved;
+    private bool _hasResolvedLocation;
     private long _resolvedSince;
     private long _boundVersion = -1;
 
@@ -68,8 +70,8 @@ internal sealed class GraphRoutes
     internal Action? BeforePublication { get; set; }
 
     /// <summary>
-    /// Whether the paths may resolve differently than at the last publication: the structure of the graph changed since
-    /// the paths were resolved, a change was in progress then, or there is no registry.
+    /// Whether the paths or the location may resolve differently than at the last publication: the structure of the graph
+    /// changed since they were resolved, a change was in progress then, or there is no registry.
     /// </summary>
     public bool NeedsResolving()
     {
@@ -92,6 +94,7 @@ internal sealed class GraphRoutes
     public string? ResolveLocation(Automation automation)
     {
         NoteResolution();
+        _hasResolvedLocation = true;
         _location.Clear();
         return Resolver.GetPath(automation, PathStyle.Canonical, _location);
     }
@@ -119,18 +122,15 @@ internal sealed class GraphRoutes
     }
 
     // Reads the version after the publication, so that a change committed before it is either routed by the route
-    // published now or seen here.
+    // published now or seen here. A pass that resolved the paths of the rules alone leaves the location bound only while
+    // the version is the one it was resolved at.
     private void BindVersion(int chainDepth)
     {
         var version = _getStructureVersion();
-        if (version >= 0 && version == _resolvedSince && version % 2 == 0)
-        {
-            _boundVersion = version;
-            return;
-        }
-
-        _boundVersion = -1;
-        if (version >= 0)
+        var isCurrent = version >= 0 && version == _resolvedSince && version % 2 == 0;
+        _boundVersion = isCurrent && (_hasResolvedLocation || _boundVersion == version) ? version : -1;
+        _hasResolvedLocation = false;
+        if (!isCurrent && version >= 0)
         {
             _changes?.RequestGraphChange(chainDepth);
         }

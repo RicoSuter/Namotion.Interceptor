@@ -10,22 +10,26 @@ namespace HomeBlaze.Automation.Tests.Runtime;
 
 public class AutomationTriggersTests
 {
+    // The location is resolved with the paths of the rules on a graph change, as the worker does, which binds the version.
     [Fact]
-    public void WhenAGraphChangeLeavesTheStructureAsItWas_ThenThePathsAreNotResolvedAgain()
+    public async Task WhenAGraphChangeLeavesTheStructureAsItWas_ThenThePathsAreNotResolvedAgain()
     {
         // Arrange
-        var graph = new TestGraph();
-        graph.Add("Weather", new TestSensor());
+        await using var host = await AutomationTestHost.StartAsync(_ => { });
+        var graph = host.Graph;
+        var automation = host.CreateAutomation("Gusts");
+        graph.Add("Gusts", automation);
         var registry = graph.Context.GetService<ISubjectRegistry>();
         var publishes = 0;
-        var routes = new GraphRoutes(graph.Resolver, null, () => registry.StructureVersion, null);
+        var routes = new GraphRoutes(graph.Resolver, automation, () => registry.StructureVersion, null);
         var triggers = new AutomationTriggers(
-            routes, new FakeTimeProvider(AutomationTestHost.Start), new AutomationInputQueue(), NullLogger.Instance, () => "Storm", _ => publishes++);
+            routes, new FakeTimeProvider(AutomationTestHost.Start), new AutomationInputQueue(), NullLogger.Instance, () => "Gusts", _ => publishes++);
         var rule = Compile("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")));
         rule.IsActivated = true;
         triggers.Activate([rule], [rule]);
         triggers.GetRequests(new ActivationInput([rule], 0), [rule]);
         routes.Publish(0);
+        routes.ResolveLocation(automation);
         triggers.OnGraphChanged([rule]);
         routes.Publish(0);
         var publishesAfterTheFirstGraphChange = publishes;
@@ -36,6 +40,7 @@ public class AutomationTriggersTests
         routes.Publish(0);
         var publishesAfterTheSameChildren = publishes;
         graph.Add("Blinds", new TestBlinds());
+        routes.ResolveLocation(automation);
         triggers.OnGraphChanged([rule]);
 
         // Assert
