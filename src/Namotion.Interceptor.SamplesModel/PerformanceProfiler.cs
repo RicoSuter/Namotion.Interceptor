@@ -140,7 +140,10 @@ public class PerformanceProfiler : IDisposable
     {
         using var proc = Process.GetCurrentProcess();
         var workingSetMb = proc.WorkingSet64 / (1024.0 * 1024.0);
-        var totalMemoryMb = GC.GetTotalMemory(forceFullCollection: false) / (1024.0 * 1024.0);
+        // Not GC.GetTotalMemory, which can go negative on the .NET 10 regions GC while pinned objects keep extra gen0
+        // regions (dotnet/runtime#106712).
+        var gcInfo = GC.GetGCMemoryInfo(GCKind.Any);
+        var totalMemoryMb = (gcInfo.HeapSizeBytes - gcInfo.FragmentedBytes) / (1024.0 * 1024.0);
         var now = DateTimeOffset.UtcNow;
         var elapsedSec = Math.Max(1.0, Math.Round((now - windowStartTimeCopy).TotalSeconds, 0));
         var totalAllocatedBytesNow = GC.GetTotalAllocatedBytes(precise: true);
