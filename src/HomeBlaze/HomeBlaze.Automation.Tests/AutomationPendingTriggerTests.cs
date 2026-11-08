@@ -279,4 +279,25 @@ public class AutomationPendingTriggerTests
         Assert.Equal("On: Waiting since 2026-11-06 12:01:30: Only if is false", host.Rule("overheat").Status);
         Assert.Equal(2, host.Logger.Messages.Count(message => message.EndsWith("did not run: Only if is false.", StringComparison.Ordinal)));
     }
+
+    [Fact]
+    public async Task WhenTheGraphChangesWhileAnElapsedTimeOfOnlyIfPassesAndTheWorkerIsBusy_ThenTheWaitingTriggerRunsOnceTheWorkerIsFree()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Gust > 8")], [Invoke("/Blinds/Close")], "now - /Weather/LastUpdated > 20s")),
+            ("wait", On("Wait", When("/Weather/Power > 0"), Invoke("/Blinds/Wait")))));
+        host.Weather.LastUpdated = AutomationTestHost.Start;
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        var runsWhileOnlyIfIsFalse = host.Blinds.CloseCount;
+
+        // Act
+        await host.ChangeTheGraphWhileBusyAsync(TimeSpan.FromSeconds(30));
+
+        // Assert
+        Assert.Equal(0, runsWhileOnlyIfIsFalse);
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(AutomationTestHost.Start.AddSeconds(30), host.Rule("retract").LastTriggeredAt);
+    }
 }

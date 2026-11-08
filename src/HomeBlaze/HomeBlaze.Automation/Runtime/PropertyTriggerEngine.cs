@@ -246,35 +246,112 @@ internal sealed class PropertyTriggerEngine(
         properties.Count == 0 ? [] : ObserveWhere(rules, trigger => trigger.Dependencies.Any(properties.Contains));
 
     /// <summary>
-    /// Resolves the properties of the active triggers and of Only if of the rules of their pending triggers again, such as a
-    /// pending state that a Save carried over, and publishes them.
+    /// Resolves the properties of the active triggers and of Only if of the rules of their pending triggers again, tracks
+    /// the pending triggers it does not track yet, such as a pending state that a Save carried over, and publishes the
+    /// properties. A trigger or Only if whose properties resolve as before keeps when it is due and its place among the
+    /// pending triggers; one whose properties changed and that reads the clock is due at once, since the instants derived
+    /// before read the properties it was bound to.
     /// </summary>
     public void Refresh(IReadOnlyList<CompiledRule> rules)
     {
-        _pending.Clear();
-        var now = timeProvider.GetUtcNow();
-        foreach (var trigger in ActiveTriggers(rules))
+        for (var index = _pending.Count - 1; index >= 0; index--)
         {
-            if (ResolveDependencies(trigger))
+            if (!IsPending(_pending[index]))
             {
-                _rebound.Add(trigger);
+                _pending.RemoveAt(index);
+            }
+        }
+
+        DateTimeOffset? now = null;
+        foreach (var rule in rules)
+        {
+            if (!rule.IsActivated)
+            {
+                continue;
             }
 
-            ScheduleCheck(trigger, now);
-
-            if (trigger.State.Phase == TriggerPhase.Pending)
+            var isTracked = IsTracked(rule);
+            if (RefreshTriggers(rule, ref now))
             {
-                if (ResolveOnlyIfDependencies(trigger.Rule))
-                {
-                    _reboundOnlyIfRules.Add(trigger.Rule);
-                }
-
-                ScheduleOnlyIfRecheck(trigger.Rule, now);
-                _pending.Add(trigger);
+                RefreshOnlyIf(rule, isTracked, ref now);
             }
         }
 
         PublishWatched(rules, []);
+    }
+
+    // Returns whether a trigger of the rule is pending.
+    private bool RefreshTriggers(CompiledRule rule, ref DateTimeOffset? now)
+    {
+        var hasPending = false;
+        foreach (var trigger in rule.PropertyTriggers)
+        {
+            var phase = trigger.State.Phase;
+            if (phase == TriggerPhase.Inactive)
+            {
+                continue;
+            }
+
+            if (ResolveDependencies(trigger))
+            {
+                OnRebound(trigger, ref now);
+            }
+
+            if (phase == TriggerPhase.Pending)
+            {
+                hasPending = true;
+                if (!_pending.Contains(trigger))
+                {
+                    _pending.Add(trigger);
+                }
+            }
+        }
+
+        return hasPending;
+    }
+
+    // The instants derived for the clock read the properties the trigger was bound to before.
+    private void OnRebound(CompiledPropertyTrigger trigger, ref DateTimeOffset? now)
+    {
+        _rebound.Add(trigger);
+        if (trigger.Clock is not null)
+        {
+            trigger.NextCheckAt = Earliest(trigger.NextCheckAt, now ??= timeProvider.GetUtcNow());
+        }
+    }
+
+    // Derives when Only if of a rule that was not tracked as pending is due; the instants derived for a tracked rule stay
+    // unless its properties changed.
+    private void RefreshOnlyIf(CompiledRule rule, bool isTracked, ref DateTimeOffset? now)
+    {
+        var isRebound = ResolveOnlyIfDependencies(rule);
+        if (isRebound)
+        {
+            _reboundOnlyIfRules.Add(rule);
+        }
+
+        if (!isTracked)
+        {
+            ScheduleOnlyIfRecheck(rule, now ??= timeProvider.GetUtcNow());
+        }
+        else if (isRebound && rule.OnlyIfClock is { IsEverySecond: false })
+        {
+            rule.OnlyIfRecheckAt = Earliest(rule.OnlyIfRecheckAt, now ??= timeProvider.GetUtcNow());
+        }
+    }
+
+    // Whether a trigger of the rule is tracked as pending, so that when its Only if is due is derived already.
+    private bool IsTracked(CompiledRule rule)
+    {
+        foreach (var trigger in _pending)
+        {
+            if (ReferenceEquals(trigger.Rule, rule))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public static void Deactivate(CompiledRule rule)
