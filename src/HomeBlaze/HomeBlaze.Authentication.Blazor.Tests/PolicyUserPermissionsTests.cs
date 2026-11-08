@@ -1,11 +1,16 @@
+using System.Collections.Immutable;
 using System.Security.Claims;
+using System.Text.Json;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Authentication.Data;
 using HomeBlaze.Authorization;
 using HomeBlaze.Authorization.Abstractions;
+using HomeBlaze.Storage.Abstractions.Metadata;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
@@ -470,5 +475,39 @@ public class PolicyUserPermissionsTests
         var authenticationState = (IHostEnvironmentAuthenticationStateProvider)services.GetRequiredService<AuthenticationStateProvider>();
         authenticationState.SetAuthenticationState(Task.FromResult(new AuthenticationState(principal)));
         return authenticationState;
+    }
+
+    [Fact]
+    public async Task WhenTheOrderOfAFolderNamesAChildThePersonIsNotShown_ThenTheValueTheyAreShownLeavesItOut()
+    {
+        // Arrange
+        var role = new AuthorizationRole
+        {
+            Name = "nosecret",
+            Includes = [BuiltInRoles.ReaderName],
+            Deny = [new PermissionRule { Paths = ["/Folder/Secret/**"], Actions = [PermissionAction.Read] }]
+        };
+        await using var graph = await PermissionsTestGraph.CreateAsync(roles: [role.Name], customRoles: [role]);
+        var secret = new PermissionsTestDevice();
+        var folder = new PermissionsTestFolder
+        {
+            Children = new Dictionary<string, IInterceptorSubject> { ["Docs"] = new PermissionsTestDevice(), ["Secret"] = secret }
+        };
+        graph.Root.Children = new Dictionary<string, IInterceptorSubject>(graph.Root.Children) { ["Folder"] = folder };
+        var values = ImmutableDictionary<string, JsonElement>.Empty
+            .Add("navTitle", JsonSerializer.SerializeToElement("Folder"))
+            .Add(MetadataKeys.Order, JsonSerializer.SerializeToElement(new[] { "Secret", "Docs" }));
+        var registeredFolder = folder.TryGetRegisteredSubject()!;
+        registeredFolder.AddProperty(KnownAttributes.Metadata, typeof(ImmutableDictionary<string, JsonElement>), _ => values, null);
+        var metadata = registeredFolder.TryGetProperty(KnownAttributes.Metadata)!;
+
+        // Act
+        var shown = (ImmutableDictionary<string, JsonElement>)((IUserPermissions)graph.Permissions).GetValue(metadata)!;
+
+        // Assert
+        Assert.False(graph.Permissions.CanShow(secret.TryGetRegisteredSubject()!));
+        Assert.Equal("Folder", shown["navTitle"].GetString());
+        Assert.Equal(["Docs"], shown[MetadataKeys.Order].EnumerateArray().Select(name => name.GetString()));
+        Assert.Equal(2, values[MetadataKeys.Order].GetArrayLength());
     }
 }

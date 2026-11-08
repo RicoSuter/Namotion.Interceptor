@@ -1,5 +1,7 @@
 using HomeBlaze.Authorization.Abstractions;
+using HomeBlaze.Services.Metadata;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using AuthorizationService = HomeBlaze.Authorization.AuthorizationService;
 
@@ -11,8 +13,9 @@ namespace HomeBlaze.Authentication.Blazor;
 /// <see cref="Authorization.User"/>, and <see cref="Authorization.Authorization.Users"/> and adding users), which a scoped
 /// grant allows. A signed-in person is also shown the users they may administer and reads their members and history,
 /// which the system rules otherwise hide. The members of an <see cref="Authorization.IRoleScopedSubject"/> it scopes are
-/// denied to a person who may not act through its roles, see <see cref="CanActThrough"/>. A person who must change their
-/// password is denied everything until they change it. Scoped per circuit; thread-safe.
+/// denied to a person who may not act through its roles, see <see cref="CanActThrough"/>. The order in the metadata of a
+/// folder names only the children the person is shown. A person who must change their password is denied everything
+/// until they change it. Scoped per circuit; thread-safe.
 /// </summary>
 public sealed partial class PolicyUserPermissions : IUserPermissions, IDisposable
 {
@@ -45,6 +48,17 @@ public sealed partial class PolicyUserPermissions : IUserPermissions, IDisposabl
 
     /// <inheritdoc />
     public bool CanRead(RegisteredSubjectProperty member) => _decisions.CanRead(member);
+
+    /// <inheritdoc />
+    public object? GetValue(RegisteredSubjectProperty member) =>
+        ChildOrdering.FilterOrderInMetadata(
+            member,
+            member.GetValue(),
+            _decisions,
+            static (decisions, folder) => ChildOrdering.GetListedNames(
+                folder,
+                decisions,
+                static (shownDecisions, _, child) => child.Subject.TryGetRegisteredSubject() is { } registered && shownDecisions.CanShow(registered)));
 
     /// <inheritdoc />
     public bool CanWrite(RegisteredSubjectProperty member) => _decisions.CanWrite(member);

@@ -1,14 +1,17 @@
 using System.Collections.Immutable;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using HomeBlaze.Storage.Abstractions.Metadata;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Services.Metadata;
 
 /// <summary>
 /// The order in which the children of a container are shown everywhere: the names in the order of the container
-/// first, in that order, then the others, a readme first and an index second, then by name.
+/// first, in that order, then the others, a readme first and an index second, then by name. A reader who is listed only
+/// some of the children is shown an order that names only those.
 /// </summary>
 public static class ChildOrdering
 {
@@ -76,6 +79,64 @@ public static class ChildOrdering
         return Order(children, childOrder, static child => child.Index?.ToString() ?? string.Empty)
             .Select(static child => child.Index?.ToString() ?? string.Empty)
             .ToArray();
+    }
+
+    /// <summary>
+    /// Gets the names of the children of a container that <paramref name="isListed"/> allows, the keys of its
+    /// <see cref="IMetadataContainer.ChildrenPropertyName"/> property.
+    /// </summary>
+    /// <param name="container">The container.</param>
+    /// <param name="state">Passed to <paramref name="isListed"/>.</param>
+    /// <param name="isListed">Whether the reader is listed a child, given the property that holds it.</param>
+    public static HashSet<string> GetListedNames<TState>(
+        RegisteredSubject container, TState state, Func<TState, RegisteredSubjectProperty, SubjectPropertyChild, bool> isListed)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        if (container.TryGetProperty(IMetadataContainer.ChildrenPropertyName) is not { } childrenProperty)
+        {
+            return names;
+        }
+
+        foreach (var child in childrenProperty.Children)
+        {
+            if (child.Index is { } index && isListed(state, childrenProperty, child))
+            {
+                names.Add(index.ToString() ?? string.Empty);
+            }
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// Gets the value of <paramref name="member"/> as a reader who is listed only some children is shown it: when the
+    /// member holds the metadata of a container, its order without the names that
+    /// <paramref name="getListedNames"/> does not return for the container; any other value as it is.
+    /// </summary>
+    /// <param name="member">The member the value was read from.</param>
+    /// <param name="value">The value of the member.</param>
+    /// <param name="state">Passed to <paramref name="getListedNames"/>.</param>
+    /// <param name="getListedNames">Gets the names of the children of the container the reader is listed, called only
+    /// for a value that has an order.</param>
+    public static object? FilterOrderInMetadata<TState>(
+        RegisteredSubjectProperty member, object? value, TState state, Func<TState, RegisteredSubject, IReadOnlySet<string>> getListedNames)
+    {
+        if (value is not ImmutableDictionary<string, JsonElement> metadata ||
+            member.IsAttribute ||
+            member.Parent.Subject is not IMetadataContainer ||
+            !member.IsMetadata() ||
+            !metadata.TryGetValue(MetadataKeys.Order, out var order) ||
+            order.ValueKind != JsonValueKind.Array)
+        {
+            return value;
+        }
+
+        var listedNames = getListedNames(state, member.Parent);
+        var names = order.EnumerateArray()
+            .Where(item => item.ValueKind == JsonValueKind.String && listedNames.Contains(item.GetString()!))
+            .Select(item => item.GetString()!)
+            .ToArray();
+        return metadata.SetItem(MetadataKeys.Order, JsonSerializer.SerializeToElement(names));
     }
 
     private static int GetDefaultRank(string name)

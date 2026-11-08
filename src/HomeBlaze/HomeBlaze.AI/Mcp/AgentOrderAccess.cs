@@ -105,22 +105,20 @@ internal static class AgentOrderAccess
     private static HashSet<string> GetListedChildNames(
         RegisteredSubject folder, McpServerConfiguration configuration, IInterceptorSubject root)
     {
-        var names = new HashSet<string>(StringComparer.Ordinal);
-        if (folder.TryGetProperty(IMetadataContainer.ChildrenPropertyName) is not { } childrenProperty ||
-            root.TryGetRegisteredSubject() is not { } registeredRoot)
+        if (root.TryGetRegisteredSubject() is not { } registeredRoot)
         {
-            return names;
+            return new HashSet<string>(StringComparer.Ordinal);
         }
 
-        foreach (var child in childrenProperty.Children)
-        {
-            if (child.Index is { } index && IsListed(child.Subject, childrenProperty.TryGetPath(configuration.PathProvider, root, index), folder, registeredRoot, configuration))
-            {
-                names.Add(index.ToString() ?? string.Empty);
-            }
-        }
-
-        return names;
+        return ChildOrdering.GetListedNames(
+            folder,
+            (Configuration: configuration, Root: root, RegisteredRoot: registeredRoot),
+            static (state, childrenProperty, child) => IsListed(
+                child.Subject,
+                childrenProperty.TryGetPath(state.Configuration.PathProvider, state.Root, child.Index),
+                childrenProperty.Parent,
+                state.RegisteredRoot,
+                state.Configuration));
     }
 
     private static bool IsListed(
@@ -136,23 +134,11 @@ internal static class AgentOrderAccess
 
     private sealed class MetadataOrderFilter(McpServerConfiguration configuration, Func<IInterceptorSubject> rootSubjectProvider) : IMcpValueFilter
     {
-        public object? Filter(RegisteredSubjectProperty member, object? value)
-        {
-            if (value is not ImmutableDictionary<string, JsonElement> metadata || !IsOwnMetadataOfFolder(member) ||
-                !metadata.TryGetValue(MetadataKeys.Order, out var order) || order.ValueKind != JsonValueKind.Array)
-            {
-                return value;
-            }
-
-            var listedNames = GetListedChildNames(member.Parent, configuration, rootSubjectProvider());
-            var names = order.EnumerateArray()
-                .Where(item => item.ValueKind == JsonValueKind.String && listedNames.Contains(item.GetString()!))
-                .Select(item => item.GetString()!)
-                .ToArray();
-            return metadata.SetItem(MetadataKeys.Order, JsonSerializer.SerializeToElement(names));
-        }
-
-        private static bool IsOwnMetadataOfFolder(RegisteredSubjectProperty member)
-            => !member.IsAttribute && member.Parent.Subject is IMetadataContainer && member.IsMetadata();
+        public object? Filter(RegisteredSubjectProperty member, object? value) =>
+            ChildOrdering.FilterOrderInMetadata(
+                member,
+                value,
+                (Configuration: configuration, RootSubjectProvider: rootSubjectProvider),
+                static (state, folder) => GetListedChildNames(folder, state.Configuration, state.RootSubjectProvider()));
     }
 }

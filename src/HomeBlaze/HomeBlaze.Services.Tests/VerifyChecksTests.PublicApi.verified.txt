@@ -453,6 +453,8 @@ namespace HomeBlaze.Services.Metadata
 {
     public static class ChildOrdering
     {
+        public static object? FilterOrderInMetadata<TState>(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, object? value, TState state, System.Func<TState, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject, System.Collections.Generic.IReadOnlySet<string>> getListedNames) { }
+        public static System.Collections.Generic.HashSet<string> GetListedNames<TState>(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject container, TState state, System.Func<TState, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, Namotion.Interceptor.Registry.Abstractions.SubjectPropertyChild, bool> isListed) { }
         public static string[] GetShownNames(Namotion.Interceptor.IInterceptorSubject container) { }
         public static System.Collections.Generic.IEnumerable<T> Order<T>(System.Collections.Generic.IEnumerable<T> children, System.Collections.Immutable.ImmutableArray<string> childOrder, System.Func<T, string> getName) { }
     }
