@@ -300,4 +300,29 @@ public class AutomationPendingTriggerTests
         Assert.Equal(1, host.Blinds.CloseCount);
         Assert.Equal(AutomationTestHost.Start.AddSeconds(30), host.Rule("retract").LastTriggeredAt);
     }
+
+    [Fact]
+    public async Task WhenOnlyIfBecomesTrueInTheInputThatChangesTheState_ThenTheWaitingTriggerRuns()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Idle", "Running"];
+            automation.InitialState = "Idle";
+            automation.RuleOrder = ["retract", "start"];
+            automation.Rules = Keyed(
+                ("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Power > 40")], [Invoke("/Blinds/Close")], "not /Blinds/IsMoving")),
+                ("start", Create("Start", AutomationRuleMode.On, [When("/Weather/Power > 40")], [Set("/Blinds/IsMoving", "false"), Enter("Running")])));
+        });
+        host.Blinds.IsMoving = true;
+        await host.FlushAsync();
+
+        // Act
+        await SetAsync(host, 41);
+
+        // Assert
+        Assert.Equal("Running", host.Automation.CurrentState);
+        Assert.False(host.Blinds.IsMoving);
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
 }

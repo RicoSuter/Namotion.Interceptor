@@ -250,9 +250,10 @@ internal sealed class PropertyTriggerEngine(
     /// the pending triggers it does not track yet, such as a pending state that a Save carried over, and publishes the
     /// properties. A trigger or Only if whose properties resolve as before keeps when it is due and its place among the
     /// pending triggers; one whose properties changed and that reads the clock is due at once, since the instants derived
-    /// before read the properties it was bound to.
+    /// before read the properties it was bound to. Returns whether it began to track a pending trigger, whose Only if may
+    /// have changed before its properties were watched.
     /// </summary>
-    public void Refresh(IReadOnlyList<CompiledRule> rules)
+    public bool Refresh(IReadOnlyList<CompiledRule> rules)
     {
         for (var index = _pending.Count - 1; index >= 0; index--)
         {
@@ -263,6 +264,7 @@ internal sealed class PropertyTriggerEngine(
         }
 
         DateTimeOffset? now = null;
+        var trackedCount = _pending.Count;
         foreach (var rule in rules)
         {
             if (!rule.IsActivated)
@@ -278,6 +280,7 @@ internal sealed class PropertyTriggerEngine(
         }
 
         PublishWatched(rules, []);
+        return _pending.Count > trackedCount;
     }
 
     // Returns whether a trigger of the rule is pending.
