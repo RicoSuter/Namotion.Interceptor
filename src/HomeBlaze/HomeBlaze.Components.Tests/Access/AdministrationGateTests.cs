@@ -279,6 +279,30 @@ public sealed class AdministrationGateTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenTheViewerMayInvokeTheEditOperationButNotAdministerTheConfiguration_ThenTheEditPanelDoesNotSave()
+    {
+        // Arrange
+        var edited = new ConfiguredOperationSavedDevice { Label = "old" };
+        _store.ConfiguredOperationSaved = edited;
+        _permissions.CannotAdminister.Add(GetMember(edited, nameof(ConfiguredOperationSavedDevice.Label)));
+        var panel = RenderEditPanel(edited);
+        var editComponent = panel.FindComponent<ConfiguredOperationSavedDeviceEditComponent>().Instance;
+
+        // Act
+        var isSaved = await panel.InvokeAsync(() => panel.Instance.SaveAsync(CancellationToken.None));
+        var isApplied = await panel.InvokeAsync(() => panel.Instance.ApplyChangesAsync(CancellationToken.None));
+
+        // Assert
+        Assert.True(_permissions.CanInvoke(GetMember(edited, "Save")));
+        Assert.False(isSaved);
+        Assert.False(isApplied);
+        Assert.Equal(0, editComponent.SaveCount);
+        Assert.Equal("old", edited.Label);
+        Assert.Empty(_store.WrittenSubjects);
+        Assert.Contains(Refusal, SnackbarMessages);
+    }
+
+    [Fact]
     public async Task WhenAnEditComponentOfASubjectWithoutConfigurationHasNoEditOperation_ThenTheEditPanelDoesNotSave()
     {
         // Arrange

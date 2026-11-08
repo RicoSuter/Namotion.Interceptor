@@ -60,6 +60,15 @@ public static class RegisteredSubjectMethodExtensions
         member.IsMethodEnabled() &&
         permissions.CanInvoke(member);
 
+    /// <summary>
+    /// Gets whether the viewer may save the edit component of the subject through its edit operation instead of
+    /// administering its configuration: the subject has no configuration members, whose change needs
+    /// <see cref="UserPermissionsExtensions.CanAdministerConfiguration"/> whatever saves it, and
+    /// <see cref="CanInvokeEditOperation"/> allows its edit operation.
+    /// </summary>
+    public static bool CanSaveThroughEditOperation(this IUserPermissions permissions, IInterceptorSubject subject) =>
+        !subject.HasConfigurationProperties() && permissions.CanInvokeEditOperation(subject);
+
     private static MethodMetadata? GetOperation(RegisteredSubject subject, OperationPurpose purpose, ExclusionTarget target)
     {
         MethodMetadata? operation = null;

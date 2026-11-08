@@ -136,6 +136,23 @@ public class RegisteredSubjectMethodExtensionsTests
     }
 
     [Fact]
+    public void WhenASubjectHasConfigurationMembers_ThenNoViewerMaySaveThroughItsEditOperation()
+    {
+        // Arrange
+        var configured = new ConfiguredEditOperationTestSubject(CreateContext());
+        var unconfigured = new EditOperationTestSubject(CreateContext());
+
+        // Act
+        var canSaveConfigured = UnrestrictedPermissions.Instance.CanSaveThroughEditOperation(configured);
+        var canSaveUnconfigured = UnrestrictedPermissions.Instance.CanSaveThroughEditOperation(unconfigured);
+
+        // Assert
+        Assert.True(UnrestrictedPermissions.Instance.CanInvokeEditOperation(configured));
+        Assert.False(canSaveConfigured);
+        Assert.True(canSaveUnconfigured);
+    }
+
+    [Fact]
     public void WhenMethodsWithAPurposeAreExcluded_ThenGetAllMethodsReturnsOnlyTheOtherMethodsInOrder()
     {
         // Arrange
@@ -178,7 +195,10 @@ public class RegisteredSubjectMethodExtensionsTests
             .WithLifecycle()
             .WithService<ILifecycleHandler>(
                 () => new MethodPropertyInitializer(),
-                handler => handler is MethodPropertyInitializer);
+                handler => handler is MethodPropertyInitializer)
+            .WithService<IPropertyLifecycleHandler>(
+                () => new PropertyAttributeInitializer(),
+                handler => handler is PropertyAttributeInitializer);
     }
 
     [Fact]
@@ -339,6 +359,16 @@ public partial class EditOperationTestSubject
 
     [Operation(Title = "Save", Purpose = OperationPurpose.Edit)]
     public void Save(string label) { }
+}
+
+[InterceptorSubject]
+public partial class ConfiguredEditOperationTestSubject
+{
+    [Configuration]
+    public partial string? Label { get; set; }
+
+    [Operation(Title = "Save", Purpose = OperationPurpose.Edit)]
+    public void Save(string label) => Label = label;
 }
 
 [InterceptorSubject]

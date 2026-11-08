@@ -184,6 +184,56 @@ public sealed class OperationSavedDeviceEditComponent : ComponentBase, ISubjectE
     }
 }
 
+/// <summary>A device with a configuration member and an edit operation that requires no administration.</summary>
+[InterceptorSubject]
+public partial class ConfiguredOperationSavedDevice : IConfigurable
+{
+    [Configuration]
+    public partial string? Label { get; set; }
+
+    [Operation(Title = "Save", Purpose = OperationPurpose.Edit)]
+    public void Save(string label) => Label = label;
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+/// <summary>An edit component that sets <see cref="ConfiguredOperationSavedDevice.Label"/> to "new" itself when it saves.</summary>
+[SubjectComponent(SubjectComponentType.Edit, typeof(ConfiguredOperationSavedDevice))]
+public sealed class ConfiguredOperationSavedDeviceEditComponent : ComponentBase, ISubjectEditComponent
+{
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    public bool IsValid => true;
+
+    public bool IsDirty => false;
+
+    public event Action<bool>? IsValidChanged
+    {
+        add { }
+        remove { }
+    }
+
+    public event Action<bool>? IsDirtyChanged
+    {
+        add { }
+        remove { }
+    }
+
+    /// <summary>The number of saves.</summary>
+    public int SaveCount { get; private set; }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        SaveCount++;
+        ((ConfiguredOperationSavedDevice)Subject!).Label = "new";
+        return Task.CompletedTask;
+    }
+}
+
 /// <summary>A device without configuration members and without an edit operation, which has an edit component.</summary>
 [InterceptorSubject]
 public partial class UnconfiguredDevice
@@ -244,6 +294,8 @@ public partial class AdministeredStore : IConfigurationWriter
     public partial OperationSavedDevice? OperationSaved { get; set; }
 
     public partial UnconfiguredDevice? Unconfigured { get; set; }
+
+    public partial ConfiguredOperationSavedDevice? ConfiguredOperationSaved { get; set; }
 
     public IReadOnlyCollection<IInterceptorSubject> WrittenSubjects => _writtenSubjects;
 

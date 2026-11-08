@@ -20,7 +20,9 @@ public enum OperationPurpose
     /// <summary>
     /// Saves what the edit component of the subject edits. The subject browser shows it as its Edit button, which opens the
     /// edit component, and the component saves by invoking it with the edited values as its parameters, through the same
-    /// permission check as any other operation, so that the save is decided by the permissions on this operation.
+    /// permission check as any other operation, so that the save is decided by the permissions on this operation. The edit
+    /// component writes only through this operation. It decides the save only for a subject without configuration
+    /// members; one with configuration members needs <c>administer</c> on all of them, as without this operation.
     /// </summary>
     Edit = 2,
 }

@@ -268,14 +268,16 @@
     }
 
     /// <summary>
-    /// Gets whether the viewer may save what the editor of the subject changes. A hosted edit component may save through
-    /// the edit operation of the subject, see <see cref="RegisteredSubjectMethodExtensions.CanInvokeEditOperation"/>,
-    /// which decides each save again, and one of a file checks the content it writes itself. Otherwise the viewer needs to
-    /// administer the configuration of the subject, see <see cref="UserPermissionsExtensions.CanAdministerConfiguration"/>,
-    /// which requires at least one configuration member.
+    /// Gets whether the viewer may save what the editor of the subject changes. The edit component of a subject without
+    /// configuration members may save through the edit operation of the subject, see
+    /// <see cref="RegisteredSubjectMethodExtensions.CanSaveThroughEditOperation"/>, which decides each save again, and a
+    /// hosted component of a file checks the content it writes itself. Otherwise the viewer needs to administer the
+    /// configuration of the subject, see <see cref="UserPermissionsExtensions.CanAdministerConfiguration"/>, which requires
+    /// at least one configuration member.
     /// </summary>
     private bool CanSave(IInterceptorSubject subject) =>
-        (HostedComponentType is not null && (subject is IStorageFile || Permissions.CanInvokeEditOperation(subject))) ||
+        (HostedComponentType is not null && subject is IStorageFile) ||
+        (HostedComponentType == SubjectComponentType.Edit && Permissions.CanSaveThroughEditOperation(subject)) ||
         Permissions.CanAdministerConfiguration(subject);
 
     private bool Refuse()

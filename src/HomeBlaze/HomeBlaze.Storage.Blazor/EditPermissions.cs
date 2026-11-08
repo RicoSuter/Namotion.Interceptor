@@ -30,10 +30,11 @@ public static class EditPermissions
 
     /// <summary>
     /// Gets whether the viewer may use the editor of the subject: change the content of a file, see
-    /// <see cref="CanAdministerFileContent"/>; for a subject with an edit component, save it through the edit operation of
-    /// the subject, see <see cref="RegisteredSubjectMethodExtensions.CanInvokeEditOperation"/>; or administer the
-    /// configuration of any other subject, see <see cref="UserPermissionsExtensions.CanAdministerConfiguration"/>, which
-    /// requires at least one configuration member.
+    /// <see cref="CanAdministerFileContent"/>; for a subject with an edit component and without configuration members,
+    /// save it through the edit operation of the subject, see
+    /// <see cref="RegisteredSubjectMethodExtensions.CanSaveThroughEditOperation"/>; or administer the configuration of any
+    /// other subject, see <see cref="UserPermissionsExtensions.CanAdministerConfiguration"/>, which requires at least one
+    /// configuration member.
     /// </summary>
     /// <param name="permissions">The permissions of the viewer.</param>
     /// <param name="subject">The subject to edit.</param>
@@ -45,6 +46,6 @@ public static class EditPermissions
             return permissions.CanAdministerFileContent(subject);
         }
 
-        return (hasEditComponent && permissions.CanInvokeEditOperation(subject)) || permissions.CanAdministerConfiguration(subject);
+        return (hasEditComponent && permissions.CanSaveThroughEditOperation(subject)) || permissions.CanAdministerConfiguration(subject);
     }
 }

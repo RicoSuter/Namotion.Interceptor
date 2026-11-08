@@ -74,6 +74,23 @@ public class EditPermissionsTests
         Assert.False(canEditWithoutAdministeringTheOperation);
     }
 
+    [Fact]
+    public void WhenASubjectWithConfigurationHasAnEditOperation_ThenTheViewerNeedsToAdministerItsConfiguration()
+    {
+        // Arrange
+        var subject = new ConfiguredOperationEditedSubject(CreateContext());
+        var permissions = new TestUserPermissions { CannotAdminister = [GetMember(subject, nameof(ConfiguredOperationEditedSubject.Label))] };
+
+        // Act
+        var canEdit = permissions.CanEdit(subject, hasEditComponent: true);
+        var canEditAsAdministrator = new TestUserPermissions().CanEdit(subject, hasEditComponent: true);
+
+        // Assert
+        Assert.True(permissions.CanInvoke(GetMember(subject, "Save")));
+        Assert.False(canEdit);
+        Assert.True(canEditAsAdministrator);
+    }
+
     private static RegisteredSubjectProperty GetMember(IInterceptorSubject subject, string name) =>
         subject.TryGetRegisteredSubject()!.TryGetProperty(name)!;
 
@@ -107,5 +124,16 @@ public partial class OperationEditedSubject
     public partial string? Label { get; set; }
 
     [Operation(Title = "Save", RequiresAdministration = true, Purpose = OperationPurpose.Edit)]
+    public void Save(string label) => Label = label;
+}
+
+/// <summary>A subject with a configuration member and an edit operation that requires no administration.</summary>
+[InterceptorSubject]
+public partial class ConfiguredOperationEditedSubject
+{
+    [Configuration]
+    public partial string? Label { get; set; }
+
+    [Operation(Title = "Save", Purpose = OperationPurpose.Edit)]
     public void Save(string label) => Label = label;
 }
