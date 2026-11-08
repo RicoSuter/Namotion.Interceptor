@@ -4,7 +4,6 @@
 
 @using System.Reactive.Concurrency
 @using System.Reactive.Linq
-@using Namotion.Interceptor.Registry.Abstractions
 @using Namotion.Interceptor.Tracking
 
 @inject AuthorizationService AuthorizationService
@@ -21,10 +20,6 @@
         @if (checks.Warning is { } warning)
         {
             <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2" data-testid="role-edit-warning">@warning</MudAlert>
-        }
-        @if (checks.ExecuteWithoutRead is { } executeWithoutRead)
-        {
-            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2" data-testid="role-edit-execute-without-read">@executeWithoutRead.Describe()</MudAlert>
         }
         <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="role-edit-used-by">
             Used by @role.UsedByAgents @(role.UsedByAgents == 1 ? "agent" : "agents")
@@ -62,7 +57,7 @@
                                 What the role grants. A rule applies to a member when each of its selectors matches; an empty selector matches any.
                             </MudText>
                             @RenderFieldHint()
-                            @RenderRules(_allow, "allow", checks.ExecuteWithoutRead)
+                            @RenderRules(_allow, "allow")
                         </MudForm>
                     </ChildContent>
                 </MudTabPanel>
@@ -72,7 +67,7 @@
                         <MudForm>
                             <MudText Typo="Typo.body2" Class="mb-2">What the role takes away again, whichever role granted it.</MudText>
                             @RenderFieldHint()
-                            @RenderRules(_deny, "deny", null)
+                            @RenderRules(_deny, "deny")
                         </MudForm>
                     </ChildContent>
                 </MudTabPanel>
@@ -168,7 +163,7 @@
     private bool _wasValid = true;
     private AuthorizationRole? _checkedRole;
     private IReadOnlyList<string>? _checkedRoleNames;
-    private RoleChecks _checks = new(default, null, null);
+    private RoleChecks _checks = new(default, null);
     private IDisposable? _usedBySubscription;
     private bool _isDisposed;
 
@@ -339,9 +334,7 @@
             // Read before the policy, so that roles compiled in between are checked again.
             _checkedRoleNames = AuthorizationService.GetRoleNames();
             var result = AuthorizationService.PreviewPolicy(role);
-            _checks = result.Error is not null
-                ? new RoleChecks(result, null, null)
-                : new RoleChecks(result, GetWarning(role), FindExecuteWithoutRead(role, result.Policy));
+            _checks = new RoleChecks(result, result.Error is null ? GetWarning(role) : null);
         }
 
         return _checks;
@@ -364,11 +357,6 @@
 
         return warnings is null ? null : string.Join(' ', warnings);
     }
-
-    private ExecuteWithoutReadFindings? FindExecuteWithoutRead(AuthorizationRole role, AuthorizationPolicy policy) =>
-        ExecuteWithoutRead.MayApply(policy) && Subject?.Context.TryGetService<ISubjectRegistry>() is { } registry
-            ? ExecuteWithoutRead.Find(role, policy, registry.KnownSubjects.Values, AuthorizationService.PathProvider)
-            : null;
 
     // A selected name that is not one of the role names, which lists only the roles that can be used.
     private bool HasUnusableInclude()
@@ -400,7 +388,7 @@
         </MudText>
     };
 
-    private RenderFragment RenderRules(List<RuleEntry> rules, string section, ExecuteWithoutReadFindings? executeWithoutRead) => __builder =>
+    private RenderFragment RenderRules(List<RuleEntry> rules, string section) => __builder =>
     {
         <MudStack Spacing="2">
             @for (var index = 0; index < rules.Count; index++)
@@ -409,7 +397,6 @@
                 <RuleCard @key="entry" @ref="entry.Card" Rule="@entry.Rule" RuleChanged="@(rule => ChangeRule(entry, rule))"
                           HasInvalidTextChanged="@(hasInvalidText => SetInvalidText(entry, hasInvalidText))" IsDeny="@(section == "deny")"
                           OnRemove="@(() => RemoveRule(rules, entry))" TypeNames="@_typeNames" AccessibleName="@($"{section} rule {index + 1}")"
-                          ExecuteWithoutReadExample="@executeWithoutRead?.ExamplePathsByRule.GetValueOrDefault(entry.Rule)"
                           TestId="@($"role-edit-{section}-rule-{index}")" />
             }
         </MudStack>
@@ -487,9 +474,9 @@
         }
     }
 
-    // What the edited role would have once saved: its preview, with the error that makes it unusable, the warning about
-    // its paths, and the methods it allows to execute but not to read; no warning and no methods when there is an error.
-    private sealed record RoleChecks(AuthorizationResult Preview, string? Warning, ExecuteWithoutReadFindings? ExecuteWithoutRead);
+    // What the edited role would have once saved: its preview, with the error that makes it unusable, and the warning about
+    // its paths, which is null when there is an error.
+    private sealed record RoleChecks(AuthorizationResult Preview, string? Warning);
 
     // The lists of the role as this dialog read them, compared by reference.
     private readonly record struct LoadedLists(IReadOnlyList<string>? Includes, IReadOnlyList<PermissionRule>? Allow, IReadOnlyList<PermissionRule>? Deny)

@@ -306,7 +306,7 @@
             cells[executeIndex] = execute with
             {
                 IsUnusable = true,
-                Explanation = $"{execute.Explanation} It cannot be used, as read is denied: {ExecuteWithoutRead.Reason}"
+                Explanation = $"{execute.Explanation} It cannot be used, as read is denied: A method is listed and run only when it is readable."
             };
         }
     }
