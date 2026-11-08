@@ -10,7 +10,7 @@ namespace HomeBlaze.Automation.Tests;
 public class AutomationGraphRouteTests
 {
     [Fact]
-    public async Task WhenAPropertyThatHoldsSubjectsAndIsNotOnTheRouteChanges_ThenTheAutomationReceivesNoGraphChange()
+    public async Task WhenAPropertyThatHoldsSubjectsAndIsNotOnTheRouteChanges_ThenTheAutomationNeitherReceivesAGraphChangeNorResolvesAgain()
     {
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(_ => { });
@@ -18,15 +18,23 @@ public class AutomationGraphRouteTests
         host.Graph.Add("Holder", holder);
         var (automation, listener) = await AddCountedAsync(host, "Gusts", Rule("/Weather/Gust > 8"));
         listener.Reset();
+        var resolutions = 0;
+        automation.Runtime!.Engine.Routes.BeforePublication = () => resolutions++;
 
         // Act
         holder.Sensor = new TestSensor { Gust = 9 };
         await automation.FlushAsync();
+        var (graphChangesOffTheRoute, resolutionsOffTheRoute) = (listener.GraphChanges, resolutions);
+        host.Graph.Add("Weather", new TestSensor { Gust = 9 });
+        await automation.FlushAsync();
 
         // Assert
-        Assert.Equal(0, listener.GraphChanges);
+        Assert.Equal(0, graphChangesOffTheRoute);
+        Assert.Equal(0, resolutionsOffTheRoute);
         Assert.False(Registration(automation).IsUnbounded);
-        Assert.Equal(0L, automation.Rules["rule"].RunCount);
+        Assert.NotEqual(0, listener.GraphChanges);
+        Assert.NotEqual(0, resolutions);
+        Assert.Equal(1, host.Blinds.CloseCount);
     }
 
     [Fact]
@@ -75,6 +83,27 @@ public class AutomationGraphRouteTests
         await host.FlushAsync();
 
         // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    // A property added with a null value publishes no change, so the attach of the property is what routes a graph change.
+    [Fact]
+    public async Task WhenAPropertyIsAddedAtRunTimeWithANullValue_ThenAPathToItResolvesAndTheValueIsWatched()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(Rule("/Weather/Wind > 8"));
+        double? wind = null;
+        var registered = ((IInterceptorSubject)host.Weather).TryGetRegisteredSubject()!;
+
+        // Act
+        var property = registered.AddProperty("Wind", typeof(double?), _ => wind, (_, value) => wind = (double?)value);
+        await host.FlushAsync();
+        var isWatchedAfterAdding = Registration(host.Automation).Watched.Contains(property.Reference);
+        property.SetValue(9.0);
+        await host.FlushAsync();
+
+        // Assert
+        Assert.True(isWatchedAfterAdding);
         Assert.Equal(1, host.Blinds.CloseCount);
     }
 

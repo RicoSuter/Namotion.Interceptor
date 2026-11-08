@@ -1,8 +1,10 @@
 using System.Collections.Frozen;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Automation.Runtime;
 
@@ -10,9 +12,11 @@ namespace HomeBlaze.Automation.Runtime;
 /// Routes the property changes of a context to the automations registered for it, with one subscription per change
 /// stream shared by all of them: a change of a property to the listeners that watch it, a change of a property to the
 /// listeners whose graph route has it as a graph change, and a change of a property that holds subjects as a graph change
-/// to every listener whose graph route is unbounded. The subscription starts with the first registration for a stream
-/// and ends with the last one, so that the dispatcher holds no context without automations. Changes are routed
-/// synchronously on the writing thread, where the chain depth of the writing flow is read. Thread-safe.
+/// to every listener whose graph route is unbounded. A property attached at run time is routed as a graph change like a
+/// change of it, since a path that was missing it leads to it now, also when its first value is null and no change is
+/// published. The subscription starts with the first registration for a stream and ends with the last one, so that the
+/// dispatcher holds no context without automations. Changes are routed synchronously on the writing thread, where the
+/// chain depth of the writing flow is read. Thread-safe.
 /// </summary>
 internal sealed class AutomationChangeDispatcher
 {
@@ -45,12 +49,14 @@ internal sealed class AutomationChangeDispatcher
     public Registration Register(IInterceptorSubjectContext context, IAutomationChangeListener listener)
     {
         var interceptor = context.GetService<PropertyChangeInterceptor>();
+        var attachRouter = PropertyAttachRouter.Of(FindOwner(context, interceptor), this);
         lock (_lock)
         {
             if (!_sources.TryGetValue(interceptor, out var source))
             {
-                source = new ChangeSource(interceptor);
+                source = new ChangeSource(interceptor, attachRouter);
                 source.Subscription = interceptor.Subscribe(source);
+                attachRouter.SetSource(source);
                 _sources.Add(interceptor, source);
             }
 
@@ -120,11 +126,39 @@ internal sealed class AutomationChangeDispatcher
             if (source.IsEmpty)
             {
                 _sources.Remove(source.Interceptor);
+                source.AttachRouter.SetSource(null);
                 subscription = source.Subscription;
             }
         }
 
         subscription?.Dispose();
+    }
+
+    // The context that owns the change stream: the top of the chain of fallback contexts that serve the interceptor, which
+    // every subject of its graph falls back on, so that a handler added to it is called for every property of the graph.
+    private static IInterceptorSubjectContext FindOwner(IInterceptorSubjectContext context, PropertyChangeInterceptor interceptor)
+    {
+        var visited = new HashSet<IInterceptorSubjectContext>(ReferenceEqualityComparer.Instance) { context };
+        while (context is InterceptorSubjectContext implementation && FindOwningFallback(implementation, interceptor, visited) is { } fallback)
+        {
+            context = fallback;
+        }
+
+        return context;
+    }
+
+    private static IInterceptorSubjectContext? FindOwningFallback(
+        InterceptorSubjectContext context, PropertyChangeInterceptor interceptor, HashSet<IInterceptorSubjectContext> visited)
+    {
+        foreach (var fallback in context.FallbackContexts)
+        {
+            if (ReferenceEquals(fallback.TryGetService<PropertyChangeInterceptor>(), interceptor) && visited.Add(fallback))
+            {
+                return fallback;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>The registration of a listener; disposing it stops the delivery, except for a change already being routed.</summary>
@@ -170,12 +204,14 @@ internal sealed class AutomationChangeDispatcher
     }
 
     /// <summary>The routes of one change stream. Changed under the lock of the dispatcher and read lock-free by writers.</summary>
-    internal sealed class ChangeSource(PropertyChangeInterceptor interceptor) : IObserver<SubjectPropertyChange>
+    internal sealed class ChangeSource(PropertyChangeInterceptor interceptor, PropertyAttachRouter attachRouter) : IObserver<SubjectPropertyChange>
     {
         private readonly List<Registration> _registrations = [];
         private Routes _routes = Routes.Empty;
 
         public PropertyChangeInterceptor Interceptor { get; } = interceptor;
+
+        public PropertyAttachRouter AttachRouter { get; } = attachRouter;
 
         public IDisposable? Subscription { get; set; }
 
@@ -277,6 +313,15 @@ internal sealed class AutomationChangeDispatcher
             NotifyGraphChanged(unbounded, chainDepth);
         }
 
+        /// <summary>Routes the attach of the property to the listeners whose graph route has it, as a graph change.</summary>
+        public void OnPropertyAttached(PropertyReference property)
+        {
+            if (Volatile.Read(ref _routes).Graph.TryGetValue(property, out var listeners))
+            {
+                NotifyGraphChanged(listeners, AutomationInputQueue.CausedChainDepth);
+            }
+        }
+
         public void OnError(Exception error)
         {
             // The change stream never fails.
@@ -370,6 +415,42 @@ internal sealed class AutomationChangeDispatcher
             Array.Copy(listeners, remaining, index);
             Array.Copy(listeners, index + 1, remaining, index, listeners.Length - index - 1);
             return remaining;
+        }
+    }
+
+    /// <summary>
+    /// Routes the attach of a property through the holder index of the change stream of its context, see
+    /// <see cref="ChangeSource.OnPropertyAttached"/>. Added to the context once per dispatcher, since a context has no way
+    /// to remove a service, and routes nothing while the dispatcher has no listener for the context. Called on writing
+    /// threads, within the attach of the property, so it only looks up and enqueues.
+    /// </summary>
+    // After the registry, which raises the structure version for a property added at run time: the worker resolves its
+    // paths again only when the version it reads differs from the one it resolved at.
+    [RunsAfter(typeof(SubjectRegistry))]
+    internal sealed class PropertyAttachRouter(AutomationChangeDispatcher dispatcher) : IPropertyLifecycleHandler
+    {
+        private ChangeSource? _source;
+
+        public AutomationChangeDispatcher Dispatcher { get; } = dispatcher;
+
+        /// <summary>Sets the change stream of the context, or null once the dispatcher has no listener for it. Called under the lock of the dispatcher.</summary>
+        public void SetSource(ChangeSource? source) => Volatile.Write(ref _source, source);
+
+        /// <summary>Gets the router of the dispatcher in the context, adding it when the context has none.</summary>
+        public static PropertyAttachRouter Of(IInterceptorSubjectContext context, AutomationChangeDispatcher dispatcher)
+        {
+            context.TryAddService<IPropertyLifecycleHandler>(() => new PropertyAttachRouter(dispatcher), handler => IsOf(handler, dispatcher));
+            return (PropertyAttachRouter)context.GetServices<IPropertyLifecycleHandler>().First(handler => IsOf(handler, dispatcher));
+        }
+
+        private static bool IsOf(IPropertyLifecycleHandler handler, AutomationChangeDispatcher dispatcher) =>
+            handler is PropertyAttachRouter router && ReferenceEquals(router.Dispatcher, dispatcher);
+
+        public void AttachProperty(SubjectPropertyLifecycleChange change) => Volatile.Read(ref _source)?.OnPropertyAttached(change.Property);
+
+        public void DetachProperty(SubjectPropertyLifecycleChange change)
+        {
+            // A detached property is followed by the change of its subject, which is routed.
         }
     }
 
