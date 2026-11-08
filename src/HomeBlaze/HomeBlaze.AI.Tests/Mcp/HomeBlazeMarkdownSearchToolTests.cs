@@ -474,7 +474,8 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
             Deny = [new PermissionRule { Paths = ["/Storage/Notes.md/ReadRawContent"], Actions = [AuthorizationActions.Execute] }]
         };
         var logger = new RecordingLogger();
-        var accessPolicy = new AuthorizationMcpAccessPolicy(TestAccessPolicies.Create(role.Name, role).Policy, logger, "Searcher");
+        var policy = TestAccessPolicies.Create(role.Name, role).Policy;
+        var accessPolicy = new AuthorizationMcpAccessPolicy(() => policy, logger, "Searcher");
         var (root, services) = await CreateGraphAsync([]);
         var tool = CreateTools(services, root, accessPolicy)[HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName];
 

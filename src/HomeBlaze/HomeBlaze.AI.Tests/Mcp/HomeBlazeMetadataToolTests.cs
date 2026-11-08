@@ -111,7 +111,8 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
             Deny = [new PermissionRule { Tags = [MemberTags.Metadata], Actions = [PermissionAction.Write] }]
         };
         var logger = new RecordingLogger();
-        var accessPolicy = new AuthorizationMcpAccessPolicy(TestAccessPolicies.Create(role.Name, role).Policy, logger, "Writer");
+        var policy = TestAccessPolicies.Create(role.Name, role).Policy;
+        var accessPolicy = new AuthorizationMcpAccessPolicy(() => policy, logger, "Writer");
         var (tools, storage) = await CreateToolsAsync(accessPolicy: accessPolicy);
 
         // Act

@@ -66,5 +66,6 @@ public static class McpBuilderExtensions
     internal static McpServerConfiguration CreateServerConfiguration(
         IServiceProvider serviceProvider, Func<IInterceptorSubject> rootSubjectProvider, bool isReadOnly)
         => HomeBlazeMcpConfigurationFactory.Create(
-            serviceProvider, rootSubjectProvider, isReadOnly, McpAuthorization.GetAccessPolicy(serviceProvider, McpAuthorization.EverythingRoleNames));
+            serviceProvider, rootSubjectProvider, isReadOnly, McpAuthorization.GetAccessPolicy(
+                serviceProvider.GetRequiredService<AuthorizationService>(), McpAuthorization.EverythingRoleNames));
 }

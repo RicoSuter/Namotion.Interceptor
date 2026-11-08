@@ -90,7 +90,7 @@ public abstract partial class LlmAgentBase
             StoreRolesErrorIfNewer(computation, rolesError);
         }
 
-        return AuthorizationMcpAccessPolicy.CreatePerCall(() => _services.AuthorizationService.GetPolicy(Roles).Policy, _logger, Title);
+        return new AuthorizationMcpAccessPolicy(() => _services.AuthorizationService.GetPolicy(Roles).Policy, _logger, Title);
     }
 
     private AgentToolSet CreateToolSet(string[] allowedTools, AuthorizationMcpAccessPolicy accessPolicy, IProgress<AgentTurnUpdate> progress)

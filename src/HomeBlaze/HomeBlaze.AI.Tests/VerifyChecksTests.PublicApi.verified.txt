@@ -369,7 +369,7 @@ namespace HomeBlaze.AI.Mcp
     }
     public sealed class AuthorizationMcpAccessPolicy : Namotion.Interceptor.Mcp.Abstractions.IMcpAccessPolicy
     {
-        public AuthorizationMcpAccessPolicy(Namotion.Interceptor.Authorization.AuthorizationPolicy policy, Microsoft.Extensions.Logging.ILogger? logger = null, string? clientName = null) { }
+        public AuthorizationMcpAccessPolicy(System.Func<Namotion.Interceptor.Authorization.AuthorizationPolicy> getPolicy, Microsoft.Extensions.Logging.ILogger? logger = null, string? clientName = null) { }
         public Namotion.Interceptor.Authorization.AuthorizationPolicy Policy { get; }
         public bool IsAllowed(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, string action) { }
     }

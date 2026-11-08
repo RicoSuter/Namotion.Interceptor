@@ -75,7 +75,7 @@ public class AuthorizationMcpAccessPolicyTests
     public void WhenThePolicyIsDenyAll_ThenEveryActionIsDenied(string action)
     {
         // Arrange
-        var accessPolicy = new AuthorizationMcpAccessPolicy(AuthorizationPolicy.DenyAll);
+        var accessPolicy = new AuthorizationMcpAccessPolicy(() => AuthorizationPolicy.DenyAll);
 
         // Act
         var isAllowed = accessPolicy.IsAllowed(GetStateMember(), action);
@@ -89,7 +89,7 @@ public class AuthorizationMcpAccessPolicyTests
     {
         // Arrange
         var logger = new RecordingLogger();
-        var accessPolicy = new AuthorizationMcpAccessPolicy(AuthorizationPolicy.DenyAll, logger, "Watcher");
+        var accessPolicy = new AuthorizationMcpAccessPolicy(() => AuthorizationPolicy.DenyAll, logger, "Watcher");
         var member = GetStateMember();
 
         // Act
@@ -118,7 +118,7 @@ public class AuthorizationMcpAccessPolicyTests
     {
         // Arrange
         var logger = new RecordingLogger();
-        var accessPolicy = new AuthorizationMcpAccessPolicy(TestAccessPolicies.Everything.Policy, logger, "Watcher");
+        var accessPolicy = new AuthorizationMcpAccessPolicy(() => TestAccessPolicies.Everything.Policy, logger, "Watcher");
 
         // Act
         var isAllowed = accessPolicy.IsAllowed(GetStateMember(), AuthorizationActions.History.Name);
