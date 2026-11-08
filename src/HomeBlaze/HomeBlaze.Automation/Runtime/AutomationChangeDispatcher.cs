@@ -3,15 +3,18 @@ using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// Routes the property changes of a context to the automations registered for it, with one subscription per change
 /// stream shared by all of them: a change of a property to the listeners that watch it, and a change of a property that
-/// holds subjects to every listener. The subscription starts with the first registration for a stream and ends with the
-/// last one, so that the dispatcher holds no context without automations. Changes are routed synchronously on the
-/// writing thread, where the chain depth of the writing flow is read. Thread-safe.
+/// holds subjects or a property added at run time, which <see cref="PropertyAttachNotifier"/> reports, to every listener
+/// as a graph change, left out while every listener still has one queued. The subscription starts with the first
+/// registration for a stream and ends with the last one, so that the dispatcher holds no context without automations.
+/// Changes are routed synchronously on the writing thread, where the chain depth of the writing flow is read.
+/// Thread-safe.
 /// </summary>
 internal sealed class AutomationChangeDispatcher
 {
@@ -37,10 +40,14 @@ internal sealed class AutomationChangeDispatcher
     // White-box test hook: wraps each listener when it registers, so that a test can observe what is routed to it.
     internal Func<IAutomationChangeListener, IAutomationChangeListener>? ListenerDecorator { get; set; }
 
-    /// <summary>Registers the listener for the changes of the context, watching no property until it publishes a watched set.</summary>
+    /// <summary>
+    /// Registers the listener for the changes of the context, watching no property until it publishes a watched set, and
+    /// for a property added to a subject of the context at run time as a graph change.
+    /// </summary>
     public Registration Register(IInterceptorSubjectContext context, IAutomationChangeListener listener)
     {
         var interceptor = context.GetService<PropertyChangeInterceptor>();
+        var notifier = GetNotifier(FindOwner(context, interceptor));
         lock (_lock)
         {
             if (!_sources.TryGetValue(interceptor, out var source))
@@ -50,10 +57,56 @@ internal sealed class AutomationChangeDispatcher
                 _sources.Add(interceptor, source);
             }
 
+            source.AddNotifier(notifier);
             var registration = new Registration(this, source, ListenerDecorator?.Invoke(listener) ?? listener);
             source.Add(registration);
             return registration;
         }
+    }
+
+    // The context that holds the change interceptor itself, which every subject of the graph reaches through its fallback
+    // contexts, as a subject reaches the context of its parent.
+    private static IInterceptorSubjectContext FindOwner(IInterceptorSubjectContext context, PropertyChangeInterceptor interceptor)
+    {
+        var visited = new HashSet<IInterceptorSubjectContext>(ReferenceEqualityComparer.Instance) { context };
+        var owner = context;
+        while (owner is InterceptorSubjectContext { FallbackContexts: var fallbackContexts })
+        {
+            IInterceptorSubjectContext? next = null;
+            foreach (var fallbackContext in fallbackContexts)
+            {
+                if (fallbackContext.GetServices<PropertyChangeInterceptor>().Contains(interceptor) && visited.Add(fallbackContext))
+                {
+                    next = fallbackContext;
+                    break;
+                }
+            }
+
+            if (next is null)
+            {
+                return owner;
+            }
+
+            owner = next;
+        }
+
+        return owner;
+    }
+
+    // Added once per dispatcher and context, since a service cannot be removed from a context.
+    private PropertyAttachNotifier GetNotifier(IInterceptorSubjectContext context)
+    {
+        context.TryAddService<IPropertyLifecycleHandler>(
+            () => new PropertyAttachNotifier(this), handler => handler is PropertyAttachNotifier notifier && notifier.Dispatcher == this);
+        foreach (var handler in context.GetServices<IPropertyLifecycleHandler>())
+        {
+            if (handler is PropertyAttachNotifier notifier && notifier.Dispatcher == this)
+            {
+                return notifier;
+            }
+        }
+
+        throw new InvalidOperationException("The context did not keep the notifier of added properties.");
     }
 
     // White-box test hook: the number of listeners that a change of the property in the context is routed to as a watched change.
@@ -94,6 +147,7 @@ internal sealed class AutomationChangeDispatcher
             if (source.IsEmpty)
             {
                 _sources.Remove(source.Interceptor);
+                source.ReleaseNotifiers();
                 subscription = source.Subscription;
             }
         }
@@ -128,6 +182,12 @@ internal sealed class AutomationChangeDispatcher
         /// </summary>
         public void PublishWatched(FrozenSet<PropertyReference> watched) => _dispatcher.PublishWatched(this, watched);
 
+        /// <summary>
+        /// Tells that the listener no longer has a graph change queued, because it took it or the queue refused it, so that
+        /// a property added from now on is announced to it again. Thread-safe.
+        /// </summary>
+        public void OnGraphChangeReleased() => Source.OnGraphChangeReleased();
+
         public void Dispose() => _dispatcher.Unregister(this);
     }
 
@@ -135,9 +195,21 @@ internal sealed class AutomationChangeDispatcher
     internal sealed class ChangeSource(PropertyChangeInterceptor interceptor) : IObserver<SubjectPropertyChange>
     {
         private readonly List<Registration> _registrations = [];
+        private readonly List<PropertyAttachNotifier> _notifiers = [];
         private Routes _routes = Routes.Empty;
 
+        // Raised after a listener is added and whenever a listener releases its graph change, see NotifyGraphChanged.
+        private long _releaseCount;
+
+        // The release count read before every listener was given a graph change, or -1.
+        private long _notifiedAt = -1;
+
+        private static long _lastId;
+
         public PropertyChangeInterceptor Interceptor { get; } = interceptor;
+
+        /// <summary>Tells these routes apart from earlier and later ones; never 0.</summary>
+        public long Id { get; } = Interlocked.Increment(ref _lastId);
 
         public IDisposable? Subscription { get; set; }
 
@@ -151,7 +223,35 @@ internal sealed class AutomationChangeDispatcher
             _registrations.Add(registration);
             var routes = _routes;
             Publish(new Routes(routes.Watchers, [.. routes.Listeners, registration.Listener]));
+
+            // After the routes, so that a notification that reads the new count gives the new listener a graph change.
+            OnGraphChangeReleased();
         }
+
+        public void AddNotifier(PropertyAttachNotifier notifier)
+        {
+            if (!_notifiers.Contains(notifier))
+            {
+                _notifiers.Add(notifier);
+            }
+
+            notifier.Source = this;
+        }
+
+        public void ReleaseNotifiers()
+        {
+            foreach (var notifier in _notifiers)
+            {
+                notifier.Source = null;
+            }
+
+            _notifiers.Clear();
+        }
+
+        public void OnGraphChangeReleased() => Interlocked.Increment(ref _releaseCount);
+
+        /// <summary>Gives every listener a graph change for a property that the registry registered at run time.</summary>
+        public void OnPropertyAdded() => NotifyGraphChanged();
 
         public void Remove(Registration registration)
         {
@@ -186,10 +286,9 @@ internal sealed class AutomationChangeDispatcher
                 return;
             }
 
-            var chainDepth = AutomationInputQueue.CausedChainDepth;
             if (watchers is not null)
             {
-                var input = new PropertyChangedInput(value.Property, value.GetNewValue<object?>(), value.Revision, chainDepth);
+                var input = new PropertyChangedInput(value.Property, value.GetNewValue<object?>(), value.Revision, AutomationInputQueue.CausedChainDepth);
                 foreach (var watcher in watchers)
                 {
                     watcher.OnWatchedPropertyChanged(input);
@@ -199,11 +298,35 @@ internal sealed class AutomationChangeDispatcher
             // Also for watchers of the property, since paths through it may lead elsewhere now.
             if (isGraphChange)
             {
-                foreach (var listener in routes.Listeners)
-                {
-                    listener.OnGraphChanged(chainDepth);
-                }
+                PropertyAttachNotifier.EndAttach();
+                NotifyGraphChanged();
             }
+        }
+
+        // Gives every listener a graph change, unless each has one queued: no listener released its graph change since
+        // every listener was given one, so each takes it after this change. One write that changes the graph several
+        // times, such as the attach of a subject with its methods and attributes, gives each listener one graph change.
+        private void NotifyGraphChanged()
+        {
+            // The change was committed and fenced before, as the registry fences a property it registers, and a listener
+            // raises the count with a full fence before it reads the graph: either the count read here is the new one or
+            // the listener reads the change.
+            var releaseCount = Volatile.Read(ref _releaseCount);
+            if (Volatile.Read(ref _notifiedAt) == releaseCount)
+            {
+                return;
+            }
+
+            // Read after the count, which a listener raises after it was added to the routes.
+            var listeners = Volatile.Read(ref _routes).Listeners;
+            var chainDepth = AutomationInputQueue.CausedChainDepth;
+            foreach (var listener in listeners)
+            {
+                listener.OnGraphChanged(chainDepth);
+            }
+
+            // A concurrent notification may write an older count, which only notifies the next change again.
+            Volatile.Write(ref _notifiedAt, releaseCount);
         }
 
         public void OnError(Exception error)

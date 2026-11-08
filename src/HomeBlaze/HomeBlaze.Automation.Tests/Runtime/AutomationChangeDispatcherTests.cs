@@ -3,6 +3,7 @@ using System.Collections.Frozen;
 using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Automation.Tests.Runtime;
 
@@ -98,6 +99,31 @@ public class AutomationChangeDispatcherTests
         Assert.Equal(1, idle.GraphChanges);
         Assert.Single(watcher.Changes);
         Assert.Empty(idle.Changes);
+    }
+
+    [Fact]
+    public void WhenPropertiesAreAddedToAnAttachedSubject_ThenEachListenerIsNotifiedOnceUntilItReleasesTheGraphChange()
+    {
+        // Arrange
+        var (graph, weather) = CreateGraph();
+        var dispatcher = new AutomationChangeDispatcher();
+        var first = new RecordingListener();
+        var second = new RecordingListener();
+        using var firstRegistration = dispatcher.Register(graph.Context, first);
+        using var secondRegistration = dispatcher.Register(graph.Context, second);
+        var registered = weather.TryGetRegisteredSubject()!;
+
+        // Act
+        registered.AddProperty<double?>("Wind", _ => 10);
+        registered.AddProperty<double?>("Pressure", _ => null);
+        var graphChangesBeforeTheRelease = first.GraphChanges;
+        firstRegistration.OnGraphChangeReleased();
+        registered.AddProperty<double?>("Humidity", _ => 50);
+
+        // Assert
+        Assert.Equal(1, graphChangesBeforeTheRelease);
+        Assert.Equal(2, first.GraphChanges);
+        Assert.Equal(2, second.GraphChanges);
     }
 
     [Fact]

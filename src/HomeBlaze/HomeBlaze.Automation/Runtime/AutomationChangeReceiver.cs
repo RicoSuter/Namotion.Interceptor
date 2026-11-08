@@ -5,8 +5,8 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// The property changes of one automation: registers with <see cref="AutomationChangeDispatcher"/>, publishes the
-/// watched set of the worker to that registration, and enqueues the routed changes on the writing thread, a change of a
-/// property that holds subjects only while none is queued yet.
+/// watched set of the worker to that registration, and enqueues the routed changes on the writing thread, a graph change
+/// only while none is queued yet, which it tells the registration once the graph change is no longer queued.
 /// </summary>
 internal sealed class AutomationChangeReceiver(AutomationInputQueue queue) : IAutomationChangeListener
 {
@@ -20,7 +20,10 @@ internal sealed class AutomationChangeReceiver(AutomationInputQueue queue) : IAu
     public IDisposable Register(AutomationChangeDispatcher dispatcher, IInterceptorSubjectContext context)
     {
         var registration = dispatcher.Register(context, this);
-        _registration = registration;
+        Volatile.Write(ref _registration, registration);
+
+        // A graph change that the queue refused before the registration was known released nothing.
+        registration.OnGraphChangeReleased();
         return registration;
     }
 
@@ -31,12 +34,7 @@ internal sealed class AutomationChangeReceiver(AutomationInputQueue queue) : IAu
     /// Called by the worker when it takes the queued graph change, before it reads the graph, so that the next one is
     /// queued again.
     /// </summary>
-    public void OnGraphChangeTaken()
-    {
-        // A full fence: with a plain store, a write that commits while the store is still buffered finds the flag set and
-        // queues nothing, while the worker reads the graph from before that write.
-        Interlocked.Exchange(ref _isGraphChangePending, 0);
-    }
+    public void OnGraphChangeTaken() => ReleaseGraphChange();
 
     void IAutomationChangeListener.OnWatchedPropertyChanged(PropertyChangedInput input) => queue.TryEnqueue(input);
 
@@ -44,7 +42,15 @@ internal sealed class AutomationChangeReceiver(AutomationInputQueue queue) : IAu
     {
         if (Interlocked.Exchange(ref _isGraphChangePending, 1) == 0 && !queue.TryEnqueue(new GraphChangedInput(chainDepth)))
         {
-            Volatile.Write(ref _isGraphChangePending, 0);
+            ReleaseGraphChange();
         }
+    }
+
+    private void ReleaseGraphChange()
+    {
+        // A full fence: with a plain store, a write that commits while the store is still buffered finds the flag set and
+        // queues nothing, while the worker reads the graph from before that write.
+        Interlocked.Exchange(ref _isGraphChangePending, 0);
+        Volatile.Read(ref _registration)?.OnGraphChangeReleased();
     }
 }
