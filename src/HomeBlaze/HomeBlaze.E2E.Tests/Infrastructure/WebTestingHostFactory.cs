@@ -1,7 +1,5 @@
 using HomeBlaze.Services;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Hosting.Server;
-using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -10,9 +8,9 @@ using Microsoft.Extensions.Logging;
 namespace HomeBlaze.E2E.Tests.Infrastructure;
 
 /// <summary>
-/// A custom WebApplicationFactory that uses Kestrel instead of TestServer.
-/// Playwright requires a real HTTP endpoint to connect to.
-/// Based on: https://danieldonbavand.com/2022/06/13/using-playwright-with-the-webapplicationfactory-to-test-a-blazor-application/
+/// A <see cref="WebApplicationFactory{TEntryPoint}"/> that runs the application in one Kestrel host on a free port,
+/// because Playwright needs a real HTTP endpoint. <see cref="WebApplicationFactory{TEntryPoint}.Services"/> belongs to
+/// that host.
 /// </summary>
 /// <typeparam name="TProgram">The entry point class (usually Program)</typeparam>
 public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
@@ -21,8 +19,7 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
     private readonly IReadOnlyCollection<Type> _testTypes;
     private readonly string _authenticationDatabasePath;
 
-    private IHost? _kestrelHost;
-    private string? _serverAddress;
+    private int _startedHostCount;
 
     /// <param name="testTypes">Subject and component types of the tests that the server has to know.</param>
     /// <param name="authenticationDatabasePath">The path of the authentication database, which the server creates and seeds when missing.</param>
@@ -30,6 +27,7 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
     {
         _testTypes = testTypes;
         _authenticationDatabasePath = authenticationDatabasePath;
+        UseKestrel(0);
     }
 
     /// <summary>
@@ -37,32 +35,25 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
     /// </summary>
     public ServerLogRecorder ServerLog { get; } = new();
 
+    /// <summary>
+    /// The base address of the server, with a trailing slash. Starts the server.
+    /// </summary>
     public string ServerAddress
     {
         get
         {
-            EnsureServer();
-            return _serverAddress!;
+            StartServer();
+            return ClientOptions.BaseAddress.AbsoluteUri;
         }
     }
 
     /// <summary>
-    /// The services of the Kestrel host that serves the tests. This is a different container from
-    /// <see cref="WebApplicationFactory{TProgram}.Services"/>, which belongs to the TestServer host
-    /// the base class requires and which no request ever reaches.
+    /// The number of hosts of the application that this factory started.
     /// </summary>
-    public IServiceProvider ServerServices
-    {
-        get
-        {
-            EnsureServer();
-            return _kestrelHost!.Services;
-        }
-    }
+    public int StartedHostCount => Volatile.Read(ref _startedHostCount);
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseUrls("http://127.0.0.1:0");
         builder.UseEnvironment("Development");
 
         // Use test-specific root configuration to avoid loading HomeBlaze's Data folder
@@ -82,29 +73,9 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
         // hosted service that loads the root does. So the types of the tests are added by a hosted service that starts
         // before every other one: added after the start of the server, they are missed whenever the root loads first.
         builder.ConfigureServices(services => services.Insert(0, ServiceDescriptor.Singleton<IHostedService>(
-            provider => new TestTypeRegistration(provider.GetRequiredService<TypeProvider>(), _testTypes))));
+            provider => new TestTypeRegistration(this, provider.GetRequiredService<TypeProvider>()))));
 
         builder.ConfigureServices(services => services.AddSingleton<ILoggerProvider>(ServerLog));
-    }
-
-    private sealed class TestTypeRegistration(TypeProvider typeProvider, IReadOnlyCollection<Type> types) : IHostedService
-    {
-        public Task StartAsync(CancellationToken cancellationToken)
-        {
-            typeProvider.AddTypes(types);
-            return Task.CompletedTask;
-        }
-
-        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-    }
-
-    private void EnsureServer()
-    {
-        if (_serverAddress is null)
-        {
-            // Force the server to start by accessing Services
-            _ = Services;
-        }
     }
 
     protected override IHost CreateHost(IHostBuilder builder)
@@ -112,54 +83,18 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
         // Set CWD to the test output directory so relative paths in test configuration
         // (testRoot.json, ./TestData) resolve correctly regardless of where dotnet test is run from.
         Environment.CurrentDirectory = AppContext.BaseDirectory;
-
-        // Create the standard TestServer host (required by base class)
-        var testHost = builder.Build();
-
-        // Reconfigure the builder to use Kestrel instead
-        builder.ConfigureWebHost(webHostBuilder =>
-            webHostBuilder.UseKestrel());
-
-        // Build and start the Kestrel host
-        _kestrelHost = builder.Build();
-
-        // TypeProvider is deliberately not populated here. The entry point already registers every
-        // assembly this factory used to add, and loads the same plugins, against the same singleton.
-        // Doing it again from this thread while the entry point runs on its own put two writers into
-        // one provider at once, which is what made the E2E fixture fail to initialise.
-
-        _kestrelHost.Start();
-
-        // Get the address from Kestrel
-        var server = _kestrelHost.Services.GetRequiredService<IServer>();
-        var addresses = server.Features.Get<IServerAddressesFeature>();
-
-        _serverAddress = addresses!.Addresses.FirstOrDefault()
-            ?? throw new InvalidOperationException("Could not determine Kestrel server address");
-
-        if (!_serverAddress.EndsWith('/'))
-            _serverAddress += '/';
-
-        // Start the TestServer host to satisfy the base class
-        testHost.Start();
-        return testHost;
+        return base.CreateHost(builder);
     }
 
-    protected override void Dispose(bool disposing)
+    private sealed class TestTypeRegistration(WebTestingHostFactory<TProgram> factory, TypeProvider typeProvider) : IHostedService
     {
-        if (disposing)
+        public Task StartAsync(CancellationToken cancellationToken)
         {
-            // Give the host time to stop gracefully, including OPC UA server shutdown
-            try
-            {
-                _kestrelHost?.StopAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
-            }
-            catch
-            {
-                // Ignore timeout exceptions during shutdown
-            }
-            _kestrelHost?.Dispose();
+            Interlocked.Increment(ref factory._startedHostCount);
+            typeProvider.AddTypes(factory._testTypes);
+            return Task.CompletedTask;
         }
-        base.Dispose(disposing);
+
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

@@ -568,7 +568,9 @@ public partial class FluentStorageContainer :
     /// Adds a new subject to storage at the specified path.
     /// </summary>
     /// <exception cref="ArgumentException">The path is hidden, temporary or the name of a metadata file, and would not be loaded again.</exception>
-    /// <exception cref="InvalidOperationException">A file exists at the path, or its key in the hierarchy is taken.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A file exists at the path, which a pass then loads when the storage did not know it yet, or its key in the hierarchy is taken.
+    /// </exception>
     public async Task AddSubjectAsync(string path, IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var relativePath = StoragePath.Normalize(path);
@@ -589,7 +591,11 @@ public partial class FluentStorageContainer :
                 throw new InvalidOperationException($"A subject already exists at '{path}'.");
 
             if (await connection.Client.ObjectExists(relativePath, token))
+            {
+                // A file the index does not know, which no watcher reported, as CreateMarkdownFileAsync handles it.
+                connection.NotifyChanged(relativePath);
                 throw new InvalidOperationException($"A file already exists at '{path}'.");
+            }
 
             var entry = new StorageEntry { Path = relativePath, IsFolder = false, Subject = subject };
             await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_serializer.Serialize(subject)), token);
