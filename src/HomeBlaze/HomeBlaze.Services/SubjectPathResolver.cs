@@ -565,14 +565,15 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                 return false;
             }
 
-            if (parentRegistered.Parents.Length == 0)
+            // Read once: a detach between two reads gives a parent and then none.
+            var grandparents = parentRegistered.Parents;
+            if (grandparents.Length == 0)
             {
                 recorder?.MarkUnbounded();
                 return true;
             }
 
-            var grandparent = parentRegistered.Parents[0];
-            return BuildPathRecursive(parentSubject, grandparent, pathSegments, visited, registry, root, recorder);
+            return BuildPathRecursive(parentSubject, grandparents[0], pathSegments, visited, registry, root, recorder);
         }
         finally
         {

@@ -403,6 +403,38 @@ public class SubjectPathRecorderTests : SubjectPathResolverTestBase
         Assert.Equal(first.ParentSteps.Count, second.ParentSteps.Count);
     }
 
+    [Fact]
+    public async Task WhenAParentIsDetachedWhileThePathsOfADescendantAreBuilt_ThenNoPathBuildFails()
+    {
+        // Arrange
+        var leaf = new TestContainer(Context) { Name = "Leaf" };
+        var middle = new TestContainer(Context) { Name = "Middle", Children = new Dictionary<string, TestContainer> { ["a"] = leaf } };
+        var top = new TestContainer(Context) { Name = "Top", Child = middle };
+        var root = new TestContainer(Context) { Name = "Root", Child = top };
+        RootManager.Root = root;
+        using var writing = new ManualResetEventSlim();
+        var readers = Enumerable.Range(0, 8).Select(_ => Task.Factory.StartNew(() =>
+        {
+            while (!writing.IsSet)
+            {
+                Resolver.GetPaths(leaf, PathStyle.Canonical);
+            }
+        }, TaskCreationOptions.LongRunning)).ToArray();
+
+        // Act
+        for (var toggle = 0; toggle < 50_000; toggle++)
+        {
+            top.Child = toggle % 2 == 0 ? null : middle;
+        }
+
+        writing.Set();
+        var reading = Task.WhenAll(readers);
+
+        // Assert
+        await reading;
+        Assert.Equal(["/Child/Child/Children[a]"], Resolver.GetPaths(leaf, PathStyle.Canonical));
+    }
+
     private (IInterceptorSubject? Subject, RecordedRoute Route) ResolveSubject(string path, IInterceptorSubject? relativeTo = null)
     {
         var route = new RecordedRoute();
