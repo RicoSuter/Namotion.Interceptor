@@ -51,19 +51,12 @@ internal sealed class AutomationTriggers
     }
 
     /// <summary>
-    /// Makes up for the inputs dropped from a feedback chain: resolves the paths again after a dropped graph change,
-    /// observes the dropped changes and activates the rules of the dropped activations. Returns the runs they request,
-    /// which must not execute.
+    /// Makes up for the inputs dropped from a feedback chain: resolves the paths again, observes the dropped changes and
+    /// activates the rules of the dropped activations. Returns the runs they request, which must not execute, among them
+    /// the runs of the triggers that a dropped graph change led elsewhere.
     /// </summary>
-    public IReadOnlyList<RunRequest> MakeUpForChain(IReadOnlyList<CompiledRule> rules, DroppedInputs dropped)
-    {
-        if (dropped.HasGraphChange)
-        {
-            Resolve(rules, []);
-        }
-
-        return MakeUpFor(rules, dropped.Changes.Where(DroppedInputs.IsChainDrop), dropped.Activations.Where(DroppedInputs.IsChainDrop), evaluateAll: false);
-    }
+    public IReadOnlyList<RunRequest> MakeUpForChain(IReadOnlyList<CompiledRule> rules, DroppedInputs dropped) =>
+        MakeUpFor(rules, dropped.Changes.Where(DroppedInputs.IsChainDrop), dropped.Activations.Where(DroppedInputs.IsChainDrop), evaluateAll: false);
 
     /// <summary>Makes up for the inputs dropped because the queue was full and evaluates every active trigger again.</summary>
     public IReadOnlyList<RunRequest> MakeUpForOverload(IReadOnlyList<CompiledRule> rules, DroppedInputs dropped) => MakeUpFor(
@@ -73,10 +66,11 @@ internal sealed class AutomationTriggers
         evaluateAll: true);
 
     /// <summary>
-    /// Makes up for dropped inputs: observes the dropped changes that are newer than the observed values, then evaluates
-    /// every active property trigger after resolving the paths again (<paramref name="evaluateAll"/>) or only those that
-    /// read a changed property, and activates the rules of the dropped activations that are still activated. Returns the
-    /// runs they request in rule order.
+    /// Makes up for dropped inputs: observes the dropped changes that are newer than the observed values, resolves the
+    /// paths again, then evaluates every active property trigger (<paramref name="evaluateAll"/>) or only those that read
+    /// a changed property or whose properties were resolved differently, and activates the rules of the dropped
+    /// activations that are still activated. Returns the runs they request in rule order; the triggers resolved
+    /// differently are evaluated here and not in a queued input, so that the caller decides whether their runs execute.
     /// </summary>
     private IReadOnlyList<RunRequest> MakeUpFor(
         IReadOnlyList<CompiledRule> rules,
@@ -85,15 +79,16 @@ internal sealed class AutomationTriggers
         bool evaluateAll)
     {
         var changed = _propertyTriggers.Apply(changes);
-        var requests = new List<RunRequest>(evaluateAll ? EvaluateAll(rules) : _propertyTriggers.ObserveReaders(rules, changed));
-        var activated = ActivateTriggers([.. activations.SelectMany(activation => activation.Rules)], rules);
-        if (activated.Count == 0)
+        var activating = PropertyTriggerEngine.GetInactiveTriggers([.. activations.SelectMany(activation => activation.Rules)], rules);
+        ResolveOnly(rules, activating);
+        var requests = new List<RunRequest>(evaluateAll ? _propertyTriggers.EvaluateAll(rules) : _propertyTriggers.ObserveReaders(rules, changed));
+        if (!evaluateAll)
         {
-            return requests;
+            requests.AddRange(_propertyTriggers.EvaluateResolvedDifferently(rules));
         }
 
-        requests.AddRange(activated);
-        return [.. requests.OrderBy(request => IndexOf(rules, request.Rule))];
+        requests.AddRange(_propertyTriggers.Activate(activating));
+        return requests.Count == 0 ? requests : [.. requests.OrderBy(request => IndexOf(rules, request.Rule))];
     }
 
     public static void Deactivate(CompiledRule rule)
@@ -211,12 +206,6 @@ internal sealed class AutomationTriggers
         var triggers = PropertyTriggerEngine.GetInactiveTriggers(activated, rules);
         Resolve(rules, triggers);
         return _propertyTriggers.Activate(triggers);
-    }
-
-    private IReadOnlyList<RunRequest> EvaluateAll(IReadOnlyList<CompiledRule> rules)
-    {
-        ResolveOnly(rules, []);
-        return _propertyTriggers.EvaluateAll(rules);
     }
 
     // Resolves every path and queues the evaluation of the triggers and Only if resolved differently, for a caller that

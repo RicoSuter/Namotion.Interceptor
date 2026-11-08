@@ -123,3 +123,22 @@ public partial class TestFolder
         Children = children;
     }
 }
+
+/// <summary>A holder whose operation replaces its sensor, a structural change on the route of a rule that reads the sensor.</summary>
+[InterceptorSubject]
+public partial class TestReplacer
+{
+    private int _replacements;
+
+    public partial TestSensor? Sensor { get; set; }
+
+    public int Replacements => Volatile.Read(ref _replacements);
+
+    /// <summary>Replaces the sensor by one whose gust is high when the current one is low, and low otherwise.</summary>
+    [Operation]
+    public void Replace()
+    {
+        Interlocked.Increment(ref _replacements);
+        Sensor = new TestSensor { Gust = Sensor?.Gust > 8 ? 1 : 9 };
+    }
+}

@@ -24,6 +24,30 @@ public class AutomationFeedbackTests
         Assert.StartsWith("A feedback chain of more than 16 inputs was stopped", host.Automation.StatusMessage);
     }
 
+    // Each run replaces the sensor, a structural change on the route of both rules, so the chain continues through graph
+    // changes; the flush is bounded so that a chain that does not stop fails the test instead of hanging it.
+    [Fact]
+    public async Task WhenRulesReplaceTheSubjectTheirTriggersReadEndlessly_ThenTheChainIsStoppedAndDoesNotRestart()
+    {
+        // Arrange
+        var replacer = new TestReplacer { Sensor = new TestSensor { Gust = 1 } };
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("high", On("High", When("/Replacer/Sensor/Gust > 8"), Invoke("/Replacer/Replace"))),
+            ("low", On("Low", When("/Replacer/Sensor/Gust < 5"), Invoke("/Replacer/Replace")))));
+
+        // Act
+        host.Graph.Add("Replacer", replacer);
+        await host.FlushAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        var replacementsAfterTheStop = replacer.Replacements;
+        await host.FlushAsync().WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, host.Automation.Status);
+        Assert.StartsWith("A feedback chain of more than 16 inputs was stopped", host.Automation.StatusMessage);
+        Assert.True(replacementsAfterTheStop > 0);
+        Assert.Equal(replacementsAfterTheStop, replacer.Replacements);
+    }
+
     [Fact]
     public async Task WhenRulesResetTheStateAndEnterItAgainEndlessly_ThenTheChainIsStoppedAndReported()
     {
