@@ -101,6 +101,48 @@ public sealed class PushoverServiceEditComponentAccessTests : BunitContext, IAsy
     }
 
     [Fact]
+    public async Task WhenAListedKeyNamesAnotherTargetBeforeTheSave_ThenTheSaveIsRefusedAndChangesNothing()
+    {
+        // Arrange
+        var service = CreateService("alice", "bob");
+        var rendered = Render<PushoverServiceEditComponent>(parameters => parameters.Add(component => component.Subject, service));
+        var other = new PushoverTarget { Name = "Other", UserKey = "user-other" };
+        var targets = new Dictionary<string, PushoverTarget>(service.Targets) { ["alice"] = other };
+        service.Targets = targets;
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => rendered.InvokeAsync(() => rendered.Instance.SaveAsync(CancellationToken.None)));
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(exception);
+        Assert.Contains("changed elsewhere", exception.Message, StringComparison.Ordinal);
+        Assert.Same(targets, service.Targets);
+        Assert.Equal("Other", other.Name);
+    }
+
+    [Fact]
+    public async Task WhenANewTargetWasSaved_ThenTheNextSaveKeepsItAsListed()
+    {
+        // Arrange
+        var service = CreateService("alice");
+        var rendered = Render<PushoverServiceEditComponent>(parameters => parameters.Add(component => component.Subject, service));
+        await rendered.InvokeAsync(() => rendered.FindAll("button").Single(button => button.TextContent.Contains("Add Target")).Click());
+        var fields = rendered.FindAll("input");
+        await rendered.InvokeAsync(() => fields[4].Input("bob"));
+        await rendered.InvokeAsync(() => fields[5].Input("user-bob"));
+        await rendered.InvokeAsync(() => rendered.Instance.SaveAsync(CancellationToken.None));
+        var bob = service.Targets["bob"];
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => rendered.InvokeAsync(() => rendered.Instance.SaveAsync(CancellationToken.None)));
+
+        // Assert
+        Assert.Null(exception);
+        Assert.Equal(["alice", "bob"], service.Targets.Keys);
+        Assert.Same(bob, service.Targets["bob"]);
+    }
+
+    [Fact]
     public async Task WhenAListedTargetWasRemovedElsewhereAndANewTargetGetsItsName_ThenTheSaveKeepsBothUnderDifferentKeys()
     {
         // Arrange
