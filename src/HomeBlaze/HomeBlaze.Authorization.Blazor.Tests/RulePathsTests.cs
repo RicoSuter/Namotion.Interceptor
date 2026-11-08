@@ -45,7 +45,7 @@ public sealed class RulePathsTests : IDisposable
                 Name = "kitchen",
                 Allow = [new PermissionRule { Paths = [paths[index]!], Actions = [PermissionAction.Read] }]
             };
-            var policy = _graph.Service.PreviewPolicy(role).Policy;
+            var policy = _graph.Service.PreviewPolicy(role, PrincipalKind.NonHuman).Policy;
             var decision = policy.Explain(members[index], PermissionAction.Read);
             Assert.True(decision.AllowedByRule is not null, $"'{paths[index]}' does not match {members[index].Name}.");
         }

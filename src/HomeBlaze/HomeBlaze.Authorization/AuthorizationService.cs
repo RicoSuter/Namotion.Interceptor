@@ -24,9 +24,6 @@ namespace HomeBlaze.Authorization;
 /// </remarks>
 public sealed class AuthorizationService : IDisposable
 {
-    /// <summary>The status of every <see cref="Authorization"/> and of their roles while several exist.</summary>
-    internal const string SeveralAuthorizationsStatus = AuthorizationSnapshot.SeveralAuthorizationsStatus;
-
     private readonly ISubjectRegistry _registry;
     private readonly PathProviderBase _pathProvider;
     private readonly ILogger<AuthorizationService>? _logger;
@@ -130,18 +127,14 @@ public sealed class AuthorizationService : IDisposable
     }
 
     /// <summary>
-    /// Gets the policy of a principal holding only <paramref name="editedRole"/>, compiled like <see cref="GetPolicy(IReadOnlyCollection{string})"/>, with the system rules of
-    /// agents and MCP clients (<see cref="PrincipalKind.NonHuman"/>), and with
-    /// <paramref name="editedRole"/> in place of the saved custom role of the same name, or added when none
-    /// is saved. Neither policies nor statuses change.
+    /// Gets the policy of a principal of <paramref name="kind"/> holding only <paramref name="editedRole"/>, compiled like
+    /// <see cref="GetPolicy(IReadOnlyCollection{string}, PrincipalKind)"/>, with <paramref name="editedRole"/> in place of
+    /// the saved custom role of the same name, or added when none is saved. Neither policies nor statuses change.
     /// </summary>
     /// <returns>
     /// The policy and no error, or <see cref="AuthorizationPolicy.DenyAll"/> and the status the role would have once saved:
     /// why its name cannot be used, why custom roles are unavailable, or why it does not compile.
     /// </returns>
-    public AuthorizationResult PreviewPolicy(AuthorizationRole editedRole) => PreviewPolicy(editedRole, PrincipalKind.NonHuman);
-
-    /// <summary>As <see cref="PreviewPolicy(AuthorizationRole)"/>, with the system rules of <paramref name="kind"/>.</summary>
     public AuthorizationResult PreviewPolicy(AuthorizationRole editedRole, PrincipalKind kind)
     {
         ArgumentNullException.ThrowIfNull(editedRole);

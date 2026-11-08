@@ -207,7 +207,7 @@ public class GetPropertyHistoryAccessTests
     {
         var policy = AuthorizationDefinition.Create(
             [.. BuiltInRoles.All, .. customRoles],
-            SystemRules.Rules,
+            SystemRules.For(PrincipalKind.NonHuman),
             AuthorizationActions.All,
             new StateAttributePathProvider(),
             new HomeBlazeMemberTagProvider()).Compile([roleName]);

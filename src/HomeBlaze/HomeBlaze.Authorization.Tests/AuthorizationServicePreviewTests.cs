@@ -32,7 +32,7 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
         AddAuthorization(("custom", new Role()));
 
         // Act
-        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "custom", Allow = [ReadPlain()] });
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "custom", Allow = [ReadPlain()] }, PrincipalKind.NonHuman);
 
         // Assert
         Assert.Null(result.Error);
@@ -47,7 +47,7 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
         AddAuthorization(("saved", new Role { Allow = [ReadPlain()] }));
 
         // Act
-        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "new", Includes = ["saved", BuiltInRoles.ReaderName] });
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "new", Includes = ["saved", BuiltInRoles.ReaderName] }, PrincipalKind.NonHuman);
 
         // Assert
         Assert.Null(result.Error);
@@ -62,7 +62,7 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
         AddAuthorization(("custom", new Role { Allow = [ReadPlain()] }));
 
         // Act
-        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "custom" });
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "custom" }, PrincipalKind.NonHuman);
 
         // Assert
         Assert.Null(result.Error);
@@ -76,7 +76,7 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
         var allowEverything = new PermissionRule { Actions = AuthorizationActions.All };
 
         // Act
-        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "custom", Allow = [allowEverything] });
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "custom", Allow = [allowEverything] }, PrincipalKind.NonHuman);
 
         // Assert
         Assert.Null(result.Error);
@@ -91,7 +91,7 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
         AddAuthorization(("custom", new Role()), ("other", new Role { Includes = ["custom"] }));
 
         // Act
-        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "custom", Includes = ["other"] });
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "custom", Includes = ["other"] }, PrincipalKind.NonHuman);
 
         // Assert
         Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
@@ -102,7 +102,7 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
     public void WhenTheEditedRoleIncludesAnUnknownRole_ThenThePreviewReturnsTheError()
     {
         // Act
-        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "custom", Includes = ["missing"] });
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "custom", Includes = ["missing"] }, PrincipalKind.NonHuman);
 
         // Assert
         Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
@@ -117,7 +117,7 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
     public void WhenTheEditedRoleHasAnUnusableName_ThenThePreviewReturnsTheReason(string name)
     {
         // Act
-        var result = _service.PreviewPolicy(new AuthorizationRole { Name = name, Allow = [ReadPlain()] });
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = name, Allow = [ReadPlain()] }, PrincipalKind.NonHuman);
 
         // Assert
         Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
@@ -128,7 +128,7 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
     public void WhenTheEditedRoleHasAPathPatternWithoutALeadingSeparator_ThenThePreviewReturnsTheError()
     {
         // Act
-        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "custom", Allow = [ReadHome()] });
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "custom", Allow = [ReadHome()] }, PrincipalKind.NonHuman);
 
         // Assert
         Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
@@ -142,7 +142,7 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
         AddAuthorization(("bad", new Role { Allow = [ReadHome()] }));
 
         // Act
-        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "custom", Includes = ["bad"], Allow = [ReadPlain()] });
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "custom", Includes = ["bad"], Allow = [ReadPlain()] }, PrincipalKind.NonHuman);
 
         // Assert
         Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
@@ -156,7 +156,7 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
         AddAuthorization(("bad", new Role { Allow = [ReadHome()] }));
 
         // Act
-        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "bad", Allow = [ReadPlain()] });
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "bad", Allow = [ReadPlain()] }, PrincipalKind.NonHuman);
 
         // Assert
         Assert.Null(result.Error);
@@ -175,8 +175,8 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
         var badStatusBefore = bad.Status;
 
         // Act
-        var badPreview = _service.PreviewPolicy(new AuthorizationRole { Name = "good", Includes = ["missing"] });
-        var fixedPreview = _service.PreviewPolicy(new AuthorizationRole { Name = "bad", Allow = [ReadPlain()] });
+        var badPreview = _service.PreviewPolicy(new AuthorizationRole { Name = "good", Includes = ["missing"] }, PrincipalKind.NonHuman);
+        var fixedPreview = _service.PreviewPolicy(new AuthorizationRole { Name = "bad", Allow = [ReadPlain()] }, PrincipalKind.NonHuman);
 
         // Assert
         Assert.NotNull(badPreview.Error);
@@ -304,11 +304,11 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
         var saved = new Role();
         AddAuthorization(("saved", saved));
         var role = new AuthorizationRole { Name = "new", Includes = ["saved"] };
-        Assert.False(_service.PreviewPolicy(role).Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+        Assert.False(_service.PreviewPolicy(role, PrincipalKind.NonHuman).Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
 
         // Act
         saved.Allow = [ReadPlain()];
-        var result = _service.PreviewPolicy(role);
+        var result = _service.PreviewPolicy(role, PrincipalKind.NonHuman);
 
         // Assert
         Assert.True(result.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));

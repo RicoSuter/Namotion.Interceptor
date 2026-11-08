@@ -8,11 +8,9 @@ namespace HomeBlaze.Authorization;
 /// </summary>
 public static class SystemRules
 {
-    /// <summary>
-    /// The full name of the base type of agents, named here because this project does not reference it. A type rule
-    /// matches the type and every type derived from it.
-    /// </summary>
-    public const string LlmAgentBaseTypeName = "HomeBlaze.AI.Agents.LlmAgentBase";
+    // The full name of the base type of agents, named here because this project does not reference it. A type rule
+    // matches the type and every type derived from it.
+    private const string LlmAgentBaseTypeName = "HomeBlaze.AI.Agents.LlmAgentBase";
 
     private static readonly PermissionRule ConfigurationWrites =
         new() { Tags = [MemberTags.Configuration], Actions = [PermissionAction.Write] };
@@ -50,9 +48,6 @@ public static class SystemRules
         .. Person,
         new PermissionRule { Actions = [AuthorizationActions.Administer] }
     ];
-
-    /// <summary>The rules of agents and MCP clients, see <see cref="For"/>.</summary>
-    public static ImmutableArray<PermissionRule> Rules => NonHuman;
 
     /// <summary>
     /// Gets the deny rules compiled into every policy of <paramref name="kind"/>, whatever the roles allow. Every kind:

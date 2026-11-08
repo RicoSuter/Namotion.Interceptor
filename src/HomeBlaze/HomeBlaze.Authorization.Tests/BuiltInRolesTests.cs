@@ -200,7 +200,7 @@ public class BuiltInRolesTests
     private static AuthorizationPolicy Compile(string roleName) =>
         AuthorizationDefinition.Create(
             BuiltInRoles.All,
-            SystemRules.Rules,
+            SystemRules.For(PrincipalKind.NonHuman),
             AuthorizationActions.All,
             new DefaultPathProvider('/'),
             new HomeBlazeMemberTagProvider()).Compile([roleName]);

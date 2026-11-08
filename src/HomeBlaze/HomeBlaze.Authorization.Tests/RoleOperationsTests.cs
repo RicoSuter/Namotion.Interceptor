@@ -75,7 +75,7 @@ public sealed class RoleOperationsTests
         // Assert
         var reader = _authorization.Roles[BuiltInRoles.ReaderName];
         Assert.True(reader.IsBuiltIn);
-        Assert.Equal(BuiltInRoles.Reader.Allow, reader.Allow);
+        Assert.Equal(BuiltInRoles.All.Single(role => role.Name == BuiltInRoles.ReaderName).Allow, reader.Allow);
         Assert.Equal(BuiltInRoles.All.Select(role => role.Name), _authorization.Roles.Keys);
     }
 

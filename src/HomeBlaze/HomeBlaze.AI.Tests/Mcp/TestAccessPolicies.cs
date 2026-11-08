@@ -18,7 +18,7 @@ internal static class TestAccessPolicies
     {
         var policy = AuthorizationDefinition.Create(
             [.. BuiltInRoles.All, .. customRoles],
-            SystemRules.Rules,
+            SystemRules.For(PrincipalKind.NonHuman),
             AuthorizationActions.All,
             McpAuthorization.PathProvider,
             new HomeBlazeMemberTagProvider()).Compile([roleName]);

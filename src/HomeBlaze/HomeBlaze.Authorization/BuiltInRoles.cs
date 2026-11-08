@@ -20,7 +20,7 @@ public static class BuiltInRoles
     /// <summary>
     /// Reads every member and its history and executes queries. Secrets stay unreadable through the system rules.
     /// </summary>
-    public static AuthorizationRole Reader { get; } = new()
+    private static AuthorizationRole Reader { get; } = new()
     {
         Name = ReaderName,
         // Without selectors a rule matches every member, also one without a marker, such as a derived title.
@@ -35,7 +35,7 @@ public static class BuiltInRoles
     /// Includes <see cref="Reader"/>, writes every member and executes operations. Configuration, secrets and operations
     /// that require confirmation stay blocked through the system rules.
     /// </summary>
-    public static AuthorizationRole Operator { get; } = new()
+    private static AuthorizationRole Operator { get; } = new()
     {
         Name = OperatorName,
         Includes = [ReaderName],
@@ -49,7 +49,7 @@ public static class BuiltInRoles
     /// <summary>
     /// Allows every action on every member; the system rules still apply.
     /// </summary>
-    public static AuthorizationRole Everything { get; } = new()
+    private static AuthorizationRole Everything { get; } = new()
     {
         Name = EverythingName,
         // Without selectors a rule matches every member, also one of a subject whose paths cannot be listed.

@@ -1,5 +1,6 @@
 using System.Reactive.Concurrency;
 using System.Runtime.CompilerServices;
+using HomeBlaze.Authorization.Internal;
 using HomeBlaze.Authorization.Tests.Subjects;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Authorization;
@@ -660,7 +661,7 @@ public sealed class AuthorizationServiceTests : IDisposable
         _ = _service.GetRoleNames();
 
         // Assert
-        await StatusAssert.EqualAsync(AuthorizationService.SeveralAuthorizationsStatus, () => first.Roles["First"].Status);
+        await StatusAssert.EqualAsync(AuthorizationSnapshot.SeveralAuthorizationsStatus, () => first.Roles["First"].Status);
         await StatusAssert.EqualAsync(1, () => first.Roles[BuiltInRoles.ReaderName].UsedByAgents);
         await StatusAssert.EqualAsync(1, () => second.Roles[BuiltInRoles.ReaderName].UsedByAgents);
         Assert.Null(first.Roles[BuiltInRoles.ReaderName].Status);
@@ -744,7 +745,7 @@ public sealed class AuthorizationServiceTests : IDisposable
 
         // Assert
         Assert.Equal(["First", "Second"], unavailable.Keys.Order(StringComparer.Ordinal));
-        Assert.All(unavailable.Values, reason => Assert.Equal(AuthorizationService.SeveralAuthorizationsStatus, reason));
+        Assert.All(unavailable.Values, reason => Assert.Equal(AuthorizationSnapshot.SeveralAuthorizationsStatus, reason));
     }
 
     [Fact]

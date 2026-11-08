@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
 
@@ -22,8 +21,8 @@ public static class NameRules
     public const int MaximumLength = 64;
 
     /// <summary>The rule, as a person reads it.</summary>
-    public const string RuleDescription =
-        "Use lowercase letters a-z, digits, '.', '-' or '_', starting with a letter or digit, at most 64 characters.";
+    public static string RuleDescription { get; } =
+        $"Use lowercase letters a-z, digits, '.', '-' or '_', starting with a letter or digit, at most {MaximumLength} characters.";
 
     /// <summary>The maximum length of a display name, in UTF-16 code units.</summary>
     public const int MaximumDisplayNameLength = 100;
@@ -46,9 +45,6 @@ public static class NameRules
 
     // Letters and symbols that render blank: the Hangul fillers and the blank Braille pattern.
     private static readonly int[] BlankCharacters = [0x115F, 0x1160, 0x2800, 0x3164, 0xFFA0];
-
-    /// <summary>The names of the built-in users.</summary>
-    public static ImmutableArray<string> BuiltInUserNames { get; } = [AnonymousUserName, McpUserName];
 
     /// <summary>Whether <paramref name="name"/> is the name of a built-in user.</summary>
     public static bool IsBuiltInUserName(string name) =>
