@@ -51,44 +51,78 @@ internal sealed class AutomationTriggers
     }
 
     /// <summary>
-    /// Makes up for the inputs dropped from a feedback chain: resolves the paths again, observes the dropped changes and
-    /// activates the rules of the dropped activations. Returns the runs they request, which must not execute, among them
-    /// the runs of the triggers that a dropped graph change led elsewhere.
+    /// Whether the worker makes up for dropped inputs. A resolution then queues no input for the triggers it resolved
+    /// differently: the make-ups evaluate them themselves, so that the runs of a stopped feedback chain are skipped and
+    /// those of an overload continue its chain, and the differences left afterwards wait for the next graph change.
+    /// Set by the worker around the resynchronization.
     /// </summary>
-    public IReadOnlyList<RunRequest> MakeUpForChain(IReadOnlyList<CompiledRule> rules, DroppedInputs dropped) =>
-        MakeUpFor(rules, dropped.Changes.Where(DroppedInputs.IsChainDrop), dropped.Activations.Where(DroppedInputs.IsChainDrop), evaluateAll: false);
+    public bool IsResynchronizing { get; set; }
+
+    /// <summary>
+    /// Makes up for the inputs dropped from a feedback chain, nothing without one: resolves the paths again, observes the
+    /// dropped changes and activates the rules of the dropped activations. Returns the runs they request, which must not
+    /// execute, among them the runs of the triggers that a dropped graph change of the chain led elsewhere.
+    /// </summary>
+    public IReadOnlyList<RunRequest> MakeUpForChain(IReadOnlyList<CompiledRule> rules, DroppedInputs dropped)
+    {
+        if (!dropped.HasChainDrops)
+        {
+            return [];
+        }
+
+        return MakeUpFor(
+            rules,
+            dropped.Changes.Where(DroppedInputs.IsChainDrop),
+            dropped.Activations.Where(DroppedInputs.IsChainDrop),
+            evaluateAll: false,
+            evaluateResolvedDifferently: dropped.HasChainDroppedGraphChange);
+    }
 
     /// <summary>Makes up for the inputs dropped because the queue was full and evaluates every active trigger again.</summary>
     public IReadOnlyList<RunRequest> MakeUpForOverload(IReadOnlyList<CompiledRule> rules, DroppedInputs dropped) => MakeUpFor(
         rules,
         dropped.Changes.Where(change => !DroppedInputs.IsChainDrop(change)),
         dropped.Activations.Where(activation => !DroppedInputs.IsChainDrop(activation)),
-        evaluateAll: true);
+        evaluateAll: true,
+        evaluateResolvedDifferently: true);
+
+    /// <summary>
+    /// Keeps track of the pending triggers after the runs of a stopped feedback chain were skipped, which leaves their
+    /// triggers pending, and forgets the differences of those triggers: Only if of a rule that became pending resolves
+    /// for the first time here, and a request for it would continue the chain. The properties of Only if are watched, so a
+    /// change of one requests the run as a new chain.
+    /// </summary>
+    public void StopChain(IReadOnlyList<CompiledRule> rules, IReadOnlyList<RunRequest> stopped)
+    {
+        TrackPending(rules, stopped);
+        _propertyTriggers.ForgetResolvedDifferently(stopped);
+    }
 
     /// <summary>
     /// Makes up for dropped inputs: observes the dropped changes that are newer than the observed values, resolves the
     /// paths again, then evaluates every active property trigger (<paramref name="evaluateAll"/>) or only those that read
-    /// a changed property or whose properties were resolved differently, and activates the rules of the dropped
-    /// activations that are still activated. Returns the runs they request in rule order; the triggers resolved
-    /// differently are evaluated here and not in a queued input, so that the caller decides whether their runs execute.
+    /// a changed property, and with <paramref name="evaluateResolvedDifferently"/> those whose properties were resolved
+    /// differently, and activates the rules of the dropped activations that are still activated. Returns the runs they
+    /// request in rule order, each trigger once.
     /// </summary>
     private IReadOnlyList<RunRequest> MakeUpFor(
         IReadOnlyList<CompiledRule> rules,
         IEnumerable<PropertyChangedInput> changes,
         IEnumerable<ActivationInput> activations,
-        bool evaluateAll)
+        bool evaluateAll,
+        bool evaluateResolvedDifferently)
     {
         var changed = _propertyTriggers.Apply(changes);
         var activating = PropertyTriggerEngine.GetInactiveTriggers([.. activations.SelectMany(activation => activation.Rules)], rules);
         ResolveOnly(rules, activating);
         var requests = new List<RunRequest>(evaluateAll ? _propertyTriggers.EvaluateAll(rules) : _propertyTriggers.ObserveReaders(rules, changed));
-        if (!evaluateAll)
+        if (!evaluateAll && evaluateResolvedDifferently)
         {
             requests.AddRange(_propertyTriggers.EvaluateResolvedDifferently(rules));
         }
 
         requests.AddRange(_propertyTriggers.Activate(activating));
-        return requests.Count == 0 ? requests : [.. requests.OrderBy(request => IndexOf(rules, request.Rule))];
+        return requests.Count == 0 ? requests : [.. requests.DistinctBy(request => request.Trigger).OrderBy(request => IndexOf(rules, request.Rule))];
     }
 
     public static void Deactivate(CompiledRule rule)
@@ -209,11 +243,11 @@ internal sealed class AutomationTriggers
     }
 
     // Resolves every path and queues the evaluation of the triggers and Only if resolved differently, for a caller that
-    // does not evaluate them itself.
+    // does not evaluate them itself, except while the worker makes up for dropped inputs, see IsResynchronizing.
     private void Resolve(IReadOnlyList<CompiledRule> rules, IReadOnlyList<CompiledPropertyTrigger> activating)
     {
         ResolveOnly(rules, activating);
-        if (_propertyTriggers.HasResolvedDifferently)
+        if (!IsResynchronizing && _propertyTriggers.HasResolvedDifferently)
         {
             _queue.TryEnqueue(new ResolvedDifferentlyInput(AutomationInputQueue.CausedChainDepth));
         }

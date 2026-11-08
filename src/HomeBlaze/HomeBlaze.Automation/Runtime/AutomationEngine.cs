@@ -252,18 +252,26 @@ internal sealed class AutomationEngine : IRuleRunHost
     public async Task ResynchronizeAsync(DroppedInputs dropped, CancellationToken cancellationToken)
     {
         _status.ReportFaults(dropped.Faults, _automation.TimeProvider.GetUtcNow());
-        var stopped = _triggers.MakeUpForChain(_snapshot.Rules, dropped);
-        if (stopped.Count > 0)
+        _triggers.IsResynchronizing = true;
+        try
         {
-            _dispatcher.Skip(stopped, $"a feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped");
+            var stopped = _triggers.MakeUpForChain(_snapshot.Rules, dropped);
+            if (stopped.Count > 0)
+            {
+                _dispatcher.Skip(stopped, $"a feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped");
 
-            // No recheck of their Only if follows, since a recheck would run them and continue the chain.
-            _triggers.TrackPending(_snapshot.Rules, stopped);
+                // No recheck of their Only if follows, since a recheck would run them and continue the chain.
+                _triggers.StopChain(_snapshot.Rules, stopped);
+            }
+
+            if (dropped.HasOverload)
+            {
+                await DispatchAsync(_triggers.MakeUpForOverload(_snapshot.Rules, dropped), cancellationToken);
+            }
         }
-
-        if (dropped.HasOverload)
+        finally
         {
-            await DispatchAsync(_triggers.MakeUpForOverload(_snapshot.Rules, dropped), cancellationToken);
+            _triggers.IsResynchronizing = false;
         }
     }
 

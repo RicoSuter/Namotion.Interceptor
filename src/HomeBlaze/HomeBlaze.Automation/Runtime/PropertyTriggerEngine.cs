@@ -167,6 +167,22 @@ internal sealed class PropertyTriggerEngine(
         }
     }
 
+    /// <summary>
+    /// Forgets the differences of the triggers whose runs <paramref name="stopped"/> requested and of Only if of their
+    /// rules, so that no evaluation requests them again.
+    /// </summary>
+    public void ForgetResolvedDifferently(IReadOnlyList<RunRequest> stopped)
+    {
+        foreach (var request in stopped)
+        {
+            if (request.Trigger is { } trigger)
+            {
+                _resolvedDifferently.Remove(trigger);
+                _onlyIfResolvedDifferently.Remove(trigger.Rule);
+            }
+        }
+    }
+
     /// <summary>Evaluates every active trigger and requests the runs of every pending trigger.</summary>
     public IReadOnlyList<RunRequest> EvaluateAll(IReadOnlyList<CompiledRule> rules)
     {

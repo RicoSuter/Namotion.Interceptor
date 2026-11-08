@@ -17,6 +17,12 @@ internal sealed class DroppedInputs
 
     public bool HasGraphChange { get; private set; }
 
+    /// <summary>Whether a graph change dropped because it continued a feedback chain beyond the limit is among the inputs.</summary>
+    public bool HasChainDroppedGraphChange { get; private set; }
+
+    /// <summary>Whether an input dropped because it continued a feedback chain beyond the limit is among the inputs.</summary>
+    public bool HasChainDrops => HasChainDroppedGraphChange || _changes.Values.Any(IsChainDrop) || _activations.Any(IsChainDrop);
+
     /// <summary>The drops counted when the worker took these inputs, of every kind of input.</summary>
     public QueueFaults Faults { get; set; }
 
@@ -51,6 +57,7 @@ internal sealed class DroppedInputs
                 break;
             case GraphChangedInput:
                 HasGraphChange = true;
+                HasChainDroppedGraphChange |= IsChainDrop(input);
                 break;
         }
     }
