@@ -9,6 +9,7 @@ using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Storage.Tests;
 
+[Trait("Category", "Portability")]
 public class EmbeddedSubjectRedactionTests
 {
     private static readonly HashSet<MarkdownBlock> NoLayoutBlocks = [];

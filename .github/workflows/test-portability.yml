@@ -39,14 +39,8 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Run Sonos tests
-        run: dotnet test src/HomeBlaze/Namotion.Devices.Sonos.Tests --configuration Release --filter "Category!=Integration" --logger trx --results-directory TestResults
-
-      - name: Run AI tests
-        run: dotnet test src/HomeBlaze/HomeBlaze.AI.Tests --configuration Release --filter "Category!=Integration" --logger trx --results-directory TestResults
-
-      - name: Run storage tests
-        run: dotnet test src/HomeBlaze/HomeBlaze.Storage.Tests --configuration Release --filter "Category!=Integration" --logger trx --results-directory TestResults
+      - name: Run portability tests
+        run: dotnet test src/Namotion.Interceptor.slnx --configuration Release --filter "Category=Portability&Category!=Integration" --logger trx --results-directory TestResults
 
       - name: Upload test results
         if: always()

@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Namotion.Devices.Sonos.Tests;
 
+[Trait("Category", "Portability")]
 public class UpnpEventParserTests
 {
     private const string SpotifyUri = TestFixtures.SpotifyConnectUri;

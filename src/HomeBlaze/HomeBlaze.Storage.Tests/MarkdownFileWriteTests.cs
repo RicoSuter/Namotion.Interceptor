@@ -16,6 +16,7 @@ using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Storage.Tests;
 
+[Trait("Category", "Portability")]
 public class MarkdownFileWriteTests : IDisposable
 {
     private readonly DirectoryInfo _directory = Directory.CreateTempSubdirectory("homeblaze-markdown-");
