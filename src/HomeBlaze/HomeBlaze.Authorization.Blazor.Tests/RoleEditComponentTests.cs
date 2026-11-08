@@ -411,10 +411,9 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         await EnterTextAsync(component, "role-edit-deny-rule-0", "rule-members", "Secret*");
 
         // Act
-        var saved = await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
 
         // Assert
-        Assert.True(saved);
         var savedRole = Assert.Single(Graph.RoleStore.Saves).Role;
         Assert.Equal([BuiltInRoles.ReaderName], savedRole.Includes.ToArray());
         Assert.Equal([new PermissionRule { Paths = ["/Devices/**"], Actions = [PermissionAction.Read] }], savedRole.Allow.ToArray());
@@ -423,7 +422,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     }
 
     [Fact]
-    public async Task WhenNoAuthorizationHoldsTheRole_ThenSavingFailsAndTheStoreReceivesNothing()
+    public async Task WhenNoAuthorizationHoldsTheRole_ThenSavingThrowsAndTheStoreReceivesNothing()
     {
         // Arrange: in the graph, so that the dialog opens, but outside an Authorization, so that it would be saved nowhere.
         var role = new Role();
@@ -431,10 +430,10 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         var component = RenderEditor(role);
 
         // Act
-        var saved = await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+        var exception = await Record.ExceptionAsync(() => component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None)));
 
         // Assert
-        Assert.False(saved);
+        Assert.IsType<InvalidOperationException>(exception);
         Assert.Empty(Graph.RoleStore.Saves);
         Assert.Contains("not part of an Authorization subject", component.Find("[data-testid='role-edit-save-error']").TextContent);
     }
@@ -449,10 +448,10 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         Graph.SetRole("kitchen", includes: [BuiltInRoles.ReaderName]);
 
         // Act
-        var saved = await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+        var exception = await Record.ExceptionAsync(() => component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None)));
 
         // Assert
-        Assert.False(saved);
+        Assert.IsType<InvalidOperationException>(exception);
         Assert.Empty(Graph.RoleStore.Saves);
         Assert.Contains("The role 'kitchen' changed since you opened it.", component.Find("[data-testid='role-edit-save-error']").TextContent);
         Assert.True(component.Instance.IsDirty);
@@ -471,11 +470,10 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         component.Render();
 
         // Act
-        var saved = await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
 
         // Assert
         Assert.NotSame(opened, Graph.GetRole("kitchen"));
-        Assert.True(saved);
         Assert.Equal("kitchen", Assert.Single(Graph.RoleStore.Saves).OriginalName);
         Assert.Equal([new PermissionRule { Actions = [PermissionAction.Read] }], Graph.GetRole("kitchen").Allow);
         Assert.Empty(component.FindAll("[data-testid='role-edit-save-error']"));
@@ -516,7 +514,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     }
 
     [Fact]
-    public async Task WhenTheStoreRefusesTheSave_ThenTheErrorIsShownAndSaveReturnsFalse()
+    public async Task WhenTheStoreRefusesTheSave_ThenTheErrorIsShownAndSavingThrows()
     {
         // Arrange
         Graph.RoleStore.Result = new RoleChangeResult(false, "changed since you opened it");
@@ -525,10 +523,10 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         await SetActionAsync(component, 0, "read", true);
 
         // Act
-        var saved = await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+        var exception = await Record.ExceptionAsync(() => component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None)));
 
         // Assert
-        Assert.False(saved);
+        Assert.IsType<InvalidOperationException>(exception);
         Assert.Contains("changed since you opened it", component.Find("[data-testid='role-edit-save-error']").TextContent);
         Assert.True(component.Instance.IsDirty);
         Assert.Empty(Graph.GetRole("kitchen").Allow);
@@ -580,10 +578,10 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         Permissions.CannotAdminister.Add(GetEditOperationMember(role));
 
         // Act
-        var saved = await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+        var exception = await Record.ExceptionAsync(() => component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None)));
 
         // Assert
-        Assert.False(saved);
+        Assert.IsType<InvalidOperationException>(exception);
         Assert.Empty(Graph.RoleStore.Saves);
         Assert.Contains("full administrator", component.Find("[data-testid='role-edit-save-error']").TextContent);
     }
@@ -598,10 +596,9 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         await SetActionAsync(component, 0, "read", true);
 
         // Act
-        var saved = await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
 
         // Assert
-        Assert.True(saved);
         Assert.Equal([new PermissionRule { Actions = [PermissionAction.Read] }], Graph.GetRole("kitchen").Allow);
     }
 

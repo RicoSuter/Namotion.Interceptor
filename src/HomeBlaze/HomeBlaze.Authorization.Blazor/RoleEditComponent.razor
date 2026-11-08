@@ -162,6 +162,8 @@
 @code {
     private const string NotFullAdministratorMessage = "Only a full administrator can change roles.";
 
+    private const string CouldNotSaveMessage = "The role could not be saved.";
+
     private const string NotFullAdministratorPreviewMessage = "Only a full administrator can preview roles.";
 
     private string? _name;
@@ -263,16 +265,16 @@
     /// <summary>
     /// Saves the edited role by invoking the edit operation of the role, see <see cref="Role.EditAsync"/>, when the viewer may.
     /// </summary>
-    /// <returns>
-    /// Whether the role was saved; when not, because the viewer may not invoke the edit operation, the role changed since it
-    /// was loaded or the store refused it, the reason is shown and the edits are kept.
-    /// </returns>
-    /// <exception cref="InvalidOperationException">The role has invalid rules, which the host does not save.</exception>
-    public async Task<bool> SaveAsync(CancellationToken cancellationToken)
+    /// <exception cref="InvalidOperationException">
+    /// The role was not saved: it has invalid rules, which the host does not save, or the viewer may not invoke the edit
+    /// operation, the role changed since it was loaded or the store refused it, in which case the reason is shown as well,
+    /// and the edits are kept. The host keeps the dialog open and shows the message.
+    /// </exception>
+    public async Task SaveAsync(CancellationToken cancellationToken)
     {
         if (_heldRole is null)
         {
-            return false;
+            throw new InvalidOperationException(CouldNotSaveMessage);
         }
 
         // Text typed but not added would be lost, and a rule saved without it applies to more members than intended.
@@ -289,7 +291,7 @@
 
         if (GetCurrentRole() is not { } role)
         {
-            return ShowSaveError(GetChangedMessage(_name!));
+            throw ShowSaveError(GetChangedMessage(_name!));
         }
 
         var editedRole = GetEditedRole();
@@ -298,9 +300,9 @@
         switch (invocation.Outcome)
         {
             case PermittedOperationOutcome.Denied:
-                return ShowSaveError(NotFullAdministratorMessage);
+                throw ShowSaveError(NotFullAdministratorMessage);
             case PermittedOperationOutcome.Failed:
-                return ShowSaveError(invocation.Exception?.Message ?? "The role could not be saved.");
+                throw ShowSaveError(invocation.Exception?.Message ?? CouldNotSaveMessage);
         }
 
         // The store replaced every role subject. A subject that holds other rules than the saved ones comes from a change
@@ -315,7 +317,6 @@
         _saveError = null;
         _isDirty = false;
         IsDirtyChanged?.Invoke(false);
-        return true;
     }
 
     // The store replaces every role subject on any change of a role, which leaves the held one without its edit operation.
@@ -345,20 +346,12 @@
         role.Allow.SequenceEqual(allow) &&
         role.Deny.SequenceEqual(deny);
 
-    // The host keeps the dialog open when the save fails, and shows the message besides the one in the dialog.
-    async Task ISubjectEditComponent.SaveAsync(CancellationToken cancellationToken)
-    {
-        if (!await SaveAsync(cancellationToken))
-        {
-            throw new InvalidOperationException(_saveError ?? "The role could not be saved.");
-        }
-    }
-
-    private bool ShowSaveError(string error)
+    // Shown in the dialog besides the message of the host, which the returned exception carries.
+    private InvalidOperationException ShowSaveError(string error)
     {
         _saveError = error;
         StateHasChanged();
-        return false;
+        return new InvalidOperationException(error);
     }
 
     // Another role saved meanwhile, such as an included one, changes the checks of the same edited role. Raised on the
