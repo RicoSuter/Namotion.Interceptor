@@ -19,7 +19,7 @@
     var map = widget.Map;
     var onProperty = ValueReader.ResolveProperty(PathResolver, widget, on, Permissions);
     var offProperty = ValueReader.ResolveProperty(PathResolver, widget, off, Permissions);
-    var valueMap = ValueReader.ResolveMap(PathResolver, widget, map, out var mapError);
+    var valueMap = ValueReader.ResolveMap(PathResolver, widget, map, Permissions, out var mapError);
     var label = _label.Render(widget.Label, PathResolver, widget, path, TimeZone, Permissions, out var labelError);
     if (string.IsNullOrEmpty(label))
     {

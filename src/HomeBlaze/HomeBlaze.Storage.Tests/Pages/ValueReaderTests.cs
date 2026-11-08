@@ -215,7 +215,7 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var valueMap = ValueReader.ResolveMap(resolver, page, "broken", out var error);
+        var valueMap = ValueReader.ResolveMap(resolver, page, "broken", UnrestrictedPermissions.Instance, out var error);
         var reading = ValueReader.Read(resolver, page, "meter/IsOn", "broken", null, UnrestrictedPermissions.Instance);
 
         // Assert: the error does not depend on whether the value matches the case with the wrong color.
@@ -261,7 +261,7 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var valueMap = ValueReader.ResolveMap(resolver, page, "brokentext", out var error);
+        var valueMap = ValueReader.ResolveMap(resolver, page, "brokentext", UnrestrictedPermissions.Instance, out var error);
         var reading = ValueReader.Read(resolver, page, "meter/IsOn", "brokentext", null, UnrestrictedPermissions.Instance);
 
         // Assert: the case with the wrong text color is not the one that matches.
@@ -345,7 +345,7 @@ public class ValueReaderTests
         // Arrange
         var (resolver, page) = await AddPageAsync();
         var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
-        var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", out _);
+        var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", UnrestrictedPermissions.Instance, out _);
 
         // Act
         var reading = ValueReader.ReadProperty(resolver, meter, nameof(TestMeter.IsOn), valueMap, null, UnrestrictedPermissions.Instance);
@@ -383,7 +383,7 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var map = ValueReader.ResolveMap(resolver, page, "nomap", out var error);
+        var map = ValueReader.ResolveMap(resolver, page, "nomap", UnrestrictedPermissions.Instance, out var error);
 
         // Assert
         Assert.Null(map);
@@ -493,7 +493,7 @@ public class ValueReaderTests
         // Arrange
         var (resolver, page) = await AddPageAsync();
         var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
-        var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", out _);
+        var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", UnrestrictedPermissions.Instance, out _);
 
         // Act
         var fromSubject = ValueReader.ReadProperty(resolver, meter, nameof(TestMeter.IsOn), valueMap, null, UnrestrictedPermissions.Instance);
@@ -510,7 +510,7 @@ public class ValueReaderTests
         // Arrange
         var (resolver, page) = await AddPageAsync();
         var property = ValueReader.ResolveProperty(resolver, page, "meter/IsOn", UnrestrictedPermissions.Instance);
-        var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", out _);
+        var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", UnrestrictedPermissions.Instance, out _);
 
         // Act
         var fromProperty = ValueReader.ReadResolved(resolver, property, valueMap, null, UnrestrictedPermissions.Instance);

@@ -41,7 +41,7 @@
     else
     {
         // A select and a value row show the map; one that cannot be resolved replaces the control, as it does every widget.
-        var valueMap = ValueReader.ResolveMap(PathResolver, control, map, out var mapError);
+        var valueMap = ValueReader.ResolveMap(PathResolver, control, map, Permissions, out var mapError);
         // A widget shows one error: that of its map first, then that of its label.
         var error = mapError ?? labelError;
         if (error is not null)

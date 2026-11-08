@@ -25,7 +25,7 @@
         var hasMapError = false;
         for (var index = 0; index < columns.Length; index++)
         {
-            maps[index] = ValueReader.ResolveMap(PathResolver, columns[index], columns[index].Map, out var mapError);
+            maps[index] = ValueReader.ResolveMap(PathResolver, columns[index], columns[index].Map, Permissions, out var mapError);
             if (mapError is not null)
             {
                 hasMapError = true;

@@ -125,18 +125,7 @@ public static class ExpressionDisplay
         ITimeZoneDisplay? timeZone,
         IUserPermissions permissions)
     {
-        IInterceptorSubject? map;
-        try
-        {
-            map = resolver.ResolveScopedSubject(mapName, PathStyle.Canonical, scope, permissions);
-        }
-        catch
-        {
-            // The name is written by the author of a page, and a malformed one must not take the page down.
-            map = null;
-        }
-
-        if (map is not IValueMap valueMap || !IsReadable(map, permissions))
+        if (ResolveReadableMap(resolver, scope, mapName, permissions) is not IValueMap valueMap)
         {
             return ExpressionValue.FromText($"Cannot resolve map: {mapName}");
         }
@@ -148,6 +137,33 @@ public static class ExpressionDisplay
 
         var binding = ValueBinding.FromExpressionValue(input);
         return ExpressionValue.FromText(valueMap.GetText(binding, resolver, timeZone, permissions) ?? ToText(input, timeZone));
+    }
+
+    /// <summary>
+    /// Resolves the name or path of a value map for a viewer, as the pipe <c>map</c> and the <c>Map</c> of a widget do: the
+    /// subject that <paramref name="mapName"/> leads to from <paramref name="scope"/>, when the viewer may read every member
+    /// the path reads through, is shown the subject and may read one of its members; otherwise null, as for a name that
+    /// leads nowhere, also for a malformed name.
+    /// </summary>
+    /// <param name="resolver">The resolver of the name.</param>
+    /// <param name="scope">The subject the name resolves from, such as the page or the widget.</param>
+    /// <param name="mapName">The name or path of the map.</param>
+    /// <param name="permissions">The permissions of the viewer.</param>
+    public static IInterceptorSubject? ResolveReadableMap(
+        SubjectPathResolver resolver, IInterceptorSubject scope, string mapName, IUserPermissions permissions)
+    {
+        IInterceptorSubject? map;
+        try
+        {
+            map = resolver.ResolveScopedSubject(mapName, PathStyle.Canonical, scope, permissions);
+        }
+        catch
+        {
+            // The name is written by the author of a page, and a malformed one must not take the page down.
+            map = null;
+        }
+
+        return map is not null && IsReadable(map, permissions) ? map : null;
     }
 
     // A map that the caller may not reach reads as a missing one, so that neither its texts nor its existence are shown.

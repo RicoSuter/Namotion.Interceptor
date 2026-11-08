@@ -39,7 +39,7 @@ public static class ValueReader
         ITimeZoneDisplay? timeZone,
         IUserPermissions permissions)
     {
-        var valueMap = ResolveMap(resolver, widget, map, out var mapError);
+        var valueMap = ResolveMap(resolver, widget, map, permissions, out var mapError);
         return ReadCore(ValueBinding.FromPath(resolver, widget, path, permissions), valueMap, mapError, resolver, timeZone, permissions);
     }
 
@@ -192,16 +192,20 @@ public static class ValueReader
     }
 
     /// <summary>
-    /// Resolves the name or path of a <see cref="ValueMap"/>. Null or empty gives no map and no error.
+    /// Resolves the name or path of a <see cref="ValueMap"/> for a viewer, as the pipe <c>map</c> does, see
+    /// <see cref="ExpressionDisplay.ResolveReadableMap"/>. Null or empty gives no map and no error.
     /// </summary>
     /// <param name="resolver">The resolver of the map.</param>
     /// <param name="widget">The subject the map is relative to, usually the widget itself.</param>
     /// <param name="map">The name or path of the map as written.</param>
-    /// <param name="error">The widget argument error when the map leads nowhere or to no <see cref="ValueMap"/>, or
+    /// <param name="permissions">The permissions of the viewer, for whom a map they may not reach is missing.</param>
+    /// <param name="error">The widget argument error when the map leads nowhere, to no <see cref="ValueMap"/> or to one the
+    /// viewer may not reach, or
     /// when the <see cref="ValueMapCase.Color"/> or the <see cref="ValueMapCase.TextColor"/> of one of its cases is no
     /// color, or when a case has a condition or a text with a mistake, or a case without Value and When is not the last one,
     /// otherwise null.</param>
-    public static ValueMap? ResolveMap(SubjectPathResolver resolver, IInterceptorSubject widget, string? map, out string? error)
+    public static ValueMap? ResolveMap(
+        SubjectPathResolver resolver, IInterceptorSubject widget, string? map, IUserPermissions permissions, out string? error)
     {
         error = null;
         if (string.IsNullOrEmpty(map))
@@ -209,7 +213,7 @@ public static class ValueReader
             return null;
         }
 
-        if (ResolveSubjectUnchecked(resolver, widget, map) is ValueMap valueMap)
+        if (ExpressionDisplay.ResolveReadableMap(resolver, widget, map, permissions) is ValueMap valueMap)
         {
             error = valueMap.GetError();
             return error is null ? valueMap : null;
@@ -240,10 +244,10 @@ public static class ValueReader
         }
     }
 
-    // The path of a property and that of a map are written by the author of a page, and a malformed one
-    // must not take the page down. This holds for ResolveProperty above as well.
-    // Checks nothing for the viewer: only for the name of a map, which is configuration rather than a value, and for
-    // Widget.ResolvedSubject, which no viewer sees. A path a widget shows resolves through the overload with a viewer.
+    // The path of a property is written by the author of a page, and a malformed one must not take the page down. This
+    // holds for ResolveProperty above as well.
+    // Checks nothing for the viewer: only for Widget.ResolvedSubject, which no viewer sees. A path a widget shows resolves
+    // through the overload with a viewer.
     internal static IInterceptorSubject? ResolveSubjectUnchecked(SubjectPathResolver resolver, IInterceptorSubject widget, string path)
     {
         try

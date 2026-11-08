@@ -388,6 +388,7 @@ namespace HomeBlaze.Services.Display
         public const char PathSeparator = '/';
         public static Namotion.Interceptor.Expressions.ExpressionValue ApplyPipe(string name, System.Collections.Immutable.ImmutableArray<string> arguments, Namotion.Interceptor.Expressions.ExpressionValue input, HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject scope, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions) { }
         public static string? Check(Namotion.Interceptor.Expressions.ParsedExpression expression, HomeBlaze.Services.Display.ExpressionUse use) { }
+        public static Namotion.Interceptor.IInterceptorSubject? ResolveReadableMap(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject scope, string mapName, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions) { }
         public static string ToText(Namotion.Interceptor.Expressions.ExpressionValue result, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
     }
     public enum ExpressionUse

@@ -4,6 +4,7 @@ using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Authorization;
 using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Components;
+using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
@@ -232,6 +233,36 @@ public class MarkdownReadAccessTests
         // Assert
         Assert.Equal("Absolute: [], named: []", GetLastLine(evaluated));
         Assert.Equal("Absolute: [1.23 kW], named: [1.23 kW]", GetLastLine(evaluatedUnrestricted));
+    }
+
+    [Fact]
+    public async Task WhenTheMapOfAWidgetIsNotShownIsHeldByAHiddenMemberOrHasNoReadableMember_ThenItReadsAsAMissingMap()
+    {
+        // Arrange
+        var (fixture, page) = await AddPageAsync("Text");
+        var resolver = fixture.Services.GetRequiredService<SubjectPathResolver>();
+        var map = page.Children.Values.OfType<ValueMap>().Single();
+        var holdingMember = map.TryGetRegisteredSubject()!.Parents[0].Property;
+        var notShown = new ReadablePermissions(_ => true, subject => !ReferenceEquals(subject.Subject, map));
+        var heldByHiddenMember = new ReadablePermissions(property => property != holdingMember);
+        var noReadableMember = new ReadablePermissions(property => !ReferenceEquals(property.Subject, map));
+
+        // Act
+        var shown = ValueReader.Read(resolver, page, "meter/Power", "busy", null, UnrestrictedPermissions.Instance);
+        var readings = new[] { notShown, heldByHiddenMember, noReadableMember }
+            .Select(permissions => (
+                Hidden: ValueReader.Read(resolver, page, "meter/Power", "busy", null, permissions),
+                Missing: ValueReader.Read(resolver, page, "meter/Power", "missing", null, permissions)))
+            .ToArray();
+
+        // Assert
+        Assert.Null(shown.MapError);
+        Assert.Equal("busy at 1.23 kW", shown.Text);
+        Assert.All(readings, reading =>
+        {
+            Assert.Equal("Cannot resolve map: busy", reading.Hidden.MapError);
+            Assert.Equal(reading.Missing.Text, reading.Hidden.Text);
+        });
     }
 
     // May do everything except read the properties the predicate refuses and see the subjects the other one refuses.
