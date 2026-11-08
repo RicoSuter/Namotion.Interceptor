@@ -299,13 +299,14 @@ At their top, the tabs "Allow" and "Deny" say "In each field, press Enter, click
 
 ### Previewing a Role
 
-The tab "Preview" shows what the role allows on one subject. It uses the role as currently edited, unsaved changes included, together with the roles it includes and the [system rules](#system-rules), as an agent with only this role would get it. It changes nothing, and as it lists the members of any subject, only a full administrator sees it.
+The tab "Preview" shows what the role allows on one subject. It uses the role as currently edited, unsaved changes included, together with the roles it includes and the [system rules](#system-rules) of the kind chosen in "Preview as": "Person" (the default), "Agent or MCP client" or "Anonymous". The system rules differ by kind, so a person may be allowed what an agent with the same role is not, such as administration; preview as "Agent or MCP client" to see what an agent with only this role gets. It changes nothing, and as it lists the members of any subject, only a full administrator sees it.
 
 1. Click the tab "Preview".
-2. Type the path of a subject into the field "Subject", such as `/Devices/Bedroom/CeilingLight`, or click the search button next to it, named "Browse Subject" for screen readers, pick the subject in "Select Path" and click "OK".
-3. Read the line below the field, whether the subject is readable.
-4. Read the table of its members, and hover over or click a cell to see why.
-5. Change a rule on the tab "Allow" or "Deny" and return; the preview follows the change.
+2. Choose in "Preview as" whom the role is for.
+3. Type the path of a subject into the field "Subject", such as `/Devices/Bedroom/CeilingLight`, or click the search button next to it, named "Browse Subject" for screen readers, pick the subject in "Select Path" and click "OK".
+4. Read the line below the field, whether the subject is readable.
+5. Read the table of its members, and hover over or click a cell to see why.
+6. Change a rule on the tab "Allow" or "Deny" and return; the preview follows the change.
 
 The preview also follows the roles saved meanwhile, such as an included role saved by another user. A subject added or removed while the dialog is open shows once a rule or a role changes, or the subject is chosen again.
 
