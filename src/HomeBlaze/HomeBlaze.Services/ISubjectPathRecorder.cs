@@ -9,6 +9,10 @@ namespace HomeBlaze.Services;
 /// path, so that a caller can tell which changes of the graph may change the result. A resolution served from a cache
 /// reports the route it was computed with. Called on the thread that resolves, while it resolves.
 /// </summary>
+/// <remarks>
+/// The route excludes the attachment of the subject a relative path starts at: a path resolves differently once that
+/// subject is detached from the graph, which the caller that chose the subject observes itself.
+/// </remarks>
 public interface ISubjectPathRecorder
 {
     /// <summary>
