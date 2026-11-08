@@ -22,7 +22,6 @@ namespace HomeBlaze.Authentication.Blazor;
 /// </remarks>
 internal sealed partial class HomeBlazeRevalidatingAuthenticationStateProvider : RevalidatingServerAuthenticationStateProvider, IHostEnvironmentAuthenticationStateProvider
 {
-
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IOptions<IdentityOptions> _identityOptions;
     private readonly UserStore _userStore;

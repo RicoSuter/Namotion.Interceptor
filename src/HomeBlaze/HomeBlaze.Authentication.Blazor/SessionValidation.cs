@@ -15,9 +15,10 @@ namespace HomeBlaze.Authentication.Blazor;
 /// security stamp included, see <see cref="UserStore.IsSessionAllowed"/>, so that an endpoint outside the app does not
 /// serve a session that a removal, a lock, a reset or a password change made through the store ended, and against the
 /// stored security stamp every 5 minutes, see <see cref="SessionStampValidator"/>. A refused session is treated as not
-/// signed in for that request only, and its cookie is kept; when it carries another stamp than the store holds for a person,
-/// the store reloads that person, see <see cref="UserStore.RequestStampReload"/>. A renewal of the cookie, by the stamp check or the sliding
-/// expiration, is not written for a refused session, nor when the store no longer allows its session as the response starts.
+/// signed in for that request only, and its cookie is kept; when it carries another stamp than the store holds for a
+/// person, the store reloads that person, see <see cref="UserStore.RequestStampReload"/>. A renewal of the cookie, by
+/// the stamp check or the sliding expiration, is not written for a refused session, nor when the store no longer allows
+/// its session as the response starts.
 /// </summary>
 internal static class SessionValidation
 {

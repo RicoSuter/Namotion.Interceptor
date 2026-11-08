@@ -172,7 +172,6 @@ public sealed class UserStore : IMcpClientAccess
         return isClaimed ? Task.Run(() => ReloadStampAsync(userId)) : Task.CompletedTask;
     }
 
-
     /// <summary>
     /// Whether the person with <paramref name="userId"/> may do nothing but set a password: they must change it, as after
     /// a reset or a setup code, or sign in with an empty one. True for a user the store does not know.
