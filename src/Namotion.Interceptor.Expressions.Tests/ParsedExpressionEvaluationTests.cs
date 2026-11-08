@@ -524,6 +524,65 @@ public class ParsedExpressionEvaluationTests
         Assert.Null(result.Property);
     }
 
+    public static TheoryData<object, Type?, string?> NegatedValues => new()
+    {
+        { (sbyte)-3, typeof(decimal), "3" },
+        { (byte)4, typeof(decimal), "-4" },
+        { (short)5, typeof(decimal), "-5" },
+        { (ushort)6, typeof(decimal), "-6" },
+        { 7, typeof(decimal), "-7" },
+        { 8u, typeof(decimal), "-8" },
+        { 9L, typeof(decimal), "-9" },
+        { ulong.MaxValue, typeof(decimal), "-18446744073709551615" },
+        { (int?)5, typeof(decimal), "-5" },
+        { 1.50m, typeof(decimal), "-1.5" },
+        { -2.5m, typeof(decimal), "2.5" },
+        { 0m, typeof(decimal), "0" },
+        { 0.0m, typeof(decimal), "0" },
+        { decimal.MinValue, typeof(decimal), "79228162514264337593543950335" },
+        { 0.1f, typeof(float), "-0.1" },
+        { -0f, typeof(float), "0" },
+        { float.MaxValue, typeof(float), "-3.4028235E+38" },
+        { float.PositiveInfinity, null, null },
+        { float.NaN, null, null },
+        { 0.1, typeof(double), "-0.1" },
+        { -0d, typeof(double), "0" },
+        { double.MaxValue, typeof(double), "-1.7976931348623157E+308" },
+        { double.NegativeInfinity, null, null },
+        { double.NaN, null, null },
+        { TimeSpan.FromSeconds(90), typeof(TimeSpan), "-00:01:30" },
+        { TimeSpan.MaxValue, typeof(TimeSpan), "-10675199.02:48:05.4775807" },
+        { TimeSpan.MinValue, null, null },
+        { "Kitchen", null, null },
+        { true, null, null },
+        { new DateTimeOffset(2026, 11, 6, 14, 0, 0, TimeSpan.Zero), null, null },
+        { new DateTime(2026, 11, 6, 0, 0, 0, DateTimeKind.Utc), null, null },
+        { ConsoleColor.Red, null, null }
+    };
+
+    [Theory]
+    [MemberData(nameof(NegatedValues))]
+    public void WhenValueIsNegated_ThenTheResultHasTheTypeAndTextOfItsKind(object value, Type? expectedType, string? expectedText)
+    {
+        // Arrange
+        Assert.True(ParsedExpression.TryParse("-Value", '/', out var expression, out var error), error);
+        var context = new TestExpressionContext(new Dictionary<string, object?> { ["Value"] = value });
+
+        // Act
+        var result = expression.Evaluate(ref context);
+
+        // Assert
+        if (expectedType is null)
+        {
+            Assert.Null(result.Value);
+        }
+        else
+        {
+            Assert.IsType(expectedType, result.Value);
+            Assert.Equal(expectedText, Convert.ToString(result.Value, CultureInfo.InvariantCulture));
+        }
+    }
+
     [Theory]
     [InlineData("Missing + 1 > 0")]
     [InlineData("1 + Missing > 0")]
