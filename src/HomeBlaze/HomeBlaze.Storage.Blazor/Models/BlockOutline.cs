@@ -12,6 +12,7 @@ namespace HomeBlaze.Storage.Blazor.Models;
 /// <param name="Name">The name of the block, or the type name of a block without a name, or the attributes of a style block.</param>
 /// <param name="HeadFence">The fence of the head line.</param>
 /// <param name="ClosingFence">The fence of the closing line of the block, or null when the block has none of its own.</param>
+/// <param name="NamePosition">Where the type name of a widget block or the name of a slot block stands on the head line, without its <c>#</c> name and arguments, or null for a block without a head.</param>
 public record BlockOutline(
     int StartLine,
     int EndLine,
@@ -21,10 +22,11 @@ public record BlockOutline(
     int Depth,
     string Name,
     FencePosition HeadFence,
-    FencePosition? ClosingFence);
+    FencePosition? ClosingFence,
+    FencePosition? NamePosition = null);
 
 /// <summary>
-/// The place of the fence characters on a line.
+/// The place of characters on a line, such as the fence characters or the name of a head line.
 /// </summary>
 /// <param name="Line">1-based line.</param>
 /// <param name="Column">1-based column of the first fence character.</param>

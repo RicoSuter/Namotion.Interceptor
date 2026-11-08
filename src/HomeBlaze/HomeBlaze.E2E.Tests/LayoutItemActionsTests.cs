@@ -122,11 +122,16 @@ public class LayoutItemActionsTests
         var actionBar = page.GetWidgetActionBar();
         await Assertions.Expect(actionBar.GetByTestId("edit-subject-button")).ToBeVisibleAsync(new() { Timeout = Timeout });
 
-        // Act: the bar of the card holds the buttons that select the grid and edit the card.
-        await page.Keyboard.PressAsync("Tab");
-        await Assertions.Expect(actionBar.GetByTestId("select-parent-button")).ToBeFocusedAsync(new() { Timeout = Timeout });
-        await page.Keyboard.PressAsync("Tab");
-        await Assertions.Expect(actionBar.GetByTestId("edit-subject-button")).ToBeFocusedAsync(new() { Timeout = Timeout });
+        // Act: the bar of the card holds the buttons that select the grid, edit the card and change its block, in order.
+        var buttons = actionBar.GetByRole(AriaRole.Button);
+        await Assertions.Expect(buttons.First).ToHaveAttributeAsync("data-testid", "select-parent-button");
+        var buttonCount = await buttons.CountAsync();
+        for (var index = 0; index < buttonCount; index++)
+        {
+            await page.Keyboard.PressAsync("Tab");
+            await Assertions.Expect(buttons.Nth(index)).ToBeFocusedAsync(new() { Timeout = Timeout });
+        }
+
         await page.Keyboard.PressAsync("Tab");
 
         // Assert

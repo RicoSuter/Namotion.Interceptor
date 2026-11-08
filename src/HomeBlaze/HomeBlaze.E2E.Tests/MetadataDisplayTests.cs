@@ -199,7 +199,7 @@ public class MetadataDisplayTests
         await link.ClickAsync();
 
         // Assert
-        await page.WaitForURLAsync("**/browser/Demo/Motor?property=Temperature", new() { Timeout = PageLoadTimeout });
+        await _fixture.WaitForUrlAsync(page, url => url.EndsWith("/browser/Demo/Motor?property=Temperature", StringComparison.Ordinal), PageLoadTimeout);
         await Assertions.Expect(summary).ToHaveCountAsync(0, new() { Timeout = PageLoadTimeout });
         var highlighted = page.Locator("[data-testid='subject-pane-value'][data-highlighted='true']");
         await Assertions.Expect(highlighted).ToHaveCountAsync(1, new() { Timeout = PageLoadTimeout });
@@ -604,7 +604,7 @@ public class MetadataDisplayTests
         await link.ClickAsync(new() { Timeout = PageLoadTimeout });
 
         // Assert
-        await page.WaitForURLAsync("**/browser/Demo/HistoryValues", new() { Timeout = PageLoadTimeout });
+        await _fixture.WaitForUrlAsync(page, url => url.EndsWith("/browser/Demo/HistoryValues", StringComparison.Ordinal), PageLoadTimeout);
         await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = PageLoadTimeout });
     });
 }

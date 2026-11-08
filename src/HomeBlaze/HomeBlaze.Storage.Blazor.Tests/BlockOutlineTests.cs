@@ -201,7 +201,7 @@ public class BlockOutlineTests
         Assert.Equal(0, decorations.Values.Length % BlockOutlineDecorations.RecordLength);
         Assert.Equal(["motors", "ValueList"], decorations.Labels);
         var records = decorations.Values.Chunk(BlockOutlineDecorations.RecordLength).ToList();
-        Assert.Equal(11, records.Count);
+        Assert.Equal(13, records.Count);
         Assert.Equal(2, records.Count(record => record[0] == BlockOutlineDecorations.SubjectBlockKind));
         Assert.Contains([BlockOutlineDecorations.HeadKind, 0, 1, 1, 1, 20], records);
         Assert.Contains([BlockOutlineDecorations.HeadKind, 1, 2, 1, 2, 19], records);
@@ -210,6 +210,36 @@ public class BlockOutlineTests
         Assert.Contains([BlockOutlineDecorations.ClosingFenceKind, 1, 4, 1, 4, 4], records);
         Assert.Contains([BlockOutlineDecorations.ClosingFenceKind, 0, 5, 1, 5, 3], records);
         Assert.Equal([(1, 5), (2, 4)], GetFolds(parsed.Regions, parsed.Outlines));
+    }
+
+    [Theory]
+    [InlineData("Text\n\n:: Test.Alert#info\n::", 3, 4, 10)]
+    [InlineData("::Demo.Card Title=A\n::", 1, 3, 9)]
+    [InlineData(":: Demo.Card\n::: Tab#cooling Title=\"Cooling Fan\"\n:::\n::", 2, 5, 3)]
+    public void WhenABlockHasAName_ThenTheOutlineHasThePositionOfTheNameWithoutIdAndArguments(string content, int line, int column, int length)
+    {
+        // Act
+        var outline = MarkdownDecorationParser.ParseDecorations(content).Outlines.Last();
+
+        // Assert
+        Assert.Equal(new FencePosition(line, column, length), outline.NamePosition);
+    }
+
+    [Fact]
+    public void WhenDecorationsAreCreated_ThenEveryNamedHeadLineHasANameRecord()
+    {
+        // Arrange
+        var parsed = MarkdownDecorationParser.ParseDecorations(":: Demo.Card\n::: Tab\n:::\n::");
+
+        // Act
+        var values = BlockOutlineDecorations.Create(parsed.Regions, parsed.Outlines).Values;
+
+        // Assert
+        var nameRecords = values.Chunk(BlockOutlineDecorations.RecordLength)
+            .Where(record => record[0] == BlockOutlineDecorations.NameKind)
+            .Select(record => (record[2], record[3], record[5]))
+            .ToList();
+        Assert.Equal([(1, 4, 13), (2, 5, 8)], nameRecords);
     }
 
     private static List<(int Start, int End)> GetFolds(IReadOnlyList<DecorationRegion> regions, IReadOnlyList<BlockOutline> outlines) =>

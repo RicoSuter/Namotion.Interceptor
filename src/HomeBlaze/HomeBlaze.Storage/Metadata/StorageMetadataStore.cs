@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Text.Json;
-using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage.Abstractions.Metadata;
@@ -200,7 +199,7 @@ internal sealed class StorageMetadataStore
             // A file in a folder that is gone is gone with its metadata file.
             if (!isFileKnownGone &&
                 (await connection.Reconciler.IsFolderGoneAsync(entry.Parent, CancellationToken.None) ||
-                 await connection.Client.ExistsAsync(entry.Path, CancellationToken.None)))
+                 await connection.Client.ObjectExists(entry.Path, CancellationToken.None)))
             {
                 return;
             }
@@ -236,17 +235,46 @@ internal sealed class StorageMetadataStore
         }
     }
 
+    /// <summary>
+    /// Deletes the metadata file of a folder that is deleted, if it has one, and removes it from the index. A failure
+    /// is thrown, as the folder cannot be deleted while the file is there. Called on the worker.
+    /// </summary>
+    public Task DeleteFolderMetadataFileAsync(StorageConnection connection, string folderPath, CancellationToken cancellationToken)
+        => DeleteMetadataFileAsync(connection, StorageMetadataPath.GetFolderFilePath(folderPath), cancellationToken);
+
+    /// <summary>
+    /// Writes the metadata file of a folder back after the delete of the folder failed, also when the caller has given
+    /// up by now, as nothing would write it later. A failure is only logged, as the delete fails with its own error.
+    /// Called on the worker.
+    /// </summary>
+    public async Task RestoreFolderMetadataFileAsync(StorageConnection connection, string folderPath, byte[] content)
+    {
+        var path = StorageMetadataPath.GetFolderFilePath(folderPath);
+        try
+        {
+            StorageMetadataFile.TryParse(content, out var file, out _);
+            var entry = new StorageEntry { Path = path, IsFolder = false, Metadata = file };
+            await _storage.WriteAndRecordAsync(connection, entry, content, CancellationToken.None);
+            connection.Index.Set(entry);
+            connection.Reconciler.Apply();
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogWarning(exception, "Failed to write back the metadata file of a folder that could not be deleted: {Path}", path);
+        }
+    }
+
     private static async Task DeleteMetadataFileAsync(StorageConnection connection, string path, CancellationToken cancellationToken)
     {
         if (connection.Index.TryGet(path, out var entry))
         {
-            // A folder with the name of a metadata file is no metadata file, and deleting the path would delete it with all it holds.
+            // A folder with the name of a metadata file is no metadata file, and its entry must stay in the index.
             if (entry.IsFolder)
             {
                 return;
             }
         }
-        else if (!await connection.Client.ExistsAsync(path, cancellationToken))
+        else if (!await connection.Client.ObjectExists(path, cancellationToken))
         {
             // A file that no pass has listed yet is deleted as well.
             return;
@@ -254,7 +282,7 @@ internal sealed class StorageMetadataStore
 
         try
         {
-            await connection.Client.DeleteAsync(path, cancellationToken: cancellationToken);
+            await connection.Client.DeleteObject(path, cancellationToken);
         }
         catch (Exception exception) when (FluentStorageContainer.CanHaveReachedStorage(exception))
         {

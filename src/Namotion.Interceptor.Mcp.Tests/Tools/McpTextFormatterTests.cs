@@ -169,7 +169,8 @@ public class McpTextFormatterTests
         {
             Result = new SubjectNode { Path = "/", Type = "MyApp.Root" },
             SubjectCount = 3,
-            Truncated = true
+            Truncated = true,
+            OmittedCount = 4
         };
 
         // Act & Assert

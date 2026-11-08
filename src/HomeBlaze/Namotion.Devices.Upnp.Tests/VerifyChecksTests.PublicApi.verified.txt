@@ -1,0 +1,43 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Devices.Upnp.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.Devices.Upnp
+{
+    public sealed class UpnpFaultException : System.Exception
+    {
+        public UpnpFaultException(string serviceType, string action, int? errorCode, string? faultText) { }
+        public string Action { get; }
+        public int? ErrorCode { get; }
+        public string? FaultText { get; }
+        public string ServiceType { get; }
+    }
+    public sealed class UpnpService
+    {
+        public UpnpService(string serviceType, string controlPath) { }
+        public string ControlPath { get; }
+        public string ServiceType { get; }
+    }
+    public sealed class UpnpSoapClient
+    {
+        public UpnpSoapClient(System.Net.Http.HttpClient httpClient, System.Uri baseUri) { }
+        public System.Threading.Tasks.Task InvokeAsync(Namotion.Devices.Upnp.UpnpService service, string action, [System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Name",
+                "Value"})] System.ReadOnlySpan<System.ValueTuple<string, string>> arguments, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<Namotion.Devices.Upnp.UpnpSoapResponse> QueryAsync(Namotion.Devices.Upnp.UpnpService service, string action, [System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Name",
+                "Value"})] System.ReadOnlySpan<System.ValueTuple<string, string>> arguments, System.Threading.CancellationToken cancellationToken) { }
+    }
+    public sealed class UpnpSoapResponse
+    {
+        public bool? GetBoolean(string name) { }
+        public int? GetInt32(string name) { }
+        public long? GetInt64(string name) { }
+        public string? GetString(string name) { }
+    }
+    public static class UpnpXml
+    {
+        public const int MaximumLevels = 64;
+        public static System.Xml.XmlReader CreateReader(System.IO.Stream stream) { }
+        public static System.Xml.Linq.XDocument Parse(string xml) { }
+    }
+}

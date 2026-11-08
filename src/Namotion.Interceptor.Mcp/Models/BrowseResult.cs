@@ -13,6 +13,12 @@ public class BrowseResult
     [JsonPropertyName("truncated")]
     public bool Truncated { get; init; }
 
+    /// <summary>
+    /// The children left out where maxSubjects or the server limit cut the tree. Their own children are not counted.
+    /// </summary>
+    [JsonPropertyName("omittedCount")]
+    public int OmittedCount { get; init; }
+
     /// <inheritdoc cref="SearchResult.Warnings"/>
     [JsonPropertyName("warnings")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

@@ -9,7 +9,6 @@ using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class LayoutSlotBlockTests
 {
     private const string Motors =

@@ -5,7 +5,6 @@ using Xunit;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class ValueWidgetBlockTests
 {
     private static async Task<MarkdownFile> AddPageAsync(string content)

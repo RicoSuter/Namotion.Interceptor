@@ -15,19 +15,19 @@ namespace HomeBlaze.Services;
 /// <summary>
 /// Thread-safe service that resolves subjects from paths and builds paths from subjects.
 /// Supports canonical notation (/Items[0]/Name) and route notation (/Items/0/Name).
-/// Implements lifecycle handling to invalidate caches when subjects are attached or detached, when a list is reordered,
-/// and when a property is added at run time.
+/// Implements lifecycle handling to invalidate caches when subjects are attached or detached, when a kept subject moves
+/// to another position or key, and when a property is added at run time.
 /// </summary>
 // After the registry, so that a change has reached the parents and children it reads when the caches are invalidated.
 [RunsAfter(typeof(SubjectRegistry))]
-public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler, ISubjectPathResolver
+public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler, IChildIndexHandler, ISubjectPathResolver
 {
     private readonly Func<IInterceptorSubject?> _getRoot;
 
-    // Subject → canonical paths cache (with leading /), see InvalidatePaths for the version
-    private readonly ConcurrentDictionary<IInterceptorSubject, (long Version, IReadOnlyList<string> Paths)> _canonicalPathsCache = new();
+    // Subject → canonical paths cache (with leading /), see GetStructureVersion for the version
+    private readonly ConcurrentDictionary<IInterceptorSubject, (long Version, IReadOnlyList<string> Paths)> _canonicalPathsCache = new(ReferenceEqualityComparer.Instance);
 
-    // (path, style) → Subject resolve cache (absolute paths only), see InvalidatePaths for the version
+    // (path, style) → Subject resolve cache (absolute paths only), see GetStructureVersion for the version
     private readonly ConcurrentDictionary<(string Path, PathStyle Style), (long Version, IInterceptorSubject? Subject)> _resolveCache = new();
 
     // In a context of its own, so that a change of the version tells only the components that read it and not the
@@ -86,7 +86,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
 
             // Looked up first, so that a hit allocates nothing: every render asks for the same paths again.
             var key = (path, style);
-            var version = Volatile.Read(ref _pathsVersionValue);
+            var version = GetStructureVersion(root);
             if (_resolveCache.TryGetValue(key, out var cached) && cached.Version == version)
                 return cached.Subject;
 
@@ -154,7 +154,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         PathStyle style)
     {
         _ = _pathsVersion.Value;
-        var version = Volatile.Read(ref _pathsVersionValue);
+        var version = GetStructureVersion(_getRoot() ?? subject);
         if (!_canonicalPathsCache.TryGetValue(subject, out var cached) || cached.Version != version)
         {
             cached = (version, ComputeCanonicalPaths(subject));
@@ -209,21 +209,15 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     {
     }
 
-    // Called after the attach and detach of a collection write, once the registry has given its retained entries their
-    // new positions. A reorder attaches and detaches nothing, so this is the only change it makes. The registry moves
-    // no entry of a dictionary, which some subjects assign again on every poll.
-    void IPropertyLifecycleHandler.RefreshCollectionProperty(PropertyReference property, object? value)
+    // A move attaches and detaches nothing, so this is the only change it makes.
+    void IChildIndexHandler.HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
     {
-        if (property.TryGetRegisteredProperty() is { IsSubjectCollection: true })
-        {
-            InvalidatePaths();
-        }
+        InvalidatePaths();
     }
 
-    // A cache entry carries the version read before it was computed and is served only while that version is current,
-    // so an entry computed before a change can never be served after it, whenever it was added. The clear only lets
-    // detached subjects be collected. Published last, so that a component that renders again on the new version
-    // computes its paths again.
+    // The clear only lets detached subjects be collected; the registry's version keeps the entries current, see
+    // GetStructureVersion. Published last, so that a component that renders again on the new version computes its paths
+    // again.
     private void InvalidatePaths()
     {
         var version = Interlocked.Increment(ref _pathsVersionValue);
@@ -231,6 +225,12 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         _resolveCache.Clear();
         _pathsVersion.Value = version;
     }
+
+    // A cache entry carries the registry's version read before it was computed and is served only while that version is
+    // current, so an entry computed before or during a change carries a version from before the change ended and is
+    // never served after it, whenever it was added, also when this resolver is not registered as a lifecycle handler.
+    private static long GetStructureVersion(IInterceptorSubject subject)
+        => subject.Context.TryGetService<ISubjectRegistry>()?.StructureVersion ?? 0;
 
     /// <summary>
     /// Gets a number that changes whenever the paths of subjects may have changed. Reading it in a render makes the
@@ -375,7 +375,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             return Array.Empty<string>();
 
         var paths = new List<string>();
-        var visited = new HashSet<IInterceptorSubject>();
+        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
 
         foreach (var parent in parents)
         {

@@ -103,6 +103,22 @@ public static class MarkdownDecorationParser
                 ? GetName(head)
                 : content.AsSpan(block.HeadSpan.Start + block.FenceLength, block.HeadSpan.Length - block.FenceLength).Trim().ToString();
 
+            FencePosition? namePosition = null;
+            if (block.Head is { } blockHead)
+            {
+                var nameStart = block.HeadSpan.Start + block.FenceLength;
+                while (nameStart < block.HeadSpan.End && content[nameStart] is ' ' or '\t')
+                {
+                    nameStart++;
+                }
+
+                if (string.CompareOrdinal(content, nameStart, blockHead.Name, 0, blockHead.Name.Length) == 0)
+                {
+                    var (nameLine, nameColumn) = GetLineAndColumn(lineStarts, nameStart);
+                    namePosition = new FencePosition(nameLine, nameColumn, blockHead.Name.Length);
+                }
+            }
+
             outlines.Add(new BlockOutline(
                 startLine,
                 Math.Max(block.EndLine, startLine),
@@ -112,7 +128,8 @@ public static class MarkdownDecorationParser
                 depth,
                 name,
                 new FencePosition(startLine, column, block.FenceLength),
-                block.HasClosingLine ? FindClosingFence(content, lineStarts, block.EndLine) : null));
+                block.HasClosingLine ? FindClosingFence(content, lineStarts, block.EndLine) : null,
+                namePosition));
 
             AddOutlines(block.Children, depth + 1, content, lineStarts, outlines);
         }

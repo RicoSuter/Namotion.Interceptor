@@ -19,6 +19,17 @@ internal static class WidgetSelectionExtensions
     }
 
     /// <summary>
+    /// Opens a dialog through a button of the selection and waits until it shows. A content updates its insert lines only
+    /// after the render of the selection, and the dialog comes with a later round trip, so the lines are final by then and a
+    /// test can tell that none are left.
+    /// </summary>
+    public static async Task OpenDialogAfterSelectionAsync(this IPage page, ILocator dialogButton)
+    {
+        await dialogButton.ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToBeVisibleAsync(new() { Timeout = Timeout });
+    }
+
+    /// <summary>
     /// Clicks the middle of the element, which selects the innermost widget there, and returns the bar with the
     /// actions of that widget.
     /// </summary>

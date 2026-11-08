@@ -209,7 +209,8 @@ The header has a status chip, **Run now** and **New conversation** (disabled whi
 | Memory | The entries with update times and a size bar, see [Memory](#memory) |
 | Settings | A summary of the settings; change them with the subject's Edit action |
 
-- Replies render as Markdown while they stream in. A link to an http, https or mailto address opens in a new tab, a link to a HomeBlaze path such as `/browser/Devices` or `/pages/Dashboard.md` opens in the same tab, and any other target, such as a relative path or a script, is shown as text.
+- Replies render as Markdown while they stream in. A link to an http, https or mailto address opens in a new tab, a link to a HomeBlaze path such as `/browser/Devices` or `/pages/Dashboard.md` opens in the same tab, and any other target, such as a relative path or a script, is shown as text. A `mermaid` code block is shown as a [diagram](pages.md#diagrams) once its closing fence has arrived. A diagram whose text contains `url(`, `image(`, `image-set(`, `img`, `src`, `href`, `@{`, `%%{`, a backslash or an entity such as `#117;` is shown as code instead, because drawing it could load an address.
+- **On another page**: an agent has a page of its own and no widget, so its chat cannot be placed on another page. Link to its page instead, which opens at `/pages` and the path of the agent, such as `[Ask Claude](/pages/Agents/Claude)` for the agent stored as `Agents/Claude.json`; [Routes](paths.md#routes) has the scheme.
 - The run count on the Activity tab also includes older runs and survives restarts and new conversations.
 - Enter sends and Shift+Enter adds a line; on touch devices Enter adds a line and the button sends.
 - While a background run or an `AnthropicAgent` summary holds the agent, the status shows Waiting and your message is answered after it.
@@ -254,7 +255,7 @@ Pages and documents, such as these docs under `/Docs`, are the main context abou
 
 With `invoke_operation` or `set_property` allowed, the edit form marks the agent as able to change devices and send notifications. The preamble tells it to change something only when asked or when its instructions call for it, and to say what it changed. These limits always apply:
 
-- **`set_property` never writes configuration**, for agents and external MCP clients alike. It writes only `[State]` properties and refuses one that is also `[Configuration]`, such as `IsEnabled` of an OPC UA server or the mode of a GPIO pin: "Property is not writable: path. It is a configuration property; set_property cannot change configuration, an operation of the subject may."
+- **`set_property` never writes configuration**, for agents and external MCP clients alike. It writes only `[State]` properties and refuses one that is also `[Configuration]`, such as `IsEnabled` of an OPC UA server or the mode of a GPIO pin: "Property is not writable: path. The access policy does not allow it." The `set_property` description tells the client that an operation of the subject may change configuration.
 - **Agent settings** are not reachable at all, and operations of agents, such as Run now, are refused: "Agents cannot run operations of agents." `SetMetadata` of a storage for an agent or a subject inside one is refused as well: "Agents cannot change the metadata of agents." [`SearchMetadata`](metadata.md#agents) leaves out what `SetMetadata` refuses an agent.
 - **Operations that require confirmation** cannot be called through MCP by anyone; run them from the UI. `list_methods` marks them with `requiresConfirmation`. Examples: Wallbox reboot, firmware update, Unlock, Set ICP Max Current and charge port unlock and toggle; door lock unlock, toggle and unlatch; Nuki smart lock Lock 'n' Go and Lock 'n' Go with unlatch; Nuki Opener Open door, Activate ring to open and Activate continuous mode; FRITZ!Box guest WLAN on and toggle; adding and removing plugins; starting and stopping the OPC UA server and client; New conversation of an agent.
 
@@ -277,7 +278,6 @@ Each tool can be allowed on its own; the edit form marks them "Changes pages and
 The operations change text only and refuse:
 
 - **Changing blocks**: adding, changing, removing or moving any [block](pages.md#blocks), with its arguments, `json` block and everything inside, because a block creates or configures running subjects. Slot blocks such as `Footer` and style blocks such as `:: {.note}` count. Text directly after a block without a closing line belongs to it.
-- **Recreating unnamed blocks**: a change that would create the subject of a block without a `#name` again, such as adding an expression or a first text before it, see [What an Edit of the Page Keeps](pages.md#what-an-edit-of-the-page-keeps). Editing existing text is fine; a `#name` given in the page editor frees the text before it.
 - **Active content**: raw HTML, images and media, math and diagram blocks, element attributes such as `{onclick=...}`, abbreviation definitions such as `*[HB]: HomeBlaze` (which change text inside blocks and expressions), and links other than http, https and mailto. Active content a page already has may stay or be removed. One gap remains: an agent can add a link reference definition with an http or https address, which changes where a `[text][label]` link inside a block leads.
 - **Large pages**: more than 64 KB of source, counted with `***` for hidden values.
 

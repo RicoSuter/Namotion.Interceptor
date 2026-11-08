@@ -1,0 +1,12 @@
+.invisible-widget-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 10px;
+    border: 1px dashed rgba(var(--mud-palette-primary-rgb), 0.7);
+    border-radius: 14px;
+    background: var(--mud-palette-surface);
+    font-size: 0.8125rem;
+    color: var(--mud-palette-text-primary);
+}

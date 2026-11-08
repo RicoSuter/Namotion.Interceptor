@@ -8,7 +8,7 @@
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(JsonFile))]
 @implements ISubjectEditComponent
 
-<StandaloneCodeEditor @ref="_editor"
+<DisposeAwareCodeEditor @ref="_editor"
     Id="json-editor"
     CssClass="monaco-editor-container"
     ConstructionOptions="GetEditorOptions"
@@ -29,7 +29,7 @@
     public bool IsCreating { get; set; }
 
     private JsonFile? File => Subject as JsonFile;
-    private StandaloneCodeEditor? _editor;
+    private DisposeAwareCodeEditor? _editor;
     private string _originalContent = string.Empty;
     private string _currentContent = string.Empty;
 

@@ -38,7 +38,7 @@ internal sealed class DerivedPropertyData
     /// <summary>
     /// Reentrancy guard for RecalculateDerivedProperty.
     /// Prevents infinite recursion when a derived-with-setter property's
-    /// SetPropertyValueWithInterception re-enters WriteProperty.
+    /// PublishDerivedPropertyValue re-enters WriteProperty.
     /// Only read/written inside lock(this), so no volatile needed.
     /// </summary>
     internal bool IsRecalculating;
@@ -62,7 +62,8 @@ internal sealed class DerivedPropertyData
     /// <summary>
     /// Lifecycle flag cleared during DetachProperty under lock(this).
     /// Checked by RecalculateDerivedProperty to prevent zombie used-by property resurrection.
-    /// Set by AttachProperty to support re-attachment.
+    /// Set by AttachProperty on every attach of a derived property. Not read for source properties,
+    /// whose data a detach always removes.
     /// Defaults to true because properties are assumed to be attached until explicitly detached.
     /// </summary>
     internal bool IsAttached = true;
@@ -147,7 +148,8 @@ internal sealed class DerivedPropertyData
             LastKnownValue = null;
         }
 
-        // Case 2: snapshot used-by properties, then clear. Snapshot is stable (copy-on-write).
+        // Case 2: snapshot used-by properties, then clear. The snapshot is stable because the collection
+        // never changes an array it handed out.
         var snapshot = _usedByProperties?.ItemsArray ?? [];
         _usedByProperties = null;
         return snapshot;
@@ -172,17 +174,10 @@ internal sealed class DerivedPropertyData
         }
 
         RemoveStaleUsedByProperties(derivedProperty, previousRequiredProperties, recordedDependencies);
-
-        if (TryAddNewUsedByProperties(derivedProperty, previousRequiredProperties, recordedDependencies))
-        {
-            SetRequiredProperties(recordedDependencies);
-            recorder.ClearLastRecording();
-            return true;
-        }
-
-        // Rare: a dependency was detaching concurrently — reconcile under locks.
-        return ReconcileSkippedDependencies(
-            derivedProperty, previousRequiredProperties, recordedDependencies, recorder);
+        AddNewUsedByProperties(derivedProperty, previousRequiredProperties, recordedDependencies);
+        SetRequiredProperties(recordedDependencies);
+        recorder.ClearLastRecording();
+        return true;
     }
 
     /// <summary>
@@ -205,82 +200,38 @@ internal sealed class DerivedPropertyData
 
     /// <summary>
     /// Adds used-by properties for newly recorded dependencies. Locks each dependency's data
-    /// to serialize with DetachProperty's IsAttached check.
-    /// Returns true if all used-by properties were added; false if any were skipped (concurrent detach).
+    /// to serialize with DetachProperty's used-by snapshot. Called under lock(this).
     /// </summary>
-    private static bool TryAddNewUsedByProperties(
+    private static void AddNewUsedByProperties(
         in PropertyReference derivedProperty,
         ReadOnlySpan<PropertyReference> previousRequiredProperties,
         ReadOnlySpan<PropertyReference> recordedDependencies)
     {
-        var allAdded = true;
         foreach (ref readonly var newDependency in recordedDependencies)
         {
             if (!previousRequiredProperties.Contains(newDependency))
             {
-                var dependencyData = newDependency.GetDerivedPropertyData();
-                lock (dependencyData)
-                {
-                    if (dependencyData.IsAttached)
-                    {
-                        dependencyData.AddUsedByProperty(derivedProperty);
-                    }
-                    else
-                    {
-                        allAdded = false;
-                    }
-                }
+                AddUsedByPropertyToCurrentData(newDependency, derivedProperty);
             }
         }
-
-        return allAdded;
     }
 
-    /// <summary>
-    /// Handles the rare case where a dependency was detaching concurrently during used-by property registration.
-    /// Re-checks each dependency under lock, filters out still-detached deps, updates RequiredProperties.
-    /// Called under lock(this).
-    /// </summary>
-    private bool ReconcileSkippedDependencies(
-        in PropertyReference derivedProperty,
-        ReadOnlySpan<PropertyReference> previousRequiredProperties,
-        ReadOnlySpan<PropertyReference> recordedDependencies,
-        DerivedPropertyRecorder recorder)
+    private static void AddUsedByPropertyToCurrentData(in PropertyReference dependency, in PropertyReference derivedProperty)
     {
-        // Allocate owned copy to preserve previousRequiredProperties span for the final SequenceEqual check.
-        var newItems = recordedDependencies.ToArray();
-        recorder.ClearLastRecording();
-
-        var liveCount = 0;
-        for (var i = 0; i < newItems.Length; i++)
+        // A detach may remove the fetched data before it is locked. Registering on the removed instance would
+        // lose this used-by property when the dependency is attached again, so register on the current data.
+        while (true)
         {
-            var dependencyData = newItems[i].TryGetDerivedPropertyData();
-            if (dependencyData is null)
-            {
-                newItems[liveCount++] = newItems[i];
-                continue;
-            }
-
+            var dependencyData = dependency.GetDerivedPropertyData();
             lock (dependencyData)
             {
-                if (dependencyData.IsAttached)
+                if (ReferenceEquals(dependency.TryGetDerivedPropertyData(), dependencyData))
                 {
                     dependencyData.AddUsedByProperty(derivedProperty);
-                    newItems[liveCount++] = newItems[i];
-                }
-                else
-                {
-                    dependencyData.RemoveUsedByProperty(derivedProperty);
+                    return;
                 }
             }
         }
-
-        SetRequiredProperties(newItems.AsSpan(0, liveCount));
-
-        // If a filtered result matches previous deps, nothing effectively changed.
-        // Return false to prevent infinite stabilization loop.
-        // the previousRequiredProperties span is still valid (points to old array, replaced above).
-        return !RequiredPropertiesSpan.SequenceEqual(previousRequiredProperties);
     }
 
     /// <summary>
@@ -361,7 +312,7 @@ internal sealed class DerivedPropertyData
 
     /// <summary>
     /// Adds a used-by property. Creates PropertyReferenceCollection on first call
-    /// with the item pre-populated, avoiding a separate CAS Add allocation.
+    /// with the item pre-populated, avoiding a separate Add.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void AddUsedByProperty(in PropertyReference dependentProperty)
@@ -373,7 +324,7 @@ internal sealed class DerivedPropertyData
             return;
         }
 
-        // First used-by property: Create collection with item already included (one allocation instead of two).
+        // First used-by property: create the collection with the item already included instead of a separate Add.
         var created = new PropertyReferenceCollection(dependentProperty);
         var existing = Interlocked.CompareExchange(ref _usedByProperties, created, null);
 

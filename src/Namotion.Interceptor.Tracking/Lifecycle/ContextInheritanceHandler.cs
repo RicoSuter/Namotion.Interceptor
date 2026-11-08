@@ -1,4 +1,5 @@
 ﻿using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -20,7 +21,61 @@ public class ContextInheritanceHandler : ILifecycleHandler
             }
             else if (change is { ReferenceCount: 0, IsPropertyReferenceRemoved: true })
             {
-                change.Subject.Context.RemoveFallbackContext(change.Property.Value.Subject.Context);
+                var releasingContext = change.Property.Value.Subject.Context;
+                if (change is { Interceptor: { } interceptor } && change.Subject.Context is InterceptorSubjectContext context)
+                {
+                    RemoveFallbackContextsOfGraph(context, releasingContext, interceptor);
+                }
+                else
+                {
+                    change.Subject.Context.RemoveFallbackContext(releasingContext);
+                }
+            }
+            else if (change is { IsPropertyReferenceRemoved: true, IsContextDetach: false, Interceptor: { } interceptor } &&
+                     change.Subject.Context is InterceptorSubjectContext context &&
+                     context.HasFallbackContext(change.Property.Value.Subject.Context))
+            {
+                InheritFromRemainingParent(context, change.Property.Value.Subject, interceptor.GetPropertyReferences(change.Subject));
+            }
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void RemoveFallbackContextsOfGraph(InterceptorSubjectContext context, IInterceptorSubjectContext releasingContext, LifecycleInterceptor interceptor)
+    {
+        foreach (var fallbackContext in context.FallbackContexts)
+        {
+            // A context that also reaches another interceptor belongs to another graph as well: removing it would
+            // detach the subject there, taking that interceptor's lock while this one's is held.
+            if (ReferenceEquals(fallbackContext, releasingContext) ||
+                fallbackContext.GetServices<ILifecycleInterceptor>() is [var only] && ReferenceEquals(only, interceptor))
+            {
+                context.RemoveFallbackContext(fallbackContext);
+            }
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void InheritFromRemainingParent(InterceptorSubjectContext context, IInterceptorSubject releasingParent, PropertyReferenceSet remainingReferences)
+    {
+        if (remainingReferences.IsEmpty || remainingReferences.ContainsSubject(releasingParent))
+        {
+            return;
+        }
+
+        // Fails for a parent whose context falls back on the subject's own, such as a child of the subject that holds
+        // it as well, or reaches other lifecycle interceptors.
+        var releasingContext = releasingParent.Context;
+        if (context.ReplaceFallbackContext(releasingContext, remainingReferences.First.Subject.Context) || remainingReferences.Additional is null)
+        {
+            return;
+        }
+
+        foreach (var reference in remainingReferences.Additional)
+        {
+            if (context.ReplaceFallbackContext(releasingContext, reference.Subject.Context))
+            {
+                return;
             }
         }
     }

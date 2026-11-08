@@ -73,6 +73,12 @@ The tester hosts a server and one or more clients in a single process, connected
 
 - **BatchMutationEngine** (load profiles, `NumberOfBatches > 0`): Mutates `ValueMutationRate` nodes per second, spread across `NumberOfBatches` parallel batches within 1-second windows. Each participant mutates a single fixed property to avoid subscription coalescing. When `UseTransactions` is enabled, each batch is wrapped in a transaction and runs sequentially.
 
+Transactions commit with `BestEffort`. A failed commit is counted in one of three categories, logged once per category and set of exception types per cycle, and does not stop the engine:
+
+- **Conflict**: another participant changed a written property first. Expected under chaos.
+- **Source write failure**: only source writes failed, as when a connector is disconnected or faulted. Expected under chaos. A connector that throws while writing is reported the same way as a disconnect, so check the logged exception types.
+- **Unexpected**: anything else, such as a transaction writer that threw, a local apply or revert failure, or a validation rejection. Logged as an error, and fails the cycle even when it converges.
+
 ### Mutate/Converge Cycle
 
 Each test cycle has two phases:
@@ -153,14 +159,14 @@ This isolates each side's CPU and throughput and stops one shared heap hiding wh
 --- Cycle 1 Statistics ---
 Duration: 85s (converged in 5.1s)
 Total mutations: 17,200 | Total chaos events: 7
-  server: 11,300 value mutations, 0 structural mutations
-  client-a: 2,950 value mutations, 0 structural mutations
-  client-b: 2,950 value mutations, 0 structural mutations
+  server: 11,300 value mutations, 0 structural mutations, 0 commits (0 conflicts, 0 source write failures, 0 unexpected failures)
+  client-a: 2,950 value mutations, 0 structural mutations, 0 commits (0 conflicts, 0 source write failures, 0 unexpected failures)
+  client-b: 2,950 value mutations, 0 structural mutations, 0 commits (0 conflicts, 0 source write failures, 0 unexpected failures)
   client-b: disconnect at 21:08:37 (2.8s)
   server: kill at 21:08:38 (5.4s)
 ```
 
-**Failure**: Prints `FAIL`, runs failure diagnostics, then exits with code 1:
+**Failure**: Prints `FAIL`, runs failure diagnostics, then exits with code 1. A cycle that converged but had an unexpected commit failure prints `FAIL (N unexpected commit failures, see the logged errors)` instead and skips the diagnostics:
 
 ```
 === Cycle 3: FAIL (did not converge within 00:01:00) ===
@@ -218,7 +224,7 @@ Performance metrics are written to `performance-{participant}.csv` per participa
 
 ### Cycle Logs
 
-`cycles.csv` records one row per verification cycle. Columns: Timestamp, Cycle, Result, Profile, MutateSeconds, ConvergeSeconds, CycleSeconds, ValueMutations, StructuralMutations, ChaosEvents, HeapMB, ProcessMB. HeapMB is measured after a full GC with LOH compaction, giving a stable post-GC baseline. Use this column for memory leak detection: a steady upward trend across cycles indicates a leak.
+`cycles.csv` records one row per verification cycle. Columns: Timestamp, Cycle, Result, Profile, MutateSeconds, ConvergeSeconds, CycleSeconds, ValueMutations, StructuralMutations, ChaosEvents, HeapMB, ProcessMB, Commits, ConflictCommits, SourceWriteFailedCommits, UnexpectedFailedCommits. The commit columns count transaction commits and their failures by category, see [Mutation Engines](#mutation-engines). HeapMB is measured after a full GC with LOH compaction, giving a stable post-GC baseline. Use this column for memory leak detection: a steady upward trend across cycles indicates a leak.
 
 ## Configuration
 

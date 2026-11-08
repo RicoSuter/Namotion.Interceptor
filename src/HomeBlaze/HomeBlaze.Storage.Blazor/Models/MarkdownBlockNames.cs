@@ -20,6 +20,23 @@ public static class MarkdownBlockNames
         return new SubjectNameOptions("Block name", "", GetUsedNames(pageText)) { Rule = GetError };
     }
 
+    /// <summary>
+    /// Gets how the create subject dialog asks for the name of a new block of a part of the page text: as
+    /// <see cref="CreateNameOptions(string)"/> for the part, and the names in <paramref name="reservedNames"/>, which the
+    /// rest of the page uses, are taken as well.
+    /// </summary>
+    public static SubjectNameOptions CreateNameOptions(string text, IReadOnlyCollection<string> reservedNames)
+    {
+        if (reservedNames.Count == 0)
+        {
+            return CreateNameOptions(text);
+        }
+
+        var names = new HashSet<string>(GetUsedNames(text));
+        names.UnionWith(reservedNames);
+        return new SubjectNameOptions("Block name", "", names) { Rule = GetError };
+    }
+
     /// <summary>Gets the names that the blocks of the page text already use.</summary>
     public static IReadOnlySet<string> GetUsedNames(string pageText)
     {

@@ -145,15 +145,17 @@ public sealed partial class MarkdownContentParser
 
     /// <summary>
     /// Keeps the subject of a block whose text did not change since it was last applied in full, with its values,
-    /// its slot values and the subjects of the blocks inside it, and registers them for the blocks of this parse.
+    /// its slot values and the subjects of the blocks inside it, and registers them and the HTML segments that start its
+    /// text blocks for the blocks and text blocks of this parse.
     /// </summary>
     /// <remarks>
     /// The values in memory can hold a change that is about to be saved, such as a value added to a slot, which
     /// the reload inside the save of another block must not reset. A slot value without a block stays one, so
     /// the save of its owner inserts its block.
     /// </remarks>
-    private bool TryKeepUnchangedBlock(IInterceptorSubject existing, MarkdownBlock block, ParseState state)
+    private bool TryKeepUnchangedBlock(IInterceptorSubject existing, BlockMarkdownSegment segment, ParseState state)
     {
+        var block = segment.Block;
         if (!_appliedBlocks.TryGetValue(existing, out var applied) ||
             !state.TryGetBlockSpan(block, out var start, out var length) ||
             !state.Source.AsSpan(start, length).SequenceEqual(applied.Text))
@@ -179,13 +181,74 @@ public sealed partial class MarkdownContentParser
         }
 
         state.Register(block, block.Head!.Id, existing);
+
+        var ordinal = 0;
+        var next = 0;
+        RegisterTextSegments(segment.Content, applied.TextSegments, state, ref ordinal, ref next);
         return true;
+    }
+
+    // The same text inside a block gives the same text blocks in the same order, so a text block is found again by its
+    // ordinal in a walk of the content in document order, also when lines before the block moved its lines.
+    private static void RegisterTextSegments(
+        IReadOnlyList<MarkdownSegment> content,
+        (int Ordinal, HtmlSegment Segment)[] textSegments,
+        ParseState state,
+        ref int ordinal,
+        ref int next)
+    {
+        foreach (var item in content)
+        {
+            if (next == textSegments.Length)
+            {
+                return;
+            }
+
+            if (item is HtmlMarkdownSegment { TextBlock: { } textBlock })
+            {
+                if (textSegments[next].Ordinal == ordinal)
+                {
+                    state.AddTextBlock(textSegments[next++].Segment, textBlock);
+                }
+
+                ordinal++;
+            }
+            else if (item is BlockMarkdownSegment inner)
+            {
+                RegisterTextSegments(inner.Content, textSegments, state, ref ordinal, ref next);
+            }
+        }
+    }
+
+    private static void FindTextSegments(
+        IReadOnlyList<MarkdownSegment> content,
+        ParseState state,
+        ref int ordinal,
+        List<(int Ordinal, HtmlSegment Segment)> result)
+    {
+        foreach (var item in content)
+        {
+            if (item is HtmlMarkdownSegment { TextBlock: { } textBlock })
+            {
+                if (state.SegmentsByTextBlock.TryGetValue(textBlock, out var htmlSegment))
+                {
+                    result.Add((ordinal, htmlSegment));
+                }
+
+                ordinal++;
+            }
+            else if (item is BlockMarkdownSegment inner)
+            {
+                FindTextSegments(inner.Content, state, ref ordinal, result);
+            }
+        }
     }
 
     // Only a block without an error box inside is remembered: an error can come from outside the block, such as a
     // name that another block took, and must go away when that changes.
-    private void RememberAppliedBlock(IInterceptorSubject subject, MarkdownBlock block, ParseState state, int registrationCount)
+    private void RememberAppliedBlock(IInterceptorSubject subject, BlockMarkdownSegment segment, ParseState state, int registrationCount)
     {
+        var block = segment.Block;
         if (!state.TryGetBlockSpan(block, out var start, out var length))
         {
             _appliedBlocks.Remove(subject);
@@ -201,7 +264,12 @@ public sealed partial class MarkdownContentParser
             }
         }
 
-        _appliedBlocks.AddOrUpdate(subject, new AppliedBlock(state.Source, start, length, innerSubjects.ToArray()));
+        var textSegments = new List<(int Ordinal, HtmlSegment Segment)>();
+        var ordinal = 0;
+        FindTextSegments(segment.Content, state, ref ordinal, textSegments);
+
+        _appliedBlocks.AddOrUpdate(
+            subject, new AppliedBlock(state.Source, start, length, innerSubjects.ToArray(), textSegments.ToArray()));
     }
 
     // Updating in place only sets the keys that are present. A key that was removed from the page
@@ -450,7 +518,14 @@ public sealed partial class MarkdownContentParser
     /// Where the text of a block is in the text of the page it was parsed from, which all blocks of that parse share
     /// instead of a copy each, and the subjects of the blocks inside it by their distance from the block.
     /// </summary>
-    private sealed record AppliedBlock(string Source, int Start, int Length, (int Offset, IInterceptorSubject Subject)[] InnerSubjects)
+    // TextSegments are the HTML segments that start the text blocks inside the block, by the ordinal of their text block in
+    // a walk of the content of the block in document order, ascending.
+    private sealed record AppliedBlock(
+        string Source,
+        int Start,
+        int Length,
+        (int Offset, IInterceptorSubject Subject)[] InnerSubjects,
+        (int Ordinal, HtmlSegment Segment)[] TextSegments)
     {
         public ReadOnlySpan<char> Text => Source.AsSpan(Start, Length);
     }

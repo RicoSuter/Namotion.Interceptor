@@ -100,8 +100,20 @@ Check the [installation guide](../administration/installation.md) for examples.
 | `[Link](../../root.md)` | Two levels up |
 | `[Link](sibling.md#section)` | A section of a page in the same folder |
 | `[Link](#section)` | A section of the page itself |
+| `![Picture](images/plan.png)` | A picture of the storage, see [Pictures](#pictures) |
+| `[Link](manual.pdf)` | A file of the storage, opens in a new tab |
+| `[Link](subfolder/)` | A folder, opens in the subject browser |
+| `[Link](..)` | The parent folder, opens in the subject browser |
 
-A section is addressed by the id of its heading. Every heading gets its id from its text: the letters in lower case, the digits, a hyphen for the spaces between two words, and no other punctuation than `-`, `_` and `.`. The id starts at the first letter of the heading, and the second heading with the same text gets `-1` at its end. `## Live Expressions` gets the id `live-expressions`. A link that is only `#` and an id, like `[Link](#live-expressions)`, leads to that section of the page it stands on.
+A section is addressed by the id of its heading. Every heading gets its id from its text: the letters in lower case, the digits, a hyphen for the spaces between two words, and no other punctuation than `-`, `_` and `.`. The id starts at the first letter of the heading, and the second heading with the same text gets `-1` at its end. `## Live Expressions` gets the id `live-expressions`. A link that is only `#` and an id, like `[Link](#live-expressions)`, leads to that section of the page it stands on. A link that is only a query, starting with `?`, leads to the page it stands on as well.
+
+### Link Targets
+
+- **Links on a page open in the same tab**: a relative link to a page, a relative link to a folder such as `[Demo](Demo/)`, and an address of the application such as `/browser/Demo`. The `Href` of a [Card](widgets/card.md) opens in the same tab as well, so it should not point at a file.
+- **Links that open in a new tab**: a link with a scheme, such as a web address or `mailto:`, a link to another host that starts with `//`, a relative link to a file of the storage such as `[Manual](manual.pdf)`, and an address under `/files/` written in full.
+- **A page in a new tab**: write the link as an HTML element with a target, `<a href="/pages/Docs/home.md" target="_blank" rel="noopener">Home</a>`. The page keeps the attribute as written.
+- **Notes and replies**: a web address in the notes of the metadata and in a reply of an agent opens in a new tab, see [Metadata](metadata.md) and [AI Agents](ai-agents.md#the-agent-page).
+- **Addresses**: [Routes](paths.md#routes) shows the address of a page and of a subject in the browser.
 
 ---
 
@@ -113,12 +125,44 @@ A picture is written as in any markdown text, with the address of a picture on t
 ![The heat pump](https://example.com/heat-pump.jpg)
 ~~~~
 
+A picture can also be a file of the storage. Put the file next to the page, or in a folder next to it, and write its path relative to the page:
+
+~~~~markdown
+![Sample floor plan](images/sample-floor-plan.svg)
+~~~~
+
+![Sample floor plan](images/sample-floor-plan.svg)
+
+- **Address**: the picture is served under `/files/` with its path in the storage, here `/files/Docs/administration/images/sample-floor-plan.svg`. The `Image` of a [Card](widgets/card.md) takes a relative path in the same way.
+- **What is served**: any file that is not a subject of its own type, such as `.png`, `.jpg`, `.svg` or `.pdf`. Pages (`.md`), JSON files and hidden files, whose name starts with a dot, are never served. A text file is served as UTF-8.
+- **Who can read it**: HomeBlaze has no authorization yet (see [Security](../architecture/design/security.md)), so every served file can be read by anyone who can reach the app. Do not keep secrets in such a file, for example a backup copy of a configuration.
+- **Names with `%`**: a file, or any file in a folder, whose name contains a literal `%` followed by two hex digits, such as `50%25.png`, cannot be reached, by a picture or a link alike, as for pages.
+- **A changed file**: a picture that is replaced in the storage shows on the next view of the page.
+
 A picture is shown in a size that fits the page, and it always keeps its proportions:
 
 - **Width**: never wider than the place it stands in, such as the text of the page, a narrow screen or a card.
 - **Height**: at most four fifths of the height of the browser window.
-- **Your own width**: write the picture as HTML with a `width` to give it a size of its own, as in `<img src="https://example.com/heat-pump.jpg" width="300">`. Such a picture is still never wider than its place, and it has no limit of its height.
+- **Your own width**: write the picture as HTML with a `width` to give it a size of its own, as in `<img src="https://example.com/heat-pump.jpg" width="300">`. Such a picture is still never wider than its place, and it has no limit of its height. A picture of the storage written as HTML needs its address, as in `<img src="/files/Docs/administration/images/sample-floor-plan.svg" width="300">`, because the path in an HTML element is not rewritten.
 - **Not available**: a picture that cannot be loaded is replaced by a placeholder with its text. The address of the picture is the tooltip of the placeholder.
+
+---
+
+## Diagrams
+
+A fenced code block with the language `mermaid` is shown as a [Mermaid](https://mermaid.js.org) diagram, as on GitHub:
+
+~~~~markdown
+```mermaid
+graph LR
+    Pump --> Tank --> Heater
+```
+~~~~
+
+- **Size**: a diagram is never wider than its place.
+- **Theme**: a diagram takes the dark or light theme that is active when it is shown. After a switch, it changes on the next visit of the page.
+- **Not shown**: a diagram with an error, or one on a browser that cannot load Mermaid, appears as its source in a code block. Mermaid only accepts ASCII characters in the labels of a `sankey` diagram, so a label with a letter such as `ä`, `ß` or `é` is an error there; write it in ASCII instead, such as `ae` for `ä`.
+- **No interaction**: `click` lines, links and HTML in labels are ignored, and an `init` directive or frontmatter of a diagram cannot change these settings.
 
 ---
 
@@ -194,11 +238,11 @@ The conveyor runs fast: {{ /Demo/Conveyor/CurrentSpeed > 500 }}.
 
 With the pipe `map` a condition shows the text of a case instead, such as `{{ /Demo/Conveyor/CurrentSpeed > 500 | map:fastslow }}` with a map whose cases have `Value=True` and `Value=False`.
 
-- **Comparisons**: `==`, `!=`, `<`, `<=`, `>` and `>=` compare a value with a number, `true`, `false`, `null`, a text in quotes, or another path. A word after an operator is a path when it holds a slash or an index in brackets, such as `mymotor/Speed`, `../Pump/Speed`, `/Demo/Pump/Speed` or `/Devices[0]`. Any other word is a text, such as the name of an enum value: `{{ mymotor/Status == Running }}`.
+- **Comparisons**: `==`, `!=`, `<`, `<=`, `>` and `>=` compare a value with a number, `true`, `false`, `null`, a text in quotes, or another path. A word after an operator is a path when it holds a slash or an index in brackets, such as `mymotor/Speed`, `../Pump/Speed`, `/Demo/Pump/Speed` or `/Devices[0]`. Any other word is a text, such as the name of an enum value: `{{ mymotor/Status == Running }}`. A word in arithmetic is a path, so `mymotor/Speed > Limit + 5` reads `Limit` as a path.
 - **Missing values and `null`**: `== null` is true for a missing value and `!= null` is false, so neither is ever unknown. Any other operator with `null` is unknown.
 - **Logic**: `and` (`&&`), `or` (`||`), `not` (`!`) and parentheses combine comparisons. A missing value makes a comparison unknown, and an unknown part makes the whole unknown unless the rest decides it: `false and unknown` is `false`.
 - **Texts and enums** compare without regard to upper and lower case. A date compares with a text in ISO 8601, such as `'2026-10-01'`.
-- **No arithmetic**: `+`, `-`, `*` and `/` between values show an error. They are reserved, so that a later version can add arithmetic without changing what a page shows.
+- **Arithmetic**: `+`, `-`, `*` and `/` compute with numbers, dates and durations, with a space after the operator: `{{ /Demo/Meter/Import - /Demo/Meter/Export }}`. A duration is written like `90s`, `15m` or `1h30m`, a date minus a date is a duration, and a date plus or minus a duration is a date. A computed value is shown without the unit of a property.
 - **Errors**: A mistake shows its message and where it is, such as `expected ')' at position 16`, in place of the value. See [Page Errors](page-errors.md#expression-errors).
 
 ### Where an Expression Works
@@ -223,7 +267,7 @@ The reader sees "Speed: 600 RPM", and the tooltip of the text shows the target s
 ### Expression Limits
 
 - **Length and depth**: An expression is at most 1000 characters long and nests at most 32 levels. Each parenthesis counts as a level, and so does each `not` or `!`, so a chain of them reaches the limit. A longer or deeper expression shows an error in place of the value.
-- **Pipes**: An expression has the pipes `display`, `raw` and `map`. Another unit, another number of decimals and arithmetic are not supported.
+- **Pipes**: An expression has the pipes `display`, `raw` and `map`. Another unit and another number of decimals are not supported.
 - **Single values**: An expression is made for text, numbers, yes or no, durations and times. For a property that holds a subject or a list of subjects, it shows a technical type name. A list of plain values is shown on one line with a space between the values. The form `raw` shows a technical type name for every list.
 - **No error for a wrong path**: An expression whose path leads to nothing shows nothing. Check the spelling of the path when a value is missing.
 - **Special characters in a name are percent-encoded**: A name with an operator character, a quote, a brace or a space is written percent-encoded in an expression. [Paths](paths.md) has the characters and examples. Inside HTML that you write, write `<` as `&lt;`.
@@ -935,12 +979,12 @@ When the text of a page changes, the page is read again. A subject that is still
 ::
 ~~~~
 
-Add a sentence above both motors and save the page: the named motor keeps its speed, and the unnamed motor starts again at zero, because its position on the page changed.
+Add a block above both motors and save the page: the named motor keeps its speed, and the unnamed motor starts again at zero, because its position among the blocks changed. Text and expressions above it change nothing.
 
 The page knows a block by its key. The key is the `#name` of the block. A block without a name has its type and its position as key. The rule: a block keeps its subject when its key and its type are unchanged, no argument was removed, and the block around it kept its subject.
 
 - **With a name**: A subject with a `#name` is kept as long as its block keeps its name and its type and stays directly inside the same block, or directly on the page. Changing or adding an argument updates it.
-- **Without a name**: The position counts the pieces of content before the block at the same level, which is the page or the block around it: every block, every expression and every stretch of text between them is one piece. Adding or removing a block or an expression before the block creates its subject again. So does a first line of text before a block that had none.
+- **Without a name**: The position counts the blocks before the block at the same level, which is the page or the block around it. Adding or removing a block before it creates its subject again. Text and expressions do not count. A block that is moved, inserted or deleted in Inline mode leaves every other subject in place, see [Editing the blocks of a page inline](#editing-the-blocks-of-a-page-inline).
 - **Removed arguments**: When an argument, or a name at the top level of the `json` block, is removed, the subject is created again, so that the property gets its default value like after a restart.
 - **Nested blocks**: A subject inside another block is kept only when the block around it is kept. A named motor inside a card without a name is created again when the card is.
 - **Subjects in the `json` block**: A subject nested in a value of the `json` block is created again on every reload of the page. The block itself is kept, but its configuration is applied again, and that creates the subjects in it anew.
@@ -956,7 +1000,9 @@ The Markdown tools of [AI agents](ai-agents.md#changing-pages) refuse a change t
 
 ## Editing in the Page Editor
 
-The page editor shows the text of the page. It marks the head line of every widget block and of every slot block that creates a subject, together with its `json` block, and it marks every expression.
+The page editor shows the text of the page. It marks the head line of every widget block and of every slot block that creates a subject, together with its `json` block, and it marks every expression. On a phone or tablet the editor is a plain text field without these marks, so only "Create" of the actions below is there.
+
+The page editor saves with "Save" or Ctrl+S (Cmd+S on a Mac), and it asks before unsaved text is discarded. The mode chosen in the menu at the top right of a page stays for the next pages of the browser tab.
 
 - **Edit a block**: With the cursor on a marked head line, the toolbar shows a button "Edit" followed by the name of the block, or by its type when it has no name. It opens the edit dialog of the subject. Saving the dialog writes the configuration back into the block and saves the page. Only the head line and the `json` block change, the content of the block stays as it is, and a block without a closing line gets none.
 - **Edit an expression**: With the cursor in an expression, the toolbar shows the button "Edit Expression". It opens a dialog to choose another path, writes the path into the expression and saves the page.
@@ -979,22 +1025,45 @@ What the editor writes:
 - **Values**: A configuration property is written when its value differs from the default of its type, which is the value that a new block of that type without the argument gets. A value that equals the default is left out, unless the block already had that argument, which then stays. Values that are not set are left out too. A block without an argument follows the default of its type, so when a later version of the type changes that default, such pages change with it. A default that the type computes from the host, such as from its culture, machine name or time zone, can differ from one host to another, and so can the value of a block without the argument.
 - **Colons**: The head line keeps its number of colons and its `#name` and gets one space after the colons. The arguments are written anew, so arguments that you wrote by hand can change their order.
 
-Editing a subject elsewhere in the UI, for example through "Edit" in the bar of its selected widget in the Inline or Split mode of the page, writes its block in the same way.
+Editing a subject elsewhere in the UI, for example through "Edit" in the bar of its selected widget in the Inline mode of the page, writes its block in the same way. When the file cannot be written, the save fails and the page is read again, so the subject takes the values of its block in the file again.
 
-While the page is in edit mode, which is with "Split" or "Inline" in the menu at the top right of the page, a `GridLayout` shows a plus in every free place, and once the grid itself is selected, a click on it adds a cell there. A `CanvasLayout` adds a node with a click on a free place of the canvas, a click on a node selects the widget in it, or the canvas when the node has no widget, and a node can be moved with the mouse. Each cell and each node has buttons to edit and remove it, which show while its layout or a widget in the layout is selected, so a click on a cell without a widget selects the grid and shows the buttons of all its cells. Each of these writes the `Cell` and `Node` blocks of the page and saves the page:
+While the page is in edit mode, which is with "Inline" in the menu at the top right of the page, a `GridLayout` shows a plus in every free place, and once the grid itself is selected, a click on it adds a cell there. A `CanvasLayout` adds a node with a click on a free place of the canvas, a click on a node selects the widget in it, or the canvas when the node has no widget, and a node can be moved with the mouse. Each cell and each node has buttons to edit and remove it, which show while its layout or a widget in the layout is selected, so a click on a cell without a widget selects the grid and shows the buttons of all its cells. Each of these writes the `Cell` and `Node` blocks of the page and saves the page:
 
 - **Add**: The click opens the dialog "Create subject". The new cell or node is a `Cell` or `Node` block after the last one of its layout, with the widget that you chose as a block inside it. It is written like the block before it: with as many colons, and with a closing line only when that block has one. In a layout without a cell or a node, the new block has one colon more than the layout. It then gets a closing line when every widget block and slot block of the page has one, and none otherwise.
 - **Edit and move**: Editing a cell or a node, or moving a node, writes the head line of its block again, by the rules of the editor above. A node that had only `X` and `Y` gets `Width` and `Height` only when they differ from their defaults. The content of the block stays as it is.
 - **Remove**: Removing a cell or a node removes its block with everything in it. Where the text before the block and the text after it would then stand directly below each other, one empty line stays between them.
 - **A change that the page cannot keep**: When the page cannot keep a change, nothing is written, and the notification "Configuration applied but not saved. It will be lost on restart." appears. When adding or removing the block would change another block or other text of the page, or the cells or nodes were put into another order outside of the page, for example by a method or another tool, the page is read again at once, and the layout shows what the page holds. When the page is being read again at that moment, or the page text was saved elsewhere while this change was written, the layout shows the change until the page is read again, which every save of its text and a restart do, so save it again. The order of cells and nodes is the order of their blocks, so change it in the text of the page.
 
-Use these buttons with "Inline". In "Split", the editor next to the page does not show what the buttons wrote until the page is opened again, so do not save the text of the editor after using them, because it would write its older text over theirs.
+Use these buttons in "Inline" mode. The page next to the editor in "Split" mode does not edit.
+
+### Editing the blocks of a page inline
+
+In "Inline" mode a page is edited on the page itself:
+
+- **Widgets**: A click selects a widget. Its bar moves it up or down, deletes it, opens its edit dialog, which a double click also opens, and adds widgets, text or items to its slots with "+". The rows of a `ValueList` and the cases of a `ValueMap` are blocks of their own once the list or map is selected. A widget that shows nothing, such as a `ValueMap`, or a `Responsive` block hidden at the current width, is a chip where its block stands.
+- **Text**: Every paragraph, heading, list, table, quote and code block is a block of its own, with a green outline. It moves and deletes like a widget, and "Edit" opens its Markdown in a dialog, where "Create" also adds new widgets to the text.
+- **Insert**: The plus lines between blocks insert a new widget or new text there.
+- **Content edited in the page editor**: Raw HTML and the text inside an element that it opens, style blocks, errors, the footnotes, a list or a quote with a block in it, and the text in a cell of a `GridLayout` or a node of a `CanvasLayout`. Its bar has "Edit in Source", which opens its lines in "Split" mode.
+
+What a change in this mode does:
+
+- **Only the text of the page**: Every change writes only the text of the page. A change that would alter any other block or the text around it is refused with a message, and so is a change when the file changed since the page read it, for example in another editor. The page then shows the file.
+- **Subjects stay**: Every block that a move, an insert or a delete leaves keeps its subject, so a running device keeps running. A widget without a name gets the key of its new position, see [What an Edit of the Page Keeps](#what-an-edit-of-the-page-keeps), so its path changes. Name a widget whose path must stay stable.
+- **Widgets in text**: A widget in the text of the dialog must be a complete widget block with a name that is new to the page. A widget with too few colons for its place gets the colons it needs when the dialog is saved.
+- **Comments**: An HTML comment moves with the block after it, so a comment that names a block stays with it.
+
+In "Split" mode the page next to the editor only shows the saved page and cannot be operated. A click on a block in it shows the block's lines in the editor.
+
+Known limits:
+
+- **HTML left open**: Removing or moving a widget can put the text after it into an element that raw HTML before the widget leaves open. The viewed page then shows that text inside the element, and it can be edited only in the page editor.
+- **The bar at the top**: The bar of a block right below the title can cover the mode menu of the page. Escape clears the selection.
 
 ---
 
 ## Not Supported
 
-- More pipes for expressions than `display`, `raw` and `map`, like another unit or another number of decimals, and arithmetic in expressions.
+- More pipes for expressions than `display`, `raw` and `map`, like another unit or another number of decimals.
 - Expressions in arguments. The value of an argument is fixed text, except the `Text` and the `When` of a `Case` of a value map, see [ValueMap](widgets/value-map.md#conditions).
 - Short names for types. A block always has the full type name.
 - A name for an `Item` of a `FlowLayout`, and with it a subject inside an item that survives a change of the items before it.

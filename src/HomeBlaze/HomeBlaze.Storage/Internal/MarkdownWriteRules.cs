@@ -56,21 +56,28 @@ internal static partial class MarkdownWriteRules
         var size = Encoding.UTF8.GetByteCount(content);
         if (size > MarkdownFile.MaxContentSize)
         {
-            throw new ArgumentException(
-                $"The Markdown source would be {size} bytes, more than the limit of {MarkdownFile.MaxContentSize} bytes.", parameterName);
+            throw new ArgumentException(FormatSizeRefusal(size), parameterName);
         }
     }
+
+    /// <summary>
+    /// Gets why the content is too large, larger than <see cref="MarkdownFile.MaxContentSize"/> bytes as UTF-8 and larger than
+    /// <paramref name="previousContent"/>, or null. An edit of a page that is already too large may keep or shrink its size.
+    /// </summary>
+    public static string? GetContentGrowthRefusal(string content, string previousContent)
+    {
+        var size = Encoding.UTF8.GetByteCount(content);
+        return size > MarkdownFile.MaxContentSize && size > Encoding.UTF8.GetByteCount(previousContent) ? FormatSizeRefusal(size) : null;
+    }
+
+    private static string FormatSizeRefusal(int size) =>
+        $"The Markdown source would be {size} bytes, more than the limit of {MarkdownFile.MaxContentSize} bytes.";
 
     private const string ActiveContentMessage =
         $"Blocks cannot be added, changed or removed, and {MarkdownFile.ActiveContent} cannot be added or changed through " +
         "these operations; use the page editor. A block starts with a line of two or more colons and ends with its closing " +
         "line, and text directly after a block without a closing line belongs to that block. Keep each block and each old " +
         "subject(name) code block exactly as ReadRawContent shows it, with *** where it hides a secret value.";
-
-    private const string BlockPositionMessage =
-        "The change adds or removes an expression, the first text, or text between two blocks before a block without a " +
-        "#name, which would create the subject of that block again. Change the text elsewhere or keep the expressions and " +
-        "the text before such a block where they are, or ask an operator to give the block a #name in the page editor.";
 
     private const string LayoutMessage =
         "With the permission to edit page layout, only layout blocks can be added, changed, removed or moved: cards, tabs, " +
@@ -94,8 +101,8 @@ internal static partial class MarkdownWriteRules
     private static readonly HashSet<string> DiagramLanguages = new(StringComparer.OrdinalIgnoreCase) { "mermaid", "nomnoml" };
 
     /// <summary>
-    /// Ensures that the new source of a page keeps its blocks and old subject(name) code blocks exactly as they are, in the
-    /// same order and each block without a #name at the same position among the content around it, and adds none of the
+    /// Ensures that the new source of a page keeps its blocks and old subject(name) code blocks exactly as they are and in
+    /// the same order, which keeps the key of every block (see <see cref="MarkdownSubjectKeys"/>), and adds none of the
     /// <see cref="MarkdownFile.ActiveContent"/> that the old source does not already contain. A new page passes an empty
     /// old source. With <paramref name="layout"/>, layout blocks (<see cref="MarkdownPageLayout"/>) may change, every
     /// other block must stay as it is, inside the same blocks and at the same position, and each reference path of a
@@ -146,11 +153,16 @@ internal static partial class MarkdownWriteRules
             throw new ArgumentException(ActiveContentMessage, parameterName);
         }
 
-        // The page knows such a block by its type and its position, so a new position would create its subject again.
-        if (!oldContent.UnnamedBlockPositions.SequenceEqual(newContent.UnnamedBlockPositions))
-        {
-            throw new ArgumentException(BlockPositionMessage, parameterName);
-        }
+        EnsureRenders(newPage);
+    }
+
+    /// <summary>Ensures that the page can be shown: Markdown nested beyond the depth limit of Markdig cannot.</summary>
+    /// <exception cref="ArgumentException">The page holds Markdown nested beyond the depth limit.</exception>
+    internal static void EnsureRenders(MarkdownPage page)
+    {
+        // Markdig finds such Markdown only when it renders, and throws an ArgumentException then, so a source that the
+        // page or the notes could never show is refused instead of written.
+        MarkdownSegmentBuilder.Build(page);
     }
 
     private static IEnumerable<string> GetUnitKeys(List<UnitText> units) =>
@@ -231,7 +243,9 @@ internal static partial class MarkdownWriteRules
     /// <summary>
     /// Ensures that the reference paths of each layout block of the new page that configures a subject, a widget block or
     /// a slot block that is not open, and that the old page does not have with the same text lead to subjects, so that a
-    /// dangling reference the page already has does not block every layout edit.
+    /// dangling reference the page already has does not block every layout edit. A reference that starts with a name a
+    /// layout block of the new page declares, such as a ValueMap added in the same edit, leads to the subject that block
+    /// creates once the page is written.
     /// </summary>
     /// <exception cref="ArgumentException">A layout block or a subject in it refers to a path that leads to no subject.</exception>
     private static void EnsureReferencesResolve(
@@ -260,7 +274,7 @@ internal static partial class MarkdownWriteRules
 
             foreach (var path in MarkdownPageLayout.GetReferencePaths(block, type))
             {
-                if (!layout.ResolvesToSubject(path))
+                if (!layout.ResolvesToSubject(path) && !StartsWithDeclaredName(path, newLayout))
                 {
                     throw new ArgumentException(
                         $"The {block.Head!.Name} block at line {block.Line} refers to '{path}', which leads to no existing subject.",
@@ -268,6 +282,21 @@ internal static partial class MarkdownWriteRules
                 }
             }
         }
+    }
+
+    private static bool StartsWithDeclaredName(string path, LayoutAnalysis layout)
+    {
+        var end = path.IndexOf('/');
+        var name = end < 0 ? path.AsSpan() : path.AsSpan(0, end);
+        foreach (var block in layout.LayoutTypes.Keys)
+        {
+            if (block.Head?.Id is { } id && name.SequenceEqual(id))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -374,8 +403,8 @@ internal static partial class MarkdownWriteRules
 
     /// <summary>
     /// Collects what in a Markdown source makes the page run code or subjects, or load content, rather than show text,
-    /// the way the page parses it: the blocks, each with its kind and its whole text, the positions of the blocks without
-    /// a #name directly on the page, and the <see cref="MarkdownFile.ActiveContent"/>.
+    /// the way the page parses it: the blocks, each with its kind and its whole text, and the
+    /// <see cref="MarkdownFile.ActiveContent"/>.
     /// </summary>
     private static ActiveContentOfPage GetActiveContent(MarkdownPage page, PageLayoutRules? layout, LayoutAnalysis? analysis)
     {
@@ -427,39 +456,7 @@ internal static partial class MarkdownWriteRules
             activeMarkup.AddRange(abbreviations.Values.Select(abbreviation => "abbreviation:" + abbreviation.Label + "=" + abbreviation.Text));
         }
 
-        return new ActiveContentOfPage(GetUnits(page, analysis), layout is null ? GetUnnamedBlockPositions(page) : [], activeMarkup, analysis);
-    }
-
-    /// <summary>
-    /// Gets the position of each block without a #name among the content around it, with the positions of the blocks
-    /// around it up to the nearest one with a #name, which is what its key holds.
-    /// </summary>
-    private static List<string> GetUnnamedBlockPositions(MarkdownPage page)
-    {
-        var positions = new List<string>();
-        AddUnnamedBlockPositions(MarkdownSegmentBuilder.Build(page), string.Empty, positions);
-        return positions;
-    }
-
-    private static void AddUnnamedBlockPositions(IReadOnlyList<MarkdownSegment> segments, string path, List<string> positions)
-    {
-        for (var index = 0; index < segments.Count; index++)
-        {
-            if (segments[index] is BlockMarkdownSegment blockSegment)
-            {
-                // A block with a #name keeps its subject wherever it is, and the keys of the blocks inside it count
-                // from its content, so their positions are taken relative to it.
-                if (blockSegment.Block.Head?.Id is { } id)
-                {
-                    AddUnnamedBlockPositions(blockSegment.Content, "#" + id, positions);
-                    continue;
-                }
-
-                var blockPath = path + "/" + index.ToString(CultureInfo.InvariantCulture);
-                positions.Add(blockPath);
-                AddUnnamedBlockPositions(blockSegment.Content, blockPath, positions);
-            }
-        }
+        return new ActiveContentOfPage(GetUnits(page, analysis), activeMarkup, analysis);
     }
 
     /// <summary>
@@ -668,8 +665,7 @@ internal static partial class MarkdownWriteRules
     /// <summary>The kind of a unit, its text for the comparison, its span in its source and its place among the blocks.</summary>
     private readonly record struct UnitText(string Kind, string Text, MarkdownSpan Span, string Identity);
 
-    private sealed record ActiveContentOfPage(
-        List<UnitText> Units, List<string> UnnamedBlockPositions, List<string> ActiveMarkup, LayoutAnalysis? Layout);
+    private sealed record ActiveContentOfPage(List<UnitText> Units, List<string> ActiveMarkup, LayoutAnalysis? Layout);
 
     /// <summary>
     /// The layout blocks of a page, the type of each one that configures a subject, its blocks with their places, and the

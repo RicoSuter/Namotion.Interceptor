@@ -65,7 +65,7 @@ public class AppBarMenuTests
 
         // Act
         await page.Locator($".mud-popover-open a[href='{MenuPageUrl}']").ClickAsync();
-        await page.WaitForURLAsync(url => url.EndsWith(MenuPageUrl, StringComparison.Ordinal), new() { Timeout = Timeout });
+        await _fixture.WaitForUrlAsync(page, url => url.EndsWith(MenuPageUrl, StringComparison.Ordinal), Timeout);
 
         // Assert
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Menu Page", Exact = true }))

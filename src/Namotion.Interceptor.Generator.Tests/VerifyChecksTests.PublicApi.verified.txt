@@ -1,0 +1,12 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Generator.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETStandard,Version=v2.0", FrameworkDisplayName=".NET Standard 2.0")]
+namespace Namotion.Interceptor.Generator
+{
+    [Microsoft.CodeAnalysis.Generator]
+    public class InterceptorSubjectGenerator : Microsoft.CodeAnalysis.IIncrementalGenerator
+    {
+        public InterceptorSubjectGenerator() { }
+        public void Initialize(Microsoft.CodeAnalysis.IncrementalGeneratorInitializationContext context) { }
+    }
+}

@@ -56,6 +56,14 @@ public partial class HistoryChart : IConfigurable, ITitleProvider
     public partial int Height { get; set; }
 
     /// <summary>
+    /// The lowest the lines may get in pixels, or null to let them get as low as their proportions need. With it a chart in
+    /// a narrow place, such as a grid cell, gets higher than half its width, up to <see cref="Height"/>. A minimum above
+    /// <see cref="Height"/> is the height of the lines.
+    /// </summary>
+    [Configuration]
+    public partial int? MinHeight { get; set; }
+
+    /// <summary>
     /// How often the chart queries again at most while its values change. Less than a minute counts as a minute, a fixed
     /// bucket longer than the interval lengthens it to the bucket, and more than a day is an error.
     /// </summary>

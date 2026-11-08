@@ -232,6 +232,7 @@ public partial class Motor
 - Cannot be `partial` (they're computed, not stored)
 - Can combine with `[State]` to display in UI
 - Automatically recalculates when `TargetSpeed` or `CurrentSpeed` changes
+- Reads another subject through intercepted properties or through a field that holds its owner (see [Shared Child Subjects](#shared-child-subjects)). Through a field that holds any other subject, it stops following that subject once the subject is detached and attached again while this one stays attached
 
 ## Child Subject Collections
 
@@ -474,6 +475,7 @@ public partial class Motor
 | `Icon` | MudBlazor icon name | `"Speed"`, `"Stop"` |
 | `Position` | Sort position in operations list | `1`, `2`, `3` |
 | `RequiresConfirmation` | Show confirmation dialog before executing | `true` |
+| `Purpose` | What the operation is for. `OperationPurpose.Delete` makes it the subject's Delete button in the browser instead of an operation button | `OperationPurpose.Delete` |
 
 **Key points:**
 - Operations appear as buttons in the subject's property panel, grouped by [category](#categories)
@@ -484,6 +486,7 @@ public partial class Motor
 - Operations with `RequiresConfirmation = true` show a confirmation dialog first and cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions). Use it for operations a person must decide on, such as unlocking, rebooting or installing code
 - Confirmation is inherited: an implementation of an interface operation or an override of a base class operation that requires confirmation requires it too, also with its own `[Operation]`, and a `[Query]` in its place becomes an operation that requires confirmation
 - Do not require confirmation for safety actions such as an emergency stop; agents must be able to call them
+- An operation with `Purpose = OperationPurpose.Delete` deletes or removes the subject. The subject browser shows it as the Delete button of the subject's pane, asks for confirmation before it runs it, whether or not it sets `RequiresConfirmation`, and leaves it out of the operation buttons. The button is disabled while the operation's `IsEnabled` attribute is false. Agents see it as an ordinary operation, so `RequiresConfirmation` still decides whether they may call it. It must take no parameter that requires input, otherwise the purpose is ignored. `Purpose` comes from the `[Operation]` attribute of the method itself and, unlike `RequiresConfirmation`, is not inherited: an override or implementation with its own `[Operation]` has only the purpose it sets itself. A subject stored in a file of a storage gets a `Delete` operation from the storage, which requires confirmation, unless it has a delete operation of its own, and so does a folder of a storage, which is enabled only while the folder is empty
 
 **Where a method is offered:**
 
@@ -1221,14 +1224,77 @@ public bool IsEditing { get; set; }
 | Ignore | Read-only widget, no editing support | Status displays |
 | Hybrid | Simple fields inline, complex via dialog | Basic fields inline, advanced via dialog |
 
+The page next to the text editor of the Split mode gets `IsEditing` false. Its content is `inert`, so that neither the pointer nor the keyboard reaches a control, and a widget needs nothing to keep the preview from writing the page under the unsaved text of the editor.
+
 ### Auto Edit Button
 
-In the Inline and Split modes of a page, a click on a widget selects it, and the host shows a bar with its actions above the top right corner of the widget. Every widget block of a page that shows something can be selected. A block that shows nothing, such as a `ValueMap`, is hidden while the page is edited inline and is edited in the [page editor](../administration/pages.md#editing-in-the-page-editor). When the widget has an Edit component or configuration properties, the bar has an edit button. A widget without either, such as a `ValueList`, gets only the outline, and the bar when it has a parent to select:
+In the Inline mode of a page, a click on a widget selects it, and the host shows a bar with its actions above the top right corner of the widget: select the parent, move up and down, add to its slots with "+", edit and delete. Edit is there when the widget has an Edit component or configuration properties, so a widget without either, such as a `ValueList`, gets no edit button. A double click opens the same edit dialog. The blocks of text of a markdown page are selectable as well and are edited in a Markdown dialog. In the Split mode, the page next to the editor cannot be operated.
 
 - Clicking it opens the `SubjectEditDialog` with the Edit component, or with the generated properties editor without one
 - A widget inside another one has an arrow up button that selects the widget around it, and Escape or a click on the page clears the selection
 - The content of a widget takes no mouse input while the page is edited, so that a click selects the widget instead of operating it. A part that is meant to be used while the page is edited takes it back with the class `edit-mode-interactive`, as the slider above does, or with `edit-mode-selected-interactive` once its widget is selected
 - No boilerplate needed in widget components
+
+### Editor Support
+
+Most widgets need nothing for the editing of a page. The host selects them, shows their bar, moves, adds and deletes their blocks, and opens their edit dialog. Each `[Slot]` gets its entries in the "+" menu, and content that a widget renders with `SubjectComponent`, as [Rendering Slots](#rendering-slots) shows, gets insert lines and selectable blocks of text. The Split preview is `inert` and needs no handling either.
+
+Three cases ask for a few lines:
+
+| Case | What to do | Example |
+|------|------------|---------|
+| The widget shows nothing on a viewed page | Render a `WidgetChip` while the page is edited inline, so that the widget has an area to click | `ValueMapWidget`, a `Responsive` whose content the screen hides |
+| Parts of the widget become blocks of their own once it is selected | Derive from `SelectionContainingWidgetBase` and render those parts only while `ContainsSelection` is true | The rows of a `ValueList`, the cases of a `ValueMap` |
+| The widget has controls that act, such as a button or a switch | Disable them while `IsEditing` is true. The host takes the pointer from the content of a widget while the page is edited, but the keyboard still reaches a control | `DoorLockWidget` |
+
+A widget that shows nothing, with a chip while it is edited inline. `Selection` is only set while the page is edited inline, never in the Split preview:
+
+```razor
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Schedule))]
+@implements ISubjectComponent
+
+@if (IsEditing && Selection is not null)
+{
+    <WidgetChip Icon="@Icons.Material.Filled.Schedule" Text="Schedule" />
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
+    [CascadingParameter]
+    public WidgetSelection? Selection { get; set; }
+}
+```
+
+`SelectionContainingWidgetBase` provides `IsEditing`, `Selection` and `ContainsSelection`, and renders the widget again only when the selection enters or leaves it. A widget that overrides `OnParametersSet` calls the base first:
+
+```razor
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Schedule))]
+@implements ISubjectComponent
+@inherits SelectionContainingWidgetBase
+
+@if (IsEditing && Selection is not null)
+{
+    <WidgetChip Icon="@Icons.Material.Filled.Schedule" Text="Schedule" />
+
+    @if (ContainsSelection && Subject is Schedule schedule)
+    {
+        @foreach (var entry in schedule.Entries)
+        {
+            <SubjectComponent Subject="@entry" Type="SubjectComponentType.Widget" />
+        }
+    }
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}
+```
 
 ### Content Slots
 

@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 using HomeBlaze.Components;
 using HomeBlaze.Storage.Pages;
@@ -88,14 +89,71 @@ public partial class RepositoryPagesTests
         // Arrange
         var text = ReadPage(relativePath);
 
-        // Act
+        // Act: a Razor expression is a component parameter in a code sample, not a page argument.
         var unknownIconNames = IconArgument().Matches(text)
             .Select(match => match.Groups["name"].Value)
+            .Where(name => !name.StartsWith('@'))
             .Where(name => name != "Article" && MudBlazorIconResolver.Resolve(name) == Icons.Material.Filled.Article)
             .ToList();
 
         // Assert
         Assert.Empty(unknownIconNames);
+    }
+
+    [Theory]
+    [MemberData(nameof(PagePaths))]
+    public void WhenTheTextBlocksOfARepositoryPageAreMarked_ThenItsHtmlStaysTheSame(string relativePath)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(ReadPage(relativePath));
+
+        // Act
+        var marked = DescribeAsViewed(MarkdownSegmentBuilder.Build(page, linkRewriter: null, markTextBlocks: true));
+        var unmarked = DescribeAsViewed(MarkdownSegmentBuilder.Build(page));
+
+        // Assert
+        Assert.Equal(unmarked, marked);
+    }
+
+    // The segments as a viewed page joins them: the HTML between two other segments in one piece, and every block with its
+    // content.
+    private static List<string> DescribeAsViewed(IReadOnlyList<MarkdownSegment> segments)
+    {
+        var result = new List<string>();
+        var html = new StringBuilder();
+        foreach (var segment in segments)
+        {
+            if (segment is HtmlMarkdownSegment htmlSegment)
+            {
+                html.Append(htmlSegment.Html);
+                continue;
+            }
+
+            if (html.Length > 0)
+            {
+                result.Add("html:" + html);
+                html.Clear();
+            }
+
+            switch (segment)
+            {
+                case ExpressionMarkdownSegment expression:
+                    result.Add($"expression:{expression.Text}");
+                    break;
+                case BlockMarkdownSegment block:
+                    result.Add($"block:{block.Block.Index}");
+                    result.AddRange(DescribeAsViewed(block.Content));
+                    result.Add($"end:{block.Block.Index}");
+                    break;
+            }
+        }
+
+        if (html.Length > 0)
+        {
+            result.Add("html:" + html);
+        }
+
+        return result;
     }
 
     internal static string ReadPage(string relativePath) =>

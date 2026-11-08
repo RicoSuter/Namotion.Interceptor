@@ -24,14 +24,11 @@ namespace Namotion.Interceptor.Mqtt.Server;
 /// </summary>
 public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncDisposable
 {
-    private sealed class RunClientCounter
-    {
-        internal int Count;
-    }
-
     // NOTE: We cannot pool UserProperties here because InjectApplicationMessages queues messages
     // asynchronously. The server may still be serializing packets after this method returns,
     // which would cause a race condition if we returned the lists to a pool.
+
+    private const int BrokerDrainTimeoutMilliseconds = 5000;
 
     private readonly string _serverClientId;
     private readonly IInterceptorSubject _subject;
@@ -47,8 +44,12 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
     // re-publishes client-originated values to all subscribers (server-authoritative relay).
     private readonly object _mqttClientSource = new();
 
-    private readonly ConcurrentDictionary<PropertyReference, (string? Topic, MqttPropertyMapping? Mapping)> _propertyToTopic = new();
-    private readonly ConcurrentDictionary<string, PropertyReference?> _pathToProperty = new();
+    private readonly ISubjectRegistry? _registry;
+
+    // Entries carry the structure and mapper versions read before they were computed and are served only while both are
+    // current, so an entry computed during a change is never served after it.
+    private readonly ConcurrentDictionary<PropertyReference, (string? Topic, MqttPropertyMapping? Mapping, long StructureVersion, long MapperVersion)> _propertyToTopic = new();
+    private readonly ConcurrentDictionary<string, (PropertyReference Property, long StructureVersion, long MapperVersion)> _pathToProperty = new();
 
     private List<Task>? _runningInitialStateTasks;
     private readonly Lock _initialStateTasksLock = new();
@@ -58,24 +59,15 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
 
     private int _disposed;
     private MqttServer? _mqttServer;
-    private volatile RunClientCounter? _currentClientCounter;
+    private volatile MqttConnectedClientTracker? _currentConnectedClients;
 
     /// <inheritdoc cref="SubjectConnectorBase.Diagnostics" />
     public override MqttServerDiagnostics Diagnostics { get; }
 
     /// <summary>
-    /// Gets the number of clients currently connected to the broker.
+    /// Gets the number of client connections currently open on the broker.
     /// </summary>
-    internal int ConnectedClientCount
-    {
-        get
-        {
-            var clientCounter = _currentClientCounter;
-            return clientCounter is null
-                ? 0
-                : Math.Max(0, Volatile.Read(ref clientCounter.Count));
-        }
-    }
+    internal int ConnectedClientCount => _currentConnectedClients?.Count ?? 0;
 
     public MqttSubjectServer(
         IInterceptorSubject subject,
@@ -87,6 +79,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _context = subject.Context;
+        _registry = _context.TryGetService<ISubjectRegistry>();
         _serverClientId = _configuration.ClientId;
 
         Diagnostics = new MqttServerDiagnostics(this, Metrics);
@@ -94,9 +87,12 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         configuration.Validate();
     }
 
-    private bool IsPropertyIncluded(PropertyReference propertyReference) =>
-        propertyReference.TryGetRegisteredProperty() is { } property &&
-        _configuration.Mapper.TryGetMapping(property, _subject, out _);
+    /// <summary>
+    /// Whether a change of the property is published: it holds no subjects and the current mapper gives it a topic.
+    /// </summary>
+    internal bool IsPropertyIncluded(PropertyReference propertyReference) =>
+        propertyReference.TryGetRegisteredProperty() is { CanContainSubjects: false } property &&
+        TryGetTopicForProperty(property.Reference).Topic is not null;
 
     /// <inheritdoc />
     async Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
@@ -151,20 +147,20 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         var shutdownCts = new CancellationTokenSource();
         var shutdownToken = shutdownCts.Token;
         var initialStateTasks = new List<Task>();
-        var clientCounter = new RunClientCounter();
+        var connectedClients = new MqttConnectedClientTracker();
         var publishLease = new ConnectorCommitLease();
 
         Task ClientConnectedForRunAsync(ClientConnectedEventArgs args) =>
-            ClientConnectedAsync(args, server, shutdownToken, initialStateTasks, clientCounter);
+            ClientConnectedAsync(args, server, shutdownToken, initialStateTasks, connectedClients);
 
         Task ClientDisconnectedForRunAsync(ClientDisconnectedEventArgs args) =>
-            ClientDisconnectedAsync(args, clientCounter);
+            ClientDisconnectedAsync(args, connectedClients);
 
         Task InterceptingPublishForRunAsync(InterceptingPublishEventArgs args) =>
             InterceptingPublishAsync(args, server, shutdownToken, publishLease);
 
         _mqttServer = server;
-        _currentClientCounter = clientCounter;
+        _currentConnectedClients = connectedClients;
         lock (_initialStateTasksLock)
         {
             _runningInitialStateTasks = initialStateTasks;
@@ -211,6 +207,28 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                             if (!stoppingToken.IsCancellationRequested)
                             {
                                 await server.StopAsync().ConfigureAwait(false);
+                                Metrics.MarkNotOperational();
+
+                                // MQTTnet removes a stopped connection's session only after StopAsync returns, and
+                                // restarting the same server before that keeps the session referenced forever.
+                                // The delay takes no token so cancellation cannot skip the rest of this finally;
+                                // the loop condition ends the wait on a stop instead.
+                                var drainDeadline = Environment.TickCount64 + BrokerDrainTimeoutMilliseconds;
+                                int remainingClientCount;
+                                while ((remainingClientCount = connectedClients.Count) > 0 &&
+                                       !stoppingToken.IsCancellationRequested &&
+                                       Environment.TickCount64 < drainDeadline)
+                                {
+                                    await Task.Delay(10).ConfigureAwait(false);
+                                }
+
+                                // The loop's last count is above 0 only when it stopped on the deadline or a stop.
+                                if (remainingClientCount > 0 && !stoppingToken.IsCancellationRequested)
+                                {
+                                    _logger.LogWarning(
+                                        "MQTT server restarts with {Count} client session(s) still open after waiting {Timeout} ms for them to close; they may stay referenced by the broker.",
+                                        remainingClientCount, BrokerDrainTimeoutMilliseconds);
+                                }
                             }
 
                             Metrics.MarkNotOperational();
@@ -271,7 +289,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                 InterceptingPublishForRunAsync,
                 shutdownCts,
                 initialStateTasks,
-                clientCounter,
+                connectedClients,
                 publishLease).ConfigureAwait(false);
         }
     }
@@ -284,7 +302,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         Func<InterceptingPublishEventArgs, Task> interceptingPublishHandler,
         CancellationTokenSource shutdownCts,
         List<Task> initialStateTasks,
-        RunClientCounter clientCounter,
+        MqttConnectedClientTracker connectedClients,
         ConnectorCommitLease publishLease)
     {
         try
@@ -362,9 +380,9 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
             }
         }
 
-        if (ReferenceEquals(_currentClientCounter, clientCounter))
+        if (ReferenceEquals(_currentConnectedClients, connectedClients))
         {
-            _currentClientCounter = null;
+            _currentConnectedClients = null;
         }
 
         _propertyToTopic.Clear();
@@ -403,7 +421,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                         continue;
                     }
 
-                    var (topic, mapping) = TryGetTopicForProperty(change.Property, registeredProperty);
+                    var (topic, mapping) = TryGetTopicForProperty(change.Property);
                     if (topic is null) continue;
 
                     byte[] payload;
@@ -468,39 +486,68 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         }
     }
 
-    internal (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
+    /// <summary>
+    /// Gets the topic, with the configured prefix, and the mapping the current mapper gives the property's current
+    /// registration, or a null topic when it has none or the property is no longer registered.
+    /// </summary>
+    internal (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(PropertyReference propertyReference)
     {
-        if (_propertyToTopic.TryGetValue(propertyReference, out var cached))
+        var structureVersion = _registry?.StructureVersion ?? 0;
+        var mapperVersion = _configuration.Mapper.Version;
+        if (_propertyToTopic.TryGetValue(propertyReference, out var cached) &&
+            cached.StructureVersion == structureVersion &&
+            cached.MapperVersion == mapperVersion)
         {
-            return cached;
+            return (cached.Topic, cached.Mapping);
+        }
+
+        // The caller's registration may predate the versions just read. One discarded by a detach and attach since
+        // has no path, so its missing topic would be cached at the current versions and served until the next change.
+        var currentProperty = propertyReference.TryGetRegisteredProperty();
+        if (currentProperty is null)
+        {
+            return (null, null);
         }
 
         string? topic = null;
         MqttPropertyMapping? resolvedMapping = null;
-        if (_configuration.Mapper.TryGetMapping(property, _subject, out var mapping) && mapping.Topic is not null)
+        if (_configuration.Mapper.TryGetMapping(currentProperty, _subject, out var mapping) && mapping.Topic is not null)
         {
             topic = MqttHelper.BuildTopic(mapping.Topic, _configuration.TopicPrefix);
             resolvedMapping = mapping;
         }
 
-        var entry = (topic, resolvedMapping);
-
         // Add first, then validate (guarantees no memory leak)
-        if (_propertyToTopic.TryAdd(propertyReference, entry) && !IsRetainable(propertyReference.Subject))
+        var entry = (topic, resolvedMapping, structureVersion, mapperVersion);
+        _propertyToTopic[propertyReference] = entry;
+        if (!IsRetainable(propertyReference.Subject))
         {
-            _propertyToTopic.TryRemove(propertyReference, out _);
+            _propertyToTopic.TryRemove(KeyValuePair.Create(propertyReference, entry));
         }
 
-        return entry;
+        return (topic, resolvedMapping);
     }
+
+    /// <summary>
+    /// Whether the topic cache holds an entry for the property.
+    /// </summary>
+    internal bool HasCachedTopic(PropertyReference property) => _propertyToTopic.ContainsKey(property);
+
+    /// <summary>
+    /// Whether the path cache holds an entry for the path.
+    /// </summary>
+    internal bool HasCachedPath(string path) => _pathToProperty.ContainsKey(path);
 
     internal async ValueTask<PropertyReference?> TryGetPropertyForTopicAsync(
         string path,
         CancellationToken cancellationToken)
     {
-        if (_pathToProperty.TryGetValue(path, out var cachedProperty))
+        var structureVersion = _registry?.StructureVersion ?? 0;
+        var mapperVersion = _configuration.Mapper.Version;
+        var hasCached = _pathToProperty.TryGetValue(path, out var cached);
+        if (hasCached && cached.StructureVersion == structureVersion && cached.MapperVersion == mapperVersion)
         {
-            return cachedProperty;
+            return cached.Property;
         }
 
         var registered = _subject.TryGetRegisteredSubject();
@@ -510,11 +557,19 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         var propertyReference = property?.Reference;
 
         // A missing path can become reachable after a structural change; only cache resolved properties.
-        if (propertyReference is { } resolvedProperty &&
-            _pathToProperty.TryAdd(path, propertyReference) &&
-            !IsRetainable(resolvedProperty.Subject))
+        if (propertyReference is { } resolvedProperty)
         {
-            _pathToProperty.TryRemove(path, out _);
+            var entry = (resolvedProperty, structureVersion, mapperVersion);
+            _pathToProperty[path] = entry;
+            if (!IsRetainable(resolvedProperty.Subject))
+            {
+                _pathToProperty.TryRemove(KeyValuePair.Create(path, entry));
+            }
+        }
+        else if (hasCached)
+        {
+            // Removes only the stale entry, not one a concurrent lookup added since.
+            _pathToProperty.TryRemove(KeyValuePair.Create(path, cached));
         }
 
         return propertyReference;
@@ -522,7 +577,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
 
     /// <summary>
     /// Whether a cache entry for a property of <paramref name="subject"/> may stay. The reference count
-    /// drops before LifecycleInterceptor.SubjectDetaching fires, where the eviction scan runs, and the registry
+    /// drops before LifecycleInterceptor.SubjectDetaching fires, where the caches are cleared, and the registry
     /// deregisters only after that. Only the count catches a lookup that inserts in between. The connector root is
     /// exempt: it is anchored to the context rather than to a property, so its count is zero for its whole life.
     /// </summary>
@@ -538,10 +593,10 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         MqttServer server,
         CancellationToken shutdownToken,
         List<Task> initialStateTasks,
-        RunClientCounter clientCounter)
+        MqttConnectedClientTracker connectedClients)
     {
-        var count = Interlocked.Increment(ref clientCounter.Count);
-        _logger.LogInformation("Client {ClientId} connected. Total clients: {Count}.", arg.ClientId, count);
+        connectedClients.Add(arg.ClientId, arg.RemoteEndPoint);
+        _logger.LogInformation("Client {ClientId} connected. Total clients: {Count}.", arg.ClientId, connectedClients.Count);
 
         // Publish all current property values to new client
         lock (_initialStateTasksLock)
@@ -765,33 +820,19 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         }
     }
 
-    private Task ClientDisconnectedAsync(ClientDisconnectedEventArgs arg, RunClientCounter clientCounter)
+    private Task ClientDisconnectedAsync(ClientDisconnectedEventArgs arg, MqttConnectedClientTracker connectedClients)
     {
-        var count = Interlocked.Decrement(ref clientCounter.Count);
-        _logger.LogInformation("Client {ClientId} disconnected. Total clients: {Count}.", arg.ClientId, count);
+        connectedClients.Remove(arg.ClientId, arg.RemoteEndPoint);
+        _logger.LogInformation("Client {ClientId} disconnected. Total clients: {Count}.", arg.ClientId, connectedClients.Count);
         return Task.CompletedTask;
     }
 
-    private void OnSubjectDetaching(SubjectLifecycleChange change)
+    internal void OnSubjectDetaching(SubjectLifecycleChange change)
     {
-        // TODO(perf): O(n) scan over all cached entries per detached subject.
-        // Consider adding a reverse index (Dictionary<IInterceptorSubject, List<PropertyReference>>) for O(1) cleanup
-        // if profiling shows this as a bottleneck with large object graphs and frequent attach/detach cycles.
-        foreach (var kvp in _propertyToTopic)
-        {
-            if (kvp.Key.Subject == change.Subject)
-            {
-                _propertyToTopic.TryRemove(kvp.Key, out _);
-            }
-        }
-
-        foreach (var kvp in _pathToProperty)
-        {
-            if (kvp.Value?.Subject == change.Subject)
-            {
-                _pathToProperty.TryRemove(kvp.Key, out _);
-            }
-        }
+        // Every detach raises the registry's structure version, so every entry is stale anyway. Clearing lets the
+        // detached subject be collected without an O(n) scan under the lifecycle lock.
+        _propertyToTopic.Clear();
+        _pathToProperty.Clear();
     }
 
     /// <inheritdoc />

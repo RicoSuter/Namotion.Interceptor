@@ -63,6 +63,33 @@ public class SubscriptionManagerDiagnosticsTests
     }
 
     [Fact]
+    public async Task WhenTheSdkTransfersSubscriptions_ThenAcceptedOnesStayHookedAndARefusedOneIsReplacedByItsClone()
+    {
+        // Arrange - the SDK hands back an accepted subscription as the same object and a refused one
+        // as a clone that already carries the callback.
+        var configuration = CreateConfiguration();
+        await using var source = CreateClientSource(configuration: configuration);
+        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
+        await using var manager = CreateManager(source, propertyWriter, configuration, new ConcurrentQueue<Exception>());
+        var acceptedSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        var refusedSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        manager.UpdateTransferredSubscriptions([acceptedSubscription, refusedSubscription]);
+        var recreatedSubscription = new Subscription(refusedSubscription, copyEventHandlers: true);
+
+        // Act
+        manager.UpdateTransferredSubscriptions([acceptedSubscription, recreatedSubscription]);
+
+        // Assert
+        Assert.Equal(2, manager.SubscriptionCount);
+        Assert.Contains(acceptedSubscription, manager.Subscriptions);
+        Assert.Contains(recreatedSubscription, manager.Subscriptions);
+        Assert.DoesNotContain(refusedSubscription, manager.Subscriptions);
+        Assert.Single(acceptedSubscription.FastDataChangeCallback!.GetInvocationList());
+        Assert.Single(recreatedSubscription.FastDataChangeCallback!.GetInvocationList());
+        Assert.Null(refusedSubscription.FastDataChangeCallback);
+    }
+
+    [Fact]
     public async Task WhenConversionThrows_ThenSourceReportsExactFailureOnceAndSdkCallbackStillThrows()
     {
         // Arrange

@@ -2,7 +2,7 @@ namespace HomeBlaze.Storage.Blazor.Models;
 
 /// <summary>
 /// Writes the decorations and folding ranges of the page editor as records of six numbers: kind, color, start line,
-/// start column, end line and end column. The editor module (<c>Files/MarkdownFileEditComponent.razor.js</c>) turns
+/// start column, end line and end column. The editor module (<c>Files/MarkdownSourceEditor.razor.js</c>) turns
 /// them into Monaco decorations, so a refresh sends numbers and not decoration objects.
 /// </summary>
 public static class BlockOutlineDecorations
@@ -25,6 +25,9 @@ public static class BlockOutlineDecorations
     /// <summary>A folding range from the start line to the end line. The columns are 1.</summary>
     public const int FoldKind = 5;
 
+    /// <summary>The name on a head line, in bold.</summary>
+    public const int NameKind = 6;
+
     /// <summary>Number of values per record.</summary>
     public const int RecordLength = 6;
 
@@ -43,7 +46,7 @@ public static class BlockOutlineDecorations
         {
             var outline = outlines[i];
             var hasClosingFence = outline.ClosingFence is not null;
-            recordCount += 2 + (hasClosingFence ? 1 : 0) + (HasBlockFold(outline) ? 1 : 0) + (HasConfigurationFold(outline) ? 1 : 0);
+            recordCount += 2 + (outline.NamePosition is not null ? 1 : 0) + (hasClosingFence ? 1 : 0) + (HasBlockFold(outline) ? 1 : 0) + (HasConfigurationFold(outline) ? 1 : 0);
             labelCount += hasClosingFence ? 1 : 0;
         }
 
@@ -66,6 +69,11 @@ public static class BlockOutlineDecorations
 
             Write(values, ref index, HeadKind, color, outline.StartLine, outline.HeadFence.Column, outline.HeadEndLine, outline.HeadEndColumn);
             WriteFence(values, ref index, FenceKind, color, outline.HeadFence);
+            if (outline.NamePosition is { } namePosition)
+            {
+                WriteFence(values, ref index, NameKind, color, namePosition);
+            }
+
             if (outline.ClosingFence is { } closingFence)
             {
                 WriteFence(values, ref index, ClosingFenceKind, color, closingFence);

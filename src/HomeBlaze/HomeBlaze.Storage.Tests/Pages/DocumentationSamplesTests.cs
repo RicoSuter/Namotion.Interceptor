@@ -25,7 +25,6 @@ namespace HomeBlaze.Storage.Tests.Pages;
 /// per line. A sample that the page shows at work has the comment <see cref="LiveMarker"/> on the line
 /// above it, and the lines after it are the same lines again as blocks of the page.
 /// </remarks>
-[Collection(MarkdownPageFixture.StorageCollection)]
 public partial class DocumentationSamplesTests
 {
     private const string DocumentationFolder = "src/HomeBlaze/HomeBlaze/Data/Files/Docs";

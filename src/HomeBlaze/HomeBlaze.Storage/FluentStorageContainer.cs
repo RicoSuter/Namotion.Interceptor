@@ -3,9 +3,10 @@ using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
 using FluentStorage;
-using FluentStorage.Blobs;
+using FluentStorage.Storage;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage.Abstractions;
@@ -18,6 +19,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Attributes;
 using StoragePath = HomeBlaze.Storage.Internal.StoragePath;
 
@@ -39,8 +41,14 @@ namespace HomeBlaze.Storage;
 [InterceptorSubject]
 public partial class FluentStorageContainer :
     BackgroundService,
-    IStorageContainer, IConfigurationWriter, ITitleProvider, IIconProvider, IConfigurable, IMetadataContainer, IMetadataStore
+    IStorageContainer, IConfigurationWriter, ITitleProvider, IIconProvider, IConfigurable, IMetadataContainer, IMetadataStore,
+    IChildMethodProvider
 {
+    private const string DeleteOperationName = "Delete";
+
+    private static readonly MethodParameter[] DeleteParameters =
+        [new MethodParameter { Name = "cancellationToken", Type = typeof(CancellationToken), IsRuntimeProvided = true }];
+
     private static readonly IReadOnlySet<string> NoPaths = new HashSet<string>();
 
     private readonly FileSubjectFactory _subjectFactory;
@@ -74,9 +82,9 @@ public partial class FluentStorageContainer :
     internal StorageMetadataStore MetadataStore { get; }
 
     /// <summary>Wraps the storage client when the storage connects.</summary>
-    internal Func<IBlobStorage, IBlobStorage>? ClientDecorator { get; set; }
+    internal Func<IStore, IStore>? ClientDecorator { get; set; }
 
-    /// <inheritdoc cref="TimeLimitedBlobStorage.IsUnresponsive"/>
+    /// <inheritdoc cref="TimeLimitedStore.IsUnresponsive"/>
     internal bool IsStorageUnresponsive => _connection is { IsStorageUnresponsive: true };
 
     /// <summary>Gets whether the caller runs within work of the worker of the current connection.</summary>
@@ -322,8 +330,8 @@ public partial class FluentStorageContainer :
             var storageDirectory = settings.IsInMemory ? null : ResolveStorageDirectory(settings.ConnectionString);
             var client = settings.StorageType switch
             {
-                "disk" or "filesystem" => StorageFactory.Blobs.DirectoryFiles(storageDirectory!),
-                "inmemory" => StorageFactory.Blobs.InMemory(),
+                "disk" or "filesystem" => StorageFactory.Disk(storageDirectory!),
+                "inmemory" => StorageFactory.InMemory(),
                 _ => throw new NotSupportedException($"Storage type '{settings.StorageType}' is not supported")
             };
 
@@ -574,11 +582,11 @@ public partial class FluentStorageContainer :
             if (connection.Index.TryGet(relativePath, out _))
                 throw new InvalidOperationException($"A file already exists at '{path}'.");
 
-            // Before the storage is asked: on disk, asking about a path creates the folder of that path.
+            // Before the storage is asked, so that a taken key fails without a call into the storage.
             if (!connection.Reconciler.IsKeyFree(relativePath, subject))
                 throw new InvalidOperationException($"A subject already exists at '{path}'.");
 
-            if (await connection.Client.ExistsAsync(relativePath, token))
+            if (await connection.Client.ObjectExists(relativePath, token))
                 throw new InvalidOperationException($"A file already exists at '{path}'.");
 
             var entry = new StorageEntry { Path = relativePath, IsFolder = false, Subject = subject };
@@ -649,11 +657,11 @@ public partial class FluentStorageContainer :
     private static async Task WriteAsync(
         StorageConnection connection, string path, byte[] content, CancellationToken cancellationToken)
     {
-        // Not disposed when the write fails, see TimeLimitedBlobStorage.
+        // Not disposed when the write fails, see TimeLimitedStore.
         var stream = new MemoryStream(content);
         try
         {
-            await connection.Client.WriteAsync(path, stream, append: false, cancellationToken: cancellationToken);
+            await connection.Client.SetObject(path, stream, append: false, cancellationToken: cancellationToken);
         }
         catch (Exception exception) when (CanHaveReachedStorage(exception))
         {
@@ -672,9 +680,6 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// IStorageContainer - Gets metadata about a blob.
     /// </summary>
-    /// <remarks>
-    /// On disk, asking for a path in a folder that does not exist creates that folder, as reading the path does.
-    /// </remarks>
     public async Task<BlobMetadata?> GetBlobMetadataAsync(string path, CancellationToken cancellationToken)
     {
         var relativePath = StoragePath.Normalize(path);
@@ -683,10 +688,8 @@ public partial class FluentStorageContainer :
 
         // Through the client also for a storage on disk: a file subject can ask from its load on the worker,
         // and only a call on the client is limited.
-        var blobs = await Connection.Client.GetBlobsAsync([relativePath], cancellationToken);
-        return blobs.FirstOrDefault() is { } blob
-            ? new BlobMetadata(blob.Size ?? 0, blob.LastModificationTime?.UtcDateTime)
-            : null;
+        var blob = await Connection.Client.GetObjectInfo(relativePath, cancellationToken);
+        return blob is null ? null : new BlobMetadata(blob.Size ?? 0, blob.DateModified?.UtcDateTime);
     }
 
     /// <summary>
@@ -694,7 +697,7 @@ public partial class FluentStorageContainer :
     /// </summary>
     public async Task<Stream> ReadBlobAsync(string path, CancellationToken cancellationToken)
     {
-        return await Connection.Client.OpenReadAsync(path, cancellationToken: cancellationToken);
+        return await Connection.Client.OpenRead(path, cancellationToken);
     }
 
     /// <summary>
@@ -722,7 +725,7 @@ public partial class FluentStorageContainer :
         => WriteBlobCoreAsync(path, content.ToArray(), cancellationToken);
 
     // The bytes belong to the write and are not changed by anyone else, because a write that was given up still
-    // reads them after the caller got its result, see TimeLimitedBlobStorage.
+    // reads them after the caller got its result, see TimeLimitedStore.
     private async Task WriteBlobCoreAsync(string path, byte[] bytes, CancellationToken cancellationToken)
     {
         var connection = Connection;
@@ -915,11 +918,11 @@ public partial class FluentStorageContainer :
                 if (connection.Index.TryGet(relativePath, out _))
                     throw new ArgumentException($"'{name}' already exists in this folder.", nameof(name));
 
-                // Before the storage is asked, as for AddSubjectAsync: on disk, asking about a path creates its folder.
+                // Before the storage is asked, as for AddSubjectAsync.
                 if (!connection.Reconciler.IsKeyFree(relativePath, subject))
                     throw new ArgumentException(GetKeyTakenMessage(connection, relativePath, name), nameof(name));
 
-                if (await connection.Client.ExistsAsync(relativePath, token))
+                if (await connection.Client.ObjectExists(relativePath, token))
                 {
                     isPassNeeded = true;
                     throw new ArgumentException($"'{name}' already exists in this folder.", nameof(name));
@@ -985,25 +988,139 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// IStorageContainer - Deletes a subject by finding its path in the index.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The subject is not the subject of a file in this storage.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The subject is not the subject of a file or folder in this storage, or it is a folder that is not empty.
+    /// </exception>
     public async Task DeleteSubjectAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var connection = Connection;
         await RunOperationAsync(connection, token =>
         {
-            // A folder has an entry too, but no file that could be deleted.
-            if (!connection.Index.TryGetEntry(subject, out var entry) || entry.IsFolder)
+            if (!connection.Index.TryGetEntry(subject, out var entry))
                 throw new InvalidOperationException("Subject not found in storage registry");
 
-            return DeleteEntryAsync(connection, entry, token);
+            return entry.IsFolder
+                ? DeleteFolderAsync(connection, entry, token)
+                : DeleteEntryAsync(connection, entry, token);
         }, cancellationToken);
+    }
+
+    // Only an empty folder, which has at most its own metadata file. Never recursive, so that a file that appeared since
+    // the last pass makes the delete fail instead of being lost. Called on the worker.
+    private async Task DeleteFolderAsync(StorageConnection connection, StorageEntry entry, CancellationToken cancellationToken)
+    {
+        var name = StoragePath.GetName(entry.Path);
+        var folderPrefix = entry.Path + "/";
+        var metadataPath = StorageMetadataPath.GetFolderFilePath(entry.Path);
+        foreach (var other in connection.Index.Entries)
+        {
+            if (other.Path.StartsWith(folderPrefix, StringComparison.Ordinal) &&
+                !string.Equals(other.Path, metadataPath, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"'{name}' cannot be deleted: the folder is not empty.");
+            }
+        }
+
+        // Only a directory on disk has folders as such. On a bucket the folder is virtual and ends with its last object,
+        // and deleting it there deletes every object below it.
+        byte[]? metadata = null;
+        if (connection.IsOnDisk)
+        {
+            // Before anything is deleted: files that the index never holds, such as hidden ones, are not seen as content,
+            // and would make the delete of the directory fail after the metadata file is gone.
+            var content = await connection.Client.ListObjects(new StorageListOptions { FolderPath = entry.Path }, cancellationToken);
+            if (content.Exists(blob => !string.Equals(blob.FullPath, metadataPath, StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException($"'{name}' cannot be deleted: the folder contains files that are not shown.");
+            }
+
+            if (connection.Index.TryGet(metadataPath, out var metadataEntry) && !metadataEntry.IsFolder)
+            {
+                metadata = await connection.Reconciler.ReadMetadataFileAsync(metadataPath, cancellationToken);
+            }
+        }
+
+        await MetadataStore.DeleteFolderMetadataFileAsync(connection, entry.Path, cancellationToken);
+
+        if (connection.IsOnDisk)
+        {
+            try
+            {
+                await connection.Client.DeleteDirectory(entry.Path, recursive: false, cancellationToken);
+            }
+            catch (Exception exception)
+            {
+                // A file can still have appeared since the listing, and the folder is then still there with its metadata.
+                if (metadata is not null)
+                {
+                    await MetadataStore.RestoreFolderMetadataFileAsync(connection, entry.Path, metadata);
+                }
+
+                if (CanHaveReachedStorage(exception))
+                {
+                    connection.NotifyChanged(entry.Path);
+                }
+
+                throw;
+            }
+        }
+
+        connection.Index.Remove(entry.Path);
+        connection.Reconciler.Apply();
+        _subjectFactory.Release(entry.Subject);
+
+        // The key is free now, and an entry that waited for it is only loaded by a pass.
+        connection.NotifyChanged(entry.Path);
+
+        _logger?.LogDebug("Deleted folder from storage: {Path}", entry.Path);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Adds <c>Delete</c>, which requires confirmation and deletes through <see cref="DeleteSubjectAsync"/>, to each
+    /// subject that this storage holds in a file and to each of its folders, unless it has a delete operation or a property
+    /// of that name already. The operation of a folder is enabled only while the folder is empty.
+    /// A subject that keeps its <c>Delete</c> when it moves to another storage deletes through the storage that added it.
+    /// </remarks>
+    public void AddMethods(IInterceptorSubject subject)
+    {
+        if (subject.TryGetRegisteredSubject() is not { } registered ||
+            registered.TryGetProperty(DeleteOperationName) is not null ||
+            !MetadataStore.Applier.TryFindStoredSubject(registered, out var stored) ||
+            !ReferenceEquals(stored, registered) ||
+            registered.GetDeleteOperation(ExclusionTarget.None) is not null)
+        {
+            return;
+        }
+
+        var operation = new MethodMetadata(arguments => DeleteSubjectAsync(subject, (CancellationToken)arguments![0]!))
+        {
+            Kind = MethodKind.Operation,
+            Purpose = OperationPurpose.Delete,
+            PropertyName = DeleteOperationName,
+            Title = "Delete",
+            Description = subject is VirtualFolder
+                ? "Deletes the folder from the storage, which only an empty folder allows."
+                : "Deletes the file of this subject from the storage.",
+            Icon = "Delete",
+            RequiresConfirmation = true,
+            Parameters = DeleteParameters,
+        };
+
+        var property = registered.AddProperty(DeleteOperationName, typeof(MethodMetadata), _ => operation, null);
+
+        // A folder with something in it cannot be deleted, so the operation is offered only while it is empty.
+        if (subject is VirtualFolder folder)
+        {
+            property.AddAttribute<bool>(KnownAttributes.IsEnabled, _ => folder.Children.Count == 0);
+        }
     }
 
     private async Task DeleteEntryAsync(StorageConnection connection, StorageEntry entry, CancellationToken cancellationToken)
     {
         try
         {
-            await connection.Client.DeleteAsync(entry.Path, cancellationToken: cancellationToken);
+            await connection.Client.DeleteObject(entry.Path, cancellationToken);
         }
         catch (Exception exception) when (CanHaveReachedStorage(exception))
         {

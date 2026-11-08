@@ -51,11 +51,17 @@
     var icon = shown is null
         ? Icons.Material.Filled.QuestionMark
         : MudBlazorIconResolver.ResolveOrNull(string.IsNullOrEmpty(matched?.Icon) ? Icon : matched.Icon);
+    // An empty label leaves the tile to its icon, which a place too low for the icon and a label then keeps. The tile is
+    // then named by the operation that a click invokes, else by the label of the property.
+    var hidesLabel = Label is "";
+    var accessibleName = hidesLabel && UsesOperations && (isOn ? OffProperty : OnProperty)?.GetValue() is MethodMetadata clickMethod
+        ? clickMethod.Title
+        : label;
     @* The label alone is the accessible name, as for the toggle switch: the subtitle is the state, which aria-checked gives. *@
     <TileView TestId="switch-tile"
               Checked="@(_pending ?? isOn)"
-              AccessibleName="@label"
-              Label="@label"
+              AccessibleName="@accessibleName"
+              Label="@(hidesLabel ? null : label)"
               Subtitle="@subtitle"
               Outlined="@Outlined"
               Icon="@icon"
@@ -103,7 +109,8 @@ else
     public string? Path { get; set; }
 
     /// <summary>
-    /// The label next to the switch, the title that the property declares when it is not set.
+    /// The label next to the switch, the title that the property declares when it is not set. An empty label hides the
+    /// label of a tile.
     /// </summary>
     [Parameter]
     public string? Label { get; set; }

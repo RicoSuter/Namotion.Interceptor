@@ -93,6 +93,9 @@
     /// </summary>
     public bool IsValid => (_subjectComponent as ISubjectEditComponent)?.IsValid ?? _propertiesEditor?.IsValid ?? true;
 
+    /// <summary>Gets the edit component of the subject once it has rendered, or null.</summary>
+    public ISubjectComponent? EditComponent => _subjectComponent;
+
     protected override void OnInitialized()
     {
         // These events fire on every keystroke in the hosted form, and a normal handler would re-render the

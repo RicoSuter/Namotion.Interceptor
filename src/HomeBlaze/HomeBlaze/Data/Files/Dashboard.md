@@ -9,6 +9,11 @@ alignment: Left
 
 Welcome to your HomeBlaze dashboard.
 
+```mermaid
+graph LR
+    Pump --> Tank --> Heater
+```
+
 ## Motor Status
 
 | Motor | Temperature | Speed | Target |

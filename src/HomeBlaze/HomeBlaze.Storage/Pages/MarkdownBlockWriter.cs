@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using HomeBlaze.Services;
@@ -172,7 +173,7 @@ public static class MarkdownBlockWriter
         owner.Children.Where(child => child.Kind == MarkdownBlockKind.Slot && child.Head!.Name == slotName);
 
     // The white space before the head line of the block on its line.
-    private static string GetIndentation(string source, MarkdownBlock block) =>
+    internal static string GetIndentation(string source, MarkdownBlock block) =>
         source[(source.AsSpan(0, block.HeadSpan.Start).LastIndexOf('\n') + 1)..block.HeadSpan.Start];
 
     /// <summary>
@@ -198,6 +199,205 @@ public static class MarkdownBlockWriter
         edit = new MarkdownLineEdit(source.AsSpan(0, offset).Count('\n') + 1, 0, insertedLineCount);
         return source.Insert(offset, text + lineEnding);
     }
+
+    /// <summary>
+    /// Inserts the lines of a block before the 1-based <paramref name="line"/>, with an empty line between the block
+    /// and a line before or after it that is not empty. A line after the last line of the text appends the block.
+    /// <paramref name="blockText"/> has no line ending after its last line.
+    /// </summary>
+    public static string InsertBlockText(string source, int line, string blockText, string lineEnding) =>
+        InsertBlockText(source, line, blockText, lineEnding, out _);
+
+    /// <inheritdoc cref="InsertBlockText(string, int, string, string)"/>
+    internal static string InsertBlockText(string source, int line, string blockText, string lineEnding, out MarkdownLineEdit edit) =>
+        InsertMovedLines(source, line, blockText, lineEnding, standsApart: true, out edit);
+
+    /// <summary>Gets the 1-based line that <see cref="InsertLines"/> takes to append after the last line of text.</summary>
+    internal static int GetAppendLine(string source)
+    {
+        var lineFeedCount = source.AsSpan().Count('\n');
+        return source.Length == 0 || source[^1] == '\n' ? lineFeedCount + 1 : lineFeedCount + 2;
+    }
+
+    /// <summary>Gets the lines from <paramref name="line"/> to <paramref name="endLine"/>, without the line ending of the last one.</summary>
+    internal static string GetLines(string source, int line, int endLine)
+    {
+        var start = GetLineStart(source, line);
+        var end = GetLineStart(source, endLine + 1);
+        return source[start..end].TrimEnd('\n').TrimEnd('\r');
+    }
+
+    /// <summary>Gets whether an empty line stands right before or right after the lines, as between blocks that stand apart.</summary>
+    internal static bool HasEmptyLineAround(string source, int line, int endLine)
+    {
+        var start = GetLineStart(source, line);
+        var end = GetLineStart(source, endLine + 1);
+        return (line > 1 && IsEmptyLine(source, GetLineStart(source, line - 1), start)) ||
+               (end < source.Length && IsEmptyLine(source, end, GetLineStart(source, endLine + 2)));
+    }
+
+    /// <summary>
+    /// Replaces the lines from <paramref name="line"/> to <paramref name="endLine"/> with <paramref name="text"/>, which has
+    /// no line ending after its last line. An empty line keeps it apart from a line of text right before or after it.
+    /// </summary>
+    /// <remarks><paramref name="source"/> must have no lone carriage return, see <see cref="HasLoneCarriageReturn"/>.</remarks>
+    internal static string ReplaceLines(string source, int line, int endLine, string text, string lineEnding, out MarkdownLineEdit edit)
+    {
+        var start = GetLineStart(source, line);
+        var end = GetLineStart(source, endLine + 1);
+        if (line > 1 && IsTextLine(source, GetLineStart(source, line - 1), start))
+        {
+            text = lineEnding + text;
+        }
+
+        if (IsTextLine(source, end, GetLineStart(source, endLine + 2)))
+        {
+            text += lineEnding;
+        }
+
+        // Lines that end the text without a line ending give the new last line none either.
+        var replacement = end == source.Length && source.Length > 0 && source[^1] != '\n' ? text : text + lineEnding;
+        edit = new MarkdownLineEdit(line, endLine - line + 1, text.AsSpan().Count('\n') + 1);
+        return string.Concat(source.AsSpan(0, start), replacement, source.AsSpan(end));
+    }
+
+    /// <summary>Takes <paramref name="indentation"/> off the start of every line of <paramref name="text"/>, which has line feeds, that starts with it.</summary>
+    internal static string RemoveIndentation(string text, string indentation)
+    {
+        var lines = text.Split('\n');
+        for (var index = 0; index < lines.Length; index++)
+        {
+            if (lines[index].StartsWith(indentation, StringComparison.Ordinal))
+            {
+                lines[index] = lines[index][indentation.Length..];
+            }
+        }
+
+        return string.Join('\n', lines);
+    }
+
+    /// <summary>
+    /// Removes the lines from <paramref name="line"/> to <paramref name="endLine"/> so that the text around them stays apart
+    /// as before. Between two lines of text one empty line stays (see <see cref="RemoveBlock"/>). Of the empty lines around
+    /// them, the one after goes with them when the one before is empty too or they start the text, and the one before when
+    /// they end the text. When they end the text without a line ending, the text keeps ending without one.
+    /// </summary>
+    /// <remarks><paramref name="source"/> must have no lone carriage return, see <see cref="HasLoneCarriageReturn"/>.</remarks>
+    internal static string CutLines(string source, int line, int endLine, out MarkdownLineEdit edit)
+    {
+        var start = GetLineStart(source, line);
+        var end = GetLineStart(source, endLine + 1);
+        var previousStart = GetLineStart(source, line - 1);
+        var nextEnd = GetLineStart(source, endLine + 2);
+
+        if (line > 1 && IsTextLine(source, previousStart, start) && IsTextLine(source, end, nextEnd))
+        {
+            edit = new MarkdownLineEdit(line, endLine - line + 1, 1);
+            return source.Remove(start, end - start).Insert(start, GetLineEnding(source, start));
+        }
+
+        var isEmptyBefore = line > 1 && IsEmptyLine(source, previousStart, start);
+        var isEmptyAfter = end < source.Length && IsEmptyLine(source, end, nextEnd);
+        if (isEmptyAfter && (isEmptyBefore || line == 1))
+        {
+            end = nextEnd;
+            endLine++;
+        }
+        else if (isEmptyBefore && end == source.Length)
+        {
+            start = previousStart;
+            line--;
+        }
+
+        // The cut lines end the text without a line ending, so the line before them now ends it and gives up its own.
+        if (end == source.Length && start > 0 && source[^1] != '\n')
+        {
+            start -= start > 1 && source[start - 2] == '\r' ? 2 : 1;
+        }
+
+        edit = new MarkdownLineEdit(line, endLine - line + 1, 0);
+        return source.Remove(start, end - start);
+    }
+
+    /// <summary>
+    /// Removes the lines from <paramref name="line"/> to <paramref name="endLine"/> with the empty lines around them, so that
+    /// the text around them keeps the spacing of a page: no empty line at the start or the end of the text, or next to
+    /// <paramref name="headLine"/> or <paramref name="closingLine"/>, the head line and the closing line of the block whose
+    /// content the lines are (0 for none), and one empty line where the lines stood apart from the text around them or that
+    /// text would be joined (see <see cref="RemoveBlock"/>). When the lines end the text without a line ending, the text keeps
+    /// ending without one.
+    /// </summary>
+    /// <remarks><paramref name="source"/> must have no lone carriage return, see <see cref="HasLoneCarriageReturn"/>.</remarks>
+    internal static string RemoveLines(string source, int line, int endLine, int headLine, int closingLine, out MarkdownLineEdit edit)
+    {
+        // The line after the last line ending is no line of its own.
+        var lastLine = source.AsSpan().Count('\n') + (source.EndsWith('\n') ? 0 : 1);
+        var first = line;
+        while (first > 1 && IsEmptyLine(source, GetLineStart(source, first - 1), GetLineStart(source, first)))
+        {
+            first--;
+        }
+
+        var last = endLine;
+        while (last < lastLine && IsEmptyLine(source, GetLineStart(source, last + 1), GetLineStart(source, last + 2)))
+        {
+            last++;
+        }
+
+        var start = GetLineStart(source, first);
+        var end = GetLineStart(source, last + 1);
+        var previous = first - 1;
+        var next = last + 1;
+        if (previous >= 1 && next <= lastLine && previous != headLine && next != closingLine &&
+            (first < line || last > endLine ||
+             (IsTextLine(source, GetLineStart(source, previous), start) && IsTextLine(source, end, GetLineStart(source, next + 1)))))
+        {
+            edit = new MarkdownLineEdit(first, last - first + 1, 1);
+            return source.Remove(start, end - start).Insert(start, GetLineEnding(source, start));
+        }
+
+        // The removed lines end the text without a line ending, so the line before them now ends it and gives up its own.
+        if (end == source.Length && start > 0 && source[^1] != '\n')
+        {
+            start -= start > 1 && source[start - 2] == '\r' ? 2 : 1;
+        }
+
+        edit = new MarkdownLineEdit(first, last - first + 1, 0);
+        return source.Remove(start, end - start);
+    }
+
+    /// <summary>
+    /// Inserts <paramref name="text"/>, lines that <see cref="CutLines"/> cut, before the 1-based <paramref name="line"/>. An
+    /// empty line separates them from a line before or after them that is not empty when they stood apart before
+    /// (<paramref name="standsApart"/>) or that line is text, which they would join otherwise.
+    /// </summary>
+    /// <remarks><paramref name="source"/> must have no lone carriage return, see <see cref="HasLoneCarriageReturn"/>.</remarks>
+    internal static string InsertMovedLines(
+        string source, int line, string text, string lineEnding, bool standsApart, out MarkdownLineEdit edit)
+    {
+        var lineStart = GetLineStart(source, line);
+        var nextLineStart = GetLineStart(source, line + 1);
+        if (line > 1)
+        {
+            var previousLineStart = GetLineStart(source, line - 1);
+            if (!IsEmptyLine(source, previousLineStart, lineStart) && (standsApart || IsTextLine(source, previousLineStart, lineStart)))
+            {
+                text = lineEnding + text;
+            }
+        }
+
+        if (!IsEmptyLine(source, lineStart, nextLineStart) && (standsApart || IsTextLine(source, lineStart, nextLineStart)))
+        {
+            text += lineEnding;
+        }
+
+        return InsertLines(source, line, text, lineEnding, out edit);
+    }
+
+    // Whether the line between the two offsets has nothing but white space. The text after the last line ending is a
+    // line of its own, and it is empty when the text ends with a line ending.
+    private static bool IsEmptyLine(string source, int lineStart, int nextLineStart) =>
+        source.AsSpan(lineStart, nextLineStart - lineStart).IsWhiteSpace();
 
     /// <summary>
     /// Removes the block with everything in it: the lines from its head line to its last line, which is its
@@ -266,12 +466,38 @@ public static class MarkdownBlockWriter
         return false;
     }
 
-    /// <summary>Puts <paramref name="indentation"/> before every line of <paramref name="text"/>.</summary>
-    internal static string Indent(string text, string indentation, string lineEnding) =>
-        indentation.Length == 0 ? text : indentation + text.Replace(lineEnding, lineEnding + indentation);
+    /// <summary>Puts <paramref name="indentation"/> before every line of <paramref name="text"/> that is not empty or only white space.</summary>
+    internal static string Indent(string text, string indentation, string lineEnding)
+    {
+        if (indentation.Length == 0)
+        {
+            return text;
+        }
+
+        var builder = new StringBuilder(text.Length + indentation.Length * 4);
+        var remaining = text.AsSpan();
+        while (true)
+        {
+            var lineEnd = remaining.IndexOf(lineEnding);
+            var line = lineEnd < 0 ? remaining : remaining[..lineEnd];
+            if (!line.IsWhiteSpace())
+            {
+                builder.Append(indentation);
+            }
+
+            builder.Append(line);
+            if (lineEnd < 0)
+            {
+                return builder.ToString();
+            }
+
+            builder.Append(lineEnding);
+            remaining = remaining[(lineEnd + lineEnding.Length)..];
+        }
+    }
 
     // The offset of the first character of the 1-based line, or the length of the text for a line after the last one.
-    private static int GetLineStart(string source, int line)
+    internal static int GetLineStart(string source, int line)
     {
         var offset = 0;
         for (var current = 1; current < line; current++)

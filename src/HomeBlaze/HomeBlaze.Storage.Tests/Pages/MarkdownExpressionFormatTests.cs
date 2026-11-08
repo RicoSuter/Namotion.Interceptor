@@ -9,7 +9,6 @@ using Xunit;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownExpressionFormatTests
 {
     private static readonly string Namespace = typeof(TestMeter).Namespace!;

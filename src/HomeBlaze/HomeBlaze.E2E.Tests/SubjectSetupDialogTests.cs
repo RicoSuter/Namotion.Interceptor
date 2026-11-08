@@ -74,7 +74,7 @@ public class SubjectSetupDialogTests
         var browserLink = page.GetByRole(AriaRole.Link, new() { Name = "Browser" });
         await Assertions.Expect(browserLink).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
         await browserLink.ClickAsync();
-        await page.WaitForURLAsync(url => url.Contains("/browser"), new() { Timeout = PageLoadTimeout });
+        await _fixture.WaitForUrlAsync(page, url => url.Contains("/browser"), PageLoadTimeout);
 
         // The URL changes before the browser has built its panes, and the pane's Create operation is
         // what the dialog is opened from, so that button is the condition the next step depends on.
@@ -575,6 +575,32 @@ public class SubjectSetupDialogTests
 
         // Assert
         await Assertions.Expect(CreateButton(page)).ToBeDisabledAsync(new() { Timeout = ElementVisibilityTimeout });
+    }
+
+    [Fact]
+    public async Task WhenATypeIsPickedBeforeThePointerIsKnown_ThenTheNameFieldTakesTheFocus()
+    {
+        // Arrange - the dialog asks the browser for its pointer once it has rendered, and holding back the module
+        // it asks with lets the type be picked before the answer arrives, as a busy machine does by chance.
+        var page = await _fixture.CreatePageAsync();
+        var heldModuleRequest = new TaskCompletionSource<IRoute>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // The module is served under a fingerprinted name, such as "SubjectSetupDialog.m938w0l6zk.razor.js".
+        await page.RouteAsync(url => url.Contains("/SubjectSetupDialog."), route =>
+        {
+            heldModuleRequest.TrySetResult(route);
+            return Task.CompletedTask;
+        });
+
+        await OpenDialogAsync(page);
+        var moduleRequest = await heldModuleRequest.Task.WaitAsync(TimeSpan.FromMilliseconds(PageLoadTimeout));
+
+        // Act
+        await PickTypeAsync(page, "motor");
+        await moduleRequest.ContinueAsync();
+
+        // Assert
+        await Assertions.Expect(NameInput(page)).ToBeFocusedAsync(new() { Timeout = ElementVisibilityTimeout });
     }
 
     [Fact]

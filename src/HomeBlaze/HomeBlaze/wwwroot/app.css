@@ -3,3 +3,8 @@
 h1[tabindex="-1"]:focus {
     outline: none;
 }
+
+/* A Mermaid diagram (mermaid-diagrams.js) is hidden while it renders; one that cannot render keeps its source as code. */
+pre.mermaid[data-mermaid-state="pending"] {
+    visibility: hidden;
+}

@@ -68,6 +68,25 @@ public class LiveUpdateTests
     }
 
     [Fact]
+    public async Task WhenAValueChanges_ThenAStaticBlockOfThePageKeepsItsElement()
+    {
+        // Arrange
+        var content = "Static paragraph.\n\n| Value |\n|---|\n| {{ $P/Text }} |\n";
+        var (subject, page) = await OpenPageAsync(content, live => live.Text = "Before");
+        var markdown = page.Locator(".markdown-content");
+        await Assertions.Expect(markdown).ToContainTextAsync("Before", new() { Timeout = Timeout });
+        var paragraph = markdown.Locator("p", new() { HasText = "Static paragraph." });
+        await paragraph.EvaluateAsync("element => element.dataset.probe = 'kept'");
+
+        // Act
+        subject.Text = "After";
+        await Assertions.Expect(markdown).ToContainTextAsync("After", new() { Timeout = Timeout });
+
+        // Assert
+        await Assertions.Expect(paragraph).ToHaveAttributeAsync("data-probe", "kept");
+    }
+
+    [Fact]
     public async Task WhenAValueInAHiddenTabChanges_ThenTheTabShowsTheNewValueWhenOpenedAndAfterwards()
     {
         // Arrange

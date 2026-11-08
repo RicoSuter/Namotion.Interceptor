@@ -119,6 +119,13 @@ public partial class ShellyCover :
     [PropertyAttribute("Close", KnownAttributes.IsEnabled)]
     public bool Close_IsEnabled => _device.IsConnected && ShutterState is not (RollerShutterState.Closed or RollerShutterState.Closing);
 
+    // Disabled only while the cover is known to stand still, so a state that is not known yet or lags behind the
+    // motor never blocks stopping it.
+    [Derived]
+    [PropertyAttribute("Stop", KnownAttributes.IsEnabled)]
+    public bool Stop_IsEnabled => _device.IsConnected &&
+        (IsMoving == true || ShutterState is not (RollerShutterState.Open or RollerShutterState.Closed or RollerShutterState.PartiallyOpen));
+
     public ShellyCover(ShellyDevice device, int index)
     {
         _device = device;

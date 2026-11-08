@@ -83,7 +83,7 @@ public class NavigationTests
         await browserLink.ClickAsync();
 
         // Wait for navigation to complete
-        await page.WaitForURLAsync(url => url.Contains("/browser"), new() { Timeout = 30000 });
+        await _fixture.WaitForUrlAsync(page, url => url.Contains("/browser"));
 
         // Assert
         Assert.Contains("/browser", page.Url);

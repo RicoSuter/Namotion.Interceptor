@@ -3,7 +3,6 @@ using HomeBlaze.Storage.Pages;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class HistoryChartBlockTests
 {
     [Fact]

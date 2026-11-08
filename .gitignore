@@ -386,6 +386,7 @@ src/HomeBlaze/HomeBlaze/PluginsCache/
 src/HomeBlaze/HomeBlaze/Data/History/
 src/HomeBlaze/HomeBlaze/Data/Agents/
 src/HomeBlaze/HomeBlaze/Data/OpcUa/
+src/HomeBlaze/HomeBlaze/Data/DataProtection-Keys/
 # Performance pass artifacts
 benchmark_*.md
 .claude/scheduled_tasks.lock

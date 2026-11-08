@@ -21,7 +21,8 @@ public class SubjectCollectionOperation
     public required object Index { get; init; }
 
     /// <summary>
-    /// Source index for Move operations (arrays only).
+    /// Source index for Move operations (arrays only), numbered against the collection
+    /// after all Remove and Insert operations of the same update have been applied.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("fromIndex")]

@@ -701,4 +701,110 @@ public class MarkdownBlockWriterTests
         // Assert
         Assert.Equal("  a\r\n  b", result);
     }
+
+    [Theory]
+    [InlineData("intro\n\n:: Demo.One\n::\n", 3, "intro\n\n:: Demo.New\n::\n\n:: Demo.One\n::\n")]
+    [InlineData("intro\n:: Demo.One\n::\n", 2, "intro\n\n:: Demo.New\n::\n\n:: Demo.One\n::\n")]
+    [InlineData("intro\n", 2, "intro\n\n:: Demo.New\n::\n")]
+    [InlineData("intro", 2, "intro\n\n:: Demo.New\n::")]
+    [InlineData("", 1, ":: Demo.New\n::\n")]
+    public void WhenBlockTextIsInserted_ThenAnEmptyLineSeparatesItFromLinesThatAreNotEmpty(string source, int line, string expected)
+    {
+        // Act
+        var result = MarkdownBlockWriter.InsertBlockText(source, line, ":: Demo.New\n::", "\n");
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void WhenBlockTextIsInsertedIntoAPageWithWindowsLineEndings_ThenTheResultHasOnlyWindowsLineEndings()
+    {
+        // Arrange
+        const string source = "intro\r\n:: Demo.One\r\n::\r\n";
+
+        // Act
+        var result = MarkdownBlockWriter.InsertBlockText(source, 2, ":: Demo.New\r\n::", "\r\n");
+
+        // Assert
+        Assert.Equal("intro\r\n\r\n:: Demo.New\r\n::\r\n\r\n:: Demo.One\r\n::\r\n", result);
+    }
+
+    [Theory]
+    [InlineData("intro\n", 2)]
+    [InlineData("intro", 2)]
+    [InlineData("a\nb\n", 3)]
+    [InlineData("", 1)]
+    public void WhenTheAppendLineIsAskedFor_ThenItIsTheLineAfterTheLastLineOfText(string source, int expected)
+    {
+        // Act & Assert
+        Assert.Equal(expected, MarkdownBlockWriter.GetAppendLine(source));
+    }
+
+    [Fact]
+    public void WhenLinesAreAskedFor_ThenTheyComeWithoutTheLastLineEnding()
+    {
+        // Arrange
+        const string source = "intro\r\n\r\n:: Demo.Card\r\n::: Row Label=A\r\n:::\r\n::\r\n\r\noutro\r\n";
+
+        // Act
+        var text = MarkdownBlockWriter.GetLines(source, 3, 6);
+
+        // Assert
+        Assert.Equal(":: Demo.Card\r\n::: Row Label=A\r\n:::\r\n::", text);
+    }
+
+    [Theory]
+    [InlineData("a\n\nB\n\nc\n", 3, 3, "a\n\nc\n")]
+    [InlineData("a\n\nB\n", 3, 3, "a\n")]
+    [InlineData("B\n\nc\n", 1, 1, "c\n")]
+    [InlineData("a\nB\nc\n", 2, 2, "a\n\nc\n")]
+    [InlineData(":: X\nB\n::\n", 2, 2, ":: X\n::\n")]
+    [InlineData("a\n\nB", 3, 3, "a")]
+    [InlineData("a\nB", 2, 2, "a")]
+    public void WhenLinesAreCut_ThenTheTextAroundThemStaysApartAsBefore(string source, int line, int endLine, string expected)
+    {
+        // Act
+        var result = MarkdownBlockWriter.CutLines(source, line, endLine, out _);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("a\n\nOld\n\nb\n", 3, 3, "New", "a\n\nNew\n\nb\n")]
+    [InlineData("a\nOld\nb\n", 2, 2, "New", "a\n\nNew\n\nb\n")]
+    [InlineData(":: X\nOld\n::\n", 2, 2, "New", ":: X\nNew\n::\n")]
+    [InlineData("a\n\nOld", 3, 3, "New", "a\n\nNew")]
+    public void WhenLinesAreReplaced_ThenTheNewLinesStandApartFromTextAroundThem(string source, int line, int endLine, string text, string expected)
+    {
+        // Act
+        var result = MarkdownBlockWriter.ReplaceLines(source, line, endLine, text, "\n", out _);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("  a\n  b", "  ", "a\nb")]
+    [InlineData("  a\n\n b\nc", "  ", "a\n\n b\nc")]
+    [InlineData("a", "", "a")]
+    public void WhenIndentationIsRemoved_ThenOnlyLinesThatStartWithItLoseIt(string text, string indentation, string expected)
+    {
+        // Act
+        var result = MarkdownBlockWriter.RemoveIndentation(text, indentation);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void WhenTextWithEmptyLinesIsIndented_ThenTheEmptyLinesStayEmpty()
+    {
+        // Act
+        var result = MarkdownBlockWriter.Indent("a\r\n\r\n \r\nb", "  ", "\r\n");
+
+        // Assert
+        Assert.Equal("  a\r\n\r\n \r\n  b", result);
+    }
 }

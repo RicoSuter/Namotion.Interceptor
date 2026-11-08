@@ -17,10 +17,16 @@ namespace HomeBlaze.E2E.Tests.Infrastructure;
 /// </summary>
 public class PlaywrightFixture : IAsyncLifetime
 {
+    // The default timeout of AsyncTestHelpers.WaitUntilAsync, which the polls of the files use.
+    private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(30);
+
     private IPlaywright? _playwright;
     private IBrowser? _browser;
     private WebTestingHostFactory<App>? _factory;
     private IBrowserContext? _context;
+
+    // Where the server log stood when the current page was created, see WaitForUrlAsync.
+    private int _serverLogCountAtPage;
 
     public IBrowser Browser => _browser ?? throw new InvalidOperationException("Browser not initialized");
 
@@ -29,7 +35,12 @@ public class PlaywrightFixture : IAsyncLifetime
     /// <summary>
     /// The services of the server under test, for tests that change the object graph while a page is open.
     /// </summary>
-    public IServiceProvider ServerServices => _factory?.ServerServices ?? throw new InvalidOperationException("Server not started");
+    public IServiceProvider ServerServices => _factory?.Services ?? throw new InvalidOperationException("Server not started");
+
+    /// <summary>
+    /// The number of hosts of the application that the fixture started.
+    /// </summary>
+    public int StartedHostCount => _factory?.StartedHostCount ?? throw new InvalidOperationException("Server not started");
 
     /// <summary>
     /// The warnings and errors that the server under test logs.
@@ -40,14 +51,14 @@ public class PlaywrightFixture : IAsyncLifetime
     {
         // Start the test server with Kestrel. It learns the test subjects and the widget before it loads anything.
         _factory = new WebTestingHostFactory<App>([typeof(ControlsTestSubject), typeof(ControlsTestWidget), typeof(HistoryValuesSubject), typeof(LiveValuesSubject), typeof(LiveGridSubject), typeof(LiveGridWidget)]);
-        // Force server to start by accessing ServerAddress which calls EnsureServer
+        // Accessing the address starts the server
         var address = _factory.ServerAddress;
         Console.WriteLine($"Test server started at: {address}");
 
         // The root subject is loaded by a background service, so the server serves requests before the
         // object graph behind them exists. The UI waits that window out on its own, but the wait would
         // otherwise land inside the first test's own timeout instead of here.
-        var rootManager = _factory.ServerServices.GetRequiredService<RootManager>();
+        var rootManager = _factory.Services.GetRequiredService<RootManager>();
         try
         {
             await rootManager.RootLoaded.WaitAsync(TimeSpan.FromSeconds(60));
@@ -66,7 +77,7 @@ public class PlaywrightFixture : IAsyncLifetime
 
         // Registered once for the whole run, so that every test sees the same types. Resolving a qualified
         // name adds the type to the registry.
-        var typeRegistry = _factory.ServerServices.GetRequiredService<SubjectTypeRegistry>();
+        var typeRegistry = _factory.Services.GetRequiredService<SubjectTypeRegistry>();
         if (typeRegistry.ResolveType(typeof(PlainConfigurableSubject).AssemblyQualifiedName!) is null
             || typeRegistry.ResolveType(typeof(ControlsTestSubject).AssemblyQualifiedName!) is null)
         {
@@ -181,6 +192,29 @@ public class PlaywrightFixture : IAsyncLifetime
     }
 
     /// <summary>
+    /// Stores a new motor as a JSON file of the root storage, as the create dialog does.
+    /// </summary>
+    /// <returns>The name of the motor under the root, which is its path, the path of its file and the motor.</returns>
+    public async Task<(string Name, string FilePath, IInterceptorSubject Subject)> AddStoredMotorAsync()
+    {
+        var name = $"Motor{Guid.NewGuid():N}";
+        var motor = ServerServices.GetRequiredService<SubjectFactory>().CreateSubject<HomeBlaze.Samples.Motor>();
+        await GetRoot().AddSubjectAsync($"{name}.json", motor, CancellationToken.None);
+        return (name, GetPagePath($"{name}.json"), motor);
+    }
+
+    /// <summary>
+    /// Deletes a subject of <see cref="AddStoredMotorAsync"/> with its file, unless it is gone already.
+    /// </summary>
+    public async Task DeleteStoredSubjectAsync(string filePath, IInterceptorSubject subject)
+    {
+        if (File.Exists(filePath))
+        {
+            await GetRoot().DeleteSubjectAsync(subject, CancellationToken.None);
+        }
+    }
+
+    /// <summary>
     /// Writes a page of the demo folder, given by its file name, through the page like an editor does, which also
     /// loads the page again.
     /// </summary>
@@ -216,13 +250,13 @@ public class PlaywrightFixture : IAsyncLifetime
         => Path.Combine(ServerServices.GetRequiredService<RootManager>().DataDirectory, "TestData", relativePath);
 
     /// <summary>
-    /// Reads a file that the server may hold open, such as a page that it is loading again after a write.
+    /// Reads a file of the storage of the server between the writes of the server, so that the read cannot fail one.
     /// </summary>
     public async Task<string> ReadFileAsync(string path)
     {
         var content = string.Empty;
         await RetryWhileFileIsHeldAsync(
-            () => content = File.ReadAllText(path),
+            () => content = ReadBetweenWritesOfServer(path),
             $"The file {path} could not be read");
         return content;
     }
@@ -252,12 +286,34 @@ public class PlaywrightFixture : IAsyncLifetime
         return text;
     }
 
-    // The server holds the file open while it reads it again after a write, and the poll tries a failed read again.
-    private static bool TryReadFile(string path, out string text)
+    // On the worker of the storage, which runs every write of the server. The server creates a file without sharing,
+    // and on Unix as well that fails while the file is open for reading, so a read beside a write would fail the write.
+    private string ReadBetweenWritesOfServer(string path)
+    {
+        var connection = GetRoot().Connection;
+        var text = string.Empty;
+
+        // Limited like the polls, so that a worker that hangs fails the test instead of holding it. Run on the thread
+        // pool for the reason given in WriteDemoPageAsync.
+        using var cancellation = new CancellationTokenSource(ReadTimeout);
+        Task.Run(() => FluentStorageContainer.RunOperationAsync(
+            connection,
+            _ =>
+            {
+                text = File.ReadAllText(path);
+                return Task.CompletedTask;
+            },
+            cancellation.Token)).GetAwaiter().GetResult();
+
+        return text;
+    }
+
+    // A write that the storage gave up on can still hold the file, and the poll tries a failed read again.
+    private bool TryReadFile(string path, out string text)
     {
         try
         {
-            text = File.ReadAllText(path);
+            text = ReadBetweenWritesOfServer(path);
             return true;
         }
         catch (IOException)
@@ -327,8 +383,33 @@ public class PlaywrightFixture : IAsyncLifetime
             await _context.CloseAsync();
         }
 
+        _serverLogCountAtPage = ServerLog.Count;
         _context = await Browser.NewContextAsync(contextOptions);
         return await _context.NewPageAsync();
+    }
+
+    /// <summary>
+    /// Waits until the app has navigated the page to a URL that <paramref name="isUrl"/> accepts. A timeout fails with what the
+    /// page and the server show, so that a failure on a build server tells why the app did not navigate.
+    /// </summary>
+    public async Task WaitForUrlAsync(IPage page, Func<string, bool> isUrl, float timeout = 30000)
+    {
+        try
+        {
+            // Polls the URL of the page, which follows every navigation. WaitForURLAsync misses a navigation of the app that
+            // lands between its check of the URL and its subscription to the navigation events.
+            await AsyncTestHelpers.WaitUntilAsync(() => isUrl(page.Url), TimeSpan.FromMilliseconds(timeout));
+        }
+        catch (TimeoutException exception)
+        {
+            var dialogs = string.Join(" | ", await page.Locator(".mud-dialog").AllInnerTextsAsync());
+            var showsErrorUi = await page.Locator("#blazor-error-ui").IsVisibleAsync();
+            var serverLog = string.Join('\n', ServerLog.GetEntriesSince(_serverLogCountAtPage)
+                .Select(entry => $"{entry.Level} {entry.Category}: {entry.Message} {entry.Exception}"));
+            throw new TimeoutException(
+                $"The page stayed at {page.Url}. Dialogs: [{dialogs}]. Error UI shown: {showsErrorUi}. Server log since the page was created:\n{serverLog}",
+                exception);
+        }
     }
 }
 

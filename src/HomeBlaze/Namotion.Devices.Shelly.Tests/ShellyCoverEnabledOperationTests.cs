@@ -34,8 +34,45 @@ public class ShellyCoverEnabledOperationTests
         Assert.Equal(expectedClose, cover.Close_IsEnabled);
     }
 
+    [Theory]
+    [InlineData("opening", 50, true)]
+    [InlineData("closing", 50, true)]
+    [InlineData("stopped", 100, false)]
+    [InlineData("stopped", 0, false)]
+    [InlineData("stopped", 50, false)]
+    [InlineData("calibrating", 50, true)]
+    [InlineData(null, null, true)]             // state not known yet: it may move
+    public void WhenCoverIsInAState_ThenStopIsDisabledOnlyWhileItIsKnownToStandStill(
+        string? apiState, int? apiPosition, bool expectedStop)
+    {
+        // Arrange
+        var (_, cover) = CreateConnectedCover();
+
+        // Act
+        cover.ApiState = apiState;
+        cover.CurrentPosition = apiPosition;
+
+        // Assert
+        Assert.Equal(expectedStop, cover.Stop_IsEnabled);
+    }
+
     [Fact]
-    public void WhenDeviceIsDisconnected_ThenNeitherOperationIsEnabled()
+    public void WhenCoverDrawsPowerWhileItsStateSaysStopped_ThenStopIsEnabled()
+    {
+        // Arrange
+        var (_, cover) = CreateConnectedCover();
+        cover.ApiState = "stopped";
+        cover.CurrentPosition = 50;
+
+        // Act
+        cover.MeasuredPower = 80;
+
+        // Assert
+        Assert.True(cover.Stop_IsEnabled);
+    }
+
+    [Fact]
+    public void WhenDeviceIsDisconnected_ThenNoOperationIsEnabled()
     {
         // Arrange
         var (device, cover) = CreateConnectedCover();
@@ -48,6 +85,7 @@ public class ShellyCoverEnabledOperationTests
         // Assert
         Assert.False(cover.Open_IsEnabled);
         Assert.False(cover.Close_IsEnabled);
+        Assert.False(cover.Stop_IsEnabled);
     }
 
     private class TestHttpClientFactory : IHttpClientFactory

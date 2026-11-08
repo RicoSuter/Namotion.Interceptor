@@ -55,13 +55,13 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
 
             foreach (var attachedHostedService in change.Subject.GetAttachedHostedServices())
             {
-                // The extension, not this handler's own method: it also clears the subject's
-                // attached-services data, which a plain stop would leave behind (pinned by
-                // HostedServiceHandlerTests.WhenSubjectServiceIsDetached_ThenHostedServiceIsStopped).
-                // It re-resolves the handler through the subject's context, so a subject whose own
-                // context has already lost its fallback stops resolving one; that is pre-existing and
-                // narrower than losing the data cleanup.
-                change.Subject.DetachHostedService(attachedHostedService);
+                // Stopped by this handler rather than one looked up through the subject's context:
+                // ContextInheritanceHandler runs first and may already have removed the fallback
+                // contexts that lookup goes through.
+                if (InterceptorHostingExtensions.RemoveAttachedHostedService(change.Subject, attachedHostedService))
+                {
+                    DetachHostedService(attachedHostedService);
+                }
             }
         }
     }

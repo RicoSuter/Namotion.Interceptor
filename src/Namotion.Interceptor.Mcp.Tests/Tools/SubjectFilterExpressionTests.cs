@@ -1,8 +1,9 @@
+using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking;
+using static Namotion.Interceptor.Mcp.Tests.TestGraphs;
 
 namespace Namotion.Interceptor.Mcp.Tests.Tools;
 
@@ -204,7 +205,7 @@ public class SubjectFilterExpressionTests
 
         // Assert
         Assert.True(parsed);
-        Assert.True(expression!.Matches(room.TryGetRegisteredSubject()!, DefaultPathProvider.Instance));
+        Assert.True(expression!.Matches(room.TryGetRegisteredSubject()!, DefaultPathProvider.Instance, McpSubjectReadability.Unrestricted));
     }
 
     [Fact]
@@ -255,6 +256,7 @@ public class SubjectFilterExpressionTests
     [InlineData("Temperature > Device.Missing", false)]
     [InlineData("not (Missing > 1)", false)]
     [InlineData("not (Device == Light)", false)]
+    [InlineData("Temperature - 1 > 20", true)]
     public void WhenFilterUsesPathsNotOrMissingValues_ThenItMatchesAsTheExpressionLanguageSays(string where, bool expected)
     {
         // Arrange
@@ -273,7 +275,6 @@ public class SubjectFilterExpressionTests
     [InlineData("value > 1", "where: 'value' is not available in where")]
     [InlineData("Name == value", "where: 'value' is not available in where")]
     [InlineData("Name | raw", "where: a condition takes no pipes")]
-    [InlineData("Temperature - 1 > 0", "where: arithmetic is not supported at position 12")]
     [InlineData("Devices[a] == null", "where: a path ends at a property, not at an entry such as 'Devices[a]'")]
     [InlineData("subject.Devices[a] != null", "where: a path ends at a property, not at an entry such as 'subject.Devices[a]'")]
     [InlineData("subject[0] == null", "where: a path ends at a property, not at an entry such as 'subject[0]'")]
@@ -434,14 +435,11 @@ public class SubjectFilterExpressionTests
         Assert.False(matches);
     }
 
-    private static IInterceptorSubjectContext CreateContext() =>
-        InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-
     private static bool Evaluate(string where, IInterceptorSubject subject, PathProviderBase? pathProvider = null)
     {
         pathProvider ??= DefaultPathProvider.Instance;
         Assert.True(SubjectFilterExpression.TryParse(where, pathProvider.PathSeparator, out var expression, out _));
-        return expression.Matches(subject.TryGetRegisteredSubject()!, pathProvider);
+        return expression.Matches(subject.TryGetRegisteredSubject()!, pathProvider, McpSubjectReadability.Unrestricted);
     }
 
     private sealed class SlashPathProvider : PathProviderBase
@@ -451,9 +449,10 @@ public class SubjectFilterExpressionTests
 
     private sealed class HidingPathProvider(string hiddenName) : PathProviderBase
     {
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != hiddenName;
-
-        public override string? TryGetPropertySegment(RegisteredSubjectProperty property) =>
-            IsPropertyIncluded(property) ? property.Name : null;
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        {
+            segment = property.Name != hiddenName ? property.Name : null;
+            return segment is not null;
+        }
     }
 }

@@ -50,13 +50,11 @@ public class SpacingLayoutTests
         return page;
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task WhenAFlowOfGaugesIsInACard_ThenTheCardPaddingAloneIsAroundIt(bool isInlineMode)
+    [Fact]
+    public async Task WhenAFlowOfGaugesIsInACard_ThenTheCardPaddingAloneIsAroundIt()
     {
         // Arrange
-        var page = await OpenPageAsync(isInlineMode);
+        var page = await OpenPageAsync();
         var card = page.GetCard("Gauge Card");
         await Assertions.Expect(card.GetByTestId("gauge")).ToHaveCountAsync(2, new() { Timeout = Timeout });
 
@@ -82,48 +80,42 @@ public class SpacingLayoutTests
         Assert.Equal(CardPadding, gaps[2], Tolerance);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task WhenBlocksStandInAContainer_ThenTheFirstAndTheLastAddNoSpaceAtItsEdges(bool isInlineMode)
+    [Fact]
+    public async Task WhenBlocksStandInAContainer_ThenTheFirstAndTheLastAddNoSpaceAtItsEdges()
     {
         // Arrange
-        var page = await OpenPageAsync(isInlineMode);
+        var page = await OpenPageAsync();
         await Assertions.Expect(page.GetCard("Panel Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
 
-        // Act: for every visible card body, tab panel and expansion panel, the room between its padding and the boxes of
-        // its first and last visible block.
-        var edges = await page.EvaluateAsync<string[]>(
-            """
-            () => {
-                const results = [];
-                const containers = document.querySelectorAll('.card-widget > .mud-card-content, .tab-layout-panel, .mud-expand-panel-content');
-                for (const container of containers) {
-                    if (container.getBoundingClientRect().height === 0) continue;
-                    const style = getComputedStyle(container);
-                    const box = container.getBoundingClientRect();
-                    const top = box.top + parseFloat(style.paddingTop) + parseFloat(style.borderTopWidth);
-                    const bottom = box.bottom - parseFloat(style.paddingBottom) - parseFloat(style.borderBottomWidth);
-                    const fragment = container.querySelector(':scope > .subject-component-wrapper > .markdown-fragment');
-                    const blocks = [...(fragment ?? container.firstElementChild).children]
-                        .map(block => block.getBoundingClientRect())
-                        .filter(rect => rect.height > 0);
-                    if (blocks.length === 0) continue;
-                    const label = container.closest('[data-testid=card]')?.querySelector('[data-testid=card-title]')?.textContent
-                        ?? container.className;
-                    // The body of a card in a flow grows to the height of the row, and in a grid cell or a canvas node to
-                    // the height of it, below its content.
-                    const grows = container.matches('.mud-card-content') && container.closest('.flow-layout-item, .grid-cell-content, .canvas-node-content') !== null;
-                    const below = grows ? 0 : Math.round(bottom - blocks[blocks.length - 1].bottom);
-                    results.push(`${label.trim()}: ${Math.round(blocks[0].top - top)} ${below}`);
-                }
-                return results;
-            }
-            """);
+        // Act
+        var edges = await GetContainerEdgesAsync(page, ViewedContainers);
 
         // Assert: also the tab whose first block is a Responsive that this screen hides.
-        Assert.Contains(edges, edge => edge.StartsWith("tab-layout-panel", StringComparison.Ordinal));
-        Assert.True(edges.All(edge => edge.EndsWith(": 0 0", StringComparison.Ordinal)), string.Join("; ", edges));
+        Assert.Contains(edges, edge => edge.Label.StartsWith("tab-layout-panel", StringComparison.Ordinal));
+        Assert.True(edges.All(edge => edge.Top == 0 && edge.Bottom == 0), string.Join("; ", edges));
+    }
+
+    [Fact]
+    public async Task WhenBlocksOfAContainerAreEditedInline_ThenTheyAreAtLeastOneRemFromItsEdgesAndFromEachOther()
+    {
+        // Arrange: nothing is selected, and the gaps are there before any insert line shows in them.
+        var page = await OpenPageAsync(isInlineMode: true);
+        await Assertions.Expect(page.GetCard("Panel Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        var edges = await GetContainerEdgesAsync(page, ViewedContainers + ", .flow-layout-item, .mud-alert-message");
+
+        // Assert: also the card whose heading is closer to the text below it on a viewed page, and a tab panel.
+        Assert.Contains(edges, edge => edge.Label == "Heading Card");
+        Assert.Contains(edges, edge => edge.Label.StartsWith("tab-layout-panel", StringComparison.Ordinal));
+        Assert.Contains(edges, edge => edge.Label.StartsWith("flow-layout-item", StringComparison.Ordinal));
+        Assert.Contains(edges, edge => edge.Label.StartsWith("mud-alert-message", StringComparison.Ordinal));
+        Assert.True(
+            edges.All(edge =>
+                Math.Abs(edge.Top - BlockSpacing) <= Tolerance &&
+                (edge.Grows || Math.Abs(edge.Bottom - BlockSpacing) <= Tolerance) &&
+                edge.SmallestGap >= BlockSpacing - Tolerance),
+            string.Join("; ", edges));
     }
 
     [Fact]
@@ -312,13 +304,12 @@ public class SpacingLayoutTests
         Assert.Equal(8, gaps[1], Tolerance);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task WhenAWidgetShowsNothing_ThenItTakesNoSpaceBetweenParagraphs(bool isInlineMode)
+    // Edited inline, such a widget shows a chip in its place (see InlineStructureEditingTests).
+    [Fact]
+    public async Task WhenAWidgetShowsNothing_ThenItTakesNoSpaceBetweenParagraphs()
     {
         // Arrange
-        var page = await OpenPageAsync(isInlineMode);
+        var page = await OpenPageAsync();
         var after = page.Locator(".markdown-content > p").GetByText("Text after the map.", new() { Exact = true });
         await Assertions.Expect(after).ToBeVisibleAsync(new() { Timeout = Timeout });
 
@@ -475,5 +466,65 @@ public class SpacingLayoutTests
         public string[] BrokenCodes { get; set; } = [];
 
         public int WrappedTypeNames { get; set; }
+    }
+
+    private const string ViewedContainers = ".card-widget > .mud-card-content, .tab-layout-panel, .mud-expand-panel-content";
+
+    // For every visible container that the selector finds, the room between its padding and the boxes of its first and last
+    // visible block, and the smallest gap between two of its blocks. The room below the last block of a card body or a flow
+    // item that grows is 0.
+    private static Task<ContainerEdges[]> GetContainerEdgesAsync(IPage page, string containerSelector) =>
+        page.EvaluateAsync<ContainerEdges[]>(
+            """
+            containerSelector => {
+                const results = [];
+                const containers = document.querySelectorAll(containerSelector);
+                for (const container of containers) {
+                    if (container.getBoundingClientRect().height === 0) continue;
+                    const style = getComputedStyle(container);
+                    const box = container.getBoundingClientRect();
+                    const top = box.top + parseFloat(style.paddingTop) + parseFloat(style.borderTopWidth);
+                    const bottom = box.bottom - parseFloat(style.paddingBottom) - parseFloat(style.borderBottomWidth);
+                    const fragment = container.querySelector(':scope > .subject-component-wrapper > .markdown-fragment, :scope > .layout-cell > .subject-component-wrapper > .markdown-fragment');
+                    const parent = fragment ?? container.firstElementChild;
+                    if (!parent) continue;
+                    const blocks = [...parent.children]
+                        .map(block => block.getBoundingClientRect())
+                        .filter(rect => rect.height > 0);
+                    if (blocks.length === 0) continue;
+                    const label = container.closest('[data-testid=card]')?.querySelector('[data-testid=card-title]')?.textContent
+                        ?? container.className;
+                    // A flow item and the body of a card in it grow to the height of the row, and a body in a grid cell or
+                    // a canvas node to the height of it, below its content.
+                    const grows = container.matches('.flow-layout-item') ||
+                        container.matches('.mud-card-content') && container.closest('.flow-layout-item, .grid-cell-content, .canvas-node-content') !== null;
+                    const gaps = blocks.slice(1).map((block, index) => Math.round(block.top - blocks[index].bottom));
+                    results.push({
+                        label: label.trim(),
+                        top: Math.round(blocks[0].top - top),
+                        bottom: grows ? 0 : Math.round(bottom - blocks[blocks.length - 1].bottom),
+                        grows,
+                        smallestGap: gaps.length > 0 ? Math.min(...gaps) : 1000
+                    });
+                }
+                return results;
+            }
+            """,
+            containerSelector);
+
+    // Filled by Playwright, which needs a parameterless constructor and settable properties.
+    private sealed class ContainerEdges
+    {
+        public string Label { get; set; } = string.Empty;
+
+        public double Top { get; set; }
+
+        public double Bottom { get; set; }
+
+        public bool Grows { get; set; }
+
+        public double SmallestGap { get; set; }
+
+        public override string ToString() => $"{Label}: {Top} {Bottom} {SmallestGap}";
     }
 }

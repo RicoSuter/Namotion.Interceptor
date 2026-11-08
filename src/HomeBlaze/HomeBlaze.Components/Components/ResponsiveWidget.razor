@@ -1,5 +1,6 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Responsive))]
 @implements ISubjectComponent
+@inherits SelectionContainingWidgetBase
 
 @{
     var responsive = Subject as Responsive;
@@ -10,7 +11,17 @@
     @* Not MudHidden, which renders nothing on other screens: the content is rendered and kept live everywhere, and the classes alone hide it, without JavaScript. *@
     if (Responsive.TryGetCssClasses(responsive.From, responsive.To, out var cssClasses, out var error))
     {
-        <div class="@cssClasses" data-testid="responsive">
+        var isEditingInline = IsEditing && Selection is not null;
+        var isPreview = isEditingInline && ContainsSelection;
+        @if (isEditingInline && !isPreview && Responsive.GetHiddenCssClasses(responsive.From, responsive.To) is { } hiddenClasses)
+        {
+            @* Edited inline, a chip stands where the content is hidden, and selecting it shows the content. *@
+            <div class="@hiddenClasses">
+                <WidgetChip Icon="@Icons.Material.Filled.Devices" Text="@($"Responsive · {Responsive.GetRangeLabel(responsive.From, responsive.To)}")" TestId="responsive-chip" />
+            </div>
+        }
+
+        <div class="@(isPreview ? "responsive-widget responsive-widget-preview" : cssClasses)" data-testid="responsive">
             <SubjectComponent Subject="@responsive.Content" Type="SubjectComponentType.Widget" />
         </div>
     }

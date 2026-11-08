@@ -18,6 +18,56 @@ public class MarkdownEditorTests
         _fixture = fixture;
     }
 
+    [Theory]
+    [InlineData("Split")]
+    [InlineData("Source")]
+    public async Task WhenAnEmptyPageIsEdited_ThenItsEditorShowsAndTextTypedIntoItIsSaved(string mode)
+    {
+        // Arrange
+        await _fixture.WriteDemoPageAsync("TextEditing.md", string.Empty);
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/TextEditing.md");
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
+
+        // Act
+        await page.SelectEditModeAsync(mode);
+        var editorContent = page.Locator(".monaco-editor .view-lines");
+        await Assertions.Expect(editorContent).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await editorContent.ClickAsync();
+        await page.Keyboard.TypeAsync("Text of an empty page.");
+        await page.Locator("[data-testid='save-button'] button").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync("TextEditing.md", text => text == "Text of an empty page.", "The text was not saved.");
+    }
+
+    [Fact]
+    public async Task WhenAllTextOfAPageIsDeletedAndSavedInSource_ThenTheEditorStays()
+    {
+        // Arrange
+        await _fixture.WriteDemoPageAsync("TextEditing.md", "Only text.");
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/TextEditing.md");
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
+        await page.SelectEditModeAsync("Source");
+        var editorContent = page.Locator(".monaco-editor .view-lines");
+        await Assertions.Expect(editorContent).ToContainTextAsync("Only text.", new() { Timeout = 30000 });
+        await editorContent.ClickAsync();
+        await page.Keyboard.PressAsync("ControlOrMeta+a");
+        await page.Keyboard.PressAsync("Delete");
+
+        // Act
+        await page.Locator("[data-testid='save-button'] button").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync("TextEditing.md", text => text.Length == 0, "The empty text was not saved.");
+        await Assertions.Expect(page.GetByText("Configuration saved.")).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await Assertions.Expect(page.Locator(".monaco-editor")).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await Assertions.Expect(page.Locator(".mud-progress-circular")).ToHaveCountAsync(0);
+    }
+
     [Fact]
     public async Task WhenCursorIsOnBlockHead_ThenEditButtonNamesTheBlock()
     {

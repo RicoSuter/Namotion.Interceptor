@@ -40,7 +40,8 @@
      style="@containerStyle"
      @onmousedown="MouseDownCallback"
      @onclick="ClickCallback"
-     @onclick:stopPropagation="@IsEditing">
+     @onclick:stopPropagation="@IsEditing"
+     @ondblclick:stopPropagation="@IsEditing">
 
     <Diagram @ref="_diagram" SelectionChanged="OnDiagramSelectionChanged" class="canvas-diagram" style="@($"width: 100%; height: {height}px;")">
         <NavigationSettings DisableZooming="@(!IsEditing)" DisablePanning="@(!IsEditing)" OriginChanged="@(_ => _ignoreNextClick = true)" />
@@ -63,9 +64,12 @@
                          @onmousemove:stopPropagation="@(!IsEditing)"
                          @onkeydown:stopPropagation="@(!IsEditing)">
                         <div class="canvas-node-content">
-                            <SubjectComponent @ref="_nodeComponents[node]"
-                                              Subject="@node.Child"
-                                              Type="SubjectComponentType.Widget" />
+                            @* The content of a node fills it and the node has buttons of its own, so it gets no insert lines. *@
+                            <CascadingValue Value="@node.Child" Name="PlaceContent">
+                                <SubjectComponent @ref="_nodeComponents[node]"
+                                                  Subject="@node.Child"
+                                                  Type="SubjectComponentType.Widget" />
+                            </CascadingValue>
                         </div>
                         @* After the content, so that Tab reaches them right after a selected widget in the node. *@
                         @if (IsEditing)

@@ -174,6 +174,25 @@ public class TileWidgetTests
     }
 
     [Fact]
+    public async Task WhenSwitchTileHasAnEmptyLabel_ThenItShowsItsIconAloneAndIsNamedByTheOperationOfAClick()
+    {
+        // Arrange: the tile stands in a canvas node that is too low for an icon and a label.
+        GetMotor().IsPowered = true;
+        var page = await OpenPageAsync();
+        var tile = GetSwitchTile(page, "Power Off");
+        await Assertions.Expect(tile).ToBeCheckedAsync(new() { Timeout = Timeout });
+
+        // Act
+        GetMotor().IsPowered = false;
+
+        // Assert
+        var turnedOff = GetSwitchTile(page, "Power On");
+        await Assertions.Expect(turnedOff).Not.ToBeCheckedAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(turnedOff.GetByTestId("tile-label")).ToHaveCountAsync(0);
+        await Assertions.Expect(turnedOff.GetByTestId("tile-icon")).ToBeVisibleAsync();
+    }
+
+    [Fact]
     public async Task WhenSwitchTileHasAnEmptySubtitle_ThenItShowsNoSecondLine()
     {
         // Arrange

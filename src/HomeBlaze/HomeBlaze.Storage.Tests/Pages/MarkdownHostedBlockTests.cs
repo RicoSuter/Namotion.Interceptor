@@ -10,7 +10,6 @@ namespace HomeBlaze.Storage.Tests.Pages;
 /// A hosted subject runs exactly as long as its block is on the page. A subject that a parse created and did
 /// not publish must not keep running.
 /// </summary>
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownHostedBlockTests : IAsyncLifetime
 {
     private const string Namespace = "HomeBlaze.Storage.Tests.Pages";

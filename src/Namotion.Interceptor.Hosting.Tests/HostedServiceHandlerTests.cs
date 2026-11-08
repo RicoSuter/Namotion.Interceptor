@@ -175,13 +175,36 @@ public class HostedServiceHandlerTests
     }
 
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenChildWithAttachedServiceLeavesGraph_ThenHostedServiceIsStopped(bool constructedWithContext)
+    {
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            // Arrange
+            var root = new Person(context);
+            var child = constructedWithContext ? new Person(context) : new Person();
+            root.Child = child;
+            child.AttachHostedService(new PersonBackgroundService(child));
+            await AsyncTestHelpers.WaitUntilAsync(() => child.FirstName == "John");
+
+            // Act
+            root.Child = null;
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() => child.FirstName == "Disposed");
+            Assert.Empty(child.GetAttachedHostedServices());
+        });
+    }
+
     private static async Task RunWithAppLifecycleAsync(Func<IInterceptorSubjectContext, Task> action)
     {
         var builder = Host.CreateApplicationBuilder();
 
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
+            .WithContextInheritance()
             .WithHostedServices(builder.Services);
 
         var host = builder.Build();

@@ -24,6 +24,8 @@ namespace HomeBlaze.History.Blazor
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int Height { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int? MinHeight { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
         public string Range { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public System.TimeSpan RefreshInterval { get; set; }
@@ -130,6 +132,8 @@ namespace HomeBlaze.History.Blazor
         public string? LinesTitle { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public int? MaxHeight { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public int? MinHeight { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.History.Blazor.HistoryChartPlaceholder? Placeholder { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]

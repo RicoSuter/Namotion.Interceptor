@@ -295,7 +295,7 @@ if (server.TryGetVariableNode(sensor.GetPropertyReference(nameof(Sensor.Value)),
 }
 ```
 
-Returns `false` if the property is not exposed by this server, not yet created, or was removed during a server restart.
+Returns `false` if the property is not exposed by this server, not yet created, its subject was detached, or it was removed during a server restart.
 
 ## Resilience
 
@@ -316,8 +316,7 @@ The consecutive failure counter resets when the server starts successfully. Trac
 
 The OPC UA server hooks into the interceptor lifecycle system (see [Subject Lifecycle Tracking](tracking.md#subject-lifecycle-tracking)) to clean up resources when subjects are detached.
 
-- When a subject is detached, its entries in the node manager are removed
-- The OPC UA node remains in the address space until server restart (OPC UA SDK limitation)
+- When a subject is detached, its object and variable nodes are deleted from the address space and its entries in the node manager are removed
 - Local tracking is cleaned up immediately to prevent memory leaks
 
 See also [Lifecycle Limitations](connectors-opcua.md#lifecycle-limitations) that apply to both client and server.

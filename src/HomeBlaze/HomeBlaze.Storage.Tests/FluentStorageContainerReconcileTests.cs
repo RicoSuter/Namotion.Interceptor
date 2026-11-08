@@ -1,4 +1,4 @@
-using FluentStorage.Blobs;
+using FluentStorage.Storage;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
@@ -796,7 +796,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         var directory = Path.Combine(StorageDirectory.FullName, "Late");
         var watcherStartReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var release = new ManualResetEventSlim();
-        PausableBlobStorage? client = null;
+        PausableStore? client = null;
         var logger = new CallbackLogger((level, message) =>
         {
             if (level == LogLevel.Warning && !Directory.Exists(directory))
@@ -814,7 +814,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
             container.TimeProvider = timeProvider;
             container.ReconcileIntervalSeconds = 0;
             container.ConnectionString = directory;
-            container.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+            container.ClientDecorator = inner => client = new PausableStore(inner);
         });
         await storage.ConnectAsync(CancellationToken.None);
         var statusAfterConnect = storage.Status;
@@ -825,7 +825,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         StorageStatus statusWhileWatcherStarts;
         try
         {
-            var listingReached = client!.PauseNext(nameof(IBlobStorage.ListAsync));
+            var listingReached = client!.PauseNext(nameof(IStore.ListObjects));
             var otherPass = storage.ReconcileAsync();
             await listingReached;
             client.FailHangingCall(new IOException("The share did not answer."));
@@ -850,16 +850,16 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
     {
         // Arrange
         var timeProvider = new ManualTimeProvider();
-        PausableBlobStorage? client = null;
+        PausableStore? client = null;
         WriteFile("Home.md");
         var storage = await ConnectAsync(configure: container =>
         {
             container.TimeProvider = timeProvider;
             container.ReconcileIntervalSeconds = 300;
-            container.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+            container.ClientDecorator = inner => client = new PausableStore(inner);
         });
         WriteFile("Added.md");
-        var listingReached = client!.PauseNext(nameof(IBlobStorage.ListAsync));
+        var listingReached = client!.PauseNext(nameof(IStore.ListObjects));
         timeProvider.Advance(TimeSpan.FromSeconds(300));
         await listingReached;
         client.FailHangingCall(new FileNotFoundException("A file vanished while the storage was listed."));
@@ -880,7 +880,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
     {
         // Arrange
         var timeProvider = new ManualTimeProvider();
-        PausableBlobStorage? client = null;
+        PausableStore? client = null;
         Task? listingReached = null;
         FluentStorageContainer? storage = null;
         WriteFile("Home.md");
@@ -891,8 +891,8 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
             container.ReconcileIntervalSeconds = 0;
             container.ClientDecorator = inner =>
             {
-                client = new PausableBlobStorage(inner);
-                listingReached = client.PauseNext(nameof(IBlobStorage.ListAsync));
+                client = new PausableStore(inner);
+                listingReached = client.PauseNext(nameof(IStore.ListObjects));
                 return client;
             };
         });
@@ -982,7 +982,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         // Arrange: a storage whose listing takes longer than the limit every time and then returns, before the
         // retry is due in the first row, and after the retry was refused in the second.
         var timeProvider = new ManualTimeProvider();
-        PausableBlobStorage? client = null;
+        PausableStore? client = null;
         var failedPassCount = 0;
         var logger = new CallbackLogger((_, message) =>
         {
@@ -996,15 +996,15 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         {
             container.TimeProvider = timeProvider;
             container.ReconcileIntervalSeconds = 3600;
-            container.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+            container.ClientDecorator = inner => client = new PausableStore(inner);
         });
         await storage.ConnectAsync(CancellationToken.None);
-        var listingsOfConnect = client!.GetCallCount(nameof(IBlobStorage.ListAsync));
+        var listingsOfConnect = client!.GetCallCount(nameof(IStore.ListObjects));
 
         // Act: one periodic pass, and then nothing but the storage answering late. No event arrives, and the
         // clock stays far below the next periodic pass.
         var expectedFailedPassCount = 0;
-        var listingReached = client.PauseNextAfterRelease(nameof(IBlobStorage.ListAsync));
+        var listingReached = client.PauseNextAfterRelease(nameof(IStore.ListObjects));
         timeProvider.Advance(TimeSpan.FromSeconds(3600));
         for (var retryCount = 0; ; retryCount++)
         {
@@ -1034,7 +1034,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
 
             // The retry, or the pass that the refused retry is owed: at once, or after the quiet period when
             // the storage answered before the trigger had the outcome of the refused pass.
-            listingReached = client.PauseNextAfterRelease(nameof(IBlobStorage.ListAsync));
+            listingReached = client.PauseNextAfterRelease(nameof(IStore.ListObjects));
             await AsyncTestHelpers.WaitUntilAsync(() => timeProvider.ArmedTimerCount == 2);
             timeProvider.Advance(ReconcileTrigger.MaximumDelay);
         }
@@ -1044,7 +1044,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         await storage.ReconcileAsync();
 
         // Assert
-        var listingsOfTrigger = client.GetCallCount(nameof(IBlobStorage.ListAsync)) - listingsOfConnect - 1;
+        var listingsOfTrigger = client.GetCallCount(nameof(IStore.ListObjects)) - listingsOfConnect - 1;
         Assert.Equal(1 + ReconcileTrigger.MaximumRetryCount, listingsOfTrigger);
         Assert.Equal(StorageStatus.Connected, storage.Status);
     }
@@ -1055,7 +1055,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         // Arrange: a read whose caller gave up has not returned, so the storage refuses the pass. The pass
         // logs its failure before it reports it, and by then the read has returned.
         var timeProvider = new ManualTimeProvider();
-        PausableBlobStorage? client = null;
+        PausableStore? client = null;
         FluentStorageContainer? storage = null;
         var hasAnsweredBeforeReport = false;
         var logger = new CallbackLogger((_, message) =>
@@ -1071,11 +1071,11 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         {
             container.TimeProvider = timeProvider;
             container.ReconcileIntervalSeconds = 0;
-            container.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+            container.ClientDecorator = inner => client = new PausableStore(inner);
         });
         await storage.ConnectAsync(CancellationToken.None);
         using var cancellation = new CancellationTokenSource();
-        var readReached = client!.PauseNext(nameof(IBlobStorage.GetBlobsAsync));
+        var readReached = client!.PauseNext(nameof(IStore.GetObjectInfo));
         var read = storage.GetBlobMetadataAsync("Home.md", cancellation.Token);
         await readReached;
         await cancellation.CancelAsync();
@@ -1104,7 +1104,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         // The caller of the read gives up, and the read has not returned when the first pass lists.
         var timeProvider = new ManualTimeProvider();
         var hookedTimeProvider = new HookedTimeProvider(timeProvider);
-        PausableBlobStorage? client = null;
+        PausableStore? client = null;
         Task? read = null;
         var hasReadReachedStorage = false;
         var isReadGivenUp = false;
@@ -1114,11 +1114,11 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         {
             container.TimeProvider = hookedTimeProvider;
             container.ReconcileIntervalSeconds = 0;
-            container.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+            container.ClientDecorator = inner => client = new PausableStore(inner);
         });
         hookedTimeProvider.BeforeNextTimerIsCreated(() =>
         {
-            var readReached = client!.PauseNext(nameof(IBlobStorage.GetBlobsAsync));
+            var readReached = client!.PauseNext(nameof(IStore.GetObjectInfo));
             read = storage.GetBlobMetadataAsync("Home.md", cancellation.Token);
             hasReadReachedStorage = readReached.Wait(WatcherTimeout);
             cancellation.Cancel();
@@ -1200,12 +1200,12 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         var modeOfParent = OperatingSystem.IsWindows() ? default : File.GetUnixFileMode(parent.FullName);
         Directory.CreateDirectory(root);
         File.WriteAllText(Path.Combine(root, "Home.md"), "home");
-        PausableBlobStorage? client = null;
+        PausableStore? client = null;
         var storage = CreateStorage(configure: container =>
         {
             container.ConnectionString = root;
             container.ReconcileIntervalSeconds = 0;
-            container.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+            container.ClientDecorator = inner => client = new PausableStore(inner);
         });
         await storage.ConnectAsync(CancellationToken.None);
         File.WriteAllText(Path.Combine(root, "Added.md"), "added");
@@ -1312,7 +1312,8 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
     [InlineData("metadata")]
     public async Task WhenPathInFolderIsReadWhileStorageDirectoryIsGone_ThenReadFailsAndDirectoryIsNotCreated(string call)
     {
-        // Arrange: the disk client creates the folder of a path it is asked about, and with it the directory.
+        // Arrange: the disk client creates the folder of a path it reads, and with it the directory. Asking for
+        // metadata is refused by the same check.
         WriteFile("Docs/Page.md");
         WriteFile("Notes.md");
         var storage = await ConnectAsync();
@@ -1647,7 +1648,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
     private async Task<StalledStorage> StallPeriodicPassUntilItsRetryIsRefusedAsync()
     {
         var timeProvider = new ManualTimeProvider();
-        PausableBlobStorage? client = null;
+        PausableStore? client = null;
         var failedPassCount = 0;
         var logger = new CallbackLogger((_, message) =>
         {
@@ -1660,10 +1661,10 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         {
             container.TimeProvider = timeProvider;
             container.ReconcileIntervalSeconds = 300;
-            container.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+            container.ClientDecorator = inner => client = new PausableStore(inner);
         });
         await storage.ConnectAsync(CancellationToken.None);
-        var listingReached = client!.PauseNext(nameof(IBlobStorage.ListAsync));
+        var listingReached = client!.PauseNext(nameof(IStore.ListObjects));
         timeProvider.Advance(TimeSpan.FromSeconds(300));
         await listingReached;
 
@@ -1732,7 +1733,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
 
     private sealed record StalledStorage(
         FluentStorageContainer Storage,
-        PausableBlobStorage Client,
+        PausableStore Client,
         ManualTimeProvider TimeProvider,
         int CallCountBeforeRetry,
         Func<int> GetFailedPassCount);

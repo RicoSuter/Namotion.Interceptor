@@ -1,6 +1,6 @@
 @* The buttons of one item of a layout, such as a cell of a grid or a node of a canvas, while the layout is edited. *@
 
-<div class="layout-item-actions">
+<div class="layout-item-actions" @ondblclick:stopPropagation="true">
     <MudIconButton Icon="@Icons.Material.Filled.Settings"
                    Size="Size.Small"
                    title="@EditTitle"

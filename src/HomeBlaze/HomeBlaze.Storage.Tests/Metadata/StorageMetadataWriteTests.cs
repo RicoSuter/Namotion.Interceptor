@@ -1,5 +1,5 @@
 using System.Text.Json;
-using FluentStorage.Blobs;
+using FluentStorage.Storage;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage.Abstractions.Metadata;
@@ -177,7 +177,7 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.True(File.Exists(GetFullPath("Docs/.metadata.json/Notes.md")));
     }
 
-    [Theory]
+    [CaseSensitiveFileSystemTheory]
     [InlineData("Docs/Motor.Metadata.json", "Docs/Motor.metadata.json")]
     [InlineData("Docs/.Metadata.json", "Docs/.metadata.json")]
     [InlineData("Docs/motor.metadata.json", "Docs/Motor.metadata.json")]
@@ -201,7 +201,7 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.False(File.Exists(GetFullPath(expectedPath)));
     }
 
-    [Fact]
+    [CaseSensitiveFileSystemFact]
     public async Task WhenTwoSubjectsDifferOnlyInCase_ThenEachMetadataFileIsReadAndWritten()
     {
         // Arrange
@@ -227,7 +227,7 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.Equal("{\n  \"navTitle\": \"Lower\",\n  \"icon\": \"Air\"\n}\n", ReadText("Docs/motor.metadata.json"));
     }
 
-    [Fact]
+    [CaseSensitiveFileSystemFact]
     public async Task WhenTwoSubjectsDifferOnlyInExtensionCase_ThenEachMetadataFileIsReadAndWritten()
     {
         // Arrange
@@ -253,7 +253,7 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.Equal("{\n  \"navTitle\": \"Lower\",\n  \"icon\": \"Air\"\n}\n", ReadText("Docs/motor.metadata.json"));
     }
 
-    [Fact]
+    [CaseSensitiveFileSystemFact]
     public async Task WhenTwoFoldersDifferOnlyInCase_ThenEachMetadataFileIsWritten()
     {
         // Arrange
@@ -341,10 +341,10 @@ public class StorageMetadataWriteTests : StorageTestBase
         WriteFile("a.md");
         WriteFile("b.md");
         WriteFile("Motor.json", SerializeMotor("Motor 1"));
-        PausableBlobStorage? client = null;
-        var storage = await ConnectAsync(configure: container => container.ClientDecorator = inner => client = new PausableBlobStorage(inner));
+        PausableStore? client = null;
+        var storage = await ConnectAsync(configure: container => container.ClientDecorator = inner => client = new PausableStore(inner));
         var motor = storage.Children["Motor"];
-        var writeReached = client!.PauseNext(nameof(IBlobStorage.WriteAsync));
+        var writeReached = client!.PauseNext(nameof(IStore.SetObject));
         var heldWrite = storage.SetMetadataAsync(storage, null, Values("""{ "color": "red" }"""), CancellationToken.None);
         await writeReached;
         var delete = storage.DeleteSubjectAsync(motor, CancellationToken.None);
@@ -505,8 +505,8 @@ public class StorageMetadataWriteTests : StorageTestBase
         // Arrange
         WriteFile("Motor.json", SerializeMotor("Motor 1"));
         WriteFile("Motor.metadata.json", """{ "navTitle": "Pump" }""");
-        PausableBlobStorage? client = null;
-        var storage = await ConnectAsync(configure: container => container.ClientDecorator = inner => client = new PausableBlobStorage(inner));
+        PausableStore? client = null;
+        var storage = await ConnectAsync(configure: container => container.ClientDecorator = inner => client = new PausableStore(inner));
         client!.FailNextDeleteAfterItRan(new IOException("The answer was lost."));
 
         // Act
@@ -523,8 +523,8 @@ public class StorageMetadataWriteTests : StorageTestBase
         // Arrange
         WriteFile("Motor.json", SerializeMotor("Motor 1"));
         WriteFile("Motor.metadata.json", """{ "navTitle": "Pump" }""");
-        PausableBlobStorage? client = null;
-        var storage = await ConnectAsync(configure: container => container.ClientDecorator = inner => client = new PausableBlobStorage(inner));
+        PausableStore? client = null;
+        var storage = await ConnectAsync(configure: container => container.ClientDecorator = inner => client = new PausableStore(inner));
         var motor = storage.Children["Motor"];
         client!.FailNextDeleteAfterItRan(new IOException("The answer was lost."));
 
@@ -541,12 +541,12 @@ public class StorageMetadataWriteTests : StorageTestBase
         // Arrange
         WriteFile("Motor.json", SerializeMotor("Motor 1"));
         WriteFile("Motor.metadata.json", """{ "navTitle": "Pump" }""");
-        PausableBlobStorage? client = null;
+        PausableStore? client = null;
         var logger = new RecordingLogger<FluentStorageContainer>();
-        var storage = CreateStorage(configure: container => container.ClientDecorator = inner => client = new PausableBlobStorage(inner), logger: logger);
+        var storage = CreateStorage(configure: container => container.ClientDecorator = inner => client = new PausableStore(inner), logger: logger);
         await storage.ConnectAsync(CancellationToken.None);
         client!.FailNextDeleteAfterItRan(new IOException("The answer was lost."));
-        var existsReached = client.PauseNext(nameof(PausableBlobStorage.ExistsAsync));
+        var existsReached = client.PauseNext(nameof(IStore.ObjectExists));
 
         // Act
         var delete = storage.DeleteSubjectAsync(storage.Children["Motor"], CancellationToken.None);
