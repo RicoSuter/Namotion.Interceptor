@@ -1,5 +1,4 @@
 using System.Security.Claims;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
@@ -25,12 +24,15 @@ internal static class SessionValidation
             options.Events.OnValidatePrincipal = async context =>
             {
                 await validateSecurityStamp(context);
-                await RejectAsync(context);
+                Reject(context);
             };
         });
     }
 
-    private static async Task RejectAsync(CookieValidatePrincipalContext context)
+    // Rejects the principal of this request only and keeps the cookie, which the store refuses on every request anyway: the
+    // store is empty while the users load at startup, and holds a new stamp before the browser stored the cookie that
+    // carries it, so deleting the cookie would end sessions that are valid.
+    private static void Reject(CookieValidatePrincipalContext context)
     {
         if (context.Principal is not { } principal)
         {
@@ -48,6 +50,5 @@ internal static class SessionValidation
         }
 
         context.RejectPrincipal();
-        await context.HttpContext.SignOutAsync(IdentityConstants.ApplicationScheme);
     }
 }

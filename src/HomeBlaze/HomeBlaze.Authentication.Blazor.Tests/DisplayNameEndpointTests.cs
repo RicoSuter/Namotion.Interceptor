@@ -66,7 +66,7 @@ public class DisplayNameEndpointTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task WhenTheSessionWasEndedByAResetOrALock_ThenItCannotSetTheDisplayNameAndIsSignedOut(bool isLock)
+    public async Task WhenTheSessionWasEndedByAResetOrALock_ThenItCannotSetTheDisplayName(bool isLock)
     {
         // Arrange
         await using var host = await AuthenticationTestHost.StartAsync();
@@ -92,8 +92,8 @@ public class DisplayNameEndpointTests
         // Assert
         // The user store knows of the reset, so the cookie is refused before the endpoint, which checks the stamp itself.
         Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(response, isLock ? HttpStatusCode.OK : HttpStatusCode.Unauthorized));
-
-        Assert.False(browser.HasSessionCookie);
+        // The endpoint signs out the session it finds locked; a cookie refused before it is kept, as every request refuses it.
+        Assert.Equal(!isLock, browser.HasSessionCookie);
         Assert.Null(host.UserStore.GetDisplayName(host.UserStore.GetUserId("kid")!));
     }
 

@@ -80,7 +80,6 @@ public class PasswordEndpointTests
         // The user store holds the new stamp, so the old session is refused before the endpoint.
         Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(
             await SetPasswordAsync(otherBrowser, "a password of the attacker", currentPassword: AnotherPassword), HttpStatusCode.Unauthorized));
-        Assert.False(otherBrowser.HasSessionCookie);
 
         using var oldPasswordBrowser = host.CreateBrowser();
         Assert.Equal([InvalidSignIn], await TestBrowser.GetAccountErrorsAsync(await SignInAsync(oldPasswordBrowser, AdminSeeding.AdminUserName, Password)));
@@ -286,7 +285,6 @@ public class PasswordEndpointTests
 
         // Assert
         Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(response, HttpStatusCode.Unauthorized));
-        Assert.False(browser.HasSessionCookie);
         Assert.False(await HasPasswordAsync(host, "kid"));
     }
 

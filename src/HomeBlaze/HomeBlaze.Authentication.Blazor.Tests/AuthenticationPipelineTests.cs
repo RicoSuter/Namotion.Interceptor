@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using HomeBlaze.Authentication.Data;
 using HomeBlaze.Authorization;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http;
@@ -39,7 +40,6 @@ public class AuthenticationPipelineTests
         // Assert
         Assert.True(result.Succeeded, result.Error);
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
-        Assert.False(browser.HasSessionCookie);
     }
 
     [Theory]
@@ -74,7 +74,6 @@ public class AuthenticationPipelineTests
 
         // Assert
         Assert.Equal(HttpStatusCode.Redirect, oldResponse.StatusCode);
-        Assert.False(oldBrowser.HasSessionCookie);
         Assert.Equal(HttpStatusCode.OK, newResponse.StatusCode);
     }
 
@@ -100,7 +99,28 @@ public class AuthenticationPipelineTests
         // Assert
         Assert.Equal(HttpStatusCode.OK, changingResponse.StatusCode);
         Assert.Equal(HttpStatusCode.Redirect, otherResponse.StatusCode);
-        Assert.False(otherBrowser.HasSessionCookie);
+    }
+
+    [Fact]
+    public async Task WhenTheUserStoreRefusesACookieUntilItHoldsTheStampOfTheCookieAgain_ThenTheSessionAnswersAgain()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        var added = await host.AdministrationAsAdmin.AddUserAsync("kid", null, [BuiltInRoles.ReaderName], CancellationToken.None);
+        Assert.True(added.Succeeded, added.Error);
+        using var browser = host.CreateBrowser();
+        await host.SignInAsync(browser, "kid");
+        // As while the users load at startup or right after a password change, before the browser stored the new cookie.
+        var securityStamp = await SetStoredSecurityStampAsync(host, "kid", "another stamp");
+        var refused = await browser.GetAsync("/protected");
+        await SetStoredSecurityStampAsync(host, "kid", securityStamp);
+
+        // Act
+        var response = await browser.GetAsync("/protected");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Redirect, refused.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Fact]
@@ -526,5 +546,22 @@ public class AuthenticationPipelineTests
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    // Directly in the database, which the stamp check of a fresh cookie does not read, and then in the user store; returns the stamp before.
+    private static async Task<string> SetStoredSecurityStampAsync(AuthenticationTestHost host, string userName, string securityStamp)
+    {
+        string previous;
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            var user = (await userManager.FindByNameAsync(userName))!;
+            previous = user.SecurityStamp!;
+            user.SecurityStamp = securityStamp;
+            Assert.True((await userManager.UpdateAsync(user)).Succeeded);
+        }
+
+        await host.UserStore.RefreshUserAsync(host.UserStore.GetUserId(userName)!, CancellationToken.None);
+        return previous;
     }
 }
