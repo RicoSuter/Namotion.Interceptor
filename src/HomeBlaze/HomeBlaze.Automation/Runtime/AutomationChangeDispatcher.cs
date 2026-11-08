@@ -2,6 +2,7 @@ using System.Collections.Frozen;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -100,7 +101,7 @@ internal sealed class AutomationChangeDispatcher
     private static PropertyAttachNotifier GetNotifier(IInterceptorSubjectContext context)
     {
         if (context.TryAddService<IPropertyLifecycleHandler>(
-            () => new PropertyAttachNotifier(), handler => handler is PropertyAttachNotifier))
+            () => new PropertyAttachNotifier(context.TryGetService<ISubjectRegistry>()), handler => handler is PropertyAttachNotifier))
         {
             // A writer publishes a property and then reads the handlers, and the worker publishes the handler and then
             // resolves the paths: the fence on every processor pairs with the writer's half, so that the writer sees the

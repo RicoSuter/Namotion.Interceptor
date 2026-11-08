@@ -3,6 +3,7 @@ using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Automation.Runtime;
@@ -19,7 +20,7 @@ namespace HomeBlaze.Automation.Runtime;
 // Before the method properties are added, so that the subject they are added to is known to be attaching.
 [RunsAfter(typeof(SubjectRegistry), typeof(SubjectPathResolver))]
 [RunsBefore(typeof(MethodPropertyInitializer))]
-internal sealed class PropertyAttachNotifier : ILifecycleHandler, IPropertyLifecycleHandler
+internal sealed class PropertyAttachNotifier(ISubjectRegistry? registry) : ILifecycleHandler, IPropertyLifecycleHandler
 {
     // The subject that the write on this thread attaches through a property, until the change of that write is routed or
     // another subject attaches.
@@ -55,7 +56,7 @@ internal sealed class PropertyAttachNotifier : ILifecycleHandler, IPropertyLifec
 
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
-        if (!change.IsContextAttach || Volatile.Read(ref _sources).Length == 0)
+        if (!change.IsContextAttach || Volatile.Read(ref _sources).Length == 0 || registry is null)
         {
             return;
         }
@@ -67,7 +68,7 @@ internal sealed class PropertyAttachNotifier : ILifecycleHandler, IPropertyLifec
         }
         else
         {
-            (_attaching ??= new AttachingSubject()).Set(change.Subject);
+            (_attaching ??= new AttachingSubject()).Set(change.Subject, registry.StructureVersion);
         }
     }
 
@@ -75,7 +76,8 @@ internal sealed class PropertyAttachNotifier : ILifecycleHandler, IPropertyLifec
     {
         // Any other property is attached only with its subject.
         var sources = Volatile.Read(ref _sources);
-        if (sources.Length == 0 || !change.Property.Metadata.IsDynamic || _attaching?.Is(change.Subject) == true)
+        if (sources.Length == 0 || !change.Property.Metadata.IsDynamic ||
+            (registry is not null && _attaching?.TryContinue(change.Subject, registry.StructureVersion) == true))
         {
             return;
         }
@@ -95,9 +97,10 @@ internal sealed class PropertyAttachNotifier : ILifecycleHandler, IPropertyLifec
     private sealed class AttachingSubject
     {
         private WeakReference<IInterceptorSubject>? _subject;
+        private long _structureVersion;
         private bool _isSet;
 
-        public void Set(IInterceptorSubject subject)
+        public void Set(IInterceptorSubject subject, long structureVersion)
         {
             if (_subject is null)
             {
@@ -108,12 +111,30 @@ internal sealed class PropertyAttachNotifier : ILifecycleHandler, IPropertyLifec
                 _subject.SetTarget(subject);
             }
 
+            _structureVersion = structureVersion;
             _isSet = true;
         }
 
         public void Clear() => _isSet = false;
 
-        public bool Is(IInterceptorSubject subject) =>
-            _isSet && _subject is not null && _subject.TryGetTarget(out var target) && ReferenceEquals(target, subject);
+        // A property belongs to the attach while every structural change since the mark was a property the attach added,
+        // which the registry counts with two each before this runs. Any other change, also on another thread, ends the
+        // mark, so that a mark that a failed write left behind hides a later property only while nothing else changed.
+        public bool TryContinue(IInterceptorSubject subject, long structureVersion)
+        {
+            if (!_isSet || _subject is null || !_subject.TryGetTarget(out var target) || !ReferenceEquals(target, subject))
+            {
+                return false;
+            }
+
+            if (structureVersion != _structureVersion + 2)
+            {
+                _isSet = false;
+                return false;
+            }
+
+            _structureVersion = structureVersion;
+            return true;
+        }
     }
 }
