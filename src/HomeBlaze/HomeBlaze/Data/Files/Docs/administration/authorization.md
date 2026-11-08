@@ -211,7 +211,7 @@ The line below the field reads:
 - "Hidden: the property Children of /Devices/Cameras is not readable.", naming a property on the way from the root that holds the subject and is not readable, such as for a role that denies `read` on `/Devices/Cameras/**`.
 - "Hidden: no chain of parents leads to the root."
 
-A path that names no subject shows "No subject has this path.", and a role that does not compile shows its error instead, such as "Role 'LightOperator' includes 'Readers', which is not defined.".
+A path that names no subject shows "No subject has this path.". A role that does not compile shows no table, as the dialog shows its error above the tabs, such as "Role 'LightOperator' includes 'Readers', which is not defined.".
 
 The table has a row per member: the properties, then the methods, then the attributes, named `Property@Attribute`, such as `Temperature@HomeBlaze:Metadata`. Below its name, a row shows the path a [path pattern](#path-patterns) matches the member by, in a smaller monospace font, such as `/Devices/Sonos/Play`; a click selects the whole path, to copy it into the field "Paths" of a rule. The columns are the [actions](#actions) "read", "write", "execute" and "history". A cell is a green tick when the action is allowed, a red cross when it is denied, and a gray "–" where the action does not apply: a method has "read" and "execute", a property or attribute "read", "write" and "history".
 

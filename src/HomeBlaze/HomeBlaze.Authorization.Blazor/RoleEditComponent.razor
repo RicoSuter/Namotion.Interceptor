@@ -14,7 +14,7 @@
 {
     var checks = GetChecks();
     <div class="role-edit" data-testid="role-edit">
-        @if (checks.Error is { } error)
+        @if (checks.Preview.Error is { } error)
         {
             <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2" data-testid="role-edit-status">@error</MudAlert>
         }
@@ -79,7 +79,7 @@
                 <MudTabPanel>
                     <TabContent><span data-testid="role-edit-tab-preview">Preview</span></TabContent>
                     <ChildContent>
-                        <RolePreview Role="@GetEditedRole()" />
+                        <RolePreview Result="@checks.Preview" />
                     </ChildContent>
                 </MudTabPanel>
             </ChildContent>
@@ -168,7 +168,7 @@
     private bool _wasValid = true;
     private AuthorizationRole? _checkedRole;
     private IReadOnlyList<string>? _checkedRoleNames;
-    private RoleChecks _checks = new(null, null, null);
+    private RoleChecks _checks = new(default, null, null);
     private IDisposable? _usedBySubscription;
     private bool _isDisposed;
 
@@ -328,7 +328,7 @@
         });
 
     // Checked again for each edited role and after the saved roles changed, so that the checks follow unsaved changes
-    // and the other roles. The preview of the same instance is compiled once for this and the tab "Preview".
+    // and the other roles.
     private RoleChecks GetChecks()
     {
         var role = GetEditedRole();
@@ -340,8 +340,8 @@
             _checkedRoleNames = AuthorizationService.GetRoleNames();
             var result = AuthorizationService.PreviewPolicy(role);
             _checks = result.Error is not null
-                ? new RoleChecks(result.Error, null, null)
-                : new RoleChecks(null, GetWarning(role), FindExecuteWithoutRead(role, result.Policy));
+                ? new RoleChecks(result, null, null)
+                : new RoleChecks(result, GetWarning(role), FindExecuteWithoutRead(role, result.Policy));
         }
 
         return _checks;
@@ -487,9 +487,9 @@
         }
     }
 
-    // What the edited role would have once saved: the error that makes it unusable, the warning about its paths, and the
-    // methods it allows to execute but not to read; only the error when there is one.
-    private sealed record RoleChecks(string? Error, string? Warning, ExecuteWithoutReadFindings? ExecuteWithoutRead);
+    // What the edited role would have once saved: its preview, with the error that makes it unusable, the warning about
+    // its paths, and the methods it allows to execute but not to read; no warning and no methods when there is an error.
+    private sealed record RoleChecks(AuthorizationResult Preview, string? Warning, ExecuteWithoutReadFindings? ExecuteWithoutRead);
 
     // The lists of the role as this dialog read them, compared by reference.
     private readonly record struct LoadedLists(IReadOnlyList<string>? Includes, IReadOnlyList<PermissionRule>? Allow, IReadOnlyList<PermissionRule>? Deny)
