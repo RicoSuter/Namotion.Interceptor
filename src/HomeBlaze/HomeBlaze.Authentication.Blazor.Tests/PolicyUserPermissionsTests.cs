@@ -537,4 +537,33 @@ public class PolicyUserPermissionsTests
         Assert.Equal<string>(["Docs"], shown);
         Assert.Equal<string>(["Secret", "Docs"], folder.ChildOrder);
     }
+
+    [Fact]
+    public async Task WhenTheOrderOfAFolderNamesAChildShownElsewhereThroughAFolderMemberThePersonMayNotRead_ThenTheValueTheyAreShownLeavesItOut()
+    {
+        // Arrange
+        var role = new AuthorizationRole
+        {
+            Name = "nofolderchildren",
+            Includes = [BuiltInRoles.ReaderName],
+            Deny = [new PermissionRule { Types = [typeof(PermissionsTestFolder).FullName!], Members = [nameof(PermissionsTestFolder.Children)], Actions = [PermissionAction.Read] }]
+        };
+        await using var graph = await PermissionsTestGraph.CreateAsync(roles: [role.Name], customRoles: [role]);
+        var docs = new PermissionsTestDevice();
+        var folder = new PermissionsTestFolder { Children = new Dictionary<string, IInterceptorSubject> { ["Docs"] = docs } };
+        graph.Root.Children = new Dictionary<string, IInterceptorSubject>(graph.Root.Children) { ["Folder"] = folder, ["Alias"] = docs };
+        var values = ImmutableDictionary<string, JsonElement>.Empty
+            .Add(MetadataKeys.Order, JsonSerializer.SerializeToElement(new[] { "Docs" }));
+        var registeredFolder = folder.TryGetRegisteredSubject()!;
+        registeredFolder.AddProperty(KnownAttributes.Metadata, typeof(ImmutableDictionary<string, JsonElement>), _ => values, null);
+        var metadata = registeredFolder.TryGetProperty(KnownAttributes.Metadata)!;
+
+        // Act
+        var shown = (ImmutableDictionary<string, JsonElement>)((IUserPermissions)graph.Permissions).GetValue(metadata)!;
+
+        // Assert
+        Assert.True(graph.Permissions.CanShow(docs.TryGetRegisteredSubject()!));
+        Assert.False(graph.Permissions.CanRead(registeredFolder.TryGetProperty(nameof(PermissionsTestFolder.Children))!));
+        Assert.Empty(shown[MetadataKeys.Order].EnumerateArray());
+    }
 }

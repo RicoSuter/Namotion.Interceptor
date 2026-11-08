@@ -125,7 +125,7 @@ internal sealed class PermissionDecisions : IUserPermissions
 
     /// <summary>
     /// Gets the value of the member as the principal is shown it: the order in the metadata of a folder names only the
-    /// children the principal is shown.
+    /// children the principal is shown through the member of the folder that holds them.
     /// </summary>
     public object? GetValue(RegisteredSubjectProperty member) =>
         ChildOrdering.FilterOrder(
@@ -135,7 +135,10 @@ internal sealed class PermissionDecisions : IUserPermissions
             static (decisions, folder) => ChildOrdering.GetListedNames(
                 folder,
                 decisions,
-                static (shownDecisions, _, child) => child.Subject.TryGetRegisteredSubject() is { } registered && shownDecisions.CanShow(registered)));
+                static (shownDecisions, children, child) =>
+                    shownDecisions.CanRead(children) &&
+                    child.Subject.TryGetRegisteredSubject() is { } registered &&
+                    shownDecisions.CanShow(registered)));
 
     /// <summary>Whether the principal holds every role, counting the roles they include, or is a full administrator; false for an empty set.</summary>
     public bool HoldsAllRoles(IReadOnlyCollection<string> roles)
