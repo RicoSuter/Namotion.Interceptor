@@ -5,7 +5,7 @@
         <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" aria-label="Remove trigger" OnClick="@(() => Removed.InvokeAsync())" />
     </div>
     <ConditionField Label="Fires when" Lead="" Value="@_trigger.Expression" ValueChanged="SetExpressionAsync"
-                    Validate="@RuleExpressions.ValidateCondition" Preview="@Expressions.PreviewCondition" Hints="@RuleExpressions.GetConditionHints"
+                    Validate="@RuleExpressions.ValidateCondition" Preview="@Expressions.PrepareConditionPreview" Hints="@AutomationValidator.GetConditionHints"
                     TestId="automation-trigger-condition" />
     <div class="d-flex flex-wrap gap-3 mt-2">
         <div style="flex: 1 1 160px;">
@@ -30,7 +30,7 @@
         <div class="d-flex align-start gap-1 mt-3">
             <div class="flex-grow-1" style="min-width: 0;">
                 <ConditionField Label="Fires again only after" Lead="" Value="@_trigger.Rearm" ValueChanged="SetRearmAsync"
-                                Validate="@RuleExpressions.ValidateCondition" Preview="@Expressions.PreviewCondition" Hints="@RuleExpressions.GetConditionHints"
+                                Validate="@RuleExpressions.ValidateCondition" Preview="@Expressions.PrepareConditionPreview" Hints="@AutomationValidator.GetConditionHints"
                                 TestId="automation-trigger-rearm" />
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">Default: once the condition above is false again</MudText>
             </div>
@@ -57,8 +57,7 @@
     /// <summary>Raised when the errors may have changed without an edit, such as when the hold input rejects its text.</summary>
     [Parameter] public EventCallback InputChanged { get; set; }
 
-    // The component renders again after each edit, before its parent passes the new trigger down. A stale value in that
-    // render would make the expression field reload its text and lose a row that is not finished.
+    // Kept for the render before the parent passes the edit down, as in ActionEditor.
     protected override void OnParametersSet() => _trigger = Trigger;
 
     private Task UpdateAsync(PropertyTrigger trigger)

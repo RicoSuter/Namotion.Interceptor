@@ -57,8 +57,10 @@
 @code {
     private SubjectEventTrigger _trigger = null!;
     private string? _chosenEventType;
-    private IReadOnlyList<string> _eventNames = [];
-    private IReadOnlyList<string> _fields = [];
+    private ImmutableArray<string> _eventNames = [];
+    private ImmutableArray<string> _fields = [];
+    private Type? _sourceType;
+    private string? _fieldsEventType;
 
     [Parameter, EditorRequired] public SubjectEventTrigger Trigger { get; set; } = null!;
 
@@ -74,8 +76,7 @@
 
     private bool IsOwn => _trigger.SubjectPath == AutomationEvents.OwnAutomationPath;
 
-    // The component renders again after each edit, before its parent passes the new trigger down. A stale value in that
-    // render would make the filter field reload its text and lose a row that is not finished.
+    // Kept for the render before the parent passes the edit down, as in ActionEditor.
     protected override void OnParametersSet()
     {
         _trigger = Trigger;
@@ -83,9 +84,19 @@
         Refresh();
     }
 
+    // The source is resolved on each render, because it may appear in the graph later; the names and the fields are built
+    // again only when its type or the event type changed.
     private void Refresh()
     {
-        var eventTypes = GetEventTypes(_trigger.SubjectPath);
+        var sourceType = AutomationEvents.ResolveSource(Automation, RuleKey, _trigger.SubjectPath)?.GetType();
+        if (sourceType == _sourceType && _trigger.EventType == _fieldsEventType && _fieldsEventType is not null)
+        {
+            return;
+        }
+
+        var eventTypes = sourceType is null ? [] : AutomationEvents.GetEventTypes(sourceType);
+        _sourceType = sourceType;
+        _fieldsEventType = _trigger.EventType;
         _eventNames = [.. eventTypes.Select(type => type.Name)];
         var eventType = eventTypes.FirstOrDefault(type => type.Name == _trigger.EventType);
         _fields = eventType is null
