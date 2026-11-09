@@ -548,6 +548,7 @@ Every run increments the `RunCount` of its rule, also two identical runs in a ro
 - A rule shows `On: Not applied yet` until the automation applied its configuration for the first time.
 - A saved configuration keeps the events that wait to be processed for every event trigger it leaves unchanged.
 - A system clock that is set forward or back is noticed within a minute.
+- A list or dictionary that a device changes in place, without assigning the property again, is not observed: a path through it, such as `/Room/Devices[lamp]/On`, may keep leading to what it found before until the property is assigned again.
 
 ---
 
