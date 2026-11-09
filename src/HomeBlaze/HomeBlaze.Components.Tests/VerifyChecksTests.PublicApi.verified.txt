@@ -1699,6 +1699,13 @@ namespace HomeBlaze.Components.Dialogs
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public static System.Threading.Tasks.Task ShowAsync(MudBlazor.IDialogService dialogService, string operationTitle, object? result) { }
     }
+    public static class OperationInputLayout
+    {
+        public static string[]? GetEnumNames(System.Type type) { }
+        public static string GetLabel(string name) { }
+        public static string GetMemberKey(string parameterName, string memberName) { }
+        public static bool IsEnteredPerMember(HomeBlaze.Abstractions.Metadata.MethodParameter parameter) { }
+    }
     public class SubjectEditDialog : Microsoft.AspNetCore.Components.ComponentBase
     {
         public SubjectEditDialog() { }

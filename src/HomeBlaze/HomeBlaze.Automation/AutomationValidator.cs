@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
+using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Automation.Runtime;
 using Namotion.Interceptor.Expressions;
@@ -73,6 +74,13 @@ public static class AutomationValidator
     /// invalid condition, whose error says more.
     /// </summary>
     public static ImmutableArray<string> GetConditionHints(string? text) => ConditionHints.Get(text);
+
+    /// <summary>
+    /// Whether the automation binds an argument with the key to the operation: a key that names a parameter that requires
+    /// input, or <c>parameter.Member</c> for a member of a record parameter, without regard to case.
+    /// </summary>
+    public static bool IsArgumentKey(MethodMetadata operation, string key) =>
+        ArgumentBinder.MatchKey(operation.Parameters, key, out _) is ArgumentKeyMatch.Parameter or ArgumentKeyMatch.Member;
 
     private static IEnumerable<AutomationValidationError> CheckStateNames(IReadOnlyList<string> states) =>
         states

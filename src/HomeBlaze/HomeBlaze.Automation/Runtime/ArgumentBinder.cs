@@ -208,28 +208,63 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
     private static bool TryValidateKey(
         MethodParameter[] inputs, IReadOnlyDictionary<string, string> arguments, string key, [NotNullWhen(false)] out string? error)
     {
-        error = null;
-        if (inputs.Any(parameter => IsSame(parameter.Name, key)))
+        error = MatchKey(inputs, key, out var owner) switch
         {
-            return true;
+            ArgumentKeyMatch.Parameter => null,
+            ArgumentKeyMatch.Member when TryFind(arguments, owner!.Name, out _) => $"The argument '{owner.Name}' is given both whole and per member",
+            ArgumentKeyMatch.Member => null,
+            ArgumentKeyMatch.NoMember => $"The argument '{key}' matches no member of '{owner!.Name}'",
+            _ => $"The argument '{key}' matches no parameter of the operation"
+        };
+        return error is null;
+    }
+
+    /// <summary>
+    /// Matches an argument key with the parameters that require input, without regard to case: the name of one, or
+    /// <c>parameter.Member</c> for a member of a record parameter. The owner is the parameter of a member key.
+    /// </summary>
+    internal static ArgumentKeyMatch MatchKey(IReadOnlyList<MethodParameter> parameters, string key, out MethodParameter? owner)
+    {
+        owner = null;
+        var separator = key.IndexOf('.');
+        foreach (var parameter in parameters)
+        {
+            if (!parameter.RequiresInput)
+            {
+                continue;
+            }
+
+            if (IsSame(parameter.Name, key))
+            {
+                return ArgumentKeyMatch.Parameter;
+            }
+
+            if (owner is null && separator >= 0 && parameter.Name.AsSpan().Equals(key.AsSpan(0, separator), StringComparison.OrdinalIgnoreCase))
+            {
+                owner = parameter;
+            }
         }
 
-        var separator = key.IndexOf('.');
-        var owner = separator < 0 ? null : inputs.FirstOrDefault(parameter => IsSame(parameter.Name, key[..separator]));
         if (owner is null || !ParameterConverter.IsSupportedObject(owner.Type))
         {
-            error = $"The argument '{key}' matches no parameter of the operation";
-        }
-        else if (!ParameterConverter.GetObjectMembers(owner.Type).Any(member => IsSame(member.Name, key[(separator + 1)..])))
-        {
-            error = $"The argument '{key}' matches no member of '{owner.Name}'";
-        }
-        else if (TryFind(arguments, owner.Name, out _))
-        {
-            error = $"The argument '{owner.Name}' is given both whole and per member";
+            owner = null;
+            return ArgumentKeyMatch.NoParameter;
         }
 
-        return error is null;
+        return HasMember(owner.Type, key.AsSpan(separator + 1)) ? ArgumentKeyMatch.Member : ArgumentKeyMatch.NoMember;
+    }
+
+    private static bool HasMember(Type type, ReadOnlySpan<char> name)
+    {
+        foreach (var member in ParameterConverter.GetObjectMembers(type))
+        {
+            if (name.Equals(member.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsSame(string left, string right) => string.Equals(left, right, StringComparison.OrdinalIgnoreCase);

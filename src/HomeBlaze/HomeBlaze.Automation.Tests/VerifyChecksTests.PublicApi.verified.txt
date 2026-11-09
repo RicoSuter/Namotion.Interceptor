@@ -190,6 +190,7 @@ namespace HomeBlaze.Automation
     {
         public static System.Collections.Immutable.ImmutableArray<string> Variables { get; }
         public static System.Collections.Immutable.ImmutableArray<string> GetConditionHints(string? text) { }
+        public static bool IsArgumentKey(HomeBlaze.Abstractions.Metadata.MethodMetadata operation, string key) { }
         public static bool TryParseExpression(string? text, bool allowsEvent, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Expressions.ParsedExpression? parsed, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
         public static bool TryParseTemplate(string? text, bool allowsEvent, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Expressions.TextTemplate? parsed, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
         public static System.Collections.Immutable.ImmutableArray<HomeBlaze.Automation.AutomationValidationError> Validate(System.Collections.Generic.IReadOnlyList<string> states, string? initialState, System.Collections.Generic.IReadOnlyDictionary<string, HomeBlaze.Automation.AutomationRule> rules, System.Collections.Generic.IReadOnlyList<string> ruleOrder) { }
