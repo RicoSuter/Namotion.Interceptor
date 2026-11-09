@@ -27,14 +27,31 @@ public class RuleExpressionsTests
     }
 
     [Fact]
+    public void WhenTheRuleHasAnEventTrigger_ThenItsActionsMayReadTheEventButItsConditionsMayNot()
+    {
+        // Arrange
+        var expressions = TestAutomations.Expressions(allowsEvent: true);
+
+        // Act
+        var inAction = expressions.Validate("event/State == On");
+        var inCondition = RuleExpressions.ValidateCondition("event/State == On");
+        var conditionPreview = expressions.PreviewCondition("event/State == On");
+
+        // Assert
+        Assert.Null(inAction);
+        Assert.NotNull(inCondition);
+        Assert.Null(conditionPreview);
+    }
+
+    [Fact]
     public void WhenAnExpressionIsPreviewed_ThenItHasItsResultOrNothingWhenInvalid()
     {
         // Arrange
         var expressions = TestAutomations.Expressions();
 
         // Act
-        var valid = expressions.Preview("2 > 1");
-        var invalid = expressions.Preview("2 >");
+        var valid = expressions.PreviewCondition("2 > 1");
+        var invalid = expressions.PreviewCondition("2 >");
 
         // Assert
         Assert.NotNull(valid);
@@ -70,9 +87,9 @@ public class RuleExpressionsTests
         var withViewerZone = new RuleExpressions(automation, "rule", allowsEvent: false, viewerZone);
 
         // Act
-        var relative = withViewerZone.Preview("./Name == Rule")?.Invoke();
-        var viewer = withViewerZone.Preview("now")?.Invoke();
-        var server = new RuleExpressions(automation, "rule", allowsEvent: false).Preview("now")?.Invoke();
+        var relative = withViewerZone.PreviewCondition("./Name == Rule")?.Invoke();
+        var viewer = withViewerZone.PreviewCondition("now")?.Invoke();
+        var server = new RuleExpressions(automation, "rule", allowsEvent: false).PreviewCondition("now")?.Invoke();
 
         // Assert
         Assert.True(relative?.Result);

@@ -381,11 +381,12 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public RuleExpressions(HomeBlaze.Automation.Automation automation, string ruleKey, bool allowsEvent, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone = null) { }
         public bool AllowsEvent { get; }
         public HomeBlaze.Automation.Automation Automation { get; }
-        public System.Func<HomeBlaze.Components.Inputs.ExpressionPreview>? Preview(string text) { }
+        public System.Func<HomeBlaze.Components.Inputs.ExpressionPreview>? PreviewCondition(string text) { }
         public System.Func<string?>? Template(string text) { }
         public string? Validate(string text) { }
         public string? ValidateTemplate(string text) { }
         public static System.Collections.Generic.IReadOnlyList<string> GetConditionHints(string text) { }
+        public static string? ValidateCondition(string text) { }
         public static string? ValidateFilter(string text) { }
     }
     public class RulesTab : Microsoft.AspNetCore.Components.ComponentBase

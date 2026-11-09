@@ -12,10 +12,14 @@ public sealed class RuleExpressions(Automation automation, string ruleKey, bool 
 {
     public Automation Automation => automation;
 
-    /// <summary>Whether the rule has an event trigger, so that its expressions may read <c>event</c> and <c>subject</c>.</summary>
+    /// <summary>Whether the rule has an event trigger, so that the expressions of its actions may read <c>event</c> and <c>subject</c>.</summary>
     public bool AllowsEvent => allowsEvent;
 
+    /// <summary>Validates an expression of an action, which reads the event when the rule has an event trigger.</summary>
     public string? Validate(string text) => AutomationValidator.ValidateExpression(text, allowsEvent);
+
+    /// <summary>Validates a condition of a trigger, a rearm or Only if, which never sees an event.</summary>
+    public static string? ValidateCondition(string text) => AutomationValidator.ValidateExpression(text, allowsEvent: false);
 
     /// <summary>The hints for a condition of a trigger, a rearm or Only if, which the automation checks again as the clock moves.</summary>
     public static IReadOnlyList<string> GetConditionHints(string text) => AutomationValidator.GetConditionHints(text);
@@ -26,11 +30,11 @@ public sealed class RuleExpressions(Automation automation, string ruleKey, bool 
     public string? ValidateTemplate(string text) => AutomationValidator.ValidateTemplate(text, allowsEvent);
 
     /// <summary>
-    /// Prepares an expression for its preview: the function gives the value and the result with the current values each
-    /// time it is called. Null when the expression is invalid.
+    /// Prepares a condition of a trigger, a rearm or Only if, or a path of one, for its preview: the function gives the
+    /// value and the result with the current values each time it is called. Null when the condition is invalid.
     /// </summary>
-    public Func<ExpressionPreview>? Preview(string text) =>
-        AutomationPreview.TryParseExpression(text, allowsEvent, out var parsed, out _) ? () => Evaluate(parsed) : null;
+    public Func<ExpressionPreview>? PreviewCondition(string text) =>
+        AutomationPreview.TryParseExpression(text, allowsEvent: false, out var parsed, out _) ? () => Evaluate(parsed) : null;
 
     /// <summary>
     /// Prepares a template for its preview: the function renders it with the current values each time it is called.

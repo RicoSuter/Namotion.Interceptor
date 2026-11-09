@@ -4,7 +4,7 @@
 <MudPaper Outlined="true" Class="pa-3" data-testid="automation-only-if">
     <ConditionField Label="Checked when a trigger fires" Lead="Check" Value="@_condition"
                     ValueChanged="@(value => SetOnlyIfAsync(value, _cooldown))"
-                    Validate="@Expressions.Validate" Preview="@Expressions.Preview" Hints="@RuleExpressions.GetConditionHints"
+                    Validate="@RuleExpressions.ValidateCondition" Preview="@Expressions.PreviewCondition" Hints="@RuleExpressions.GetConditionHints"
                     TestId="automation-only-if-condition" />
     <div class="d-flex flex-wrap align-center gap-3 mt-2">
         <DurationField Label="At most once every" Value="@_cooldown" ValueChanged="@(value => SetOnlyIfAsync(_condition, value))"
