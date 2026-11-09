@@ -579,7 +579,7 @@ public partial class FluentStorageContainer :
     public void ThrowIfWriteRefused(IInterceptorSubject subject)
     {
         var connection = _connection;
-        if (connection is null or { IsEnded: true })
+        if (connection is null or { IsEnded: true } || !connection.Reconciler.HasConfigurationIssues)
             return;
 
         var path = string.Empty;

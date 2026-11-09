@@ -189,6 +189,24 @@ public class FluentStorageContainerConfigurationIssueTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenOneOfTwoFilesWithIssuesIsDeleted_ThenTheSubjectOfTheOtherIsStillRefused()
+    {
+        // Arrange
+        WriteFile("Motor.json", $$"""{ "$type": "{{MotorType}}", "name": "Belt", "targetSpeed": "fast" }""");
+        WriteFile("Pump.json", $$"""{ "$type": "{{MotorType}}", "name": "Pump", "targetSpeed": "slow" }""");
+        var storage = await ConnectAsync();
+        var pump = Assert.IsType<Samples.Motor>(storage.Children["Pump"]);
+        File.Delete(GetFullPath("Motor.json"));
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        var check = Assert.Throws<ConfigurationWriteRefusedException>(() => ((IConfigurationWriter)storage).ThrowIfWriteRefused(pump));
+        Assert.Contains("Pump.json", check.Message);
+    }
+
+    [Fact]
     public async Task WhenTheFileOfASubjectWithIssuesIsMovedToAnotherFolder_ThenTheSubjectIsStillRefusedUnderTheNewPath()
     {
         // Arrange

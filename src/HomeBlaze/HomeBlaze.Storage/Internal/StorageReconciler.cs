@@ -20,7 +20,8 @@ namespace HomeBlaze.Storage.Internal;
 /// the children of each changed folder once.
 /// </summary>
 /// <remarks>
-/// Not thread-safe. Every member runs on the <see cref="StorageWorker"/>, except <see cref="TryGetConfigurationIssues"/>.
+/// Not thread-safe. Every member runs on the <see cref="StorageWorker"/>, except <see cref="TryGetConfigurationIssues"/> and
+/// <see cref="HasConfigurationIssues"/>.
 /// </remarks>
 internal sealed class StorageReconciler
 {
@@ -49,6 +50,9 @@ internal sealed class StorageReconciler
     // The entry of each subject whose configuration has issues, read off the worker. Weak keys, so that a released
     // subject leaves it.
     private readonly ConditionalWeakTable<IInterceptorSubject, StorageEntry> _entriesWithConfigurationIssues = new();
+
+    // At least the number of entries in _entriesWithConfigurationIssues, more when a subject was collected while in it.
+    private int _configurationIssueEntryCount;
 
     public StorageReconciler(
         IStore client,
@@ -80,7 +84,7 @@ internal sealed class StorageReconciler
     /// <returns>False when the subject is no subject of a file of this connection whose configuration has issues.</returns>
     public bool TryGetConfigurationIssues(IInterceptorSubject subject, out string path, out ImmutableArray<string> issues)
     {
-        if (_entriesWithConfigurationIssues.TryGetValue(subject, out var entry))
+        if (HasConfigurationIssues && _entriesWithConfigurationIssues.TryGetValue(subject, out var entry))
         {
             issues = entry.ConfigurationIssues;
             path = entry.Path;
@@ -91,6 +95,12 @@ internal sealed class StorageReconciler
         issues = [];
         return false;
     }
+
+    /// <summary>
+    /// Whether the configuration of a file of this connection may have issues, see <see cref="TryGetConfigurationIssues"/>.
+    /// False only when none has. Can be called from any thread.
+    /// </summary>
+    public bool HasConfigurationIssues => Volatile.Read(ref _configurationIssueEntryCount) > 0;
 
     // Every change of the issues of an entry goes through here, so that TryGetConfigurationIssues follows it.
     private void SetConfigurationIssues(StorageEntry entry, ImmutableArray<string> issues)
@@ -107,6 +117,12 @@ internal sealed class StorageReconciler
         }
         else
         {
+            // Counted before the entry is added, so that a reader that finds the entry also sees the count.
+            if (!_entriesWithConfigurationIssues.TryGetValue(subject, out _))
+            {
+                Interlocked.Increment(ref _configurationIssueEntryCount);
+            }
+
             _entriesWithConfigurationIssues.AddOrUpdate(subject, entry);
         }
     }
@@ -138,7 +154,10 @@ internal sealed class StorageReconciler
 
     private void RemoveConfigurationIssues(IInterceptorSubject subject)
     {
-        _entriesWithConfigurationIssues.Remove(subject);
+        if (_entriesWithConfigurationIssues.Remove(subject))
+        {
+            Interlocked.Decrement(ref _configurationIssueEntryCount);
+        }
     }
 
     /// <summary>
