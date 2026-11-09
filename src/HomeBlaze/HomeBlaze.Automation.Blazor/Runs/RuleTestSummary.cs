@@ -5,7 +5,8 @@ namespace HomeBlaze.Automation.Blazor.Runs;
 /// <summary>
 /// Sums up the result of Test now: whether the rule would run with the current values, and the first reason why not. Test now
 /// evaluates the expressions, not whether a condition fired already, so the verdict on Only if says what happens to a condition
-/// that becomes true, not that one waits now. It evaluates them while the automation is not running, too.
+/// that becomes true, not that one waits now. It evaluates them while the automation is not running, too, and then the verdict
+/// gives the status instead, as nothing waits.
 /// </summary>
 internal static class RuleTestSummary
 {
@@ -37,10 +38,10 @@ internal static class RuleTestSummary
     private static RuleTestVerdict DescribeOnlyIf(AutomationRuleTestResult result, ServiceStatus status) =>
         result.OnlyIfResult switch
         {
-            false => new RuleTestVerdict(false, $"Would not run now: Only if is false. {GetWaitText("false")}"),
+            false => new RuleTestVerdict(false, $"Would not run now: Only if is false{GetOnlyIfSuffix("false", status)}"),
             null when result.OnlyIfMissingPaths.Count > 0 => new RuleTestVerdict(
-                false, $"Would not run now: Only if is unknown, missing {string.Join(", ", result.OnlyIfMissingPaths)}. {GetWaitText("unknown")}"),
-            null => new RuleTestVerdict(false, $"Would not run now: Only if is unknown. {GetWaitText("unknown")}"),
+                false, $"Would not run now: Only if is unknown, missing {string.Join(", ", result.OnlyIfMissingPaths)}{GetOnlyIfSuffix("unknown", status)}"),
+            null => new RuleTestVerdict(false, $"Would not run now: Only if is unknown{GetOnlyIfSuffix("unknown", status)}"),
             _ when status != ServiceStatus.Running => new RuleTestVerdict(
                 false, $"Would not run now: the automation {DescribeStatus(status)}. {(result.HasOnlyIf ? "A condition and Only if are true." : "A condition is true.")}"),
             _ => new RuleTestVerdict(true, "Would run now.")
@@ -52,6 +53,7 @@ internal static class RuleTestSummary
         _ => $"is {status.ToString().ToLowerInvariant()}"
     };
 
-    private static string GetWaitText(string onlyIfResult) =>
-        $"A condition that becomes true while Only if is {onlyIfResult} waits until Only if is true.";
+    private static string GetOnlyIfSuffix(string onlyIfResult, ServiceStatus status) => status == ServiceStatus.Running
+        ? $". A condition that becomes true while Only if is {onlyIfResult} waits until Only if is true."
+        : $", and the automation {DescribeStatus(status)}.";
 }

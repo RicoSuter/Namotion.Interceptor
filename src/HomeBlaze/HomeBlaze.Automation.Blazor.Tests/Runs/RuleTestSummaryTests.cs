@@ -66,6 +66,34 @@ public class RuleTestSummaryTests
         Assert.Equal(new RuleTestVerdict(false, text), verdict);
     }
 
+    [Theory]
+    [InlineData(false, ServiceStatus.Stopped, "Would not run now: Only if is false, and the automation is stopped.")]
+    [InlineData(null, ServiceStatus.Error, "Would not run now: Only if is unknown, and the automation stopped with an error.")]
+    public void WhenOnlyIfIsNotTrueAndTheAutomationIsNotRunning_ThenTheVerdictGivesTheStatusInsteadOfWaiting(bool? onlyIf, ServiceStatus status, string text)
+    {
+        // Arrange
+        var result = Result(onlyIf: onlyIf);
+
+        // Act
+        var verdict = RuleTestSummary.Describe(result, false, status);
+
+        // Assert
+        Assert.Equal(new RuleTestVerdict(false, text), verdict);
+    }
+
+    [Fact]
+    public void WhenOnlyIfMissesPathsAndTheAutomationIsStarting_ThenTheVerdictGivesThePathsAndTheStatus()
+    {
+        // Arrange
+        var result = Result(onlyIf: null, onlyIfMissingPaths: "/Blinds/IsMoving");
+
+        // Act
+        var verdict = RuleTestSummary.Describe(result, false, ServiceStatus.Starting);
+
+        // Assert
+        Assert.Equal(new RuleTestVerdict(false, "Would not run now: Only if is unknown, missing /Blinds/IsMoving, and the automation is starting."), verdict);
+    }
+
     [Fact]
     public void WhenTheRuleWouldNotRunAndTheAutomationIsStopped_ThenTheVerdictKeepsTheReasonOfTheRule()
     {
