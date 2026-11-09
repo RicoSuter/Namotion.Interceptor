@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using HomeBlaze.Automation.Expressions;
+using HomeBlaze.Services;
 using Namotion.Interceptor.Expressions;
 
 namespace HomeBlaze.Automation.Runtime;
@@ -62,6 +63,14 @@ internal static class AutomationCompiler
         if (rule.InState is { } state && !states.Contains(state, StringComparer.Ordinal))
         {
             errors.Add($"'{state}' is not a state");
+        }
+
+        foreach (var setting in rule.UnknownSettings?.Keys ?? Enumerable.Empty<string>())
+        {
+            if (setting != ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName)
+            {
+                errors.Add($"'{setting}' is no setting of a rule");
+            }
         }
 
         CompileTriggers(candidate, rule.Triggers, errors);
@@ -168,6 +177,7 @@ internal static class AutomationCompiler
             {
                 PropertyTrigger property => CompilePropertyTrigger(rule, index, property),
                 SubjectEventTrigger subjectEvent => CompileEventTrigger(rule, index, subjectEvent),
+                UnreadableTrigger unreadable => unreadable.Error,
                 _ => "the type is unknown"
             };
 
@@ -254,6 +264,7 @@ internal static class AutomationCompiler
         InvokeOperationAction invoke => CheckInvoke(invoke, allowsEvent),
         SetPropertyAction set => CheckSet(set, allowsEvent),
         ChangeStateAction change => states.Contains(change.TargetState, StringComparer.Ordinal) ? null : $"'{change.TargetState}' is not a state",
+        UnreadableAction unreadable => unreadable.Error,
         _ => "the type is unknown"
     };
 

@@ -1,15 +1,15 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Automation;
 
 /// <summary>
-/// One step of a rule. Serialized with a stable <c>$type</c> discriminator; an unknown discriminator is rejected.
+/// One step of a rule. Serialized with a stable <c>$type</c> discriminator. An action that cannot be read, such as one
+/// with an unknown discriminator or a key that names no setting, makes its rule invalid and is saved back as it was
+/// written.
 /// </summary>
-[JsonPolymorphic(TypeDiscriminatorPropertyName = "$type", UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization)]
-[JsonDerivedType(typeof(InvokeOperationAction), "InvokeOperation")]
-[JsonDerivedType(typeof(SetPropertyAction), "SetProperty")]
-[JsonDerivedType(typeof(ChangeStateAction), "ChangeState")]
+[JsonConverter(typeof(AutomationActionJsonConverter))]
 public abstract record AutomationAction
 {
     /// <summary>A stable identifier of the action within its rule, used in run messages and logs.</summary>
@@ -55,4 +55,39 @@ public sealed record ChangeStateAction : AutomationAction
     /// <summary>The state to enter, one of the states of the automation.</summary>
     [Configuration]
     public string TargetState { get; init; } = string.Empty;
+}
+
+/// <summary>
+/// An action that could not be read: the element as it was written and the reason. Its <see cref="AutomationAction.Id"/>
+/// is the written <c>id</c> when that is a text, so that messages name it.
+/// </summary>
+internal sealed record UnreadableAction : AutomationAction
+{
+    public UnreadableAction(JsonElement json, string error)
+    {
+        Json = json;
+        Error = error;
+        Id = FindId(json);
+    }
+
+    public JsonElement Json { get; }
+
+    public string Error { get; }
+
+    // The naming of the configuration decides whether the key is "id" or "Id".
+    private static string FindId(JsonElement json)
+    {
+        if (json.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in json.EnumerateObject())
+            {
+                if (property.NameEquals("id") || property.NameEquals("Id"))
+                {
+                    return property.Value.ValueKind == JsonValueKind.String ? property.Value.GetString()! : string.Empty;
+                }
+            }
+        }
+
+        return string.Empty;
+    }
 }

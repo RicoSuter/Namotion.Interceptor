@@ -29,7 +29,8 @@ public class ConfigurationJsonTypeInfoResolverTests
             typeof(Level1Subject),
             typeof(Level2Subject),
             typeof(Level3Subject),
-            typeof(SubjectWithMixedProperties)
+            typeof(SubjectWithMixedProperties),
+            typeof(SubjectWithExtensionData)
         ]);
 
         _options = new JsonSerializerOptions
@@ -61,6 +62,19 @@ public class ConfigurationJsonTypeInfoResolverTests
         Assert.Contains("saved", json);
         Assert.DoesNotContain("stateProperty", json);
         Assert.DoesNotContain("not-saved", json);
+    }
+
+    [Fact]
+    public void WhenASubjectHasExtensionData_ThenTheKeysItHoldsAreWrittenBack()
+    {
+        // Arrange
+        var subject = JsonSerializer.Deserialize<SubjectWithExtensionData>("""{ "name": "a", "nmae": "b" }""", _options)!;
+
+        // Act
+        var json = JsonSerializer.Serialize(subject, _options);
+
+        // Assert
+        Assert.Equal("""{"name":"a","nmae":"b"}""", json);
     }
 
     [Fact]

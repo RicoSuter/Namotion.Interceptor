@@ -15,6 +15,7 @@ namespace HomeBlaze.Services.Serialization;
 /// - Sets up polymorphism for IConfigurable with $type discriminator
 /// - Filters properties to only [Configuration] for IConfigurable types
 /// - Allows all properties for plain value objects
+/// - Writes a [JsonExtensionData] property, which holds the keys a type read without a property of its own, back unfiltered
 /// - Creates IConfigurable types that have no parameterless constructor through the service provider
 /// - Names every property by its declared name when the naming is <see cref="ConfigurationNaming.CSharpProperty"/>
 /// </summary>
@@ -88,6 +89,11 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
                 if (_naming == ConfigurationNaming.CSharpProperty)
                 {
                     property.Name = propertyName;
+                }
+
+                if (property.IsExtensionData)
+                {
+                    continue;
                 }
 
                 var ignoreNulls = options.DefaultIgnoreCondition == JsonIgnoreCondition.WhenWritingNull;

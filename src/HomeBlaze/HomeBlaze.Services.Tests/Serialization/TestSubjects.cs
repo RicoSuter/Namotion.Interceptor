@@ -1,4 +1,6 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor;
@@ -19,6 +21,19 @@ public partial class TestSubject : IConfigurable
         ConfigProperty = string.Empty;
         StateProperty = string.Empty;
     }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class SubjectWithExtensionData : IConfigurable
+{
+    [Configuration]
+    public partial string? Name { get; set; }
+
+    [JsonExtensionData]
+    [JsonInclude]
+    internal Dictionary<string, JsonElement>? UnknownKeys { get; set; }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
