@@ -29,6 +29,11 @@ internal static class AutomationPaths
     private static readonly ConditionalWeakTable<RegisteredSubjectProperty, string>.CreateValueCallback CreateStateName =
         property => GetAttributePropertyName(property.Name, KnownAttributes.State);
 
+    // The subject path and the name of each path, kept with the path, since an expression resolves the same path
+    // instances on each evaluation.
+    private static readonly ConditionalWeakTable<string, PathParts> Parts = new();
+    private static readonly ConditionalWeakTable<string, PathParts>.CreateValueCallback CreateParts = PathParts.Create;
+
     /// <summary>
     /// Gets the name under which a route records the attribute of a property, the name that
     /// <see cref="RegisteredSubjectProperty.AddAttribute"/> gives it; an attribute added under another name is announced
@@ -104,24 +109,20 @@ internal static class AutomationPaths
     public static RegisteredSubjectProperty? ResolveTarget(SubjectPathResolver resolver, string path, IInterceptorSubject rule, GraphRouteBuilder? recorder = null)
     {
         var lastSeparator = path.LastIndexOf(Separator);
-        var name = lastSeparator < 0 ? path : path[(lastSeparator + 1)..];
-        if (name.Length == 0)
+        if (lastSeparator == path.Length - 1)
         {
             return null;
         }
 
-        IInterceptorSubject? owner;
         if (lastSeparator < 0)
         {
             AddRuleParents(rule, recorder);
-            owner = rule;
-        }
-        else
-        {
-            owner = ResolveSubject(resolver, lastSeparator == 0 ? "/" : path[..lastSeparator], rule, recorder);
+            return FindProperty(rule, path, recorder);
         }
 
-        return owner is null ? null : FindProperty(owner, name, recorder);
+        var parts = Parts.GetValue(path, CreateParts);
+        var owner = ResolveSubject(resolver, parts.SubjectPath, rule, recorder);
+        return owner is null ? null : FindProperty(owner, parts.Name, recorder);
     }
 
     private static RegisteredSubjectProperty? FindProperty(IInterceptorSubject owner, string name, GraphRouteBuilder? recorder)
@@ -192,5 +193,18 @@ internal static class AutomationPaths
         var relativePath = path.StartsWith("./", StringComparison.Ordinal) ? path : "./" + path;
         var property = ResolveProperty(resolver, relativePath, subject);
         return property is null ? ExpressionValue.Missing : ExpressionValue.FromProperty(property, property.GetValue());
+    }
+
+    private sealed class PathParts(string subjectPath, string name)
+    {
+        public string SubjectPath { get; } = subjectPath;
+
+        public string Name { get; } = name;
+
+        public static PathParts Create(string path)
+        {
+            var lastSeparator = path.LastIndexOf(Separator);
+            return new PathParts(lastSeparator == 0 ? "/" : path[..lastSeparator], path[(lastSeparator + 1)..]);
+        }
     }
 }

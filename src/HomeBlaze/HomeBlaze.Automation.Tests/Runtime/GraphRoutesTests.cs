@@ -149,6 +149,31 @@ public class GraphRoutesTests
         Assert.True(allocated < resolutions * 8, $"{allocated} bytes for {resolutions} resolutions");
     }
 
+    // As above, less than 8 bytes a resolution leaves room only for allocations of the runtime that happen once.
+    [Theory]
+    [InlineData("/Room/Sensor/Gust")]
+    [InlineData("Name")]
+    public async Task WhenTheSamePathIsResolvedAgain_ThenResolvingItsTargetAllocatesNothing(string path)
+    {
+        // Arrange
+        const int resolutions = 1000;
+        await using var fixture = await RouteFixture.CreateAsync();
+        var resolver = fixture.Host.Graph.Resolver;
+        Assert.NotNull(AutomationPaths.ResolveTarget(resolver, path, fixture.Rule));
+
+        // Act
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var index = 0; index < resolutions; index++)
+        {
+            AutomationPaths.ResolveTarget(resolver, path, fixture.Rule);
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert
+        Assert.True(allocated < resolutions * 8, $"{allocated} bytes for {resolutions} resolutions");
+    }
+
     private static long ReplaceAndResolve(RouteFixture fixture, GraphRoutes other, TestSensor sensor)
     {
         const string path = "/Room/Sensor/Gust";
