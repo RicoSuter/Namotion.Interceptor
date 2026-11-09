@@ -30,8 +30,14 @@ internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, Au
                 break;
             }
 
-            if (await DispatchOneAsync(requests[index], isActive, summary, cancellationToken))
+            if (await DispatchOneAsync(requests[index], isActive, summary, cancellationToken) is { ChangedState: true } result)
             {
+                // A state that the run passed deactivates the rules it does not hold, as it would between two runs.
+                foreach (var state in result.PassedStates)
+                {
+                    summary.MarkDeactivated(requests, index + 1, rule => rule.IsActiveIn(automation.Enabled, state));
+                }
+
                 summary.MarkDeactivated(requests, index + 1, isActive);
             }
         }
@@ -48,27 +54,27 @@ internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, Au
         }
     }
 
-    // Returns whether the request ran and changed the state.
-    private async Task<bool> DispatchOneAsync(
+    // Returns the result of the request when it ran, else null.
+    private async Task<RuleRunResult?> DispatchOneAsync(
         RunRequest request, Func<CompiledRule, bool> isActive, DispatchSummary summary, CancellationToken cancellationToken)
     {
         if (summary.ChangedState && request.Event is null)
         {
             summary.SkippedForStateChange = true;
             Skip(request, $"the state changed to {host.CurrentState} for the same input");
-            return false;
+            return null;
         }
 
         if (!request.Rule.IsActivated || !isActive(request.Rule) || summary.HasRun(request.Rule) || summary.WasDeactivated(request.Rule))
         {
-            return false;
+            return null;
         }
 
         if (request.EventInput is not null)
         {
             if (EventTriggerEngine.CheckFilters(automation.PathResolver, automation.TimeProvider, request) is not { } passed)
             {
-                return false;
+                return null;
             }
 
             request = passed;
@@ -76,7 +82,7 @@ internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, Au
 
         var result = await _runner.RunAsync(request, host, cancellationToken);
         host.RunUnlessAbandoned(() => Complete(request, result, summary));
-        return result.ChangedState;
+        return result;
     }
 
     private void Complete(RunRequest request, RuleRunResult result, DispatchSummary summary)

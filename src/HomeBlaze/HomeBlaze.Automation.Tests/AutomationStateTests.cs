@@ -226,6 +226,30 @@ public class AutomationStateTests
     }
 
     [Fact]
+    public async Task WhenOneRuleLeavesAndEntersAStateAgainForAnEvent_ThenALaterRuleOfThatStateDoesNotRunForTheEvent()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Off", "On"];
+            automation.InitialState = "Off";
+            automation.RuleOrder = ["roundTrip", "offOnly"];
+            automation.Rules = Keyed(
+                ("roundTrip", Create("Round trip", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Enter("On"), Enter("Off")])),
+                ("offOnly", Create("Off only", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Invoke("/Blinds/Close")], inState: "Off")));
+        });
+
+        // Act
+        host.Button.Press("Release");
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal("Off", host.Automation.CurrentState);
+        Assert.Equal(0, host.Blinds.CloseCount);
+        Assert.Equal(0L, host.Rule("offOnly").RunCount);
+    }
+
+    [Fact]
     public async Task WhenOneEventLeavesAndEntersAStateAgainWhileAHoldOfThatStateRuns_ThenTheHoldRestarts()
     {
         // Arrange
