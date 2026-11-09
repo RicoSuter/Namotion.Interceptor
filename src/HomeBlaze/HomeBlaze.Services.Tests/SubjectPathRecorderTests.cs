@@ -133,16 +133,21 @@ public class SubjectPathRecorderTests : SubjectPathResolverTestBase
     }
 
     [Fact]
-    public void WhenARecorderOverloadIsCalledWithoutARecorder_ThenItThrows()
+    public void WhenARecorderOverloadIsCalledWithoutARecorder_ThenItResolvesAsTheOverloadWithoutOne()
     {
         // Arrange
         var root = new TestContainer(Context) { Name = "Root" };
         RootManager.Root = root;
 
-        // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => Resolver.ResolveSubject("/", PathStyle.Canonical, null, null!));
-        Assert.Throws<ArgumentNullException>(() => Resolver.GetPaths(root, PathStyle.Canonical, null!));
-        Assert.Throws<ArgumentNullException>(() => Resolver.GetPath(root, PathStyle.Canonical, null!));
+        // Act
+        var subject = Resolver.ResolveSubject("/", PathStyle.Canonical, null, recorder: null);
+        var paths = Resolver.GetPaths(root, PathStyle.Canonical, recorder: null);
+        var path = Resolver.GetPath(root, PathStyle.Canonical, recorder: null);
+
+        // Assert
+        Assert.Same(Resolver.ResolveSubject("/", PathStyle.Canonical), subject);
+        Assert.Equal(Resolver.GetPaths(root, PathStyle.Canonical), paths);
+        Assert.Equal(Resolver.GetPath(root, PathStyle.Canonical), path);
     }
 
     [Fact]
