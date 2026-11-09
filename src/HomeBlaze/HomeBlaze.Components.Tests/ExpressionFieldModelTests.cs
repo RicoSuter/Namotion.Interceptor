@@ -65,6 +65,60 @@ public class ExpressionFieldModelTests
     }
 
     [Fact]
+    public void WhenARemovedRowIsRemovedAgain_ThenNoOtherRowIsRemoved()
+    {
+        // Arrange
+        var model = new ExpressionFieldModel("/a/B > 1 and /c/D < 2 and /e/F == 3");
+        var middle = model.GetRowKey(1);
+        var last = model.GetRowKey(2);
+
+        // Act
+        var isRemoved = model.RemoveRow(middle);
+        var isRemovedAgain = model.RemoveRow(middle);
+        model.RemoveRow(last);
+        var isLastRemovedAgain = model.RemoveRow(last);
+
+        // Assert
+        Assert.True(isRemoved);
+        Assert.False(isRemovedAgain);
+        Assert.False(isLastRemovedAgain);
+        Assert.Equal("/a/B > 1", model.Text);
+    }
+
+    [Fact]
+    public void WhenARowThatIsGoneIsEdited_ThenNothingChanges()
+    {
+        // Arrange
+        var model = new ExpressionFieldModel("/a/B > 1 and /c/D < 2");
+        var removed = model.GetRowKey(0);
+        model.RemoveRow(removed);
+
+        // Act
+        var isChanged = model.SetRow(removed, new ExpressionRow(string.Empty, "/x/Y", "==", "5"));
+
+        // Assert
+        Assert.False(isChanged);
+        Assert.Equal("/c/D < 2", model.Text);
+        Assert.False(model.HasPendingRow);
+    }
+
+    [Fact]
+    public void WhenRowsAreAddedOrRemoved_ThenEachRowKeepsItsKey()
+    {
+        // Arrange
+        var model = new ExpressionFieldModel("/a/B > 1 and /c/D < 2");
+        var second = model.GetRowKey(1);
+
+        // Act
+        model.AddRow();
+        model.RemoveRow(model.GetRowKey(0));
+
+        // Assert
+        Assert.Same(second, model.GetRowKey(0));
+        Assert.NotSame(second, model.GetRowKey(1));
+    }
+
+    [Fact]
     public void WhenASimpleTextIsLoadedInAdvancedMode_ThenTheModeStaysAdvanced()
     {
         // Arrange

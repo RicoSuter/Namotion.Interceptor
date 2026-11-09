@@ -26,11 +26,13 @@
             @for (var index = 0; index < _model.Rows.Count; index++)
             {
                 var rowIndex = index;
+                @* The handlers name the row by its key, so that a click the browser sent before a render removed the row reaches no other row. *@
+                var key = _model.GetRowKey(rowIndex);
                 var pending = _model.GetPendingRow(rowIndex);
-                var row = pending?.Row ?? _model.Rows[rowIndex];
+                var row = _model.GetDisplayRow(rowIndex);
                 var pathError = pending?.PathError;
                 var valueError = pending?.ValueError;
-                <div class="d-flex flex-wrap align-center gap-2" data-testid="@_testIds.Row">
+                <div @key="key" class="d-flex flex-wrap align-center gap-2" data-testid="@_testIds.Row">
                     <div style="width: 64px;">
                         @if (rowIndex == 0)
                         {
@@ -39,7 +41,7 @@
                         else
                         {
                             <MudSelect T="string" Dense="true" Value="@row.Combinator" aria-label="Combine with the previous condition"
-                                       ValueChanged="@(value => SetRowAsync(rowIndex, row with { Combinator = value ?? ExpressionRows.Combinators[0] }))">
+                                       ValueChanged="@(value => SetRowAsync(key, row with { Combinator = value ?? ExpressionRows.Combinators[0] }))">
                                 @foreach (var combinator in ExpressionRows.Combinators)
                                 {
                                     <MudSelectItem Value="@combinator">@combinator</MudSelectItem>
@@ -51,18 +53,18 @@
                         @if (Fields is { } fields)
                         {
                             <MudAutocomplete T="string" Label="Field" Dense="true" Value="@row.Path" CoerceValue="true" Error="@(pathError is not null)" ErrorText="@pathError"
-                                             ValueChanged="@(value => SetRowAsync(rowIndex, row with { Path = value ?? string.Empty }))"
+                                             ValueChanged="@(value => SetRowAsync(key, row with { Path = value ?? string.Empty }))"
                                              SearchFunc="@((text, _) => SearchFieldsAsync(fields, text))" />
                         }
                         else
                         {
                             <SubjectPathField Label="Property" Value="@row.Path" ErrorText="@pathError"
-                                              ValueChanged="@(value => SetRowAsync(rowIndex, row with { Path = value ?? string.Empty }))" />
+                                              ValueChanged="@(value => SetRowAsync(key, row with { Path = value ?? string.Empty }))" />
                         }
                     </div>
                     <div style="width: 130px;">
                         <MudSelect T="string" Label="Operator" Dense="true" Value="@row.Operator" ToStringFunc="@ExpressionRows.GetOperatorLabel"
-                                   ValueChanged="@(value => SetRowAsync(rowIndex, row with { Operator = value ?? ExpressionRows.Operators[0].Symbol }))">
+                                   ValueChanged="@(value => SetRowAsync(key, row with { Operator = value ?? ExpressionRows.Operators[0].Symbol }))">
                             @foreach (var (symbol, label) in ExpressionRows.Operators)
                             {
                                 <MudSelectItem Value="@symbol">@label</MudSelectItem>
@@ -71,11 +73,11 @@
                     </div>
                     <div style="flex: 1 1 120px; min-width: 0;">
                         <MudTextField T="string" Label="Value" Value="@row.Value" Error="@(valueError is not null)" ErrorText="@valueError"
-                                      ValueChanged="@(value => SetRowAsync(rowIndex, row with { Value = value ?? string.Empty }))" />
+                                      ValueChanged="@(value => SetRowAsync(key, row with { Value = value ?? string.Empty }))" />
                     </div>
                     <MudText Typo="Typo.caption" Class="mud-text-secondary" data-testid="@_testIds.RowNow">@GetRowText(rowIndex)</MudText>
                     <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" aria-label="Remove condition"
-                                   OnClick="@(() => RemoveRowAsync(rowIndex))" />
+                                   OnClick="@(() => RemoveRowAsync(key))" />
                 </div>
             }
         </MudStack>
@@ -193,7 +195,7 @@
         return EmitAsync(_model.Text != previous);
     }
 
-    private Task SetRowAsync(int index, ExpressionRow row) => EmitAsync(_model.SetRow(index, row));
+    private Task SetRowAsync(object key, ExpressionRow row) => EmitAsync(_model.SetRow(key, row));
 
     private Task AddRowAsync()
     {
@@ -201,11 +203,7 @@
         return EmitAsync(isTextChanged: true);
     }
 
-    private Task RemoveRowAsync(int index)
-    {
-        _model.RemoveRow(index);
-        return EmitAsync(isTextChanged: true);
-    }
+    private Task RemoveRowAsync(object key) => EmitAsync(_model.RemoveRow(key));
 
     // An edit that stays pending leaves the text as it is, and the owner is not told about a value that did not change.
     private async Task EmitAsync(bool isTextChanged)

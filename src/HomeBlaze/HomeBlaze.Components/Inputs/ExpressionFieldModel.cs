@@ -13,7 +13,7 @@ internal sealed class ExpressionFieldModel
     private static readonly ImmutableArray<string> DefaultVariables = [ExpressionVariables.Value, ExpressionVariables.Subject];
 
     private List<ExpressionRow> _rows = [];
-    private List<PendingRow?> _pending = [];
+    private List<RowSlot> _slots = [];
     private string _ownerValue;
 
     /// <param name="text">The expression text.</param>
@@ -45,7 +45,7 @@ internal sealed class ExpressionFieldModel
     /// row of the text has no path or no value yet.
     /// </summary>
     public bool HasPendingRow =>
-        _pending.Exists(static pending => pending is not null) ||
+        _slots.Exists(static slot => slot.Pending is not null) ||
         _rows.Exists(static row => row.Path.Length == 0 || row.Value.Length == 0);
 
     /// <summary>
@@ -74,7 +74,7 @@ internal sealed class ExpressionFieldModel
         Text = text ?? string.Empty;
         CanShowSimple = ExpressionRows.TryParse(Text, out var rows);
         _rows = [.. rows];
-        _pending = CreatePending(_rows.Count);
+        _slots = CreateSlots(_rows.Count);
         if (!CanShowSimple)
         {
             IsAdvanced = true;
@@ -84,7 +84,7 @@ internal sealed class ExpressionFieldModel
     public void ShowAdvanced()
     {
         IsAdvanced = true;
-        _pending = CreatePending(_rows.Count);
+        _slots = CreateSlots(_rows.Count);
     }
 
     /// <summary>Shows the rows; false when the text does not have the simple form.</summary>
@@ -100,10 +100,34 @@ internal sealed class ExpressionFieldModel
     }
 
     /// <summary>The row as the user sees it: the pending edit when there is one, otherwise the row of the text.</summary>
-    public ExpressionRow GetDisplayRow(int index) => _pending[index]?.Row ?? _rows[index];
+    public ExpressionRow GetDisplayRow(int index) => _slots[index].Pending?.Row ?? _rows[index];
 
     /// <summary>The pending edit of the row with its errors, or null when the row is the one of the text.</summary>
-    public PendingRow? GetPendingRow(int index) => _pending[index];
+    public PendingRow? GetPendingRow(int index) => _slots[index].Pending;
+
+    /// <summary>
+    /// The identity of the row at the index, which stays with the row while rows before it are added or removed and is
+    /// never given to another row, so that an edit sent for a row that is gone changes nothing.
+    /// </summary>
+    public object GetRowKey(int index) => _slots[index];
+
+    /// <summary>Takes an edited row like <see cref="SetRow(int, ExpressionRow)"/>; does nothing when the row with the key is gone.</summary>
+    /// <returns>Whether <see cref="Text"/> changed.</returns>
+    public bool SetRow(object key, ExpressionRow row) => IndexOf(key) is var index and >= 0 && SetRow(index, row);
+
+    /// <summary>Removes the row with the key; does nothing when it is gone.</summary>
+    /// <returns>Whether a row was removed.</returns>
+    public bool RemoveRow(object key)
+    {
+        var index = IndexOf(key);
+        if (index < 0)
+        {
+            return false;
+        }
+
+        RemoveRow(index);
+        return true;
+    }
 
     /// <summary>
     /// Takes an edited row. A typed value that is not one token is written as text in quotes, so that it cannot change
@@ -119,13 +143,13 @@ internal sealed class ExpressionFieldModel
         var pending = Check(row, _rows[index], out var applied);
         if (pending is not null)
         {
-            _pending[index] = pending;
+            _slots[index].Pending = pending;
             return false;
         }
 
         var isChanged = applied != _rows[index];
         _rows[index] = applied;
-        _pending[index] = null;
+        _slots[index].Pending = null;
         if (isChanged)
         {
             Emit();
@@ -137,18 +161,21 @@ internal sealed class ExpressionFieldModel
     public void AddRow()
     {
         _rows.Add(ExpressionRow.Empty(_rows.Count == 0 ? string.Empty : ExpressionRows.Combinators[0]));
-        _pending.Add(null);
+        _slots.Add(new RowSlot());
         Emit();
     }
 
     public void RemoveRow(int index)
     {
         _rows.RemoveAt(index);
-        _pending.RemoveAt(index);
+        _slots.RemoveAt(index);
         if (index == 0 && _rows.Count > 0)
         {
             _rows[0] = _rows[0] with { Combinator = string.Empty };
-            _pending[0] = _pending[0] is { } first ? first with { Row = first.Row with { Combinator = string.Empty } } : null;
+            if (_slots[0].Pending is { } first)
+            {
+                _slots[0].Pending = first with { Row = first.Row with { Combinator = string.Empty } };
+            }
         }
 
         Emit();
@@ -266,15 +293,23 @@ internal sealed class ExpressionFieldModel
     private static bool IsSingleToken(string text) =>
         ExpressionTokens.Split(text) is [var token] && token == text;
 
-    private static List<PendingRow?> CreatePending(int count)
+    private int IndexOf(object key) => _slots.FindIndex(slot => ReferenceEquals(slot, key));
+
+    private static List<RowSlot> CreateSlots(int count)
     {
-        var pending = new List<PendingRow?>(count);
+        var slots = new List<RowSlot>(count);
         for (var index = 0; index < count; index++)
         {
-            pending.Add(null);
+            slots.Add(new RowSlot());
         }
 
-        return pending;
+        return slots;
+    }
+
+    // One per row: its identity, and its edit that is not part of the text.
+    private sealed class RowSlot
+    {
+        public PendingRow? Pending { get; set; }
     }
 
     /// <summary>An edit of a row that is not part of <see cref="Text"/>, with the error of its path or value when it is invalid.</summary>
