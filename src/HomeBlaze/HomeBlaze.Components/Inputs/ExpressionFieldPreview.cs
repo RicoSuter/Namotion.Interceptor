@@ -5,10 +5,8 @@ namespace HomeBlaze.Components.Inputs;
 
 /// <summary>
 /// The texts an <see cref="ExpressionField"/> shows about its expression: the error, the hints, the result and the current
-/// value of each row. <see cref="Update"/> evaluates them only when the text, the rows or the delegates changed and
-/// prepares the expression, the rows and the hints for evaluation once, so that <see cref="RefreshValues"/> reads the
-/// current values again without parsing anything, and a render evaluates nothing. The hints of the host depend on the
-/// text only, so a refresh does not ask for them again.
+/// value of each row. <see cref="Update"/> prepares them when the text, the rows, the variables or a delegate changed;
+/// <see cref="RefreshValues"/> reads the current values again without parsing or asking the host for hints.
 /// </summary>
 internal sealed class ExpressionFieldPreview
 {

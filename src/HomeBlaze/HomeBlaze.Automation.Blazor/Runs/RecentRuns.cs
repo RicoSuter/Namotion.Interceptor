@@ -45,10 +45,7 @@ internal static class RecentRuns
         }
     }
 
-    /// <summary>
-    /// A hash of the names and run counts of the rules, which changes with every run, so that the page that renders it knows
-    /// when to load the runs again. A hash instead of a text, because the page renders on every change of a status.
-    /// </summary>
+    /// <summary>A hash of the names and run counts of the rules, which changes with every run, for a page to know when to load the runs again.</summary>
     public static int GetKey(Automation automation)
     {
         var hash = new HashCode();
