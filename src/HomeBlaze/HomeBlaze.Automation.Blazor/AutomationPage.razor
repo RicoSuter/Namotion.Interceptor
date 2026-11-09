@@ -44,7 +44,7 @@
                 <MudText Typo="Typo.h6">State</MudText>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">Read only. Edit the states in the States tab of the editor.</MudText>
                 <div class="mt-2" style="overflow-x: auto;">
-                    <StateDiagram Layout="@GetLayout(automation)" CurrentState="@automation.CurrentState" CurrentDetail="@GetCurrentDetail(automation)" />
+                    <StateDiagram Layout="@_layouts.Get(automation)" CurrentState="@automation.CurrentState" CurrentDetail="@GetCurrentDetail(automation)" />
                 </div>
             </section>
         }
@@ -143,8 +143,7 @@
 
     private readonly RunReloadSchedule _reloads = new(ReloadInterval, RetryWindow);
     private readonly CancellationTokenSource _disposal = new();
-    private StateDiagramLayout? _layout;
-    private (string[] States, string? InitialState, Dictionary<string, AutomationRule> Rules, string[] RuleOrder) _layoutConfiguration;
+    private readonly StateDiagramLayoutCache _layouts = new();
     private RecentRunsResult _recentRuns = new(false, [], null, false);
     private int? _renderedRunsKey;
     private int? _loadedRunsKey;
@@ -263,20 +262,6 @@
 
     private string GetCurrentDetail(Automation automation) =>
         automation.StateEnteredAt is { } since ? $"Current, since {AutomationTime.Format(TimeZone, since, TimeProvider.GetUtcNow())}" : "Current";
-
-    // The page renders on every change of a status or a run, so the layout is computed again only after a configuration was
-    // applied, which replaces these values.
-    private StateDiagramLayout GetLayout(Automation automation)
-    {
-        var configuration = (automation.States, automation.InitialState, automation.Rules, automation.RuleOrder);
-        if (_layout is null || _layoutConfiguration != configuration)
-        {
-            _layoutConfiguration = configuration;
-            _layout = StateDiagramLayout.Create(automation.States, automation.InitialState, [.. automation.GetRulesInOrder().Select(pair => StateDiagramRule.From(pair.Key, pair.Value))]);
-        }
-
-        return _layout;
-    }
 
     private static string? DescribeScope(Automation automation, AutomationRule rule)
     {
