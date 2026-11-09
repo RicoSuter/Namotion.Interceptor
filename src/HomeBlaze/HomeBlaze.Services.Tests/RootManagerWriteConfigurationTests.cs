@@ -90,6 +90,23 @@ public class RootManagerWriteConfigurationTests : IDisposable
         Assert.Contains("\"childConfig\": \"second\"", await File.ReadAllTextAsync(_configurationFilePath));
     }
 
+    [Fact]
+    public async Task WhenAValueOfTheRootConfigurationCannotBeRead_ThenWritingIsRefusedAndTheFileIsKept()
+    {
+        // Arrange
+        var content = $$"""{ "$type": "{{typeof(ParentWithChildSubject).FullName}}", "name": "root", "child": 5 }""";
+        await File.WriteAllTextAsync(_configurationFilePath, content);
+        await _rootManager.StartAsync(CancellationToken.None);
+        var root = await _rootManager.RootLoaded.WaitAsync(DeadlockTimeout);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => _rootManager.WriteConfigurationAsync(root, CancellationToken.None));
+
+        // Assert
+        Assert.Contains("the value of 'child' could not be read", exception.Message);
+        Assert.Equal(content, await File.ReadAllTextAsync(_configurationFilePath));
+    }
+
     /// <summary>Blocks the thread of the next read of one property of one subject, after the value was read, until it is released.</summary>
     private sealed class BlockingReadAfterValue(IInterceptorSubject subject, string propertyName) : IReadInterceptor, IDisposable
     {

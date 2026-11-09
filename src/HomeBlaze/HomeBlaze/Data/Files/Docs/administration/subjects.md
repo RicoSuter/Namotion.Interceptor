@@ -103,6 +103,12 @@ Create subjects by adding JSON files with a `$type` discriminator:
 
 The `$type` property specifies the .NET class to instantiate. Properties marked with `[Configuration]` in the class are automatically persisted. See [Building Subjects](../development/building-subjects.md) for authoring the C# side.
 
+### Values That Cannot Be Read
+
+A value of the wrong type, such as `"targetSpeed": "fast"` for a number or a name that an option does not have, is skipped when the file is read: the subject keeps the default of that property, or the value it had when the file is read again, and takes the other properties. The log names the file and each value that was skipped. While a file has such a value, the subject is not saved: a change in the UI shows the error and leaves the file as it is, because saving would replace what could not be read. Correct the file, and saving works again once it is read.
+
+A key that names no property, such as a misspelled `enabeld`, is ignored, except by subjects that report it as an error of their configuration, such as automations. Those also show the values that were skipped, and are not saved either until the file is corrected.
+
 ### Background Services
 
 Subjects that inherit from `BackgroundService` start automatically when loaded. They stop when removed from the graph.

@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text;
 using FluentStorage.Storage;
 using HomeBlaze.Abstractions;
@@ -637,11 +638,13 @@ internal sealed class StorageReconciler
                 candidates[0].Parent != entry.Parent)
             {
                 entry.Subject = candidates[0].Subject;
+                entry.ConfigurationIssues = candidates[0].ConfigurationIssues;
                 _hasUnappliedMove = true;
             }
             else
             {
-                entry.Subject = CreateFromJson(listed.Path, DecodeText(content), listed.Version);
+                entry.Subject = CreateFromJson(listed.Path, DecodeText(content), listed.Version, out var issues);
+                entry.ConfigurationIssues = issues;
             }
         }
         else
@@ -714,9 +717,9 @@ internal sealed class StorageReconciler
         });
     }
 
-    private IInterceptorSubject CreateFromJson(string path, string json, StorageVersion version)
+    private IInterceptorSubject CreateFromJson(string path, string json, StorageVersion version, out ImmutableArray<string> issues)
     {
-        var subject = _subjectFactory.CreateFromJson(_storage, StoragePath.ToFullPath(path), json);
+        var subject = _subjectFactory.CreateFromJson(_storage, StoragePath.ToFullPath(path), json, out issues);
         if (subject is JsonFile file)
         {
             SetMetadata(file, version);
@@ -802,7 +805,9 @@ internal sealed class StorageReconciler
             // Can attach nested subjects, see the creation of a subject from JSON.
             using (ExecutionContext.SuppressFlow())
             {
-                _serializer.UpdateConfiguration(entry.Subject, json);
+                var skipped = new List<SkippedConfigurationProperty>();
+                _serializer.UpdateConfiguration(entry.Subject, json, skipped.Add);
+                entry.ConfigurationIssues = _subjectFactory.ReportIssues(entry.Subject, entry.Path, json, skipped);
             }
 
             await configurable.ApplyConfigurationAsync(cancellationToken);
@@ -817,7 +822,7 @@ internal sealed class StorageReconciler
 
         // The file is something else now: a plain file that became a subject, a subject of another type, or a
         // subject that became a plain file. Only a plain file that stays one keeps its instance.
-        var subject = CreateFromJson(entry.Path, json, version);
+        var subject = CreateFromJson(entry.Path, json, version, out var issues);
         if (subject is JsonFile && entry.Subject is JsonFile)
         {
             return false;
@@ -825,7 +830,7 @@ internal sealed class StorageReconciler
 
         _subjectFactory.Release(entry.Subject);
 
-        _index.Set(new StorageEntry { Path = entry.Path, IsFolder = false, Version = version, Hash = hash, Subject = subject });
+        _index.Set(new StorageEntry { Path = entry.Path, IsFolder = false, Version = version, Hash = hash, Subject = subject, ConfigurationIssues = issues });
         _logger?.LogInformation("Replaced the subject of: {Path}", entry.Path);
         return true;
     }
