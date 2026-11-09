@@ -149,7 +149,7 @@ public partial class HomeBlazeInstallation
         var configurationWriter = this.TryGetFirstParent<IConfigurationWriter>();
         configurationWriter?.ThrowIfWriteRefused(this);
 
-        var previousName = client.Name;
+        var previous = client.CaptureName();
         client.Name = name;
         try
         {
@@ -160,10 +160,33 @@ public partial class HomeBlazeInstallation
         }
         catch (ConfigurationWriteRefusedException)
         {
-            // Refused after the check above, when the file was read again in between.
-            client.Name = previousName;
+            // Refused after the check above, when the file was read again in between. A later name wins over the restore.
+            if (client.TryRestoreName(previous, name))
+            {
+                RestoreRemovedClient(client);
+            }
+
             throw;
         }
+    }
+
+    /// <summary>
+    /// Adds the client back to <see cref="Clients"/> when the reconcile of its forgetting removed it and nothing took its id since.
+    /// </summary>
+    private void RestoreRemovedClient(HomeBlazeClient client)
+    {
+        lock (_clientsLock)
+        {
+            // A pending reload replaces the clients, so the restored client must not come back into them.
+            if (!client.IsNamed || _pendingClients is not null || Clients.ContainsKey(client.Id))
+            {
+                return;
+            }
+
+            Clients = new Dictionary<string, HomeBlazeClient>(Clients) { [client.Id] = client };
+        }
+
+        ReconcileClients();
     }
 
     private void OnClientConnectionsChanged()

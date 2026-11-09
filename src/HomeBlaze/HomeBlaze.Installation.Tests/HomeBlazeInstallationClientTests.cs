@@ -212,15 +212,27 @@ public class HomeBlazeInstallationClientTests
         Assert.Empty(_root.Written);
     }
 
-    [Fact]
-    public async Task WhenTheConfigurationIsRefused_ThenForgettingThrowsTheRefusalAndTheClientKeepsItsName()
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    public async Task WhenTheConfigurationIsRefused_ThenForgettingThrowsTheRefusalAndTheClientKeepsItsNameAndToken(bool isRefusalFoundOnlyByWrite, bool isConnected)
     {
         // Arrange
         var connection = _connections.Connect(null, new FakeClientCallbacks());
         _installation.ReconcileClients();
         var client = _installation.Clients[connection.ConnectionId];
         await client.RenameAsync("Hall", CancellationToken.None);
+        if (!isConnected)
+        {
+            _connections.Disconnect(connection);
+            _installation.ReconcileClients();
+        }
+
+        var tokenHash = client.TokenHash;
         _root.Refusal = new ConfigurationWriteRefusedException("refused", ["the value of 'x' could not be read"]);
+        _root.IsRefusalFoundOnlyByWrite = isRefusalFoundOnlyByWrite;
 
         // Act
         var exception = await Record.ExceptionAsync(() => client.ForgetAsync(CancellationToken.None));
@@ -228,6 +240,10 @@ public class HomeBlazeInstallationClientTests
         // Assert
         Assert.Same(_root.Refusal, exception);
         Assert.Equal("Hall", client.Name);
+        Assert.NotNull(tokenHash);
+        Assert.Equal(tokenHash, client.TokenHash);
+        Assert.Same(client, _installation.Clients[client.Id]);
+        Assert.Equal(isConnected, client.IsConnected);
         Assert.Equal("Hall", connection.ClientName);
     }
 
