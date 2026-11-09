@@ -579,7 +579,7 @@ Every run increments the `RunCount` of its rule, also two identical runs in a ro
 ### Limits
 
 - An automation processes its inputs one after the other. At most 1024 inputs wait; more are dropped, the rules are evaluated again with the current values, and the status says how many inputs were dropped. The log summarizes the drops at most once a minute.
-- A chain of more than 16 runs that each caused the next, such as two rules that change each other's values, is stopped and reported.
+- A chain of more than 16 runs that each caused the next, such as two rules that change each other's values, is stopped and reported with the number of inputs that were dropped. A run of the chain that changes which subject a path leads to, such as replacing a device, usually reaches only the automations with a path through that change: an automation without one then neither reports the chain for it nor counts it among its dropped inputs.
 - An operation may run for one minute, then its cancellation is requested and the action fails. An operation that ignores its cancellation is still awaited, so that it never overlaps a later run of the automation. Every other rule of the automation waits meanwhile, so give each concern its own automation.
 - Stopping an automation, such as when HomeBlaze shuts down, cancels the running action; the actions after it and the other rules of that input do not run, and the run is recorded as **Canceled**, which the page shows as **Canceled by a stop**. A stop waits at most 10 seconds: a worker that is still in an operation is then abandoned and changes nothing anymore, and an operation that ignores its cancellation is abandoned once its minute is over. The runs not written yet are written on the stop, unless the stop is given no time at all, which can lose the runs of the last 5 seconds.
 - `LastRunMessage` holds at most 500 characters; the full errors are in the log.
@@ -593,6 +593,8 @@ While a saved configuration is rejected, the previous rules run a call or a writ
 - A rule shows `On: Not applied yet` until the automation applied its configuration for the first time.
 - A saved configuration keeps the events that wait to be processed for every event trigger it leaves unchanged.
 - A system clock that is set forward or back is noticed within a minute.
+- A list or dictionary that a device changes in place is not observed: a path through it, such as `/Room/Devices[lamp]/On`, may keep leading to what it found before until a new list or dictionary is assigned.
+- Neither is an attribute whose value a device changes without a write, such as configuration metadata that becomes secret: a path to its property keeps whether it may be read until the automation resolves the path again, such as after a subject on the path is replaced.
 
 ---
 

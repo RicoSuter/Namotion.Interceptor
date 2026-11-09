@@ -48,6 +48,9 @@ internal sealed class CompiledPropertyTrigger
     /// <summary>The properties that <see cref="PropertyPaths"/> resolved to when the trigger was last bound.</summary>
     public PropertyReference[] Dependencies { get; set; } = [];
 
+    /// <summary>The graph route of <see cref="Dependencies"/>.</summary>
+    public GraphRouteSlot DependencyRoute { get; } = new();
+
     public string Description => $"trigger {Index + 1} ({Configuration.Expression})";
 
     /// <summary>Hands the state to the trigger that replaces this one with an equal configuration, and starts over.</summary>

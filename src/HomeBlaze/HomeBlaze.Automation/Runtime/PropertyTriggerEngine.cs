@@ -22,7 +22,8 @@ internal sealed class PropertyTriggerEngine(
     TimeProvider timeProvider,
     ILogger logger,
     Func<string> getAutomationName,
-    Action<FrozenSet<PropertyReference>> publishWatched)
+    Action<FrozenSet<PropertyReference>> publishWatched,
+    GraphRoutes routes)
 {
     private readonly ObservedValues _values = new();
     private readonly List<CompiledPropertyTrigger> _pending = [];
@@ -175,6 +176,7 @@ internal sealed class PropertyTriggerEngine(
     {
         _rebound.Clear();
         _reboundOnlyIfRules.Clear();
+        routes.AwaitsGraphChange = false;
     }
 
     /// <summary>Requests the runs of every pending trigger, such as after a state change skipped them.</summary>
@@ -199,6 +201,11 @@ internal sealed class PropertyTriggerEngine(
         }
 
         var hasRemoved = _pending.RemoveAll(trigger => !IsPending(trigger)) > 0;
+        if (hasRemoved)
+        {
+            ClearUntrackedOnlyIfRoutes(rules);
+        }
+
         var hasAdded = false;
         var now = timeProvider.GetUtcNow();
         foreach (var request in requests)
@@ -255,12 +262,18 @@ internal sealed class PropertyTriggerEngine(
     /// </summary>
     public bool Refresh(IReadOnlyList<CompiledRule> rules)
     {
+        var trackedBefore = _pending.Count;
         for (var index = _pending.Count - 1; index >= 0; index--)
         {
             if (!IsPending(_pending[index]))
             {
                 _pending.RemoveAt(index);
             }
+        }
+
+        if (_pending.Count < trackedBefore)
+        {
+            ClearUntrackedOnlyIfRoutes(rules);
         }
 
         DateTimeOffset? now = null;
@@ -279,6 +292,8 @@ internal sealed class PropertyTriggerEngine(
             }
         }
 
+        // The next graph change evaluates them, whatever it changed.
+        routes.AwaitsGraphChange = _rebound.Count > 0 || _reboundOnlyIfRules.Count > 0;
         PublishWatched(rules, []);
         return _pending.Count > trackedCount;
     }
@@ -357,16 +372,30 @@ internal sealed class PropertyTriggerEngine(
         return false;
     }
 
+    // Only if of a rule without a tracked pending trigger is resolved again when one becomes tracked.
+    private void ClearUntrackedOnlyIfRoutes(IReadOnlyList<CompiledRule> rules)
+    {
+        foreach (var rule in rules)
+        {
+            if (!ReferenceEquals(rule.OnlyIfRoute.Route, GraphRoute.Empty) && !IsTracked(rule))
+            {
+                rule.OnlyIfRoute.Clear();
+            }
+        }
+    }
+
     public static void Deactivate(CompiledRule rule)
     {
         foreach (var trigger in rule.PropertyTriggers)
         {
             trigger.State.Deactivate();
             trigger.Dependencies = [];
+            trigger.DependencyRoute.Clear();
             trigger.NextCheckAt = null;
         }
 
         rule.OnlyIfDependencies = [];
+        rule.OnlyIfRoute.Clear();
     }
 
     // A change queued while its property was watched may arrive after it no longer is; kept, it would hide the current
@@ -499,7 +528,7 @@ internal sealed class PropertyTriggerEngine(
     private bool ResolveOnlyIfDependencies(CompiledRule rule)
     {
         var previous = rule.OnlyIfDependencies;
-        rule.OnlyIfDependencies = Resolve(rule.OnlyIfPropertyPaths, rule.Rule);
+        rule.OnlyIfDependencies = Resolve(rule.OnlyIfPropertyPaths, rule.Rule, rule.OnlyIfRoute);
         return !rule.OnlyIfDependencies.AsSpan().SequenceEqual(previous);
     }
 
@@ -552,21 +581,23 @@ internal sealed class PropertyTriggerEngine(
     private bool ResolveDependencies(CompiledPropertyTrigger trigger)
     {
         var previous = trigger.Dependencies;
-        trigger.Dependencies = Resolve(trigger.PropertyPaths, trigger.Rule.Rule);
+        trigger.Dependencies = Resolve(trigger.PropertyPaths, trigger.Rule.Rule, trigger.DependencyRoute);
         return !trigger.Dependencies.AsSpan().SequenceEqual(previous);
     }
 
-    private PropertyReference[] Resolve(IReadOnlyList<string> paths, AutomationRule rule)
+    private PropertyReference[] Resolve(IReadOnlyList<string> paths, AutomationRule rule, GraphRouteSlot route)
     {
+        var recorder = routes.BeginRoute();
         var resolved = new List<PropertyReference>(paths.Count);
         foreach (var path in paths)
         {
-            if (AutomationPaths.ResolveProperty(resolver, path, rule) is { } property)
+            if (AutomationPaths.ResolveProperty(resolver, path, rule, recorder) is { } property)
             {
                 resolved.Add(property.Reference);
             }
         }
 
+        routes.EndRoute(route);
         return [.. resolved];
     }
 

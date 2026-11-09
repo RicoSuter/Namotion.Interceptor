@@ -172,6 +172,9 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         }
     }
 
+    /// <summary>The worker of the current start, or null while the automation is stopped.</summary>
+    internal AutomationRuntime? Runtime => Volatile.Read(ref _runtime);
+
     /// <summary>Completes once every input queued so far, and every input those caused, was processed, or the worker stopped.</summary>
     internal Task FlushAsync() => Volatile.Read(ref _runtime)?.FlushAsync() ?? Task.CompletedTask;
 
