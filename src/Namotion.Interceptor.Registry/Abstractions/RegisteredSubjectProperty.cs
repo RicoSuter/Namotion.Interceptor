@@ -423,22 +423,31 @@ public class RegisteredSubjectProperty
                 }
             }
 
-            foreach (var child in children)
+            try
             {
-                var position = positions?.GetValueOrDefault(child.Subject, -1) ?? IndexOfChild(child.Subject);
-                if (position < 0)
-                    continue;
+                foreach (var child in children)
+                {
+                    var position = positions?.GetValueOrDefault(child.Subject, -1) ?? IndexOfChild(child.Subject);
+                    if (position < 0)
+                        continue;
 
-                _children[position] = _children[position] with { Index = child.Index };
-                knownSubjects.GetValueOrDefault(child.Subject)?.UpdateParentIndex(this, child.Index);
+                    // An equal key counts as unchanged, so the stored instance stays. Its Equals can throw.
+                    if (Equals(_children[position].Index, child.Index))
+                        continue;
+
+                    _children[position] = _children[position] with { Index = child.Index };
+                    knownSubjects.GetValueOrDefault(child.Subject)?.UpdateParentIndex(this, child.Index);
+                }
             }
+            finally
+            {
+                SortByPosition();
+                _childrenCache = default;
 
-            SortByPosition();
-            _childrenCache = default;
-
-            // Release references so subjects can be GC'd on idle threads. Nothing above runs user code or
-            // throws; a throw would leave entries of this property in the thread-static map for the next one.
-            positions?.Clear();
+                // Release references so subjects can be GC'd on idle threads, and keep entries of this property
+                // out of the thread-static map for the next one.
+                positions?.Clear();
+            }
         }
     }
 

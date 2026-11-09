@@ -54,6 +54,26 @@ public class DictionaryIndexTests
     }
 
     [Fact]
+    public void WhenSubjectUnderAnEqualKeyGainsAnotherKey_ThenChildAndParentKeepTheStoredKeyInstance()
+    {
+        // Arrange: the second write keeps the stored key, since its key is equal.
+        var child = new TestItem();
+        var storedKey = new string('A', 1);
+        var container = new TestContainer(CreateContext())
+        {
+            Items = new Dictionary<string, TestItem> { [storedKey] = child }
+        };
+        container.Items = new Dictionary<string, TestItem> { [new string('A', 1)] = child };
+
+        // Act
+        container.Items = new Dictionary<string, TestItem> { [new string('A', 1)] = child, ["Other"] = child };
+
+        // Assert
+        Assert.Same(storedKey, Assert.Single(GetProperty(container, nameof(TestContainer.Items)).Children).Index);
+        Assert.Same(storedKey, Assert.Single(child.TryGetRegisteredSubject()!.Parents).Index);
+    }
+
+    [Fact]
     public void WhenCollectionPropertyHoldsAStringKeyedDictionaryWithoutDictionaryInterface_ThenIndexIsTheNewKey()
     {
         // Arrange: a collection refresh first, so that this thread holds a reusable position map,

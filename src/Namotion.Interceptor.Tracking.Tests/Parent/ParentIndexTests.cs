@@ -168,6 +168,25 @@ public class ParentIndexTests
     }
 
     [Fact]
+    public void WhenSubjectUnderAnEqualKeyGainsAnotherKey_ThenParentIndexKeepsTheStoredKeyInstance()
+    {
+        // Arrange: the second write keeps the stored key, since its key is equal.
+        var car = new Car();
+        var storedKey = new string('A', 1);
+        var garage = new Garage(CreateContext())
+        {
+            CarsByName = new Dictionary<string, Car> { [storedKey] = car }
+        };
+        garage.CarsByName = new Dictionary<string, Car> { [new string('A', 1)] = car };
+
+        // Act
+        garage.CarsByName = new Dictionary<string, Car> { [new string('A', 1)] = car, ["Other"] = car };
+
+        // Assert
+        Assert.Same(storedKey, Assert.Single(car.GetParents()).Index);
+    }
+
+    [Fact]
     public void WhenSubjectMovesToSeveralPositions_ThenParentIndexIsTheFirstPosition()
     {
         // Arrange
