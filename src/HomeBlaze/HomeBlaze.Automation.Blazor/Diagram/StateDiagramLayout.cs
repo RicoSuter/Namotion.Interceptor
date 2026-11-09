@@ -5,8 +5,9 @@ namespace HomeBlaze.Automation.Blazor.Diagram;
 /// <summary>
 /// The picture of the states of an automation and the rules between them: one row of states, preceded by an "Any state"
 /// node when a rule without a state scope changes the state. A rule with exactly one state change, from the state it is
-/// active in to another state, is an edge, up to <see cref="MaxEdges"/>; an edge to the right arcs above the row and one to the left below it, as high as it takes to clear the labels and arrows below it. Every other rule is listed in <see cref="OtherRules"/>, so the rule list stays the only store
-/// of transitions. The positions are computed and never stored, and they do not depend on the current state.
+/// active in to another state, is an edge, up to <see cref="MaxEdges"/>; an edge to the right arcs above the row and one
+/// to the left below it, as high as it takes to clear the labels and arrows below it. Every other rule is listed in
+/// <see cref="OtherRules"/>. The positions do not depend on the current state.
 /// </summary>
 public sealed class StateDiagramLayout
 {
@@ -204,8 +205,9 @@ public sealed class StateDiagramLayout
         private const int Samples = 48;
         private const double Clearance = 3;
         private const double ArrowClearance = 10;
+        private const double TouchDistance = 8;
 
-        private readonly List<(double X, double Height)[]> _curves = [];
+        private readonly List<Curve> _curves = [];
         private readonly List<Box> _labels = [];
 
         // A cubic curve whose control points sit above its ends reaches three quarters of the control height in the middle.
@@ -217,14 +219,16 @@ public sealed class StateDiagramLayout
 
         public double Fit(double startX, double endX, double labelWidth)
         {
-            var curve = new (double X, double Height)[Samples + 1];
+            var points = new (double X, double Height)[Samples + 1];
+            Sample(points, startX, endX, BaseRise);
+            var curve = Curve.Of(points);
             double rise;
             Box label;
             var step = 0;
             do
             {
                 rise = BaseRise + (step * RiseStep);
-                Sample(curve, startX, endX, rise);
+                Sample(points, startX, endX, rise);
                 label = CreateLabelBox((startX + endX) / 2, labelWidth, rise);
                 step++;
             }
@@ -250,13 +254,73 @@ public sealed class StateDiagramLayout
             return new Box(middleX - (labelWidth / 2), middleX + (labelWidth / 2), peak + (isAbove ? 4 : 6), peak + LabelTop(isAbove));
         }
 
-        private bool Conflicts(IReadOnlyList<(double X, double Height)> curve, Box label) =>
-            _labels.Exists(other => other.Overlaps(label))
-            || curve.Any(point => _labels.Exists(other => other.Contains(point.X, point.Height, Clearance)))
-            || _curves.Exists(other => other.Any(point => label.Contains(point.X, point.Height, Clearance)))
-            || _curves.Exists(other => Touches(curve, other));
+        // A curve or label whose x range is apart from the other one cannot touch it, which skips most pairs of a wide diagram.
+        private bool Conflicts(Curve curve, Box label)
+        {
+            foreach (var other in _labels)
+            {
+                if (other.Overlaps(label) || (curve.IsNear(other.Left, other.Right, Clearance) && curve.Enters(other, Clearance)))
+                {
+                    return true;
+                }
+            }
 
-        private static bool Touches(IReadOnlyList<(double X, double Height)> curve, (double X, double Height)[] other) =>
-            curve.Any(point => point.Height > 2 * ArrowClearance && Array.Exists(other, candidate => Math.Abs(candidate.X - point.X) < 8 && Math.Abs(candidate.Height - point.Height) < ArrowClearance));
+            foreach (var other in _curves)
+            {
+                if ((other.IsNear(label.Left, label.Right, Clearance) && other.Enters(label, Clearance)) ||
+                    (other.IsNear(curve.MinX, curve.MaxX, TouchDistance) && Touches(curve.Points, other.Points)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool Touches((double X, double Height)[] curve, (double X, double Height)[] other)
+        {
+            foreach (var point in curve)
+            {
+                if (point.Height > 2 * ArrowClearance &&
+                    Array.Exists(other, candidate => Math.Abs(candidate.X - point.X) < TouchDistance && Math.Abs(candidate.Height - point.Height) < ArrowClearance))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private readonly record struct Curve(double MinX, double MaxX, (double X, double Height)[] Points)
+        {
+            // The x of the samples does not depend on the rise, so the bounds hold while the points are sampled again higher.
+            public static Curve Of((double X, double Height)[] points)
+            {
+                var minX = double.MaxValue;
+                var maxX = double.MinValue;
+                foreach (var point in points)
+                {
+                    minX = Math.Min(minX, point.X);
+                    maxX = Math.Max(maxX, point.X);
+                }
+
+                return new Curve(minX, maxX, points);
+            }
+
+            public bool IsNear(double left, double right, double distance) => MinX < right + distance && left - distance < MaxX;
+
+            public bool Enters(Box box, double padding)
+            {
+                foreach (var point in Points)
+                {
+                    if (box.Contains(point.X, point.Height, padding))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
     }
 }
