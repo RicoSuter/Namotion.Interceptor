@@ -314,14 +314,13 @@ public class GraphRoutesTests
     }
 
     [Fact]
-    public async Task WhenRoutesAreStoredClearedAndMoved_ThenTheUnionHasThePropertiesOfTheStoredRoutes()
+    public async Task WhenRoutesAreStoredAndCleared_ThenTheUnionHasThePropertiesOfTheStoredRoutes()
     {
         // Arrange
         await using var fixture = await RouteFixture.CreateAsync();
         var routes = fixture.Routes;
         var sensor = new GraphRouteSlot();
         var items = new GraphRouteSlot();
-        var moved = new GraphRouteSlot();
         var sensorHolder = new PropertyReference(fixture.Room, nameof(TestRoom.Sensor));
         var itemsHolder = new PropertyReference(fixture.Room, nameof(TestRoom.Items));
 
@@ -331,40 +330,35 @@ public class GraphRoutesTests
         var unionOfBoth = routes.Union.ToHashSet();
         items.Clear();
         var unionAfterClear = routes.Union.ToHashSet();
-        sensor.MoveTo(moved);
-        var unionAfterMove = routes.Union.ToHashSet();
-        Resolve(fixture, "../../../Level", moved);
+        Resolve(fixture, "../../../Level", sensor);
         var isUnboundedAfterTheStepAbove = routes.IsUnbounded;
-        moved.Clear();
+        sensor.Clear();
 
         // Assert
         Assert.Contains(sensorHolder, unionOfBoth);
         Assert.Contains(itemsHolder, unionOfBoth);
         Assert.Contains(fixture.RootChildren, unionAfterClear);
+        Assert.Contains(sensorHolder, unionAfterClear);
         Assert.DoesNotContain(itemsHolder, unionAfterClear);
-        Assert.Equal(unionAfterClear, unionAfterMove);
-        Assert.Same(GraphRoute.Empty, sensor.Route);
         Assert.True(isUnboundedAfterTheStepAbove);
         Assert.Empty(routes.Union);
         Assert.False(routes.IsUnbounded);
     }
 
     [Fact]
-    public async Task WhenARouteIsMovedToASlotThatHoldsOne_ThenTheRouteItHeldLeavesTheUnion()
+    public async Task WhenASlotStoresTheRouteOfAnotherResolution_ThenTheRouteItHeldLeavesTheUnion()
     {
         // Arrange
         await using var fixture = await RouteFixture.CreateAsync();
-        var source = new GraphRouteSlot();
-        var target = new GraphRouteSlot();
-        Resolve(fixture, "/Room/Sensor/Gust", source);
-        Resolve(fixture, "/Room/Items[0]/Gust", target);
+        var slot = new GraphRouteSlot();
+        Resolve(fixture, "/Room/Sensor/Gust", slot);
 
         // Act
-        source.MoveTo(target);
+        Resolve(fixture, "/Room/Items[0]/Gust", slot);
 
         // Assert
-        Assert.Contains(new PropertyReference(fixture.Room, nameof(TestRoom.Sensor)), fixture.Routes.Union);
-        Assert.DoesNotContain(new PropertyReference(fixture.Room, nameof(TestRoom.Items)), fixture.Routes.Union);
+        Assert.Contains(new PropertyReference(fixture.Room, nameof(TestRoom.Items)), fixture.Routes.Union);
+        Assert.DoesNotContain(new PropertyReference(fixture.Room, nameof(TestRoom.Sensor)), fixture.Routes.Union);
     }
 
     [Fact]

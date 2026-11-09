@@ -59,7 +59,6 @@ internal sealed class CompiledPropertyTrigger
         target.State = State;
         target.Dependencies = Dependencies;
         target.NextCheckAt = NextCheckAt;
-        DependencyRoute.MoveTo(target.DependencyRoute);
         State = CreateState();
         Dependencies = [];
     }

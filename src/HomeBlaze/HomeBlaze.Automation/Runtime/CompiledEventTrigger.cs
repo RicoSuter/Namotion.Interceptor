@@ -56,7 +56,6 @@ internal sealed class CompiledEventTrigger(CompiledRule rule, int index, Subject
         subscription.Trigger = target;
         target.Subscription = subscription;
         target.Source = Source;
-        SourceRoute.MoveTo(target.SourceRoute);
         target.SourceError = SourceError;
         Subscription = null;
     }

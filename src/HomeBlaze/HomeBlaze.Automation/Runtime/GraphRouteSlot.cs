@@ -2,7 +2,7 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// The graph route of a stored resolution, next to its result, counted in the <see cref="GraphRoutes"/> of the worker
-/// that stored it until it is cleared or moved. Used by the worker only.
+/// that stored it until it is cleared. Used by the worker only.
 /// </summary>
 internal sealed class GraphRouteSlot
 {
@@ -28,16 +28,6 @@ internal sealed class GraphRouteSlot
     public void Clear()
     {
         _routes?.Remove(Route);
-        Route = GraphRoute.Empty;
-        _routes = null;
-    }
-
-    /// <summary>Hands the route to the slot of the result that the stored result moved to, which keeps it counted.</summary>
-    public void MoveTo(GraphRouteSlot target)
-    {
-        target.Clear();
-        target.Route = Route;
-        target._routes = _routes;
         Route = GraphRoute.Empty;
         _routes = null;
     }

@@ -592,7 +592,7 @@ public class AutomationGraphRouteTests
         Assert.DoesNotContain(sensorOfRoom, Routes(automation).Union);
     }
 
-    // The Save hands each trigger and its route to the trigger of the new rule instance, which the deactivation clears.
+    // The Save hands the state of each trigger to the trigger of the new rule instance, which resolves its route again.
     [Fact]
     public async Task WhenASaveCarriesTheTriggersOverAndTheRulesAreDeactivatedThen_ThenOnlyTheLocationIsInTheUnion()
     {
