@@ -14,7 +14,8 @@ internal static class ChildIndexRefresher
     private static Buffers? _reusableBuffers;
 
     /// <summary>
-    /// Reports every subject both values hold whose first key or position differs between them.
+    /// Reports every subject both values hold whose keys or positions differ between them, with the first of them in
+    /// the new value.
     /// </summary>
     /// <param name="property">The written property.</param>
     /// <param name="oldChildren">The subjects the old value held, as the lifecycle interceptor scanned them.</param>
@@ -55,6 +56,8 @@ internal static class ChildIndexRefresher
             // Release references so subjects can be GC'd on idle threads
             buffers.Changes.Clear();
             buffers.OldIndices.Clear();
+            buffers.OldPlaces.Clear();
+            buffers.ChangedSubjects.Clear();
             _reusableBuffers = buffers;
         }
     }
@@ -72,6 +75,10 @@ internal static class ChildIndexRefresher
         // A subject held more than once is known by its first key or position, which a comparison
         // by place cannot tell from a later one, so every first occurrence is looked up instead.
         var holdsDuplicates = oldSubjects.Count != oldSpan.Length || newSubjects.Count != newSpan.Length;
+        if (holdsDuplicates)
+        {
+            CollectSubjectsWithChangedPlaces(oldSpan, newSpan, buffers.OldPlaces, buffers.ChangedSubjects);
+        }
 
         var oldIndices = buffers.OldIndices;
         for (var i = 0; i < newSpan.Length; i++)
@@ -91,10 +98,56 @@ internal static class ChildIndexRefresher
                 MapFirstIndices(oldSpan, oldIndices);
             }
 
-            if (!Equals(oldIndices[subject], index))
+            AddIfChanged(buffers, subject, oldIndices[subject], index);
+        }
+    }
+
+    private static void AddIfChanged(Buffers buffers, IInterceptorSubject subject, object? oldIndex, object? index)
+    {
+        if (!Equals(oldIndex, index))
+        {
+            buffers.Changes.Add(new SubjectChild(subject, index));
+        }
+        else if (buffers.ChangedSubjects.Count > 0 && buffers.ChangedSubjects.Contains(subject))
+        {
+            // The old instance, since an equal key counts as unchanged.
+            buffers.Changes.Add(new SubjectChild(subject, oldIndex));
+        }
+    }
+
+    // Finds the subjects that gained or lost a key or position, which a subject held more than once can do while its
+    // first one stays. Each position identifies one occurrence, and so does each key unless the dictionary's comparer
+    // tells apart keys that Equals counts as equal.
+    private static void CollectSubjectsWithChangedPlaces(
+        ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> oldSpan,
+        ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> newSpan,
+        Dictionary<object, IInterceptorSubject> oldPlaces,
+        HashSet<IInterceptorSubject> changedSubjects)
+    {
+        foreach (var (subject, _, index) in oldSpan)
+        {
+            if (index is not null)
             {
-                buffers.Changes.Add(new SubjectChild(subject, index));
+                oldPlaces.TryAdd(index, subject);
             }
+        }
+
+        foreach (var (subject, _, index) in newSpan)
+        {
+            if (index is not null && oldPlaces.Remove(index, out var oldSubject))
+            {
+                if (ReferenceEquals(oldSubject, subject))
+                    continue;
+
+                changedSubjects.Add(oldSubject);
+            }
+
+            changedSubjects.Add(subject);
+        }
+
+        foreach (var oldSubject in oldPlaces.Values)
+        {
+            changedSubjects.Add(oldSubject);
         }
     }
 
@@ -124,5 +177,9 @@ internal static class ChildIndexRefresher
         public List<SubjectChild> Changes { get; } = [];
 
         public Dictionary<IInterceptorSubject, object?> OldIndices { get; } = new(ReferenceEqualityComparer.Instance);
+
+        public Dictionary<object, IInterceptorSubject> OldPlaces { get; } = [];
+
+        public HashSet<IInterceptorSubject> ChangedSubjects { get; } = new(ReferenceEqualityComparer.Instance);
     }
 }
