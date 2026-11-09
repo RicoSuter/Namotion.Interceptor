@@ -236,9 +236,65 @@ public class AutomationGraphRouteTests
         Assert.Contains("missing ../Enabled", host.Rule("rule").Status);
     }
 
-    // The write that gives the rule a second parent also changes a watched property; without routes the watched change
-    // of a write is routed before its graph change.
-    // No path leads up from a rule, so the Rules property of the automation is on no route.
+    // A relative path starts at the rule, which a write of the Rules property detaches; the rule changes while no change
+    // of it is published.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenARuleChangesWhileDetachedAndIsAttachedAgain_ThenAPathFromItResolvesAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { });
+        host.ChangeDispatcher.MakesEveryRouteUnbounded = makesEveryRouteUnbounded;
+        var automation = await host.AddAutomationAsync("Self", automation => automation.Rules = Keyed(
+            ("rule", On("Gusty", When("./Name == \"Calm\""), Invoke("/Blinds/Close")))));
+        var rule = automation.Rules["rule"];
+        var closesBefore = host.Blinds.CloseCount;
+
+        // Act
+        automation.Rules = new Dictionary<string, AutomationRule>();
+        await automation.FlushAsync();
+        rule.Name = "Calm";
+        automation.Rules = new Dictionary<string, AutomationRule> { ["rule"] = rule };
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.Equal(0, closesBefore);
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenARuleIsRemovedAndAddedAgainWithoutApplying_ThenAPathFromItIsWatchedOnlyWhileAttachedAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { });
+        host.ChangeDispatcher.MakesEveryRouteUnbounded = makesEveryRouteUnbounded;
+        var automation = await host.AddAutomationAsync("Self", automation => automation.Rules = Keyed(
+            ("rule", On("Gusty", When("./Name == \"Gusty\""), Invoke("/Blinds/Close")))));
+        var rule = automation.Rules["rule"];
+        var name = new PropertyReference(rule, nameof(AutomationRule.Name));
+        var closesBefore = host.Blinds.CloseCount;
+
+        // Act
+        automation.Rules = new Dictionary<string, AutomationRule>();
+        await automation.FlushAsync();
+        var isWatchedWhileRemoved = Registration(automation).Watched.Contains(name);
+        automation.Rules = new Dictionary<string, AutomationRule> { ["rule"] = rule };
+        await automation.FlushAsync();
+        rule.Name = "Calm";
+        await automation.FlushAsync();
+        rule.Name = "Gusty";
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, closesBefore);
+        Assert.False(isWatchedWhileRemoved);
+        Assert.Equal(2, host.Blinds.CloseCount);
+    }
+
+    // No path starts at a rule, so the Rules property of the automation is on no route.
     [Fact]
     public async Task WhenANewRuleGainsItsFirstParentInTheAutomation_ThenTheAutomationReceivesAGraphChange()
     {
@@ -262,6 +318,8 @@ public class AutomationGraphRouteTests
         Assert.Equal(1, listener.GraphChanges);
     }
 
+    // The write that gives the rule a second parent also changes a watched property; without routes the watched change
+    // of a write is routed before its graph change.
     [Fact]
     public async Task WhenAWriteChangesAWatchedPropertyAndGivesARuleASecondParent_ThenTheWatchedChangeComesBeforeTheGraphChange()
     {

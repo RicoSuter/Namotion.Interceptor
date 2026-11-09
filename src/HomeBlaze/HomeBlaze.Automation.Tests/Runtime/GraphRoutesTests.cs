@@ -99,6 +99,58 @@ public class GraphRoutesTests
         Assert.False(route.IsUnbounded);
     }
 
+    // Removing the rule from the automation and putting it back is a write of the Rules property, which detaches and
+    // attaches the subject the path starts at.
+    [Theory]
+    [InlineData("Name")]
+    [InlineData("./Name")]
+    public async Task WhenAPathStartsAtTheRule_ThenTheRouteHasTheHolderOfTheRuleAndIsBounded(string path)
+    {
+        // Arrange
+        await using var fixture = await RouteFixture.CreateAsync();
+
+        // Act
+        var (property, route) = fixture.ResolveProperty(path);
+
+        // Assert
+        Assert.NotNull(property);
+        Assert.Contains(new PropertyReference(fixture.Automation, nameof(Automation.Rules)), route.Properties.ToArray());
+        Assert.False(route.IsUnbounded);
+    }
+
+    [Fact]
+    public async Task WhenTheSubjectOfAnEventTriggerIsTheRule_ThenTheRouteHasTheHolderOfTheRuleAndIsBounded()
+    {
+        // Arrange
+        await using var fixture = await RouteFixture.CreateAsync();
+        var slot = new GraphRouteSlot();
+
+        // Act
+        var subject = AutomationPaths.ResolveSubject(fixture.Host.Graph.Resolver, ".", fixture.Rule, fixture.Routes.BeginRoute());
+        fixture.Routes.EndRoute(slot);
+
+        // Assert
+        Assert.Same(fixture.Rule, subject);
+        Assert.Equal([new PropertyReference(fixture.Automation, nameof(Automation.Rules))], slot.Route.Properties.ToArray());
+        Assert.False(slot.Route.IsUnbounded);
+    }
+
+    [Fact]
+    public async Task WhenAPathStartsAtARuleThatIsNotAttached_ThenTheRouteIsUnbounded()
+    {
+        // Arrange
+        await using var fixture = await RouteFixture.CreateAsync();
+        var detachedRule = On("Detached", When("/Weather/Gust > 8"), Invoke("/Blinds/Close"));
+        var slot = new GraphRouteSlot();
+
+        // Act
+        AutomationPaths.ResolveSubject(fixture.Host.Graph.Resolver, ".", detachedRule, fixture.Routes.BeginRoute());
+        fixture.Routes.EndRoute(slot);
+
+        // Assert
+        Assert.True(slot.Route.IsUnbounded);
+    }
+
     [Theory]
     [InlineData("../../../Level")]
     [InlineData("../../../Room/Sensor/Gust")]

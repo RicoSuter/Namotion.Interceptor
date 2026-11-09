@@ -67,8 +67,17 @@ internal static class AutomationPaths
             return null;
         }
 
-        var ownerPath = lastSeparator == 0 ? "/" : path[..Math.Max(lastSeparator, 0)];
-        var owner = lastSeparator < 0 ? rule : ResolveSubject(resolver, ownerPath, rule, recorder);
+        IInterceptorSubject? owner;
+        if (lastSeparator < 0)
+        {
+            AddRuleParents(rule, recorder);
+            owner = rule;
+        }
+        else
+        {
+            owner = ResolveSubject(resolver, lastSeparator == 0 ? "/" : path[..lastSeparator], rule, recorder);
+        }
+
         return owner is null ? null : FindProperty(owner, name, recorder);
     }
 
@@ -93,6 +102,11 @@ internal static class AutomationPaths
     /// <summary>Resolves a subject; a path that leads nowhere or is malformed gives null.</summary>
     public static IInterceptorSubject? ResolveSubject(SubjectPathResolver resolver, string path, IInterceptorSubject rule, ISubjectPathRecorder? recorder = null)
     {
+        if (!path.StartsWith(Separator))
+        {
+            AddRuleParents(rule, recorder);
+        }
+
         if (path == ".")
         {
             return rule;
@@ -109,6 +123,25 @@ internal static class AutomationPaths
             // Written by the author of a rule: a malformed path leads nowhere instead of failing the automation.
             recorder?.MarkUnbounded();
             return null;
+        }
+    }
+
+    // The resolver leaves out the attachment of the subject a relative path starts at, and a rule is detached and
+    // attached again by a write of the property that holds it.
+    private static void AddRuleParents(IInterceptorSubject rule, ISubjectPathRecorder? recorder)
+    {
+        if (recorder is null)
+        {
+            return;
+        }
+
+        if (rule.TryGetRegisteredSubject() is { } registered)
+        {
+            recorder.AddParentStep(rule, registered.Parents);
+        }
+        else
+        {
+            recorder.MarkUnbounded();
         }
     }
 
