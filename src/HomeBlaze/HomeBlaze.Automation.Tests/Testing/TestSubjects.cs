@@ -67,16 +67,23 @@ public partial class TestSensorHolder
     public partial TestSensor? Sensor { get; set; }
 }
 
-/// <summary>A subject that leads to a sensor through properties that are no parents of it: a plain one and a derived one.</summary>
+/// <summary>A subject that leads to a sensor through properties that are no parents of it: plain ones and derived ones.</summary>
 [InterceptorSubject]
 public partial class TestSensorView
 {
     public TestSensor? Plain { get; set; }
 
+    public TestSensorHolder? Lookup { get; set; }
+
     public partial TestSensorHolder? Source { get; set; }
 
     [Derived]
     public TestSensor? Current => Source?.Sensor;
+
+    [Derived]
+    public TestSensor? ViaLookup => Lookup?.Sensor;
+
+    public TestSensor? Pick => Source?.Sensor;
 }
 
 /// <summary>A subject that holds the root, which gives the root a parent.</summary>

@@ -260,6 +260,237 @@ public class AutomationGraphRouteTests
         Assert.Equal(0, host.Blinds.CloseCount);
     }
 
+    // The plain property is no parent of the sensor, whose only parent is detached and another one attached, both off
+    // the route.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenASubjectReachedThroughAPlainPropertyIsDetachedAndAttachedAgainOffTheRoute_ThenThePathFollowsItsAttachmentAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
+        var sensor = new TestSensor { Gust = 9 };
+        var building = new TestFolder();
+        var floor = new TestFolder();
+        host.Graph.Add("Building", building);
+        building.Add("Floor", floor);
+        floor.Add("First", new TestSensorHolder { Sensor = sensor });
+        host.Graph.Add("View", new TestSensorView { Plain = sensor });
+        var automation = await host.AddAutomationAsync("Gusts", Rule("/View/Plain/Gust > 5"));
+
+        // Act
+        building.Remove("Floor");
+        await automation.FlushAsync();
+        var detachedStatus = automation.Rules["rule"].Status;
+        building.Add("Annex", new TestSensorHolder { Sensor = sensor });
+        await automation.FlushAsync();
+        var attachedStatus = automation.Rules["rule"].Status;
+        sensor.Gust = 1;
+        await automation.FlushAsync();
+        sensor.Gust = 9;
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.Contains("missing /View/Plain/Gust", detachedStatus);
+        Assert.DoesNotContain("missing", attachedStatus);
+        Assert.Equal(2, host.Blinds.CloseCount);
+    }
+
+    // The derived property reads its sensor through a plain property, so neither of them is a parent of the sensor.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenASubjectReachedThroughADerivedPropertyOverAPlainOneIsDetachedAndAttachedAgainOffTheRoute_ThenThePathFollowsItsAttachmentAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
+        var sensor = new TestSensor { Gust = 9 };
+        var building = new TestFolder();
+        var floor = new TestFolder();
+        var first = new TestSensorHolder { Sensor = sensor };
+        host.Graph.Add("Building", building);
+        building.Add("Floor", floor);
+        floor.Add("First", first);
+        host.Graph.Add("View", new TestSensorView { Lookup = first });
+        var automation = await host.AddAutomationAsync("Gusts", Rule("/View/ViaLookup/Gust > 5"));
+
+        // Act
+        building.Remove("Floor");
+        await automation.FlushAsync();
+        var detachedStatus = automation.Rules["rule"].Status;
+        building.Add("Annex", new TestSensorHolder { Sensor = sensor });
+        await automation.FlushAsync();
+        var attachedStatus = automation.Rules["rule"].Status;
+        sensor.Gust = 1;
+        await automation.FlushAsync();
+        sensor.Gust = 9;
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.Contains("missing /View/ViaLookup/Gust", detachedStatus);
+        Assert.DoesNotContain("missing", attachedStatus);
+        Assert.Equal(2, host.Blinds.CloseCount);
+    }
+
+    // The source of the derived property is a parent of the sensor and the view holds it, so the sensor stays attached.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenTheSourceOfADerivedPropertyIsDetachedOffTheRouteAndReplacedByAHolderOfTheSameSubject_ThenThePathStaysResolvedAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
+        var sensor = new TestSensor { Gust = 9 };
+        var building = new TestFolder();
+        var floor = new TestFolder();
+        var first = new TestSensorHolder { Sensor = sensor };
+        var view = new TestSensorView { Source = first };
+        host.Graph.Add("Building", building);
+        building.Add("Floor", floor);
+        floor.Add("First", first);
+        host.Graph.Add("View", view);
+        var automation = await host.AddAutomationAsync("Gusts", Rule("/View/Current/Gust > 5"));
+
+        // Act
+        building.Remove("Floor");
+        await automation.FlushAsync();
+        var detachedStatus = automation.Rules["rule"].Status;
+        var second = new TestSensorHolder { Sensor = sensor };
+        host.Graph.Add("Annex", second);
+        view.Source = second;
+        await automation.FlushAsync();
+        first.Sensor = null;
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.DoesNotContain("missing", detachedStatus);
+        Assert.DoesNotContain("missing", automation.Rules["rule"].Status);
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    // The plain getter returns the sensor of the holder, whose replacement writes no property that the route has.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenAPlainGetterOnThePathReturnsAnotherSubjectAfterAWriteOffTheRoute_ThenThePathFollowsItAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
+        var holder = new TestSensorHolder { Sensor = new TestSensor { Gust = 1 } };
+        host.Graph.Add("View", new TestSensorView { Source = holder });
+        var automation = await host.AddAutomationAsync("Gusts", Rule("/View/Pick/Gust > 5"));
+        var closesBefore = host.Blinds.CloseCount;
+
+        // Act
+        holder.Sensor = new TestSensor { Gust = 9 };
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.Equal(0, closesBefore);
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    // The holder reached through the plain property is detached after the sensor gained another parent, both off the
+    // route, which leaves the path through the detached holder unresolved.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenAHolderReachedThroughAPlainPropertyIsDetachedOffTheRoute_ThenThePathIsMissingAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
+        var sensor = new TestSensor { Gust = 1 };
+        var building = new TestFolder();
+        var floor = new TestFolder();
+        var first = new TestSensorHolder { Sensor = sensor };
+        host.Graph.Add("Building", building);
+        building.Add("Floor", floor);
+        floor.Add("First", first);
+        host.Graph.Add("View", new TestSensorView { Lookup = first });
+        var automation = await host.AddAutomationAsync("Gusts", Rule("/View/Lookup/Sensor/Gust > 5"));
+        building.Add("Annex", new TestSensorHolder { Sensor = sensor });
+        await automation.FlushAsync();
+
+        // Act
+        building.Remove("Floor");
+        await automation.FlushAsync();
+        var detachedStatus = automation.Rules["rule"].Status;
+        sensor.Gust = 9;
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.Contains("missing /View/Lookup/Sensor/Gust", detachedStatus);
+        Assert.Equal(0, host.Blinds.CloseCount);
+    }
+
+    // The sensor gains a parent and loses another one off the route before its secret configuration is registered under
+    // a name of its own.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenASubjectWithSeveralParentsGainsASecretConfigurationUnderAnotherName_ThenThePathIsNoLongerReadAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
+        var sensor = new TestSensor { Gust = 1 };
+        var annex = new TestSensorHolder { Sensor = sensor };
+        var building = new TestFolder();
+        host.Graph.Add("Building", building);
+        host.Graph.Add("Main", new TestSensorHolder { Sensor = sensor });
+        building.Add("Annex", annex);
+        var automation = await host.AddAutomationAsync("Gusts", Rule("/Main/Sensor/Gust > 5"));
+        building.Add("Later", new TestSensorHolder { Sensor = sensor });
+        await automation.FlushAsync();
+        annex.Sensor = null;
+        await automation.FlushAsync();
+
+        // Act
+        ((IInterceptorSubject)sensor).TryGetRegisteredSubject()!.AddProperty(
+            "GustConfiguration", typeof(ConfigurationMetadata), _ => new ConfigurationMetadata { IsSecret = true }, null,
+            new PropertyAttributeAttribute(nameof(TestSensor.Gust), KnownAttributes.Configuration));
+        await automation.FlushAsync();
+        var status = automation.Rules["rule"].Status;
+        sensor.Gust = 9;
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.Contains("missing /Main/Sensor/Gust", status);
+        Assert.Equal(0, host.Blinds.CloseCount);
+    }
+
+    // The sensor changes while it is detached, so only a resolution at its attach off the route reads the new value.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenASubjectReachedThroughAPlainPropertyChangesWhileDetachedAndIsAttachedAgainOffTheRoute_ThenThePathReadsTheNewValueAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
+        var sensor = new TestSensor { Gust = 1 };
+        var building = new TestFolder();
+        var floor = new TestFolder();
+        host.Graph.Add("Building", building);
+        building.Add("Floor", floor);
+        floor.Add("First", new TestSensorHolder { Sensor = sensor });
+        host.Graph.Add("View", new TestSensorView { Plain = sensor });
+        var automation = await host.AddAutomationAsync("Gusts", Rule("/View/Plain/Gust > 5"));
+
+        // Act
+        building.Remove("Floor");
+        await automation.FlushAsync();
+        sensor.Gust = 9;
+        await automation.FlushAsync();
+        var detachedStatus = automation.Rules["rule"].Status;
+        var closesWhileDetached = host.Blinds.CloseCount;
+        building.Add("Annex", new TestSensorHolder { Sensor = sensor });
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.Contains("missing /View/Plain/Gust", detachedStatus);
+        Assert.Equal(0, closesWhileDetached);
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
     // An absolute path reaches the root through none of its parents, which it gains and loses off the route.
     [Theory]
     [InlineData(false)]

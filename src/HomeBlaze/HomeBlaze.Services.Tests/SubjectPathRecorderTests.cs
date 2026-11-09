@@ -211,6 +211,42 @@ public class SubjectPathRecorderTests : SubjectPathResolverTestBase
         Assert.False(route.IsUnbounded);
     }
 
+    [Theory]
+    [InlineData("/Plain")]
+    [InlineData("/Current")]
+    public void WhenAPathStepsThroughAPropertyThatIsNotIntercepted_ThenTheRouteIsUnbounded(string path)
+    {
+        // Arrange
+        var child = new TestContainer(Context) { Name = "Child" };
+        var root = new TestContainerWithPlainProperties(Context) { Plain = child };
+        RootManager.Root = root;
+
+        // Act
+        var (subject, route) = ResolveSubject(path);
+
+        // Assert
+        Assert.Same(child, subject);
+        Assert.Equal([Property(root, path[1..])], route.Properties);
+        Assert.True(route.IsUnbounded);
+    }
+
+    [Fact]
+    public void WhenAPathUsesAChildOfAnInlinePathsPropertyThatIsNotIntercepted_ThenTheRouteIsUnbounded()
+    {
+        // Arrange
+        var child = new TestContainer(Context) { Name = "Child" };
+        var root = new TestContainerWithPlainProperties(Context) { Children = new Dictionary<string, TestContainer> { ["kitchen"] = child } };
+        RootManager.Root = root;
+
+        // Act
+        var (subject, route) = ResolveSubject("/kitchen");
+
+        // Assert
+        Assert.Same(child, subject);
+        Assert.Equal([Property(root, "kitchen"), Property(root, nameof(TestContainerWithPlainProperties.Children))], route.Properties);
+        Assert.True(route.IsUnbounded);
+    }
+
     [Fact]
     public void WhenAPropertyAndAnInlinePathsChildHaveTheSameName_ThenTheRouteHasThePropertyOnly()
     {

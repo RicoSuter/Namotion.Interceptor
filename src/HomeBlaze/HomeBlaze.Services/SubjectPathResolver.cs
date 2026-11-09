@@ -435,6 +435,8 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                 {
                     var childrenProperty = registered.TryGetProperty(inlinePathsPropertyName);
                     recorder?.AddProperty(childrenProperty?.Reference ?? new PropertyReference(current, inlinePathsPropertyName));
+                    if (childrenProperty is { Reference.Metadata.IsIntercepted: false })
+                        recorder?.MarkUnbounded();
                     if (childrenProperty?.GetValue() is { } childrenValue)
                     {
                         var childSubject = SubjectPathResolverExtensions.FindChildByIndex(childrenProperty, childrenValue, segment);
@@ -449,6 +451,12 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             }
 
             recorder?.AddProperty(property.Reference);
+
+            // A property that is not intercepted is no parent of the subject it returns, so the route tells neither the
+            // attachment of that subject nor, for a plain property, a change of its value.
+            if (!property.Reference.Metadata.IsIntercepted)
+                recorder?.MarkUnbounded();
+
             var value = property.GetValue();
             if (value == null)
                 return null;
