@@ -5,7 +5,9 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// Runs the requests of one input in rule order, each rule at most once, and records every run. A run consumes every
-/// pending property trigger of its rule. A request that does not run is not recorded: one that Only if rejects, and,
+/// pending property trigger of its rule. The filters of an event request are checked just before its rule runs, after
+/// the earlier rules of the event ran; a request that no filter passes is dropped. A request that does not run is not
+/// recorded: one that Only if rejects, and,
 /// once a rule changed the state, the remaining requests of a property input; the rule shows why and the log says it
 /// once per reason, and its property trigger stays pending. The requests of an event still run after a state change,
 /// except those of the rules that the change deactivated. A request of a rule that is no longer active is dropped, and
@@ -55,6 +57,16 @@ internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, Au
         if (!request.Rule.IsActivated || !isActive(request.Rule) || summary.HasRun(request.Rule))
         {
             return;
+        }
+
+        if (request.EventInput is not null)
+        {
+            if (EventTriggerEngine.CheckFilters(automation.PathResolver, automation.TimeProvider, request) is not { } passed)
+            {
+                return;
+            }
+
+            request = passed;
         }
 
         var result = await _runner.RunAsync(request, host, cancellationToken);

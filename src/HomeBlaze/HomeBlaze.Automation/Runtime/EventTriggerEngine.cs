@@ -10,10 +10,11 @@ namespace HomeBlaze.Automation.Runtime;
 /// <summary>
 /// The event triggers of the rules that listen for events: shares one subscription per source and event type among
 /// them, follows a source that the graph replaces, and turns a received event into the run requests of the rules that are
-/// active when the worker processes it, in rule order. Used by the worker only; a subscription only enqueues.
+/// active when the worker processes it, in rule order, whose filters are checked when each rule is about to run. Used by
+/// the worker only; a subscription only enqueues.
 /// </summary>
 internal sealed class EventTriggerEngine(
-    SubjectPathResolver resolver, TimeProvider timeProvider, AutomationInputQueue queue, ILogger logger, Func<string> getAutomationName)
+    SubjectPathResolver resolver, AutomationInputQueue queue, ILogger logger, Func<string> getAutomationName)
 {
     private readonly Dictionary<IInterceptorSubject, List<EventSubscription>> _subscriptions = new(ReferenceEqualityComparer.Instance);
 
@@ -83,35 +84,55 @@ internal sealed class EventTriggerEngine(
 
     /// <summary>
     /// Gets the run requests of the event, in rule order: one for each active rule with a trigger that uses the
-    /// subscription of the event, received the event after it joined and whose filter passes.
+    /// subscription of the event and received the event after it joined. The filters are checked by
+    /// <see cref="CheckFilters"/> just before each rule runs, so that they see what the earlier rules changed.
     /// </summary>
-    public IReadOnlyList<RunRequest> OnEvent(EventInput input, IReadOnlyList<CompiledRule> rules)
+    public static IReadOnlyList<RunRequest> OnEvent(EventInput input, IReadOnlyList<CompiledRule> rules)
     {
         List<RunRequest>? requests = null;
         foreach (var rule in rules)
         {
-            if (rule.IsActivated && FindTrigger(rule, input) is { } trigger)
+            if (rule.IsActivated && FindReceivingTrigger(rule, input) is { } trigger)
             {
                 requests ??= [];
-                requests.Add(new RunRequest(rule, input.Event, trigger.Description));
+                requests.Add(new RunRequest(rule, input.Event, trigger.Description, EventInput: input));
             }
         }
 
-        if (requests is null)
-        {
-            return [];
-        }
-
-        return requests;
+        return requests ?? (IReadOnlyList<RunRequest>)[];
     }
 
-    private CompiledEventTrigger? FindTrigger(CompiledRule rule, EventInput input)
+    /// <summary>
+    /// Checks the filters of the triggers of an event request against the graph now: returns the request with the first
+    /// trigger whose filter passes as its source, or null when none passes.
+    /// </summary>
+    public static RunRequest? CheckFilters(SubjectPathResolver resolver, TimeProvider timeProvider, RunRequest request)
+    {
+        var input = request.EventInput!;
+        var isFirst = true;
+        foreach (var trigger in request.Rule.EventTriggers)
+        {
+            if (!Receives(trigger, input))
+            {
+                continue;
+            }
+
+            if (trigger.Filter is not { } filter || Passes(resolver, timeProvider, trigger, filter, input.Event))
+            {
+                return isFirst ? request : request with { Source = trigger.Description };
+            }
+
+            isFirst = false;
+        }
+
+        return null;
+    }
+
+    private static CompiledEventTrigger? FindReceivingTrigger(CompiledRule rule, EventInput input)
     {
         foreach (var trigger in rule.EventTriggers)
         {
-            if (ReferenceEquals(trigger.Subscription, input.Subscription) &&
-                input.Sequence > trigger.JoinedAfter &&
-                (trigger.Filter is not { } filter || Passes(trigger, filter, input.Event)))
+            if (Receives(trigger, input))
             {
                 return trigger;
             }
@@ -120,7 +141,10 @@ internal sealed class EventTriggerEngine(
         return null;
     }
 
-    private bool Passes(CompiledEventTrigger trigger, ParsedExpression filter, CapturedEvent captured)
+    private static bool Receives(CompiledEventTrigger trigger, EventInput input) =>
+        ReferenceEquals(trigger.Subscription, input.Subscription) && input.Sequence > trigger.JoinedAfter;
+
+    private static bool Passes(SubjectPathResolver resolver, TimeProvider timeProvider, CompiledEventTrigger trigger, ParsedExpression filter, CapturedEvent captured)
     {
         var evaluation = new AutomationEvaluation(resolver, trigger.Rule.Rule, timeProvider.GetUtcNow(), timeProvider.LocalTimeZone, captured);
         return evaluation.EvaluateCondition(filter) == true;

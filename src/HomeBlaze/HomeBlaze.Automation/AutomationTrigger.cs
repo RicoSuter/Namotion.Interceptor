@@ -51,7 +51,10 @@ public sealed record SubjectEventTrigger : AutomationTrigger
     [Configuration]
     public string EventType { get; init; } = string.Empty;
 
-    /// <summary>A condition over the event, such as <c>event/ButtonState == Release</c>; null passes every event.</summary>
+    /// <summary>
+    /// A condition over the event, such as <c>event/ButtonState == Release</c>, checked just before the rule runs, after
+    /// the earlier rules of the same event ran; null passes every event.
+    /// </summary>
     [Configuration]
     public string? Filter { get; init; }
 }

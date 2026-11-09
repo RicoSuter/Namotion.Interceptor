@@ -45,7 +45,7 @@ internal sealed class AutomationTriggers
         _queue = queue;
         _getStructureVersion = getStructureVersion;
         _propertyTriggers = new PropertyTriggerEngine(resolver, timeProvider, logger, getAutomationName, publishWatched);
-        _eventTriggers = new EventTriggerEngine(resolver, timeProvider, queue, logger, getAutomationName);
+        _eventTriggers = new EventTriggerEngine(resolver, queue, logger, getAutomationName);
     }
 
     /// <summary>
@@ -171,7 +171,7 @@ internal sealed class AutomationTriggers
     {
         PropertyChangedInput change => _propertyTriggers.OnPropertyChanged(rules, change),
         TickInput => _propertyTriggers.OnTick(rules),
-        EventInput subjectEvent => _eventTriggers.OnEvent(subjectEvent, rules),
+        EventInput subjectEvent => EventTriggerEngine.OnEvent(subjectEvent, rules),
         GraphChangedInput => OnGraphChanged(rules),
         ActivationInput activation => _propertyTriggers.Activate(activation.Rules, rules),
         PendingRecheckInput => _propertyTriggers.RequestPendingRuns(rules),

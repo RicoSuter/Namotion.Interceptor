@@ -90,6 +90,28 @@ public class AutomationEventTriggerTests
     }
 
     [Fact]
+    public async Task WhenAnEarlierRuleChangesWhatTheFilterOfALaterRuleReads_ThenTheFilterSeesTheChange()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.RuleOrder = ["position", "close"];
+            automation.Rules = Keyed(
+                ("position", On("Position", OnEvent("/Button", "TestPressEvent"), Set("/Blinds/Position", "1"))),
+                ("close", On("Close", OnEvent("/Button", "TestPressEvent", "/Blinds/Position == 1"), Invoke("/Blinds/Close"))));
+        });
+
+        // Act
+        host.Button.Press("Release");
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, host.Blinds.Position);
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(1L, host.Rule("close").RunCount);
+    }
+
+    [Fact]
     public async Task WhenARuleIsSwitchedOnWhileAnEventIsQueued_ThenTheRuleHandlesOnlyLaterEvents()
     {
         // Arrange
