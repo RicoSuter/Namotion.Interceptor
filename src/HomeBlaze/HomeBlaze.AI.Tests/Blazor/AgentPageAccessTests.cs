@@ -127,7 +127,10 @@ public sealed class AgentPageAccessTests : BunitContext, IAsyncLifetime
         Assert.Equal(0, refusedBefore);
         page.WaitForAssertion(() => Assert.Single(page.FindAll("[data-testid='agent-activity-refusal']")));
         page.FindAll(".mud-tab").First(tab => tab.TextContent.Contains("Memory", StringComparison.Ordinal)).Click();
-        Assert.Single(page.FindAll("[data-testid='agent-memory-tab-refusal']"));
-        Assert.True(page.Find("[data-testid='agent-new-conversation']").HasAttribute("disabled"));
+        page.WaitForAssertion(() =>
+        {
+            Assert.Single(page.FindAll("[data-testid='agent-memory-tab-refusal']"));
+            Assert.True(page.Find("[data-testid='agent-new-conversation']").HasAttribute("disabled"));
+        });
     }
 }
