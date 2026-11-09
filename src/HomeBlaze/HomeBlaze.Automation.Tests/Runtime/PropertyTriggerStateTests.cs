@@ -197,6 +197,39 @@ public class PropertyTriggerStateTests
     }
 
     [Fact]
+    public void WhenTheWallClockMovesDuringAHold_ThenTheHoldEndsAfterItsDurationOnTheMonotonicClock()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(Hold, hasRearm: false);
+        state.Activate(TriggerActivation.EvaluateImmediately, TrueValue, At(0));
+        var shiftedForward = new TriggerTime(Start.AddHours(2), TimeSpan.FromSeconds(5));
+
+        // Act
+        var firedEarly = state.Observe(TrueValue, shiftedForward);
+        var holdEnd = state.GetHoldEnd(shiftedForward);
+        var firedAfterTheHold = state.Observe(TrueValue, new TriggerTime(Start.AddHours(-1), Hold));
+
+        // Assert
+        Assert.False(firedEarly);
+        Assert.Equal(Start.AddHours(2).AddSeconds(15), holdEnd);
+        Assert.True(firedAfterTheHold);
+    }
+
+    [Fact]
+    public void WhenAHoldWouldEndAfterTheLatestInstant_ThenItsEndIsTheLatestInstant()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(TimeSpan.MaxValue, hasRearm: false);
+        state.Activate(TriggerActivation.EvaluateImmediately, TrueValue, At(0));
+
+        // Act
+        var holdEnd = state.GetHoldEnd(At(1));
+
+        // Assert
+        Assert.Equal(DateTimeOffset.MaxValue, holdEnd);
+    }
+
+    [Fact]
     public void WhenActivationWaitsForFalseToTrue_ThenATrueBaselineMustTurnFalseFirst()
     {
         // Arrange
