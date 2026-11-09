@@ -16,8 +16,8 @@ public interface IChildIndexHandler
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A reported index can equal the stored one, also as another instance, such as for a subject whose later keys
-    /// changed. An equal key counts as unchanged, so the handler keeps the instance it stored.
+    /// A reported index can equal the stored one, such as for a subject whose later keys or positions changed, and
+    /// can then be another instance of an equal key.
     /// </para>
     /// <para>
     /// The handler must not block, must not throw, and must not write the property that was written:
@@ -25,6 +25,6 @@ public interface IChildIndexHandler
     /// </para>
     /// </remarks>
     /// <param name="property">The property that was written.</param>
-    /// <param name="children">The kept subjects with their key or position in the new value, each once.</param>
+    /// <param name="children">The kept subjects with their first key or position in the new value, each once.</param>
     void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children);
 }

@@ -210,9 +210,7 @@ public static class ParentsHandlerExtensions
             lock (_lock)
             {
                 ref var current = ref CollectionsMarshal.GetValueRefOrNullRef(_indices, parent);
-
-                // An equal key counts as unchanged, so the stored instance stays.
-                if (Unsafe.IsNullRef(ref current) || Equals(current, index))
+                if (Unsafe.IsNullRef(ref current))
                 {
                     return;
                 }
