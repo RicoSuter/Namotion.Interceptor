@@ -14,8 +14,11 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
 {
     public TriggerPhase Phase { get; private set; }
 
-    /// <summary>When the running hold started, or null without one.</summary>
+    /// <summary>When the running hold started on the wall clock, for display, or null without one.</summary>
     public DateTimeOffset? HoldStartedAt { get; private set; }
+
+    /// <summary>When the running hold started on the monotonic clock of <see cref="TriggerTime.Elapsed"/>, which measures it.</summary>
+    public TimeSpan HoldStartedElapsed { get; private set; }
 
     /// <summary>When the trigger fired while it is <see cref="TriggerPhase.Pending"/>, or null.</summary>
     public DateTimeOffset? PendingSince { get; private set; }
@@ -32,29 +35,29 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
     public int Version { get; private set; }
 
     /// <summary>Activates the trigger with fresh state and returns whether it fires at once.</summary>
-    public bool Activate(TriggerActivation policy, TriggerObservation observation, DateTimeOffset now)
+    public bool Activate(TriggerActivation policy, TriggerObservation observation, TriggerTime time)
     {
         Deactivate();
         if (policy == TriggerActivation.WaitForFalseToTrue)
         {
             Phase = GetBaselinePhase(observation.Value);
-            UpdateUnknown(observation, now);
+            UpdateUnknown(observation, time.Now);
             return false;
         }
 
         Phase = TriggerPhase.Armed;
-        UpdateUnknown(observation, now);
-        return ObserveArmed(observation.Value, now);
+        UpdateUnknown(observation, time.Now);
+        return ObserveArmed(observation.Value, time);
     }
 
     /// <summary>Applies an observation and returns whether the trigger fires.</summary>
-    public bool Observe(TriggerObservation observation, DateTimeOffset now)
+    public bool Observe(TriggerObservation observation, TriggerTime time)
     {
         var phase = Phase;
         var holdStartedAt = HoldStartedAt;
         var unknownSince = UnknownSince;
         var missingPaths = MissingPaths;
-        var fires = ObserveCore(observation, now);
+        var fires = ObserveCore(observation, time);
         if (phase != Phase || holdStartedAt != HoldStartedAt || unknownSince != UnknownSince || !ReferenceEquals(missingPaths, MissingPaths))
         {
             Version++;
@@ -63,19 +66,19 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
         return fires;
     }
 
-    private bool ObserveCore(TriggerObservation observation, DateTimeOffset now)
+    private bool ObserveCore(TriggerObservation observation, TriggerTime time)
     {
         if (Phase == TriggerPhase.Inactive)
         {
             return false;
         }
 
-        UpdateUnknown(observation, now);
+        UpdateUnknown(observation, time.Now);
         return Phase switch
         {
-            TriggerPhase.AwaitingBaseline => SetBaseline(observation, now),
-            TriggerPhase.Armed => ObserveArmed(observation.Value, now),
-            TriggerPhase.Holding => ObserveHolding(observation.Value, now),
+            TriggerPhase.AwaitingBaseline => SetBaseline(observation, time.Now),
+            TriggerPhase.Armed => ObserveArmed(observation.Value, time),
+            TriggerPhase.Holding => ObserveHolding(observation.Value, time),
             TriggerPhase.Pending => ObservePending(observation.Value),
             TriggerPhase.WaitingToRearm => ObserveWaitingToRearm(observation),
             TriggerPhase.WaitingForFalse => ObserveWaitingForFalse(observation.Value),
@@ -119,7 +122,19 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
         return false;
     }
 
-    private bool ObserveArmed(bool? value, DateTimeOffset now)
+    /// <summary>When the running hold ends on the wall clock as it reads at <paramref name="time"/>, or null without a running hold.</summary>
+    public DateTimeOffset? GetHoldEnd(TriggerTime time)
+    {
+        if (Phase != TriggerPhase.Holding)
+        {
+            return null;
+        }
+
+        var remaining = hold.GetValueOrDefault() - (time.Elapsed - HoldStartedElapsed);
+        return remaining >= DateTimeOffset.MaxValue - time.Now ? DateTimeOffset.MaxValue : time.Now + remaining;
+    }
+
+    private bool ObserveArmed(bool? value, TriggerTime time)
     {
         if (value != true)
         {
@@ -128,15 +143,16 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
 
         if (hold is not { } duration || duration <= TimeSpan.Zero)
         {
-            return Fire(now);
+            return Fire(time.Now);
         }
 
         Phase = TriggerPhase.Holding;
-        HoldStartedAt = now;
+        HoldStartedAt = time.Now;
+        HoldStartedElapsed = time.Elapsed;
         return false;
     }
 
-    private bool ObserveHolding(bool? value, DateTimeOffset now)
+    private bool ObserveHolding(bool? value, TriggerTime time)
     {
         if (value != true)
         {
@@ -145,12 +161,12 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
             return false;
         }
 
-        if (now - HoldStartedAt!.Value < hold.GetValueOrDefault())
+        if (time.Elapsed - HoldStartedElapsed < hold.GetValueOrDefault())
         {
             return false;
         }
 
-        return Fire(now);
+        return Fire(time.Now);
     }
 
     // A pending trigger keeps waiting while the expression is true, and a value that is not true ends the wait without a

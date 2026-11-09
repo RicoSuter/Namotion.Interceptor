@@ -6,6 +6,9 @@ public class RuleStatusTextTests
 {
     private static readonly DateTimeOffset Start = new(2026, 11, 6, 12, 0, 0, TimeSpan.Zero);
 
+    // An instant the seconds after the start, on the wall clock and on the monotonic clock alike.
+    private static TriggerTime At(double seconds) => new(Start.AddSeconds(seconds), TimeSpan.FromSeconds(seconds));
+
     private static TriggerStatus Phase(TriggerPhase phase) => new(phase, null, null, null, [], null);
 
     [Fact]
@@ -60,10 +63,10 @@ public class RuleStatusTextTests
     {
         // Arrange
         var state = new PropertyTriggerState(hold: null, hasRearm: true);
-        state.Activate(TriggerActivation.EvaluateImmediately, new TriggerObservation(false, null, []), Start);
-        state.Observe(new TriggerObservation(true, null, []), Start);
+        state.Activate(TriggerActivation.EvaluateImmediately, new TriggerObservation(false, null, []), At(0));
+        state.Observe(new TriggerObservation(true, null, []), At(0));
         state.Consume();
-        state.Observe(new TriggerObservation(true, null, ["/Weather/Threshold"]), Start.AddSeconds(5));
+        state.Observe(new TriggerObservation(true, null, ["/Weather/Threshold"]), At(5));
 
         // Act
         var text = RuleStatusText.Format(AutomationRuleMode.On, null, [TriggerStatus.FromProperty(state, null)], TimeZoneInfo.Utc);

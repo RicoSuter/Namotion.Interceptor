@@ -25,6 +25,7 @@ internal sealed class PropertyTriggerEngine(
     Action<FrozenSet<PropertyReference>> publishWatched)
 {
     private readonly ObservedValues _values = new();
+    private readonly long _startedAt = timeProvider.GetTimestamp();
     private readonly List<CompiledPropertyTrigger> _pending = [];
 
     // The latest instant from which an instant when a trigger or Only if is due was derived; a later tick before it means
@@ -52,17 +53,17 @@ internal sealed class PropertyTriggerEngine(
 
         // Published before the values are read, so that no change between the read and the publication is lost.
         PublishWatched(allRules, triggers);
-        var now = timeProvider.GetUtcNow();
+        var time = GetTime();
         var requests = new List<RunRequest>();
         foreach (var trigger in triggers)
         {
             var wasUnknown = trigger.State.IsUnknown;
-            if (trigger.State.Activate(trigger.Configuration.OnActivation, Observe(trigger, now), now))
+            if (trigger.State.Activate(trigger.Configuration.OnActivation, Observe(trigger, time.Now), time))
             {
                 requests.Add(CreateRequest(trigger));
             }
 
-            ScheduleCheck(trigger, now);
+            ScheduleCheck(trigger, time);
             LogUnknownChange(trigger, wasUnknown);
         }
 
@@ -387,7 +388,7 @@ internal sealed class PropertyTriggerEngine(
         Func<CompiledPropertyTrigger, bool>? requestPending = null)
     {
         List<RunRequest>? requests = null;
-        DateTimeOffset? now = null;
+        TriggerTime? time = null;
         foreach (var rule in rules)
         {
             if (!rule.IsActivated)
@@ -398,7 +399,7 @@ internal sealed class PropertyTriggerEngine(
             foreach (var trigger in rule.PropertyTriggers)
             {
                 if (trigger.State.Phase != TriggerPhase.Inactive && predicate(trigger) &&
-                    ObserveOne(trigger, now ??= timeProvider.GetUtcNow(), requestPending) is { } request)
+                    ObserveOne(trigger, time ??= GetTime(), requestPending) is { } request)
                 {
                     (requests ??= []).Add(request);
                 }
@@ -408,12 +409,12 @@ internal sealed class PropertyTriggerEngine(
         return requests ?? (IReadOnlyList<RunRequest>)[];
     }
 
-    private RunRequest? ObserveOne(CompiledPropertyTrigger trigger, DateTimeOffset now, Func<CompiledPropertyTrigger, bool>? requestPending)
+    private RunRequest? ObserveOne(CompiledPropertyTrigger trigger, TriggerTime time, Func<CompiledPropertyTrigger, bool>? requestPending)
     {
         var wasUnknown = trigger.State.IsUnknown;
         var wasPending = trigger.State.Phase == TriggerPhase.Pending;
         RunRequest? request = null;
-        if (trigger.State.Observe(Observe(trigger, now), now) ||
+        if (trigger.State.Observe(Observe(trigger, time.Now), time) ||
             (wasPending && trigger.State.Phase == TriggerPhase.Pending && requestPending?.Invoke(trigger) == true))
         {
             request = CreateRequest(trigger);
@@ -423,19 +424,18 @@ internal sealed class PropertyTriggerEngine(
             EndWait(trigger.Rule);
         }
 
-        ScheduleCheck(trigger, now);
+        ScheduleCheck(trigger, time);
         LogUnknownChange(trigger, wasUnknown);
         return request;
     }
 
     // Due when the hold ends or the expressions can change with the clock, whichever comes first; a read of the clock
     // that cannot be derived is due at the next second.
-    private void ScheduleCheck(CompiledPropertyTrigger trigger, DateTimeOffset now)
+    private void ScheduleCheck(CompiledPropertyTrigger trigger, TriggerTime time)
     {
         var state = trigger.State;
-        DateTimeOffset? next = state is { Phase: TriggerPhase.Holding, HoldStartedAt: { } start }
-            ? start + trigger.Configuration.For.GetValueOrDefault()
-            : null;
+        var now = time.Now;
+        var next = state.GetHoldEnd(time);
         if (state.Phase != TriggerPhase.Inactive && trigger.Clock is { } clock)
         {
             var rule = trigger.Rule.Rule;
@@ -457,6 +457,8 @@ internal sealed class PropertyTriggerEngine(
     }
 
     private static DateTimeOffset Max(DateTimeOffset first, DateTimeOffset second) => first > second ? first : second;
+
+    private TriggerTime GetTime() => new(timeProvider.GetUtcNow(), timeProvider.GetElapsedTime(_startedAt));
 
     // A comparison of elapsed time that changed already changes again only when the wall clock is set back, which a tick
     // notices; checked as often as the worker wakes up at most.

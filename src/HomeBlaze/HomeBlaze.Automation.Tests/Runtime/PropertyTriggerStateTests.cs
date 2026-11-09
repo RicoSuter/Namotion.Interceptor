@@ -5,6 +5,9 @@ namespace HomeBlaze.Automation.Tests.Runtime;
 public class PropertyTriggerStateTests
 {
     private static readonly DateTimeOffset Start = new(2026, 11, 6, 12, 0, 0, TimeSpan.Zero);
+
+    // An instant the seconds after the start, on the wall clock and on the monotonic clock alike.
+    private static TriggerTime At(double seconds) => new(Start.AddSeconds(seconds), TimeSpan.FromSeconds(seconds));
     private static readonly TimeSpan Hold = TimeSpan.FromSeconds(20);
     private static readonly TriggerObservation TrueValue = new(true, null, []);
     private static readonly TriggerObservation FalseValue = new(false, null, []);
@@ -14,9 +17,9 @@ public class PropertyTriggerStateTests
     private static TriggerObservation WithRearm(bool? value, bool? rearm) => new(value, rearm, []);
 
     // Observes the value and, when the trigger fires, runs its rule.
-    private static bool Run(PropertyTriggerState state, TriggerObservation observation, DateTimeOffset now)
+    private static bool Run(PropertyTriggerState state, TriggerObservation observation, TriggerTime time)
     {
-        var fired = state.Observe(observation, now);
+        var fired = state.Observe(observation, time);
         if (fired)
         {
             state.Consume();
@@ -30,15 +33,15 @@ public class PropertyTriggerStateTests
     {
         // Arrange
         var state = new PropertyTriggerState(Hold, hasRearm: true);
-        state.Activate(TriggerActivation.EvaluateImmediately, WithRearm(false, null), Start);
-        state.Observe(WithRearm(true, null), Start);
+        state.Activate(TriggerActivation.EvaluateImmediately, WithRearm(false, null), At(0));
+        state.Observe(WithRearm(true, null), At(0));
 
         // Act
-        var fired = state.Observe(WithRearm(true, null), Start.AddSeconds(20));
-        var stillTrue = state.Observe(WithRearm(true, null), Start.AddSeconds(30));
+        var fired = state.Observe(WithRearm(true, null), At(20));
+        var stillTrue = state.Observe(WithRearm(true, null), At(30));
         var phaseWhileTrue = state.Phase;
         var pendingSince = state.PendingSince;
-        var turnedFalse = state.Observe(WithRearm(false, null), Start.AddSeconds(40));
+        var turnedFalse = state.Observe(WithRearm(false, null), At(40));
 
         // Assert
         Assert.True(fired);
@@ -55,12 +58,12 @@ public class PropertyTriggerStateTests
     {
         // Arrange
         var state = new PropertyTriggerState(hold: null, hasRearm: false);
-        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, Start);
-        state.Observe(TrueValue, Start);
+        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, At(0));
+        state.Observe(TrueValue, At(0));
 
         // Act
         state.Consume();
-        var stillTrue = state.Observe(TrueValue, Start.AddSeconds(1));
+        var stillTrue = state.Observe(TrueValue, At(1));
 
         // Assert
         Assert.False(stillTrue);
@@ -73,13 +76,13 @@ public class PropertyTriggerStateTests
     {
         // Arrange
         var state = new PropertyTriggerState(hold: null, hasRearm: false);
-        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, Start);
+        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, At(0));
 
         // Act
-        var first = Run(state, TrueValue, Start);
-        var repeated = Run(state, TrueValue, Start.AddSeconds(1));
-        var rearmed = Run(state, FalseValue, Start.AddSeconds(2));
-        var second = Run(state, TrueValue, Start.AddSeconds(3));
+        var first = Run(state, TrueValue, At(0));
+        var repeated = Run(state, TrueValue, At(1));
+        var rearmed = Run(state, FalseValue, At(2));
+        var second = Run(state, TrueValue, At(3));
 
         // Assert
         Assert.True(first);
@@ -93,13 +96,13 @@ public class PropertyTriggerStateTests
     {
         // Arrange
         var state = new PropertyTriggerState(Hold, hasRearm: false);
-        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, Start);
+        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, At(0));
 
         // Act
-        var started = Run(state, TrueValue, Start);
+        var started = Run(state, TrueValue, At(0));
         var phaseWhileHolding = state.Phase;
-        var early = Run(state, TrueValue, Start.AddSeconds(19));
-        var elapsed = Run(state, TrueValue, Start.AddSeconds(20));
+        var early = Run(state, TrueValue, At(19));
+        var elapsed = Run(state, TrueValue, At(20));
 
         // Assert
         Assert.False(started);
@@ -116,14 +119,14 @@ public class PropertyTriggerStateTests
     {
         // Arrange
         var state = new PropertyTriggerState(Hold, hasRearm: false);
-        state.Activate(TriggerActivation.EvaluateImmediately, TrueValue, Start);
+        state.Activate(TriggerActivation.EvaluateImmediately, TrueValue, At(0));
 
         // Act
-        Run(state, interruption is null ? Unknown("/Weather/Gust") : FalseValue, Start.AddSeconds(10));
-        Run(state, TrueValue, Start.AddSeconds(15));
-        var atOriginalHoldEnd = Run(state, TrueValue, Start.AddSeconds(20));
-        var beforeHold = Run(state, TrueValue, Start.AddSeconds(34));
-        var afterHold = Run(state, TrueValue, Start.AddSeconds(35));
+        Run(state, interruption is null ? Unknown("/Weather/Gust") : FalseValue, At(10));
+        Run(state, TrueValue, At(15));
+        var atOriginalHoldEnd = Run(state, TrueValue, At(20));
+        var beforeHold = Run(state, TrueValue, At(34));
+        var afterHold = Run(state, TrueValue, At(35));
 
         // Assert
         Assert.False(atOriginalHoldEnd);
@@ -136,14 +139,14 @@ public class PropertyTriggerStateTests
     {
         // Arrange
         var state = new PropertyTriggerState(hold: null, hasRearm: true);
-        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, Start);
+        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, At(0));
 
         // Act
-        var first = Run(state, WithRearm(true, null), Start);
-        var belowThreshold = Run(state, WithRearm(false, false), Start.AddSeconds(1));
-        var aboveAgain = Run(state, WithRearm(true, false), Start.AddSeconds(2));
-        Run(state, WithRearm(false, true), Start.AddSeconds(3));
-        var second = Run(state, WithRearm(true, false), Start.AddSeconds(4));
+        var first = Run(state, WithRearm(true, null), At(0));
+        var belowThreshold = Run(state, WithRearm(false, false), At(1));
+        var aboveAgain = Run(state, WithRearm(true, false), At(2));
+        Run(state, WithRearm(false, true), At(3));
+        var second = Run(state, WithRearm(true, false), At(4));
 
         // Assert
         Assert.True(first);
@@ -159,13 +162,13 @@ public class PropertyTriggerStateTests
         var state = new PropertyTriggerState(hold: null, hasRearm: false);
 
         // Act
-        var activated = state.Activate(TriggerActivation.EvaluateImmediately, Unknown("/Weather/Gust"), Start);
-        Run(state, Unknown("/Weather/Gust"), Start.AddSeconds(5));
+        var activated = state.Activate(TriggerActivation.EvaluateImmediately, Unknown("/Weather/Gust"), At(0));
+        Run(state, Unknown("/Weather/Gust"), At(5));
         var unknownSince = state.UnknownSince;
         var missingPaths = state.MissingPaths.ToArray();
-        var fired = Run(state, TrueValue, Start.AddSeconds(6));
+        var fired = Run(state, TrueValue, At(6));
         var isUnknownAfterTrue = state.IsUnknown;
-        Run(state, Unknown("/Weather/Gust"), Start.AddSeconds(7));
+        Run(state, Unknown("/Weather/Gust"), At(7));
 
         // Assert
         Assert.False(activated);
@@ -184,8 +187,8 @@ public class PropertyTriggerStateTests
         var withHold = new PropertyTriggerState(Hold, hasRearm: false);
 
         // Act
-        var firedAtOnce = withoutHold.Activate(TriggerActivation.EvaluateImmediately, TrueValue, Start);
-        var firedWithHold = withHold.Activate(TriggerActivation.EvaluateImmediately, TrueValue, Start);
+        var firedAtOnce = withoutHold.Activate(TriggerActivation.EvaluateImmediately, TrueValue, At(0));
+        var firedWithHold = withHold.Activate(TriggerActivation.EvaluateImmediately, TrueValue, At(0));
 
         // Assert
         Assert.True(firedAtOnce);
@@ -200,10 +203,10 @@ public class PropertyTriggerStateTests
         var state = new PropertyTriggerState(hold: null, hasRearm: false);
 
         // Act
-        var activated = state.Activate(TriggerActivation.WaitForFalseToTrue, TrueValue, Start);
-        var stillTrue = Run(state, TrueValue, Start.AddSeconds(1));
-        Run(state, FalseValue, Start.AddSeconds(2));
-        var turnedTrue = Run(state, TrueValue, Start.AddSeconds(3));
+        var activated = state.Activate(TriggerActivation.WaitForFalseToTrue, TrueValue, At(0));
+        var stillTrue = Run(state, TrueValue, At(1));
+        Run(state, FalseValue, At(2));
+        var turnedTrue = Run(state, TrueValue, At(3));
 
         // Assert
         Assert.False(activated);
@@ -216,10 +219,10 @@ public class PropertyTriggerStateTests
     {
         // Arrange
         var state = new PropertyTriggerState(hold: null, hasRearm: false);
-        state.Activate(TriggerActivation.WaitForFalseToTrue, Unknown("/Weather/Gust"), Start);
+        state.Activate(TriggerActivation.WaitForFalseToTrue, Unknown("/Weather/Gust"), At(0));
 
         // Act
-        var firstKnown = Run(state, TrueValue, Start.AddSeconds(1));
+        var firstKnown = Run(state, TrueValue, At(1));
 
         // Assert
         Assert.False(firstKnown);
@@ -231,12 +234,12 @@ public class PropertyTriggerStateTests
     {
         // Arrange
         var state = new PropertyTriggerState(hold: null, hasRearm: true);
-        state.Activate(TriggerActivation.WaitForFalseToTrue, WithRearm(true, null), Start);
+        state.Activate(TriggerActivation.WaitForFalseToTrue, WithRearm(true, null), At(0));
 
         // Act
-        var movedBetween = Run(state, WithRearm(true, false), Start.AddSeconds(1));
-        var falseButNotRearmed = Run(state, WithRearm(false, false), Start.AddSeconds(2));
-        var trueAgain = Run(state, WithRearm(true, false), Start.AddSeconds(3));
+        var movedBetween = Run(state, WithRearm(true, false), At(1));
+        var falseButNotRearmed = Run(state, WithRearm(false, false), At(2));
+        var trueAgain = Run(state, WithRearm(true, false), At(3));
 
         // Assert
         Assert.False(movedBetween);
@@ -250,11 +253,11 @@ public class PropertyTriggerStateTests
     {
         // Arrange
         var state = new PropertyTriggerState(hold: null, hasRearm: true);
-        state.Activate(TriggerActivation.WaitForFalseToTrue, WithRearm(true, null), Start);
-        Run(state, WithRearm(false, true), Start.AddSeconds(1));
+        state.Activate(TriggerActivation.WaitForFalseToTrue, WithRearm(true, null), At(0));
+        Run(state, WithRearm(false, true), At(1));
 
         // Act
-        var fired = Run(state, WithRearm(true, false), Start.AddSeconds(2));
+        var fired = Run(state, WithRearm(true, false), At(2));
 
         // Assert
         Assert.True(fired);
@@ -265,10 +268,10 @@ public class PropertyTriggerStateTests
     {
         // Arrange
         var state = new PropertyTriggerState(hold: null, hasRearm: true);
-        state.Activate(TriggerActivation.WaitForFalseToTrue, new TriggerObservation(true, null, ["/Weather/Gust"]), Start);
+        state.Activate(TriggerActivation.WaitForFalseToTrue, new TriggerObservation(true, null, ["/Weather/Gust"]), At(0));
 
         // Act
-        var fired = Run(state, new TriggerObservation(true, null, ["/Weather/Gust"]), Start.AddSeconds(1));
+        var fired = Run(state, new TriggerObservation(true, null, ["/Weather/Gust"]), At(1));
 
         // Assert
         Assert.False(fired);
@@ -283,12 +286,12 @@ public class PropertyTriggerStateTests
     {
         // Arrange
         var state = new PropertyTriggerState(hold: null, hasRearm: true);
-        state.Activate(TriggerActivation.WaitForFalseToTrue, Unknown("/Weather/Gust"), Start);
+        state.Activate(TriggerActivation.WaitForFalseToTrue, Unknown("/Weather/Gust"), At(0));
 
         // Act
-        var firstKnown = Run(state, WithRearm(true, false), Start.AddSeconds(1));
-        var falseButNotRearmed = Run(state, WithRearm(false, false), Start.AddSeconds(2));
-        var trueAgain = Run(state, WithRearm(true, false), Start.AddSeconds(3));
+        var firstKnown = Run(state, WithRearm(true, false), At(1));
+        var falseButNotRearmed = Run(state, WithRearm(false, false), At(2));
+        var trueAgain = Run(state, WithRearm(true, false), At(3));
 
         // Assert
         Assert.False(firstKnown);
@@ -302,14 +305,14 @@ public class PropertyTriggerStateTests
     {
         // Arrange
         var state = new PropertyTriggerState(hold: null, hasRearm: true);
-        state.Activate(TriggerActivation.EvaluateImmediately, WithRearm(false, null), Start);
-        Run(state, WithRearm(true, false), Start.AddSeconds(1));
+        state.Activate(TriggerActivation.EvaluateImmediately, WithRearm(false, null), At(0));
+        Run(state, WithRearm(true, false), At(1));
 
         // Act
-        var rearmedWhileTrue = Run(state, WithRearm(true, true), Start.AddSeconds(2));
-        var stillTrue = Run(state, WithRearm(true, true), Start.AddSeconds(3));
-        var turnedFalse = Run(state, WithRearm(false, true), Start.AddSeconds(4));
-        var trueAgain = Run(state, WithRearm(true, false), Start.AddSeconds(5));
+        var rearmedWhileTrue = Run(state, WithRearm(true, true), At(2));
+        var stillTrue = Run(state, WithRearm(true, true), At(3));
+        var turnedFalse = Run(state, WithRearm(false, true), At(4));
+        var trueAgain = Run(state, WithRearm(true, false), At(5));
 
         // Assert
         Assert.False(rearmedWhileTrue);
@@ -323,13 +326,13 @@ public class PropertyTriggerStateTests
     {
         // Arrange
         var state = new PropertyTriggerState(hold: null, hasRearm: true);
-        state.Activate(TriggerActivation.EvaluateImmediately, WithRearm(false, null), Start);
-        Run(state, WithRearm(true, false), Start.AddSeconds(1));
-        Run(state, WithRearm(true, true), Start.AddSeconds(2));
+        state.Activate(TriggerActivation.EvaluateImmediately, WithRearm(false, null), At(0));
+        Run(state, WithRearm(true, false), At(1));
+        Run(state, WithRearm(true, true), At(2));
 
         // Act
-        var unknown = Run(state, Unknown("/Weather/Gust"), Start.AddSeconds(3));
-        var trueAgain = Run(state, WithRearm(true, false), Start.AddSeconds(4));
+        var unknown = Run(state, Unknown("/Weather/Gust"), At(3));
+        var trueAgain = Run(state, WithRearm(true, false), At(4));
 
         // Assert
         Assert.False(unknown);
@@ -341,11 +344,11 @@ public class PropertyTriggerStateTests
     {
         // Arrange
         var state = new PropertyTriggerState(hold: null, hasRearm: false);
-        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, Start);
+        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, At(0));
 
         // Act
         state.Deactivate();
-        var fired = Run(state, TrueValue, Start.AddSeconds(1));
+        var fired = Run(state, TrueValue, At(1));
 
         // Assert
         Assert.False(fired);
@@ -357,16 +360,16 @@ public class PropertyTriggerStateTests
     {
         // Arrange
         var state = new PropertyTriggerState(hold: null, hasRearm: true);
-        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, Start);
-        Run(state, WithRearm(true, null), Start);
+        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, At(0));
+        Run(state, WithRearm(true, null), At(0));
 
         // Act
-        var whileUnknown = Run(state, new TriggerObservation(true, null, ["/Weather/Threshold"]), Start.AddSeconds(1));
+        var whileUnknown = Run(state, new TriggerObservation(true, null, ["/Weather/Threshold"]), At(1));
         var isUnknown = state.IsUnknown;
         var missingPaths = state.MissingPaths.ToArray();
         var phaseWhileUnknown = state.Phase;
         var unknownSince = state.UnknownSince;
-        var rearmFired = Run(state, WithRearm(true, true), Start.AddSeconds(2));
+        var rearmFired = Run(state, WithRearm(true, true), At(2));
 
         // Assert
         Assert.False(whileUnknown);
@@ -384,13 +387,13 @@ public class PropertyTriggerStateTests
     {
         // Arrange
         var state = new PropertyTriggerState(hold: null, hasRearm: true);
-        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, Start);
-        Run(state, WithRearm(true, null), Start);
-        Run(state, new TriggerObservation(true, null, ["/Weather/Threshold"]), Start.AddSeconds(1));
+        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, At(0));
+        Run(state, WithRearm(true, null), At(0));
+        Run(state, new TriggerObservation(true, null, ["/Weather/Threshold"]), At(1));
 
         // Act
-        var firedOnRearm = Run(state, WithRearm(false, true), Start.AddSeconds(2));
-        var fired = Run(state, WithRearm(true, false), Start.AddSeconds(3));
+        var firedOnRearm = Run(state, WithRearm(false, true), At(2));
+        var fired = Run(state, WithRearm(true, false), At(3));
 
         // Assert
         Assert.False(firedOnRearm);
@@ -403,10 +406,10 @@ public class PropertyTriggerStateTests
     {
         // Arrange
         var state = new PropertyTriggerState(Hold, hasRearm: false);
-        state.Activate(TriggerActivation.EvaluateImmediately, Unknown("/Weather/Gust"), Start);
+        state.Activate(TriggerActivation.EvaluateImmediately, Unknown("/Weather/Gust"), At(0));
 
         // Act
-        state.Activate(TriggerActivation.EvaluateImmediately, Unknown("/Weather/Rain"), Start.AddSeconds(5));
+        state.Activate(TriggerActivation.EvaluateImmediately, Unknown("/Weather/Rain"), At(5));
 
         // Assert
         Assert.Equal(Start.AddSeconds(5), state.UnknownSince);
@@ -419,13 +422,13 @@ public class PropertyTriggerStateTests
     {
         // Arrange
         var state = new PropertyTriggerState(hold: null, hasRearm: false);
-        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, Start);
-        Run(state, TrueValue, Start.AddSeconds(1));
+        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, At(0));
+        Run(state, TrueValue, At(1));
         state.Deactivate();
 
         // Act
-        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, Start.AddSeconds(2));
-        var fired = Run(state, TrueValue, Start.AddSeconds(3));
+        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, At(2));
+        var fired = Run(state, TrueValue, At(3));
 
         // Assert
         Assert.True(fired);
@@ -436,10 +439,10 @@ public class PropertyTriggerStateTests
     {
         // Arrange
         var state = new PropertyTriggerState(TimeSpan.Zero, hasRearm: false);
-        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, Start);
+        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, At(0));
 
         // Act
-        var fired = Run(state, TrueValue, Start.AddSeconds(1));
+        var fired = Run(state, TrueValue, At(1));
 
         // Assert
         Assert.True(fired);
@@ -450,11 +453,11 @@ public class PropertyTriggerStateTests
     {
         // Arrange
         var state = new PropertyTriggerState(hold: null, hasRearm: false);
-        state.Activate(TriggerActivation.WaitForFalseToTrue, TrueValue, Start);
+        state.Activate(TriggerActivation.WaitForFalseToTrue, TrueValue, At(0));
 
         // Act
-        var fired = Run(state, Unknown("/Weather/Gust"), Start.AddSeconds(1));
-        var firedOnTrue = Run(state, TrueValue, Start.AddSeconds(2));
+        var fired = Run(state, Unknown("/Weather/Gust"), At(1));
+        var firedOnTrue = Run(state, TrueValue, At(2));
 
         // Assert
         Assert.False(fired);
@@ -468,7 +471,7 @@ public class PropertyTriggerStateTests
     {
         // Arrange
         var state = new PropertyTriggerState(Hold, hasRearm: false);
-        state.Activate(TriggerActivation.EvaluateImmediately, TrueValue, Start);
+        state.Activate(TriggerActivation.EvaluateImmediately, TrueValue, At(0));
 
         // Act
         var status = TriggerStatus.FromProperty(state, Hold);
