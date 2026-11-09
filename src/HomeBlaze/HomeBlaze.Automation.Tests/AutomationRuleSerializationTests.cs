@@ -151,6 +151,10 @@ public sealed class AutomationRuleSerializationTests : IDisposable
     [Theory]
     [InlineData("\"OnlyIf\": \"not /Blinds/IsMoving\"", "Rule 'Retract': 'OnlyIf' is no setting of a rule")]
     [InlineData("\"guard\": \"not /Blinds/IsMoving\"", "Rule 'Retract': 'guard' is no setting of a rule")]
+    [InlineData("\"status\": \"Armed\"", "Rule 'Retract': 'status' is no setting of a rule")]
+    [InlineData("\"title\": \"Retract\"", "Rule 'Retract': 'title' is no setting of a rule")]
+    [InlineData("\"runCount\": 3", "Rule 'Retract': 'runCount' is no setting of a rule")]
+    [InlineData("\"lastTriggeredAt\": \"2026-11-06T12:00:00Z\"", "Rule 'Retract': 'lastTriggeredAt' is no setting of a rule")]
     public void WhenTheRuleHasAnUnknownKey_ThenTheRuleIsAnErrorThatNamesTheKey(string setting, string expected)
     {
         // Arrange

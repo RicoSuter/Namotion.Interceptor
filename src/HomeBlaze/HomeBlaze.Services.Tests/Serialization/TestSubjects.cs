@@ -31,6 +31,9 @@ public partial class SubjectWithExtensionData : IConfigurable
     [Configuration]
     public partial string? Name { get; set; }
 
+    [State]
+    public partial string? Status { get; set; }
+
     [JsonExtensionData]
     [JsonInclude]
     internal Dictionary<string, JsonElement>? UnknownKeys { get; set; }

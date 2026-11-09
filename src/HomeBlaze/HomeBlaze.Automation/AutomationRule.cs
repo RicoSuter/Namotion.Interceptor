@@ -77,8 +77,8 @@ public partial class AutomationRule : IConfigurable, ITitleProvider
     public string? Title => Name;
 
     /// <summary>
-    /// The keys of the configuration of the rule that name no setting, such as a misspelled <c>onlyIf</c>; they make the
-    /// rule invalid and are saved back as they were written.
+    /// The keys of the configuration of the rule that name no setting, such as a misspelled <c>onlyIf</c> or a state such
+    /// as <c>status</c>; they make the rule invalid and are saved back as they were written.
     /// </summary>
     [JsonExtensionData]
     [JsonInclude]

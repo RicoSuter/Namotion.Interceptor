@@ -78,6 +78,17 @@ public class ConfigurationJsonTypeInfoResolverTests
     }
 
     [Fact]
+    public void WhenASubjectWithExtensionDataReadsAKeyOfAPropertyWithoutConfiguration_ThenTheExtensionDataHoldsIt()
+    {
+        // Act
+        var subject = JsonSerializer.Deserialize<SubjectWithExtensionData>("""{ "name": "a", "status": "Running" }""", _options)!;
+
+        // Assert
+        Assert.Null(subject.Status);
+        Assert.Equal("Running", Assert.Single(subject.UnknownKeys!, key => key.Key == "status").Value.GetString());
+    }
+
+    [Fact]
     public void Serialize_ValueObject_IncludesAllProperties()
     {
         // Arrange
