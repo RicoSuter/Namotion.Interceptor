@@ -201,8 +201,8 @@ internal sealed class AutomationEngine : IRuleRunHost
 
     /// <summary>
     /// Enters the initial state, clears the trigger times and starts every active rule over as if it entered its state:
-    /// fresh holds, the activation policy of its triggers applies again and its event triggers subscribe again, also when the
-    /// state did not change. A saved reset clears the error shown unless the configuration is invalid, since a reset is how
+    /// fresh holds, the activation policy of its triggers applies again and the event triggers of every rule ignore the events
+    /// received before, also when the state did not change. A saved reset clears the error shown unless the configuration is invalid, since a reset is how
     /// an automation leaves a saved state that its configuration no longer has.
     /// </summary>
     public void ResetState()
@@ -224,7 +224,12 @@ internal sealed class AutomationEngine : IRuleRunHost
 
     private void RestartRules()
     {
-        Stop();
+        foreach (var rule in _snapshot.Rules)
+        {
+            Deactivate(rule);
+            AutomationTriggers.SkipReceivedEvents(rule);
+        }
+
         ActivateRules();
     }
 
@@ -285,6 +290,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         foreach (var rule in _snapshot.Rules)
         {
             Deactivate(rule);
+            _triggers.StopListening(rule);
         }
     }
 
@@ -377,6 +383,7 @@ internal sealed class AutomationEngine : IRuleRunHost
             else
             {
                 Deactivate(rule);
+                _triggers.StopListening(rule);
             }
         }
 
@@ -388,25 +395,46 @@ internal sealed class AutomationEngine : IRuleRunHost
         _triggers.Rebind(_snapshot.Rules);
     }
 
-    // A trigger that stays the same in a rule that stays active keeps its state, so that a Save does not run it again, and
-    // its subscription, so that a Save drops no queued event.
+    // A property trigger that stays the same in a rule that stays active keeps its state, so that a Save does not run it
+    // again, and an event trigger that stays the same in a rule that keeps listening keeps its subscription, so that a
+    // Save drops no queued event.
     private void CarryOver(CompiledAutomation previous, CompiledAutomation next)
     {
         foreach (var rule in next.Rules)
         {
-            if (previous.FindRule(rule.Key) is { IsActivated: true } old && IsActive(rule))
+            if (previous.FindRule(rule.Key) is not { } old)
             {
-                AutomationTriggers.CarryOver(old, rule);
+                continue;
+            }
+
+            if (old.IsActivated && IsActive(rule))
+            {
+                AutomationTriggers.CarryOverStates(old, rule);
+            }
+
+            if (ListensForEvents(rule))
+            {
+                AutomationTriggers.CarryOverSubscriptions(old, rule);
             }
         }
     }
 
-    // Returns whether a pending property trigger began to be tracked.
+    // Has the rules that are not Off listen for events and activates the rules of the current state. Returns whether a
+    // pending property trigger began to be tracked.
     private bool ActivateRules()
     {
         var pending = new List<CompiledRule>();
         foreach (var rule in _snapshot.Rules)
         {
+            if (ListensForEvents(rule))
+            {
+                _triggers.Listen(rule);
+            }
+            else
+            {
+                _triggers.StopListening(rule);
+            }
+
             if (rule.IsActivated || !IsActive(rule))
             {
                 continue;
@@ -508,6 +536,10 @@ internal sealed class AutomationEngine : IRuleRunHost
     private bool HasStickyError => _hasConfigurationError || _hasCheckpointError || _runWriteError is not null;
 
     private bool IsActive(CompiledRule rule) => rule.IsActiveIn(_automation.Enabled, CurrentState);
+
+    // In every state, so that an event queued while a rule of another state ran is handled by the rules of the state
+    // that is current when the worker takes the event.
+    private bool ListensForEvents(CompiledRule rule) => _automation.Enabled && rule.Mode != AutomationRuleMode.Off;
 
     private string? GetInactiveReason(CompiledRule rule)
     {

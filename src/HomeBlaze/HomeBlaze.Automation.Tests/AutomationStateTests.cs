@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Automation.Tests.Testing;
+using Namotion.Interceptor.Testing;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
 namespace HomeBlaze.Automation.Tests;
@@ -197,6 +198,68 @@ public class AutomationStateTests
         Assert.Equal("On", host.Automation.CurrentState);
         Assert.Equal(0, host.Blinds.CloseCount);
         Assert.Equal(0L, host.Rule("offOnly").RunCount);
+    }
+
+    [Fact]
+    public async Task WhenTheButtonIsPressedAgainWhileTheFirstPressRuns_ThenTheSecondPressIsHandledInTheNewState()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Off", "On"];
+            automation.InitialState = "Off";
+            automation.RuleOrder = ["switchOn", "switchOff"];
+            automation.Rules = Keyed(
+                ("switchOn", Create(
+                    "Switch on",
+                    AutomationRuleMode.On,
+                    [OnEvent("/Button", "TestPressEvent", "event/Gesture == Release")],
+                    [Invoke("/Blinds/Wait"), Set("/Blinds/Position", "1"), Enter("On")],
+                    inState: "Off")),
+                ("switchOff", Create(
+                    "Switch off",
+                    AutomationRuleMode.On,
+                    [OnEvent("/Button", "TestPressEvent", "event/Gesture == Release")],
+                    [Set("/Blinds/Position", "2"), Enter("Off")],
+                    inState: "On")));
+        });
+
+        // Act
+        host.Button.Press("Release");
+        await AsyncTestHelpers.WaitUntilAsync(() => host.Blinds.IsWaiting);
+        host.Button.Press("Release");
+        host.Blinds.Release();
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(2, host.Blinds.Position);
+        Assert.Equal("Off", host.Automation.CurrentState);
+        Assert.Equal(1L, host.Rule("switchOff").RunCount);
+    }
+
+    [Fact]
+    public async Task WhenARuleBeforeTheChangingRuleIsSwitchedOn_ThenItHandlesTheEventBeforeTheStateChanges()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Idle", "Running"];
+            automation.InitialState = "Idle";
+            automation.RuleOrder = ["note", "switch"];
+            automation.Rules = Keyed(
+                ("note", Create("Note", AutomationRuleMode.Off, [OnEvent("/Button", "TestPressEvent")], [Set("/Blinds/Position", "7")], inState: "Idle")),
+                ("switch", Create("Switch", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Enter("Running")], inState: "Idle")));
+        });
+        host.Automation.Rules["note"].Mode = AutomationRuleMode.On;
+        await host.SaveAsync();
+
+        // Act
+        host.Button.Press("Release");
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal("Running", host.Automation.CurrentState);
+        Assert.Equal(7, host.Blinds.Position);
     }
 
     [Fact]

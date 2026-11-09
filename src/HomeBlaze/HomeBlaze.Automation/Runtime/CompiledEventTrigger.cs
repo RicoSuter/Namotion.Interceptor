@@ -4,8 +4,8 @@ using Namotion.Interceptor.Expressions;
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// An event trigger with its parsed filter and its subscription. An event queued by an earlier subscription is not
-/// processed.
+/// An event trigger with its parsed filter and the subscription it uses, which it handles only the events of that it
+/// received after it joined.
 /// </summary>
 internal sealed class CompiledEventTrigger(CompiledRule rule, int index, SubjectEventTrigger configuration, ParsedExpression? filter)
 {
@@ -20,7 +20,10 @@ internal sealed class CompiledEventTrigger(CompiledRule rule, int index, Subject
 
     public IInterceptorSubject? Source { get; set; }
 
-    public EventTriggerSubscription? Subscription { get; set; }
+    public EventSubscription? Subscription { get; set; }
+
+    /// <summary>The sequence number of the last event of <see cref="Subscription"/> before the trigger joined it; the trigger handles only later events.</summary>
+    public long JoinedAfter { get; set; }
 
     /// <summary>Why the trigger receives no events, or null while it is subscribed.</summary>
     public string? SourceError
@@ -41,7 +44,7 @@ internal sealed class CompiledEventTrigger(CompiledRule rule, int index, Subject
 
     /// <summary>
     /// Hands the subscription to the trigger that replaces this one with an equal configuration, so that the events
-    /// queued and received from now on run on that one.
+    /// queued and received from now on are handled by that one.
     /// </summary>
     public void MoveSubscriptionTo(CompiledEventTrigger target)
     {
@@ -50,8 +53,8 @@ internal sealed class CompiledEventTrigger(CompiledRule rule, int index, Subject
             return;
         }
 
-        subscription.Trigger = target;
         target.Subscription = subscription;
+        target.JoinedAfter = JoinedAfter;
         target.Source = Source;
         target.SourceError = SourceError;
         Subscription = null;

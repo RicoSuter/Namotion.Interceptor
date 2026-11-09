@@ -7,61 +7,116 @@ using Namotion.Interceptor.Expressions;
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// The event triggers of active rules: subscribes to their sources, follows a source that the graph replaces, and turns
-/// a received event that passes its filter into a run request. Used by the worker only; a subscription only enqueues.
+/// The event triggers of the rules that listen for events: shares one subscription per source and event type among
+/// them, follows a source that the graph replaces, and turns a received event into the run requests of the rules that are
+/// active when the worker processes it, in rule order. Used by the worker only; a subscription only enqueues.
 /// </summary>
-internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvider timeProvider, AutomationInputQueue queue)
+internal sealed class EventTriggerEngine(
+    SubjectPathResolver resolver, TimeProvider timeProvider, AutomationInputQueue queue)
 {
-    /// <summary>Subscribes the triggers of the rule, except one that a Save carried over and whose path still leads to its source.</summary>
-    public void Activate(CompiledRule rule)
+    private readonly Dictionary<IInterceptorSubject, List<EventSubscription>> _subscriptions = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>
+    /// Has the rule listen for events: subscribes each trigger that has no subscription, or whose path no longer leads to
+    /// the source of the subscription that a Save carried over. Does nothing for a rule that listens already.
+    /// </summary>
+    public void Listen(CompiledRule rule)
+    {
+        if (rule.ListensForEvents)
+        {
+            return;
+        }
+
+        rule.ListensForEvents = true;
+        foreach (var trigger in rule.EventTriggers)
+        {
+            if (trigger.Subscription is null || !ReferenceEquals(ResolveSource(trigger), trigger.Source))
+            {
+                Leave(trigger);
+                Join(trigger);
+            }
+        }
+    }
+
+    public void StopListening(CompiledRule rule)
+    {
+        rule.ListensForEvents = false;
+        foreach (var trigger in rule.EventTriggers)
+        {
+            Leave(trigger);
+        }
+    }
+
+    /// <summary>Has the triggers of the rule ignore the events received so far, as if they subscribed now.</summary>
+    public static void SkipReceived(CompiledRule rule)
     {
         foreach (var trigger in rule.EventTriggers)
         {
-            if (trigger.Subscription is not null && ReferenceEquals(ResolveSource(trigger), trigger.Source))
+            if (trigger.Subscription is { } subscription)
+            {
+                trigger.JoinedAfter = subscription.Received;
+            }
+        }
+    }
+
+    /// <summary>Subscribes the triggers of the listening rules again whose path now leads to another subject.</summary>
+    public void Rebind(IReadOnlyList<CompiledRule> rules)
+    {
+        foreach (var rule in rules)
+        {
+            if (!rule.ListensForEvents)
             {
                 continue;
             }
 
-            Unsubscribe(trigger);
-            Subscribe(trigger);
-        }
-    }
-
-    public static void Deactivate(CompiledRule rule)
-    {
-        foreach (var trigger in rule.EventTriggers)
-        {
-            Unsubscribe(trigger);
-        }
-    }
-
-    /// <summary>Subscribes the triggers of the active rules again whose path now leads to another subject.</summary>
-    public void Rebind(IReadOnlyList<CompiledRule> rules)
-    {
-        foreach (var trigger in rules.Where(rule => rule.IsActivated).SelectMany(rule => rule.EventTriggers))
-        {
-            if (!ReferenceEquals(ResolveSource(trigger), trigger.Source))
+            foreach (var trigger in rule.EventTriggers)
             {
-                Unsubscribe(trigger);
-                Subscribe(trigger);
+                if (!ReferenceEquals(ResolveSource(trigger), trigger.Source))
+                {
+                    Leave(trigger);
+                    Join(trigger);
+                }
             }
         }
     }
 
-    public IReadOnlyList<RunRequest> OnEvent(EventInput input)
+    /// <summary>
+    /// Gets the run requests of the event, in rule order: one for each active rule with a trigger that uses the
+    /// subscription of the event, received the event after it joined and whose filter passes.
+    /// </summary>
+    public IReadOnlyList<RunRequest> OnEvent(EventInput input, IReadOnlyList<CompiledRule> rules)
     {
-        var trigger = input.Subscription.Trigger;
-        if (!ReferenceEquals(trigger.Subscription, input.Subscription) || !trigger.Rule.IsActivated)
+        List<RunRequest>? requests = null;
+        foreach (var rule in rules)
+        {
+            if (rule.IsActivated && FindTrigger(rule, input) is { } trigger)
+            {
+                requests ??= [];
+                requests.Add(new RunRequest(rule, input.Event, trigger.Description));
+            }
+        }
+
+        if (requests is null)
         {
             return [];
         }
 
-        if (trigger.Filter is { } filter && !Passes(trigger, filter, input.Event))
+        return requests;
+    }
+
+    private CompiledEventTrigger? FindTrigger(CompiledRule rule, EventInput input)
+    {
+        foreach (var trigger in rule.EventTriggers)
         {
-            return [];
+            if (ReferenceEquals(trigger.Subscription, input.Subscription) &&
+                input.Sequence > trigger.JoinedAfter &&
+                (trigger.Filter is not { } filter || Passes(trigger, filter, input.Event)))
+            {
+                return trigger;
+            }
         }
 
-        return [new RunRequest(trigger.Rule, input.Event, trigger.Description)];
+        return null;
     }
 
     private bool Passes(CompiledEventTrigger trigger, ParsedExpression filter, CapturedEvent captured)
@@ -88,26 +143,88 @@ internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvi
         return eventType is null ? $"{configuration.SubjectPath} publishes no {configuration.EventType}" : null;
     }
 
-    private void Subscribe(CompiledEventTrigger trigger)
+    private void Join(CompiledEventTrigger trigger)
     {
         var error = FindSource(resolver, trigger, out var source, out var eventType);
         trigger.Source = source;
-        trigger.SourceError = error;
         if (source is null || eventType is null)
+        {
+            trigger.SourceError = error;
+            return;
+        }
+
+        if (Find(source, eventType) is { } shared)
+        {
+            trigger.JoinedAfter = shared.Received;
+            Use(trigger, shared);
+            return;
+        }
+
+        // An event that the source publishes while it is subscribed is a new one, so the trigger handles every event.
+        trigger.JoinedAfter = 0;
+        Use(trigger, Subscribe(source, eventType));
+    }
+
+    private static void Use(CompiledEventTrigger trigger, EventSubscription subscription)
+    {
+        subscription.TriggerCount++;
+        trigger.Subscription = subscription;
+        trigger.SourceError = null;
+    }
+
+    private EventSubscription Subscribe(IInterceptorSubject source, Type eventType)
+    {
+        var subscription = new EventSubscription(source, eventType);
+        subscription.Handle = EventSources.Subscribe(source, eventType, payload => queue.TryEnqueue(
+            new EventInput(subscription, new CapturedEvent(source, payload), subscription.Receive(), AutomationInputQueue.CausedChainDepth)));
+
+        if (!_subscriptions.TryGetValue(source, out var subscriptions))
+        {
+            subscriptions = [];
+            _subscriptions.Add(source, subscriptions);
+        }
+
+        subscriptions.Add(subscription);
+        return subscription;
+    }
+
+    private EventSubscription? Find(IInterceptorSubject source, Type eventType)
+    {
+        if (_subscriptions.TryGetValue(source, out var subscriptions))
+        {
+            foreach (var subscription in subscriptions)
+            {
+                if (subscription.EventType == eventType)
+                {
+                    return subscription;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    // The last trigger that leaves a subscription disposes it; an event it queued before finds no trigger and is dropped.
+    private void Leave(CompiledEventTrigger trigger)
+    {
+        if (trigger.Subscription is not { } subscription)
         {
             return;
         }
 
-        // Assigned before the source is subscribed, so that an event it publishes at once is not taken for a stale one.
-        var subscription = new EventTriggerSubscription(trigger);
-        trigger.Subscription = subscription;
-        subscription.Handle = EventSources.Subscribe(source, eventType, payload =>
-            queue.TryEnqueue(new EventInput(subscription, new CapturedEvent(source, payload), AutomationInputQueue.CausedChainDepth)));
-    }
-
-    private static void Unsubscribe(CompiledEventTrigger trigger)
-    {
-        trigger.Subscription?.Dispose();
         trigger.Subscription = null;
+        subscription.TriggerCount--;
+        if (subscription.TriggerCount > 0)
+        {
+            return;
+        }
+
+        subscription.Dispose();
+        var subscriptions = _subscriptions[subscription.Source];
+        subscriptions.Remove(subscription);
+        if (subscriptions.Count == 0)
+        {
+            _subscriptions.Remove(subscription.Source);
+        }
     }
 }

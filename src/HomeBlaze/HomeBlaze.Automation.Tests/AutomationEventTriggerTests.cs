@@ -1,4 +1,5 @@
 using HomeBlaze.Automation.Tests.Testing;
+using Namotion.Interceptor.Testing;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
 namespace HomeBlaze.Automation.Tests;
@@ -58,6 +59,57 @@ public class AutomationEventTriggerTests
 
         // Assert
         Assert.Equal(0, closesAfterThePressOfTheOldSource);
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenTheRulesAreReordered_ThenRulesOnTheSameEventRunInTheNewOrder()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.RuleOrder = ["a", "b"];
+            automation.Rules = Keyed(
+                ("a", On("A", OnEvent("/Button", "TestPressEvent"), Set("/Blinds/Position", "1"))),
+                ("b", On("B", OnEvent("/Button", "TestPressEvent"), Set("/Blinds/Position", "2"))));
+        });
+        host.Button.Press("Release");
+        await host.FlushAsync();
+        var positionBeforeTheReorder = host.Blinds.Position;
+
+        // Act
+        host.Automation.RuleOrder = ["b", "a"];
+        await host.SaveAsync();
+        host.Button.Press("Release");
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(2, positionBeforeTheReorder);
+        Assert.Equal(1, host.Blinds.Position);
+    }
+
+    [Fact]
+    public async Task WhenARuleIsSwitchedOnWhileAnEventIsQueued_ThenTheRuleHandlesOnlyLaterEvents()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("wait", On("Wait", OnEvent("/Button", "TestPressEvent"), Invoke("/Blinds/Wait"))),
+            ("close", Create("Close", AutomationRuleMode.Off, [OnEvent("/Button", "TestPressEvent")], [Invoke("/Blinds/Close")]))));
+        host.Button.Press("Release");
+        await AsyncTestHelpers.WaitUntilAsync(() => host.Blinds.IsWaiting);
+        host.Button.Press("Release");
+
+        // Act
+        host.Rule("close").Mode = AutomationRuleMode.On;
+        await host.Automation.ApplyConfigurationAsync(CancellationToken.None);
+        host.Blinds.Release();
+        await host.FlushAsync();
+        var closesForTheQueuedPress = host.Blinds.CloseCount;
+        host.Button.Press("Release");
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(0, closesForTheQueuedPress);
         Assert.Equal(1, host.Blinds.CloseCount);
     }
 

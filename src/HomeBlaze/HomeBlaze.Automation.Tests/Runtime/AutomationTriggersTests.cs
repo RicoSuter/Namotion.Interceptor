@@ -51,7 +51,7 @@ public class AutomationTriggersTests
         var rule = Compile(When("/Weather/Rain > 0"), When("/Weather/Rain > 0"));
 
         // Act
-        AutomationTriggers.CarryOver(old, rule);
+        AutomationTriggers.CarryOverStates(old, rule);
 
         // Assert
         Assert.Same(first, rule.PropertyTriggers[0].State);

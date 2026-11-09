@@ -7,9 +7,9 @@ using Namotion.Interceptor.Registry.Abstractions;
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// The property and event triggers of the rules of an automation: subscribes the triggers of rules that became active
-/// and queues the activation of their property triggers, binds them again when paths may lead elsewhere, and turns the
-/// inputs of the worker into run requests. Used by the worker only.
+/// The property and event triggers of the rules of an automation: subscribes the event triggers of the rules that listen
+/// for events, queues the activation of the property triggers of rules that became active, binds them again when paths
+/// may lead elsewhere, and turns the inputs of the worker into run requests. Used by the worker only.
 /// </summary>
 internal sealed class AutomationTriggers
 {
@@ -49,17 +49,12 @@ internal sealed class AutomationTriggers
     }
 
     /// <summary>
-    /// Subscribes the event triggers of the rules that became active, publishes the watched set of all active rules and
-    /// queues the activation of the property triggers of the new rules, which evaluates them in a later input. Returns
-    /// whether a pending property trigger began to be tracked, whose Only if is to be checked again in a later input.
+    /// Publishes the watched set of all active rules and queues the activation of the property triggers of the rules that
+    /// became active, which evaluates them in a later input. Returns whether a pending property trigger began to be
+    /// tracked, whose Only if is to be checked again in a later input.
     /// </summary>
     public bool Activate(IReadOnlyList<CompiledRule> activated, IReadOnlyList<CompiledRule> rules)
     {
-        foreach (var rule in activated)
-        {
-            _eventTriggers.Activate(rule);
-        }
-
         var tracksNewPending = _propertyTriggers.Refresh(rules);
         if (activated.Count > 0)
         {
@@ -115,18 +110,24 @@ internal sealed class AutomationTriggers
         return [.. requests.OrderBy(request => IndexOf(rules, request.Rule))];
     }
 
-    public static void Deactivate(CompiledRule rule)
-    {
-        PropertyTriggerEngine.Deactivate(rule);
-        EventTriggerEngine.Deactivate(rule);
-    }
+    /// <summary>Stops the property triggers of the rule; its event triggers stay subscribed.</summary>
+    public static void Deactivate(CompiledRule rule) => PropertyTriggerEngine.Deactivate(rule);
+
+    /// <summary>Subscribes the event triggers of the rule, unless it listens already.</summary>
+    public void Listen(CompiledRule rule) => _eventTriggers.Listen(rule);
+
+    /// <summary>Gives up the subscriptions of the event triggers of the rule.</summary>
+    public void StopListening(CompiledRule rule) => _eventTriggers.StopListening(rule);
+
+    /// <summary>Has the event triggers of the rule ignore the events received so far, as if they subscribed now.</summary>
+    public static void SkipReceivedEvents(CompiledRule rule) => EventTriggerEngine.SkipReceived(rule);
 
     /// <summary>
-    /// Hands the state of each property trigger and the subscription of each event trigger of the old rule to a trigger
-    /// with an equal configuration, wherever it moved in the rule: each new trigger takes the first old one with an equal
-    /// configuration that no earlier new trigger took, so that equal triggers pair up in order.
+    /// Hands the state of each property trigger of the old rule to a trigger with an equal configuration, wherever it
+    /// moved in the rule: each new trigger takes the first old one with an equal configuration that no earlier new trigger
+    /// took, so that equal triggers pair up in order.
     /// </summary>
-    public static void CarryOver(CompiledRule old, CompiledRule rule)
+    public static void CarryOverStates(CompiledRule old, CompiledRule rule)
     {
         var propertyTriggers = new List<CompiledPropertyTrigger>(old.PropertyTriggers);
         foreach (var trigger in rule.PropertyTriggers)
@@ -138,7 +139,14 @@ internal sealed class AutomationTriggers
                 propertyTriggers.RemoveAt(index);
             }
         }
+    }
 
+    /// <summary>
+    /// Hands the subscription of each event trigger of the old rule to a trigger with an equal configuration, paired up as
+    /// by <see cref="CarryOverStates"/>, so that the trigger handles the events queued before.
+    /// </summary>
+    public static void CarryOverSubscriptions(CompiledRule old, CompiledRule rule)
+    {
         var eventTriggers = new List<CompiledEventTrigger>(old.EventTriggers);
         foreach (var trigger in rule.EventTriggers)
         {
@@ -163,7 +171,7 @@ internal sealed class AutomationTriggers
     {
         PropertyChangedInput change => _propertyTriggers.OnPropertyChanged(rules, change),
         TickInput => _propertyTriggers.OnTick(rules),
-        EventInput subjectEvent => _eventTriggers.OnEvent(subjectEvent),
+        EventInput subjectEvent => _eventTriggers.OnEvent(subjectEvent, rules),
         GraphChangedInput => OnGraphChanged(rules),
         ActivationInput activation => _propertyTriggers.Activate(activation.Rules, rules),
         PendingRecheckInput => _propertyTriggers.RequestPendingRuns(rules),

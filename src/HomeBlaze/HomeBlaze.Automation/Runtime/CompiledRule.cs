@@ -63,6 +63,9 @@ internal sealed class CompiledRule(string key, AutomationRule rule, ParsedExpres
         }
     }
 
+    /// <summary>Whether the event triggers of the rule are subscribed, which they are in an enabled automation while its mode is not Off, whatever the state.</summary>
+    public bool ListensForEvents { get; set; }
+
     /// <summary>Why the last request of the rule did not run, until a request runs or the rule is deactivated; null otherwise.</summary>
     public string? SkipReason
     {
