@@ -7,8 +7,9 @@ namespace HomeBlaze.Automation.Tests.Runtime;
 
 /// <summary>
 /// Threads mark parent gains of registrations and route graph changes concurrently, while other registrations gain
-/// parents as they are disposed. Every gain must reach its listener with a graph change routed after it, and the number
-/// of marks, which a writer reads before the marks, must never fall below zero and must return to zero.
+/// parents as they are disposed. Every gain must reach its listener, which no other thread marks, with a graph change
+/// routed after it, and the number of marks, which a writer reads before the marks, must never fall below zero and must
+/// return to zero.
 /// </summary>
 [Trait("Category", "Integration")]
 public class AutomationChangeDispatcherStressTests
@@ -26,8 +27,8 @@ public class AutomationChangeDispatcherStressTests
         using var race = new GainRace();
 
         // Act
-        var gainers = Enumerable.Range(0, GainerCount).Select(gainer => Task.Run(() => race.Gain(new Random(seed * 100 + gainer)))).ToArray();
-        var notifiers = Enumerable.Range(0, NotifierCount).Select(_ => Task.Run(race.Notify)).ToArray();
+        var gainers = Enumerable.Range(0, GainerCount).Select(gainer => StartSpinning(() => race.Gain(gainer, new Random(seed * 100 + gainer)))).ToArray();
+        var notifiers = Enumerable.Range(0, NotifierCount).Select(_ => StartSpinning(race.Notify)).ToArray();
         var churn = Task.Run(() => race.ChurnAsync(new Random(seed)));
         await Task.WhenAll(gainers);
         race.StopGaining();
@@ -40,9 +41,13 @@ public class AutomationChangeDispatcherStressTests
         Assert.Equal(0, race.Count);
     }
 
+    // A dedicated thread, so that spinning threads do not wait for the thread pool to grow on a runner with few cores.
+    private static Task StartSpinning(Action action) =>
+        Task.Factory.StartNew(action, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+
     private sealed class GainRace : IDisposable
     {
-        private const int ListenerCount = 8;
+        private const int ListenersPerGainer = 2;
         private const int GainsPerGainer = 20_000;
         private static readonly TimeSpan Bound = TimeSpan.FromSeconds(30);
 
@@ -64,13 +69,13 @@ public class AutomationChangeDispatcherStressTests
             _graph.Add("Weather", weather);
             _added = new PropertyReference(weather, "Added");
             _route = new[] { new PropertyReference(weather, nameof(TestSensor.Gust)) }.ToFrozenSet();
-            _listeners = [.. Enumerable.Range(0, ListenerCount).Select(_ => new CountingListener())];
+            _listeners = [.. Enumerable.Range(0, GainerCount * ListenersPerGainer).Select(_ => new CountingListener())];
             _registrations = [.. _listeners.Select(Register)];
 
             // Keeps the change stream subscribed while the other registrations come and go.
             _keeper = Register(new CountingListener());
             _source = _keeper.Source;
-            _source.ParentGainCountChanging = _ => LowerTo(ref _lowestCount, _source.ParentGainCount);
+            _source.ParentGainCountChanging = delta => LowerTo(ref _lowestCount, _source.ParentGainCount + delta);
         }
 
         public int LostGains => Volatile.Read(ref _lostGains);
@@ -79,11 +84,11 @@ public class AutomationChangeDispatcherStressTests
 
         public int Count => _source.ParentGainCount;
 
-        public void Gain(Random random)
+        public void Gain(int gainer, Random random)
         {
             for (var gain = 0; gain < GainsPerGainer; gain++)
             {
-                var index = random.Next(ListenerCount);
+                var index = gainer * ListenersPerGainer + random.Next(ListenersPerGainer);
                 var listener = _listeners[index];
                 var graphChangesBefore = listener.GraphChanges;
                 _registrations[index].OnParentGained();
@@ -94,6 +99,7 @@ public class AutomationChangeDispatcherStressTests
                 if (!SpinWait.SpinUntil(() => listener.GraphChanges > graphChangesBefore, Bound))
                 {
                     Interlocked.Increment(ref _lostGains);
+                    return;
                 }
             }
         }

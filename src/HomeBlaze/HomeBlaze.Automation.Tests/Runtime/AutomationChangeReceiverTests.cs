@@ -19,6 +19,8 @@ public class AutomationChangeReceiverTests
         using var registration = receiver.Register(new AutomationChangeDispatcher(), graph.Context);
         holder.Sensor = new TestSensor();
         var first = await queue.ReadAsync(CancellationToken.None);
+        holder.Sensor = new TestSensor();
+        var isQueuedBeforeTaken = queue.HasWork;
 
         // Act
         receiver.OnGraphChangeTaken();
@@ -26,6 +28,7 @@ public class AutomationChangeReceiverTests
 
         // Assert
         Assert.IsType<GraphChangedInput>(first);
+        Assert.False(isQueuedBeforeTaken);
         Assert.True(queue.HasWork);
         Assert.IsType<GraphChangedInput>(await queue.ReadAsync(CancellationToken.None));
     }
