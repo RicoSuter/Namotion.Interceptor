@@ -132,8 +132,8 @@
 
     /// <summary>
     /// Raised with true while a row holds an edit that is not part of <see cref="Value"/>, because it is invalid or not
-    /// finished, or a row of <see cref="Value"/> has no path or no value yet, and with false when none does. A host blocks
-    /// saving while it is true.
+    /// finished, or a row has no path or no value yet, which <see cref="Value"/> leaves out, and with false when none does.
+    /// A host blocks saving while it is true.
     /// </summary>
     [Parameter] public EventCallback<bool> HasPendingRowChanged { get; set; }
 
@@ -200,7 +200,7 @@
     private Task AddRowAsync()
     {
         _model.AddRow();
-        return EmitAsync(isTextChanged: true);
+        return EmitAsync(isTextChanged: false);
     }
 
     private Task RemoveRowAsync(object key) => EmitAsync(_model.RemoveRow(key));
