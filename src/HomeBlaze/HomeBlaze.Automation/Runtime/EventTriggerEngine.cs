@@ -232,7 +232,8 @@ internal sealed class EventTriggerEngine(
         return null;
     }
 
-    // The last trigger that leaves a subscription disposes it; an event it queued before finds no trigger and is dropped.
+    // The last trigger that leaves a subscription disposes it; an event it queued or delivers later finds no trigger and
+    // is dropped. It is removed first, so that a source that fails to end it leaves no subscription for a trigger to join.
     private void Leave(CompiledEventTrigger trigger)
     {
         if (trigger.Subscription is not { } subscription)
@@ -247,12 +248,21 @@ internal sealed class EventTriggerEngine(
             return;
         }
 
-        subscription.Dispose();
         var subscriptions = _subscriptions[subscription.Source];
         subscriptions.Remove(subscription);
         if (subscriptions.Count == 0)
         {
             _subscriptions.Remove(subscription.Source);
+        }
+
+        try
+        {
+            subscription.Dispose();
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "The automation {Automation} could not end its subscription to the {EventType} of {Path}.",
+                getAutomationName(), trigger.Configuration.EventType, trigger.Configuration.SubjectPath);
         }
     }
 }

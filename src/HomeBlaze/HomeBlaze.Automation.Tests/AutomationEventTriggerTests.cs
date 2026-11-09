@@ -179,6 +179,30 @@ public class AutomationEventTriggerTests
     }
 
     [Fact]
+    public async Task WhenEndingASubscriptionFails_ThenTheRuleSubscribesAgainWhenItIsSwitchedOnAgain()
+    {
+        // Arrange
+        var source = new TestFailingUnsubscribeEventSource();
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("press", On("Press", OnEvent("/Source", "TestPressEvent"), Invoke("/Blinds/Close")))));
+        host.Graph.Add("Source", source);
+        await host.FlushAsync();
+
+        // Act
+        host.Rule("press").Mode = AutomationRuleMode.Off;
+        await host.SaveAsync();
+        host.Rule("press").Mode = AutomationRuleMode.On;
+        await host.SaveAsync();
+        source.Press();
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
+        Assert.Contains(host.Logger.Messages, message => message.Contains("could not end its subscription", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task WhenAnEventSourceRefusesTheSubscriptionOnASave_ThenTheNewPropertyRulesOfTheSaveRun()
     {
         // Arrange
