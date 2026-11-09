@@ -20,7 +20,10 @@
 
     [Parameter] public EventCallback<TimeSpan?> ValueChanged { get; set; }
 
-    /// <summary>Raised when the field shows an error for a text it rejects, which leaves <see cref="Value"/> as it is.</summary>
+    /// <summary>
+    /// Raised when the error of the field may have changed without a change of <see cref="Value"/>: it rejects a text, or a
+    /// text gives <see cref="Value"/> again after an error.
+    /// </summary>
     [Parameter] public EventCallback ErrorChanged { get; set; }
 
     [Parameter, EditorRequired] public AutomationDraft Draft { get; set; } = null!;
