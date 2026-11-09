@@ -223,6 +223,27 @@ public class GraphRoutesTests
     }
 
     [Fact]
+    public async Task WhenNoResolutionIsStored_ThenTheFirstPublicationPublishesAnEmptyBoundedRoute()
+    {
+        // Arrange
+        await using var fixture = await RouteFixture.CreateAsync();
+        var dispatcher = new AutomationChangeDispatcher();
+        var changes = new AutomationChangeReceiver(new AutomationInputQueue());
+        using var registration = changes.Register(dispatcher, fixture.Host.Graph.Context);
+        var routes = new GraphRoutes(fixture.Automation, changes);
+        var isUnboundedBefore = changes.Registration!.IsUnbounded;
+
+        // Act
+        var hasPublished = routes.Publish();
+
+        // Assert
+        Assert.True(isUnboundedBefore);
+        Assert.True(hasPublished);
+        Assert.False(changes.Registration.IsUnbounded);
+        Assert.Empty(changes.Registration.Route);
+    }
+
+    [Fact]
     public async Task WhenTheRoutesAreForNoAutomation_ThenAPathThatLeadsUpHasAnUnboundedRoute()
     {
         // Arrange

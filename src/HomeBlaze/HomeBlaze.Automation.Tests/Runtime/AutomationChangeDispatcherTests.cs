@@ -411,6 +411,54 @@ public class AutomationChangeDispatcherTests
         Assert.Equal([3, 0], routed.GraphChainDepths);
     }
 
+    // A subject attached to the context directly gains parents without a write whose change follows.
+    [Fact]
+    public async Task WhenAListenerGainsAParentWithoutAWriteThatFollows_ThenTheNextGraphChangeOfItsStreamReachesItOnce()
+    {
+        // Arrange
+        var (graph, weather) = CreateGraph();
+        var holder = new TestSensorHolder();
+        graph.Add("Holder", holder);
+        var dispatcher = new AutomationChangeDispatcher();
+        var listener = new RecordingListener();
+        using var registration = dispatcher.Register(graph.Context, listener);
+        registration.PublishRoute(Watch(Gust(weather)), isUnbounded: false);
+
+        // Act
+        registration.OnParentGained();
+        await Task.Run(() => holder.Sensor = new TestSensor());
+        var graphChangesAfterTheNextChange = listener.GraphChanges;
+        registration.OnGraphChangeReleased();
+        holder.Sensor = new TestSensor();
+
+        // Assert
+        Assert.Equal(1, graphChangesAfterTheNextChange);
+        Assert.Equal(1, listener.GraphChanges);
+    }
+
+    [Fact]
+    public void WhenAListenerThatGainedAParentIsUnregistered_ThenTheNextGraphChangeDoesNotReachIt()
+    {
+        // Arrange
+        var (graph, weather) = CreateGraph();
+        var holder = new TestSensorHolder();
+        graph.Add("Holder", holder);
+        var dispatcher = new AutomationChangeDispatcher();
+        var listener = new RecordingListener();
+        var registration = dispatcher.Register(graph.Context, listener);
+        using var otherRegistration = dispatcher.Register(graph.Context, new RecordingListener());
+        registration.PublishRoute(Watch(Gust(weather)), isUnbounded: false);
+        registration.OnParentGained();
+
+        // Act
+        registration.Dispose();
+        registration.OnParentGained();
+        holder.Sensor = new TestSensor();
+
+        // Assert
+        Assert.Equal(0, listener.GraphChanges);
+    }
+
     // Writes alternate between two subjects that stay attached elsewhere, so that the registry allocates the same for each;
     // the smallest object takes 24 bytes, so less than 8 bytes a write leaves room only for allocations of the runtime
     // that happen once.

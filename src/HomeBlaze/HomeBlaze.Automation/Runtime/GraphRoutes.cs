@@ -25,8 +25,9 @@ internal sealed class GraphRoutes
     private readonly Dictionary<PropertyReference, int> _counts = [];
     private int _unboundedCount;
 
-    // Set when a property enters or leaves the union or the union becomes bounded or unbounded.
-    private bool _hasUnionChanged;
+    // Set when a property enters or leaves the union or the union becomes bounded or unbounded, and before the first
+    // publication, also of an empty union.
+    private bool _hasUnionChanged = true;
     private bool _awaitsGraphChange;
 
     // Unbounded until the first publication, as the dispatcher registers a listener.

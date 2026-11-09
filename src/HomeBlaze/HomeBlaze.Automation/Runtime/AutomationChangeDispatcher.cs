@@ -16,7 +16,8 @@ namespace HomeBlaze.Automation.Runtime;
 /// to the listeners whose graph route has the property and to every listener whose graph route is unbounded or not
 /// published yet, each once and left out while every listener still has one queued. A listener that resolves receives
 /// every graph change until it published the route of what it resolved, see <see cref="Registration.BeginResolving"/>,
-/// and a listener whose automation or rule gained a parent receives the graph change of the write that added it. The
+/// and a listener whose automation or rule gained a parent receives the next graph change, see
+/// <see cref="Registration.OnParentGained"/>. The
 /// subscription starts with the first registration for a stream and ends with the last one, so that the dispatcher holds
 /// no context without automations.
 /// Changes are routed synchronously on the writing thread, where the chain depth of the writing flow is read.
@@ -206,6 +207,7 @@ internal sealed class AutomationChangeDispatcher
 
             registration.IsDisposed = true;
             registration.EndResolving();
+            registration.TakeParentGain();
             var source = registration.Source;
             source.Remove(registration);
             registration.Watched = FrozenSet<PropertyReference>.Empty;
@@ -226,6 +228,8 @@ internal sealed class AutomationChangeDispatcher
     {
         private readonly AutomationChangeDispatcher _dispatcher;
         private int _isResolving;
+        private int _hasParentGain;
+        private volatile bool _isDisposed;
 
         internal Registration(AutomationChangeDispatcher dispatcher, ChangeSource source, IAutomationChangeListener listener)
         {
@@ -246,7 +250,11 @@ internal sealed class AutomationChangeDispatcher
 
         internal bool IsUnbounded { get; set; } = true;
 
-        internal bool IsDisposed { get; set; }
+        internal bool IsDisposed
+        {
+            get => _isDisposed;
+            set => _isDisposed = value;
+        }
 
         internal bool IsResolving => Volatile.Read(ref _isResolving) != 0;
 
@@ -276,6 +284,37 @@ internal sealed class AutomationChangeDispatcher
             }
         }
 
+        /// <summary>
+        /// Gives the listener the next graph change of its change stream, also one off its route, since its automation or
+        /// one of its rules gained a parent, which no route has. On the thread of the write that added the parent, that is
+        /// the change of the write, after its watched changes. Thread-safe.
+        /// </summary>
+        public void OnParentGained()
+        {
+            if (Interlocked.Exchange(ref _hasParentGain, 1) == 0)
+            {
+                Source.OnParentGainChanged(1);
+
+                // Unregister takes the mark after it set the flag, so that a mark set meanwhile is taken here.
+                if (IsDisposed)
+                {
+                    TakeParentGain();
+                }
+            }
+        }
+
+        /// <summary>Takes the mark of <see cref="OnParentGained"/>; false when there was none. Thread-safe.</summary>
+        internal bool TakeParentGain()
+        {
+            if (Volatile.Read(ref _hasParentGain) == 0 || Interlocked.Exchange(ref _hasParentGain, 0) == 0)
+            {
+                return false;
+            }
+
+            Source.OnParentGainChanged(-1);
+            return true;
+        }
+
         /// <summary>Ends <see cref="BeginResolving"/>, once the route of the results is published.</summary>
         public void EndResolving()
         {
@@ -297,18 +336,15 @@ internal sealed class AutomationChangeDispatcher
     /// <summary>The routes of one change stream. Changed under the lock of the dispatcher and read lock-free by writers.</summary>
     internal sealed class ChangeSource(PropertyChangeInterceptor interceptor) : IObserver<SubjectPropertyChange>
     {
-        // The registrations whose automation or rule gained a parent on this thread, until the change of the write that
-        // added the parent is routed.
-        [ThreadStatic]
-        private static List<Registration>? _parentGains;
-
         private readonly List<Registration> _registrations = [];
         private readonly List<PropertyAttachNotifier> _notifiers = [];
         private Routes _routes = Routes.Empty;
 
-        // The registrations, read lock-free before the routes, and how many of them resolve, see NotifyGraphChanged.
+        // The registrations, read lock-free before the routes, and how many of them resolve or gained a parent, see
+        // NotifyGraphChanged.
         private Registration[] _registrationSnapshot = [];
         private int _resolvingCount;
+        private int _parentGainCount;
 
         // Raised after a listener is added and whenever a listener releases its graph change, see NotifyGraphChanged.
         private long _releaseCount;
@@ -335,19 +371,6 @@ internal sealed class AutomationChangeDispatcher
             var routes = Volatile.Read(ref _routes);
             return (routes.Graph.TryGetValue(property, out var routed) && Array.Exists(routed, registration => registration.Listener == listener)) ||
                 Array.Exists(routes.Unbounded, registration => registration.Listener == listener);
-        }
-
-        /// <summary>
-        /// Gives the registration a graph change with the change of the write that runs on this thread, after its watched
-        /// changes, since its automation or one of its rules gained a parent, which no route has.
-        /// </summary>
-        public static void AddParentGain(Registration registration)
-        {
-            var parentGains = _parentGains ??= [];
-            if (!parentGains.Contains(registration))
-            {
-                parentGains.Add(registration);
-            }
         }
 
         public void Add(Registration registration)
@@ -383,6 +406,8 @@ internal sealed class AutomationChangeDispatcher
         public void OnGraphChangeReleased() => Interlocked.Increment(ref _releaseCount);
 
         public void OnResolvingChanged(int delta) => Interlocked.Add(ref _resolvingCount, delta);
+
+        public void OnParentGainChanged(int delta) => Interlocked.Add(ref _parentGainCount, delta);
 
         /// <summary>Gives a graph change for a property that the registry registered at run time.</summary>
         public void OnPropertyAdded(PropertyReference property) => NotifyGraphChanged(property);
@@ -463,34 +488,35 @@ internal sealed class AutomationChangeDispatcher
         }
 
         // Gives a graph change to the listeners whose route has the property, to every unbounded listener, to every
-        // listener that resolves and to every listener whose automation gained a parent in this write, each once, unless
-        // each listener has one queued: no listener released its graph change since every listener was given one, so each
-        // takes it after this change. One write that changes the graph several times, such as the attach of a subject with
-        // its methods and attributes, gives each listener one graph change.
+        // listener that resolves and to every listener whose automation gained a parent, each once, unless each listener
+        // has one queued: no listener released its graph change since every listener was given one, so each takes it
+        // after this change. One write that changes the graph several times, such as the attach of a subject with its
+        // methods and attributes, gives each listener one graph change.
         private void NotifyGraphChanged(PropertyReference property)
         {
-            var parentGains = TakeParentGains();
-
-            // The change was committed and fenced before, and a listener that begins to resolve raises the count with a full
-            // fence before it reads the graph: either the count read here is raised or the listener reads the change.
-            if (Volatile.Read(ref _resolvingCount) == 0)
+            // The change was committed and fenced before, and a listener raises the counts read here and the release count
+            // with a full fence before it reads the graph: either a count read here is raised or the listener reads the
+            // change. A write marks a parent gain before its change is routed.
+            if (Volatile.Read(ref _resolvingCount) == 0 && Volatile.Read(ref _parentGainCount) == 0)
             {
-                NotifyGraphChanged(property, [], [], parentGains);
+                NotifyGraphChanged(property, [], []);
                 return;
             }
 
             // Read before the routes: a listener ends to resolve after it published the route that covers what it read.
             var registrations = Volatile.Read(ref _registrationSnapshot);
             var rented = registrations.Length <= 64 ? null : ArrayPool<bool>.Shared.Rent(registrations.Length);
-            var isResolving = rented is null ? stackalloc bool[registrations.Length] : rented.AsSpan(0, registrations.Length);
+            var isNotified = rented is null ? stackalloc bool[registrations.Length] : rented.AsSpan(0, registrations.Length);
             for (var index = 0; index < registrations.Length; index++)
             {
-                isResolving[index] = registrations[index].IsResolving;
+                // Taken also from a listener that resolves, which this change reaches anyway.
+                var hasGainedParent = registrations[index].TakeParentGain();
+                isNotified[index] = hasGainedParent || registrations[index].IsResolving;
             }
 
             try
             {
-                NotifyGraphChanged(property, registrations, isResolving, parentGains);
+                NotifyGraphChanged(property, registrations, isNotified);
             }
             finally
             {
@@ -501,15 +527,8 @@ internal sealed class AutomationChangeDispatcher
             }
         }
 
-        private void NotifyGraphChanged(
-            PropertyReference property,
-            Registration[] registrations,
-            ReadOnlySpan<bool> isResolving,
-            ReadOnlySpan<Registration> parentGains)
+        private void NotifyGraphChanged(PropertyReference property, Registration[] registrations, ReadOnlySpan<bool> isNotified)
         {
-            // The change was committed and fenced before, as the registry fences a property it registers, and a listener
-            // raises the count with a full fence before it reads the graph: either the count read here is the new one or
-            // the listener reads the change.
             var releaseCount = Volatile.Read(ref _releaseCount);
             if (Volatile.Read(ref _notifiedAt) == releaseCount)
             {
@@ -523,57 +542,20 @@ internal sealed class AutomationChangeDispatcher
             routed ??= [];
             Notify(routed, chainDepth);
             Notify(routes.Unbounded, chainDepth);
-            NotifyOthers(routed, routes.Unbounded, registrations, isResolving, parentGains, chainDepth);
+            for (var index = 0; index < registrations.Length; index++)
+            {
+                var registration = registrations[index];
+                if (isNotified[index] && Array.IndexOf(routed, registration) < 0 && Array.IndexOf(routes.Unbounded, registration) < 0)
+                {
+                    registration.Listener.OnGraphChanged(chainDepth);
+                }
+            }
 
             // A concurrent notification may write an older count, which only notifies the next change again.
             if (routes.Unbounded.Length == routes.Count)
             {
                 Volatile.Write(ref _notifiedAt, releaseCount);
             }
-        }
-
-        // The resolving registrations and those whose automation gained a parent, unless the routes notified them.
-        private static void NotifyOthers(
-            Registration[] routed,
-            Registration[] unbounded,
-            Registration[] registrations,
-            ReadOnlySpan<bool> isResolving,
-            ReadOnlySpan<Registration> parentGains,
-            int chainDepth)
-        {
-            for (var index = 0; index < registrations.Length; index++)
-            {
-                if (isResolving[index] && IsNotNotified(registrations[index], routed, unbounded))
-                {
-                    registrations[index].Listener.OnGraphChanged(chainDepth);
-                }
-            }
-
-            foreach (var registration in parentGains)
-            {
-                var index = Array.IndexOf(registrations, registration);
-                if ((index < 0 || !isResolving[index]) && IsNotNotified(registration, routed, unbounded) && !registration.IsDisposed)
-                {
-                    registration.Listener.OnGraphChanged(chainDepth);
-                }
-            }
-        }
-
-        private static bool IsNotNotified(Registration registration, Registration[] routed, Registration[] unbounded) =>
-            Array.IndexOf(routed, registration) < 0 && Array.IndexOf(unbounded, registration) < 0;
-
-        // Takes the parent gains of this stream, leaving those of another one for its own change.
-        private Registration[] TakeParentGains()
-        {
-            var parentGains = _parentGains;
-            if (parentGains is not { Count: > 0 })
-            {
-                return [];
-            }
-
-            var taken = parentGains.FindAll(registration => registration.Source == this);
-            parentGains.RemoveAll(registration => registration.Source == this || registration.IsDisposed);
-            return [.. taken];
         }
 
         private static void Notify(Registration[] registrations, int chainDepth)
