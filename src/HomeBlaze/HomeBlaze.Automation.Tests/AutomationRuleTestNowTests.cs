@@ -77,6 +77,32 @@ public class AutomationRuleTestNowTests
     }
 
     [Fact]
+    public async Task WhenTheSavedStateIsNoLongerAState_ThenTheRuleIsInactive()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Idle", "Running"];
+            automation.InitialState = "Idle";
+            automation.Rules = Keyed(
+                ("started", Create("Started", AutomationRuleMode.On, [When("/Weather/Power > 500")], [Enter("Running")], inState: "Idle")),
+                ("retract", Retract()));
+        });
+        host.Weather.Power = 600;
+        await host.FlushAsync();
+        host.Automation.States = ["Idle"];
+        host.Automation.RuleOrder = [];
+        await host.SaveAsync(Keyed(("retract", Retract())));
+
+        // Act
+        var result = host.Rule("retract").TestNow();
+
+        // Assert
+        Assert.Equal("On: Inactive until Reset state", host.Rule("retract").Status);
+        Assert.False(result.IsActive);
+    }
+
+    [Fact]
     public async Task WhenTheAuthorizerThrows_ThenTheTestShowsTheFailureInsteadOfThrowing()
     {
         // Arrange
