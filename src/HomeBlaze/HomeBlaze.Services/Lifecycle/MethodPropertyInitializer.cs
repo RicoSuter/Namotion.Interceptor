@@ -235,7 +235,7 @@ public class MethodPropertyInitializer : ILifecycleHandler
             {
                 var operationParameterAttribute = parameter.GetCustomAttribute<OperationParameterAttribute>();
                 var isNullable = Nullable.GetUnderlyingType(parameter.ParameterType) != null
-                    || nullabilityContext.Create(parameter).WriteState == NullabilityState.Nullable
+                    || IsAnnotatedAsNullable(nullabilityContext, parameter)
                     || parameter is { HasDefaultValue: true, DefaultValue: null };
 
                 return new MethodParameter
@@ -248,6 +248,19 @@ public class MethodPropertyInitializer : ILifecycleHandler
                     IsNullable = isNullable,
                 };
             });
+        }
+
+        private static bool IsAnnotatedAsNullable(NullabilityInfoContext nullabilityContext, ParameterInfo parameter)
+        {
+            try
+            {
+                return nullabilityContext.Create(parameter).WriteState == NullabilityState.Nullable;
+            }
+            catch (InvalidOperationException)
+            {
+                // An app that turns off NullabilityInfoContextSupport, as trimming does by default, cannot read annotations.
+                return false;
+            }
         }
 
         private static string? FindCategory(MethodInfo method, bool isInterfaceMethod, MethodInfo? classMethod, List<MethodInfo> implementedMethods)

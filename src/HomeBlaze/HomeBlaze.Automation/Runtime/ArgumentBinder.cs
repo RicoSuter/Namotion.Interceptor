@@ -1,8 +1,6 @@
 using System.Collections.Frozen;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
-using System.Reflection;
-using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Services;
@@ -13,9 +11,11 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// Binds configured texts to the parameters of an operation or to a property. The text of a string is a text template.
-/// An empty text, also one of white space only, is null for a parameter or property that accepts null: one of a nullable
-/// value type, or of a reference type that is not annotated as non-nullable. Any other text
-/// is a constant when it converts to the type, otherwise an expression whose value is converted as
+/// An empty text, also one of white space only, is null where null is accepted: for a nullable value type; for a parameter
+/// of a reference type that is annotated as nullable or defaults to null, see <see cref="MethodParameter.IsNullable"/>;
+/// for a property of a reference type that is not annotated as non-nullable, so also one without annotations, and for
+/// every property of a reference type in an app that cannot read annotations, such as a trimmed one; and for a member of
+/// a record parameter of any reference type. Any other text is a constant when it converts to the type, otherwise an expression whose value is converted as
 /// <see cref="ParameterConverter.TryConvertValue"/> does; an unknown expression fails. Constants are read as expressions
 /// write them: a duration as <see cref="AutomationDuration"/> reads it or as a <see cref="TimeSpan"/> with a <c>:</c>, so a
 /// bare number is no duration; an instant in ISO 8601 with a date, such as <c>2026-11-06T10:00</c>, in UTC without an
@@ -61,11 +61,6 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
 
     private static readonly string[] TimeOfDayFormats = ["HH:mm", "HH:mm:ss.FFFFFFF"];
 
-    // Weak keys, so that the properties of an unloaded plugin are not held.
-    private static readonly ConditionalWeakTable<PropertyInfo, object> AcceptsNullByProperty = new();
-    private static readonly object True = true;
-    private static readonly object False = false;
-
     private readonly List<string> _display = [];
 
     private delegate bool ConstantParser(string text, out object? value);
@@ -108,7 +103,7 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
 
     /// <summary>
     /// Binds one text to a value of the property, which accepts null when its type is a nullable value type or a reference
-    /// type that the property does not annotate as non-nullable.
+    /// type that the property does not annotate as non-nullable, or any reference type in an app that cannot read annotations.
     /// </summary>
     public bool TryBindProperty(RegisteredSubjectProperty property, string text, out object? value, [NotNullWhen(false)] out string? error) =>
         TryBindValue(property.Name, text, property.Type, acceptsNull: AcceptsNull(property), out value, out error);
@@ -142,17 +137,13 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
         return true;
     }
 
-    private static bool AcceptsNull(Type type) => !type.IsValueType || Nullable.GetUnderlyingType(type) is not null;
+    private static bool AcceptsNull(Type type) => PropertyNullability.AcceptsNull(type);
 
     // A dynamic property has no PropertyInfo and so no annotation.
     private static bool AcceptsNull(RegisteredSubjectProperty property) =>
         property.Type.IsValueType || property.Reference.Metadata.PropertyInfo is not { } propertyInfo
             ? AcceptsNull(property.Type)
-            : ReferenceEquals(AcceptsNullByProperty.GetValue(propertyInfo, ReadAcceptsNull), True);
-
-    // A context per read: it is not thread-safe and caches what it reads.
-    private static object ReadAcceptsNull(PropertyInfo propertyInfo) =>
-        new NullabilityInfoContext().Create(propertyInfo).WriteState == NullabilityState.NotNull ? False : True;
+            : PropertyNullability.AcceptsNull(propertyInfo);
 
     private bool TryParseConstant(string text, Type type, out object? value)
     {
