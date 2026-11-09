@@ -107,10 +107,14 @@ public class PendingRowsTests
         var tracker = new PendingRowTracker(null, "a");
 
         // Act
-        tracker.Report(true);
-        tracker.Dispose();
+        var exception = Record.Exception(() =>
+        {
+            tracker.Report(true);
+            tracker.Discard();
+            tracker.Dispose();
+        });
 
         // Assert
-        Assert.NotNull(tracker);
+        Assert.Null(exception);
     }
 }
