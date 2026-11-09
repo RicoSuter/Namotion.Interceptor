@@ -34,36 +34,13 @@ public partial class TestRoot : IConfigurationWriter
         }
     }
 
-    /// <summary>The refusal that writes throw, and also the check unless <see cref="IsRefusalFoundOnlyByWrite"/>.</summary>
-    public ConfigurationWriteRefusedException? Refusal { get; set; }
-
-    /// <summary>Whether only a write throws <see cref="Refusal"/>, as when the file was read again after the check.</summary>
-    public bool IsRefusalFoundOnlyByWrite { get; set; }
-
-    /// <summary>Runs at the start of each write, as something that happens while the storage writes.</summary>
-    public Action? DuringWrite { get; set; }
-
     public Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
-        DuringWrite?.Invoke();
-        if (Refusal is { } refusal)
-        {
-            throw refusal;
-        }
-
         lock (_lock)
         {
             _written.Add(subject);
         }
 
         return Task.FromResult(true);
-    }
-
-    public void ThrowIfWriteRefused(IInterceptorSubject subject)
-    {
-        if (Refusal is { } refusal && !IsRefusalFoundOnlyByWrite)
-        {
-            throw refusal;
-        }
     }
 }

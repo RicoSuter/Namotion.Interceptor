@@ -390,31 +390,11 @@ public partial class EcowittGateway : BackgroundService,
         if (configurationWriter == null)
             return;
 
-        bool isWritten;
-        string? refusal = null;
-        try
-        {
-            isWritten = await configurationWriter.WriteConfigurationAsync(this, cancellationToken);
-        }
-        catch (ConfigurationWriteRefusedException exception)
-        {
-            // Not written, as when the writer stores nothing, so that polling goes on.
-            isWritten = false;
-            refusal = exception.Message;
-        }
-
+        var isWritten = await configurationWriter.WriteConfigurationAsync(this, cancellationToken);
         if (!isWritten && !_isConfigurationUnsaved)
         {
-            if (refusal is null)
-            {
-                _logger.LogWarning(
-                    "Ecowitt gateway {HostAddress} rain totals were not saved and will be lost on restart", HostAddress);
-            }
-            else
-            {
-                _logger.LogWarning(
-                    "Ecowitt gateway {HostAddress} rain totals were not saved and will be lost on restart: {Refusal}", HostAddress, refusal);
-            }
+            _logger.LogWarning(
+                "Ecowitt gateway {HostAddress} rain totals were not saved and will be lost on restart", HostAddress);
         }
 
         _isConfigurationUnsaved = !isWritten;
