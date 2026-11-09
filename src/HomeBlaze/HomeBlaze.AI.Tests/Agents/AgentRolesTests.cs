@@ -134,7 +134,7 @@ public sealed class AgentRolesTests : IAsyncLifetime
         await test.RunNowAndWaitAsync();
 
         // Assert
-        var lines = test.Agent.Requests[^1].UserMessage.Split('\n');
+        var lines = test.Agent.Requests[^1].UserMessage.ReplaceLineEndings("\n").Split('\n');
         var stateLines = lines.SkipWhile(line => line != "```jsonl").Skip(1).TakeWhile(line => line != "```")
             .Select(line => JsonDocument.Parse(line).RootElement)
             .ToList();
@@ -786,8 +786,10 @@ public sealed class AgentRolesTests : IAsyncLifetime
     {
         // The hosted service handler starts the agent once it is attached.
         graph.Root.Children = new Dictionary<string, IInterceptorSubject>(graph.Root.Children) { ["Agent"] = agent };
+        // The status is written before its message, which every started status has, so both are waited for.
         await AsyncTestHelpers.WaitUntilAsync(
-            () => agent.Status is not (ServiceStatus.Stopped or ServiceStatus.Starting), message: "The agent should finish starting.");
+            () => agent.Status is not (ServiceStatus.Stopped or ServiceStatus.Starting) && agent.StatusMessage is not null,
+            message: "The agent should finish starting.");
     }
 
     private async Task<Graph> CreateGraphAsync(string notes, params (string Name, Role Role)[] roles)
