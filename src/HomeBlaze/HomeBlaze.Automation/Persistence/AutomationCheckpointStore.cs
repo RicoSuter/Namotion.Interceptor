@@ -10,13 +10,11 @@ namespace HomeBlaze.Automation.Persistence;
 /// <summary>
 /// The checkpoint file of one automation, at the canonical path of the automation below the folder
 /// <see cref="HomeBlazePaths.AutomationStateDirectory"/> of the data directory, such as
-/// <c>AutomationState/Demo/ConveyorGuard.json</c> for <c>/Demo/ConveyorGuard</c>. Each path has a file of its own: a
-/// character that a file name cannot hold, the escape character <c>%</c>, a name that Windows reserves and a folder name
-/// that ends with <c>.json</c> are percent-encoded. Without a path nothing is read or written. A write replaces the file
-/// atomically with a temporary file flushed to the disk, so that also after a power loss it holds the old or the new
-/// checkpoint and never a part of one. A store owns its file from its
-/// creation until it is released or a later store of the same file is created, process-wide; a store that does not own
-/// its file writes, moves and deletes nothing, so that two workers never write one file.
+/// <c>AutomationState/Demo/ConveyorGuard.json</c> for <c>/Demo/ConveyorGuard</c>; each path has a file of its own.
+/// Without a path nothing is read or written. A write replaces the file atomically, so that also after a power loss it
+/// holds the old or the new checkpoint and never a part of one. A store owns its file from its creation until it is
+/// released or a later store of the same file is created, process-wide; a store that does not own its file writes, moves
+/// and deletes nothing, so that two workers never write one file.
 /// </summary>
 internal sealed class AutomationCheckpointStore
 {
