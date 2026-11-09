@@ -19,10 +19,10 @@ namespace HomeBlaze.Automation.Tests;
 /// </summary>
 /// <remarks>
 /// Each step is one change from the test followed by a flush of every automation, so that the inputs of a step are
-/// queued before the workers process them; a move flushes between its two writes. The rules write only properties that no other automation reads, so that the
-/// workers of a step do not race each other. Without routes every automation receives every structural change, also
-/// one that cannot change what its paths resolve to, which differs observably in two ways only, each kept out of the
-/// scenario by the constraint named here:
+/// queued before the workers process them; a move flushes between its two writes. The rules write only properties that
+/// no other automation reads, so that the workers of a step do not race each other. Without routes every automation
+/// receives every structural change, also one that cannot change what its paths resolve to, which differs observably
+/// in two ways only, each kept out of the scenario by the constraint named here:
 /// <list type="bullet">
 /// <item>A structural write that a rule makes reaches every automation at the chain depth of the run, and beyond the
 /// chain limit it is dropped and reported as a stopped feedback chain by an automation that takes no part in the chain,
@@ -34,6 +34,8 @@ namespace HomeBlaze.Automation.Tests;
 /// that the number of dropped inputs and which ones differ. The step that overloads a queue writes no structure, and
 /// the steps before it are flushed.</item>
 /// </list>
+/// A change that no write publishes, such as a list or dictionary changed in place or an attribute whose getter returns
+/// another value, is observed without routes only at the next unrelated structural change; the scenario makes none.
 /// </remarks>
 public class AutomationGraphRouteDifferentialTests
 {
