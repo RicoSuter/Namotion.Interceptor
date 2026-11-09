@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text.RegularExpressions;
 using HomeBlaze.Automation.Runtime;
 
@@ -17,7 +18,7 @@ internal static partial class ConditionHints
         "Checked every second, because when this use of the clock changes cannot be computed. " +
         "A comparison such as now - ./LastTriggeredAt > 30m or time >= 7h is checked only when its result can change.";
 
-    public static IReadOnlyList<string> Get(string? text)
+    public static ImmutableArray<string> Get(string? text)
     {
         if (!AutomationExpressionCheck.TryParseExpression(text, allowsEvent: true, out var expression, out _) ||
             ExpressionClock.Create(expression) is not { } clock)

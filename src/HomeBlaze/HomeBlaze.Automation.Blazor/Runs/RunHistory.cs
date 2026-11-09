@@ -16,9 +16,8 @@ internal static class RunHistory
 
     /// <summary>
     /// Gets the runs between the instants, newest first, at most the given number over all rules, and whether the history
-    /// lags behind the rules: a rule whose current run count is above the newest count stored. History stores buffer their
-    /// writes, so a run that has just happened is not stored yet. A rule without a stored count does not lag, because a store
-    /// that never stored its count, or that dropped it, would not catch up. Reads the newest counts of each rule and the
+    /// lags behind the rules: a rule whose current run count is above the newest count stored, as a buffered store shows a
+    /// run that has just happened. A rule without a stored count does not lag. Reads the newest counts of each rule and the
     /// outcome and message only of the runs it returns.
     /// </summary>
     public static async Task<RunHistoryResult> LoadAsync(

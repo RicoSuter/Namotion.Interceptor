@@ -2,63 +2,15 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.Components.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.Services.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
-namespace HomeBlaze.Services.Clients
-{
-    public sealed class ClientConnection
-    {
-        public HomeBlaze.Services.Clients.IClientConnectionCallbacks Callbacks { get; }
-        public string? ClientId { get; }
-        public string? ClientName { get; }
-        public System.DateTimeOffset ConnectedAt { get; }
-        public string ConnectionId { get; }
-        public string? CookieTokenHash { get; set; }
-        public void Assign(string clientId, string clientName) { }
-    }
-    public sealed class ClientConnectionService
-    {
-        public ClientConnectionService(System.TimeProvider timeProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Services.Clients.ClientConnectionService> logger) { }
-        public System.Collections.Immutable.ImmutableArray<HomeBlaze.Services.Clients.ClientConnection> Connections { get; }
-        public event System.Action? Changed;
-        public HomeBlaze.Services.Clients.ClientConnection Connect(string? cookieToken, HomeBlaze.Services.Clients.IClientConnectionCallbacks callbacks) { }
-        public void Disconnect(HomeBlaze.Services.Clients.ClientConnection connection) { }
-        public System.Threading.Tasks.Task RenameAsync(HomeBlaze.Services.Clients.ClientConnection connection, string name, System.Threading.CancellationToken cancellationToken) { }
-        public System.IDisposable SetRenameHandler(System.Func<HomeBlaze.Services.Clients.ClientConnection, string, System.Threading.CancellationToken, System.Threading.Tasks.Task> handler) { }
-        public static string CreateClientId() { }
-        public static string CreateClientToken() { }
-        public static string HashClientToken(string token) { }
-    }
-    public sealed class CurrentClientConnection
-    {
-        public CurrentClientConnection() { }
-        public HomeBlaze.Services.Clients.ClientConnection? Connection { get; set; }
-    }
-    public interface IClientConnectionCallbacks
-    {
-        System.Threading.Tasks.Task ShowNotificationAsync(HomeBlaze.Abstractions.Messaging.Notification notification, System.Threading.CancellationToken cancellationToken);
-        System.Threading.Tasks.Task StoreClientTokenAsync(string token);
-    }
-}
-namespace HomeBlaze.Services.Components
-{
-    public class SubjectComponentRegistration : System.IEquatable<HomeBlaze.Services.Components.SubjectComponentRegistration>
-    {
-        public SubjectComponentRegistration(System.Type ComponentType, System.Type SubjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType Type, string? Name) { }
-        public System.Type ComponentType { get; init; }
-        public string? Name { get; init; }
-        public System.Type SubjectType { get; init; }
-        public HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType Type { get; init; }
-    }
-    public class SubjectComponentRegistry
-    {
-        public SubjectComponentRegistry(HomeBlaze.Services.TypeProvider typeProvider) { }
-        public System.Collections.Generic.IReadOnlyCollection<HomeBlaze.Services.Components.SubjectComponentRegistration> GetAllComponents() { }
-        public HomeBlaze.Services.Components.SubjectComponentRegistration? GetComponent(System.Type subjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType type, string? name = null) { }
-        public System.Collections.Generic.IEnumerable<HomeBlaze.Services.Components.SubjectComponentRegistration> GetComponents(System.Type subjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType type) { }
-        public bool HasComponent(System.Type subjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType type, string? name = null) { }
-    }
-}
 namespace HomeBlaze.Services
 {
+    public static class AtomicFile
+    {
+        public static bool IsTemporaryFile(System.ReadOnlySpan<char> fileName, System.ReadOnlySpan<char> targetFileName) { }
+        public static void WriteAllBytes(string path, System.ReadOnlySpan<byte> content) { }
+        public static System.Threading.Tasks.Task WriteAllBytesAsync(string path, System.ReadOnlyMemory<byte> content, System.Threading.CancellationToken cancellationToken) { }
+        public static System.Threading.Tasks.Task WriteAllTextAsync(string path, string content, System.Threading.CancellationToken cancellationToken) { }
+    }
     public class ConfigurableSubjectSerializer
     {
         public const string TypeDiscriminatorPropertyName = "$type";
@@ -69,6 +21,7 @@ namespace HomeBlaze.Services
         public HomeBlaze.Abstractions.IConfigurable? Deserialize(string json, System.Action<Namotion.Interceptor.IInterceptorSubject>? created, System.Action<HomeBlaze.Services.SkippedConfigurationProperty>? skipped, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public System.Text.Json.JsonElement? GetDefaultConfiguration(System.Type type, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public void Release(Namotion.Interceptor.IInterceptorSubject subject) { }
+        public System.Collections.Immutable.ImmutableArray<string> ReportIssues(Namotion.Interceptor.IInterceptorSubject subject, string json, System.Collections.Generic.IEnumerable<HomeBlaze.Services.SkippedConfigurationProperty> skipped, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public string Serialize(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public string Serialize(Namotion.Interceptor.IInterceptorSubject subject, System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, bool> isExcluded, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public void UpdateConfiguration(Namotion.Interceptor.IInterceptorSubject subject, string json, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
@@ -131,6 +84,7 @@ namespace HomeBlaze.Services
         public static bool TryConvert(string? input, System.Type targetType, out object? value) { }
         public static bool TryConvert(string? input, System.Type targetType, HomeBlaze.Abstractions.Attributes.StateUnit? unit, out object? value) { }
         public static bool TryConvertValue(object value, System.Type targetType, out object? converted) { }
+        public static bool TryCreateObject(System.Type type, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, out object? value, out string? error) { }
         public static bool TryCreateObject(System.Type type, System.Collections.Generic.IReadOnlyDictionary<string, string?> inputs, out object? value, out string? error) { }
         public static bool TryParseJson(string? input, System.Type type, bool isNullable, out object? value, out string? error) { }
     }
@@ -156,6 +110,7 @@ namespace HomeBlaze.Services
         public Namotion.Interceptor.IInterceptorSubject? Root { get; }
         public System.Threading.Tasks.Task<Namotion.Interceptor.IInterceptorSubject> RootLoaded { get; }
         protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        public void ThrowIfWriteRefused(Namotion.Interceptor.IInterceptorSubject subject) { }
         public System.Threading.Tasks.Task<bool> WriteConfigurationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
     }
     public static class RootManagerExtensions
@@ -204,12 +159,12 @@ namespace HomeBlaze.Services
         public SubjectPathResolver(System.Func<Namotion.Interceptor.IInterceptorSubject?> getRoot) { }
         public long PathsVersion { get; }
         public string? GetPath(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Abstractions.PathStyle style) { }
-        public string? GetPath(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Abstractions.PathStyle style, HomeBlaze.Services.ISubjectPathRecorder recorder) { }
+        public string? GetPath(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Abstractions.PathStyle style, HomeBlaze.Services.ISubjectPathRecorder? recorder) { }
         public System.Collections.Generic.IReadOnlyList<string> GetPaths(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Abstractions.PathStyle style) { }
-        public System.Collections.Generic.IReadOnlyList<string> GetPaths(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Abstractions.PathStyle style, HomeBlaze.Services.ISubjectPathRecorder recorder) { }
+        public System.Collections.Generic.IReadOnlyList<string> GetPaths(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Abstractions.PathStyle style, HomeBlaze.Services.ISubjectPathRecorder? recorder) { }
         public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }
         public Namotion.Interceptor.IInterceptorSubject? ResolveSubject(string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject? relativeTo = null) { }
-        public Namotion.Interceptor.IInterceptorSubject? ResolveSubject(string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject? relativeTo, HomeBlaze.Services.ISubjectPathRecorder recorder) { }
+        public Namotion.Interceptor.IInterceptorSubject? ResolveSubject(string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject? relativeTo, HomeBlaze.Services.ISubjectPathRecorder? recorder) { }
     }
     public static class SubjectPathResolverExtensions
     {
@@ -279,6 +234,61 @@ namespace HomeBlaze.Services
         public System.Collections.Generic.IReadOnlyCollection<System.Type> Types { get; }
         public HomeBlaze.Services.TypeProvider AddAssembly(System.Reflection.Assembly assembly) { }
         public void AddTypes(System.Collections.Generic.IEnumerable<System.Type> types) { }
+    }
+}
+namespace HomeBlaze.Services.Clients
+{
+    public sealed class ClientConnection
+    {
+        public HomeBlaze.Services.Clients.IClientConnectionCallbacks Callbacks { get; }
+        public string? ClientId { get; }
+        public string? ClientName { get; }
+        public System.DateTimeOffset ConnectedAt { get; }
+        public string ConnectionId { get; }
+        public string? CookieTokenHash { get; set; }
+        public void Assign(string clientId, string clientName) { }
+    }
+    public sealed class ClientConnectionService
+    {
+        public ClientConnectionService(System.TimeProvider timeProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Services.Clients.ClientConnectionService> logger) { }
+        public System.Collections.Immutable.ImmutableArray<HomeBlaze.Services.Clients.ClientConnection> Connections { get; }
+        public event System.Action? Changed;
+        public HomeBlaze.Services.Clients.ClientConnection Connect(string? cookieToken, HomeBlaze.Services.Clients.IClientConnectionCallbacks callbacks) { }
+        public void Disconnect(HomeBlaze.Services.Clients.ClientConnection connection) { }
+        public System.Threading.Tasks.Task RenameAsync(HomeBlaze.Services.Clients.ClientConnection connection, string name, System.Threading.CancellationToken cancellationToken) { }
+        public System.IDisposable SetRenameHandler(System.Func<HomeBlaze.Services.Clients.ClientConnection, string, System.Threading.CancellationToken, System.Threading.Tasks.Task> handler) { }
+        public static string CreateClientId() { }
+        public static string CreateClientToken() { }
+        public static string HashClientToken(string token) { }
+    }
+    public sealed class CurrentClientConnection
+    {
+        public CurrentClientConnection() { }
+        public HomeBlaze.Services.Clients.ClientConnection? Connection { get; set; }
+    }
+    public interface IClientConnectionCallbacks
+    {
+        System.Threading.Tasks.Task ShowNotificationAsync(HomeBlaze.Abstractions.Messaging.Notification notification, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task StoreClientTokenAsync(string token);
+    }
+}
+namespace HomeBlaze.Services.Components
+{
+    public class SubjectComponentRegistration : System.IEquatable<HomeBlaze.Services.Components.SubjectComponentRegistration>
+    {
+        public SubjectComponentRegistration(System.Type ComponentType, System.Type SubjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType Type, string? Name) { }
+        public System.Type ComponentType { get; init; }
+        public string? Name { get; init; }
+        public System.Type SubjectType { get; init; }
+        public HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType Type { get; init; }
+    }
+    public class SubjectComponentRegistry
+    {
+        public SubjectComponentRegistry(HomeBlaze.Services.TypeProvider typeProvider) { }
+        public System.Collections.Generic.IReadOnlyCollection<HomeBlaze.Services.Components.SubjectComponentRegistration> GetAllComponents() { }
+        public HomeBlaze.Services.Components.SubjectComponentRegistration? GetComponent(System.Type subjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType type, string? name = null) { }
+        public System.Collections.Generic.IEnumerable<HomeBlaze.Services.Components.SubjectComponentRegistration> GetComponents(System.Type subjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType type) { }
+        public bool HasComponent(System.Type subjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType type, string? name = null) { }
     }
 }
 namespace HomeBlaze.Services.Diagnostics
@@ -419,6 +429,7 @@ namespace HomeBlaze.Services.Display
     public static class SecretValueTypes
     {
         public static bool HoldsSecret(object value) { }
+        public static bool IsSecret(System.Reflection.PropertyInfo property) { }
     }
     public static class StateUnitExtensions
     {

@@ -1,4 +1,5 @@
 using HomeBlaze.Automation.Tests.Testing;
+using HomeBlaze.Components.Abstractions.Expressions;
 using HomeBlaze.Components.Abstractions.TimeZones;
 using HomeBlaze.Services;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
@@ -18,11 +19,10 @@ public class AutomationPreviewTests
         host.Weather.Gust = 9;
 
         // Act
-        var condition = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/Gust > 8", allowsEvent: false);
-        var value = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/Gust", allowsEvent: false);
+        var condition = Evaluate(host.Automation, "retract", "/Weather/Gust > 8");
+        var value = Evaluate(host.Automation, "retract", "/Weather/Gust");
 
         // Assert
-        Assert.Null(condition.Error);
         Assert.True(condition.Result);
         Assert.Null(value.Result);
         Assert.Equal(9.0, value.Value);
@@ -35,8 +35,8 @@ public class AutomationPreviewTests
         // Arrange
         await using var host = await StartAsync();
         host.Weather.Gust = 9;
-        Assert.True(AutomationPreview.TryParseExpression("/Weather/Gust > 8", allowsEvent: false, out var expression, out var expressionError), expressionError);
-        Assert.True(AutomationPreview.TryParseTemplate("Gust {{ /Weather/Gust | raw }}", allowsEvent: false, out var template, out var templateError), templateError);
+        Assert.True(AutomationValidator.TryParseExpression("/Weather/Gust > 8", allowsEvent: false, out var expression, out var expressionError), expressionError);
+        Assert.True(AutomationValidator.TryParseTemplate("Gust {{ /Weather/Gust | raw }}", allowsEvent: false, out var template, out var templateError), templateError);
 
         // Act
         var before = AutomationPreview.Evaluate(host.Automation, "retract", expression);
@@ -48,9 +48,9 @@ public class AutomationPreviewTests
         // Assert
         Assert.True(before.Result);
         Assert.False(after.Result);
-        Assert.Equal("Gust 9", renderedBefore.Text);
-        Assert.Equal("Gust 5", renderedAfter.Text);
-        Assert.False(AutomationPreview.TryParseExpression("/Weather/Gust >", allowsEvent: false, out _, out var error));
+        Assert.Equal("Gust 9", renderedBefore);
+        Assert.Equal("Gust 5", renderedAfter);
+        Assert.False(AutomationValidator.TryParseExpression("/Weather/Gust >", allowsEvent: false, out _, out var error));
         Assert.NotNull(error);
     }
 
@@ -61,7 +61,7 @@ public class AutomationPreviewTests
         await using var host = await StartAsync();
 
         // Act
-        var preview = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/Rain > 0", allowsEvent: false);
+        var preview = Evaluate(host.Automation, "retract", "/Weather/Rain > 0");
 
         // Assert
         Assert.Null(preview.Result);
@@ -75,27 +75,13 @@ public class AutomationPreviewTests
         await using var host = await StartAsync();
 
         // Act
-        var saved = AutomationPreview.Evaluate(host.Automation, "retract", "./Name", allowsEvent: false);
-        var unsaved = AutomationPreview.Evaluate(host.Automation, "new", "./Name", allowsEvent: false);
+        var saved = Evaluate(host.Automation, "retract", "./Name");
+        var unsaved = Evaluate(host.Automation, "new", "./Name");
 
         // Assert
         Assert.Equal("Retract", saved.Value);
         Assert.Null(unsaved.Value);
         Assert.Null(unsaved.Text);
-    }
-
-    [Fact]
-    public async Task WhenTheExpressionIsInvalid_ThenThePreviewHasTheError()
-    {
-        // Arrange
-        await using var host = await StartAsync();
-
-        // Act
-        var preview = AutomationPreview.Evaluate(host.Automation, "retract", "event/Gesture == Release", allowsEvent: false);
-
-        // Assert
-        Assert.Equal("'event' is only available in event filters and in the arguments of a rule with an event trigger", preview.Error);
-        Assert.Null(preview.Result);
     }
 
     [Fact]
@@ -106,11 +92,10 @@ public class AutomationPreviewTests
         host.Weather.Gust = 9;
 
         // Act
-        var preview = AutomationPreview.Render(host.Automation, "retract", "Gust {{ /Weather/Gust | raw }} m/s", allowsEvent: false);
+        var preview = Render(host.Automation, "retract", "Gust {{ /Weather/Gust | raw }} m/s");
 
         // Assert
-        Assert.Null(preview.Error);
-        Assert.Equal("Gust 9 m/s", preview.Text);
+        Assert.Equal("Gust 9 m/s", preview);
     }
 
     [Fact]
@@ -138,8 +123,8 @@ public class AutomationPreviewTests
         zone.SetResolved(TimeZonePreference.Automatic, TimeZoneInfo.CreateCustomTimeZone("plus5", TimeSpan.FromHours(5), "plus5", "plus5"));
 
         // Act
-        var viewer = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/LastUpdated", allowsEvent: false, zone);
-        var server = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/LastUpdated", allowsEvent: false);
+        var viewer = Evaluate(host.Automation, "retract", "/Weather/LastUpdated", zone);
+        var server = Evaluate(host.Automation, "retract", "/Weather/LastUpdated");
 
         // Assert
         Assert.Contains("+05:00", viewer.Text);
@@ -155,16 +140,16 @@ public class AutomationPreviewTests
         host.Weather.RawPayload = "payload";
 
         // Act
-        var secret = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/ApiKey", allowsEvent: false);
-        var excluded = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/RawPayload", allowsEvent: false);
-        var template = AutomationPreview.Render(host.Automation, "retract", "{{ /Weather/ApiKey | raw }}|{{ /Weather/RawPayload | raw }}", allowsEvent: false);
+        var secret = Evaluate(host.Automation, "retract", "/Weather/ApiKey");
+        var excluded = Evaluate(host.Automation, "retract", "/Weather/RawPayload");
+        var template = Render(host.Automation, "retract", "{{ /Weather/ApiKey | raw }}|{{ /Weather/RawPayload | raw }}");
 
         // Assert
         Assert.Null(secret.Value);
         Assert.Null(secret.Text);
         Assert.Null(excluded.Value);
-        Assert.DoesNotContain("secret", template.Text);
-        Assert.DoesNotContain("payload", template.Text);
+        Assert.DoesNotContain("secret", template);
+        Assert.DoesNotContain("payload", template);
     }
 
     [Fact]
@@ -175,19 +160,19 @@ public class AutomationPreviewTests
         host.Weather.Gust = 12345;
 
         // Act
-        AutomationExpressionPreview condition;
-        AutomationExpressionPreview template;
+        ExpressionPreview condition;
+        string template;
         using (PropertyReadAccess.Enter(property => property.Name != nameof(TestSensor.Gust)))
         {
-            condition = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/Gust > 8", allowsEvent: false);
-            template = AutomationPreview.Render(host.Automation, "retract", "Gust {{ /Weather/Gust | raw }}", allowsEvent: false);
+            condition = Evaluate(host.Automation, "retract", "/Weather/Gust > 8");
+            template = Render(host.Automation, "retract", "Gust {{ /Weather/Gust | raw }}");
         }
 
         // Assert
         Assert.Null(condition.Result);
         Assert.Null(condition.Value);
         Assert.Null(condition.Text);
-        Assert.Equal("Gust ", template.Text);
+        Assert.Equal("Gust ", template);
     }
 
     [Fact]
@@ -198,16 +183,14 @@ public class AutomationPreviewTests
         host.Weather.Reading = new UnreadableReading();
 
         // Act
-        var value = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/Reading", allowsEvent: false);
-        var template = AutomationPreview.Render(host.Automation, "retract", "Reading {{ /Weather/Reading }}", allowsEvent: false);
+        var value = Evaluate(host.Automation, "retract", "/Weather/Reading");
+        var template = Render(host.Automation, "retract", "Reading {{ /Weather/Reading }}");
 
         // Assert
-        Assert.Null(value.Error);
         Assert.Null(value.Result);
         Assert.Null(value.Value);
         Assert.Equal("cannot be read: The reading is corrupt", value.Text);
-        Assert.Null(template.Error);
-        Assert.Equal("cannot be read: The reading is corrupt", template.Text);
+        Assert.Equal("cannot be read: The reading is corrupt", template);
     }
 
     [Fact]
@@ -218,17 +201,29 @@ public class AutomationPreviewTests
         host.Weather.Reading = new UnreadableReading();
 
         // Act
-        AutomationExpressionPreview value;
-        AutomationExpressionPreview template;
+        ExpressionPreview value;
+        string template;
         using (PropertyReadAccess.Enter(property => property.Name != nameof(TestSensor.Reading)))
         {
-            value = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/Reading", allowsEvent: false);
-            template = AutomationPreview.Render(host.Automation, "retract", "Reading {{ /Weather/Reading }}", allowsEvent: false);
+            value = Evaluate(host.Automation, "retract", "/Weather/Reading");
+            template = Render(host.Automation, "retract", "Reading {{ /Weather/Reading }}");
         }
 
         // Assert
         Assert.Null(value.Value);
         Assert.Null(value.Text);
-        Assert.Equal("Reading ", template.Text);
+        Assert.Equal("Reading ", template);
+    }
+
+    private static ExpressionPreview Evaluate(Automation automation, string ruleKey, string expression, ITimeZoneDisplay? timeZone = null)
+    {
+        Assert.True(AutomationValidator.TryParseExpression(expression, allowsEvent: false, out var parsed, out var error), error);
+        return AutomationPreview.Evaluate(automation, ruleKey, parsed, timeZone);
+    }
+
+    private static string Render(Automation automation, string ruleKey, string template)
+    {
+        Assert.True(AutomationValidator.TryParseTemplate(template, allowsEvent: false, out var parsed, out var error), error);
+        return AutomationPreview.Render(automation, ruleKey, parsed);
     }
 }

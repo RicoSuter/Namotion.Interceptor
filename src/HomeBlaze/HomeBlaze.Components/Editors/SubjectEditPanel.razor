@@ -188,18 +188,25 @@
     /// <returns>
     /// True when the edits were applied and <see cref="PersistAsync"/> ran, which reports a failure of its own to
     /// the user. False when the edits were not applied, which is reported to the user, and nothing was persisted:
-    /// either <see cref="ApplyChangesAsync"/> returned false, or the edit component failed while saving.
+    /// the writer would refuse to save the configuration that contains the subject, see
+    /// <see cref="ConfigurationPersistence.ThrowIfOwnerWriteRefused"/>, <see cref="ApplyChangesAsync"/> returned false,
+    /// or the edit component failed while saving.
     /// </returns>
     public async Task<bool> SaveAsync(CancellationToken cancellationToken)
     {
         bool isApplied;
         try
         {
+            if (Subject is { } subject)
+            {
+                ConfigurationPersistence.ThrowIfOwnerWriteRefused(RootManager, subject);
+            }
+
             isApplied = await ApplyChangesAsync(cancellationToken);
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
+            Snackbar.AddConfigurationSaveError(ex.Message);
             return false;
         }
 
@@ -264,7 +271,7 @@
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
+            Snackbar.AddConfigurationSaveError(ex.Message);
         }
     }
 

@@ -1,6 +1,9 @@
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
+using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Automation.Runtime;
+using Namotion.Interceptor.Expressions;
 
 namespace HomeBlaze.Automation;
 
@@ -27,7 +30,7 @@ public static class AutomationValidator
     /// <param name="initialState">The initial state of the configuration.</param>
     /// <param name="rules">The rules of the configuration by key.</param>
     /// <param name="ruleOrder">The keys of the rules in run order.</param>
-    public static IReadOnlyList<AutomationValidationError> Validate(
+    public static ImmutableArray<AutomationValidationError> Validate(
         Automation automation,
         IReadOnlyList<string> roles,
         IReadOnlyList<string> states,
@@ -41,10 +44,10 @@ public static class AutomationValidator
         ruleOrder ??= [];
         var permissions = AutomationTargets.GetPermissions(automation, roles);
         var targets = new ActionTargetCheck(automation.PathResolver, permissions, key => AutomationPreview.GetAnchor(automation, key));
-        var errors = AutomationCompiler.CheckStates(states, initialState)
+        var errors = ImmutableArray.CreateBuilder<AutomationValidationError>();
+        errors.AddRange(AutomationCompiler.CheckStates(states, initialState)
             .Select(message => new AutomationValidationError(null, message))
-            .Concat(CheckStateNames(states))
-            .ToList();
+            .Concat(CheckStateNames(states)));
         if (AutomationTargets.GetRolesError(permissions, rules.Values) is { } rolesError)
         {
             errors.Add(new AutomationValidationError(null, rolesError));
@@ -63,32 +66,43 @@ public static class AutomationValidator
             }
         }
 
-        return errors;
+        return errors.DrainToImmutable();
     }
 
-    /// <summary>Gets the error of an expression of a trigger, a rearm, Only if or an event filter, or null when it is valid.</summary>
-    /// <param name="text">The expression.</param>
-    /// <param name="allowsEvent">Whether an event is captured where it is evaluated: in event filters and in rules with an event trigger.</param>
-    public static string? ValidateExpression(string? text, bool allowsEvent) =>
-        AutomationExpressionCheck.TryParseExpression(text, allowsEvent, out _, out var error) ? null : error;
-
-    /// <summary>The hint for a condition that compares <c>now</c> or <c>time</c> with <c>==</c> or <c>!=</c>.</summary>
-    public const string ClockEqualityHint = ConditionHints.ClockEquality;
-
-    /// <summary>The hint for a condition whose use of the clock is checked every second.</summary>
-    public const string EverySecondHint = ConditionHints.EverySecond;
-
     /// <summary>
-    /// Gets the hints for a valid condition of a trigger, a rearm or Only if: <see cref="ClockEqualityHint"/> and
-    /// <see cref="EverySecondHint"/>. Empty for an invalid condition, whose error says more.
+    /// Parses an expression of a trigger, a rearm, Only if, an event filter or an argument as the automation does. The
+    /// error says why the expression is invalid.
     /// </summary>
-    public static IReadOnlyList<string> GetConditionHints(string? text) => ConditionHints.Get(text);
+    /// <param name="text">The expression.</param>
+    /// <param name="allowsEvent">Whether an event is captured where it is evaluated: in event filters and in the arguments of a rule with an event trigger.</param>
+    /// <param name="parsed">The parsed expression, for <see cref="AutomationPreview.Evaluate"/>.</param>
+    /// <param name="error">Why the expression is invalid.</param>
+    public static bool TryParseExpression(
+        string? text, bool allowsEvent, [NotNullWhen(true)] out ParsedExpression? parsed, [NotNullWhen(false)] out string? error) =>
+        AutomationExpressionCheck.TryParseExpression(text, allowsEvent, out parsed, out error);
 
-    /// <summary>Gets the error of the text template of an argument, or null when it is valid.</summary>
+    /// <summary>Parses the text template of an argument as the automation does. The error says why the template is invalid.</summary>
     /// <param name="text">The template.</param>
     /// <param name="allowsEvent">Whether the rule has an event trigger.</param>
-    public static string? ValidateTemplate(string? text, bool allowsEvent) =>
-        AutomationExpressionCheck.TryParseTemplate(text, allowsEvent, out _, out var error) ? null : error;
+    /// <param name="parsed">The parsed template, for <see cref="AutomationPreview.Render"/>.</param>
+    /// <param name="error">Why the template is invalid.</param>
+    public static bool TryParseTemplate(
+        string? text, bool allowsEvent, [NotNullWhen(true)] out TextTemplate? parsed, [NotNullWhen(false)] out string? error) =>
+        AutomationExpressionCheck.TryParseTemplate(text, allowsEvent, out parsed, out error);
+
+    /// <summary>
+    /// Gets the hints for a valid condition of a trigger, a rearm or Only if: one when it compares <c>now</c> or
+    /// <c>time</c> with <c>==</c> or <c>!=</c>, and one when its use of the clock is checked every second. Empty for an
+    /// invalid condition, whose error says more.
+    /// </summary>
+    public static ImmutableArray<string> GetConditionHints(string? text) => ConditionHints.Get(text);
+
+    /// <summary>
+    /// Whether the automation binds an argument with the key to the operation: a key that names a parameter that requires
+    /// input, or <c>parameter.Member</c> for a member of a record parameter, without regard to case.
+    /// </summary>
+    public static bool IsArgumentKey(MethodMetadata operation, string key) =>
+        ArgumentBinder.MatchKey(operation.Parameters, key, out _) is ArgumentKeyMatch.Parameter or ArgumentKeyMatch.Member;
 
     private static IEnumerable<AutomationValidationError> CheckStateNames(IReadOnlyList<string> states) =>
         states

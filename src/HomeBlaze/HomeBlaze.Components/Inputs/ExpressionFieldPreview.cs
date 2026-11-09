@@ -1,13 +1,12 @@
 using System.Collections.Immutable;
+using HomeBlaze.Components.Abstractions.Expressions;
 
 namespace HomeBlaze.Components.Inputs;
 
 /// <summary>
 /// The texts an <see cref="ExpressionField"/> shows about its expression: the error, the hints, the result and the current
-/// value of each row. <see cref="Update"/> evaluates them only when the text, the rows or the delegates changed and
-/// prepares the expression, the rows and the hints for evaluation once, so that <see cref="RefreshValues"/> reads the
-/// current values again without parsing anything, and a render evaluates nothing. The hints of the host depend on the
-/// text only, so a refresh does not ask for them again.
+/// value of each row. <see cref="Update"/> prepares them when the text, the rows, the variables or a delegate changed;
+/// <see cref="RefreshValues"/> reads the current values again without parsing or asking the host for hints.
 /// </summary>
 internal sealed class ExpressionFieldPreview
 {
@@ -18,8 +17,8 @@ internal sealed class ExpressionFieldPreview
     private ImmutableArray<string> _variables;
     private Func<string, string?>? _validate;
     private Func<string, Func<ExpressionPreview>?>? _preview;
-    private Func<string, IReadOnlyList<string>>? _getHints;
-    private IReadOnlyList<string> _hostHints = [];
+    private Func<string, ImmutableArray<string>>? _getHints;
+    private ImmutableArray<string> _hostHints = [];
     private Func<ExpressionPreview>? _result;
     private RowReader[] _rowReaders = [];
     private string[] _rowTexts = [];
@@ -38,7 +37,8 @@ internal sealed class ExpressionFieldPreview
 
     /// <summary>
     /// Evaluates the texts when anything they depend on changed. <paramref name="preview"/> prepares an expression or a
-    /// path for evaluation with the current values, or returns null when it cannot be evaluated.
+    /// path for evaluation with the current values, or returns null when it cannot be evaluated. <paramref name="getHints"/>
+    /// gives the hints of the host for a valid expression, which come first; a default array counts as none.
     /// </summary>
     public void Update(
         string text,
@@ -46,7 +46,7 @@ internal sealed class ExpressionFieldPreview
         ImmutableArray<string> variables,
         Func<string, string?>? validate,
         Func<string, Func<ExpressionPreview>?>? preview,
-        Func<string, IReadOnlyList<string>>? getHints = null)
+        Func<string, ImmutableArray<string>>? getHints = null)
     {
         if (_text == text && _variables == variables && Equals(_validate, validate) &&
             Equals(_preview, preview) && Equals(_getHints, getHints) && HasRows(rows))
@@ -62,7 +62,8 @@ internal sealed class ExpressionFieldPreview
         _getHints = getHints;
         var hasText = !string.IsNullOrWhiteSpace(text);
         Error = hasText ? validate?.Invoke(text) : null;
-        _hostHints = Error is null && hasText && getHints is not null ? getHints(text) : [];
+        var hostHints = Error is null && hasText && getHints is not null ? getHints(text) : [];
+        _hostHints = hostHints.IsDefault ? [] : hostHints;
         _result = hasText && Error is null ? preview?.Invoke(text) : null;
         _rowReaders = new RowReader[_rows.Length];
         _rowTexts = new string[_rows.Length];

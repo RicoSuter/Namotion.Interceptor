@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using HomeBlaze.Automation.Expressions;
+using HomeBlaze.Services;
 using Namotion.Interceptor.Expressions;
 
 namespace HomeBlaze.Automation.Runtime;
@@ -18,32 +19,54 @@ internal static class AutomationCompiler
         IReadOnlyList<string> ruleOrder,
         [NotNullWhen(true)] out CompiledAutomation? compiled,
         [NotNullWhen(false)] out string? error) =>
-        TryCompile(states, initialState, rules, ruleOrder, targets: null, out compiled, out error);
+        TryCompile(states, initialState, rules, ruleOrder, configurationIssues: [], out compiled, out error);
 
     /// <summary>
-    /// Compiles the configuration of the automation with the rules and roles read from it, checking the targets of actions
-    /// that resolve against the roles.
+    /// Compiles as the overload without <paramref name="configurationIssues"/> does; each issue of the configuration
+    /// file, see <see cref="Automation.ConfigurationIssues"/>, is an error before those of the states and the rules.
+    /// </summary>
+    public static bool TryCompile(
+        IReadOnlyList<string> states,
+        string? initialState,
+        IReadOnlyDictionary<string, AutomationRule> rules,
+        IReadOnlyList<string> ruleOrder,
+        IReadOnlyList<string> configurationIssues,
+        [NotNullWhen(true)] out CompiledAutomation? compiled,
+        [NotNullWhen(false)] out string? error)
+    {
+        var errors = new List<string>(configurationIssues);
+        error = TryCompile(errors, states, initialState, rules, ruleOrder, targets: null, out compiled) ? null : string.Join("; ", errors);
+        return compiled is not null;
+    }
+
+    /// <summary>
+    /// Compiles the configuration of the automation with the rules and roles read from it, the issues of its configuration
+    /// file first, checking the targets of actions that resolve against the roles.
     /// </summary>
     public static bool TryCompile(
         Automation automation,
         IReadOnlyList<string> roles,
         IReadOnlyDictionary<string, AutomationRule> rules,
         [NotNullWhen(true)] out CompiledAutomation? compiled,
-        [NotNullWhen(false)] out string? error) =>
-        TryCompile(
-            automation.States, automation.InitialState, rules, automation.RuleOrder, ActionTargetCheck.Create(automation, roles), out compiled, out error);
+        [NotNullWhen(false)] out string? error)
+    {
+        var errors = new List<string>(automation.ConfigurationIssues);
+        var targets = ActionTargetCheck.Create(automation, roles);
+        error = TryCompile(errors, automation.States, automation.InitialState, rules, automation.RuleOrder, targets, out compiled) ? null : string.Join("; ", errors);
+        return compiled is not null;
+    }
 
-    /// <summary>Compiles the configuration; <paramref name="targets"/> also checks the targets of actions that resolve.</summary>
-    public static bool TryCompile(
+    // Adds the errors of the states and the rules to those already in the list; targets also checks the targets of actions that resolve.
+    private static bool TryCompile(
+        List<string> errors,
         IReadOnlyList<string> states,
         string? initialState,
         IReadOnlyDictionary<string, AutomationRule> rules,
         IReadOnlyList<string> ruleOrder,
         ActionTargetCheck? targets,
-        [NotNullWhen(true)] out CompiledAutomation? compiled,
-        [NotNullWhen(false)] out string? error)
+        [NotNullWhen(true)] out CompiledAutomation? compiled)
     {
-        var errors = CheckStates(states, initialState);
+        errors.AddRange(CheckStates(states, initialState));
         var compiledRules = new List<CompiledRule>();
         foreach (var key in OrderKeys(rules.Keys, ruleOrder))
         {
@@ -60,12 +83,10 @@ internal static class AutomationCompiler
         if (errors.Count > 0)
         {
             compiled = null;
-            error = string.Join("; ", errors);
             return false;
         }
 
         compiled = new CompiledAutomation(compiledRules, [.. states], initialState);
-        error = null;
         return true;
     }
 
@@ -120,6 +141,14 @@ internal static class AutomationCompiler
         if (rule.InState is { } state && !states.Contains(state, StringComparer.Ordinal))
         {
             errors.Add($"'{state}' is not a state");
+        }
+
+        foreach (var setting in rule.UnknownSettings?.Keys ?? Enumerable.Empty<string>())
+        {
+            if (setting != ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName)
+            {
+                errors.Add($"'{setting}' is no setting of a rule");
+            }
         }
 
         CompileTriggers(candidate, rule.Triggers, errors);
@@ -218,6 +247,7 @@ internal static class AutomationCompiler
             {
                 PropertyTrigger property => CompilePropertyTrigger(rule, index, property),
                 SubjectEventTrigger subjectEvent => CompileEventTrigger(rule, index, subjectEvent),
+                UnreadableTrigger unreadable => unreadable.Error,
                 _ => "the type is unknown"
             };
 
@@ -238,6 +268,11 @@ internal static class AutomationCompiler
         if (trigger.For < TimeSpan.Zero)
         {
             return "the hold cannot be negative";
+        }
+
+        if (trigger.For > AutomationDuration.Maximum)
+        {
+            return $"the hold cannot be longer than {AutomationDuration.Format(AutomationDuration.Maximum)}";
         }
 
         if (!Enum.IsDefined(trigger.OnActivation))
@@ -306,6 +341,7 @@ internal static class AutomationCompiler
         InvokeOperationAction invoke => CheckInvoke(invoke, allowsEvent),
         SetPropertyAction set => CheckSet(set, allowsEvent),
         ChangeStateAction change => states.Contains(change.TargetState, StringComparer.Ordinal) ? null : $"'{change.TargetState}' is not a state",
+        UnreadableAction unreadable => unreadable.Error,
         _ => "the type is unknown"
     };
 
@@ -321,8 +357,14 @@ internal static class AutomationCompiler
             return "the arguments are missing";
         }
 
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (name, value) in action.Arguments)
         {
+            if (!names.Add(name))
+            {
+                return $"argument '{name}' is given twice";
+            }
+
             if (CheckValue(value, allowsEvent) is { } error)
             {
                 return $"argument '{name}': {error}";

@@ -5,11 +5,13 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// Runs the requests of one input in rule order, each rule at most once, and records every run. A run consumes every
-/// pending property trigger of its rule. A request that does not run is not recorded: one
-/// that Only if rejects, and, once a rule changed the state, the remaining requests of the input; the rule shows why
-/// and the log says it once per reason, and its property trigger stays pending. An event is an input of its own with
-/// one request, so a state change skips no event. A request of a rule that is no longer active is dropped, and so are
-/// the requests after a run that a stop canceled. Used by the worker only.
+/// pending property trigger of its rule. The filters of an event request are checked just before its rule runs, after
+/// the earlier rules of the event ran; a request that no filter passes is dropped. A request that does not run is not
+/// recorded: one that Only if rejects, and, once a rule changed the state, the remaining requests of a property input;
+/// the rule shows why and the log says it once per reason, and its property trigger stays pending. The requests of an
+/// event still run after a state change, except those of the rules that a state change of the event deactivated, also
+/// when a later one activated them again. A request of a rule that is no longer active is dropped, and so are the
+/// requests after a run that a stop canceled. Used by the worker only.
 /// </summary>
 internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, AutomationStateKeeper keeper, ILogger logger)
 {
@@ -19,7 +21,7 @@ internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, Au
         IReadOnlyList<RunRequest> requests, Func<CompiledRule, bool> isActive, CancellationToken cancellationToken)
     {
         var summary = new DispatchSummary();
-        foreach (var request in requests)
+        for (var index = 0; index < requests.Count; index++)
         {
             // A stop ends the input: the requests after a canceled run do not run.
             if (cancellationToken.IsCancellationRequested)
@@ -27,7 +29,16 @@ internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, Au
                 break;
             }
 
-            await DispatchOneAsync(request, isActive, summary, cancellationToken);
+            if (await DispatchOneAsync(requests[index], isActive, summary, cancellationToken) is { ChangedState: true } result)
+            {
+                // A state that the run passed deactivates the rules it does not hold, as it would between two runs.
+                foreach (var state in result.PassedStates)
+                {
+                    summary.MarkDeactivated(requests, index + 1, rule => rule.IsActiveIn(automation.Enabled, state));
+                }
+
+                summary.MarkDeactivated(requests, index + 1, isActive);
+            }
         }
 
         return summary;
@@ -42,23 +53,35 @@ internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, Au
         }
     }
 
-    private async Task DispatchOneAsync(
+    // Returns the result of the request when it ran, else null.
+    private async Task<RuleRunResult?> DispatchOneAsync(
         RunRequest request, Func<CompiledRule, bool> isActive, DispatchSummary summary, CancellationToken cancellationToken)
     {
-        if (summary.ChangedState)
+        if (summary.ChangedState && request.Event is null)
         {
             summary.SkippedForStateChange = true;
             Skip(request, $"the state changed to {host.CurrentState} for the same input");
-            return;
+            return null;
         }
 
-        if (!request.Rule.IsActivated || !isActive(request.Rule) || summary.HasRun(request.Rule))
+        if (!request.Rule.IsActivated || !isActive(request.Rule) || summary.HasRun(request.Rule) || summary.WasDeactivated(request.Rule))
         {
-            return;
+            return null;
+        }
+
+        if (request.EventInput is not null)
+        {
+            if (EventTriggerEngine.CheckFilters(automation.PathResolver, automation.TimeProvider, request) is not { } passed)
+            {
+                return null;
+            }
+
+            request = passed;
         }
 
         var result = await _runner.RunAsync(request, host, cancellationToken);
         host.RunUnlessAbandoned(() => Complete(request, result, summary));
+        return result;
     }
 
     private void Complete(RunRequest request, RuleRunResult result, DispatchSummary summary)

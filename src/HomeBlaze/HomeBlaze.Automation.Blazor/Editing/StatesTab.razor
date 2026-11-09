@@ -15,7 +15,7 @@
         else
         {
             var layout = CreateLayout();
-            <StateDiagram Layout="layout" CurrentState="@Automation.CurrentState" SelectedState="@_selection.SelectedState" StateClicked="SelectClickedAsync" RuleClicked="OpenRuleAsync" />
+            <StateDiagram Layout="layout" CurrentState="@Automation.CurrentState" SelectedState="@_selection.SelectedState" StateClicked="SelectClicked" RuleClicked="OpenRuleAsync" />
             @if (layout.OtherRules.Count > 0)
             {
                 <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2">
@@ -70,7 +70,7 @@
     private readonly StateDiagramLayoutCache _layouts = new();
     private StateSelection _selection = null!;
 
-    [CascadingParameter] private PendingRows? PendingRows { get; set; }
+    [CascadingParameter] private UnappliedInputs? Inputs { get; set; }
 
     [Parameter, EditorRequired] public Automation Automation { get; set; } = null!;
 
@@ -79,12 +79,9 @@
     /// <summary>Raised after an edit of the draft.</summary>
     [Parameter] public EventCallback Changed { get; set; }
 
-    /// <summary>Raised when the error of the name input changed without an edit of the draft.</summary>
-    [Parameter] public EventCallback InputChanged { get; set; }
-
     [Parameter] public EventCallback<string> RuleOpened { get; set; }
 
-    protected override void OnInitialized() => _selection = new StateSelection(Draft);
+    protected override void OnInitialized() => _selection = new StateSelection(Draft, Inputs);
 
     private StateDiagramLayout CreateLayout() =>
         _layouts.Get(Draft.States, Draft.InitialState, [.. Draft.Rules.Select(StateDiagramRule.From)]);
@@ -93,7 +90,7 @@
     {
         if (_selection.RenameError is not null)
         {
-            PendingRows?.Discard("A state name that was not applied");
+            Inputs?.Discard("A state name that was not applied");
         }
 
         _selection.Dispose();
@@ -109,19 +106,10 @@
 
     // The field commits when it is left or Enter is pressed, not per keystroke, so that references are rewritten once with the
     // final name. The typed text stays in the field while it is rejected.
-    private Task RenameAsync(string? newName)
-    {
-        var hadError = _selection.RenameError;
-        if (_selection.Rename(newName))
-        {
-            return Changed.InvokeAsync();
-        }
+    private Task RenameAsync(string? newName) =>
+        _selection.Rename(newName) ? Changed.InvokeAsync() : Task.CompletedTask;
 
-        return hadError != _selection.RenameError ? InputChanged.InvokeAsync() : Task.CompletedTask;
-    }
-
-    private Task SelectClickedAsync(string state) =>
-        _selection.Select(state) ? InputChanged.InvokeAsync() : Task.CompletedTask;
+    private void SelectClicked(string state) => _selection.Select(state);
 
     private Task SetInitialAsync(string state)
     {

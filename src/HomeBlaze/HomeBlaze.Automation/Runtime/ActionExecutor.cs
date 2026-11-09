@@ -10,7 +10,8 @@ namespace HomeBlaze.Automation.Runtime;
 /// <summary>
 /// Runs the operation calls and property writes of rules: resolves the target, refuses what an automation may not do,
 /// what its roles or the roles of a rejected configuration do not allow or what the authorizer failed to decide, binds the
-/// arguments and executes. A failure is a result with its reason; only a cancellation of the caller's token is thrown.
+/// arguments and executes. A failure is a result with its reason; an exception is thrown only once the caller's token is
+/// canceled, which need not be an <see cref="OperationCanceledException"/>.
 /// </summary>
 internal sealed class ActionExecutor(
     SubjectPathResolver resolver,
@@ -158,7 +159,7 @@ internal sealed class ActionExecutor(
         }
 
         var binder = new ArgumentBinder(scope.Evaluation, scope.AllowsEvent);
-        if (!binder.TryBindValue(property.Name, action.Value, property.Type, out var value, out error))
+        if (!binder.TryBindProperty(property, action.Value, out var value, out error))
         {
             return false;
         }

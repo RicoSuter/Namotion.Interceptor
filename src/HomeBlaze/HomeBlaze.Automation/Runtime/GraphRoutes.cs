@@ -1,5 +1,4 @@
 using System.Collections.Frozen;
-using HomeBlaze.Services;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Automation.Runtime;
@@ -7,14 +6,10 @@ namespace HomeBlaze.Automation.Runtime;
 /// <summary>
 /// The graph routes of the stored resolutions of one automation: records the route of each resolution that the worker
 /// stores, see <see cref="GraphRouteSlot"/>, keeps the union of the stored routes and publishes it to the receiver of the
-/// automation, so that a graph change reaches the automation only when it can change a stored result. Used by the worker
-/// only.
+/// automation, so that a graph change reaches the automation only when it can change a stored result. From the first
+/// resolution after a publication until the next publication the receiver gets every graph change, since the union
+/// published before may lack a property that a new result depends on. Used by the worker only.
 /// </summary>
-/// <remarks>
-/// A change that commits while the worker resolves is routed by the union published before, which may lack a property
-/// that a new result depends on. From the first resolution after a publication until the next publication the receiver
-/// therefore receives every graph change, as it does without routes.
-/// </remarks>
 internal sealed class GraphRoutes
 {
     private readonly GraphRouteBuilder _builder;
@@ -75,7 +70,7 @@ internal sealed class GraphRoutes
     internal Action? BeforePublication { get; set; }
 
     /// <summary>Starts a resolution whose result is stored, which records its route with the returned recorder.</summary>
-    public ISubjectPathRecorder BeginRoute()
+    public GraphRouteBuilder BeginRoute()
     {
         ResolutionCount++;
         BeginResolving();

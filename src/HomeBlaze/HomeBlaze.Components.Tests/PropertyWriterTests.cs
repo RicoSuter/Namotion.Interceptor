@@ -1,5 +1,6 @@
 using HomeBlaze.Components.Controls;
 using HomeBlaze.Components.Tests.Models;
+using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using MudBlazor;
 using Namotion.Interceptor;
@@ -199,6 +200,25 @@ public sealed class PropertyWriterTests : IDisposable
         Assert.Equal(Severity.Warning, message.Severity);
         Assert.Contains("not saved", message.Message);
         Assert.Equal(100, _graph.Device.Speed);
+    }
+
+    [Fact]
+    public void WhenTheWriterWouldRefuseTheSave_ThenTheValueIsNotSetAndTheRefusalIsShown()
+    {
+        // Arrange
+        _graph.Store.Refusal = new ConfigurationWriteRefusedException("refused", ["the value of 'speed' could not be read"]);
+
+        // Act
+        var isWritten = _writer.TryWrite(GetProperty(_graph.Device, nameof(PersistedDevice.Speed)), 100);
+        _timeProvider.Advance(PropertyWriter.PersistDelay);
+
+        // Assert
+        Assert.False(isWritten);
+        Assert.Equal(0, _graph.Device.Speed);
+        var message = Assert.Single(_snackbar.Messages);
+        Assert.Equal(Severity.Error, message.Severity);
+        Assert.Equal("Could not set 'Speed': refused", message.Message);
+        Assert.Empty(_graph.Store.WrittenSubjects);
     }
 
     [Fact]

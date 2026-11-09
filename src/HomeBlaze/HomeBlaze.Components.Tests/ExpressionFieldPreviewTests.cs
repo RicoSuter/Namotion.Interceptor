@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using HomeBlaze.Components.Abstractions.Expressions;
 using HomeBlaze.Components.Inputs;
 using Xunit;
 
@@ -61,6 +62,24 @@ public class ExpressionFieldPreviewTests
         Assert.Equal((validations, preparations, evaluations), (host.Validations, host.Preparations, host.Evaluations));
         Assert.Equal("true", preview.ResultText);
         Assert.Equal(["now 9, true"], preview.RowTexts.ToArray());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenTheHostGivesHints_ThenTheyAreShownAndADefaultArrayCountsAsNone(bool isDefault)
+    {
+        // Arrange
+        var host = new Host();
+        var preview = new ExpressionFieldPreview();
+        ImmutableArray<string> hostHints = isDefault ? default : ["Gust is in m/s."];
+        string[] expected = isDefault ? [] : ["Gust is in m/s."];
+
+        // Act
+        preview.Update("/Weather/Gust > 8", [], Variables, host.Validate, host.Preview, _ => hostHints);
+
+        // Assert
+        Assert.Equal(expected, preview.Hints.ToArray());
     }
 
     [Fact]
@@ -162,7 +181,7 @@ public class ExpressionFieldPreviewTests
         var host = new Host();
         var preview = new ExpressionFieldPreview();
         var hintCount = 0;
-        IReadOnlyList<string> GetHints(string text)
+        ImmutableArray<string> GetHints(string text)
         {
             hintCount++;
             return text.Contains("==") ? ["Use >="] : [];

@@ -4,11 +4,11 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// The bounded input queue of one automation. Writers never wait. An input that does not fit, or that continues a
-/// feedback chain beyond <see cref="MaxChainDepth"/>, is dropped and counted, and the worker reports the count and makes
-/// up for what it can with one queued resynchronization; external events are never dropped silently. The chain depth flows with the
-/// asynchronous flow of a run while the run is active, so the property writes, operations and events of a run cause
-/// inputs one deeper than the input of the run. Work that outlives the run, and changes applied later on another flow
-/// (for example a device confirming a write from its own thread), start a new chain.
+/// feedback chain beyond <see cref="MaxChainDepth"/>, is dropped and counted, and the worker reports the count and
+/// makes up for what it can with one queued resynchronization; external events are never dropped silently. The chain
+/// depth flows with the asynchronous flow of a run while the run is active, so the property writes, operations and
+/// events of a run cause inputs one deeper than the input of the run. Work that outlives the run, and changes applied
+/// later on another flow (for example a device confirming a write from its own thread), start a new chain.
 /// </summary>
 internal sealed class AutomationInputQueue
 {
@@ -29,6 +29,8 @@ internal sealed class AutomationInputQueue
     private int _resynchronizations;
     private int _overloaded;
     private int _feedbackChains;
+    private long _eventSequence;
+    private long _configurationRequestedAt;
 
     /// <summary>
     /// The chain depth of an input caused now: one more than the input of the run on this flow while that run is active,
@@ -38,6 +40,38 @@ internal sealed class AutomationInputQueue
 
     /// <summary>Whether an input other than a flush is queued.</summary>
     public bool HasWork => Volatile.Read(ref _count) > 0 || Volatile.Read(ref _resynchronizations) > 0;
+
+    /// <summary>The sequence number of the last event that a subscription of the automation received, 0 before the first.</summary>
+    public long LastEventSequence => Interlocked.Read(ref _eventSequence);
+
+    /// <summary>
+    /// <see cref="LastEventSequence"/> when the latest configuration was requested, so that the triggers it subscribes
+    /// handle the events received after the request.
+    /// </summary>
+    public long ConfigurationRequestedAt => Interlocked.Read(ref _configurationRequestedAt);
+
+    /// <summary>Numbers an event received by a subscription of the automation; the numbers increase across all of them.</summary>
+    public long NextEventSequence() => Interlocked.Increment(ref _eventSequence);
+
+    /// <summary>
+    /// Records <see cref="LastEventSequence"/> as <see cref="ConfigurationRequestedAt"/>. Called before the configuration
+    /// version changes, so that the worker that reads the version and then this finds the mark of that request or a later one.
+    /// </summary>
+    public void MarkConfigurationRequested()
+    {
+        var sequence = LastEventSequence;
+        var current = Interlocked.Read(ref _configurationRequestedAt);
+        while (current < sequence)
+        {
+            var found = Interlocked.CompareExchange(ref _configurationRequestedAt, sequence, current);
+            if (found == current)
+            {
+                return;
+            }
+
+            current = found;
+        }
+    }
 
     /// <summary>Marks the flow as running an input of the depth until the scope is disposed.</summary>
     public static RunScope EnterRun(int inputChainDepth)

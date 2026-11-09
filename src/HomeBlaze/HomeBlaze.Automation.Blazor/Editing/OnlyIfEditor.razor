@@ -4,11 +4,11 @@
 <MudPaper Outlined="true" Class="pa-3" data-testid="automation-only-if">
     <ConditionField Label="Checked when a trigger fires" Lead="Check" Value="@_condition"
                     ValueChanged="@(value => SetOnlyIfAsync(value, _cooldown))"
-                    Validate="@Expressions.Validate" Preview="@Expressions.Preview" Hints="@RuleExpressions.GetConditionHints"
+                    Validate="@RuleExpressions.ValidateCondition" Preview="@Expressions.PrepareConditionPreview" Hints="@AutomationValidator.GetConditionHints"
                     TestId="automation-only-if-condition" />
     <div class="d-flex flex-wrap align-center gap-3 mt-2">
         <DurationField Label="At most once every" Value="@_cooldown" ValueChanged="@(value => SetOnlyIfAsync(_condition, value))"
-                       Draft="Draft" MustBePositive="true" RuleKey="@Rule.Key" HelperText="Empty: no limit" Style="max-width: 240px;" />
+                       MustBePositive="true" RuleKey="@Rule.Key" HelperText="Empty: no limit" Style="max-width: 240px;" />
         @if (LastTriggeredAt is { } lastTriggeredAt)
         {
             <MudText Typo="Typo.caption" Class="mud-text-secondary">Last triggered @AutomationTime.Format(TimeZone, lastTriggeredAt, TimeProvider.GetUtcNow())</MudText>
@@ -22,8 +22,6 @@
     private string? _writtenOnlyIf;
 
     [Parameter, EditorRequired] public RuleDraft Rule { get; set; } = null!;
-
-    [Parameter, EditorRequired] public AutomationDraft Draft { get; set; } = null!;
 
     [Parameter, EditorRequired] public RuleExpressions Expressions { get; set; } = null!;
 

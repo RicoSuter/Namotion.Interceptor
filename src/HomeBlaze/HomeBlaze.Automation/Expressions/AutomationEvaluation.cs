@@ -12,7 +12,7 @@ namespace HomeBlaze.Automation.Expressions;
 /// </summary>
 internal sealed class AutomationEvaluation
 {
-    private readonly List<string> _missingPaths = [];
+    private List<string>? _missingPaths;
     private readonly TimeZoneInfo _timeZone;
     private readonly Func<RegisteredSubjectProperty, bool>? _canRead;
     private TimeSpan? _timeOfDay;
@@ -60,34 +60,35 @@ internal sealed class AutomationEvaluation
     public ObservedValues? Values { get; }
 
     /// <summary>The distinct paths of the last evaluation that led to no value, in order of first appearance.</summary>
-    public IReadOnlyList<string> MissingPaths => _missingPaths;
+    public IReadOnlyList<string> MissingPaths => _missingPaths ?? (IReadOnlyList<string>)[];
 
     /// <summary>Gets whether the caller of the evaluation may read the property.</summary>
     public bool CanRead(RegisteredSubjectProperty property) => _canRead?.Invoke(property) ?? true;
 
     public bool? EvaluateCondition(ParsedExpression expression)
     {
-        _missingPaths.Clear();
+        _missingPaths?.Clear();
         var context = new AutomationExpressionContext(this);
         return expression.EvaluateCondition(ref context);
     }
 
     public ExpressionValue Evaluate(ParsedExpression expression)
     {
-        _missingPaths.Clear();
+        _missingPaths?.Clear();
         var context = new AutomationExpressionContext(this);
         return expression.Evaluate(ref context);
     }
 
     public string Render(TextTemplate template)
     {
-        _missingPaths.Clear();
+        _missingPaths?.Clear();
         var context = new AutomationExpressionContext(this);
         return template.Render(ref context);
     }
 
     internal void AddMissingPath(string path)
     {
+        _missingPaths ??= [];
         if (!_missingPaths.Contains(path))
         {
             _missingPaths.Add(path);

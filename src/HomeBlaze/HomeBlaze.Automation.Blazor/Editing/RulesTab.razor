@@ -9,10 +9,11 @@
                 var isLast = index == Draft.Rules.Count - 1;
                 <MudPaper @key="rule" Outlined="true" Class="pa-2 d-flex align-center gap-1" Style="@GetItemStyle(rule)"
                           @onclick="@(() => SelectAsync(rule))" data-testid="automation-rule-item">
-                    <div class="flex-grow-1" style="min-width: 0;">
-                        <MudText Typo="Typo.body2" Style="font-weight: 500; overflow-wrap: anywhere;">@rule.DisplayName</MudText>
-                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@Describe(rule)</MudText>
-                    </div>
+                    @* A button selects the rule with Enter and Space too: its click reaches the handler of the item. *@
+                    <button type="button" class="automation-rule-select flex-grow-1" aria-current="@(rule.Key == SelectedRuleKey ? "true" : null)">
+                        <MudText Typo="Typo.body2" HtmlTag="span" Class="d-block" Style="font-weight: 500; overflow-wrap: anywhere;">@rule.DisplayName</MudText>
+                        <MudText Typo="Typo.caption" HtmlTag="span" Class="d-block mud-text-secondary">@Describe(rule)</MudText>
+                    </button>
                     @if (Errors.Any(error => error.RuleKey == rule.Key))
                     {
                         <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Color="Color.Warning" Size="Size.Small" />
@@ -45,7 +46,7 @@
 
     [Parameter, EditorRequired] public AutomationDraft Draft { get; set; } = null!;
 
-    [Parameter] public IReadOnlyList<AutomationValidationError> Errors { get; set; } = [];
+    [Parameter] public ImmutableArray<AutomationValidationError> Errors { get; set; } = [];
 
     [Parameter] public string? SelectedRuleKey { get; set; }
 
@@ -60,7 +61,7 @@
         ? "cursor: pointer; border-color: var(--mud-palette-primary); border-width: 2px;"
         : "cursor: pointer;";
 
-    private IReadOnlyList<AutomationValidationError> GetErrors(RuleDraft rule) => [.. Errors.Where(error => error.RuleKey == rule.Key)];
+    private ImmutableArray<AutomationValidationError> GetErrors(RuleDraft rule) => [.. Errors.Where(error => error.RuleKey == rule.Key)];
 
     private Task SelectAsync(RuleDraft rule) => SelectedRuleKeyChanged.InvokeAsync(rule.Key);
 

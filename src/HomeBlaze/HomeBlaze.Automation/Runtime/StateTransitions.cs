@@ -5,9 +5,9 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// Changes the state of an automation: writes the checkpoint with the new state first, and only when that succeeded sets
-/// the state, its entry time and publishes the state-change event. The event of a rule's state change is held until
-/// <see cref="PublishPendingChanges"/>, which the engine calls once the rules of the new state are active, so that a
-/// rule active in the entered state receives it and a rule of the left state does not.
+/// the state, its entry time and publishes the state-change event. The events of the state changes of the runs of one
+/// input are held until <see cref="PublishPendingChanges"/>, which the engine calls once the rules of the last entered
+/// state are active, so that their activation is queued before the events.
 /// </summary>
 internal sealed class StateTransitions(Automation automation, AutomationStateKeeper keeper, TimeProvider timeProvider, ILogger logger)
 {
@@ -112,10 +112,17 @@ internal sealed class StateTransitions(Automation automation, AutomationStateKee
     }
 
     /// <summary>Gets why the current state is not valid, such as a saved state that the configuration no longer has, or null.</summary>
-    public static string? CheckState(CompiledAutomation snapshot, string? currentState) =>
-        snapshot.States.Count == 0 || currentState is null || snapshot.HasState(currentState)
-            ? null
-            : $"The saved state '{currentState}' is not a state of the automation; reset the automation to enter '{snapshot.InitialState}'";
+    public static string? CheckState(CompiledAutomation snapshot, string? currentState)
+    {
+        if (currentState is null || snapshot.HasState(currentState))
+        {
+            return null;
+        }
+
+        return snapshot.States.Count == 0
+            ? $"The saved state '{currentState}' is not a state of the automation, which has no states anymore, so no rule runs until Reset state leaves it"
+            : $"The saved state '{currentState}' is not a state of the automation, so no rule runs until Reset state enters '{snapshot.InitialState}'";
+    }
 
     private void Enter(string? state, DateTimeOffset enteredAt)
     {

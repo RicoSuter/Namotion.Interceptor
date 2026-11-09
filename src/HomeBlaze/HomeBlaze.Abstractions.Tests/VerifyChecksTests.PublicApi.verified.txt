@@ -515,6 +515,10 @@ namespace HomeBlaze.Abstractions
     {
         System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken);
     }
+    public interface IConfigurationIssueReceiver
+    {
+        void SetConfigurationIssues(string[] issues);
+    }
     public interface IDataDirectoryProvider
     {
         string DataDirectory { get; }

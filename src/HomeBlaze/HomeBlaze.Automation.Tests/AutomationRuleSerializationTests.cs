@@ -1,16 +1,30 @@
 using System.Text.Json;
+using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HomeBlaze.Automation.Tests;
 
-public class AutomationRuleSerializationTests
+public sealed class AutomationRuleSerializationTests : IDisposable
 {
-    private static ConfigurableSubjectSerializer CreateSerializer()
+    private readonly ServiceProvider _services = CreateServices();
+
+    public void Dispose() => _services.Dispose();
+
+    private static ServiceProvider CreateServices()
     {
-        var typeProvider = new TypeProvider().AddAssembly(typeof(AutomationRule).Assembly);
-        return new ConfigurableSubjectSerializer(typeProvider, new ServiceCollection().BuildServiceProvider());
+        var services = new ServiceCollection();
+        services.AddSingleton(new SubjectPathResolver(() => null));
+        services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+        services.AddSingleton<IAutomationAuthorizer, AllowAllAutomationAuthorizer>();
+        services.AddHomeBlazeAutomation();
+        return services.BuildServiceProvider();
     }
+
+    private ConfigurableSubjectSerializer CreateSerializer() =>
+        new(new TypeProvider().AddAssembly(typeof(AutomationRule).Assembly), _services);
 
     [Fact]
     public void WhenRuleIsSerialized_ThenTriggersAndActionsKeepTheirTypesAndValues()
@@ -74,13 +88,13 @@ public class AutomationRuleSerializationTests
     {
         // Arrange
         var serializer = CreateSerializer();
-        var json = RuleWithHold(value);
+        var json = AutomationWithRule(RuleWithHold(value));
 
         // Act
-        var rule = (AutomationRule)serializer.Deserialize(json)!;
+        using var automation = (Automation)serializer.Deserialize(json)!;
 
         // Assert
-        Assert.Equal(new TimeSpan(hours, minutes, seconds), Assert.IsType<PropertyTrigger>(Assert.Single(rule.Triggers)).For);
+        Assert.Equal(new TimeSpan(hours, minutes, seconds), Assert.IsType<PropertyTrigger>(Assert.Single(automation.Rules["retract"].Triggers)).For);
     }
 
     [Fact]
@@ -90,102 +104,184 @@ public class AutomationRuleSerializationTests
         var serializer = CreateSerializer();
 
         // Act
-        var rule = (AutomationRule)serializer.Deserialize(RuleWithHold("null"))!;
+        using var automation = (Automation)serializer.Deserialize(AutomationWithRule(RuleWithHold("null")))!;
 
         // Assert
-        Assert.Null(Assert.IsType<PropertyTrigger>(Assert.Single(rule.Triggers)).For);
-    }
-
-    [Theory]
-    [InlineData("\"10\"")]
-    [InlineData("\"ten minutes\"")]
-    [InlineData("600")]
-    public void WhenTheHoldIsNoDuration_ThenTheTriggersAreRejected(string value)
-    {
-        // Arrange
-        var serializer = CreateSerializer();
-        var skipped = new List<SkippedConfigurationProperty>();
-
-        // Act
-        var rule = (AutomationRule)serializer.Deserialize(RuleWithHold(value), created: null, skipped.Add)!;
-
-        // Assert
-        Assert.Empty(rule.Triggers);
-        Assert.Equal(nameof(AutomationRule.Triggers), Assert.Single(skipped).PropertyName);
+        Assert.Null(Assert.IsType<PropertyTrigger>(Assert.Single(automation.Rules["retract"].Triggers)).For);
     }
 
     [Theory]
     [InlineData("\"10\"", "10")]
     [InlineData("\"ten minutes\"", "ten minutes")]
     [InlineData("600", "600")]
-    public void WhenTheHoldIsNoDuration_ThenTheReasonNamesTheValue(string value, string expected)
+    public void WhenTheHoldIsNoDuration_ThenTheTriggerIsAnErrorThatNamesTheValue(string value, string expected)
     {
         // Arrange
         var serializer = CreateSerializer();
-        var skipped = new List<SkippedConfigurationProperty>();
 
         // Act
-        serializer.Deserialize(RuleWithHold(value), created: null, skipped.Add);
+        using var automation = (Automation)serializer.Deserialize(AutomationWithRule(RuleWithHold(value)))!;
 
         // Assert
         Assert.Equal(
-            $"'{expected}' is not a duration: use a text such as 10m, 1h30m or 00:10:00.",
-            Assert.Single(skipped).Exception.Message);
+            $"Rule 'Hold': trigger 1: '{expected}' is not a duration: use a text such as 10m, 1h30m or 00:10:00.",
+            GetConfigurationError(automation));
     }
 
     private static string RuleWithHold(string value) => $$"""
         {
-          "$type": "HomeBlaze.Automation.AutomationRule",
           "name": "Hold",
-          "triggers": [ { "$type": "PropertyTrigger", "expression": "/Weather/Gust > 8", "for": {{value}} } ]
+          "triggers": [ { "$type": "PropertyTrigger", "expression": "/Weather/Gust > 8", "for": {{value}} } ],
+          "actions": [ { "$type": "InvokeOperation", "operationPath": "/Blinds/Close" } ]
+        }
+        """;
+
+    private static string AutomationWithRule(string rule) => $$"""
+        {
+          "$type": "HomeBlaze.Automation.Automation",
+          "rules": { "retract": {{rule}} }
         }
         """;
 
     [Fact]
-    public void WhenTheRuleHasAnUnknownKey_ThenTheKeyIsIgnored()
+    public void WhenTheAutomationFileHasAKeyThatNamesNoSettingAndAValueThatCannotBeRead_ThenTheyAreConfigurationErrors()
     {
         // Arrange
         var serializer = CreateSerializer();
-        const string json = """
+        var json = """
             {
-              "$type": "HomeBlaze.Automation.AutomationRule",
-              "name": "Retract",
-              "guard": "not /Blinds/IsMoving",
-              "triggers": [ { "$type": "PropertyTrigger", "expression": "/Weather/Gust > 8" } ]
+              "$type": "HomeBlaze.Automation.Automation",
+              "enabeld": false,
+              "rules": { "retract": { "name": "Retract", "mode": "Sometimes" } }
             }
             """;
         var skipped = new List<SkippedConfigurationProperty>();
+        using var automation = (Automation)serializer.Deserialize(json, created: null, skipped.Add)!;
 
         // Act
-        var rule = (AutomationRule)serializer.Deserialize(json, created: null, skipped.Add)!;
+        serializer.ReportIssues(automation, json, skipped);
 
         // Assert
-        Assert.Equal("Retract", rule.Name);
-        Assert.Null(rule.OnlyIf);
-        Assert.Single(rule.Triggers);
-        Assert.Empty(skipped);
+        Assert.Equal(2, automation.ConfigurationIssues.Length);
+        Assert.StartsWith("the value of 'rules' could not be read: ", automation.ConfigurationIssues[0]);
+        Assert.Equal("'enabeld' is no setting of Automation", automation.ConfigurationIssues[1]);
+        Assert.False(AutomationCompiler.TryCompile(
+            automation.States, automation.InitialState, automation.Rules, automation.RuleOrder, automation.ConfigurationIssues, out _, out var error));
+        Assert.StartsWith("the value of 'rules' could not be read: ", error);
+        Assert.EndsWith("; 'enabeld' is no setting of Automation", error);
+    }
+
+    private static string? GetConfigurationError(Automation automation)
+    {
+        AutomationCompiler.TryCompile(automation.States, automation.InitialState, automation.Rules, automation.RuleOrder, out _, out var error);
+        return error;
+    }
+
+    [Theory]
+    [InlineData("\"OnlyIf\": \"not /Blinds/IsMoving\"", "Rule 'Retract': 'OnlyIf' is no setting of a rule")]
+    [InlineData("\"guard\": \"not /Blinds/IsMoving\"", "Rule 'Retract': 'guard' is no setting of a rule")]
+    [InlineData("\"status\": \"Armed\"", "Rule 'Retract': 'status' is no setting of a rule")]
+    [InlineData("\"title\": \"Retract\"", "Rule 'Retract': 'title' is no setting of a rule")]
+    [InlineData("\"runCount\": 3", "Rule 'Retract': 'runCount' is no setting of a rule")]
+    [InlineData("\"lastTriggeredAt\": \"2026-11-06T12:00:00Z\"", "Rule 'Retract': 'lastTriggeredAt' is no setting of a rule")]
+    public void WhenTheRuleHasAnUnknownKey_ThenTheRuleIsAnErrorThatNamesTheKey(string setting, string expected)
+    {
+        // Arrange
+        var serializer = CreateSerializer();
+        var rule = $$"""
+            {
+              "name": "Retract",
+              {{setting}},
+              "triggers": [ { "$type": "PropertyTrigger", "expression": "/Weather/Gust > 8" } ],
+              "actions": [ { "$type": "InvokeOperation", "operationPath": "/Blinds/Close" } ]
+            }
+            """;
+
+        // Act
+        using var automation = (Automation)serializer.Deserialize(AutomationWithRule(rule))!;
+
+        // Assert
+        Assert.Equal(expected, GetConfigurationError(automation));
+    }
+
+    [Theory]
+    [InlineData("{ \"$type\": \"PropertyTrigger\", \"expression\": \"/A/B > 1\", \"hold\": \"10m\" }", "'hold' is no setting of PropertyTrigger")]
+    [InlineData("{ \"$type\": \"PropertyTrigger\", \"expression\": \"/A/B > 1\", \"Rearm\": \"/A/B < 1\" }", "'Rearm' is no setting of PropertyTrigger")]
+    [InlineData("{ \"$type\": \"TimerTrigger\", \"interval\": \"00:01:00\" }", "the type 'TimerTrigger' is unknown")]
+    [InlineData("{ \"expression\": \"/A/B > 1\" }", "it has no $type")]
+    public void WhenATriggerCannotBeRead_ThenTheRuleIsAnErrorThatNamesTheTrigger(string trigger, string expected)
+    {
+        // Arrange
+        var serializer = CreateSerializer();
+        var rule = $$"""
+            {
+              "name": "Retract",
+              "triggers": [ { "$type": "PropertyTrigger", "expression": "/Weather/Gust > 8" }, {{trigger}} ],
+              "actions": [ { "$type": "InvokeOperation", "operationPath": "/Blinds/Close" } ]
+            }
+            """;
+
+        // Act
+        using var automation = (Automation)serializer.Deserialize(AutomationWithRule(rule))!;
+
+        // Assert
+        Assert.Equal($"Rule 'Retract': trigger 2: {expected}", GetConfigurationError(automation));
+        Assert.Equal(2, automation.Rules["retract"].Triggers.Length);
+    }
+
+    [Theory]
+    [InlineData("{ \"$type\": \"SetProperty\", \"id\": \"b\", \"propertyPath\": \"/X/Z\", \"value\": 5 }", "action 'b': 'value': The JSON value could not be converted to System.String.")]
+    [InlineData("{ \"$type\": \"InvokeOperation\", \"id\": \"b\", \"operationPath\": \"/X/Z\", \"onlyIf\": \"/X/Moving == false\" }", "action 'b': 'onlyIf' is no setting of InvokeOperation")]
+    public void WhenAnActionCannotBeRead_ThenTheOtherActionsLoadAndTheRuleIsAnErrorThatNamesTheAction(string action, string expected)
+    {
+        // Arrange
+        var serializer = CreateSerializer();
+        var rule = $$"""
+            {
+              "name": "Retract",
+              "triggers": [ { "$type": "PropertyTrigger", "expression": "/Weather/Gust > 8" } ],
+              "actions": [ { "$type": "InvokeOperation", "id": "a", "operationPath": "/X/Y" }, {{action}} ]
+            }
+            """;
+
+        // Act
+        using var automation = (Automation)serializer.Deserialize(AutomationWithRule(rule))!;
+
+        // Assert
+        Assert.Equal($"Rule 'Retract': {expected}", GetConfigurationError(automation));
+        Assert.Equal("/X/Y", Assert.IsType<InvokeOperationAction>(automation.Rules["retract"].Actions[0]).OperationPath);
     }
 
     [Fact]
-    public void WhenTriggerHasAnUnknownDiscriminator_ThenTheTriggersAreRejected()
+    public void WhenAnAutomationWithElementsAndKeysThatCannotBeReadIsSaved_ThenTheyAreWrittenBackUnchanged()
     {
         // Arrange
         var serializer = CreateSerializer();
-        const string json = """
+        const string rule = """
             {
-              "$type": "HomeBlaze.Automation.AutomationRule",
-              "name": "Unknown",
-              "triggers": [ { "$type": "TimerTrigger", "interval": "00:01:00" } ]
+              "name": "Retract",
+              "OnlyIf": "not /Blinds/IsMoving",
+              "triggers": [ { "$type": "PropertyTrigger", "expression": "/Weather/Gust > 8", "hold": "10m" } ],
+              "actions": [
+                { "$type": "InvokeOperation", "id": "a", "operationPath": "/X/Y" },
+                { "$type": "SetProperty", "id": "b", "propertyPath": "/X/Z", "value": 5 }
+              ]
             }
             """;
-        var skipped = new List<SkippedConfigurationProperty>();
+        using var automation = (Automation)serializer.Deserialize(AutomationWithRule(rule))!;
 
         // Act
-        var rule = (AutomationRule)serializer.Deserialize(json, created: null, skipped.Add)!;
+        var saved = serializer.Serialize(automation);
+        using var reloaded = (Automation)serializer.Deserialize(saved)!;
 
         // Assert
-        Assert.Empty(rule.Triggers);
-        Assert.Equal(nameof(AutomationRule.Triggers), Assert.Single(skipped).PropertyName);
+        using var document = JsonDocument.Parse(saved);
+        var savedRule = document.RootElement.GetProperty("rules").GetProperty("retract");
+        Assert.Equal("not /Blinds/IsMoving", savedRule.GetProperty("OnlyIf").GetString());
+        Assert.Equal("10m", savedRule.GetProperty("triggers")[0].GetProperty("hold").GetString());
+        Assert.Equal("/X/Y", savedRule.GetProperty("actions")[0].GetProperty("operationPath").GetString());
+        Assert.Equal(5, savedRule.GetProperty("actions")[1].GetProperty("value").GetInt32());
+        Assert.Equal(GetConfigurationError(automation), GetConfigurationError(reloaded));
     }
 
     [Fact]

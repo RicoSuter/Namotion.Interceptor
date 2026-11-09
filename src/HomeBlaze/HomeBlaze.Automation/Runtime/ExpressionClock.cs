@@ -93,8 +93,8 @@ internal sealed partial class ExpressionClock
     /// Gets the next instant after <paramref name="now"/> at which a comparison can change, with the instants the paths
     /// lead to now and the local time of <paramref name="timeZone"/>; null when none can change before one of the
     /// instants does. Also gets whether a comparison changed already before <paramref name="now"/>, which a wall clock set
-    /// back can undo. False when a path leads to a value that is no instant, so that the expression is evaluated every
-    /// second.
+    /// back can undo. An instant whose change is beyond the range of <see cref="DateTimeOffset"/> never changes. False
+    /// when a path leads to a value that is no instant, so that the expression is evaluated every second.
     /// </summary>
     public bool TryGetNextChange(
         Func<string, object?> readInstant, DateTimeOffset now, TimeZoneInfo timeZone, out DateTimeOffset? nextChange, out bool hasChanged)
@@ -106,6 +106,9 @@ internal sealed partial class ExpressionClock
             switch (readInstant(comparison.Path))
             {
                 case null:
+                    continue;
+                // A change beyond the range of DateTimeOffset never comes.
+                case DateTimeOffset instant when DateTimeOffset.MaxValue.UtcTicks - instant.UtcTicks < comparison.Duration.Ticks:
                     continue;
                 case DateTimeOffset instant:
                     hasChanged |= instant + comparison.Duration <= now;
@@ -153,17 +156,9 @@ internal sealed partial class ExpressionClock
     // A strict comparison changes one tick after the boundary, for example now - x > d at x + d plus one tick.
     private static TimeSpan GetOffset(Match match) => match.Groups["operator"].Value is ">" or "<=" ? TimeSpan.FromTicks(1) : TimeSpan.Zero;
 
-    private static TimeSpan? ReadDuration(string text)
-    {
-        if (!ParsedExpression.TryParse(text, AutomationPaths.Separator, AutomationVariables.All, out var expression, out _) ||
-            !expression.Paths.IsEmpty)
-        {
-            return null;
-        }
-
-        var context = new ConstantContext();
-        return expression.Evaluate(ref context).Value is TimeSpan duration ? duration : null;
-    }
+    // TryParse refuses a duration beyond AutomationDuration.Maximum, which added to an instant can leave the range of
+    // DateTimeOffset; such a comparison is evaluated every second.
+    private static TimeSpan? ReadDuration(string text) => AutomationDuration.TryParse(text, out var duration) ? duration : null;
 
     [GeneratedRegex(@"(?<=(^|\(|\band|\bor|&&|\|\|)\s*)(?<![\w./])now\s+-\s+(?<path>[^\s()]+)\s*(?<operator>>=|<=|>|<)\s*(?<duration>[0-9][0-9A-Za-z.]*)(?=\s*($|\)|and\b|or\b|&&|\|\|))")]
     private static partial Regex ElapsedComparisonPattern();
@@ -182,15 +177,4 @@ internal sealed partial class ExpressionClock
 
     /// <summary>A comparison <c>time op duration</c>, which changes when the local time of day passes <see cref="TimeOfDay"/>.</summary>
     internal readonly record struct TimeOfDayComparison(TimeSpan TimeOfDay);
-
-    private readonly struct ConstantContext : IExpressionContext
-    {
-        public ExpressionValue ResolvePath(string path) => ExpressionValue.Missing;
-
-        public ExpressionValue ResolveVariable(string variable, string? memberPath) => ExpressionValue.Missing;
-
-        public ExpressionValue ApplyPipe(string name, ImmutableArray<string> arguments, ExpressionValue input) => ExpressionValue.Missing;
-
-        public string ToText(ExpressionValue result) => string.Empty;
-    }
 }

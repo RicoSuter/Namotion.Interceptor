@@ -11,7 +11,7 @@ namespace HomeBlaze.Automation.Blazor.Diagram;
 /// <param name="InState">The state the rule is active in, or null for any state.</param>
 /// <param name="TargetState">The state of its state change when it has exactly one, otherwise null.</param>
 /// <param name="ActionCount">The number of its actions.</param>
-public sealed record StateDiagramRule(string Key, string Name, string? InState, string? TargetState, int ActionCount)
+internal sealed record StateDiagramRule(string Key, string Name, string? InState, string? TargetState, int ActionCount)
 {
     private static StateDiagramRule Create(string key, string name, string? inState, IEnumerable<AutomationAction?>? actions)
     {
@@ -20,7 +20,7 @@ public sealed record StateDiagramRule(string Key, string Name, string? InState, 
         return new StateDiagramRule(key, name, inState, targets.Count == 1 ? targets[0] : null, list.Count);
     }
 
-    public static StateDiagramRule From(string key, AutomationRule rule) => Create(key, rule.Name ?? key, rule.InState, rule.Actions);
+    internal static StateDiagramRule From(string key, AutomationRule rule) => Create(key, rule.Name ?? key, rule.InState, rule.Actions);
 
-    public static StateDiagramRule From(RuleDraft rule) => Create(rule.Key, rule.DisplayName, rule.InState, rule.Actions.Select(action => action.Value));
+    internal static StateDiagramRule From(RuleDraft rule) => Create(rule.Key, rule.DisplayName, rule.InState, rule.Actions.Select(action => action.Value));
 }

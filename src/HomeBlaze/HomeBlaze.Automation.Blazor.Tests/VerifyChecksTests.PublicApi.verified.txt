@@ -18,7 +18,6 @@ namespace HomeBlaze.Automation.Blazor
         public event System.Action<bool>? IsValidChanged;
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public void Dispose() { }
-        protected override void OnAfterRender(bool firstRender) { }
         protected override void OnInitialized() { }
         public System.Threading.Tasks.Task SaveAsync(System.Threading.CancellationToken cancellationToken) { }
     }
@@ -45,12 +44,16 @@ namespace HomeBlaze.Automation.Blazor
         public RuleTestDialog() { }
         [Microsoft.AspNetCore.Components.Parameter]
         public string EvaluatedAt { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool IsRunningRules { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.AutomationRuleTestResult Result { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.AutomationRule Rule { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override void OnParametersSet() { }
     }
@@ -81,51 +84,10 @@ namespace HomeBlaze.Automation.Blazor.Diagram
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public System.Threading.Tasks.ValueTask DisposeAsync() { }
         protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
+        protected override void OnParametersSet() { }
+        protected override bool ShouldRender() { }
     }
-    public sealed class StateDiagramEdge : System.IEquatable<HomeBlaze.Automation.Blazor.Diagram.StateDiagramEdge>
-    {
-        public StateDiagramEdge(string RuleKey, string Label, string? Detail, string? From, string To, string PathData, double LabelX, double LabelY, string FullLabel) { }
-        public string? Detail { get; init; }
-        public string? From { get; init; }
-        public string FullLabel { get; init; }
-        public string Label { get; init; }
-        public double LabelX { get; init; }
-        public double LabelY { get; init; }
-        public string PathData { get; init; }
-        public string RuleKey { get; init; }
-        public string To { get; init; }
-    }
-    public sealed class StateDiagramLayout
-    {
-        public const int MaxEdges = 40;
-        public const double NodeHeight = 64D;
-        public const double NodeWidth = 150D;
-        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Diagram.StateDiagramEdge> Edges { get; }
-        public double Height { get; }
-        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Diagram.StateDiagramNode> Nodes { get; }
-        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Diagram.StateDiagramRule> OtherRules { get; }
-        public double Width { get; }
-        public static HomeBlaze.Automation.Blazor.Diagram.StateDiagramLayout Create(System.Collections.Generic.IReadOnlyList<string> states, string? initialState, System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Diagram.StateDiagramRule> rules) { }
-    }
-    public sealed class StateDiagramNode : System.IEquatable<HomeBlaze.Automation.Blazor.Diagram.StateDiagramNode>
-    {
-        public StateDiagramNode(string? State, bool IsInitial, double X, double Y) { }
-        public bool IsInitial { get; init; }
-        public string? State { get; init; }
-        public double X { get; init; }
-        public double Y { get; init; }
-    }
-    public sealed class StateDiagramRule : System.IEquatable<HomeBlaze.Automation.Blazor.Diagram.StateDiagramRule>
-    {
-        public StateDiagramRule(string Key, string Name, string? InState, string? TargetState, int ActionCount) { }
-        public int ActionCount { get; init; }
-        public string? InState { get; init; }
-        public string Key { get; init; }
-        public string Name { get; init; }
-        public string? TargetState { get; init; }
-        public static HomeBlaze.Automation.Blazor.Diagram.StateDiagramRule From(HomeBlaze.Automation.Blazor.Editing.RuleDraft rule) { }
-        public static HomeBlaze.Automation.Blazor.Diagram.StateDiagramRule From(string key, HomeBlaze.Automation.AutomationRule rule) { }
-    }
+    public sealed class StateDiagramLayout { }
     public class StateDiagramText : Microsoft.AspNetCore.Components.ComponentBase
     {
         public StateDiagramText() { }
@@ -187,41 +149,20 @@ namespace HomeBlaze.Automation.Blazor.Editing
         protected override void OnInitialized() { }
         protected override void OnParametersSet() { }
     }
-    public sealed class AutomationDraft
-    {
-        public bool Enabled { get; set; }
-        public string? InitialState { get; set; }
-        public int InputErrorVersion { get; }
-        public string? Name { get; set; }
-        public System.Collections.Generic.IReadOnlyList<string> Roles { get; set; }
-        public System.Collections.Generic.List<HomeBlaze.Automation.Blazor.Editing.RuleDraft> Rules { get; }
-        public System.Collections.Generic.List<string> States { get; }
-        public HomeBlaze.Automation.Blazor.Editing.RuleDraft AddRule() { }
-        public string AddState() { }
-        public void ApplyTo(HomeBlaze.Automation.Automation automation) { }
-        public HomeBlaze.Automation.Blazor.Editing.RuleDraft? FindRule(string? key) { }
-        public HomeBlaze.Automation.IAutomationPermissions GetPermissions() { }
-        public void MoveRule(HomeBlaze.Automation.Blazor.Editing.RuleDraft rule, int offset) { }
-        public void RemoveRule(HomeBlaze.Automation.Blazor.Editing.RuleDraft rule) { }
-        public bool RemoveState(string state) { }
-        public bool RenameState(string state, string newName) { }
-        public void SetInputError(string inputId, HomeBlaze.Automation.AutomationValidationError? error) { }
-        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.AutomationValidationError> Validate() { }
-        public static HomeBlaze.Automation.Blazor.Editing.AutomationDraft From(HomeBlaze.Automation.Automation automation) { }
-    }
+    public sealed class AutomationDraft { }
     public class ConditionField : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public ConditionField() { }
         [Microsoft.AspNetCore.Components.Parameter]
-        public System.Collections.Generic.IReadOnlyList<string>? Fields { get; set; }
+        public System.Collections.Immutable.ImmutableArray<string> Fields { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public System.Func<string, System.Collections.Generic.IReadOnlyList<string>>? Hints { get; set; }
+        public System.Func<string, System.Collections.Immutable.ImmutableArray<string>>? Hints { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string Label { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string Lead { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public System.Func<string, System.Func<HomeBlaze.Components.Inputs.ExpressionPreview>?>? Preview { get; set; }
+        public System.Func<string, System.Func<HomeBlaze.Components.Abstractions.Expressions.ExpressionPreview>?>? Preview { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string TestId { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -234,19 +175,9 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public void Dispose() { }
         protected override void OnInitialized() { }
     }
-    public sealed class DraftItem<T>
-        where T :  class
-    {
-        public DraftItem(T value) { }
-        public bool IsOperationChanged { get; set; }
-        public T Value { get; set; }
-    }
     public class DurationField : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public DurationField() { }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public HomeBlaze.Automation.Blazor.Editing.AutomationDraft Draft { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? HelperText { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -301,9 +232,6 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public Microsoft.AspNetCore.Components.EventCallback Changed { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
-        public HomeBlaze.Automation.Blazor.Editing.AutomationDraft Draft { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.Blazor.Editing.RuleExpressions Expressions { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public System.DateTimeOffset? LastTriggeredAt { get; set; }
@@ -316,9 +244,6 @@ namespace HomeBlaze.Automation.Blazor.Editing
     public class PropertyTriggerEditor : Microsoft.AspNetCore.Components.ComponentBase
     {
         public PropertyTriggerEditor() { }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public HomeBlaze.Automation.Blazor.Editing.AutomationDraft Draft { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.Blazor.Editing.RuleExpressions Expressions { get; set; }
@@ -335,28 +260,7 @@ namespace HomeBlaze.Automation.Blazor.Editing
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override void OnParametersSet() { }
     }
-    public sealed class RuleDraft
-    {
-        public System.Collections.Generic.List<HomeBlaze.Automation.Blazor.Editing.DraftItem<HomeBlaze.Automation.AutomationAction>> Actions { get; }
-        public bool AllowsEvent { get; }
-        public string DisplayName { get; }
-        public string? InState { get; set; }
-        public string Key { get; }
-        public HomeBlaze.Automation.AutomationRuleMode Mode { get; set; }
-        public string? Name { get; set; }
-        public string? OnlyIf { get; set; }
-        public System.Collections.Generic.IEnumerable<string> TargetStates { get; }
-        public System.Collections.Generic.IEnumerable<string> Texts { get; }
-        public System.Collections.Generic.List<HomeBlaze.Automation.Blazor.Editing.DraftItem<HomeBlaze.Automation.AutomationTrigger>> Triggers { get; }
-        public void AddCallOperation() { }
-        public void AddChangeState(string targetState) { }
-        public void AddSetProperty() { }
-        public void AddTrigger(HomeBlaze.Automation.AutomationTrigger trigger) { }
-        public void MoveAction(HomeBlaze.Automation.Blazor.Editing.DraftItem<HomeBlaze.Automation.AutomationAction> action, int offset) { }
-        public HomeBlaze.Automation.AutomationRule ToRule(System.Func<string, HomeBlaze.Abstractions.Metadata.MethodMetadata?> getMethod) { }
-        public static HomeBlaze.Automation.Blazor.Editing.RuleDraft Create(string key, string name) { }
-        public static HomeBlaze.Automation.Blazor.Editing.RuleDraft From(string key, HomeBlaze.Automation.AutomationRule rule) { }
-    }
+    public sealed class RuleDraft { }
     public class RuleEditor : Microsoft.AspNetCore.Components.ComponentBase
     {
         public RuleEditor() { }
@@ -369,7 +273,7 @@ namespace HomeBlaze.Automation.Blazor.Editing
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.Blazor.Editing.AutomationDraft Draft { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.AutomationValidationError> Errors { get; set; }
+        public System.Collections.Immutable.ImmutableArray<HomeBlaze.Automation.AutomationValidationError> Errors { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback InputChanged { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -383,14 +287,6 @@ namespace HomeBlaze.Automation.Blazor.Editing
     public sealed class RuleExpressions
     {
         public RuleExpressions(HomeBlaze.Automation.Automation automation, string ruleKey, bool allowsEvent, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone = null) { }
-        public bool AllowsEvent { get; }
-        public HomeBlaze.Automation.Automation Automation { get; }
-        public System.Func<HomeBlaze.Components.Inputs.ExpressionPreview>? Preview(string text) { }
-        public System.Func<string?>? Template(string text) { }
-        public string? Validate(string text) { }
-        public string? ValidateTemplate(string text) { }
-        public static System.Collections.Generic.IReadOnlyList<string> GetConditionHints(string text) { }
-        public static string? ValidateFilter(string text) { }
     }
     public class RulesTab : Microsoft.AspNetCore.Components.ComponentBase
     {
@@ -404,7 +300,7 @@ namespace HomeBlaze.Automation.Blazor.Editing
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.Blazor.Editing.AutomationDraft Draft { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.AutomationValidationError> Errors { get; set; }
+        public System.Collections.Immutable.ImmutableArray<HomeBlaze.Automation.AutomationValidationError> Errors { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback InputChanged { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -424,8 +320,6 @@ namespace HomeBlaze.Automation.Blazor.Editing
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.Blazor.Editing.AutomationDraft Draft { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback InputChanged { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<string> RuleOpened { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }

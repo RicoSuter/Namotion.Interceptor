@@ -72,18 +72,14 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
 
     /// <summary>
     /// Resolves a subject from a path as <see cref="ResolveSubject(string, PathStyle, IInterceptorSubject?)"/> does and
-    /// reports the graph route of the resolution to <paramref name="recorder"/>, also for a result served from the cache.
+    /// reports the graph route of the resolution to <paramref name="recorder"/> unless it is null, also for a result served
+    /// from the cache.
     /// </summary>
-    /// <exception cref="ArgumentNullException"><paramref name="recorder"/> is null.</exception>
     public IInterceptorSubject? ResolveSubject(
         string path,
         PathStyle style,
         IInterceptorSubject? relativeTo,
-        ISubjectPathRecorder recorder)
-    {
-        ArgumentNullException.ThrowIfNull(recorder);
-        return ResolveSubjectCore(path, style, relativeTo, recorder);
-    }
+        ISubjectPathRecorder? recorder) => ResolveSubjectCore(path, style, relativeTo, recorder);
 
     private IInterceptorSubject? ResolveSubjectCore(
         string path,
@@ -227,18 +223,13 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
 
     /// <summary>
     /// Gets all paths to the subject as <see cref="GetPaths(IInterceptorSubject, PathStyle)"/> does and reports the graph
-    /// route of the paths to <paramref name="recorder"/>, also for paths served from the cache: a parent step of the
-    /// subject, then the properties that hold the subject and its ancestors.
+    /// route of the paths to <paramref name="recorder"/> unless it is null, also for paths served from the cache: a parent
+    /// step of the subject, then the properties that hold the subject and its ancestors.
     /// </summary>
-    /// <exception cref="ArgumentNullException"><paramref name="recorder"/> is null.</exception>
     public IReadOnlyList<string> GetPaths(
         IInterceptorSubject subject,
         PathStyle style,
-        ISubjectPathRecorder recorder)
-    {
-        ArgumentNullException.ThrowIfNull(recorder);
-        return GetPathsCore(subject, style, recorder);
-    }
+        ISubjectPathRecorder? recorder) => GetPathsCore(subject, style, recorder);
 
     private IReadOnlyList<string> GetPathsCore(
         IInterceptorSubject subject,
@@ -292,14 +283,13 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         PathStyle style) => GetPath(GetPathsCore(subject, style, recorder: null));
 
     /// <summary>
-    /// Gets the first path to the subject and reports the graph route of its paths to <paramref name="recorder"/>, see
-    /// <see cref="GetPaths(IInterceptorSubject, PathStyle, ISubjectPathRecorder)"/>.
+    /// Gets the first path to the subject and reports the graph route of its paths to <paramref name="recorder"/> unless it
+    /// is null, see <see cref="GetPaths(IInterceptorSubject, PathStyle, ISubjectPathRecorder?)"/>.
     /// </summary>
-    /// <exception cref="ArgumentNullException"><paramref name="recorder"/> is null.</exception>
     public string? GetPath(
         IInterceptorSubject subject,
         PathStyle style,
-        ISubjectPathRecorder recorder) => GetPath(GetPaths(subject, style, recorder));
+        ISubjectPathRecorder? recorder) => GetPath(GetPathsCore(subject, style, recorder));
 
     private static string? GetPath(IReadOnlyList<string> paths) => paths.Count > 0 ? paths[0] : null;
 

@@ -54,6 +54,19 @@
     flex: 0 0 240px;
 }
 
+.automation-editor ::deep .automation-rule-select {
+    display: block;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+}
+
 .automation-editor ::deep .automation-rule-details,
 .automation-editor ::deep .automation-state-diagram {
     flex: 1 1 480px;

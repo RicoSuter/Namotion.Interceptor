@@ -54,7 +54,7 @@
                 <MudText Typo="Typo.h6">State</MudText>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">Read only. Edit the states in the States tab of the editor.</MudText>
                 <div class="mt-2" style="overflow-x: auto;">
-                    <StateDiagram Layout="@GetLayout(automation)" CurrentState="@automation.CurrentState" CurrentDetail="@GetCurrentDetail(automation)" />
+                    <StateDiagram Layout="@_layouts.Get(automation)" CurrentState="@automation.CurrentState" CurrentDetail="@GetCurrentDetail(automation)" />
                 </div>
             </section>
         }
@@ -97,7 +97,7 @@
                                     <td>@(rule.RunCount ?? 0)</td>
                                     <td>
                                         <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Science"
-                                                   OnClick="@(() => TestAsync(key, rule))" data-testid="automation-test-now">Test now</MudButton>
+                                                   OnClick="@(() => TestAsync(automation, key, rule))" data-testid="automation-test-now">Test now</MudButton>
                                     </td>
                                 </tr>
                             }
@@ -132,7 +132,7 @@
                     @foreach (var run in _recentRuns.Runs)
                     {
                         <div class="d-flex flex-wrap align-center gap-2" data-testid="automation-run">
-                            <MudText Typo="Typo.caption" Style="min-width: 160px;">@FormatInstant(run.At, "Last run")</MudText>
+                            <MudText Typo="Typo.caption" Style="min-width: 160px;">@(run.At is { } at ? AutomationTime.FormatWithSeconds(TimeZone, at, TimeProvider.GetUtcNow()) : "Last run")</MudText>
                             <MudText Typo="Typo.body2" Style="font-weight: 500;">@run.RuleName</MudText>
                             @if (run.Outcome is { } outcome)
                             {
@@ -153,8 +153,7 @@
 
     private readonly RunReloadSchedule _reloads = new(ReloadInterval, RetryWindow);
     private readonly CancellationTokenSource _disposal = new();
-    private StateDiagramLayout? _layout;
-    private (string[] States, string? InitialState, Dictionary<string, AutomationRule> Rules, string[] RuleOrder) _layoutConfiguration;
+    private readonly StateDiagramLayoutCache _layouts = new();
     private RecentRunsResult _recentRuns = new(false, [], null, false);
     private int? _renderedRunsKey;
     private int? _loadedRunsKey;
@@ -216,8 +215,10 @@
     private static string? GetDryRunHint(AutomationRule rule) =>
         AutomationSummary.GetDryRunHint(rule.Mode, rule.InState, (rule.Actions ?? []).OfType<ChangeStateAction>().Select(action => action.TargetState));
 
-    private async Task TestAsync(string key, AutomationRule rule)
+    private async Task TestAsync(Automation automation, string key, AutomationRule rule)
     {
+        var status = automation.Status;
+        var isRunningRules = automation.IsRunningRules;
         AutomationRuleTestResult result;
         try
         {
@@ -234,6 +235,8 @@
         {
             { dialog => dialog.Result, result },
             { dialog => dialog.Rule, rule },
+            { dialog => dialog.Status, status },
+            { dialog => dialog.IsRunningRules, isRunningRules },
             { dialog => dialog.EvaluatedAt, AutomationTime.Format(TimeZone, TimeProvider.GetUtcNow(), TimeProvider.GetUtcNow()) }
         };
 
@@ -271,20 +274,6 @@
 
     private string GetCurrentDetail(Automation automation) =>
         automation.StateEnteredAt is { } since ? $"Current, since {AutomationTime.Format(TimeZone, since, TimeProvider.GetUtcNow())}" : "Current";
-
-    // The page renders on every change of a status or a run, so the layout is computed again only after a configuration was
-    // applied, which replaces these values.
-    private StateDiagramLayout GetLayout(Automation automation)
-    {
-        var configuration = (automation.States, automation.InitialState, automation.Rules, automation.RuleOrder);
-        if (_layout is null || _layoutConfiguration != configuration)
-        {
-            _layoutConfiguration = configuration;
-            _layout = StateDiagramLayout.Create(automation.States, automation.InitialState, [.. automation.GetRulesInOrder().Select(pair => StateDiagramRule.From(pair.Key, pair.Value))]);
-        }
-
-        return _layout;
-    }
 
     // From the roles rather than the status, which names a refused action only after it ran.
     private static string? GetRolesError(Automation automation) =>

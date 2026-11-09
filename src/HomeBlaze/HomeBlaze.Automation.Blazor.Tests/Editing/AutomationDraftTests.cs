@@ -348,29 +348,6 @@ public class AutomationDraftTests
     }
 
     [Fact]
-    public void WhenAnInputErrorIsSetAgainOrClearedTwice_ThenTheDraftIsInvalidUntilItIsClearedAndTheVersionChangesOnlyWithTheErrors()
-    {
-        // Arrange
-        var draft = AutomationDraft.From(CreateWasher());
-        var error = new AutomationValidationError("finished", "For at least: use a duration such as 20s");
-
-        // Act
-        draft.SetInputError("hold", error);
-        draft.SetInputError("hold", error);
-        var versionWithError = draft.InputErrorVersion;
-        var withError = draft.Validate();
-        draft.SetInputError("hold", null);
-        draft.SetInputError("hold", null);
-        var withoutError = draft.Validate();
-
-        // Assert
-        Assert.Equal(1, versionWithError);
-        Assert.Equal(2, draft.InputErrorVersion);
-        Assert.Equal(error, Assert.Single(withError));
-        Assert.Empty(withoutError);
-    }
-
-    [Fact]
     public void WhenActionsAreAdded_ThenEachGetsTheNextFreeIdOfItsKind()
     {
         // Arrange

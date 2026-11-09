@@ -12,7 +12,7 @@ namespace HomeBlaze.Automation.Events;
 internal static class EventSources
 {
     private static readonly MethodInfo SubscribeTypedMethod =
-        typeof(EventSources).GetMethod(nameof(SubscribeTyped), BindingFlags.Public | BindingFlags.Static)!;
+        new Func<object, Action<IEvent>, IDisposable>(SubscribeTyped<IEvent>).Method.GetGenericMethodDefinition();
 
     // Weak, so that the types of an unloaded plugin are not kept alive.
     private static readonly ConditionalWeakTable<Type, Type[]> EventTypesBySubjectType = new();
@@ -38,8 +38,7 @@ internal static class EventSources
         return subscribe(source, onEvent);
     }
 
-    /// <summary>Called through <see cref="Subscribe"/> only.</summary>
-    public static IDisposable SubscribeTyped<TEvent>(object source, Action<IEvent> onEvent)
+    private static IDisposable SubscribeTyped<TEvent>(object source, Action<IEvent> onEvent)
         where TEvent : IEvent =>
         ((IObservable<TEvent>)source).Subscribe(new EventObserver<TEvent>(onEvent));
 

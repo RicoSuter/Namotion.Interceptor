@@ -57,24 +57,22 @@ jobs:
             homeblaze:
               - 'src/HomeBlaze/**'
               - 'src/Namotion.Interceptor.Expressions/**'
-              - 'src/Directory.Packages.props'
-              - 'src/Directory.Build.props'
-              - 'src/Directory.Build.targets'
-              - '.github/workflows/build.yml'
+              - &build-files
+                - 'src/Directory.Packages.props'
+                - 'src/Directory.Build.props'
+                - 'src/Directory.Build.targets'
+                - '.github/workflows/build.yml'
             # Everything HomeBlaze.Automation.Tests builds from.
             automation:
               - *shared
+              - *build-files
               - 'src/Namotion.Interceptor.Expressions/**'
               - 'src/HomeBlaze/HomeBlaze.Automation/**'
               - 'src/HomeBlaze/HomeBlaze.Automation.Tests/**'
               - 'src/HomeBlaze/HomeBlaze.Services/**'
               - 'src/HomeBlaze/HomeBlaze.*Abstractions/**'
               - 'src/HomeBlaze/Directory.Build.props'
-              - 'src/Directory.Packages.props'
-              - 'src/Directory.Build.props'
-              - 'src/Directory.Build.targets'
               - 'src/.editorconfig'
-              - '.github/workflows/build.yml'
             nugetplugins:
               - 'src/HomeBlaze/Namotion.NuGet.Plugins/**'
               - 'src/HomeBlaze/Namotion.NuGet.Plugins.Tests/**'

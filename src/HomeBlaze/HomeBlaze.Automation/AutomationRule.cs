@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
@@ -59,7 +61,7 @@ public partial class AutomationRule : IConfigurable, ITitleProvider
     /// <summary>
     /// The number of runs: those that executed their actions and dry runs. A request that did not run, such as one that
     /// <see cref="OnlyIf"/> rejected, is not counted. Null until the automation restored it. After a crash it can restart
-    /// below the last value history recorded, since runs are saved at most every 5 seconds.
+    /// below the last value history recorded, since the runs of the last seconds before it may not be saved yet.
     /// </summary>
     [State("Runs", IsCumulative = true, Position = 3)]
     public partial long? RunCount { get; internal set; }
@@ -73,6 +75,14 @@ public partial class AutomationRule : IConfigurable, ITitleProvider
 
     [Derived]
     public string? Title => Name;
+
+    /// <summary>
+    /// The keys of the configuration of the rule that name no setting, such as a misspelled <c>onlyIf</c> or a state such
+    /// as <c>status</c>; they make the rule invalid and are saved back as they were written.
+    /// </summary>
+    [JsonExtensionData]
+    [JsonInclude]
+    internal Dictionary<string, JsonElement>? UnknownSettings { get; set; }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 

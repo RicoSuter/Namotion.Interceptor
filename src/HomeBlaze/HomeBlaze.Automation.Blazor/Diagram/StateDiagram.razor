@@ -21,7 +21,9 @@
         @foreach (var edge in Layout.Edges)
         {
             var isEdgeClickable = RuleClicked.HasDelegate;
-            <g @onclick="@(() => RuleClicked.InvokeAsync(edge.RuleKey))" @onkeydown="@(args => OnKeyDownAsync(args, () => RuleClicked.InvokeAsync(edge.RuleKey)))"
+            @* A read-only diagram registers no handlers. *@
+            <g @onclick="@(isEdgeClickable ? OnClick(() => RuleClicked.InvokeAsync(edge.RuleKey)) : default)"
+               @onkeydown="@(isEdgeClickable ? OnKeyDown(() => RuleClicked.InvokeAsync(edge.RuleKey)) : default)"
                role="@(isEdgeClickable ? "button" : null)" tabindex="@(isEdgeClickable ? "0" : null)"
                aria-label="@(isEdgeClickable ? $"{edge.FullLabel}: {edge.From ?? "Any state"} to {edge.To}" : null)"
                data-automation-clickable="@(isEdgeClickable ? "true" : null)" data-testid="automation-state-edge">
@@ -41,7 +43,8 @@
             var isSelected = node.State is not null && node.State == SelectedState;
             var isCurrent = node.State is not null && node.State == CurrentState;
             var isNodeClickable = node.State is not null && StateClicked.HasDelegate;
-            <g @onclick="@(() => ClickStateAsync(node))" @onkeydown="@(args => OnKeyDownAsync(args, () => ClickStateAsync(node)))"
+            <g @onclick="@(isNodeClickable ? OnClick(() => ClickStateAsync(node)) : default)"
+               @onkeydown="@(isNodeClickable ? OnKeyDown(() => ClickStateAsync(node)) : default)"
                role="@(isNodeClickable ? "button" : null)" tabindex="@(isNodeClickable ? "0" : null)"
                aria-label="@(isNodeClickable ? $"State {node.State}" : null)" aria-pressed="@(isNodeClickable ? isSelected.ToString().ToLowerInvariant() : null)"
                data-automation-clickable="@(isNodeClickable ? "true" : null)" data-testid="@($"automation-state-node-{node.State ?? "any"}")">
@@ -69,6 +72,8 @@
     private IJSObjectReference? _module;
     private IJSObjectReference? _keyGuard;
     private bool _isDisposed;
+    private (StateDiagramLayout? Layout, string? CurrentDetail, string? SelectedState, string? CurrentState, bool IsStateClickable, bool IsRuleClickable) _shown;
+    private bool _isChanged = true;
 
     [Parameter, EditorRequired] public StateDiagramLayout Layout { get; set; } = null!;
 
@@ -83,6 +88,17 @@
     [Parameter] public EventCallback<string> StateClicked { get; set; }
 
     [Parameter] public EventCallback<string> RuleClicked { get; set; }
+
+    // A page renders on every change of a status or a run, which rarely changes the diagram. The handlers read the
+    // callbacks when they run, so a callback that is only a new instance needs no render.
+    protected override void OnParametersSet()
+    {
+        var shown = (Layout, CurrentDetail, SelectedState, CurrentState, StateClicked.HasDelegate, RuleClicked.HasDelegate);
+        _isChanged = shown != _shown;
+        _shown = shown;
+    }
+
+    protected override bool ShouldRender() => _isChanged;
 
     // A key down cannot be prevented per key in Blazor, and preventing it for all keys would break Tab, so Space, which would scroll
     // the page, is prevented in the browser on the focused states and edges.
@@ -148,8 +164,10 @@
 
     private bool IsInteractive => StateClicked.HasDelegate || RuleClicked.HasDelegate;
 
-    private static Task OnKeyDownAsync(KeyboardEventArgs args, Func<Task> click) =>
-        args.Key is "Enter" or " " ? click() : Task.CompletedTask;
+    private EventCallback<MouseEventArgs> OnClick(Func<Task> click) => EventCallback.Factory.Create<MouseEventArgs>(this, click);
+
+    private EventCallback<KeyboardEventArgs> OnKeyDown(Func<Task> click) =>
+        EventCallback.Factory.Create<KeyboardEventArgs>(this, args => args.Key is "Enter" or " " ? click() : Task.CompletedTask);
 
     private Task ClickStateAsync(StateDiagramNode node) =>
         node.State is { } state ? StateClicked.InvokeAsync(state) : Task.CompletedTask;

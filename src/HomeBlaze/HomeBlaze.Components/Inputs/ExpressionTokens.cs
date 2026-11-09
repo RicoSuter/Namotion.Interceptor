@@ -1,8 +1,8 @@
 namespace HomeBlaze.Components.Inputs;
 
 /// <summary>
-/// Splits an expression at white space outside quotes and brackets, keeping every token as it is written. Like the
-/// expression parser, it reads a quote inside brackets as part of the key, and a bracket inside a quote as text.
+/// Splits an expression at white space outside quotes and brackets, as <see cref="ExpressionScanner"/> reads them,
+/// keeping every token as it is written.
 /// </summary>
 internal static class ExpressionTokens
 {
@@ -16,46 +16,25 @@ internal static class ExpressionTokens
         }
 
         var start = -1;
-        var quote = '\0';
-        var bracketDepth = 0;
+        var scanner = new ExpressionScanner();
         for (var index = 0; index < text.Length; index++)
         {
             var character = text[index];
-            if (quote == '\0' && bracketDepth == 0 && char.IsWhiteSpace(character))
+            if (scanner.Read(character) && char.IsWhiteSpace(character))
             {
                 if (start >= 0)
                 {
                     tokens.Add(text[start..index]);
                     start = -1;
                 }
-
-                continue;
             }
-
-            if (start < 0)
+            else if (start < 0)
             {
                 start = index;
             }
-
-            if (quote != '\0')
-            {
-                quote = character == quote ? '\0' : quote;
-            }
-            else if (character is '"' or '\'' && bracketDepth == 0)
-            {
-                quote = character;
-            }
-            else if (character == '[')
-            {
-                bracketDepth++;
-            }
-            else if (character == ']' && bracketDepth > 0)
-            {
-                bracketDepth--;
-            }
         }
 
-        if (quote != '\0' || bracketDepth != 0)
+        if (scanner.IsOpen)
         {
             return null;
         }

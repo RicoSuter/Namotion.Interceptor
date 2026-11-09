@@ -182,4 +182,61 @@ public class AutomationWakeUpTests
         Assert.Equal(1, runsBeforeTheCorrection);
         Assert.Equal(2, host.Blinds.CloseCount);
     }
+
+    [Fact]
+    public async Task WhenTheWallClockIsSetForwardDuringAHold_ThenTheHoldStillLastsItsDuration()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("finished", On("Finished", When("/Weather/Power < 5", TimeSpan.FromMinutes(10)), Invoke("/Blinds/Close")))));
+        host.Weather.Power = 1;
+        await host.FlushAsync();
+
+        // Act
+        host.Clock.WallClockShift = TimeSpan.FromHours(2);
+        await AdvanceAsync(host, TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(1));
+        var closesAfterAMinute = host.Blinds.CloseCount;
+        await AdvanceAsync(host, TimeSpan.FromMinutes(9), TimeSpan.FromSeconds(5));
+
+        // Assert
+        Assert.Equal(0, closesAfterAMinute);
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenTheWallClockIsSetBackDuringAHold_ThenTheHoldStillEndsAfterItsDuration()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("finished", On("Finished", When("/Weather/Power < 5", TimeSpan.FromMinutes(10)), Invoke("/Blinds/Close")))));
+        host.Weather.Power = 1;
+        await host.FlushAsync();
+
+        // Act
+        host.Clock.WallClockShift = TimeSpan.FromHours(-1);
+        await AdvanceAsync(host, TimeSpan.FromMinutes(11), TimeSpan.FromSeconds(5));
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenTheWallClockIsSetBackDuringAHold_ThenTheStatusShowsTheStartOnTheCorrectedClock()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("finished", On("Finished", When("/Weather/Power < 5", TimeSpan.FromMinutes(10)), Invoke("/Blinds/Close")))));
+        host.Weather.Power = 1;
+        await host.FlushAsync();
+        await AdvanceAsync(host, TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(5));
+        var statusBeforeTheCorrection = host.Rule("finished").Status;
+
+        // Act
+        host.Clock.WallClockShift = TimeSpan.FromMinutes(-20);
+        await AdvanceAsync(host, TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(1));
+
+        // Assert
+        Assert.Equal("On: Holding since 12:00:00 for 10m", statusBeforeTheCorrection);
+        Assert.Equal("On: Holding since 11:40:00 for 10m", host.Rule("finished").Status);
+    }
 }

@@ -95,8 +95,9 @@
     /// </summary>
     [Parameter] public EventCallback TargetChanged { get; set; }
 
-    // The component renders again after each edit, before its parent passes the new action down. A stale value in that
-    // render would make a text field reload and lose what was just typed.
+    // An edit renders this component again before its parent passes the new action down, and a stale value in that render
+    // would make a field reload its text and lose what was just typed or a row that is not finished. The trigger editors
+    // and TemplateField keep their own copy for the same reason.
     protected override void OnParametersSet()
     {
         _value = Value;

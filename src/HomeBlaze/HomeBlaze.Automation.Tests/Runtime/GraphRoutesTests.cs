@@ -149,6 +149,61 @@ public class GraphRoutesTests
         Assert.True(allocated < resolutions * 8, $"{allocated} bytes for {resolutions} resolutions");
     }
 
+    // As above, less than 8 bytes a resolution leaves room only for allocations of the runtime that happen once.
+    [Fact]
+    public async Task WhenTheSamePathIsResolvedAgain_ThenResolvingItsTargetAllocatesNothing()
+    {
+        // Arrange
+        const int resolutions = 1000;
+        const string path = "/Room/Sensor/Gust";
+        await using var fixture = await RouteFixture.CreateAsync();
+        var resolver = fixture.Host.Graph.Resolver;
+        Assert.NotNull(AutomationPaths.ResolveTarget(resolver, path, fixture.Rule));
+
+        // Act
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var index = 0; index < resolutions; index++)
+        {
+            AutomationPaths.ResolveTarget(resolver, path, fixture.Rule);
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert
+        Assert.True(allocated < resolutions * 8, $"{allocated} bytes for {resolutions} resolutions");
+    }
+
+    // The event and subject paths of an expression pass a new string per evaluation, made here before the measurement, so
+    // nothing may be kept per string. The readability check enumerates the attributes of the property, 32 bytes; ./Name
+    // adds its name, and Sensor/Name its subject path, its name and the walk of the resolver.
+    [Theory]
+    [InlineData("Name", false, 40)]
+    [InlineData("./Name", false, 72)]
+    [InlineData("Sensor/Name", true, 184)]
+    public async Task WhenAPathIsReadFromASubjectWithANewStringEachTime_ThenTheReadAllocatesOnlyTheSplitPath(string path, bool startsAtTheRoom, int maxBytesPerRead)
+    {
+        // Arrange
+        const int reads = 1000;
+        await using var fixture = await RouteFixture.CreateAsync();
+        var resolver = fixture.Host.Graph.Resolver;
+        fixture.Room.Sensor!.Name = "gauge";
+        IInterceptorSubject subject = startsAtTheRoom ? fixture.Room : fixture.Room.Sensor;
+        var paths = Enumerable.Range(0, reads).Select(_ => new string(path.AsSpan())).ToArray();
+        Assert.Equal("gauge", AutomationPaths.ReadFrom(resolver, path, subject).Value);
+
+        // Act
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        foreach (var instance in paths)
+        {
+            AutomationPaths.ReadFrom(resolver, instance, subject);
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert
+        Assert.True(allocated < reads * maxBytesPerRead, $"{allocated} bytes for {reads} reads of {path}");
+    }
+
     private static long ReplaceAndResolve(RouteFixture fixture, GraphRoutes other, TestSensor sensor)
     {
         const string path = "/Room/Sensor/Gust";

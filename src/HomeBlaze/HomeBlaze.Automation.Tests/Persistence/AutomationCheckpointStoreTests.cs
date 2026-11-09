@@ -126,6 +126,33 @@ public sealed class AutomationCheckpointStoreTests : IDisposable
     }
 
     [Fact]
+    public void WhenAnInterruptedWriteLeftATemporaryFile_ThenTheStoreDeletesItWhenItReads()
+    {
+        // Arrange
+        var folder = Path.Combine(_directory, "AutomationState");
+        Directory.CreateDirectory(folder);
+        var path = Path.Combine(folder, "Storm.json");
+        var store = new AutomationCheckpointStore(path);
+        store.Write(new AutomationCheckpoint { CurrentState = "Open" });
+        var leftover = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        var ofAnotherAutomation = Path.Combine(folder, "Storm.json.x.json." + Guid.NewGuid().ToString("N") + ".tmp");
+        var unrelated = path + ".notes.tmp";
+        foreach (var file in new[] { leftover, ofAnotherAutomation, unrelated })
+        {
+            File.WriteAllText(file, "{");
+        }
+
+        // Act
+        var checkpoint = store.Read();
+
+        // Assert
+        Assert.Equal("Open", checkpoint?.CurrentState);
+        Assert.False(File.Exists(leftover));
+        Assert.True(File.Exists(ofAnotherAutomation));
+        Assert.True(File.Exists(unrelated));
+    }
+
+    [Fact]
     public void WhenTheStoreIsDeleted_ThenTheFileIsGoneAndLaterWritesDoNothing()
     {
         // Arrange

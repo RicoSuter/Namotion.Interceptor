@@ -10,6 +10,9 @@ internal sealed class GraphRouteSlot
 
     public GraphRoute Route { get; private set; } = GraphRoute.Empty;
 
+    /// <summary>Whether the slot holds the empty route, such as after <see cref="Clear"/>.</summary>
+    public bool IsEmpty => ReferenceEquals(Route, GraphRoute.Empty);
+
     /// <summary>Stores the route of a resolution, counted in <paramref name="routes"/>; nothing changes for the stored instance.</summary>
     public void Store(GraphRoutes routes, GraphRoute route)
     {

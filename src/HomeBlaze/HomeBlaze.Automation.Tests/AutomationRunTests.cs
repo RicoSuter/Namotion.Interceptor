@@ -3,6 +3,8 @@ using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Automation.Tests.Testing;
 using HomeBlaze.Services;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Testing;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
@@ -107,6 +109,30 @@ public class AutomationRunTests
         Assert.Equal("Night", host.Automation.CurrentState);
         Assert.Equal(AutomationRunOutcome.Succeeded, host.Rule("night").LastRunOutcome);
         Assert.Equal("Ran ChangeState(Night)", host.Rule("night").LastRunMessage);
+    }
+
+    [Fact]
+    public async Task WhenWritingARuleStatusFails_ThenTheErrorIsShownAndTheAutomationKeepsRunning()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("close", On("Close", When("/Weather/Gust > 8", rearm: "/Weather/Gust < 6"), Invoke("/Blinds/Close")))));
+        var failingWrite = new FailingStatusWrite();
+        host.Graph.Context.AddService<IWriteInterceptor>(failingWrite);
+
+        // Act
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        var messageAfterTheFailure = host.Automation.StatusMessage;
+        host.Weather.Gust = 5;
+        await host.FlushAsync();
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal("The status could not be recorded.", messageAfterTheFailure);
+        Assert.Equal(2, host.Blinds.CloseCount);
+        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
     }
 
     [Fact]
@@ -290,6 +316,32 @@ public class AutomationRunTests
     }
 
     [Fact]
+    public async Task WhenAValidConfigurationFollowsAnInvalidOneWhileTheRunsCannotBeWritten_ThenTheErrorOfTheRunsStaysShown()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Idle"];
+            automation.InitialState = "Idle";
+            automation.Rules = Keyed(("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close"))));
+        });
+        host.BreakCheckpointWrites();
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromSeconds(5));
+        await host.SaveAsync(Keyed(("retract", On("Retract", When("/Weather/Gust >"), Invoke("/Blinds/Close")))));
+        var messageWhileInvalid = host.Automation.StatusMessage;
+
+        // Act
+        await host.SaveAsync(Keyed(("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
+
+        // Assert
+        Assert.StartsWith("The configuration is invalid", messageWhileInvalid);
+        Assert.Equal(ServiceStatus.Error, host.Automation.Status);
+        Assert.StartsWith("The runs could not be saved and are saved again in 5 seconds", host.Automation.StatusMessage);
+    }
+
+    [Fact]
     public async Task WhenARequestDoesNotRunAfterAFailedRun_ThenTheErrorStaysShown()
     {
         // Arrange
@@ -407,5 +459,21 @@ public class AutomationRunTests
 
         // Assert
         Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    // Fails the first write of a rule status, as a failing interceptor of the graph does.
+    private sealed class FailingStatusWrite : IWriteInterceptor
+    {
+        private int _isFailing = 1;
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (context.Property.Name == nameof(AutomationRule.Status) && Interlocked.Exchange(ref _isFailing, 0) == 1)
+            {
+                throw new InvalidOperationException("The status could not be recorded.");
+            }
+
+            next(ref context);
+        }
     }
 }

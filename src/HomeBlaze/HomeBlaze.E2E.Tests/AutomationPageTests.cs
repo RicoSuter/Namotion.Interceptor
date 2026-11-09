@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Automation;
 using HomeBlaze.E2E.Tests.Infrastructure;
@@ -68,6 +69,39 @@ public class AutomationPageTests
         await Assertions.Expect(dialog).ToContainTextAsync("Test now: Started", new() { Timeout = Timeout });
         await Assertions.Expect(dialog.GetByTestId("automation-test-trigger")).ToContainTextAsync("/Demo/Motor/Temperature > 1000");
         await Assertions.Expect(dialog.GetByTestId("automation-test-verdict")).ToContainTextAsync("Would not run now");
+    }
+
+    [Fact]
+    public async Task WhenTestNowIsClickedForARuleWhoseConditionIsTrue_ThenTheDialogSaysItWouldRun()
+    {
+        // Arrange
+        await using var ready = await _fixture.AddStoredAutomationAsync(created =>
+        {
+            created.Name = "Ready";
+            created.States = ["Idle", "Done"];
+            created.InitialState = "Idle";
+            created.Rules = new Dictionary<string, AutomationRule>
+            {
+                ["ready"] = new()
+                {
+                    Name = "Ready",
+                    Mode = AutomationRuleMode.DryRun,
+                    Triggers = [new PropertyTrigger { Expression = "../Name == Ready" }],
+                    Actions = [new ChangeStateAction { Id = "state-1", TargetState = "Done" }]
+                }
+            };
+        });
+        var page = await _fixture.OpenSubjectPageAsync(ready.Name);
+        await Assertions.Expect(page.GetByTestId("automation-status")).ToHaveTextAsync("Running", new() { Timeout = Timeout });
+
+        // Act
+        await page.GetByTestId("automation-rule-row").First.GetByTestId("automation-test-now").ClickAsync();
+
+        // Assert
+        var dialog = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(dialog.GetByTestId("automation-test-verdict")).ToHaveTextAsync("Would run now.", new() { Timeout = Timeout });
+        await Assertions.Expect(dialog.GetByTestId("automation-test-trigger")).ToContainTextAsync("true");
+        await Assertions.Expect(dialog).ToContainTextAsync("ChangeState(Done)");
     }
 
     [Fact]
@@ -157,6 +191,7 @@ public class AutomationPageTests
         await Assertions.Expect(run).ToContainTextAsync("Ran");
         await Assertions.Expect(run).ToContainTextAsync("Would have run (dry run)");
         await Assertions.Expect(run).ToContainTextAsync("Would run ChangeState(Done)");
+        await Assertions.Expect(run).ToContainTextAsync(new Regex(@"\d:\d\d:\d\d"));
         await Assertions.Expect(page.GetByText("From history: the runs of the last seven days. Runs within about 250 ms can show as one, and a crash can drop runs.")).ToBeVisibleAsync();
     }
 

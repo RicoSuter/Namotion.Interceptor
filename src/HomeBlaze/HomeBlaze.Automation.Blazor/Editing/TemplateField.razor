@@ -37,8 +37,7 @@
 
     [Parameter, EditorRequired] public RuleExpressions Expressions { get; set; } = null!;
 
-    // The field renders again after each keystroke, before its parent passes the new value down, so the text is reloaded
-    // only when the parent holds something other than what this field last wrote.
+    // The text is reloaded only when the parent holds something other than what this field last wrote, as in ActionEditor.
     protected override void OnParametersSet()
     {
         if (Value != _written)
@@ -82,7 +81,7 @@
         _evaluatedText = text;
         _evaluatedExpressions = Expressions;
         _error = ArgumentFields.Validate(text, typeof(string), IsRequired, Expressions);
-        _render = _error is null && text.Contains("{{", StringComparison.Ordinal) ? Expressions.Template(text) : null;
+        _render = _error is null && text.Contains("{{", StringComparison.Ordinal) ? Expressions.PrepareTemplatePreview(text) : null;
         _rendered = _render?.Invoke();
     }
 

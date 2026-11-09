@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using HomeBlaze.Automation.Runtime;
 
 namespace HomeBlaze.Automation;
@@ -10,7 +11,7 @@ public static class AutomationRuleOrder
     /// others in key order. Reads <see cref="Automation.Rules"/> once, so the pairs are consistent even when the configuration is
     /// replaced meanwhile.
     /// </summary>
-    public static IReadOnlyList<KeyValuePair<string, AutomationRule>> GetRulesInOrder(this Automation automation)
+    public static ImmutableArray<KeyValuePair<string, AutomationRule>> GetRulesInOrder(this Automation automation)
     {
         var rules = automation.Rules;
         return [.. AutomationCompiler.OrderKeys(rules.Keys, automation.RuleOrder).Select(key => new KeyValuePair<string, AutomationRule>(key, rules[key]))];

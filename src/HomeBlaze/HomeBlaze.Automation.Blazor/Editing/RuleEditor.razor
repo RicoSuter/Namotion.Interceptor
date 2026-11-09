@@ -48,7 +48,7 @@
                 @switch (item.Value)
                 {
                     case PropertyTrigger propertyTrigger:
-                        <PropertyTriggerEditor @key="item" Trigger="propertyTrigger" Expressions="_expressions!" Draft="Draft" RuleKey="@Rule.Key"
+                        <PropertyTriggerEditor @key="item" Trigger="propertyTrigger" Expressions="_expressions!" RuleKey="@Rule.Key"
                                                TriggerChanged="@(trigger => EditAsync(() => item.Value = trigger))" Removed="@(() => EditAsync(() => Rule.Triggers.Remove(item)))" />
                         break;
                     case SubjectEventTrigger eventTrigger:
@@ -69,7 +69,7 @@
     <section>
         <MudText Typo="Typo.h6">Only if</MudText>
         <div class="mt-2">
-            <OnlyIfEditor Rule="Rule" Draft="Draft" Expressions="_expressions!" LastTriggeredAt="@SavedRule?.LastTriggeredAt" Changed="Changed" />
+            <OnlyIfEditor Rule="Rule" Expressions="_expressions!" LastTriggeredAt="@SavedRule?.LastTriggeredAt" Changed="Changed" />
         </div>
     </section>
 
@@ -108,7 +108,7 @@
 
     [Parameter, EditorRequired] public RuleDraft Rule { get; set; } = null!;
 
-    [Parameter] public IReadOnlyList<AutomationValidationError> Errors { get; set; } = [];
+    [Parameter] public ImmutableArray<AutomationValidationError> Errors { get; set; } = [];
 
     [Parameter] public EventCallback Changed { get; set; }
 

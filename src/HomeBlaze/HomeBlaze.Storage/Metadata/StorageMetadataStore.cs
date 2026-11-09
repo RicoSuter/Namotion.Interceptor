@@ -290,6 +290,6 @@ internal sealed class StorageMetadataStore
             throw;
         }
 
-        connection.Index.Remove(path);
+        connection.Reconciler.RemoveEntry(path);
     }
 }

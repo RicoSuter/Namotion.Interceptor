@@ -39,6 +39,8 @@ public class ExpressionClockTests
     [InlineData("now > ../StateEnteredAt + 5m")]
     [InlineData("now - ./LastTriggeredAt > 10m or now == ../StateEnteredAt")]
     [InlineData("now - ./LastTriggeredAt > 600")]
+    [InlineData("now - ./LastTriggeredAt > 10675199d")]
+    [InlineData("time < 36501d")]
     public void WhenAnExpressionReadsTheClockOtherwise_ThenItIsEvaluatedEverySecond(string text)
     {
         // Act
@@ -47,6 +49,21 @@ public class ExpressionClockTests
         // Assert
         Assert.NotNull(clock);
         Assert.True(clock.IsEverySecond);
+    }
+
+    [Fact]
+    public void WhenTheChangeOfAnInstantIsBeyondTheRangeOfDateTimeOffset_ThenItNeverChanges()
+    {
+        // Arrange
+        var clock = Create("now - ./LastTriggeredAt > 10m")!;
+
+        // Act
+        var isDerived = clock.TryGetNextChange(_ => DateTimeOffset.MaxValue, Now, TimeZoneInfo.Utc, out var nextChange, out var hasChanged);
+
+        // Assert
+        Assert.True(isDerived);
+        Assert.Null(nextChange);
+        Assert.False(hasChanged);
     }
 
     [Fact]

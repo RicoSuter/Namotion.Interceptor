@@ -12,6 +12,35 @@ public class ParsedExpressionEvaluationTests
         return expression.EvaluateCondition(ref context);
     }
 
+    [Theory]
+    [InlineData("Power > Limits.MaximumPower", true)]
+    [InlineData("Power > MaximumPower", null)]
+    public void WhenTheRightSideOfAComparisonIsAPathOrABareWord_ThenOnlyThePathIsResolved(string text, bool? expected)
+    {
+        // Arrange
+        Assert.True(ParsedExpression.TryParse(text, '.', out var expression, out var error), error);
+        var context = new TestExpressionContext(new() { ["Power"] = 10, ["Limits.MaximumPower"] = 5, ["MaximumPower"] = 5 });
+
+        // Act
+        var result = expression.EvaluateCondition(ref context);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    public static TheoryData<object> ValuesThatAreNoNumbers => new() { (Half)2, (Int128)2, (nint)2, '2' };
+
+    [Theory]
+    [MemberData(nameof(ValuesThatAreNoNumbers))]
+    public void WhenAValueHasANumericTypeThatIsNoNumber_ThenItsComparisonWithANumberIsUnknown(object value)
+    {
+        // Act
+        var result = EvaluateCondition("Value > 1", new() { ["Value"] = value });
+
+        // Assert
+        Assert.Null(result);
+    }
+
     // The rows a filter host relies on.
     [Theory]
     [InlineData("Temperature > 20", true)]
@@ -322,6 +351,30 @@ public class ParsedExpressionEvaluationTests
             ["Day"] = DayOfWeek.Monday
         });
         expression.EvaluateCondition(ref context);
+
+        // Act
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var iteration = 0; iteration < 100; iteration++)
+        {
+            expression.EvaluateCondition(ref context);
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert
+        Assert.Equal(0, allocated);
+    }
+
+    [Theory]
+    [InlineData("Power > -(5)")]
+    [InlineData("Interval > - 5m")]
+    [InlineData("Power > --5")]
+    public void WhenANegatedLiteralIsEvaluated_ThenItAllocatesNothing(string text)
+    {
+        // Arrange
+        Assert.True(ParsedExpression.TryParse(text, '/', out var expression, out var error), error);
+        var context = new TestExpressionContext(new Dictionary<string, object?> { ["Power"] = 7400m, ["Interval"] = TimeSpan.FromMinutes(1) });
+        Assert.True(expression.EvaluateCondition(ref context));
 
         // Act
         var before = GC.GetAllocatedBytesForCurrentThread();

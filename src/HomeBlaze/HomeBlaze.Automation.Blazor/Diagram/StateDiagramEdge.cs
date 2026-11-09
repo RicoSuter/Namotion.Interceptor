@@ -10,4 +10,4 @@ namespace HomeBlaze.Automation.Blazor.Diagram;
 /// <param name="LabelX">The center of the label.</param>
 /// <param name="LabelY">The baseline of the label.</param>
 /// <param name="FullLabel">The complete name of the rule.</param>
-public sealed record StateDiagramEdge(string RuleKey, string Label, string? Detail, string? From, string To, string PathData, double LabelX, double LabelY, string FullLabel);
+internal sealed record StateDiagramEdge(string RuleKey, string Label, string? Detail, string? From, string To, string PathData, double LabelX, double LabelY, string FullLabel);

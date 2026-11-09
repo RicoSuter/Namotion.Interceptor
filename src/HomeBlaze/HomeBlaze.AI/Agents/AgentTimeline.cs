@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Text.Json;
+using HomeBlaze.Services;
 
 namespace HomeBlaze.AI.Agents;
 

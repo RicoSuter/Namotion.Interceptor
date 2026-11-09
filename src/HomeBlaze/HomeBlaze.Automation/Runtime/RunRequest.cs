@@ -4,6 +4,8 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// A request of a trigger to run a rule, with the event it captured, if any, the trigger as <see cref="Source"/> for
-/// logs, and the property trigger that is pending until the request runs, if any.
+/// logs, the property trigger that is pending until the request runs, if any, and the received event whose trigger
+/// filters are checked just before the rule runs, if any.
 /// </summary>
-internal sealed record RunRequest(CompiledRule Rule, CapturedEvent? Event, string Source, CompiledPropertyTrigger? Trigger = null);
+internal sealed record RunRequest(
+    CompiledRule Rule, CapturedEvent? Event, string Source, CompiledPropertyTrigger? Trigger = null, EventInput? EventInput = null);

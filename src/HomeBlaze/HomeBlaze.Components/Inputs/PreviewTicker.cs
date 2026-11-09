@@ -3,10 +3,9 @@ using Microsoft.Extensions.Logging;
 namespace HomeBlaze.Components.Inputs;
 
 /// <summary>
-/// Calls the live previews of one circuit back once per second on their renderer, so that a preview reads its values
-/// outside of a render: a value that changes often then neither renders the component on every change nor makes a
-/// render evaluate it. One scoped instance serves every preview of the circuit: its timer runs while a component is
-/// subscribed, and each tick is one dispatch to the renderer that runs every callback.
+/// Calls the live previews of one circuit back once per second on their renderer, outside of a render. One scoped
+/// instance serves every preview of the circuit: its timer runs while a component is subscribed, and each tick is one
+/// dispatch that runs every callback.
 /// </summary>
 public sealed class PreviewTicker : IDisposable
 {
@@ -28,7 +27,11 @@ public sealed class PreviewTicker : IDisposable
         _logger = logger;
     }
 
-    /// <summary>Subscribes a component; disposing the subscription ends its callbacks. After the ticker is disposed, nothing is called.</summary>
+    /// <summary>
+    /// Subscribes a component; disposing the subscription ends its callbacks. After the ticker is disposed, nothing is
+    /// called. Every subscriber must belong to the renderer of the circuit, because a tick runs all callbacks through the
+    /// <paramref name="invokeAsync"/> of one of them.
+    /// </summary>
     /// <param name="invokeAsync">The <c>InvokeAsync</c> of the component, which runs the callbacks of a tick on the renderer.</param>
     /// <param name="tick">The callback, which is not called once the subscription is disposed.</param>
     public IDisposable Subscribe(Func<Func<Task>, Task> invokeAsync, Func<Task> tick)

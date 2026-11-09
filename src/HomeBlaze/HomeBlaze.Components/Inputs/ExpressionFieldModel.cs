@@ -6,14 +6,15 @@ namespace HomeBlaze.Components.Inputs;
 
 /// <summary>
 /// The state of an <see cref="ExpressionField"/>: the expression text, which is what the field stores, and while the
-/// expression has the simple form, its rows. A text without that form is shown advanced and never rewritten.
+/// expression has the simple form, its rows. A text without that form is shown advanced and never rewritten. A row
+/// without a path or a value is not finished and stays out of the text until it has both.
 /// </summary>
 internal sealed class ExpressionFieldModel
 {
     private static readonly ImmutableArray<string> DefaultVariables = [ExpressionVariables.Value, ExpressionVariables.Subject];
 
     private List<ExpressionRow> _rows = [];
-    private List<PendingRow?> _pending = [];
+    private List<RowSlot> _slots = [];
     private string _ownerValue;
 
     /// <param name="text">The expression text.</param>
@@ -37,21 +38,20 @@ internal sealed class ExpressionFieldModel
     /// <summary>Whether the text has the simple form, so that the rows can show it.</summary>
     public bool CanShowSimple { get; private set; }
 
-    /// <summary>The rows as they are written in <see cref="Text"/>.</summary>
+    /// <summary>The rows the field shows: those of <see cref="Text"/> and, in their places, the rows that are not finished, which it leaves out.</summary>
     public IReadOnlyList<ExpressionRow> Rows => _rows;
 
     /// <summary>
     /// Whether a row holds an edit that is not part of <see cref="Text"/>, because it is invalid or not finished, or a
-    /// row of the text has no path or no value yet.
+    /// row has no path or no value yet.
     /// </summary>
     public bool HasPendingRow =>
-        _pending.Exists(static pending => pending is not null) ||
-        _rows.Exists(static row => row.Path.Length == 0 || row.Value.Length == 0);
+        _slots.Exists(static slot => slot.Pending is not null) || !_rows.TrueForAll(IsFinished);
 
     /// <summary>
     /// Takes the value of the owner of the field and loads it only when it differs from both the value the owner passed
     /// last and <see cref="Text"/>. A render can still pass the value from before the latest edit, and loading that would
-    /// undo the edit and show a row that is not finished as advanced text.
+    /// undo the edit and drop the rows that are not finished.
     /// </summary>
     public void SetValue(string? value)
     {
@@ -74,17 +74,27 @@ internal sealed class ExpressionFieldModel
         Text = text ?? string.Empty;
         CanShowSimple = ExpressionRows.TryParse(Text, out var rows);
         _rows = [.. rows];
-        _pending = CreatePending(_rows.Count);
+        _slots = CreateSlots(_rows.Count);
         if (!CanShowSimple)
         {
             IsAdvanced = true;
         }
     }
 
-    public void ShowAdvanced()
+    /// <summary>
+    /// Shows the text. The pending edits and the rows that are not finished are not part of it, so they are dropped.
+    /// </summary>
+    /// <returns>Whether an edit or a row was dropped.</returns>
+    public bool ShowAdvanced()
     {
+        var isDropping = HasPendingRow;
+        if (isDropping)
+        {
+            Load(Text);
+        }
+
         IsAdvanced = true;
-        _pending = CreatePending(_rows.Count);
+        return isDropping;
     }
 
     /// <summary>Shows the rows; false when the text does not have the simple form.</summary>
@@ -99,11 +109,65 @@ internal sealed class ExpressionFieldModel
         return true;
     }
 
-    /// <summary>The row as the user sees it: the pending edit when there is one, otherwise the row of the text.</summary>
-    public ExpressionRow GetDisplayRow(int index) => _pending[index]?.Row ?? _rows[index];
+    /// <summary>
+    /// The row as the user sees it: the pending edit when there is one, otherwise the row of the text, with the value as
+    /// typed while it is being typed.
+    /// </summary>
+    public ExpressionRow GetDisplayRow(int index)
+    {
+        var slot = _slots[index];
+        var row = slot.Pending?.Row ?? _rows[index];
+        return slot.TypedValue is { } typedValue ? row with { Value = typedValue } : row;
+    }
 
     /// <summary>The pending edit of the row with its errors, or null when the row is the one of the text.</summary>
-    public PendingRow? GetPendingRow(int index) => _pending[index];
+    public PendingRow? GetPendingRow(int index) => _slots[index].Pending;
+
+    /// <summary>
+    /// The identity of the row at the index, which stays with the row while rows before it are added or removed and is
+    /// never given to another row, so that an edit sent for a row that is gone changes nothing.
+    /// </summary>
+    public object GetRowKey(int index) => _slots[index];
+
+    /// <summary>Takes an edited row like <see cref="SetRow(int, ExpressionRow)"/>; does nothing when the row with the key is gone.</summary>
+    /// <returns>Whether <see cref="Text"/> changed.</returns>
+    public bool SetRow(object key, ExpressionRow row) => IndexOf(key) is var index and >= 0 && SetRow(index, row);
+
+    /// <summary>
+    /// Takes the value of the row with the key while it is being typed, like <see cref="SetRow(object, ExpressionRow)"/>,
+    /// and shows it as typed until <see cref="EndTyping"/>, so that the input does not change under the cursor when the
+    /// value is written in another form, such as in quotes. A value typed back to the one the row had when typing started
+    /// is written as it was. Does nothing when the row is gone.
+    /// </summary>
+    /// <returns>Whether <see cref="Text"/> changed.</returns>
+    public bool TypeValue(object key, string value)
+    {
+        var index = IndexOf(key);
+        if (index < 0)
+        {
+            return false;
+        }
+
+        var slot = _slots[index];
+        slot.ValueBeforeTyping ??= _rows[index].Value;
+        var isChanged = SetRow(index, GetDisplayRow(index) with { Value = value });
+        slot.TypedValue = value;
+        return isChanged;
+    }
+
+    /// <summary>Shows the value of the row with the key as it is written again, once it is no longer being typed.</summary>
+    public void EndTyping(object key)
+    {
+        if (IndexOf(key) is var index and >= 0)
+        {
+            _slots[index].TypedValue = null;
+            _slots[index].ValueBeforeTyping = null;
+        }
+    }
+
+    /// <summary>Removes the row with the key; does nothing when it is gone.</summary>
+    /// <returns>Whether <see cref="Text"/> changed.</returns>
+    public bool RemoveRow(object key) => IndexOf(key) is var index and >= 0 && RemoveRow(index);
 
     /// <summary>
     /// Takes an edited row. A typed value that is not one token is written as text in quotes, so that it cannot change
@@ -116,55 +180,59 @@ internal sealed class ExpressionFieldModel
     /// <returns>Whether <see cref="Text"/> changed.</returns>
     public bool SetRow(int index, ExpressionRow row)
     {
-        var pending = Check(row, _rows[index], out var applied);
+        _slots[index].TypedValue = null;
+        var pending = Check(row, _rows[index], _slots[index].ValueBeforeTyping, out var applied);
         if (pending is not null)
         {
-            _pending[index] = pending;
+            _slots[index].Pending = pending;
             return false;
         }
 
         var isChanged = applied != _rows[index];
         _rows[index] = applied;
-        _pending[index] = null;
-        if (isChanged)
-        {
-            Emit();
-        }
-
-        return isChanged;
+        _slots[index].Pending = null;
+        return isChanged && Emit();
     }
 
+    /// <summary>Adds an empty row, which stays out of <see cref="Text"/> until it has a path and a value.</summary>
     public void AddRow()
     {
         _rows.Add(ExpressionRow.Empty(_rows.Count == 0 ? string.Empty : ExpressionRows.Combinators[0]));
-        _pending.Add(null);
-        Emit();
+        _slots.Add(new RowSlot());
     }
 
-    public void RemoveRow(int index)
+    /// <returns>Whether <see cref="Text"/> changed.</returns>
+    public bool RemoveRow(int index)
     {
         _rows.RemoveAt(index);
-        _pending.RemoveAt(index);
+        _slots.RemoveAt(index);
         if (index == 0 && _rows.Count > 0)
         {
             _rows[0] = _rows[0] with { Combinator = string.Empty };
-            _pending[0] = _pending[0] is { } first ? first with { Row = first.Row with { Combinator = string.Empty } } : null;
+            if (_slots[0].Pending is { } first)
+            {
+                _slots[0].Pending = first with { Row = first.Row with { Combinator = string.Empty } };
+            }
         }
 
-        Emit();
+        return Emit();
     }
 
-    // A row that is still being filled in is kept as it is, although its text does not parse yet.
-    private void Emit()
+    private bool Emit()
     {
-        Text = ExpressionRows.Format(_rows);
+        var previous = Text;
+        Text = ExpressionRows.Format(_rows.TrueForAll(IsFinished) ? _rows : _rows.FindAll(IsFinished));
         CanShowSimple = true;
+        return !string.Equals(previous, Text, StringComparison.Ordinal);
     }
+
+    private static bool IsFinished(ExpressionRow row) => row.Path.Length > 0 && row.Value.Length > 0;
 
     // Null when the row can be written into the text as the applied row. Only a value that differs from the one the text
-    // holds is normalized: a loaded bare path such as Sibling/Value is a valid relative lookup, and quoting it when another
-    // part of the row changes would turn a comparison against a live value into a comparison against text.
-    private PendingRow? Check(ExpressionRow row, ExpressionRow current, out ExpressionRow applied)
+    // holds, and from the one it held when typing started, is normalized: a loaded bare path such as Sibling/Value is a
+    // valid relative lookup, and quoting it when another part of the row changes, or when it is typed back after each
+    // keystroke was applied, would turn a comparison against a live value into a comparison against text.
+    private PendingRow? Check(ExpressionRow row, ExpressionRow current, string? valueBeforeTyping, out ExpressionRow applied)
     {
         applied = row;
         var path = row.Path.Trim();
@@ -174,7 +242,7 @@ internal sealed class ExpressionFieldModel
         }
 
         var value = row.Value.Trim();
-        if (value != current.Value)
+        if (value != current.Value && value != valueBeforeTyping)
         {
             var (normalized, valueError) = NormalizeValue(value);
             if (valueError is not null)
@@ -266,15 +334,39 @@ internal sealed class ExpressionFieldModel
     private static bool IsSingleToken(string text) =>
         ExpressionTokens.Split(text) is [var token] && token == text;
 
-    private static List<PendingRow?> CreatePending(int count)
+    private int IndexOf(object key)
     {
-        var pending = new List<PendingRow?>(count);
-        for (var index = 0; index < count; index++)
+        for (var index = 0; index < _slots.Count; index++)
         {
-            pending.Add(null);
+            if (ReferenceEquals(_slots[index], key))
+            {
+                return index;
+            }
         }
 
-        return pending;
+        return -1;
+    }
+
+    private static List<RowSlot> CreateSlots(int count)
+    {
+        var slots = new List<RowSlot>(count);
+        for (var index = 0; index < count; index++)
+        {
+            slots.Add(new RowSlot());
+        }
+
+        return slots;
+    }
+
+    // One per row: its identity, its edit that is not part of the text, its value as typed, and the value the row had
+    // when typing started.
+    private sealed class RowSlot
+    {
+        public PendingRow? Pending { get; set; }
+
+        public string? TypedValue { get; set; }
+
+        public string? ValueBeforeTyping { get; set; }
     }
 
     /// <summary>An edit of a row that is not part of <see cref="Text"/>, with the error of its path or value when it is invalid.</summary>
