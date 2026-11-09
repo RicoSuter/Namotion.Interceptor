@@ -34,6 +34,9 @@ internal sealed class CompiledRule(string key, AutomationRule rule, ParsedExpres
     /// <summary>The properties that <see cref="OnlyIfPropertyPaths"/> resolved to while a trigger of the rule is pending.</summary>
     public PropertyReference[] OnlyIfDependencies { get; set; } = [];
 
+    /// <summary>The graph route of <see cref="OnlyIfDependencies"/>.</summary>
+    public GraphRouteSlot OnlyIfRoute { get; } = new();
+
     /// <summary>When Only if of a rule with a pending trigger is evaluated again for the clock, or null for no such instant.</summary>
     public DateTimeOffset? OnlyIfRecheckAt { get; set; }
 

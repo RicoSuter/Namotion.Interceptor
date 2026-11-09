@@ -34,13 +34,17 @@ internal sealed class AutomationEngine : IRuleRunHost
     // Created once, since the worker publishes the rule statuses after every input.
     private readonly Action _publishRuleStatuses;
 
-    /// <summary>Creates the engine, whose property triggers publish their watched set to <paramref name="changes"/>.</summary>
-    public AutomationEngine(Automation automation, AutomationInputQueue queue, AutomationStateKeeper keeper, ILogger logger, AutomationChangeReceiver changes)
+    /// <summary>
+    /// Creates the engine, whose property triggers publish their watched set to <paramref name="changes"/> and whose
+    /// triggers store the graph routes of their resolutions in <paramref name="routes"/>.
+    /// </summary>
+    public AutomationEngine(
+        Automation automation, AutomationInputQueue queue, AutomationStateKeeper keeper, ILogger logger, AutomationChangeReceiver changes, GraphRoutes routes)
     {
         _automation = automation;
         _keeper = keeper;
         _logger = logger;
-        _triggers = AutomationTriggers.For(automation, queue, logger, () => Name, changes.PublishWatched);
+        _triggers = AutomationTriggers.For(automation, queue, logger, () => Name, changes.PublishWatched, routes);
         _dispatcher = new RunDispatcher(this, automation, keeper, logger);
         _states = new StateTransitions(automation, keeper, automation.TimeProvider, logger);
         _status = new AutomationStatusReporter(automation, logger);
@@ -52,6 +56,9 @@ internal sealed class AutomationEngine : IRuleRunHost
     IInterceptorSubject IRuleRunHost.Automation => _automation;
 
     public string? CurrentState => _automation.CurrentState;
+
+    // White-box test hook: the compiled rules applied last.
+    internal IReadOnlyList<CompiledRule> Rules => _snapshot.Rules;
 
     public bool RunUnlessAbandoned(Action write)
     {

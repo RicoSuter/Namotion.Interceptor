@@ -61,8 +61,17 @@ internal sealed class AutomationTestHost : IAsyncDisposable
 
     public string CheckpointPath => Path.Combine(DataDirectory, "AutomationState", Key + ".json");
 
+    /// <summary>
+    /// Starts the host with the automation <c>/Storm</c>, which <paramref name="configure"/> configures. With
+    /// <paramref name="makesEveryRouteUnbounded"/> the change dispatcher treats every graph route as unbounded from before
+    /// the first automation registers, which is the dispatch without graph routes.
+    /// </summary>
     public static async Task<AutomationTestHost> StartAsync(
-        Action<Automation> configure, DateTimeOffset? start = null, TimeZoneInfo? timeZone = null, IAutomationAuthorizer? authorizer = null)
+        Action<Automation> configure,
+        DateTimeOffset? start = null,
+        TimeZoneInfo? timeZone = null,
+        IAutomationAuthorizer? authorizer = null,
+        bool makesEveryRouteUnbounded = false)
     {
         var time = new FakeTimeProvider(start ?? Start);
         time.SetLocalTimeZone(timeZone ?? TimeZoneInfo.Utc);
@@ -70,6 +79,7 @@ internal sealed class AutomationTestHost : IAsyncDisposable
         var dataDirectory = Directory.CreateTempSubdirectory("automation-test").FullName;
         graph.Context.AddService<IDataDirectoryProvider>(new TestDataDirectory(dataDirectory));
         var host = new AutomationTestHost(graph, time, dataDirectory, authorizer ?? new AllowAllAutomationAuthorizer());
+        host.ChangeDispatcher.MakesEveryRouteUnbounded = makesEveryRouteUnbounded;
         graph.Add("Weather", host.Weather);
         graph.Add("Blinds", host.Blinds);
         graph.Add("Notifier", host.Notifier);
@@ -84,12 +94,23 @@ internal sealed class AutomationTestHost : IAsyncDisposable
     public Automation CreateAutomation(string name) =>
         new(Graph.Resolver, Clock, Authorizer, ServiceProvider, Logger) { Name = name };
 
-    /// <summary>Attaches a new automation under <c>/key</c>, starts it and waits until it processed its activation.</summary>
-    public async Task<Automation> AddAutomationAsync(string key, Action<Automation> configure)
+    /// <summary>
+    /// Attaches a new automation under <c>/key</c>, or with <paramref name="attach"/>, starts it and waits until it
+    /// processed its activation.
+    /// </summary>
+    public async Task<Automation> AddAutomationAsync(string key, Action<Automation> configure, Action<Automation>? attach = null)
     {
         var automation = CreateAutomation(key);
         configure(automation);
-        Graph.Add(key, automation);
+        if (attach is null)
+        {
+            Graph.Add(key, automation);
+        }
+        else
+        {
+            attach(automation);
+        }
+
         _automations.Add(automation);
         Automation = automation;
         Key = key;
@@ -108,19 +129,16 @@ internal sealed class AutomationTestHost : IAsyncDisposable
     }
 
     /// <summary>
-    /// Starts a run of <c>/Blinds/Wait</c> with a write of <c>/Weather/Power</c>, replaces the sensor of a holder at
-    /// <c>/Holder</c> while the worker is busy, a change of the graph that moves no path of the rules, and advances the
+    /// Starts a run of <c>/Blinds/Wait</c> with a write of <c>/Weather/Power</c>, adds a sensor at <c>/Holder</c> while the
+    /// worker is busy, a change of the graph on the route of every absolute path that moves none of them, and advances the
     /// fake time by <paramref name="time"/>; then ends the run and waits until the automation processed what was queued
     /// meanwhile. Needs a rule that calls <c>/Blinds/Wait</c> when <c>/Weather/Power</c> is positive.
     /// </summary>
     public async Task ChangeTheGraphWhileBusyAsync(TimeSpan time)
     {
-        var holder = new TestSensorHolder { Sensor = new TestSensor() };
-        Graph.Add("Holder", holder);
-        await FlushAsync();
         Weather.Power = 1;
         await AsyncTestHelpers.WaitUntilAsync(() => Blinds.IsWaiting);
-        holder.Sensor = new TestSensor();
+        Graph.Add("Holder", new TestSensor());
         Time.Advance(time);
         Blinds.Release();
         await FlushAsync();

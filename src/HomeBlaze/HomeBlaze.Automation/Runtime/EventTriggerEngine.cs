@@ -10,7 +10,7 @@ namespace HomeBlaze.Automation.Runtime;
 /// The event triggers of active rules: subscribes to their sources, follows a source that the graph replaces, and turns
 /// a received event that passes its filter into a run request. Used by the worker only; a subscription only enqueues.
 /// </summary>
-internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvider timeProvider, AutomationInputQueue queue)
+internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvider timeProvider, AutomationInputQueue queue, GraphRoutes routes)
 {
     /// <summary>Subscribes the triggers of the rule, except one that a Save carried over and whose path still leads to its source.</summary>
     public void Activate(CompiledRule rule)
@@ -32,6 +32,7 @@ internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvi
         foreach (var trigger in rule.EventTriggers)
         {
             Unsubscribe(trigger);
+            trigger.SourceRoute.Clear();
         }
     }
 
@@ -70,15 +71,23 @@ internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvi
         return evaluation.EvaluateCondition(filter) == true;
     }
 
-    private IInterceptorSubject? ResolveSource(CompiledEventTrigger trigger) =>
-        AutomationPaths.ResolveSubject(resolver, trigger.Configuration.SubjectPath, trigger.Rule.Rule);
+    private IInterceptorSubject? ResolveSource(CompiledEventTrigger trigger)
+    {
+        var source = AutomationPaths.ResolveSubject(resolver, trigger.Configuration.SubjectPath, trigger.Rule.Rule, routes.BeginRoute());
+        routes.EndRoute(trigger.SourceRoute);
+        return source;
+    }
 
-    /// <summary>Resolves the source of the trigger and the type of its event; returns why the trigger receives no events, or null.</summary>
-    public static string? FindSource(SubjectPathResolver resolver, CompiledEventTrigger trigger, out IInterceptorSubject? source, out Type? eventType)
+    /// <summary>
+    /// Resolves the source of the trigger and the type of its event, reporting the graph route of the source to
+    /// <paramref name="recorder"/>; returns why the trigger receives no events, or null.
+    /// </summary>
+    public static string? FindSource(
+        SubjectPathResolver resolver, CompiledEventTrigger trigger, out IInterceptorSubject? source, out Type? eventType, ISubjectPathRecorder? recorder = null)
     {
         var configuration = trigger.Configuration;
         eventType = null;
-        source = AutomationPaths.ResolveSubject(resolver, configuration.SubjectPath, trigger.Rule.Rule);
+        source = AutomationPaths.ResolveSubject(resolver, configuration.SubjectPath, trigger.Rule.Rule, recorder);
         if (source is null)
         {
             return $"No subject at {configuration.SubjectPath}";
@@ -90,7 +99,8 @@ internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvi
 
     private void Subscribe(CompiledEventTrigger trigger)
     {
-        var error = FindSource(resolver, trigger, out var source, out var eventType);
+        var error = FindSource(resolver, trigger, out var source, out var eventType, routes.BeginRoute());
+        routes.EndRoute(trigger.SourceRoute);
         trigger.Source = source;
         trigger.SourceError = error;
         if (source is null || eventType is null)
