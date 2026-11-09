@@ -244,6 +244,8 @@ namespace HomeBlaze.Automation.Blazor.Editing
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.Blazor.Editing.AutomationDraft Draft { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback ErrorChanged { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public string? HelperText { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string Label { get; set; }
@@ -302,6 +304,8 @@ namespace HomeBlaze.Automation.Blazor.Editing
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.Blazor.Editing.RuleExpressions Expressions { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback InputChanged { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public System.DateTimeOffset? LastTriggeredAt { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
@@ -318,6 +322,8 @@ namespace HomeBlaze.Automation.Blazor.Editing
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.Blazor.Editing.RuleExpressions Expressions { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback InputChanged { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback Removed { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
