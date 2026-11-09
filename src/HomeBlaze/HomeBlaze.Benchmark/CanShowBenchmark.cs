@@ -35,7 +35,6 @@ public class CanShowBenchmark
     private const string ScopedRoleName = "scoped";
 
     private AuthorizationService _authorizationService;
-    private ShowFolder _root;
     private IReadOnlyCollection<string> _roles;
     private PermissionDecisions _decisions;
     private RegisteredSubject[] _subjects;
@@ -60,7 +59,8 @@ public class CanShowBenchmark
         var authorization = new AuthorizationSubject();
         var subjects = new List<ShowFolder>();
         var home = CreateFolder(Depth, subjects);
-        _root = new ShowFolder(context)
+        // Constructed with the context, the root attaches the graph to the registry, which keeps it.
+        _ = new ShowFolder(context)
         {
             Children = new Dictionary<string, IInterceptorSubject> { ["Authorization"] = authorization, ["Home"] = home }
         };
