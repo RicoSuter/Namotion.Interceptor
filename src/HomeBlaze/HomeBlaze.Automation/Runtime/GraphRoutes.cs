@@ -33,13 +33,9 @@ internal sealed class GraphRoutes
     // Unbounded until the first publication, as the dispatcher registers a listener.
     private FrozenSet<PropertyReference> _published = FrozenSet<PropertyReference>.Empty;
     private bool _isPublishedUnbounded = true;
-    private bool _hasPublished;
 
-    /// <summary>
-    /// Creates the routes of the resolutions of <paramref name="automation"/>, or of no automation, published to
-    /// <paramref name="changes"/>.
-    /// </summary>
-    public GraphRoutes(IInterceptorSubject? automation, AutomationChangeReceiver changes)
+    /// <summary>Creates the routes of the resolutions of <paramref name="automation"/>, published to <paramref name="changes"/>.</summary>
+    public GraphRoutes(IInterceptorSubject automation, AutomationChangeReceiver changes)
     {
         _builder = new GraphRouteBuilder(automation);
         _changes = changes;
@@ -51,11 +47,25 @@ internal sealed class GraphRoutes
     // White-box test hook: the properties of the union of the stored routes.
     internal IReadOnlyCollection<PropertyReference> Union => _counts.Keys;
 
-    // White-box test hook: whether the union is unbounded.
-    internal bool IsUnbounded => _unboundedCount > 0 || WaitsForGraphChange;
+    /// <summary>Whether the union is unbounded: a stored route is, or <see cref="AwaitsGraphChange"/> is set.</summary>
+    public bool IsUnbounded => _unboundedCount > 0 || _awaitsGraphChange;
 
-    // White-box test hook: whether the next graph change evaluates or resolves something, whatever it changed.
-    internal bool WaitsForGraphChange => _awaitsGraphChange;
+    /// <summary>
+    /// Whether the worker holds results that the next graph change evaluates whatever it changed, such as triggers that a
+    /// refresh outside a graph change resolved differently; the union is unbounded while it does.
+    /// </summary>
+    public bool AwaitsGraphChange
+    {
+        get => _awaitsGraphChange;
+        set
+        {
+            if (value != _awaitsGraphChange)
+            {
+                _awaitsGraphChange = value;
+                _hasUnionChanged = true;
+            }
+        }
+    }
 
     // White-box test hook: the number of resolutions whose route was recorded.
     internal int ResolutionCount { get; private set; }
@@ -88,19 +98,6 @@ internal sealed class GraphRoutes
 
     /// <summary>Stores the route recorded since <see cref="BeginRoute"/> in the slot of the stored result.</summary>
     public void EndRoute(GraphRouteSlot slot) => slot.Store(this, _builder.ToRoute(slot.Route));
-
-    /// <summary>
-    /// Sets whether the worker holds results that the next graph change evaluates whatever it changed, such as triggers
-    /// that a refresh outside a graph change resolved differently; the union is unbounded while it does.
-    /// </summary>
-    public void SetAwaitsGraphChange(bool awaitsGraphChange)
-    {
-        if (awaitsGraphChange != _awaitsGraphChange)
-        {
-            _awaitsGraphChange = awaitsGraphChange;
-            _hasUnionChanged = true;
-        }
-    }
 
     /// <summary>
     /// Publishes the union of the stored routes when it differs from the one published last, and ends the window that
@@ -140,7 +137,6 @@ internal sealed class GraphRoutes
         }
 
         _isPublishedUnbounded = isUnbounded;
-        _hasPublished = true;
         _changes.PublishRoute(_published, isUnbounded);
         return true;
     }
@@ -184,7 +180,7 @@ internal sealed class GraphRoutes
 
     private bool HasPublishedProperties()
     {
-        if (!_hasPublished || _counts.Count != _published.Count)
+        if (_counts.Count != _published.Count)
         {
             return false;
         }

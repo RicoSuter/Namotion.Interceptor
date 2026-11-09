@@ -190,7 +190,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                     return null;
                 }
 
-                // Ambiguous with several parents, also when one of them loses its own parents, which writes no holder.
+                // Ambiguous with several parents.
                 var parents = registered.Parents;
                 recorder?.AddParentStep(current, parents);
                 if (parents.Length != 1)
@@ -585,8 +585,6 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             if (root != null && parentSubject == root)
                 return true;
 
-            // The first parent of an ancestor stays first when it gains another one, but an ancestor without parents
-            // gains a first one through a property that is not on the route.
             var parentRegistered = registry.TryGetRegisteredSubject(parentSubject);
             if (parentRegistered == null)
             {
@@ -596,6 +594,9 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
 
             // Read once: a detach between two reads gives a parent and then none.
             var grandparents = parentRegistered.Parents;
+
+            // The first parent of an ancestor stays first when it gains another one, but an ancestor without parents
+            // gains a first one through a property that is not on the route.
             if (grandparents.Length == 0)
             {
                 recorder?.MarkUnbounded();

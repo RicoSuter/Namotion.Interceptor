@@ -68,7 +68,7 @@ public class AutomationGraphRouteStressTests(ITestOutputHelper output)
             world.ChangeUnrelated();
             await world.FlushAsync();
             var stale = world.FindStale();
-            var waits = world.WaitsForGraphChange();
+            var waits = world.AwaitsGraphChange();
             var before = world.Observe();
             await world.ForceGraphChangeAsync();
             var after = world.Observe();
@@ -190,7 +190,7 @@ public class AutomationGraphRouteStressTests(ITestOutputHelper output)
             }
         }
 
-        public bool WaitsForGraphChange() => _automations.Any(automation => automation.Runtime!.Routes.WaitsForGraphChange);
+        public bool AwaitsGraphChange() => _automations.Any(automation => automation.Runtime!.Routes.AwaitsGraphChange);
 
         public void ChangeUnrelated() => _holder.Sensor = _holder.Sensor is null ? new TestSensor() : null;
 

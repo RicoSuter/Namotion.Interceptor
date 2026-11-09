@@ -176,7 +176,7 @@ internal sealed class PropertyTriggerEngine(
     {
         _rebound.Clear();
         _reboundOnlyIfRules.Clear();
-        routes.SetAwaitsGraphChange(false);
+        routes.AwaitsGraphChange = false;
     }
 
     /// <summary>Requests the runs of every pending trigger, such as after a state change skipped them.</summary>
@@ -293,7 +293,7 @@ internal sealed class PropertyTriggerEngine(
         }
 
         // The next graph change evaluates them, whatever it changed.
-        routes.SetAwaitsGraphChange(_rebound.Count > 0 || _reboundOnlyIfRules.Count > 0);
+        routes.AwaitsGraphChange = _rebound.Count > 0 || _reboundOnlyIfRules.Count > 0;
         PublishWatched(rules, []);
         return _pending.Count > trackedCount;
     }
@@ -585,7 +585,6 @@ internal sealed class PropertyTriggerEngine(
         return !trigger.Dependencies.AsSpan().SequenceEqual(previous);
     }
 
-    // Stores the graph route of the resolution in the slot.
     private PropertyReference[] Resolve(IReadOnlyList<string> paths, AutomationRule rule, GraphRouteSlot route)
     {
         var recorder = routes.BeginRoute();

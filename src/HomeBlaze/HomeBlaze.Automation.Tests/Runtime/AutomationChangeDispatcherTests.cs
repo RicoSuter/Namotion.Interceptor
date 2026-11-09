@@ -378,7 +378,7 @@ public class AutomationChangeDispatcherTests
     }
 
     [Fact]
-    public void WhenAListenerResolves_ThenItReceivesAGraphChangeOffItsRouteUntilItEndsToResolve()
+    public void WhenAListenerResolves_ThenItReceivesAGraphChangeOffItsRouteUntilItStopsResolving()
     {
         // Arrange
         var (graph, weather) = CreateGraph();

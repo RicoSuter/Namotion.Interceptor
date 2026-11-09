@@ -71,7 +71,6 @@ internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvi
         return evaluation.EvaluateCondition(filter) == true;
     }
 
-    // Stores the graph route of the resolution in the trigger.
     private IInterceptorSubject? ResolveSource(CompiledEventTrigger trigger)
     {
         var source = AutomationPaths.ResolveSubject(resolver, trigger.Configuration.SubjectPath, trigger.Rule.Rule, routes.BeginRoute());

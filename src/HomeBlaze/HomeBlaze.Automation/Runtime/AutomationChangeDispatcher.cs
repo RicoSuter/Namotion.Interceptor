@@ -63,8 +63,7 @@ internal sealed class AutomationChangeDispatcher
     public Registration Register(IInterceptorSubjectContext context, IAutomationChangeListener listener)
     {
         var interceptor = context.GetService<PropertyChangeInterceptor>();
-        var owner = FindOwner(context, interceptor);
-        var notifier = GetNotifier(owner);
+        var notifier = GetNotifier(FindOwner(context, interceptor));
         lock (_lock)
         {
             if (!_sources.TryGetValue(interceptor, out var source))
@@ -161,7 +160,8 @@ internal sealed class AutomationChangeDispatcher
         }
     }
 
-    // White-box test hook: whether a change of the property in the context is routed to the listener as a graph change.
+    // White-box test hook: whether a change of the property in the context is routed to the listener as a graph change by
+    // its route.
     internal bool IsRoutedAsGraphChange(IInterceptorSubjectContext context, IAutomationChangeListener listener, PropertyReference property)
     {
         var interceptor = context.GetService<PropertyChangeInterceptor>();
@@ -514,7 +514,7 @@ internal sealed class AutomationChangeDispatcher
                 return;
             }
 
-            // Read before the routes: a listener ends to resolve after it published the route that covers what it read.
+            // Read before the routes: a listener stops resolving after it published the route that covers what it read.
             var registrations = Volatile.Read(ref _registrationSnapshot);
             var rented = registrations.Length <= 64 ? null : ArrayPool<bool>.Shared.Rent(registrations.Length);
             var isNotified = rented is null ? stackalloc bool[registrations.Length] : rented.AsSpan(0, registrations.Length);

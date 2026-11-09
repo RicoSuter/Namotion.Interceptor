@@ -11,7 +11,7 @@ namespace HomeBlaze.Automation.Runtime;
 /// it find something else, each once, and whether the route is unbounded. Cleared and filled again by the worker, so that
 /// a resolution whose route stayed the same allocates nothing. Used by the worker only.
 /// </summary>
-internal sealed class GraphRouteBuilder(IInterceptorSubject? automation) : ISubjectPathRecorder
+internal sealed class GraphRouteBuilder(IInterceptorSubject automation) : ISubjectPathRecorder
 {
     private readonly List<PropertyReference> _properties = [];
     private readonly HashSet<PropertyReference> _added = [];
@@ -67,7 +67,7 @@ internal sealed class GraphRouteBuilder(IInterceptorSubject? automation) : ISubj
     // that parent is detached.
     private bool TellsParentGains(IInterceptorSubject subject, ImmutableArray<SubjectPropertyParent> parents)
     {
-        if (automation is null || parents.Length > 1)
+        if (parents.Length > 1)
         {
             return false;
         }

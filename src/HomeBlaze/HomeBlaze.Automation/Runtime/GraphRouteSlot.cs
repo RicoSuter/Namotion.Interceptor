@@ -13,7 +13,7 @@ internal sealed class GraphRouteSlot
     /// <summary>Stores the route of a resolution, counted in <paramref name="routes"/>; nothing changes for the stored instance.</summary>
     public void Store(GraphRoutes routes, GraphRoute route)
     {
-        if (ReferenceEquals(route, Route) && ReferenceEquals(routes, _routes))
+        if (ReferenceEquals(route, Route))
         {
             return;
         }

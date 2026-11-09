@@ -251,7 +251,7 @@ public class GraphRoutesTests
     public void WhenARouteBecomesUnboundedWithTheSameProperties_ThenTheBuilderGivesANewRoute()
     {
         // Arrange
-        var builder = new GraphRouteBuilder(automation: null);
+        var builder = new GraphRouteBuilder(automation: new TestSensor());
         var property = new PropertyReference(new TestSensor(), nameof(TestSensor.Gust));
         builder.AddProperty(property);
         var bounded = builder.ToRoute(GraphRoute.Empty);
@@ -315,22 +315,6 @@ public class GraphRoutesTests
         Assert.True(hasPublished);
         Assert.False(changes.Registration.IsUnbounded);
         Assert.Empty(changes.Registration.Route);
-    }
-
-    [Fact]
-    public async Task WhenTheRoutesAreForNoAutomation_ThenAPathThatLeadsUpHasAnUnboundedRoute()
-    {
-        // Arrange
-        await using var fixture = await RouteFixture.CreateAsync();
-        var routes = new GraphRoutes(automation: null, changes: new AutomationChangeReceiver(new AutomationInputQueue()));
-        var slot = new GraphRouteSlot();
-
-        // Act
-        AutomationPaths.ResolveProperty(fixture.Host.Graph.Resolver, "../Enabled", fixture.Rule, routes.BeginRoute());
-        routes.EndRoute(slot);
-
-        // Assert
-        Assert.True(slot.Route.IsUnbounded);
     }
 
     [Fact]
