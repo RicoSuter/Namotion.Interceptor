@@ -412,6 +412,62 @@ public class AutomationGraphRouteTests
     }
 
     [Fact]
+    public async Task WhenATriggerStopsWaiting_ThenTheRouteOfItsOnlyIfLeavesTheUnion()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { });
+        var room = new TestRoom { Sensor = new TestSensor { Power = 0 } };
+        host.Graph.Add("Room", room);
+        var automation = await host.AddAutomationAsync("Guarded", automation => automation.Rules = Keyed(
+            ("rule", Create("Guarded", AutomationRuleMode.On, [When("/Weather/Gust > 8")], [Invoke("/Blinds/Close")], onlyIf: "/Room/Sensor/Power > 5"))));
+        var sensorOfRoom = new PropertyReference(room, nameof(TestRoom.Sensor));
+        host.Weather.Gust = 9;
+        await automation.FlushAsync();
+        var isRoutedWhileWaiting = Routes(automation).Union.Contains(sensorOfRoom);
+
+        // Act
+        host.Weather.Gust = 0;
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.True(isRoutedWhileWaiting);
+        Assert.DoesNotContain(sensorOfRoom, Routes(automation).Union);
+        Assert.DoesNotContain(sensorOfRoom, (IReadOnlySet<PropertyReference>)Registration(automation).Route);
+        Assert.Equal(0, host.Blinds.CloseCount);
+    }
+
+    // The Save hands each trigger and its route to the trigger of the new rule instance, which the deactivation clears.
+    [Fact]
+    public async Task WhenASaveCarriesTheTriggersOverAndTheRulesAreDeactivatedThen_ThenOnlyTheLocationIsInTheUnion()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { });
+        var room = new TestRoom { Sensor = new TestSensor { Gust = 0, Power = 0 }, Button = new TestButton() };
+        host.Graph.Add("Room", room);
+        var automation = await host.AddAutomationAsync("Carried", automation => automation.Rules = CreateCarriedRules());
+        host.Weather.Gust = 9;
+        await automation.FlushAsync();
+        var unionBefore = Routes(automation).Union.ToHashSet();
+
+        // Act
+        await host.SaveAsync(CreateCarriedRules());
+        var unionAfterTheSave = Routes(automation).Union.ToHashSet();
+        automation.Enabled = false;
+        await host.SaveAsync();
+
+        // Assert
+        Assert.Contains(new PropertyReference(room, nameof(TestRoom.Sensor)), unionBefore);
+        Assert.Contains(new PropertyReference(room, nameof(TestRoom.Button)), unionBefore);
+        Assert.Equal(unionBefore, unionAfterTheSave);
+        Assert.Equal(Routes(automation).Location.Route.Properties.ToHashSet(), Routes(automation).Union.ToHashSet());
+    }
+
+    private static Dictionary<string, AutomationRule> CreateCarriedRules() => Keyed(
+        ("gusts", On("Gusts", When("/Room/Sensor/Gust > 8"), Invoke("/Blinds/Close"))),
+        ("press", Create("Press", AutomationRuleMode.On, [OnEvent("/Room/Button", "TestPressEvent")], [Invoke("/Blinds/Open")])),
+        ("guarded", Create("Guarded", AutomationRuleMode.On, [When("/Weather/Gust > 8")], [Invoke("/Blinds/Close")], onlyIf: "/Room/Sensor/Power > 5")));
+
+    [Fact]
     public async Task WhenAPathLeadsAboveTheAutomationAndItsParent_ThenEveryStructuralChangeReachesTheAutomation()
     {
         // Arrange

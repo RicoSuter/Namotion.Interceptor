@@ -201,6 +201,11 @@ internal sealed class PropertyTriggerEngine(
         }
 
         var hasRemoved = _pending.RemoveAll(trigger => !IsPending(trigger)) > 0;
+        if (hasRemoved)
+        {
+            ClearUntrackedOnlyIfRoutes(rules);
+        }
+
         var hasAdded = false;
         var now = timeProvider.GetUtcNow();
         foreach (var request in requests)
@@ -257,12 +262,18 @@ internal sealed class PropertyTriggerEngine(
     /// </summary>
     public bool Refresh(IReadOnlyList<CompiledRule> rules)
     {
+        var trackedBefore = _pending.Count;
         for (var index = _pending.Count - 1; index >= 0; index--)
         {
             if (!IsPending(_pending[index]))
             {
                 _pending.RemoveAt(index);
             }
+        }
+
+        if (_pending.Count < trackedBefore)
+        {
+            ClearUntrackedOnlyIfRoutes(rules);
         }
 
         DateTimeOffset? now = null;
@@ -359,6 +370,18 @@ internal sealed class PropertyTriggerEngine(
         }
 
         return false;
+    }
+
+    // Only if of a rule without a tracked pending trigger is resolved again when one becomes tracked.
+    private void ClearUntrackedOnlyIfRoutes(IReadOnlyList<CompiledRule> rules)
+    {
+        foreach (var rule in rules)
+        {
+            if (!ReferenceEquals(rule.OnlyIfRoute.Route, GraphRoute.Empty) && !IsTracked(rule))
+            {
+                rule.OnlyIfRoute.Clear();
+            }
+        }
     }
 
     public static void Deactivate(CompiledRule rule)
