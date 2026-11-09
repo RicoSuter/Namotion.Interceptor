@@ -63,12 +63,13 @@ internal sealed class AutomationChangeDispatcher
     public Registration Register(IInterceptorSubjectContext context, IAutomationChangeListener listener)
     {
         var interceptor = context.GetService<PropertyChangeInterceptor>();
-        var notifier = GetNotifier(FindOwner(context, interceptor));
+        var owner = FindOwner(context, interceptor);
+        var notifier = GetNotifier(owner);
         lock (_lock)
         {
             if (!_sources.TryGetValue(interceptor, out var source))
             {
-                source = new ChangeSource(interceptor);
+                source = new ChangeSource(interceptor, owner.TryGetService<ISubjectRegistry>());
                 source.Subscription = interceptor.Subscribe(source);
                 _sources.Add(interceptor, source);
             }
@@ -225,6 +226,7 @@ internal sealed class AutomationChangeDispatcher
     {
         private readonly AutomationChangeDispatcher _dispatcher;
         private int _isResolving;
+        private long _uncountedVersion = -1;
 
         internal Registration(AutomationChangeDispatcher dispatcher, ChangeSource source, IAutomationChangeListener listener)
         {
@@ -275,6 +277,15 @@ internal sealed class AutomationChangeDispatcher
             }
         }
 
+        /// <summary>
+        /// Takes the structure version of the last write routed to the listener that the registry did not count, after
+        /// which a path may resolve differently at the same version, or -1 for none since the last call.
+        /// </summary>
+        public long TakeUncountedVersion() =>
+            Volatile.Read(ref _uncountedVersion) < 0 ? -1 : Interlocked.Exchange(ref _uncountedVersion, -1);
+
+        internal void OnUncountedWrite(long version) => Volatile.Write(ref _uncountedVersion, version);
+
         /// <summary>Ends <see cref="BeginResolving"/>, once the route of the results is published.</summary>
         public void EndResolving()
         {
@@ -294,7 +305,7 @@ internal sealed class AutomationChangeDispatcher
     }
 
     /// <summary>The routes of one change stream. Changed under the lock of the dispatcher and read lock-free by writers.</summary>
-    internal sealed class ChangeSource(PropertyChangeInterceptor interceptor) : IObserver<SubjectPropertyChange>
+    internal sealed class ChangeSource(PropertyChangeInterceptor interceptor, ISubjectRegistry? registry) : IObserver<SubjectPropertyChange>
     {
         // The registrations whose automation or rule gained a parent on this thread, until the change of the write that
         // added the parent is routed.
@@ -314,6 +325,9 @@ internal sealed class AutomationChangeDispatcher
 
         // The release count read before every listener was given a graph change, or -1.
         private long _notifiedAt = -1;
+
+        // The structure version read at the last graph change, see GetUncountedVersion.
+        private long _structureVersion = registry?.StructureVersion ?? -1;
 
         public PropertyChangeInterceptor Interceptor { get; } = interceptor;
 
@@ -384,7 +398,11 @@ internal sealed class AutomationChangeDispatcher
         public void OnResolvingChanged(int delta) => Interlocked.Add(ref _resolvingCount, delta);
 
         /// <summary>Gives a graph change for a property that the registry registered at run time.</summary>
-        public void OnPropertyAdded(PropertyReference property) => NotifyGraphChanged(property);
+        public void OnPropertyAdded(PropertyReference property)
+        {
+            GetUncountedVersion();
+            NotifyGraphChanged(property, uncountedVersion: -1);
+        }
 
         public void Remove(Registration registration)
         {
@@ -457,7 +475,7 @@ internal sealed class AutomationChangeDispatcher
             if (isGraphChange)
             {
                 PropertyAttachNotifier.EndAttach();
-                NotifyGraphChanged(value.Property);
+                NotifyGraphChanged(value.Property, GetUncountedVersion());
             }
         }
 
@@ -466,7 +484,7 @@ internal sealed class AutomationChangeDispatcher
         // each listener has one queued: no listener released its graph change since every listener was given one, so each
         // takes it after this change. One write that changes the graph several times, such as the attach of a subject with
         // its methods and attributes, gives each listener one graph change.
-        private void NotifyGraphChanged(PropertyReference property)
+        private void NotifyGraphChanged(PropertyReference property, long uncountedVersion)
         {
             var parentGains = TakeParentGains();
 
@@ -474,7 +492,7 @@ internal sealed class AutomationChangeDispatcher
             // fence before it reads the graph: either the count read here is raised or the listener reads the change.
             if (Volatile.Read(ref _resolvingCount) == 0)
             {
-                NotifyGraphChanged(property, [], [], parentGains);
+                NotifyGraphChanged(property, uncountedVersion, [], [], parentGains);
                 return;
             }
 
@@ -489,7 +507,7 @@ internal sealed class AutomationChangeDispatcher
 
             try
             {
-                NotifyGraphChanged(property, registrations, isResolving, parentGains);
+                NotifyGraphChanged(property, uncountedVersion, registrations, isResolving, parentGains);
             }
             finally
             {
@@ -500,26 +518,32 @@ internal sealed class AutomationChangeDispatcher
             }
         }
 
+        // A write that the registry did not count is told to every listener it reaches, also to one with a graph change
+        // queued, which may resolve at the version of that write.
         private void NotifyGraphChanged(
-            PropertyReference property, Registration[] registrations, ReadOnlySpan<bool> isResolving, ReadOnlySpan<Registration> parentGains)
+            PropertyReference property,
+            long uncountedVersion,
+            Registration[] registrations,
+            ReadOnlySpan<bool> isResolving,
+            ReadOnlySpan<Registration> parentGains)
         {
             // The change was committed and fenced before, as the registry fences a property it registers, and a listener
             // raises the count with a full fence before it reads the graph: either the count read here is the new one or
             // the listener reads the change.
             var releaseCount = Volatile.Read(ref _releaseCount);
-            if (Volatile.Read(ref _notifiedAt) == releaseCount)
+            if (Volatile.Read(ref _notifiedAt) == releaseCount && uncountedVersion < 0)
             {
                 return;
             }
 
             // Read after the count, which a listener raises after it was added to the routes.
             var routes = Volatile.Read(ref _routes);
-            var chainDepth = AutomationInputQueue.CausedChainDepth;
+            var notification = new Notification(AutomationInputQueue.CausedChainDepth, uncountedVersion);
             routes.Graph.TryGetValue(property, out var routed);
             routed ??= [];
-            Notify(routed, chainDepth);
-            Notify(routes.Unbounded, chainDepth);
-            NotifyOthers(routed, routes.Unbounded, registrations, isResolving, parentGains, chainDepth);
+            Notify(routed, notification);
+            Notify(routes.Unbounded, notification);
+            NotifyOthers(routed, routes.Unbounded, registrations, isResolving, parentGains, notification);
 
             // A concurrent notification may write an older count, which only notifies the next change again.
             if (routes.Unbounded.Length == routes.Count)
@@ -535,13 +559,13 @@ internal sealed class AutomationChangeDispatcher
             Registration[] registrations,
             ReadOnlySpan<bool> isResolving,
             ReadOnlySpan<Registration> parentGains,
-            int chainDepth)
+            Notification notification)
         {
             for (var index = 0; index < registrations.Length; index++)
             {
                 if (isResolving[index] && IsNotNotified(registrations[index], routed, unbounded))
                 {
-                    registrations[index].Listener.OnGraphChanged(chainDepth);
+                    notification.Notify(registrations[index]);
                 }
             }
 
@@ -550,7 +574,7 @@ internal sealed class AutomationChangeDispatcher
                 var index = Array.IndexOf(registrations, registration);
                 if ((index < 0 || !isResolving[index]) && IsNotNotified(registration, routed, unbounded) && !registration.IsDisposed)
                 {
-                    registration.Listener.OnGraphChanged(chainDepth);
+                    notification.Notify(registration);
                 }
             }
         }
@@ -572,12 +596,28 @@ internal sealed class AutomationChangeDispatcher
             return [.. taken];
         }
 
-        private static void Notify(Registration[] registrations, int chainDepth)
+        private static void Notify(Registration[] registrations, Notification notification)
         {
             foreach (var registration in registrations)
             {
-                registration.Listener.OnGraphChanged(chainDepth);
+                notification.Notify(registration);
             }
+        }
+
+        // The structure version when the registry did not count the change of a property that holds subjects, which it
+        // reads as the same as at the graph change before, such as a second key for a subject that a dictionary holds
+        // already; -1 otherwise. A race of two writers may report a counted one, which only keeps routes unbounded longer.
+        private long GetUncountedVersion()
+        {
+            if (registry is null)
+            {
+                return -1;
+            }
+
+            var version = registry.StructureVersion;
+            var previous = Volatile.Read(ref _structureVersion);
+            Volatile.Write(ref _structureVersion, version);
+            return version == previous ? version : -1;
         }
 
         public void OnError(Exception error)
@@ -662,6 +702,19 @@ internal sealed class AutomationChangeDispatcher
             Array.Copy(items, remaining, index);
             Array.Copy(items, index + 1, remaining, index, items.Length - index - 1);
             return remaining;
+        }
+    }
+
+    private readonly record struct Notification(int ChainDepth, long UncountedVersion)
+    {
+        public void Notify(Registration registration)
+        {
+            if (UncountedVersion >= 0)
+            {
+                registration.OnUncountedWrite(UncountedVersion);
+            }
+
+            registration.Listener.OnGraphChanged(ChainDepth);
         }
     }
 

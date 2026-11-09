@@ -234,6 +234,65 @@ public class AutomationGraphRouteTests
         Assert.Equal(1, host.Blinds.OpenCount);
     }
 
+    // The registry keeps one parent per property, with the first key, so a second key for a subject the dictionary holds
+    // already leaves the structure version as it was, and the paths resolve as before until the next structural change
+    // anywhere, as without routes.
+    [Fact]
+    public async Task WhenADictionaryGainsASecondKeyForASubjectItHolds_ThenThePathsResolveAtTheNextStructuralChangeAnywhere()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { });
+        var sensor = new TestSensor { Gust = 9 };
+        var room = new TestRoom { Devices = new Dictionary<string, TestSensor> { ["d1"] = sensor } };
+        var holder = new TestSensorHolder();
+        host.Graph.Add("Room", room);
+        host.Graph.Add("Holder", holder);
+        var automation = await host.AddAutomationAsync("Gusts", Rule("/Room/Devices[d2]/Gust > 5"));
+
+        // Act
+        room.Devices = new Dictionary<string, TestSensor> { ["d1"] = sensor, ["d2"] = sensor };
+        await automation.FlushAsync();
+        holder.Sensor = new TestSensor();
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.False(Routes(automation).IsUnbounded);
+    }
+
+    // The other automation resolves the shared path at the current version after a change on its own route, so the
+    // write that the registry does not count leaves a result in the cache of the resolver that both automations read.
+    [Fact]
+    public async Task WhenAnotherAutomationCachedAPathBeforeAWriteThatTheRegistryDoesNotCount_ThenBothResolveAtTheNextStructuralChangeAnywhere()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { });
+        var sensor = new TestSensor { Gust = 9 };
+        var room = new TestRoom { Devices = new Dictionary<string, TestSensor> { ["d1"] = sensor } };
+        var other = new TestSensorHolder { Sensor = new TestSensor() };
+        var unrelated = new TestSensorHolder();
+        host.Graph.Add("Room", room);
+        host.Graph.Add("Other", other);
+        host.Graph.Add("Unrelated", unrelated);
+        var first = await host.AddAutomationAsync("First", Rule("/Room/Devices[d2]/Gust > 5"));
+        var second = await host.AddAutomationAsync("Second", automation => automation.Rules = Keyed(
+            ("rule", On("Rule", When("/Room/Devices[d2]/Gust > 5"), Invoke("/Blinds/Close"))),
+            ("other", On("Other", When("/Other/Sensor/Gust > 5"), Invoke("/Blinds/Open")))));
+        other.Sensor = new TestSensor();
+        await second.FlushAsync();
+
+        // Act
+        room.Devices = new Dictionary<string, TestSensor> { ["d1"] = sensor, ["d2"] = sensor };
+        await first.FlushAsync();
+        await second.FlushAsync();
+        unrelated.Sensor = new TestSensor();
+        await first.FlushAsync();
+        await second.FlushAsync();
+
+        // Assert
+        Assert.Equal(2, host.Blinds.CloseCount);
+    }
+
     [Fact]
     public async Task WhenTheSourceOfAnEventTriggerIsAddedLater_ThenTheTriggerSubscribesToIt()
     {

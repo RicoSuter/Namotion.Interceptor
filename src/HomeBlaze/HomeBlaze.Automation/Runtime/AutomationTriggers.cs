@@ -16,6 +16,7 @@ internal sealed class AutomationTriggers
     private readonly PropertyTriggerEngine _propertyTriggers;
     private readonly EventTriggerEngine _eventTriggers;
     private readonly Func<long> _getStructureVersion;
+    private readonly GraphRoutes _routes;
     private long _boundStructureVersion = -1;
 
     /// <summary>
@@ -37,19 +38,25 @@ internal sealed class AutomationTriggers
             queue,
             () => registry?.StructureVersion ?? -1,
             new PropertyTriggerEngine(resolver, timeProvider, logger, getAutomationName, publishWatched, routes),
-            new EventTriggerEngine(resolver, timeProvider, queue, routes));
+            new EventTriggerEngine(resolver, timeProvider, queue, routes),
+            routes);
     }
 
     /// <summary>
     /// Creates the triggers of <paramref name="propertyTriggers"/> and <paramref name="eventTriggers"/>, whose paths are
     /// resolved again on a graph change only when <paramref name="getStructureVersion"/>, the structure version of the
-    /// registry, changed since.
+    /// registry, changed since, and whose resolutions after graph changes are told to <paramref name="routes"/>.
     /// </summary>
     public AutomationTriggers(
-        AutomationInputQueue queue, Func<long> getStructureVersion, PropertyTriggerEngine propertyTriggers, EventTriggerEngine eventTriggers)
+        AutomationInputQueue queue,
+        Func<long> getStructureVersion,
+        PropertyTriggerEngine propertyTriggers,
+        EventTriggerEngine eventTriggers,
+        GraphRoutes routes)
     {
         _queue = queue;
         _getStructureVersion = getStructureVersion;
+        _routes = routes;
         _propertyTriggers = propertyTriggers;
         _eventTriggers = eventTriggers;
     }
@@ -187,11 +194,21 @@ internal sealed class AutomationTriggers
         var version = _getStructureVersion();
         if (version >= 0 && version == _boundStructureVersion)
         {
+            _routes.KeepUnboundedAt(version);
             _propertyTriggers.ForgetRebound();
             return [];
         }
 
         _boundStructureVersion = version % 2 == 0 ? version : -1;
+        if (version % 2 == 0)
+        {
+            _routes.OnResolvedAt(version);
+        }
+        else
+        {
+            _routes.KeepUnboundedAt(version);
+        }
+
         _eventTriggers.Rebind(rules);
         return _propertyTriggers.OnGraphChanged(rules, evaluateAll: false);
     }
