@@ -109,8 +109,16 @@ internal sealed class ExpressionFieldModel
         return true;
     }
 
-    /// <summary>The row as the user sees it: the pending edit when there is one, otherwise the row of the text.</summary>
-    public ExpressionRow GetDisplayRow(int index) => _slots[index].Pending?.Row ?? _rows[index];
+    /// <summary>
+    /// The row as the user sees it: the pending edit when there is one, otherwise the row of the text, with the value as
+    /// typed while it is being typed.
+    /// </summary>
+    public ExpressionRow GetDisplayRow(int index)
+    {
+        var slot = _slots[index];
+        var row = slot.Pending?.Row ?? _rows[index];
+        return slot.TypedValue is { } typedValue ? row with { Value = typedValue } : row;
+    }
 
     /// <summary>The pending edit of the row with its errors, or null when the row is the one of the text.</summary>
     public PendingRow? GetPendingRow(int index) => _slots[index].Pending;
@@ -124,6 +132,34 @@ internal sealed class ExpressionFieldModel
     /// <summary>Takes an edited row like <see cref="SetRow(int, ExpressionRow)"/>; does nothing when the row with the key is gone.</summary>
     /// <returns>Whether <see cref="Text"/> changed.</returns>
     public bool SetRow(object key, ExpressionRow row) => IndexOf(key) is var index and >= 0 && SetRow(index, row);
+
+    /// <summary>
+    /// Takes the value of the row with the key while it is being typed, like <see cref="SetRow(object, ExpressionRow)"/>,
+    /// and shows it as typed until <see cref="EndTyping"/>, so that the input does not change under the cursor when the
+    /// value is written in another form, such as in quotes. Does nothing when the row is gone.
+    /// </summary>
+    /// <returns>Whether <see cref="Text"/> changed.</returns>
+    public bool TypeValue(object key, string value)
+    {
+        var index = IndexOf(key);
+        if (index < 0)
+        {
+            return false;
+        }
+
+        var isChanged = SetRow(index, GetDisplayRow(index) with { Value = value });
+        _slots[index].TypedValue = value;
+        return isChanged;
+    }
+
+    /// <summary>Shows the value of the row with the key as it is written again, once it is no longer being typed.</summary>
+    public void EndTyping(object key)
+    {
+        if (IndexOf(key) is var index and >= 0)
+        {
+            _slots[index].TypedValue = null;
+        }
+    }
 
     /// <summary>Removes the row with the key; does nothing when it is gone.</summary>
     /// <returns>Whether <see cref="Text"/> changed.</returns>
@@ -140,6 +176,7 @@ internal sealed class ExpressionFieldModel
     /// <returns>Whether <see cref="Text"/> changed.</returns>
     public bool SetRow(int index, ExpressionRow row)
     {
+        _slots[index].TypedValue = null;
         var pending = Check(row, _rows[index], out var applied);
         if (pending is not null)
         {
@@ -305,10 +342,12 @@ internal sealed class ExpressionFieldModel
         return slots;
     }
 
-    // One per row: its identity, and its edit that is not part of the text.
+    // One per row: its identity, its edit that is not part of the text, and its value as typed.
     private sealed class RowSlot
     {
         public PendingRow? Pending { get; set; }
+
+        public string? TypedValue { get; set; }
     }
 
     /// <summary>An edit of a row that is not part of <see cref="Text"/>, with the error of its path or value when it is invalid.</summary>

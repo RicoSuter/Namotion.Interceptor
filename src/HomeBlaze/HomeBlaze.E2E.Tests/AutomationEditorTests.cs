@@ -254,6 +254,31 @@ public class AutomationEditorTests
     }
 
     [Fact]
+    public async Task WhenTheValueOfANewRowIsTypedAndSaveIsClickedRightAway_ThenTheFirstClickSavesTheRow()
+    {
+        // Arrange
+        const string testId = "automation-only-if-condition";
+        await using var washer = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        var (page, dialog) = await OpenEditorAsync(washer.Name, tab: RulesTab);
+        var field = await AddConditionRowAsync(dialog, testId);
+        await ChooseRowFieldAsync(page, field, testId, "/Demo/Motor/Temperature");
+        var value = field.GetByTestId($"{testId}-row").GetByLabel("Value", new() { Exact = true });
+        // At the pace of a user, so that renders arrive between the keystrokes, the value is written in quotes before it is complete.
+        await value.PressSequentiallyAsync("hello world", new() { Delay = 30 });
+        await Assertions.Expect(value).ToHaveValueAsync("hello world");
+
+        // Act
+        // A click with the mouse, as a user makes it: it leaves the value input first, while Playwright's click would wait
+        // until the button is enabled.
+        var box = await PageGeometry.GetBoxAsync(SaveButton(dialog));
+        await page.Mouse.ClickAsync((float)(box.Left + box.Width / 2), (float)(box.Top + box.Height / 2));
+
+        // Assert
+        await Assertions.Expect(page.GetByText("Configuration saved.")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        Assert.Equal("/Demo/Motor/Temperature == \"hello world\"", (await ReadRuleAsync(washer.FilePath, "started")).GetProperty("onlyIf").GetString());
+    }
+
+    [Fact]
     public async Task WhenARuleWithOnlyIfAndACooldownIsOpenedAndSaved_ThenItsOnlyIfTextIsUnchanged()
     {
         // Arrange

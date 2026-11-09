@@ -153,6 +153,46 @@ public class ExpressionFieldModelTests
     }
 
     [Fact]
+    public void WhenAValueIsBeingTyped_ThenTheTextHasItAtOnceAndTheRowShowsItAsTypedUntilTypingEnds()
+    {
+        // Arrange
+        var model = new ExpressionFieldModel(string.Empty);
+        model.AddRow();
+        var key = model.GetRowKey(0);
+        model.SetRow(key, new ExpressionRow(string.Empty, "/a/B", "==", string.Empty));
+
+        // Act
+        var isChanged = model.TypeValue(key, "hello world");
+        var whileTyping = model.GetDisplayRow(0).Value;
+        model.EndTyping(key);
+
+        // Assert
+        Assert.True(isChanged);
+        Assert.Equal("/a/B == \"hello world\"", model.Text);
+        Assert.Equal("hello world", whileTyping);
+        Assert.Equal("\"hello world\"", model.GetDisplayRow(0).Value);
+        Assert.False(model.HasPendingRow);
+    }
+
+    [Fact]
+    public void WhenATypedValueIsInvalid_ThenItIsPendingWithItsErrorWhileItIsTyped()
+    {
+        // Arrange
+        var model = new ExpressionFieldModel("/a/B == 1");
+        var key = model.GetRowKey(0);
+
+        // Act
+        var isChanged = model.TypeValue(key, "1,");
+
+        // Assert
+        Assert.False(isChanged);
+        Assert.Equal("/a/B == 1", model.Text);
+        Assert.Equal("1,", model.GetDisplayRow(0).Value);
+        Assert.NotNull(model.GetPendingRow(0)?.ValueError);
+        Assert.True(model.HasPendingRow);
+    }
+
+    [Fact]
     public void WhenASimpleTextIsLoadedInAdvancedMode_ThenTheModeStaysAdvanced()
     {
         // Arrange

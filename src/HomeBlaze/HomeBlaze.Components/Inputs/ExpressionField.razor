@@ -72,8 +72,10 @@
                         </MudSelect>
                     </div>
                     <div style="flex: 1 1 120px; min-width: 0;">
-                        <MudTextField T="string" Label="Value" Value="@row.Value" Error="@(valueError is not null)" ErrorText="@valueError"
-                                      ValueChanged="@(value => SetRowAsync(key, row with { Value = value ?? string.Empty }))" />
+                        @* Taken on each keystroke: a value applied only when the input is left would leave a host's Save button disabled while
+                           it is clicked, and that click only leaves the input. *@
+                        <MudTextField T="string" Label="Value" Value="@row.Value" Immediate="true" Error="@(valueError is not null)" ErrorText="@valueError"
+                                      ValueChanged="@(value => TypeValueAsync(key, value))" OnBlur="@(() => _model.EndTyping(key))" />
                     </div>
                     <MudText Typo="Typo.caption" Class="mud-text-secondary" data-testid="@_testIds.RowNow">@GetRowText(rowIndex)</MudText>
                     <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" aria-label="Remove condition"
@@ -213,6 +215,8 @@
         _model.AddRow();
         return EmitAsync(isTextChanged: false);
     }
+
+    private Task TypeValueAsync(object key, string? value) => EmitAsync(_model.TypeValue(key, value ?? string.Empty));
 
     private Task RemoveRowAsync(object key) => EmitAsync(_model.RemoveRow(key));
 
