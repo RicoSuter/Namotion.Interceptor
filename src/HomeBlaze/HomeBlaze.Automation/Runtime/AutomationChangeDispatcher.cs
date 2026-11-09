@@ -11,16 +11,13 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// Routes the property changes of a context to the automations registered for it, with one subscription per change
-/// stream shared by all of them: a change of a property to the listeners that watch it, and a change of a property that
-/// holds subjects or a property added at run time, which <see cref="PropertyAttachNotifier"/> reports, as a graph change
-/// to the listeners whose graph route has the property and to every listener whose graph route is unbounded or not
-/// published yet, each once and left out while every listener still has one queued. A listener that resolves receives
-/// every graph change until it published the route of what it resolved, see <see cref="Registration.BeginResolving"/>,
-/// and a listener whose automation or rule gained a parent receives the next graph change, see
-/// <see cref="Registration.OnParentGained"/>. The subscription starts with the first registration for a stream and ends
-/// with the last one, so that the dispatcher holds no context without automations.
-/// Changes are routed synchronously on the writing thread, where the chain depth of the writing flow is read.
-/// Thread-safe.
+/// stream shared by all of them from the first registration for the stream until the last one ends. A change of a
+/// watched property goes to the listeners that watch it. A change of a property that holds subjects, or a property added
+/// at run time, which <see cref="PropertyAttachNotifier"/> reports, is a graph change for each listener whose graph route
+/// has the property or is unbounded or not published yet, and for each listener that resolves or gained a parent, see
+/// <see cref="Registration.BeginResolving"/> and <see cref="Registration.OnParentGained"/>; it is left out while every
+/// such listener has one queued. Changes are routed synchronously on the writing thread, which knows the chain depth of
+/// the writing flow. Thread-safe.
 /// </summary>
 internal sealed class AutomationChangeDispatcher
 {

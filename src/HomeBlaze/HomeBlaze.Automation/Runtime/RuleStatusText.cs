@@ -3,13 +3,9 @@ using System.Globalization;
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// The status text of a rule: its mode, then why it is inactive, or the first pending trigger with why its run did not
-/// run, the first holding trigger, the first problem, the first unknown trigger, "Armed, waiting until false" when every
-/// trigger fired and one of them rearmed while its expression stayed true, "Already true, waiting until false" when every
-/// trigger found its expression true when it became active, "Already true, waiting to rearm" when such a trigger waits
-/// for its rearm expression, "Triggered, waiting to rearm" when every trigger fired or waits for false, and otherwise
-/// "Armed", followed by why its last request did not run. Times are local to the host. The text changes only on a
-/// transition, so history records it once per transition.
+/// The status text of a rule: its mode, then why it is inactive or the state of the trigger that matters most, followed
+/// by why its last request did not run. Times are local to the host. The text changes only on a transition, so history
+/// records it once per transition.
 /// </summary>
 internal static class RuleStatusText
 {

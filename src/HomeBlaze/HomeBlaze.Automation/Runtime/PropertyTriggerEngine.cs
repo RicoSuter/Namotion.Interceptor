@@ -7,15 +7,12 @@ using Namotion.Interceptor;
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// The property triggers of active rules: resolves the properties they read and publishes them as the watched set to
-/// <paramref name="publishWatched"/>, evaluates them against the observed values on changes, graph changes and ticks,
-/// and returns the run requests of the triggers that fire. A tick evaluates only the triggers that are due: a hold that
-/// ends, or a trigger whose expressions can change with the clock at the instant <see cref="ExpressionClock"/> derives,
-/// every second only for a read of the clock that it cannot derive; <see cref="GetNextDueAt"/> tells when the next one
-/// is due. A trigger whose run did not run stays pending, and its rule requests the run again only when its Only if can
-/// have changed: on a change of a property Only if reads, which is watched only while a trigger is pending, at the
-/// instant derived for an Only if that reads the clock, and on a change of the trigger's own properties for a rule
-/// without Only if. Rules without a pending trigger cost nothing for this. Used by the worker only.
+/// The property triggers of active rules: resolves the properties they read, publishes them as the watched set to
+/// <paramref name="publishWatched"/>, evaluates the triggers on changes, graph changes and ticks, and returns the run
+/// requests of those that fire. A tick evaluates only the triggers that are due, see <see cref="GetNextDueAt"/>. A trigger
+/// whose run did not run stays pending, and its rule requests the run again only when its Only if can have changed: on a
+/// change of a property Only if reads, which is watched only while a trigger is pending, when an Only if that reads the
+/// clock is due, and on a change of the trigger's own properties for a rule without Only if. Used by the worker only.
 /// </summary>
 internal sealed class PropertyTriggerEngine(
     SubjectPathResolver resolver,
