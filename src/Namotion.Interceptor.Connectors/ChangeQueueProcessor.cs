@@ -53,6 +53,11 @@ public class ChangeQueueProcessor : IDisposable
     internal ChangeDeliveryRule DeliveryRule => _deliveryRule;
 
     /// <summary>
+    /// The clock <see cref="TeardownFlushBound"/> is measured on.
+    /// </summary>
+    internal TimeProvider TeardownTimeProvider { get; init; } = TimeProvider.System;
+
+    /// <summary>
     /// Number of changes dropped due to bounded-queue overflow or ordinary write failure, plus changes
     /// whose delivery was still locally unconfirmed when terminal ownership closed.
     /// </summary>
@@ -271,7 +276,7 @@ public class ChangeQueueProcessor : IDisposable
         var processingCancellationTask = processingTokenSource.CancelAsync();
         var teardownCancellationTask = Task.CompletedTask;
         using var teardownDelayCancellation = new CancellationTokenSource();
-        var teardownDelay = Task.Delay(TeardownFlushBound, teardownDelayCancellation.Token);
+        var teardownDelay = Task.Delay(TeardownFlushBound, TeardownTimeProvider, teardownDelayCancellation.Token);
         try
         {
             if (await Task.WhenAny(processingTask, teardownDelay).ConfigureAwait(false) == processingTask)
