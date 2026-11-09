@@ -6,8 +6,8 @@ namespace HomeBlaze.Automation.Runtime;
 /// <summary>
 /// The <see cref="IMonitoredService"/> status of an automation: an error stays until a run that executed actions without
 /// failure, a valid configuration after an invalid one, or a saved reset of the state clears it; a request that did not
-/// run changes nothing. An invalid configuration and an unreadable checkpoint are cleared only by a valid configuration or a
-/// reset, and runs that could not be written only once they are written. An unknown value is no error.
+/// run changes nothing. An invalid configuration and an unreadable checkpoint are cleared only by a valid configuration
+/// or a reset, and runs that could not be written only once they are written. An unknown value is no error.
 /// </summary>
 internal sealed class AutomationStatusReporter(Automation automation, ILogger logger)
 {
@@ -104,7 +104,7 @@ internal sealed class AutomationStatusReporter(Automation automation, ILogger lo
         var feedback = faults.FeedbackChains > 0
             ? $"A feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped: {faults.FeedbackChains} inputs were dropped."
             : null;
-        return overloaded is null && feedback is null ? null : string.Join(" ", new[] { overloaded, feedback }.OfType<string>());
+        return overloaded is null || feedback is null ? overloaded ?? feedback : overloaded + " " + feedback;
     }
 
     /// <summary>
