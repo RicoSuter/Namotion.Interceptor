@@ -83,10 +83,11 @@ internal sealed class PropertyTriggerEngine(
         }
 
         var property = input.Property;
-        var requests = ObserveWhere(rules, trigger => Array.IndexOf(trigger.Dependencies, property) >= 0, trigger => trigger.Rule.OnlyIf is null);
+        var requests = ObserveWhere(
+            rules, property, static (trigger, property) => Array.IndexOf(trigger.Dependencies, property) >= 0, static trigger => trigger.Rule.OnlyIf is null);
         return _pending.Count == 0
             ? requests
-            : AddPendingRequests(rules, requests, trigger => Array.IndexOf(trigger.Rule.OnlyIfDependencies, property) >= 0);
+            : AddPendingRequests(rules, requests, property, static (trigger, property) => Array.IndexOf(trigger.Rule.OnlyIfDependencies, property) >= 0);
     }
 
     /// <summary>
@@ -102,14 +103,16 @@ internal sealed class PropertyTriggerEngine(
             _derivedAt = now;
         }
 
-        var requests = ObserveWhere(rules, trigger => trigger.NextCheckAt is { } checkAt && (checkAt <= now || isClockSetBack));
+        // After the clock was set back, every instant derived before is due.
+        var dueBy = isClockSetBack ? DateTimeOffset.MaxValue : now;
+        var requests = ObserveWhere(rules, dueBy, static (trigger, dueBy) => trigger.NextCheckAt <= dueBy);
         if (_pending.Count == 0)
         {
             return requests;
         }
 
-        return AddPendingRequests(rules, requests, trigger =>
-            trigger.Rule.RechecksOnlyIfEverySecond || trigger.Rule.OnlyIfRecheckAt <= now || (isClockSetBack && trigger.Rule.OnlyIfRecheckAt is not null));
+        return AddPendingRequests(
+            rules, requests, dueBy, static (trigger, dueBy) => trigger.Rule.RechecksOnlyIfEverySecond || trigger.Rule.OnlyIfRecheckAt <= dueBy);
     }
 
     /// <summary>
@@ -119,8 +122,9 @@ internal sealed class PropertyTriggerEngine(
     public DateTimeOffset? GetNextDueAt(IReadOnlyList<CompiledRule> rules, DateTimeOffset now)
     {
         DateTimeOffset? next = null;
-        foreach (var rule in rules)
+        for (var ruleIndex = 0; ruleIndex < rules.Count; ruleIndex++)
         {
+            var rule = rules[ruleIndex];
             if (!rule.IsActivated)
             {
                 continue;
@@ -152,13 +156,13 @@ internal sealed class PropertyTriggerEngine(
         {
             if (evaluateAll)
             {
-                return ObserveWhere(rules, _ => true, _ => true);
+                return ObserveWhere(rules, 0, static (_, _) => true, static _ => true);
             }
 
-            var requests = _rebound.Count == 0 ? [] : ObserveWhere(rules, _rebound.Contains, _ => true);
+            var requests = _rebound.Count == 0 ? [] : ObserveWhere(rules, _rebound, static (trigger, rebound) => rebound.Contains(trigger), static _ => true);
             return _reboundOnlyIfRules.Count == 0 || _pending.Count == 0
                 ? requests
-                : AddPendingRequests(rules, requests, trigger => _reboundOnlyIfRules.Contains(trigger.Rule));
+                : AddPendingRequests(rules, requests, _reboundOnlyIfRules, static (trigger, reboundRules) => reboundRules.Contains(trigger.Rule));
         }
         finally
         {
@@ -179,7 +183,7 @@ internal sealed class PropertyTriggerEngine(
 
     /// <summary>Requests the runs of every pending trigger, such as after a state change skipped them.</summary>
     public IReadOnlyList<RunRequest> RequestPendingRuns(IReadOnlyList<CompiledRule> rules) =>
-        _pending.Count == 0 ? [] : AddPendingRequests(rules, [], _ => true);
+        _pending.Count == 0 ? [] : AddPendingRequests(rules, [], 0, static (_, _) => true);
 
     /// <summary>Whether a trigger is pending.</summary>
     public bool HasPending => _pending.Count > 0;
@@ -243,7 +247,20 @@ internal sealed class PropertyTriggerEngine(
 
     /// <summary>Evaluates the active triggers that read one of the properties.</summary>
     public IReadOnlyList<RunRequest> ObserveReaders(IReadOnlyList<CompiledRule> rules, IReadOnlySet<PropertyReference> properties) =>
-        properties.Count == 0 ? [] : ObserveWhere(rules, trigger => trigger.Dependencies.Any(properties.Contains));
+        properties.Count == 0 ? [] : ObserveWhere(rules, properties, static (trigger, properties) => ReadsAny(trigger, properties));
+
+    private static bool ReadsAny(CompiledPropertyTrigger trigger, IReadOnlySet<PropertyReference> properties)
+    {
+        foreach (var dependency in trigger.Dependencies)
+        {
+            if (properties.Contains(dependency))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Resolves the properties of the active triggers and of Only if of the rules of their pending triggers again, tracks
@@ -397,16 +414,18 @@ internal sealed class PropertyTriggerEngine(
             .Where(trigger => trigger.State.Phase != TriggerPhase.Inactive);
 
     // A trigger that stays pending requests its run again where requestPending allows it. Allocates nothing when no
-    // trigger matches.
-    private IReadOnlyList<RunRequest> ObserveWhere(
+    // trigger matches, as long as the callers pass static lambdas with the state they read.
+    private IReadOnlyList<RunRequest> ObserveWhere<TState>(
         IReadOnlyList<CompiledRule> rules,
-        Func<CompiledPropertyTrigger, bool> predicate,
+        TState state,
+        Func<CompiledPropertyTrigger, TState, bool> predicate,
         Func<CompiledPropertyTrigger, bool>? requestPending = null)
     {
         List<RunRequest>? requests = null;
         TriggerTime? time = null;
-        foreach (var rule in rules)
+        for (var ruleIndex = 0; ruleIndex < rules.Count; ruleIndex++)
         {
+            var rule = rules[ruleIndex];
             if (!rule.IsActivated)
             {
                 continue;
@@ -414,7 +433,7 @@ internal sealed class PropertyTriggerEngine(
 
             foreach (var trigger in rule.PropertyTriggers)
             {
-                if (trigger.State.Phase != TriggerPhase.Inactive && predicate(trigger) &&
+                if (trigger.State.Phase != TriggerPhase.Inactive && predicate(trigger, state) &&
                     ObserveOne(trigger, time ??= GetTime(), requestPending) is { } request)
                 {
                     (requests ??= []).Add(request);
@@ -484,13 +503,13 @@ internal sealed class PropertyTriggerEngine(
         AutomationPaths.ResolveProperty(resolver, path, rule) is { } property ? _values.GetValue(property) : null;
 
     // Adds the requests of the pending triggers that match and have none yet, in rule order.
-    private IReadOnlyList<RunRequest> AddPendingRequests(
-        IReadOnlyList<CompiledRule> rules, IReadOnlyList<RunRequest> requests, Func<CompiledPropertyTrigger, bool> predicate)
+    private IReadOnlyList<RunRequest> AddPendingRequests<TState>(
+        IReadOnlyList<CompiledRule> rules, IReadOnlyList<RunRequest> requests, TState state, Func<CompiledPropertyTrigger, TState, bool> predicate)
     {
         List<RunRequest>? added = null;
         foreach (var trigger in _pending)
         {
-            if (IsPending(trigger) && predicate(trigger) && !requests.Any(request => ReferenceEquals(request.Trigger, trigger)))
+            if (IsPending(trigger) && predicate(trigger, state) && !HasRequest(requests, trigger))
             {
                 (added ??= []).Add(CreateRequest(trigger));
             }
@@ -499,6 +518,19 @@ internal sealed class PropertyTriggerEngine(
         return added is null
             ? requests
             : [.. requests.Concat(added).OrderBy(request => AutomationTriggers.IndexOf(rules, request.Rule))];
+    }
+
+    private static bool HasRequest(IReadOnlyList<RunRequest> requests, CompiledPropertyTrigger trigger)
+    {
+        for (var index = 0; index < requests.Count; index++)
+        {
+            if (ReferenceEquals(requests[index].Trigger, trigger))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // The wait ended without a run, so the reason it did not run no longer applies and a new wait is logged again.

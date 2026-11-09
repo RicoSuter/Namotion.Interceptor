@@ -94,4 +94,37 @@ public class PropertyTriggerEngineTests
             [rule.PropertyTriggers[1], rule.PropertyTriggers[0]],
             engine.RequestPendingRuns([rule]).Select(request => request.Trigger).ToArray());
     }
+
+    [Fact]
+    public void WhenNothingIsDueOrReadByATrigger_ThenATickAReadersCheckAndTheNextDueTimeAllocateNothing()
+    {
+        // Arrange
+        const int repetitions = 1000;
+        var graph = new TestGraph();
+        var weather = new TestSensor();
+        graph.Add("Weather", weather);
+        var engine = new PropertyTriggerEngine(graph.Resolver, new FakeTimeProvider(Now), NullLogger.Instance, () => "Storm", _ => { }, new GraphRoutes(automation: new TestSensor(), changes: new AutomationChangeReceiver(new AutomationInputQueue())));
+        var rule = Compile("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")));
+        rule.IsActivated = true;
+        engine.Activate([rule], [rule]);
+        IReadOnlyList<CompiledRule> rules = [rule];
+        IReadOnlySet<PropertyReference> unread = new HashSet<PropertyReference> { new(weather, nameof(TestSensor.Rain)) };
+        engine.OnTick(rules);
+        engine.ObserveReaders(rules, unread);
+        engine.GetNextDueAt(rules, Now);
+
+        // Act
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var index = 0; index < repetitions; index++)
+        {
+            engine.OnTick(rules);
+            engine.ObserveReaders(rules, unread);
+            engine.GetNextDueAt(rules, Now);
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert
+        Assert.Equal(0, allocated);
+    }
 }
