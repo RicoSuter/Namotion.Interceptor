@@ -52,6 +52,21 @@ public class ExpressionClockTests
     }
 
     [Fact]
+    public void WhenTheChangeOfAnInstantIsBeyondTheRangeOfDateTimeOffset_ThenItNeverChanges()
+    {
+        // Arrange
+        var clock = Create("now - ./LastTriggeredAt > 10m")!;
+
+        // Act
+        var isDerived = clock.TryGetNextChange(_ => DateTimeOffset.MaxValue, Now, TimeZoneInfo.Utc, out var nextChange, out var hasChanged);
+
+        // Assert
+        Assert.True(isDerived);
+        Assert.Null(nextChange);
+        Assert.False(hasChanged);
+    }
+
+    [Fact]
     public void WhenAnExpressionDoesNotReadTheClock_ThenItHasNoClock()
     {
         // Act
