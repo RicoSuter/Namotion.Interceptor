@@ -18,7 +18,7 @@ namespace HomeBlaze.Automation.Runtime;
 internal sealed class GraphRoutes
 {
     private readonly GraphRouteBuilder _builder;
-    private readonly AutomationChangeReceiver? _changes;
+    private readonly AutomationChangeReceiver _changes;
     private bool _isResolving;
 
     // How many stored routes have each property, and how many are unbounded; a property no stored route has is removed.
@@ -37,9 +37,9 @@ internal sealed class GraphRoutes
 
     /// <summary>
     /// Creates the routes of the resolutions of <paramref name="automation"/>, or of no automation, published to
-    /// <paramref name="changes"/>, or nowhere without it.
+    /// <paramref name="changes"/>.
     /// </summary>
-    public GraphRoutes(IInterceptorSubject? automation, AutomationChangeReceiver? changes)
+    public GraphRoutes(IInterceptorSubject? automation, AutomationChangeReceiver changes)
     {
         _builder = new GraphRouteBuilder(automation);
         _changes = changes;
@@ -82,7 +82,7 @@ internal sealed class GraphRoutes
         if (!_isResolving)
         {
             _isResolving = true;
-            _changes?.BeginResolving();
+            _changes.BeginResolving();
         }
     }
 
@@ -112,7 +112,7 @@ internal sealed class GraphRoutes
         if (_isResolving)
         {
             _isResolving = false;
-            _changes?.EndResolving();
+            _changes.EndResolving();
         }
 
         return hasPublished;
@@ -141,7 +141,7 @@ internal sealed class GraphRoutes
 
         _isPublishedUnbounded = isUnbounded;
         _hasPublished = true;
-        _changes?.PublishRoute(_published, isUnbounded);
+        _changes.PublishRoute(_published, isUnbounded);
         return true;
     }
 

@@ -27,12 +27,12 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
 {
     private readonly Func<IInterceptorSubject?> _getRoot;
 
-    // Subject → canonical paths cache (with leading /), see GetStructureVersion for the version. The route is recorded
-    // for the first caller with a recorder and kept with the entry.
+    // Subject → canonical paths cache (with leading /) and the route of the first caller with a recorder, see
+    // GetStructureVersion for the version.
     private readonly ConcurrentDictionary<IInterceptorSubject, (long Version, IReadOnlyList<string> Paths, RecordedRoute? Route)> _canonicalPathsCache = new(ReferenceEqualityComparer.Instance);
 
-    // (path, style) → Subject resolve cache (absolute paths only), see GetStructureVersion for the version. The route is
-    // recorded for the first caller with a recorder and kept with the entry.
+    // (path, style) → Subject resolve cache (absolute paths only) and the route of the first caller with a recorder, see
+    // GetStructureVersion for the version.
     private readonly ConcurrentDictionary<(string Path, PathStyle Style), (long Version, IInterceptorSubject? Subject, RecordedRoute? Route)> _resolveCache = new();
 
     // In a context of its own, so that a change of the version tells only the components that read it and not the
@@ -124,14 +124,15 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                 return null;
             }
 
-            // Looked up first, so that a hit allocates nothing: every render asks for the same paths again. The route is
-            // the same for every caller of an absolute path, so a hit replays the recorded one; an entry computed without a
-            // recorder has none yet and is computed again for the first caller with one.
+            // Looked up first, so that a hit allocates nothing: every render asks for the same paths again. An entry computed
+            // without a recorder has no route to replay.
             var key = (path, style);
             var version = GetStructureVersion(root);
             if (_resolveCache.TryGetValue(key, out var cached) && cached.Version == version && (recorder is null || cached.Route is not null))
             {
-                cached.Route?.Replay(recorder);
+                if (recorder is not null)
+                    cached.Route!.Replay(recorder);
+
                 return cached.Subject;
             }
 
@@ -150,7 +151,9 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             }
 
             _resolveCache[key] = (version, resolved, route);
-            route?.Replay(recorder);
+            if (recorder is not null)
+                route!.Replay(recorder);
+
             return resolved;
         }
 
@@ -607,10 +610,9 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         }
     }
 
-    // The route of a cached result, replayed to the recorder of a later call served from the cache: the parent step of
-    // the subject of GetPaths, which is the only one a resolution records and comes before its properties, then the
-    // properties, then whether the route is unbounded. Never changed, so that an entry computed again with the same route
-    // keeps the instance of the entry before.
+    // The route of a cached result, replayed in the order it was recorded: the parent step of the subject of GetPaths,
+    // the only one a cached resolution records, then the properties. Immutable, so that an entry computed again with the
+    // same route keeps the instance.
     private sealed class RecordedRoute(
         PropertyReference[] properties, IInterceptorSubject? parentStepSubject, ImmutableArray<SubjectPropertyParent> parentStepParents, bool isUnbounded)
     {
@@ -622,11 +624,8 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
 
         public bool IsUnbounded { get; } = isUnbounded;
 
-        public void Replay(ISubjectPathRecorder? recorder)
+        public void Replay(ISubjectPathRecorder recorder)
         {
-            if (recorder is null)
-                return;
-
             if (ParentStepSubject is not null)
                 recorder.AddParentStep(ParentStepSubject, ParentStepParents);
 

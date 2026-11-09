@@ -11,12 +11,6 @@ namespace HomeBlaze.Automation.Runtime;
 /// it find something else, each once, and whether the route is unbounded. Cleared and filled again by the worker, so that
 /// a resolution whose route stayed the same allocates nothing. Used by the worker only.
 /// </summary>
-/// <remarks>
-/// A step up from a subject depends on its parents. The route has the properties that hold the subject, which lose it,
-/// but the property that gains it next is not known, and a subject with several parents loses one when an ancestor of
-/// that parent is detached, which writes no holder; the step is exact only for a subject with at most one parent that
-/// tells the worker when it gains a parent: the automation of the worker, and a rule whose only parent is that automation.
-/// </remarks>
 internal sealed class GraphRouteBuilder(IInterceptorSubject? automation) : ISubjectPathRecorder
 {
     private readonly List<PropertyReference> _properties = [];
@@ -68,6 +62,9 @@ internal sealed class GraphRouteBuilder(IInterceptorSubject? automation) : ISubj
         return _properties.Count == 0 && !IsUnbounded ? GraphRoute.Empty : new GraphRoute([.. _properties], IsUnbounded);
     }
 
+    // The property that gives a subject its next parent is on no route, and only these subjects report a parent gain, see
+    // PropertyAttachNotifier. A subject with several parents loses one without a write of a holder when an ancestor of
+    // that parent is detached.
     private bool TellsParentGains(IInterceptorSubject subject, ImmutableArray<SubjectPropertyParent> parents)
     {
         if (automation is null || parents.Length > 1)

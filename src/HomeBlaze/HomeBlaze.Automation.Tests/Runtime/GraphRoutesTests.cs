@@ -270,7 +270,7 @@ public class GraphRoutesTests
     {
         // Arrange
         await using var fixture = await RouteFixture.CreateAsync();
-        var routes = new GraphRoutes(automation: null, changes: null);
+        var routes = new GraphRoutes(automation: null, changes: new AutomationChangeReceiver(new AutomationInputQueue()));
         var slot = new GraphRouteSlot();
 
         // Act
@@ -424,7 +424,7 @@ public class GraphRoutesTests
             host.Graph.Add("Room", Room);
             host.Graph.Add("Folder", Folder);
             Folder.Add("Automation", Automation);
-            Routes = new GraphRoutes(Automation, changes: null);
+            Routes = new GraphRoutes(Automation, changes: new AutomationChangeReceiver(new AutomationInputQueue()));
         }
 
         public AutomationTestHost Host { get; }

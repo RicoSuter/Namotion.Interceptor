@@ -26,7 +26,8 @@ namespace HomeBlaze.Automation.Tests;
 /// <list type="bullet">
 /// <item>A structural write that a rule makes reaches every automation at the chain depth of the run, and beyond the
 /// chain limit it is dropped and reported as a stopped feedback chain by an automation that takes no part in the chain,
-/// unless its graph change was still queued. The structural writes of the rules here end after one run;
+/// unless its graph change was still queued, and counted among the dropped inputs of an automation in the chain whose
+/// route does not have the written property. The structural writes of the rules here end after one run;
 /// <see cref="WhenARuleReplacesTheSubjectItReadsEndlessly_ThenTheChainStopsAsWithoutGraphRoutesAndOnlyTheOtherAutomationsDiffer"/>
 /// covers a chain beyond the limit.</item>
 /// <item>A full queue drops inputs in their order, and without routes a queued graph change takes a place in it, so

@@ -20,7 +20,7 @@ public class AutomationTriggersTests
         var publishes = 0;
         var time = new FakeTimeProvider(AutomationTestHost.Start);
         var queue = new AutomationInputQueue();
-        var routes = new GraphRoutes(automation: null, changes: null);
+        var routes = new GraphRoutes(automation: null, changes: new AutomationChangeReceiver(new AutomationInputQueue()));
         var triggers = new AutomationTriggers(
             queue,
             () => registry.StructureVersion,
