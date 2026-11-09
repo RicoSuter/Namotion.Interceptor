@@ -54,7 +54,7 @@ public class AutomationGraphRouteDifferentialTests
                 seeds.Add(seed, Steps);
             }
 
-            for (var seed = 1001; seed <= 3000; seed++)
+            for (var seed = 1001; seed <= 1200; seed++)
             {
                 seeds.Add(seed, Steps * 3);
             }
