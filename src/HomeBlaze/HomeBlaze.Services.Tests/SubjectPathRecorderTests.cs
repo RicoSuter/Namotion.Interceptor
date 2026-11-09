@@ -393,6 +393,30 @@ public class SubjectPathRecorderTests : SubjectPathResolverTestBase
         Assert.Equal(withoutRecorder, withRecorder);
     }
 
+    // A resolver that the registry does not tell about structural changes keeps its cache entry, whose route it compares
+    // with the new one.
+    [Fact]
+    public void WhenAnAbsolutePathIsComputedAgainWithAnotherRoute_ThenTheRecorderReportsTheNewRoute()
+    {
+        // Arrange
+        var child = new TestContainer(Context) { Name = "Child" };
+        var root = new TestContainer(Context) { Name = "Root" };
+        RootManager.Root = root;
+        var resolver = new SubjectPathResolver(() => root);
+        var routeBefore = new RecordedRoute();
+        resolver.ResolveSubject("/Child/Garden", PathStyle.Canonical, null, routeBefore);
+        var route = new RecordedRoute();
+
+        // Act
+        root.Child = child;
+        var subject = resolver.ResolveSubject("/Child/Garden", PathStyle.Canonical, null, route);
+
+        // Assert
+        Assert.Null(subject);
+        Assert.Equal([Property(root, nameof(TestContainer.Child))], routeBefore.Properties);
+        Assert.Equal([Property(root, nameof(TestContainer.Child)), Property(child, "Garden")], route.Properties);
+    }
+
     [Fact]
     public void WhenThePathOfASubjectWithOneParentIsBuilt_ThenTheRouteHasAParentStepAndTheHoldersOfItsAncestors()
     {
