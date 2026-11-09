@@ -49,6 +49,7 @@ internal sealed class AutomationRuntime
         private set => Volatile.Write(ref _location, value);
     }
 
+    // Keeps the token sources out of the automation, which is at the coupling limit of the analyzer.
     /// <summary>Runs the stop with a token that is canceled with <paramref name="cancellationToken"/> or after <see cref="StopTimeout"/>.</summary>
     public static async Task WaitForStopAsync(Func<CancellationToken, Task> stop, TimeProvider timeProvider, CancellationToken cancellationToken)
     {
@@ -133,7 +134,7 @@ internal sealed class AutomationRuntime
             FollowPath();
             _routes.Publish();
             _engine.RefreshRuleStatuses();
-            using var wakeTimer = new WakeTimer(_automation.TimeProvider, () => EnqueueOnce(ref _isTickPending, TickInput.Instance));
+            using var wakeTimer = new WakeTimer(_automation.TimeProvider, EnqueueTick);
             _wakeTimer = wakeTimer;
             ScheduleWake();
             while (!cancellationToken.IsCancellationRequested)
@@ -273,11 +274,11 @@ internal sealed class AutomationRuntime
         }
     }
 
-    private void EnqueueOnce(ref int isPending, AutomationInput input)
+    private void EnqueueTick()
     {
-        if (Interlocked.Exchange(ref isPending, 1) == 0 && !_queue.TryEnqueue(input))
+        if (Interlocked.Exchange(ref _isTickPending, 1) == 0 && !_queue.TryEnqueue(TickInput.Instance))
         {
-            Volatile.Write(ref isPending, 0);
+            Volatile.Write(ref _isTickPending, 0);
         }
     }
 

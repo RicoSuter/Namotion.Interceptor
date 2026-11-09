@@ -56,7 +56,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         _publishRuleStatuses = PublishRuleStatuses;
     }
 
-    public string Name => _automation.Title ?? "Automation";
+    public string Name => _automation.Title;
 
     IInterceptorSubject IRuleRunHost.Automation => _automation;
 

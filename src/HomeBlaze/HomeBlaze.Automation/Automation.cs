@@ -96,7 +96,7 @@ public partial class Automation : BackgroundService, IConfigurable, IConfigurati
     public partial string? StatusMessage { get; internal set; }
 
     [Derived]
-    public string? Title => Name ?? "Automation";
+    public string Title => Name ?? "Automation";
 
     public string? IconName => "AutoMode";
 
