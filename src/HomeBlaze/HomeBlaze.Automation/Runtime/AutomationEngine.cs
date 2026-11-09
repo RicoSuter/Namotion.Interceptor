@@ -189,7 +189,7 @@ internal sealed class AutomationEngine : IRuleRunHost
             if (!string.Equals(error, _runWriteError, StringComparison.Ordinal))
             {
                 _runWriteError = error;
-                _status.Fail($"The runs could not be saved and are saved again in {AutomationStateKeeper.RunWriteDelay.TotalSeconds:0} seconds: {error}");
+                _status.Fail(DescribeRunWriteError(error));
             }
 
             return;
@@ -205,6 +205,9 @@ internal sealed class AutomationEngine : IRuleRunHost
             }
         }
     }
+
+    private static string DescribeRunWriteError(string error) =>
+        $"The runs could not be saved and are saved again in {AutomationStateKeeper.RunWriteDelay.TotalSeconds:0} seconds: {error}";
 
     /// <summary>
     /// Enters the initial state, clears the trigger times and starts every active rule over as if it entered its state:
@@ -366,7 +369,15 @@ internal sealed class AutomationEngine : IRuleRunHost
         }
         else if ((_hasConfigurationError || _hasCheckpointError || hadStateError) && !refusesWrites)
         {
-            _status.SetRunning();
+            // The runs that still cannot be written are shown again in place of the error that this clears.
+            if (_runWriteError is not null)
+            {
+                _status.SetError(DescribeRunWriteError(_runWriteError));
+            }
+            else
+            {
+                _status.SetRunning();
+            }
         }
 
         _hasConfigurationError = false;

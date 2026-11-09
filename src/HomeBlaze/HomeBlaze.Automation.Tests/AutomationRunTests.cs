@@ -315,6 +315,32 @@ public class AutomationRunTests
     }
 
     [Fact]
+    public async Task WhenAValidConfigurationFollowsAnInvalidOneWhileTheRunsCannotBeWritten_ThenTheErrorOfTheRunsStaysShown()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Idle"];
+            automation.InitialState = "Idle";
+            automation.Rules = Keyed(("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close"))));
+        });
+        host.BreakCheckpointWrites();
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromSeconds(5));
+        await host.SaveAsync(Keyed(("retract", On("Retract", When("/Weather/Gust >"), Invoke("/Blinds/Close")))));
+        var messageWhileInvalid = host.Automation.StatusMessage;
+
+        // Act
+        await host.SaveAsync(Keyed(("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
+
+        // Assert
+        Assert.StartsWith("The configuration is invalid", messageWhileInvalid);
+        Assert.Equal(ServiceStatus.Error, host.Automation.Status);
+        Assert.StartsWith("The runs could not be saved and are saved again in 5 seconds", host.Automation.StatusMessage);
+    }
+
+    [Fact]
     public async Task WhenARequestDoesNotRunAfterAFailedRun_ThenTheErrorStaysShown()
     {
         // Arrange
