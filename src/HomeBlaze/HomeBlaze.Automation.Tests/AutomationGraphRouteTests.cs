@@ -5,6 +5,7 @@ using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Attributes;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
 namespace HomeBlaze.Automation.Tests;
@@ -292,6 +293,30 @@ public class AutomationGraphRouteTests
         Assert.Equal(1, closesBefore);
         Assert.False(isWatchedWhileRemoved);
         Assert.Equal(2, host.Blinds.CloseCount);
+    }
+
+    // State metadata registered under a name of its own is still found by the property it belongs to.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenAPlainPropertyGainsStateMetadataUnderAnotherName_ThenAPathToItBecomesReadableAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { });
+        host.ChangeDispatcher.MakesEveryRouteUnbounded = makesEveryRouteUnbounded;
+        var device = new TestPlainDevice { Level = 9 };
+        host.Graph.Add("Device", device);
+        var automation = await host.AddAutomationAsync("Levels", Rule("/Device/Level > 5"));
+        var closesWhileUnreadable = host.Blinds.CloseCount;
+
+        // Act
+        ((IInterceptorSubject)device).TryGetRegisteredSubject()!.AddProperty(
+            "LevelState", typeof(StateMetadata), _ => new StateMetadata(), null, new PropertyAttributeAttribute(nameof(TestPlainDevice.Level), KnownAttributes.State));
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.Equal(0, closesWhileUnreadable);
+        Assert.Equal(1, host.Blinds.CloseCount);
     }
 
     // No path starts at a rule, so the Rules property of the automation is on no route.

@@ -1,3 +1,4 @@
+using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
@@ -10,14 +11,14 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// Announces a property that is added to a subject at run time, such as a dynamic property or an attribute, to the
-/// automations of a context as a graph change of that property, since a path that led nowhere or through an
-/// [InlinePaths] child may lead to it now. The properties a subject is attached with by the write of a property that
-/// holds subjects, such as its methods and attributes, are announced by the change of that write instead. Also tells the
-/// registration of an automation when the automation or one of its rules gains a parent, see
-/// <see cref="AutomationChangeDispatcher.Registration.OnParentGained"/>. One per context, added with the first
-/// registration of a dispatcher for it and kept, since a service cannot be removed from a context; it serves the routes
-/// of every dispatcher that routes the changes of the context and does nothing while none does. Runs on the writing
-/// thread after the registry registered the property and only enqueues.
+/// automations of a context as a graph change of that property, and an attribute also under the name a route records it
+/// with, since a path that led nowhere or through an [InlinePaths] child may lead to it now. The properties a subject is
+/// attached with by the write of a property that holds subjects, such as its methods and attributes, are announced by
+/// the change of that write instead. Also tells the registration of an automation when the automation or one of its
+/// rules gains a parent, see <see cref="AutomationChangeDispatcher.Registration.OnParentGained"/>. One per context, added
+/// with the first registration of a dispatcher for it and kept, since a service cannot be removed from a context; it
+/// serves the routes of every dispatcher that routes the changes of the context and does nothing while none does. Runs
+/// on the writing thread after the registry registered the property and only enqueues or marks.
 /// </summary>
 // Before the method properties are added, so that the subject they are added to is known to be attaching.
 [RunsAfter(typeof(SubjectRegistry), typeof(SubjectPathResolver))]
@@ -105,13 +106,33 @@ internal sealed class PropertyAttachNotifier(ISubjectRegistry? registry) : ILife
             return;
         }
 
+        var attributeName = GetAttributeName(change.Property);
         foreach (var source in sources)
         {
             source.OnPropertyAdded(change.Property);
+            if (attributeName is { } attribute)
+            {
+                source.OnPropertyAdded(attribute);
+            }
         }
     }
 
-    // A path up from an automation or a rule depends on its parents, and the property that adds a parent is on no route.
+    // An attribute is found by the property it belongs to whatever its own name, and a route records it under the name
+    // that AddAttribute gives it.
+    private static PropertyReference? GetAttributeName(PropertyReference property)
+    {
+        if (property.TryGetRegisteredProperty() is not { IsAttribute: true } attribute)
+        {
+            return null;
+        }
+
+        var metadata = attribute.AttributeMetadata;
+        var name = AutomationPaths.GetAttributePropertyName(metadata.PropertyName, metadata.AttributeName);
+        return name == property.Name ? null : new PropertyReference(property.Subject, name);
+    }
+
+    // A path from a rule or up from an automation depends on its parents, and the property that adds a parent is on no
+    // route.
     private static void AddParentGains(IInterceptorSubject subject)
     {
         if (subject is Automation automation)
@@ -130,10 +151,7 @@ internal sealed class PropertyAttachNotifier(ISubjectRegistry? registry) : ILife
         }
     }
 
-    private static void AddParentGain(Automation automation)
-    {
-        automation.Runtime?.Changes.Registration?.OnParentGained();
-    }
+    private static void AddParentGain(Automation automation) => automation.Runtime?.Changes.Registration?.OnParentGained();
 
     // A property is detached only with its subject, whose write is a graph change already.
     public void DetachProperty(SubjectPropertyLifecycleChange change)

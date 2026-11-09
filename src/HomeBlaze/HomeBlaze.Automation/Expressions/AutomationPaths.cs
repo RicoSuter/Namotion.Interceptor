@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
@@ -17,6 +18,22 @@ internal static class AutomationPaths
 {
     /// <summary>The character between the segments of a path.</summary>
     public const char Separator = '/';
+
+    // The names that the attributes of a property have on the routes, see GetAttributePropertyName, kept with the
+    // property so that recording them again allocates nothing.
+    private static readonly ConditionalWeakTable<RegisteredSubjectProperty, string> ConfigurationNames = new();
+    private static readonly ConditionalWeakTable<RegisteredSubjectProperty, string> StateNames = new();
+    private static readonly ConditionalWeakTable<RegisteredSubjectProperty, string>.CreateValueCallback CreateConfigurationName =
+        property => GetAttributePropertyName(property.Name, KnownAttributes.Configuration);
+    private static readonly ConditionalWeakTable<RegisteredSubjectProperty, string>.CreateValueCallback CreateStateName =
+        property => GetAttributePropertyName(property.Name, KnownAttributes.State);
+
+    /// <summary>
+    /// Gets the name under which a route records the attribute of a property, the name that
+    /// <see cref="RegisteredSubjectProperty.AddAttribute"/> gives it; an attribute added under another name is announced
+    /// under this one too, see <see cref="Runtime.PropertyAttachNotifier"/>.
+    /// </summary>
+    public static string GetAttributePropertyName(string propertyName, string attributeName) => $"{propertyName}@{attributeName}";
 
     /// <summary>
     /// Resolves the property a path ends at, as <see cref="ResolveTarget"/> does, when an expression may read it: a secret
@@ -40,20 +57,17 @@ internal static class AutomationPaths
         var configuration = property.TryGetAttribute(KnownAttributes.Configuration);
         if (configuration is null)
         {
-            AddAttribute(property, KnownAttributes.Configuration, recorder);
+            recorder.AddProperty(new PropertyReference(property.Subject, ConfigurationNames.GetValue(property, CreateConfigurationName)));
         }
 
         if (!isReadable && configuration?.GetValue() is not ConfigurationMetadata { IsSecret: true } &&
             property.TryGetAttribute(KnownAttributes.State) is null)
         {
-            AddAttribute(property, KnownAttributes.State, recorder);
+            recorder.AddProperty(new PropertyReference(property.Subject, StateNames.GetValue(property, CreateStateName)));
         }
 
         return isReadable;
     }
-
-    private static void AddAttribute(RegisteredSubjectProperty property, string attributeName, ISubjectPathRecorder recorder) =>
-        recorder.AddProperty(new PropertyReference(property.Subject, $"{property.Name}@{attributeName}"));
 
     /// <summary>
     /// Resolves the property or operation a path ends at: the last segment names it, the part before it leads to its subject.
