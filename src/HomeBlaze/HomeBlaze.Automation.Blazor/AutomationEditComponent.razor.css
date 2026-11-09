@@ -55,6 +55,7 @@
 }
 
 .automation-editor ::deep .automation-rule-select {
+    display: block;
     min-width: 0;
     margin: 0;
     padding: 0;
