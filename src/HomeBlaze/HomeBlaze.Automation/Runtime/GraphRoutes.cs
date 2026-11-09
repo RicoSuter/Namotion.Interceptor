@@ -52,7 +52,10 @@ internal sealed class GraphRoutes
     internal IReadOnlyCollection<PropertyReference> Union => _counts.Keys;
 
     // White-box test hook: whether the union is unbounded.
-    internal bool IsUnbounded => _unboundedCount > 0 || _awaitsGraphChange || _staleVersion >= 0;
+    internal bool IsUnbounded => _unboundedCount > 0 || WaitsForGraphChange;
+
+    // White-box test hook: whether the next graph change evaluates or resolves something, whatever it changed.
+    internal bool WaitsForGraphChange => _awaitsGraphChange || _staleVersion >= 0;
 
     // White-box test hook: the number of resolutions whose route was recorded.
     internal int ResolutionCount { get; private set; }
