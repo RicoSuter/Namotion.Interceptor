@@ -15,13 +15,16 @@ public sealed record AutomationRuleTestResult
     /// </summary>
     public bool IsActive { get; init; }
 
+    /// <summary>The result of each trigger, in the order of the triggers of the rule.</summary>
     public IReadOnlyList<AutomationTriggerTestResult> Triggers { get; init; } = [];
 
+    /// <summary>Whether the rule has an Only if condition.</summary>
     public bool HasOnlyIf { get; init; }
 
     /// <summary>True, false or null for unknown; true without Only if.</summary>
     public bool? OnlyIfResult { get; init; }
 
+    /// <summary>The distinct paths that led to no value when <see cref="OnlyIfResult"/> is unknown, else empty.</summary>
     public IReadOnlyList<string> OnlyIfMissingPaths { get; init; } = [];
 
     /// <summary>The actions as a run would execute them now, such as <c>/Living/Blinds/MoveTo(position: 40)</c>.</summary>
@@ -37,6 +40,7 @@ public sealed record AutomationTriggerTestResult
     /// <summary>The expression of a property trigger: true, false or null for unknown. Null for an event trigger.</summary>
     public bool? Result { get; init; }
 
+    /// <summary>The distinct paths that led to no value when <see cref="Result"/> is unknown, else empty.</summary>
     public IReadOnlyList<string> MissingPaths { get; init; } = [];
 
     /// <summary>The hold a property trigger needs, or what an event trigger waits for.</summary>
