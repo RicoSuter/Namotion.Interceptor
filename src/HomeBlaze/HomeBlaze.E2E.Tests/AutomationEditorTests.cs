@@ -353,6 +353,8 @@ public class AutomationEditorTests
         // At the pace of a user, so that renders arrive between the keystrokes, the value is written in quotes before it is complete.
         await value.PressSequentiallyAsync("hello world", new() { Delay = 30 });
         await Assertions.Expect(value).ToHaveValueAsync("hello world");
+        // The pending notice going away can move the Save button, so its box is measured only after that.
+        await Assertions.Expect(dialog.GetByTestId("automation-pending")).ToHaveCountAsync(0, new() { Timeout = Timeout });
 
         // Act
         // A click with the mouse, as a user makes it: it leaves the value input first, while Playwright's click would wait
