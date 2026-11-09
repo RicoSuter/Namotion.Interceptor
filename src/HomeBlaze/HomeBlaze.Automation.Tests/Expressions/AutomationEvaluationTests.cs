@@ -115,6 +115,50 @@ public class AutomationEvaluationTests
         Assert.Equal([path], evaluation.MissingPaths.ToArray());
     }
 
+    [Theory]
+    [InlineData("event")]
+    [InlineData("event/Inner")]
+    [InlineData("event/Raw")]
+    public void WhenAnEventValueHoldsAMemberExcludedFromExpressions_ThenItIsMissing(string path)
+    {
+        // Arrange
+        var payload = new OverridingEvent
+        {
+            Timestamp = Now,
+            DeviceId = "b1",
+            Raw = "raw-secret",
+            Inner = new ExcludedInner { Source = "source-secret" }
+        };
+        var evaluation = CreateEvaluation(capturedEvent: new CapturedEvent(_graph.Weather, payload));
+        Assert.True(AutomationExpressionCheck.TryParseTemplate($"{{{{ {path} | raw }}}}", allowsEvent: true, out var template, out var error), error);
+
+        // Act
+        var text = evaluation.Render(template);
+
+        // Assert
+        Assert.Equal(string.Empty, text);
+        Assert.Equal([path], evaluation.MissingPaths.ToArray());
+    }
+
+    public record ExcludedEvent : DeviceEvent
+    {
+        [ExcludeFromExpressions]
+        public virtual string? Raw { get; init; }
+
+        public ExcludedInner? Inner { get; init; }
+    }
+
+    public sealed record OverridingEvent : ExcludedEvent
+    {
+        public override string? Raw { get; init; }
+    }
+
+    public sealed record ExcludedInner
+    {
+        [ExcludeFromExpressions]
+        public string? Source { get; init; }
+    }
+
     public sealed record SecretEvent : DeviceEvent
     {
         [Configuration(IsSecret = true)]

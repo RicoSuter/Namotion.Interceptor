@@ -404,6 +404,7 @@ namespace HomeBlaze.Services.Display
     public static class SecretValueTypes
     {
         public static bool HoldsSecret(object value) { }
+        public static bool IsSecret(System.Reflection.PropertyInfo property) { }
     }
     public static class StateUnitExtensions
     {

@@ -1,7 +1,6 @@
 using System.Collections.Frozen;
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Messaging;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Display;
@@ -11,10 +10,10 @@ using Namotion.Interceptor.Expressions;
 namespace HomeBlaze.Automation.Expressions;
 
 /// <summary>
-/// Reads the members of an event payload: the public properties of its record, found once per type, without those marked
-/// with <see cref="ConfigurationAttribute.IsSecret"/> or <see cref="ExcludeFromExpressionsAttribute"/>. A member that holds
-/// a subject continues the path into that subject, as in <c>event/Button/Name</c>. A value that
-/// <see cref="SecretValueTypes.HoldsSecret"/> is missing.
+/// Reads the members of an event payload: the public properties of its record, found once per type, without those that
+/// <see cref="SecretValueTypes.IsSecret"/> tells. A member that holds a subject continues the path into that subject, as
+/// in <c>event/Button/Name</c>. A value that <see cref="SecretValueTypes.HoldsSecret"/>, such as a payload with a hidden
+/// member, is missing.
 /// </summary>
 internal static class EventPayloadReader
 {
@@ -24,7 +23,7 @@ internal static class EventPayloadReader
     public static IReadOnlyDictionary<string, PropertyInfo> GetMembers(Type eventType) =>
         MembersByType.GetValue(eventType, static type => type
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(property => property.CanRead && property.GetIndexParameters().Length == 0 && !IsHidden(property))
+            .Where(property => property.CanRead && property.GetIndexParameters().Length == 0 && !SecretValueTypes.IsSecret(property))
             .DistinctBy(property => property.Name)
             .ToFrozenDictionary(property => property.Name, StringComparer.Ordinal));
 
@@ -54,8 +53,4 @@ internal static class EventPayloadReader
 
     private static ExpressionValue FromValue(object? value) =>
         value is not null && SecretValueTypes.HoldsSecret(value) ? ExpressionValue.Missing : ExpressionValue.FromValue(value);
-
-    private static bool IsHidden(PropertyInfo property) =>
-        property.GetCustomAttribute<ConfigurationAttribute>(true) is { IsSecret: true } ||
-        property.IsDefined(typeof(ExcludeFromExpressionsAttribute), true);
 }
