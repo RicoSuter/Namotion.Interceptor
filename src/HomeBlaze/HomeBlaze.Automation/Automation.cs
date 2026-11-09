@@ -140,6 +140,11 @@ public partial class Automation : BackgroundService, IConfigurable, IConfigurati
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Subscribes to the <see cref="AutomationStateChangedEvent"/> published when the automation enters another state.
+    /// Observers are called on the worker of the automation, which processes no other input meanwhile; an exception they
+    /// throw is logged and changes nothing in the automation.
+    /// </summary>
     public IDisposable Subscribe(IObserver<AutomationStateChangedEvent> observer) => _stateChanged.Subscribe(observer);
 
     /// <summary>
@@ -194,9 +199,9 @@ public partial class Automation : BackgroundService, IConfigurable, IConfigurati
     }
 
     /// <summary>
-    /// Stops the worker and waits until it ended, at most until <paramref name="cancellationToken"/> is canceled or
-    /// <see cref="AutomationRuntime.StopTimeout"/> passed. A worker that did not end, such as one in an operation that ignores its
-    /// cancellation, is abandoned: it changes neither the automation nor its checkpoint anymore, also after a new start.
+    /// Stops the worker and waits until it ended, at most until <paramref name="cancellationToken"/> is canceled or 10 seconds
+    /// passed. A worker that did not end, such as one in an operation that ignores its cancellation, is abandoned: it changes
+    /// neither the automation nor its checkpoint anymore, also after a new start.
     /// </summary>
     /// <remarks>
     /// The runs that an abandoned worker recorded but had not written yet are lost as after a crash: the next start
