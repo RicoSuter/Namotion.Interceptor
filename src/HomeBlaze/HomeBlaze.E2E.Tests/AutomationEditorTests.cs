@@ -660,6 +660,26 @@ public class AutomationEditorTests
     }
 
     [Fact]
+    public async Task WhenARuleIsFocusedAndEnterOrSpaceIsPressed_ThenItIsSelected()
+    {
+        // Arrange
+        await using var washer = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        var (page, dialog) = await OpenEditorAsync(washer.Name, tab: RulesTab);
+        await Assertions.Expect(dialog.GetByLabel("Rule name")).ToHaveValueAsync("Started", new() { Timeout = Timeout });
+        var rules = dialog.GetByTestId("automation-rule-list").GetByRole(AriaRole.Button);
+
+        // Act
+        await rules.Filter(new() { HasTextString = "Finished" }).FocusAsync();
+        await page.Keyboard.PressAsync("Enter");
+
+        // Assert
+        await Assertions.Expect(dialog.GetByLabel("Rule name")).ToHaveValueAsync("Finished", new() { Timeout = Timeout });
+        await rules.Filter(new() { HasTextString = "Started" }).FocusAsync();
+        await page.Keyboard.PressAsync("Space");
+        await Assertions.Expect(dialog.GetByLabel("Rule name")).ToHaveValueAsync("Started", new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenTheCooldownIsBeingTypedOrIsZero_ThenAnErrorShowsOnlyForWhatCannotBecomeValidAndAValidOneIsSavedAsOnlyIf()
     {
         // Arrange
