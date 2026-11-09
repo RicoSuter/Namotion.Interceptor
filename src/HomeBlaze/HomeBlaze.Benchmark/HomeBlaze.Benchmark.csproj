@@ -6,6 +6,9 @@
 
 	<ItemGroup>
 		<PackageReference Include="BenchmarkDotNet" />
+		<PackageReference Include="SonarAnalyzer.CSharp">
+			<PrivateAssets>all</PrivateAssets>
+		</PackageReference>
 	</ItemGroup>
 
 	<ItemGroup>
