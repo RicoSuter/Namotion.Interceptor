@@ -136,7 +136,8 @@ internal sealed class ExpressionFieldModel
     /// <summary>
     /// Takes the value of the row with the key while it is being typed, like <see cref="SetRow(object, ExpressionRow)"/>,
     /// and shows it as typed until <see cref="EndTyping"/>, so that the input does not change under the cursor when the
-    /// value is written in another form, such as in quotes. Does nothing when the row is gone.
+    /// value is written in another form, such as in quotes. A value typed back to the one the row had when typing started
+    /// is written as it was. Does nothing when the row is gone.
     /// </summary>
     /// <returns>Whether <see cref="Text"/> changed.</returns>
     public bool TypeValue(object key, string value)
@@ -147,8 +148,10 @@ internal sealed class ExpressionFieldModel
             return false;
         }
 
+        var slot = _slots[index];
+        slot.ValueBeforeTyping ??= _rows[index].Value;
         var isChanged = SetRow(index, GetDisplayRow(index) with { Value = value });
-        _slots[index].TypedValue = value;
+        slot.TypedValue = value;
         return isChanged;
     }
 
@@ -158,6 +161,7 @@ internal sealed class ExpressionFieldModel
         if (IndexOf(key) is var index and >= 0)
         {
             _slots[index].TypedValue = null;
+            _slots[index].ValueBeforeTyping = null;
         }
     }
 
@@ -177,7 +181,7 @@ internal sealed class ExpressionFieldModel
     public bool SetRow(int index, ExpressionRow row)
     {
         _slots[index].TypedValue = null;
-        var pending = Check(row, _rows[index], out var applied);
+        var pending = Check(row, _rows[index], _slots[index].ValueBeforeTyping, out var applied);
         if (pending is not null)
         {
             _slots[index].Pending = pending;
@@ -225,9 +229,10 @@ internal sealed class ExpressionFieldModel
     private static bool IsFinished(ExpressionRow row) => row.Path.Length > 0 && row.Value.Length > 0;
 
     // Null when the row can be written into the text as the applied row. Only a value that differs from the one the text
-    // holds is normalized: a loaded bare path such as Sibling/Value is a valid relative lookup, and quoting it when another
-    // part of the row changes would turn a comparison against a live value into a comparison against text.
-    private PendingRow? Check(ExpressionRow row, ExpressionRow current, out ExpressionRow applied)
+    // holds, and from the one it held when typing started, is normalized: a loaded bare path such as Sibling/Value is a
+    // valid relative lookup, and quoting it when another part of the row changes, or when it is typed back after each
+    // keystroke was applied, would turn a comparison against a live value into a comparison against text.
+    private PendingRow? Check(ExpressionRow row, ExpressionRow current, string? valueBeforeTyping, out ExpressionRow applied)
     {
         applied = row;
         var path = row.Path.Trim();
@@ -237,7 +242,7 @@ internal sealed class ExpressionFieldModel
         }
 
         var value = row.Value.Trim();
-        if (value != current.Value)
+        if (value != current.Value && value != valueBeforeTyping)
         {
             var (normalized, valueError) = NormalizeValue(value);
             if (valueError is not null)
@@ -329,7 +334,18 @@ internal sealed class ExpressionFieldModel
     private static bool IsSingleToken(string text) =>
         ExpressionTokens.Split(text) is [var token] && token == text;
 
-    private int IndexOf(object key) => _slots.FindIndex(slot => ReferenceEquals(slot, key));
+    private int IndexOf(object key)
+    {
+        for (var index = 0; index < _slots.Count; index++)
+        {
+            if (ReferenceEquals(_slots[index], key))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
 
     private static List<RowSlot> CreateSlots(int count)
     {
@@ -342,12 +358,15 @@ internal sealed class ExpressionFieldModel
         return slots;
     }
 
-    // One per row: its identity, its edit that is not part of the text, and its value as typed.
+    // One per row: its identity, its edit that is not part of the text, its value as typed, and the value the row had
+    // when typing started.
     private sealed class RowSlot
     {
         public PendingRow? Pending { get; set; }
 
         public string? TypedValue { get; set; }
+
+        public string? ValueBeforeTyping { get; set; }
     }
 
     /// <summary>An edit of a row that is not part of <see cref="Text"/>, with the error of its path or value when it is invalid.</summary>

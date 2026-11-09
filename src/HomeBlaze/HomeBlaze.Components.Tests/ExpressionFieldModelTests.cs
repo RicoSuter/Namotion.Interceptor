@@ -174,6 +174,43 @@ public class ExpressionFieldModelTests
         Assert.False(model.HasPendingRow);
     }
 
+    [Theory]
+    [InlineData("Sibling/Value", "Sibling/Valu")]
+    [InlineData("Devices[x]/IsOn", "Devices[x]/IsO")]
+    [InlineData("N/A", "N/")]
+    public void WhenALoadedValueIsTypedBackToItself_ThenItIsWrittenAsLoaded(string loaded, string intermediate)
+    {
+        // Arrange
+        var model = new ExpressionFieldModel($"/a/B == {loaded}");
+        var key = model.GetRowKey(0);
+
+        // Act
+        model.TypeValue(key, intermediate);
+        model.TypeValue(key, loaded);
+        model.EndTyping(key);
+
+        // Assert
+        Assert.Equal($"/a/B == {loaded}", model.Text);
+        Assert.Equal(loaded, model.GetDisplayRow(0).Value);
+    }
+
+    [Fact]
+    public void WhenALoadedValueIsTypedBackToItselfAfterTypingEnded_ThenItIsNormalizedLikeAnyChange()
+    {
+        // Arrange
+        var model = new ExpressionFieldModel("/a/B == Sibling/Value");
+        var key = model.GetRowKey(0);
+        model.TypeValue(key, "Sibling/Valu");
+        model.EndTyping(key);
+
+        // Act
+        model.TypeValue(key, "Sibling/Value");
+        model.EndTyping(key);
+
+        // Assert
+        Assert.Equal("/a/B == \"Sibling/Value\"", model.Text);
+    }
+
     [Fact]
     public void WhenATypedValueIsInvalid_ThenItIsPendingWithItsErrorWhileItIsTyped()
     {
