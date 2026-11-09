@@ -104,7 +104,7 @@ Two values that are not null compute by these rules:
 - **Negation**: `-` gives a number or a `TimeSpan` the other sign. An integer negates to a `decimal`, and a `float`, a `double` and a `decimal` keep their type.
 - **Every other pair**, such as a text, a boolean, an instant plus an instant or a duration times a number, is missing, and so is a result beyond the range of its type.
 
-A missing operand makes the result missing, like a path that leads nowhere. A computed value has no property, so a host shows it without the unit of a property. Each operator and negation boxes its result, so it allocates one small object per evaluation; comparisons, literals and conditions allocate nothing.
+A missing operand makes the result missing, like a path that leads nowhere. A computed value has no property, so a host shows it without the unit of a property. Each operator and negation boxes its result, so it allocates one small object per evaluation; comparisons, literals and conditions allocate nothing, and neither does a negated number or duration literal, such as `-(5)` or `- 5m`, which is read as a literal.
 
 ## Hosting an expression
 

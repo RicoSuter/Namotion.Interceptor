@@ -366,6 +366,30 @@ public class ParsedExpressionEvaluationTests
     }
 
     [Theory]
+    [InlineData("Power > -(5)")]
+    [InlineData("Interval > - 5m")]
+    [InlineData("Power > --5")]
+    public void WhenANegatedLiteralIsEvaluated_ThenItAllocatesNothing(string text)
+    {
+        // Arrange
+        Assert.True(ParsedExpression.TryParse(text, '/', out var expression, out var error), error);
+        var context = new TestExpressionContext(new Dictionary<string, object?> { ["Power"] = 7400m, ["Interval"] = TimeSpan.FromMinutes(1) });
+        Assert.True(expression.EvaluateCondition(ref context));
+
+        // Act
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var iteration = 0; iteration < 100; iteration++)
+        {
+            expression.EvaluateCondition(ref context);
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert
+        Assert.Equal(0, allocated);
+    }
+
+    [Theory]
     [InlineData("Interval == 90s", true)]
     [InlineData("Interval == 1m30s", true)]
     [InlineData("Interval == 0.025h", true)]
