@@ -205,8 +205,7 @@ public class AutomationGraphRouteDifferentialTests
 
         public static async Task<World> CreateAsync(int seed, bool makesEveryRouteUnbounded)
         {
-            var host = await AutomationTestHost.StartAsync(_ => { });
-            host.ChangeDispatcher.MakesEveryRouteUnbounded = makesEveryRouteUnbounded;
+            var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
             var world = new World(host, seed);
             await world.BuildAsync();
             return world;
@@ -856,8 +855,8 @@ public class AutomationGraphRouteDifferentialTests
         public static async Task<ReplacingWorld> CreateAsync(bool makesEveryRouteUnbounded)
         {
             var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
-                ("gusts", On("Gusts", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
-            host.ChangeDispatcher.MakesEveryRouteUnbounded = makesEveryRouteUnbounded;
+                ("gusts", On("Gusts", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))),
+                makesEveryRouteUnbounded: makesEveryRouteUnbounded);
             var world = new ReplacingWorld(host);
             host.Graph.Add("Replacer", world._replacer);
             world.Others.Add(host.Automation);

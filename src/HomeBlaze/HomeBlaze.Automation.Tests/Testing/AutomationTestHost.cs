@@ -61,8 +61,17 @@ internal sealed class AutomationTestHost : IAsyncDisposable
 
     public string CheckpointPath => Path.Combine(DataDirectory, "AutomationState", Key + ".json");
 
+    /// <summary>
+    /// Starts the host with the automation <c>/Storm</c>, which <paramref name="configure"/> configures. With
+    /// <paramref name="makesEveryRouteUnbounded"/> the change dispatcher treats every graph route as unbounded from before
+    /// the first automation registers, which is the dispatch without graph routes.
+    /// </summary>
     public static async Task<AutomationTestHost> StartAsync(
-        Action<Automation> configure, DateTimeOffset? start = null, TimeZoneInfo? timeZone = null, IAutomationAuthorizer? authorizer = null)
+        Action<Automation> configure,
+        DateTimeOffset? start = null,
+        TimeZoneInfo? timeZone = null,
+        IAutomationAuthorizer? authorizer = null,
+        bool makesEveryRouteUnbounded = false)
     {
         var time = new FakeTimeProvider(start ?? Start);
         time.SetLocalTimeZone(timeZone ?? TimeZoneInfo.Utc);
@@ -70,6 +79,7 @@ internal sealed class AutomationTestHost : IAsyncDisposable
         var dataDirectory = Directory.CreateTempSubdirectory("automation-test").FullName;
         graph.Context.AddService<IDataDirectoryProvider>(new TestDataDirectory(dataDirectory));
         var host = new AutomationTestHost(graph, time, dataDirectory, authorizer ?? new AllowAllAutomationAuthorizer());
+        host.ChangeDispatcher.MakesEveryRouteUnbounded = makesEveryRouteUnbounded;
         graph.Add("Weather", host.Weather);
         graph.Add("Blinds", host.Blinds);
         graph.Add("Notifier", host.Notifier);

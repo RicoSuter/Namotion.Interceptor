@@ -134,8 +134,7 @@ public class AutomationGraphRouteStressTests(ITestOutputHelper output)
 
         public static async Task<StressWorld> CreateAsync(int seed, bool makesEveryRouteUnbounded)
         {
-            var host = await AutomationTestHost.StartAsync(_ => { });
-            host.ChangeDispatcher.MakesEveryRouteUnbounded = makesEveryRouteUnbounded;
+            var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
             var world = new StressWorld(host) { _seed = seed };
             await world.BuildAsync(new Random(seed));
             return world;

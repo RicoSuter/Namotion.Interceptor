@@ -94,8 +94,7 @@ public class AutomationGraphRouteTests
     public async Task WhenAPlainPropertyGainsStateMetadataAtRunTime_ThenAPathToItBecomesReadableAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
     {
         // Arrange
-        await using var host = await AutomationTestHost.StartAsync(_ => { });
-        host.ChangeDispatcher.MakesEveryRouteUnbounded = makesEveryRouteUnbounded;
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
         var device = new TestPlainDevice { Level = 9 };
         host.Graph.Add("Device", device);
         var automation = await host.AddAutomationAsync("Levels", Rule("/Device/Level > 5"));
@@ -117,8 +116,7 @@ public class AutomationGraphRouteTests
     public async Task WhenAPropertyGainsASecretConfigurationAtRunTime_ThenAPathToItIsNoLongerReadAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
     {
         // Arrange
-        await using var host = await AutomationTestHost.StartAsync(_ => { });
-        host.ChangeDispatcher.MakesEveryRouteUnbounded = makesEveryRouteUnbounded;
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
         double? windValue = 1;
         var wind = ((IInterceptorSubject)host.Weather).TryGetRegisteredSubject()!
             .AddProperty("Wind", typeof(double?), _ => windValue, (_, value) => windValue = (double?)value);
@@ -245,8 +243,7 @@ public class AutomationGraphRouteTests
     public async Task WhenARuleChangesWhileDetachedAndIsAttachedAgain_ThenAPathFromItResolvesAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
     {
         // Arrange
-        await using var host = await AutomationTestHost.StartAsync(_ => { });
-        host.ChangeDispatcher.MakesEveryRouteUnbounded = makesEveryRouteUnbounded;
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
         var automation = await host.AddAutomationAsync("Self", automation => automation.Rules = Keyed(
             ("rule", On("Gusty", When("./Name == \"Calm\""), Invoke("/Blinds/Close")))));
         var rule = automation.Rules["rule"];
@@ -270,8 +267,7 @@ public class AutomationGraphRouteTests
     public async Task WhenARuleIsRemovedAndAddedAgainWithoutApplying_ThenAPathFromItIsWatchedOnlyWhileAttachedAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
     {
         // Arrange
-        await using var host = await AutomationTestHost.StartAsync(_ => { });
-        host.ChangeDispatcher.MakesEveryRouteUnbounded = makesEveryRouteUnbounded;
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
         var automation = await host.AddAutomationAsync("Self", automation => automation.Rules = Keyed(
             ("rule", On("Gusty", When("./Name == \"Gusty\""), Invoke("/Blinds/Close")))));
         var rule = automation.Rules["rule"];
@@ -302,8 +298,7 @@ public class AutomationGraphRouteTests
     public async Task WhenAPlainPropertyGainsStateMetadataUnderAnotherName_ThenAPathToItBecomesReadableAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
     {
         // Arrange
-        await using var host = await AutomationTestHost.StartAsync(_ => { });
-        host.ChangeDispatcher.MakesEveryRouteUnbounded = makesEveryRouteUnbounded;
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
         var device = new TestPlainDevice { Level = 9 };
         host.Graph.Add("Device", device);
         var automation = await host.AddAutomationAsync("Levels", Rule("/Device/Level > 5"));
@@ -446,8 +441,7 @@ public class AutomationGraphRouteTests
     public async Task WhenTheStructureVersionMovedWithoutAWriteBeforeADictionaryGainsASecondKey_ThenThePathThroughTheNewKeyResolvesAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
     {
         // Arrange
-        await using var host = await AutomationTestHost.StartAsync(_ => { });
-        host.ChangeDispatcher.MakesEveryRouteUnbounded = makesEveryRouteUnbounded;
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
         var sensor = new TestSensor { Gust = 1 };
         var room = new TestRoom { Devices = new Dictionary<string, TestSensor> { ["d0"] = sensor } };
         host.Graph.Add("R0", room);
