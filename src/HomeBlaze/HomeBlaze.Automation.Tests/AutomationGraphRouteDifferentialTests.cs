@@ -19,7 +19,7 @@ namespace HomeBlaze.Automation.Tests;
 /// </summary>
 /// <remarks>
 /// Each step is one change from the test followed by a flush of every automation, so that the inputs of a step are
-/// queued before the workers process them. The rules write only properties that no other automation reads, so that the
+/// queued before the workers process them; a move flushes between its two writes. The rules write only properties that no other automation reads, so that the
 /// workers of a step do not race each other. Without routes every automation receives every structural change, also
 /// one that cannot change what its paths resolve to, which differs observably in two ways only, each kept out of the
 /// scenario by the constraint named here:
@@ -206,11 +206,11 @@ public class AutomationGraphRouteDifferentialTests
                 3 => ChangeButton(),
                 4 => ChangeRoom(),
                 5 => ChangeFolderChild(),
-                6 => MoveAutomation(),
+                6 => await MoveAutomationAsync(),
                 7 => AddWind(),
                 8 => SetWind(),
                 9 => ChangeRuleHost(),
-                10 => MoveFolder(),
+                10 => await MoveFolderAsync(),
                 11 => AddExtra(),
                 12 => ChangeUnrelated(),
                 13 or 14 => WriteValue(),
@@ -509,8 +509,10 @@ public class AutomationGraphRouteDifferentialTests
         }
 
         // Adds the automation to another container and removes it from one it was in, except sometimes, which leaves it
-        // with several parents until a later move.
-        private string MoveAutomation()
+        // with several parents until a later move. The automations process the addition before the removal, which they
+        // otherwise race: one that resolves between the two writes sees the subject with both parents, and a move starts
+        // it fresh.
+        private async Task<string> MoveAutomationAsync()
         {
             var automation = _automations[_random.Next(_automations.Count)];
             var containers = _containers[automation];
@@ -519,6 +521,7 @@ public class AutomationGraphRouteDifferentialTests
             {
                 AddTo(target, automation);
                 containers.Add(target);
+                await FlushAsync();
             }
 
             if (containers.Count > 1 && _random.Next(4) != 0)
@@ -586,12 +589,14 @@ public class AutomationGraphRouteDifferentialTests
             return $"rule host {_ruleHost.Rules.Count} of {automation.Name}";
         }
 
-        // Moves the inner folder between the outer ones, also when an automation is in it.
-        private string MoveFolder()
+        // Moves the inner folder between the outer ones, also when an automation is in it, with the addition processed
+        // before the removal as for a move of an automation.
+        private async Task<string> MoveFolderAsync()
         {
             var inner = _folders[2];
             var (source, target) = _folders[0].Children.ContainsKey("F2") ? (_folders[0], _folders[1]) : (_folders[1], _folders[0]);
             target.Add("F2", inner);
+            await FlushAsync();
             source.Remove("F2");
             return "move F2";
         }
