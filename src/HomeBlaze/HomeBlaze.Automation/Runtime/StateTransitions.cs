@@ -115,7 +115,7 @@ internal sealed class StateTransitions(Automation automation, AutomationStateKee
     public static string? CheckState(CompiledAutomation snapshot, string? currentState) =>
         snapshot.States.Count == 0 || currentState is null || snapshot.HasState(currentState)
             ? null
-            : $"The saved state '{currentState}' is not a state of the automation; reset the automation to enter '{snapshot.InitialState}'";
+            : $"The saved state '{currentState}' is not a state of the automation, so no rule runs until Reset state enters '{snapshot.InitialState}'";
 
     private void Enter(string? state, DateTimeOffset enteredAt)
     {

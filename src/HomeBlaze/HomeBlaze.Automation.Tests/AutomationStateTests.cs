@@ -325,6 +325,39 @@ public class AutomationStateTests
     }
 
     [Fact]
+    public async Task WhenTheSavedStateWasRemoved_ThenNoRuleRunsAndTheErrorStaysUntilTheReset()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Idle", "Running"];
+            automation.InitialState = "Idle";
+            automation.Rules = Keyed(
+                ("started", Create("Started", AutomationRuleMode.On, [When("/Weather/Power > 500")], [Enter("Running")], inState: "Idle")),
+                ("close", On("Close", When("/Weather/Gust > 8"), Invoke("/Blinds/Close"))));
+        });
+        await SetPowerAsync(host, 600);
+        host.Automation.States = ["Idle"];
+        host.Automation.RuleOrder = [];
+        await host.SaveAsync(Keyed(("close", On("Close", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
+
+        // Act
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        var closesBeforeTheReset = host.Blinds.CloseCount;
+        var statusBeforeTheReset = host.Automation.Status;
+        var ruleStatusBeforeTheReset = host.Rule("close").Status;
+        await host.ResetAsync();
+
+        // Assert
+        Assert.Equal(0, closesBeforeTheReset);
+        Assert.Equal(ServiceStatus.Error, statusBeforeTheReset);
+        Assert.Equal("On: Inactive until Reset state", ruleStatusBeforeTheReset);
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
+    }
+
+    [Fact]
     public async Task WhenTheResetCannotBeSaved_ThenTheStateAndTheTriggerTimesStayAndTheErrorIsShown()
     {
         // Arrange

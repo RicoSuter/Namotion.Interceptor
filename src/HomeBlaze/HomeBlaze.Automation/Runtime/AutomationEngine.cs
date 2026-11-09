@@ -28,6 +28,9 @@ internal sealed class AutomationEngine : IRuleRunHost
     // Set by a stop under the lock of _status, which the worker holds while it writes the automation and its rules, so
     // that an abandoned worker writes nothing after the stop showed the rules as stopped.
     private bool _isAbandoned;
+
+    // A saved state that the configuration no longer has keeps every rule inactive until a reset enters the initial state.
+    private bool _hasStateError;
     private string? _runWriteError;
     private readonly RuleStatusPublisher _statusPublisher = new();
 
@@ -224,6 +227,7 @@ internal sealed class AutomationEngine : IRuleRunHost
 
     private void RestartRules()
     {
+        _hasStateError = false;
         foreach (var rule in _snapshot.Rules)
         {
             Deactivate(rule);
@@ -348,7 +352,9 @@ internal sealed class AutomationEngine : IRuleRunHost
 
         // An unreadable checkpoint that could not be moved aside stays an error until a reset, since nothing is written.
         var refusesWrites = _keeper.RefusesWrites;
-        var problem = _states.EnterInitialState(compiled) ?? StateTransitions.CheckState(compiled, CurrentState);
+        var stateProblem = StateTransitions.CheckState(compiled, CurrentState);
+        _hasStateError = stateProblem is not null;
+        var problem = _states.EnterInitialState(compiled) ?? stateProblem;
         if (problem is not null)
         {
             _status.Fail(problem);
@@ -533,19 +539,24 @@ internal sealed class AutomationEngine : IRuleRunHost
         return tracksNewPending;
     }
 
-    private bool HasStickyError => _hasConfigurationError || _hasCheckpointError || _runWriteError is not null;
+    private bool HasStickyError => _hasConfigurationError || _hasCheckpointError || _hasStateError || _runWriteError is not null;
 
-    private bool IsActive(CompiledRule rule) => rule.IsActiveIn(_automation.Enabled, CurrentState);
+    private bool IsActive(CompiledRule rule) => !_hasStateError && rule.IsActiveIn(_automation.Enabled, CurrentState);
 
     // In every state, so that an event queued while a rule of another state ran is handled by the rules of the state
     // that is current when the worker takes the event.
-    private bool ListensForEvents(CompiledRule rule) => _automation.Enabled && rule.Mode != AutomationRuleMode.Off;
+    private bool ListensForEvents(CompiledRule rule) => !_hasStateError && _automation.Enabled && rule.Mode != AutomationRuleMode.Off;
 
     private string? GetInactiveReason(CompiledRule rule)
     {
         if (!_automation.Enabled)
         {
             return "Inactive: the automation is disabled";
+        }
+
+        if (_hasStateError)
+        {
+            return "Inactive until Reset state";
         }
 
         return rule.InState is { } state && !string.Equals(state, CurrentState, StringComparison.Ordinal)
