@@ -2039,6 +2039,11 @@ public class SubjectSourceBaseTests
         var stoppedNotificationEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseStoppedNotification = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var postStoppedTransportEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Declared before the source so they outlive it: when the test fails before its own release, disposing
+        // the source still runs into the blocked Stopped handler, and only the watchdog lets it out.
+        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var watchdogRegistration = watchdog.Token.Register(() => releaseStoppedNotification.TrySetResult());
         using var source = new TestSubjectSource(
             subject,
             context,
@@ -2071,8 +2076,6 @@ public class SubjectSourceBaseTests
             }
         };
 
-        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-        using var watchdogRegistration = watchdog.Token.Register(() => releaseStoppedNotification.TrySetResult());
         await source.StartAsync(CancellationToken.None);
         var probeValue = 0;
         await AsyncTestHelpers.WaitUntilAsync(() =>
@@ -2123,6 +2126,11 @@ public class SubjectSourceBaseTests
         var subject = new Person(context);
         var stoppedNotificationEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseStoppedNotification = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Declared before the source so they outlive it: when the test fails before its own release, disposing
+        // the source still runs into the blocked Stopped handler, and only the watchdog lets it out.
+        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var watchdogRegistration = watchdog.Token.Register(() => releaseStoppedNotification.TrySetResult());
         using var source = new TestSubjectSource(subject, context, NullLogger.Instance);
         source.StateChanged += (_, sourceEvent) =>
         {
@@ -2133,8 +2141,6 @@ public class SubjectSourceBaseTests
             }
         };
 
-        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-        using var watchdogRegistration = watchdog.Token.Register(() => releaseStoppedNotification.TrySetResult());
         var starting = Task.Run(() => source.StartAsync(CancellationToken.None));
         await stoppedNotificationEntered.Task.WaitAsync(TestTimeout);
         var droppedBeforeWrite = source.Diagnostics.OutboundRetries.TotalDropped;
