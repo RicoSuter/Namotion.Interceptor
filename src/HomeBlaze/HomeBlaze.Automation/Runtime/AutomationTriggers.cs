@@ -219,6 +219,10 @@ internal sealed class AutomationTriggers
     /// <summary>Gets when the next property trigger or Only if is due for a tick, or null when none is.</summary>
     public DateTimeOffset? GetNextDueAt(IReadOnlyList<CompiledRule> rules, DateTimeOffset now) => _propertyTriggers.GetNextDueAt(rules, now);
 
+    /// <summary>The earlier of two due times, ignoring one that is null; null when both are.</summary>
+    public static DateTimeOffset? Earliest(DateTimeOffset? first, DateTimeOffset? second) =>
+        second is { } instant && (first is null || instant < first) ? instant : first;
+
     /// <summary>Whether a property trigger is pending.</summary>
     public bool HasPending => _propertyTriggers.HasPending;
 

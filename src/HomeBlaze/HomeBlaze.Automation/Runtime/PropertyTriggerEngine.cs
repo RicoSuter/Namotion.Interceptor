@@ -128,20 +128,17 @@ internal sealed class PropertyTriggerEngine(
 
             foreach (var trigger in rule.PropertyTriggers)
             {
-                next = Earliest(next, trigger.NextCheckAt);
+                next = AutomationTriggers.Earliest(next, trigger.NextCheckAt);
             }
         }
 
         foreach (var trigger in _pending)
         {
-            next = Earliest(next, trigger.Rule.RechecksOnlyIfEverySecond ? ExpressionClock.GetNextSecond(now) : trigger.Rule.OnlyIfRecheckAt);
+            next = AutomationTriggers.Earliest(next, trigger.Rule.RechecksOnlyIfEverySecond ? ExpressionClock.GetNextSecond(now) : trigger.Rule.OnlyIfRecheckAt);
         }
 
         return next;
     }
-
-    private static DateTimeOffset? Earliest(DateTimeOffset? current, DateTimeOffset? candidate) =>
-        candidate is { } instant && (current is null || instant < current) ? instant : current;
 
     /// <summary>
     /// Resolves the properties again, since paths may lead elsewhere now, and evaluates the triggers whose properties
@@ -201,12 +198,7 @@ internal sealed class PropertyTriggerEngine(
             return false;
         }
 
-        var hasRemoved = _pending.RemoveAll(trigger => !IsPending(trigger)) > 0;
-        if (hasRemoved)
-        {
-            ClearUntrackedOnlyIfRoutes(rules);
-        }
-
+        var hasRemoved = RemoveEndedPending(rules);
         var hasAdded = false;
         var now = timeProvider.GetUtcNow();
         foreach (var request in requests)
@@ -263,20 +255,7 @@ internal sealed class PropertyTriggerEngine(
     /// </summary>
     public bool Refresh(IReadOnlyList<CompiledRule> rules)
     {
-        var trackedBefore = _pending.Count;
-        for (var index = _pending.Count - 1; index >= 0; index--)
-        {
-            if (!IsPending(_pending[index]))
-            {
-                _pending.RemoveAt(index);
-            }
-        }
-
-        if (_pending.Count < trackedBefore)
-        {
-            ClearUntrackedOnlyIfRoutes(rules);
-        }
-
+        RemoveEndedPending(rules);
         DateTimeOffset? now = null;
         var trackedCount = _pending.Count;
         foreach (var rule in rules)
@@ -335,7 +314,7 @@ internal sealed class PropertyTriggerEngine(
         _rebound.Add(trigger);
         if (trigger.Clock is not null)
         {
-            trigger.NextCheckAt = Earliest(trigger.NextCheckAt, now ??= timeProvider.GetUtcNow());
+            trigger.NextCheckAt = AutomationTriggers.Earliest(trigger.NextCheckAt, now ??= timeProvider.GetUtcNow());
         }
     }
 
@@ -355,7 +334,7 @@ internal sealed class PropertyTriggerEngine(
         }
         else if (isRebound && rule.OnlyIfClock is { IsEverySecond: false })
         {
-            rule.OnlyIfRecheckAt = Earliest(rule.OnlyIfRecheckAt, now ??= timeProvider.GetUtcNow());
+            rule.OnlyIfRecheckAt = AutomationTriggers.Earliest(rule.OnlyIfRecheckAt, now ??= timeProvider.GetUtcNow());
         }
     }
 
@@ -373,9 +352,15 @@ internal sealed class PropertyTriggerEngine(
         return false;
     }
 
-    // Only if of a rule without a tracked pending trigger is resolved again when one becomes tracked.
-    private void ClearUntrackedOnlyIfRoutes(IReadOnlyList<CompiledRule> rules)
+    // Returns whether a trigger was no longer pending. Only if of a rule without a tracked pending trigger is resolved
+    // again when one becomes tracked.
+    private bool RemoveEndedPending(IReadOnlyList<CompiledRule> rules)
     {
+        if (_pending.RemoveAll(static trigger => !IsPending(trigger)) == 0)
+        {
+            return false;
+        }
+
         foreach (var rule in rules)
         {
             if (!rule.OnlyIfRoute.IsEmpty && !IsTracked(rule))
@@ -383,6 +368,8 @@ internal sealed class PropertyTriggerEngine(
                 rule.OnlyIfRoute.Clear();
             }
         }
+
+        return true;
     }
 
     public static void Deactivate(CompiledRule rule)
@@ -478,7 +465,7 @@ internal sealed class PropertyTriggerEngine(
                 change = CheckForSetBackClock(now);
             }
 
-            next = Earliest(next, change);
+            next = AutomationTriggers.Earliest(next, change);
         }
 
         trigger.NextCheckAt = next;

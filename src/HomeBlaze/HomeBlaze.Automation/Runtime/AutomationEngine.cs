@@ -170,10 +170,8 @@ internal sealed class AutomationEngine : IRuleRunHost
     /// </summary>
     public DateTimeOffset? GetNextDueAt(DateTimeOffset now)
     {
-        return Earliest(Earliest(_triggers.GetNextDueAt(_snapshot.Rules, now), _keeper.RunsDueAt), _status.UnloggedFaultsDueAt);
+        return AutomationTriggers.Earliest(AutomationTriggers.Earliest(_triggers.GetNextDueAt(_snapshot.Rules, now), _keeper.RunsDueAt), _status.UnloggedFaultsDueAt);
     }
-
-    private static DateTimeOffset? Earliest(DateTimeOffset? first, DateTimeOffset? second) => first is null || second < first ? second : first;
 
     /// <summary>
     /// Runs the requests of an input of the triggers: a property change, a tick, which also writes the runs that are due,
