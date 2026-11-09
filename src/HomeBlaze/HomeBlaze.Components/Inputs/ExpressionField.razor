@@ -137,6 +137,12 @@
     /// </summary>
     [Parameter] public EventCallback<bool> HasPendingRowChanged { get; set; }
 
+    /// <summary>
+    /// Raised when switching to the text drops a row edit that is not part of <see cref="Value"/>, before
+    /// <see cref="HasPendingRowChanged"/> is raised with false.
+    /// </summary>
+    [Parameter] public EventCallback PendingRowDiscarded { get; set; }
+
     /// <summary>The variables the host declares for its expressions; default stands for <c>value</c> and <c>subject</c>.</summary>
     [Parameter] public ImmutableArray<string> Variables { get; set; }
 
@@ -184,7 +190,12 @@
 
     private async Task ShowAdvancedAsync()
     {
-        _model.ShowAdvanced();
+        if (_model.ShowAdvanced())
+        {
+            Refresh();
+            await PendingRowDiscarded.InvokeAsync();
+        }
+
         await NotifyPendingAsync();
     }
 

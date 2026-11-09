@@ -8,12 +8,15 @@ internal sealed class PendingRowTracker(PendingRows? registry, string fieldId) :
 {
     public void Report(bool hasPendingRow) => registry?.Set(fieldId, hasPendingRow);
 
+    /// <summary>Reports that the field dropped an edit that was not applied.</summary>
+    public void Discard() => registry?.Discard("An unfinished condition");
+
     /// <summary>Removes the field and reports its edit as discarded when it had one.</summary>
     public void Dispose()
     {
         if (registry?.Set(fieldId, false) == true)
         {
-            registry.Discard("An unfinished condition");
+            Discard();
         }
     }
 }

@@ -81,6 +81,26 @@ public class PendingRowsTests
     }
 
     [Fact]
+    public void WhenTheFieldDropsAnEditWhileItStays_ThenTheDiscardedInputIsReported()
+    {
+        // Arrange
+        var pending = new PendingRows();
+        var discarded = new List<string>();
+        pending.Discarded += discarded.Add;
+        var tracker = new PendingRowTracker(pending, "a");
+        tracker.Report(true);
+
+        // Act
+        tracker.Discard();
+        tracker.Report(false);
+        tracker.Dispose();
+
+        // Assert
+        Assert.Equal(["An unfinished condition"], discarded.ToArray());
+        Assert.False(pending.Any);
+    }
+
+    [Fact]
     public void WhenTheTrackerHasNoRegistry_ThenReportingDoesNothing()
     {
         // Arrange

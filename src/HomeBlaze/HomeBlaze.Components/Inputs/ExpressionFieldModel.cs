@@ -81,10 +81,20 @@ internal sealed class ExpressionFieldModel
         }
     }
 
-    public void ShowAdvanced()
+    /// <summary>
+    /// Shows the text. The pending edits and the rows that are not finished are not part of it, so they are dropped.
+    /// </summary>
+    /// <returns>Whether an edit or a row was dropped.</returns>
+    public bool ShowAdvanced()
     {
+        var isDropping = HasPendingRow;
+        if (isDropping)
+        {
+            Load(Text);
+        }
+
         IsAdvanced = true;
-        _slots = CreateSlots(_rows.Count);
+        return isDropping;
     }
 
     /// <summary>Shows the rows; false when the text does not have the simple form.</summary>

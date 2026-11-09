@@ -119,6 +119,40 @@ public class ExpressionFieldModelTests
     }
 
     [Fact]
+    public void WhenTheTextIsShownWhileARowIsPendingOrNotFinished_ThenTheyAreDroppedAndThatIsReported()
+    {
+        // Arrange
+        var model = new ExpressionFieldModel("/a/B == 1");
+        model.SetRow(0, new ExpressionRow(string.Empty, "/a/B", "==", "1,5"));
+        model.AddRow();
+
+        // Act
+        var isDropped = model.ShowAdvanced();
+        model.ShowSimple();
+
+        // Assert
+        Assert.True(isDropped);
+        Assert.False(model.HasPendingRow);
+        Assert.Equal("/a/B == 1", model.Text);
+        Assert.Equal(new ExpressionRow(string.Empty, "/a/B", "==", "1"), Assert.Single(model.Rows));
+    }
+
+    [Fact]
+    public void WhenTheTextIsShownWithoutAPendingRow_ThenNothingIsDropped()
+    {
+        // Arrange
+        var model = new ExpressionFieldModel("/a/B == 1 and /c/D == 2");
+
+        // Act
+        var isDropped = model.ShowAdvanced();
+
+        // Assert
+        Assert.False(isDropped);
+        Assert.True(model.IsAdvanced);
+        Assert.Equal(2, model.Rows.Count);
+    }
+
+    [Fact]
     public void WhenASimpleTextIsLoadedInAdvancedMode_ThenTheModeStaysAdvanced()
     {
         // Arrange
