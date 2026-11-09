@@ -99,6 +99,26 @@ public class AutomationConfigurationTests
     }
 
     [Fact]
+    public async Task WhenTheFileOfTheAutomationHasIssues_ThenTheStatusShowsThemAndNoRuleRuns()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.Rules = Keyed(("retract", Retract()));
+            ((IConfigurationIssueReceiver)automation).SetConfigurationIssues(["'enabeld' is no setting of Automation"]);
+        });
+
+        // Act
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, host.Automation.Status);
+        Assert.Contains("'enabeld' is no setting of Automation", host.Automation.StatusMessage);
+        Assert.Equal(0, host.Blinds.CloseCount);
+    }
+
+    [Fact]
     public async Task WhenTheConfigurationIsInvalid_ThenThePreviousConfigurationKeepsRunning()
     {
         // Arrange
