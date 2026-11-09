@@ -20,9 +20,10 @@ internal sealed class EventTriggerEngine(
 
     /// <summary>
     /// Has the rule listen for events: subscribes each trigger that has no subscription, or whose path no longer leads to
-    /// the source of the subscription that a Save carried over. Does nothing for a rule that listens already.
+    /// the source of the subscription that a Save carried over, to the events after <paramref name="joinedAfter"/>. Does
+    /// nothing for a rule that listens already.
     /// </summary>
-    public void Listen(CompiledRule rule)
+    public void Listen(CompiledRule rule, long joinedAfter)
     {
         if (rule.ListensForEvents)
         {
@@ -35,7 +36,7 @@ internal sealed class EventTriggerEngine(
             if (trigger.Subscription is null || !ReferenceEquals(ResolveSource(trigger), trigger.Source))
             {
                 Leave(trigger);
-                Join(trigger);
+                Join(trigger, joinedAfter);
             }
         }
     }
@@ -52,6 +53,7 @@ internal sealed class EventTriggerEngine(
     /// <summary>Subscribes the triggers of the listening rules again whose path now leads to another subject.</summary>
     public void Rebind(IReadOnlyList<CompiledRule> rules)
     {
+        var joinedAfter = queue.LastEventSequence;
         foreach (var rule in rules)
         {
             if (!rule.ListensForEvents)
@@ -64,7 +66,7 @@ internal sealed class EventTriggerEngine(
                 if (!ReferenceEquals(ResolveSource(trigger), trigger.Source))
                 {
                     Leave(trigger);
-                    Join(trigger);
+                    Join(trigger, joinedAfter);
                 }
             }
         }
@@ -156,7 +158,7 @@ internal sealed class EventTriggerEngine(
         return eventType is null ? $"{configuration.SubjectPath} publishes no {configuration.EventType}" : null;
     }
 
-    private void Join(CompiledEventTrigger trigger)
+    private void Join(CompiledEventTrigger trigger, long joinedAfter)
     {
         var error = FindSource(resolver, trigger, out var source, out var eventType);
         trigger.Source = source;
@@ -168,7 +170,7 @@ internal sealed class EventTriggerEngine(
 
         if (Find(source, eventType) is { } shared)
         {
-            trigger.JoinedAfter = shared.Received;
+            trigger.JoinedAfter = joinedAfter;
             Use(trigger, shared);
             return;
         }
@@ -194,7 +196,7 @@ internal sealed class EventTriggerEngine(
         try
         {
             subscription.Handle = EventSources.Subscribe(source, eventType, payload => queue.TryEnqueue(
-                new EventInput(subscription, new CapturedEvent(source, payload), subscription.Receive(), AutomationInputQueue.CausedChainDepth)));
+                new EventInput(subscription, new CapturedEvent(source, payload), queue.NextEventSequence(), AutomationInputQueue.CausedChainDepth)));
         }
         catch (Exception exception)
         {

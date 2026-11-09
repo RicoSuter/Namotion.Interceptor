@@ -124,8 +124,10 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
+        var runtime = Volatile.Read(ref _runtime);
+        runtime?.MarkConfigurationRequested();
         Interlocked.Increment(ref _configurationVersion);
-        Volatile.Read(ref _runtime)?.RequestConfiguration();
+        runtime?.RequestConfiguration();
         return Task.CompletedTask;
     }
 

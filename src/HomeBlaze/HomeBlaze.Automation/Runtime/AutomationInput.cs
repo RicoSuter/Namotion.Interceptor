@@ -15,7 +15,7 @@ internal sealed record PropertyChangedInput(PropertyReference Property, object? 
 /// <summary>A property that holds subjects changed, so that paths may now lead elsewhere.</summary>
 internal sealed record GraphChangedInput(int ChainDepth) : AutomationInput(ChainDepth);
 
-/// <summary>An event received by a subscription of the event triggers, with its sequence number in that subscription.</summary>
+/// <summary>An event received by a subscription of the event triggers, with its sequence number in the automation.</summary>
 internal sealed record EventInput(EventSubscription Subscription, CapturedEvent Event, long Sequence, int ChainDepth) : AutomationInput(ChainDepth);
 
 /// <summary>Rules that became active, whose property triggers evaluate their activation.</summary>

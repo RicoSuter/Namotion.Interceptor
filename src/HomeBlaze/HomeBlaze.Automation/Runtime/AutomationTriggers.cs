@@ -113,8 +113,8 @@ internal sealed class AutomationTriggers
     /// <summary>Stops the property triggers of the rule; its event triggers stay subscribed.</summary>
     public static void Deactivate(CompiledRule rule) => PropertyTriggerEngine.Deactivate(rule);
 
-    /// <summary>Subscribes the event triggers of the rule, unless it listens already.</summary>
-    public void Listen(CompiledRule rule) => _eventTriggers.Listen(rule);
+    /// <summary>Subscribes the event triggers of the rule to the events after <paramref name="joinedAfter"/>, unless it listens already.</summary>
+    public void Listen(CompiledRule rule, long joinedAfter) => _eventTriggers.Listen(rule, joinedAfter);
 
     /// <summary>Gives up the subscriptions of the event triggers of the rule.</summary>
     public void StopListening(CompiledRule rule) => _eventTriggers.StopListening(rule);

@@ -18,6 +18,7 @@ internal sealed class AutomationEngine : IRuleRunHost
     private readonly RunDispatcher _dispatcher;
     private readonly StateTransitions _states;
     private readonly AutomationStatusReporter _status;
+    private readonly AutomationInputQueue _queue;
     private readonly ILogger _logger;
     private CompiledAutomation _snapshot = CompiledAutomation.Empty;
     private int _appliedConfigurationVersion = -1;
@@ -42,6 +43,7 @@ internal sealed class AutomationEngine : IRuleRunHost
     {
         _automation = automation;
         _keeper = keeper;
+        _queue = queue;
         _logger = logger;
         _triggers = AutomationTriggers.For(automation, queue, logger, () => Name, changes.PublishWatched);
         _dispatcher = new RunDispatcher(this, automation, keeper, logger);
@@ -135,13 +137,15 @@ internal sealed class AutomationEngine : IRuleRunHost
             return;
         }
 
+        // Read after the version, so that the rules that the configuration subscribes handle the events received after it was requested.
+        var requestedAt = _queue.ConfigurationRequestedAt;
         _appliedConfigurationVersion = version;
         var rules = _automation.Rules;
         TakeRunsOfReplacedRules(rules);
         _keeper.RestoreRules(rules);
         if (AutomationCompiler.TryCompile(_automation.States, _automation.InitialState, rules, _automation.RuleOrder, out var compiled, out var error))
         {
-            Replace(compiled);
+            Replace(compiled, requestedAt);
         }
         else
         {
@@ -234,7 +238,7 @@ internal sealed class AutomationEngine : IRuleRunHost
             Deactivate(rule);
         }
 
-        ActivateRules();
+        ActivateRules(_queue.LastEventSequence);
     }
 
     /// <summary>
@@ -343,7 +347,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         }
     }
 
-    private void Replace(CompiledAutomation compiled)
+    private void Replace(CompiledAutomation compiled, long requestedAt)
     {
         CarryOver(_snapshot, compiled);
         Stop();
@@ -367,7 +371,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         _hasConfigurationError = false;
         _hasCheckpointError = refusesWrites;
         _status.ApplyEnabled();
-        ActivateRules();
+        ActivateRules(requestedAt);
 
         // A trigger that waits keeps waiting across a Save, whose new Only if may let it run now.
         if (_triggers.HasPending)
@@ -425,16 +429,16 @@ internal sealed class AutomationEngine : IRuleRunHost
         }
     }
 
-    // Has the rules that are not Off listen for events and activates the rules of the current state. Returns whether a
-    // pending property trigger began to be tracked.
-    private bool ActivateRules()
+    // Has the rules that are not Off listen for the events after joinedAfter and activates the rules of the current
+    // state. Returns whether a pending property trigger began to be tracked.
+    private bool ActivateRules(long joinedAfter)
     {
         var pending = new List<CompiledRule>();
         foreach (var rule in _snapshot.Rules)
         {
             if (ListensForEvents(rule))
             {
-                _triggers.Listen(rule);
+                _triggers.Listen(rule, joinedAfter);
             }
             else
             {
@@ -463,7 +467,7 @@ internal sealed class AutomationEngine : IRuleRunHost
             }
         }
 
-        return ActivateRules();
+        return ActivateRules(_queue.LastEventSequence);
     }
 
     private static void Deactivate(CompiledRule rule)

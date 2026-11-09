@@ -66,6 +66,9 @@ internal sealed class AutomationRuntime
         Release();
     }
 
+    /// <summary>Has the triggers that the next configuration subscribes handle the events received from now on; called before the configuration version changes.</summary>
+    public void MarkConfigurationRequested() => _queue.MarkConfigurationRequested();
+
     public void RequestConfiguration() => _queue.TryEnqueue(ConfigurationChangedInput.Instance);
 
     /// <summary>Queues a reset; false when the queue is full or closed, or the reset continues a feedback chain beyond the limit.</summary>

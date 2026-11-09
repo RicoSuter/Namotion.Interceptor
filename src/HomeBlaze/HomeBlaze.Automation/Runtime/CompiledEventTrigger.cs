@@ -22,7 +22,10 @@ internal sealed class CompiledEventTrigger(CompiledRule rule, int index, Subject
 
     public EventSubscription? Subscription { get; set; }
 
-    /// <summary>The sequence number of the last event of <see cref="Subscription"/> before the trigger joined it; the trigger handles only later events.</summary>
+    /// <summary>
+    /// The sequence number of the last event received before the trigger joined <see cref="Subscription"/>, or before the
+    /// configuration that subscribed it was requested; the trigger handles only later events.
+    /// </summary>
     public long JoinedAfter { get; set; }
 
     /// <summary>Why the trigger receives no events, or null while it is subscribed.</summary>

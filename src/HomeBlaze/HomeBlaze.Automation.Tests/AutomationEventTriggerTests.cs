@@ -137,6 +137,28 @@ public class AutomationEventTriggerTests
     }
 
     [Fact]
+    public async Task WhenARuleIsSwitchedOnWhileTheWorkerIsBusy_ThenAPressAfterTheSaveIsHandled()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("wait", On("Wait", OnEvent("/Button", "TestPressEvent"), Invoke("/Blinds/Wait"))),
+            ("close", Create("Close", AutomationRuleMode.Off, [OnEvent("/Button", "TestPressEvent")], [Invoke("/Blinds/Close")]))));
+        host.Button.Press("Release");
+        await AsyncTestHelpers.WaitUntilAsync(() => host.Blinds.IsWaiting);
+
+        // Act
+        host.Rule("close").Mode = AutomationRuleMode.On;
+        await host.Automation.ApplyConfigurationAsync(CancellationToken.None);
+        host.Button.Press("Release");
+        host.Blinds.Release();
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(1L, host.Rule("close").RunCount);
+    }
+
+    [Fact]
     public async Task WhenAnEventSourceRefusesTheSubscriptionAtTheStart_ThenTheOtherRulesRunAndTheRuleSaysWhy()
     {
         // Arrange
