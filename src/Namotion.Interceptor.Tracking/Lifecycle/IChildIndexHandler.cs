@@ -9,7 +9,8 @@ public interface IChildIndexHandler
 {
     /// <summary>
     /// Called after a structural write that kept subjects in the property, while the lifecycle
-    /// interceptor holds its lock, with each kept subject whose key or position changed.
+    /// interceptor holds its lock, with each kept subject whose key or position changed. A subject held more than once
+    /// also counts as changed when the write only adds, removes or replaces another of its keys or positions.
     /// Not called when there is none. A subject the write attached is not reported, since its
     /// attach carries its index.
     /// </summary>
