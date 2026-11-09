@@ -17,8 +17,6 @@ public class OutboundDropCountingTests
 {
     private const int OverflowChangeCount = 4;
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan TeardownWaitTimeout =
-        ChangeQueueProcessor.TeardownFlushBound + TimeSpan.FromSeconds(5);
 
     [Fact]
     public void WhenTheRetryQueueOverflows_ThenTheDroppedWritesAreCounted()
@@ -177,9 +175,11 @@ public class OutboundDropCountingTests
         var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var writeFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var blockWrite = false;
+        var clock = new ManualTeardownClock();
         using var source = new TestSubjectSource(person, context, NullLogger.Instance,
             bufferTime: TimeSpan.FromMilliseconds(8), writeRetryQueueSize: 0)
         {
+            TeardownTimeProvider = clock,
             WriteChangesOverride = async (changes, _) =>
             {
                 if (Volatile.Read(ref blockWrite) &&
@@ -223,7 +223,9 @@ public class OutboundDropCountingTests
         try
         {
             // Act
-            await source.StopAsync(CancellationToken.None).WaitAsync(TeardownWaitTimeout);
+            var stopping = source.StopAsync(CancellationToken.None);
+            await clock.AdvanceWhenArmedAsync(ChangeQueueProcessor.TeardownFlushBound);
+            await stopping.WaitAsync(TestTimeout);
         }
         finally
         {
