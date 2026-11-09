@@ -219,4 +219,24 @@ public class AutomationWakeUpTests
         // Assert
         Assert.Equal(1, host.Blinds.CloseCount);
     }
+
+    [Fact]
+    public async Task WhenTheWallClockIsSetBackDuringAHold_ThenTheStatusShowsTheStartOnTheCorrectedClock()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("finished", On("Finished", When("/Weather/Power < 5", TimeSpan.FromMinutes(10)), Invoke("/Blinds/Close")))));
+        host.Weather.Power = 1;
+        await host.FlushAsync();
+        await AdvanceAsync(host, TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(5));
+        var statusBeforeTheCorrection = host.Rule("finished").Status;
+
+        // Act
+        host.Clock.WallClockShift = TimeSpan.FromMinutes(-20);
+        await AdvanceAsync(host, TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(1));
+
+        // Assert
+        Assert.Equal("On: Holding since 12:00:00 for 00:10:00", statusBeforeTheCorrection);
+        Assert.Equal("On: Holding since 11:40:00 for 00:10:00", host.Rule("finished").Status);
+    }
 }

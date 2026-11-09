@@ -14,7 +14,10 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
 {
     public TriggerPhase Phase { get; private set; }
 
-    /// <summary>When the running hold started on the wall clock, for display, or null without one.</summary>
+    /// <summary>
+    /// When the running hold started on the wall clock, for display, or null without one; moved back by an observation
+    /// after the wall clock was set back before it.
+    /// </summary>
     public DateTimeOffset? HoldStartedAt { get; private set; }
 
     /// <summary>When the running hold started on the monotonic clock of <see cref="TriggerTime.Elapsed"/>, which measures it.</summary>
@@ -161,8 +164,15 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
             return false;
         }
 
-        if (time.Elapsed - HoldStartedElapsed < hold.GetValueOrDefault())
+        var held = time.Elapsed - HoldStartedElapsed;
+        if (held < hold.GetValueOrDefault())
         {
+            // After the wall clock was set back, the start would be shown in the future.
+            if (HoldStartedAt > time.Now)
+            {
+                HoldStartedAt = time.Now - held;
+            }
+
             return false;
         }
 

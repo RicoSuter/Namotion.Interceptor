@@ -519,6 +519,38 @@ public class PropertyTriggerStateTests
     }
 
     [Fact]
+    public void WhenTheWallClockIsSetBackDuringAHold_ThenTheStartMovesBackByTheTimeHeld()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(Hold, hasRearm: false);
+        state.Activate(TriggerActivation.EvaluateImmediately, TrueValue, At(0));
+        var version = state.Version;
+
+        // Act
+        var fired = state.Observe(TrueValue, new TriggerTime(Start.AddMinutes(-10).AddSeconds(5), TimeSpan.FromSeconds(5)));
+
+        // Assert
+        Assert.False(fired);
+        Assert.Equal(TriggerPhase.Holding, state.Phase);
+        Assert.Equal(Start.AddMinutes(-10), state.HoldStartedAt);
+        Assert.NotEqual(version, state.Version);
+    }
+
+    [Fact]
+    public void WhenTheWallClockIsSetForwardDuringAHold_ThenTheStartStays()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(Hold, hasRearm: false);
+        state.Activate(TriggerActivation.EvaluateImmediately, TrueValue, At(0));
+
+        // Act
+        state.Observe(TrueValue, new TriggerTime(Start.AddMinutes(10).AddSeconds(5), TimeSpan.FromSeconds(5)));
+
+        // Assert
+        Assert.Equal(Start, state.HoldStartedAt);
+    }
+
+    [Fact]
     public void WhenAStatusIsCreatedFromAPropertyTrigger_ThenItCopiesTheState()
     {
         // Arrange
