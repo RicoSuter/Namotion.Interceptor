@@ -188,11 +188,17 @@ else
 
     private async Task AddCellAt(int row, int column)
     {
+        if (Grid == null || !RootManager.CheckConfigurationWriteOrShowError(Grid, Snackbar)) return;
+
         await SubjectSetupDialog.ShowAsync(DialogService, new SubjectSetupOptions
         {
             BeforeSave = subject =>
             {
                 if (Grid == null) return;
+
+                // The file may have been read again with issues while the dialog was open. The dialog shows the refusal
+                // and stays open with its input.
+                RootManager.GetConfigurationWriter(Grid).ThrowIfWriteRefused(Grid);
 
                 var cell = SubjectFactory.CreateSubject<GridCell>();
                 cell.Row = row;
@@ -220,7 +226,7 @@ else
             yesText: "Delete",
             cancelText: "Cancel");
 
-        if (confirmed == true)
+        if (confirmed == true && RootManager.CheckConfigurationWriteOrShowError(Grid, Snackbar))
         {
             Grid.Cells = Cells.Where(existing => existing != cell).ToArray();
 

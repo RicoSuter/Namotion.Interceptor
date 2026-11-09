@@ -10,7 +10,12 @@ public class AutomationDurationTests
         { TimeSpan.FromMilliseconds(500), "500ms" },
         { TimeSpan.Zero, "0s" },
         { TimeSpan.FromMinutes(-5), "-5m" },
-        { new TimeSpan(1, 2, 3, 4, 5), "1d2h3m4s5ms" }
+        { new TimeSpan(1, 2, 3, 4, 5), "1d2h3m4s5ms" },
+        { TimeSpan.FromTicks(5000), "0.5ms" },
+        { TimeSpan.FromTicks(15000), "1.5ms" },
+        { TimeSpan.FromDays(1) + TimeSpan.FromTicks(1), "1d0.0001ms" },
+        { -TimeSpan.FromTicks(12345), "-1.2345ms" },
+        { TimeSpan.MinValue, "-10675199d2h48m5s477.5808ms" }
     };
 
     [Theory]
@@ -48,6 +53,8 @@ public class AutomationDurationTests
     [InlineData("now")]
     [InlineData("20s > 1s")]
     [InlineData("20 s")]
+    [InlineData("36501d")]
+    [InlineData("-36500d - 1ms")]
     public void WhenTheTextIsNoDuration_ThenItIsNotParsed(string? text)
     {
         // Act
@@ -57,12 +64,42 @@ public class AutomationDurationTests
         Assert.False(isParsed);
     }
 
-    [Fact]
-    public void WhenAFormattedDurationIsParsed_ThenItIsTheSameDuration()
+    [Theory]
+    [InlineData("36501d")]
+    [InlineData("-36501d")]
+    public void WhenTheDurationIsLongerThanTheMaximum_ThenItIsNotParsedAndIsZero(string text)
     {
-        // Arrange
-        var duration = new TimeSpan(2, 3, 4, 5, 6);
+        // Act
+        var isParsed = AutomationDuration.TryParse(text, out var duration);
 
+        // Assert
+        Assert.False(isParsed);
+        Assert.Equal(TimeSpan.Zero, duration);
+    }
+
+    [Fact]
+    public void WhenTheDurationIsTheMaximum_ThenItIsParsed()
+    {
+        // Act
+        var isParsed = AutomationDuration.TryParse("36500d", out var duration);
+
+        // Assert
+        Assert.True(isParsed);
+        Assert.Equal(AutomationDuration.Maximum, duration);
+    }
+
+    public static TheoryData<TimeSpan> RoundTripDurations => new()
+    {
+        new TimeSpan(2, 3, 4, 5, 6),
+        TimeSpan.FromTicks(5000),
+        -TimeSpan.FromTicks(12345),
+        AutomationDuration.Maximum - TimeSpan.FromTicks(1)
+    };
+
+    [Theory]
+    [MemberData(nameof(RoundTripDurations))]
+    public void WhenAFormattedDurationIsParsed_ThenItIsTheSameDuration(TimeSpan duration)
+    {
         // Act
         var isParsed = AutomationDuration.TryParse(AutomationDuration.Format(duration), out var parsed);
 

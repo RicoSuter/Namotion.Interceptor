@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -399,6 +400,59 @@ public class ConfigurableSubjectSerializer
             return false;
         }
     }
+
+    /// <summary>
+    /// Gets the issues of a configuration that <see cref="Deserialize(string, Action{IInterceptorSubject}, Action{SkippedConfigurationProperty}, ConfigurationNaming)"/>
+    /// or <see cref="UpdateConfiguration(IInterceptorSubject, string, Action{SkippedConfigurationProperty}, ConfigurationNaming)"/>
+    /// read into the subject, and hands them to a subject that implements <see cref="IConfigurationIssueReceiver"/>, also
+    /// when there are none: one per property that was <paramref name="skipped"/>, and for such a subject one per key at
+    /// the top level of <paramref name="json"/> that names none of its configuration properties.
+    /// </summary>
+    /// <param name="subject">The subject the configuration was read into.</param>
+    /// <param name="json">The JSON of the configuration.</param>
+    /// <param name="skipped">The properties that the callback for the skipped properties got while the configuration was read.</param>
+    /// <param name="naming">The naming of the JSON.</param>
+    public ImmutableArray<string> ReportIssues(
+        IInterceptorSubject subject,
+        string json,
+        IEnumerable<SkippedConfigurationProperty> skipped,
+        ConfigurationNaming naming = ConfigurationNaming.JsonProperty)
+    {
+        var issues = ImmutableArray.CreateBuilder<string>();
+        foreach (var property in skipped)
+        {
+            issues.Add($"the value of '{GetJsonName(property.PropertyName, naming)}' could not be read: {property.Exception.Message}");
+        }
+
+        if (subject is not IConfigurationIssueReceiver receiver)
+        {
+            return issues.ToImmutable();
+        }
+
+        using var document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind == JsonValueKind.Object)
+        {
+            var names = GetConfigurationPropertyNames(subject).Select(name => GetJsonName(name, naming)).ToHashSet(StringComparer.Ordinal);
+            foreach (var key in document.RootElement.EnumerateObject())
+            {
+                if (key.Name != TypeDiscriminatorPropertyName && !names.Contains(key.Name))
+                {
+                    issues.Add($"'{key.Name}' is no setting of {subject.GetType().Name}");
+                }
+            }
+        }
+
+        receiver.SetConfigurationIssues([.. issues]);
+        return issues.ToImmutable();
+    }
+
+    // The properties that PopulateConfigurationProperties and UpdateConfiguration set.
+    private static IEnumerable<string> GetConfigurationPropertyNames(IInterceptorSubject subject) =>
+        subject.TryGetRegisteredSubject() is { } registered
+            ? registered.Properties.Where(property => property.TryGetAttribute(KnownAttributes.Configuration) != null).Select(property => property.Name)
+            : subject.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Where(property => property.CanWrite && property.GetCustomAttributes(typeof(ConfigurationAttribute), true).Length > 0)
+                .Select(property => property.Name);
 
     /// <summary>
     /// Checks whether a JSON value converts to the given property type with the options that

@@ -25,7 +25,7 @@ public class AutomationTriggersTests
             queue,
             () => registry.StructureVersion,
             new PropertyTriggerEngine(graph.Resolver, time, NullLogger.Instance, () => "Storm", _ => publishes++, routes),
-            new EventTriggerEngine(graph.Resolver, time, queue, routes));
+            new EventTriggerEngine(graph.Resolver, queue, NullLogger.Instance, () => "Storm", routes));
         var rule = Compile("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")));
         rule.IsActivated = true;
         triggers.Activate([rule], [rule]);
@@ -57,7 +57,7 @@ public class AutomationTriggersTests
         var rule = Compile(When("/Weather/Rain > 0"), When("/Weather/Rain > 0"));
 
         // Act
-        AutomationTriggers.CarryOver(old, rule);
+        AutomationTriggers.CarryOverStates(old, rule);
 
         // Assert
         Assert.Same(first, rule.PropertyTriggers[0].State);

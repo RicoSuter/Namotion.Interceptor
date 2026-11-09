@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Automation.Tests.Testing;
+using Namotion.Interceptor.Testing;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
 namespace HomeBlaze.Automation.Tests;
@@ -200,6 +201,148 @@ public class AutomationStateTests
     }
 
     [Fact]
+    public async Task WhenOneEventLeavesAndEntersAStateAgain_ThenALaterRuleOfThatStateDoesNotRunForTheEvent()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Off", "On"];
+            automation.InitialState = "Off";
+            automation.RuleOrder = ["toggle", "back", "offOnly"];
+            automation.Rules = Keyed(
+                ("toggle", Create("Toggle", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Enter("On")], inState: "Off")),
+                ("back", Create("Back", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Enter("Off")])),
+                ("offOnly", Create("Off only", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Invoke("/Blinds/Close")], inState: "Off")));
+        });
+
+        // Act
+        host.Button.Press("Release");
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal("Off", host.Automation.CurrentState);
+        Assert.Equal(0, host.Blinds.CloseCount);
+        Assert.Equal(0L, host.Rule("offOnly").RunCount);
+    }
+
+    [Fact]
+    public async Task WhenOneRuleLeavesAndEntersAStateAgainForAnEvent_ThenALaterRuleOfThatStateDoesNotRunForTheEvent()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Off", "On"];
+            automation.InitialState = "Off";
+            automation.RuleOrder = ["roundTrip", "offOnly"];
+            automation.Rules = Keyed(
+                ("roundTrip", Create("Round trip", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Enter("On"), Enter("Off")])),
+                ("offOnly", Create("Off only", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Invoke("/Blinds/Close")], inState: "Off")));
+        });
+
+        // Act
+        host.Button.Press("Release");
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal("Off", host.Automation.CurrentState);
+        Assert.Equal(0, host.Blinds.CloseCount);
+        Assert.Equal(0L, host.Rule("offOnly").RunCount);
+    }
+
+    [Fact]
+    public async Task WhenOneEventLeavesAndEntersAStateAgainWhileAHoldOfThatStateRuns_ThenTheHoldRestarts()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Off", "On"];
+            automation.InitialState = "Off";
+            automation.RuleOrder = ["toggle", "back", "retract"];
+            automation.Rules = Keyed(
+                ("toggle", Create("Toggle", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Enter("On")], inState: "Off")),
+                ("back", Create("Back", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Enter("Off")])),
+                ("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Gust > 5", TimeSpan.FromMinutes(10))], [Invoke("/Blinds/Close")], inState: "Off")));
+        });
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromMinutes(6));
+
+        // Act
+        host.Button.Press("Release");
+        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromMinutes(6));
+        var runsBeforeTheNewHoldEnds = host.Rule("retract").RunCount;
+        await host.AdvanceAsync(TimeSpan.FromMinutes(4));
+
+        // Assert
+        Assert.Equal("Off", host.Automation.CurrentState);
+        Assert.Equal(0L, runsBeforeTheNewHoldEnds);
+        Assert.Equal(1L, host.Rule("retract").RunCount);
+    }
+
+    [Fact]
+    public async Task WhenTheButtonIsPressedAgainWhileTheFirstPressRuns_ThenTheSecondPressIsHandledInTheNewState()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Off", "On"];
+            automation.InitialState = "Off";
+            automation.RuleOrder = ["switchOn", "switchOff"];
+            automation.Rules = Keyed(
+                ("switchOn", Create(
+                    "Switch on",
+                    AutomationRuleMode.On,
+                    [OnEvent("/Button", "TestPressEvent", "event/Gesture == Release")],
+                    [Invoke("/Blinds/Wait"), Set("/Blinds/Position", "1"), Enter("On")],
+                    inState: "Off")),
+                ("switchOff", Create(
+                    "Switch off",
+                    AutomationRuleMode.On,
+                    [OnEvent("/Button", "TestPressEvent", "event/Gesture == Release")],
+                    [Set("/Blinds/Position", "2"), Enter("Off")],
+                    inState: "On")));
+        });
+
+        // Act
+        host.Button.Press("Release");
+        await AsyncTestHelpers.WaitUntilAsync(() => host.Blinds.IsWaiting);
+        host.Button.Press("Release");
+        host.Blinds.Release();
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(2, host.Blinds.Position);
+        Assert.Equal("Off", host.Automation.CurrentState);
+        Assert.Equal(1L, host.Rule("switchOff").RunCount);
+    }
+
+    [Fact]
+    public async Task WhenARuleBeforeTheChangingRuleIsSwitchedOn_ThenItHandlesTheEventBeforeTheStateChanges()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Idle", "Running"];
+            automation.InitialState = "Idle";
+            automation.RuleOrder = ["note", "switch"];
+            automation.Rules = Keyed(
+                ("note", Create("Note", AutomationRuleMode.Off, [OnEvent("/Button", "TestPressEvent")], [Set("/Blinds/Position", "7")], inState: "Idle")),
+                ("switch", Create("Switch", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Enter("Running")], inState: "Idle")));
+        });
+        host.Automation.Rules["note"].Mode = AutomationRuleMode.On;
+        await host.SaveAsync();
+
+        // Act
+        host.Button.Press("Release");
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal("Running", host.Automation.CurrentState);
+        Assert.Equal(7, host.Blinds.Position);
+    }
+
+    [Fact]
     public async Task WhenTheStateChanges_ThenAnotherAutomationCanReactToIt()
     {
         // Arrange
@@ -259,6 +402,97 @@ public class AutomationStateTests
         Assert.Equal("Idle", host.Automation.CurrentState);
         Assert.Equal(ServiceStatus.Running, host.Automation.Status);
         Assert.Null(host.Automation.StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenTheSavedStateWasRemoved_ThenNoRuleRunsAndTheErrorStaysUntilTheReset()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Idle", "Running"];
+            automation.InitialState = "Idle";
+            automation.Rules = Keyed(
+                ("started", Create("Started", AutomationRuleMode.On, [When("/Weather/Power > 500")], [Enter("Running")], inState: "Idle")),
+                ("close", On("Close", When("/Weather/Gust > 8"), Invoke("/Blinds/Close"))));
+        });
+        await SetPowerAsync(host, 600);
+        host.Automation.States = ["Idle"];
+        host.Automation.RuleOrder = [];
+        await host.SaveAsync(Keyed(("close", On("Close", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
+
+        // Act
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        var closesBeforeTheReset = host.Blinds.CloseCount;
+        var statusBeforeTheReset = host.Automation.Status;
+        var ruleStatusBeforeTheReset = host.Rule("close").Status;
+        await host.ResetAsync();
+
+        // Assert
+        Assert.Equal(0, closesBeforeTheReset);
+        Assert.Equal(ServiceStatus.Error, statusBeforeTheReset);
+        Assert.Equal("On: Inactive until Reset state", ruleStatusBeforeTheReset);
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
+    }
+
+    [Fact]
+    public async Task WhenASaveAddsTheSavedStateBack_ThenTheErrorIsClearedAndTheRulesRun()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Idle", "Running"];
+            automation.InitialState = "Idle";
+            automation.Rules = Keyed(
+                ("started", Create("Started", AutomationRuleMode.On, [When("/Weather/Power > 500")], [Enter("Running")], inState: "Idle")),
+                ("close", On("Close", When("/Weather/Gust > 8"), Invoke("/Blinds/Close"))));
+        });
+        await SetPowerAsync(host, 600);
+        host.Automation.States = ["Idle"];
+        host.Automation.RuleOrder = [];
+        await host.SaveAsync(Keyed(("close", On("Close", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
+        var statusWhileTheStateIsMissing = host.Automation.Status;
+
+        // Act
+        host.Automation.States = ["Idle", "Running"];
+        await host.SaveAsync();
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, statusWhileTheStateIsMissing);
+        Assert.Equal("Running", host.Automation.CurrentState);
+        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
+        Assert.Null(host.Automation.StatusMessage);
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenEveryStateWasRemoved_ThenNoRuleRunsUntilTheResetLeavesTheSavedState()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(WashingMachine());
+        await SetPowerAsync(host, 600);
+        host.Automation.States = [];
+        host.Automation.InitialState = null;
+        host.Automation.RuleOrder = [];
+        await host.SaveAsync(Keyed(("close", On("Close", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
+
+        // Act
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        var closesBeforeTheReset = host.Blinds.CloseCount;
+        var messageBeforeTheReset = host.Automation.StatusMessage;
+        await host.ResetAsync();
+
+        // Assert
+        Assert.Equal(0, closesBeforeTheReset);
+        Assert.StartsWith("The saved state 'Running' is not a state of the automation, which has no states anymore", messageBeforeTheReset);
+        Assert.Null(host.Automation.CurrentState);
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
     }
 
     [Fact]

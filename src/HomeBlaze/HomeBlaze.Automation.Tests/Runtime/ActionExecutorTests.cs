@@ -153,6 +153,51 @@ public class ActionExecutorTests
         Assert.Equal(18, _graph.Blinds.Position);
     }
 
+    [Fact]
+    public void WhenANullablePropertyIsWrittenWithAnEmptyValue_ThenItIsCleared()
+    {
+        // Arrange
+        var executor = CreateExecutor();
+        _graph.Blinds.Tilt = 0.5;
+
+        // Act
+        var result = executor.SetProperty(new SetPropertyAction { PropertyPath = "/Blinds/Tilt", Value = "" }, CreateScope());
+
+        // Assert
+        Assert.True(result.IsSuccess, result.Message);
+        Assert.Null(_graph.Blinds.Tilt);
+    }
+
+    [Fact]
+    public void WhenANullableReferencePropertyIsWrittenWithAnEmptyValue_ThenItIsCleared()
+    {
+        // Arrange
+        var executor = CreateExecutor();
+        _graph.Blinds.LastPresets = [1];
+
+        // Act
+        var result = executor.SetProperty(new SetPropertyAction { PropertyPath = "/Blinds/LastPresets", Value = "" }, CreateScope());
+
+        // Assert
+        Assert.True(result.IsSuccess, result.Message);
+        Assert.Null(_graph.Blinds.LastPresets);
+    }
+
+    [Fact]
+    public void WhenANonNullableReferencePropertyIsWrittenWithAnEmptyValue_ThenTheWriteFailsAndKeepsTheValue()
+    {
+        // Arrange
+        var executor = CreateExecutor();
+        _graph.Blinds.Presets = [1];
+
+        // Act
+        var result = executor.SetProperty(new SetPropertyAction { PropertyPath = "/Blinds/Presets", Value = "" }, CreateScope());
+
+        // Assert
+        Assert.False(result.IsSuccess);
+        Assert.Equal([1], _graph.Blinds.Presets);
+    }
+
     [Theory]
     [InlineData("/Blinds/Level", "/Blinds/Level is read-only")]
     [InlineData("/Blinds/Label", "/Blinds/Label is configuration, which an automation cannot change")]

@@ -53,9 +53,12 @@ public sealed class PropertyWriter : IDisposable
     /// Converts the value to the type of the property and sets it. A [Configuration] property is persisted through
     /// its configuration owner <see cref="PersistDelay"/> after the last write to that owner; a save that stores
     /// nothing shows a warning and one that fails shows an error, both leave the value applied. Nothing is rolled back.
+    /// A [Configuration] property whose owner the writer would refuse to save, see
+    /// <see cref="ConfigurationPersistence.ThrowIfOwnerWriteRefused"/>, is not set.
     /// </summary>
     /// <returns>
-    /// False when the property is not writable or the conversion or the setter failed, which is shown as an error.
+    /// False when the property is not writable, the conversion or the setter failed, or the save would be refused, which
+    /// is shown as an error.
     /// </returns>
     /// <exception cref="ObjectDisposedException">The writer is disposed.</exception>
     public bool TryWrite(RegisteredSubjectProperty property, object? value)
@@ -69,12 +72,22 @@ public sealed class PropertyWriter : IDisposable
             return false;
         }
 
+        IInterceptorSubject? owner = null;
         try
         {
             var convertedValue = EditedPropertyValues.ConvertTo(value, property.Type);
             if (Equals(convertedValue, currentValue))
             {
                 return true;
+            }
+
+            if (property.IsConfigurationProperty())
+            {
+                // A subject without owner is keyed by itself, so its "not saved" warning is debounced as well.
+                owner = property.Subject.TryGetConfigurationOwner() ?? property.Subject;
+
+                // Before the value is set, so that a save that would be refused changes nothing.
+                _rootManager.GetConfigurationWriter(owner).ThrowIfWriteRefused(owner);
             }
 
             property.SetValue(convertedValue);
@@ -85,10 +98,9 @@ public sealed class PropertyWriter : IDisposable
             return false;
         }
 
-        if (property.IsConfigurationProperty())
+        if (owner is not null)
         {
-            // A subject without owner is keyed by itself, so its "not saved" warning is debounced as well.
-            SchedulePersist(property.Subject.TryGetConfigurationOwner() ?? property.Subject);
+            SchedulePersist(owner);
         }
 
         return true;
@@ -207,7 +219,7 @@ public sealed class PropertyWriter : IDisposable
             // ISnackbar is safe to call from any thread: its provider re-renders through InvokeAsync.
             if (errorMessage is not null)
             {
-                _snackbar.Add($"Error saving configuration: {errorMessage}", Severity.Error);
+                _snackbar.AddConfigurationSaveError(errorMessage);
             }
             else if (result != ConfigurationPersistResult.Written)
             {

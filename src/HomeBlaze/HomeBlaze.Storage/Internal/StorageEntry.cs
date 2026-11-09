@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using HomeBlaze.Storage.Metadata;
 using Namotion.Interceptor;
 
@@ -43,6 +44,13 @@ internal sealed class StorageEntry
     /// so also after a load that failed.
     /// </summary>
     public string? Hash { get; set; }
+
+    /// <summary>
+    /// The issues of the configuration that the subject last took from its file, such as a value that could not be read;
+    /// none for a file that is no configuration. The configuration is not saved while there are any, as the file would
+    /// lose what the subject could not take. Set by the reconciler only, which also tracks it for reads off the worker.
+    /// </summary>
+    public ImmutableArray<string> ConfigurationIssues { get; set; } = [];
 
     /// <summary>
     /// The key in the parent folder that the entry holds or asked for. Null until the entry was first applied

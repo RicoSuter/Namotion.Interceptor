@@ -37,8 +37,9 @@ internal sealed class RuleRunner(ActionExecutor executor, SubjectPathResolver re
         {
             return await ExecuteActionsAsync(request, host, cancellationToken);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
         {
+            // An operation may turn its cancellation into another exception, such as a client disposed on cancellation.
             return RuleRunResult.Canceled("Canceled: the automation stopped");
         }
     }
@@ -73,12 +74,26 @@ internal sealed class RuleRunner(ActionExecutor executor, SubjectPathResolver re
     {
         var rule = request.Rule;
         var log = new RunLog(rule.Name);
-        var stateBefore = host.CurrentState;
+
+        // Per action, so that a run that leaves the state and enters it again changed it, as two runs that do so would.
+        var changedState = false;
+        List<string>? passedStates = null;
         for (var index = 0; index < rule.Actions.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var action = rule.Actions[index];
+            var stateBefore = host.CurrentState;
             var result = await ExecuteAsync(action, request, host, cancellationToken);
+            if (!string.Equals(stateBefore, host.CurrentState, StringComparison.Ordinal))
+            {
+                if (changedState && stateBefore is not null)
+                {
+                    (passedStates ??= []).Add(stateBefore);
+                }
+
+                changedState = true;
+            }
+
             if (result.IsSuccess)
             {
                 log.Succeeded(result.Message);
@@ -97,7 +112,7 @@ internal sealed class RuleRunner(ActionExecutor executor, SubjectPathResolver re
             }
         }
 
-        return log.ToResult(changedState: !string.Equals(stateBefore, host.CurrentState, StringComparison.Ordinal));
+        return log.ToResult(changedState, passedStates ?? (IReadOnlyList<string>)[]);
     }
 
     private async Task<ActionResult> ExecuteAsync(AutomationAction action, RunRequest request, IRuleRunHost host, CancellationToken cancellationToken) => action switch

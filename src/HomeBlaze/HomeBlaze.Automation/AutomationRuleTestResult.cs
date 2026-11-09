@@ -9,7 +9,10 @@ public sealed record AutomationRuleTestResult
     /// <summary>Why the rule cannot be evaluated, such as an invalid expression; the other members are empty then.</summary>
     public string? Error { get; init; }
 
-    /// <summary>Whether the rule observes its triggers now: its mode is not Off and its automation is enabled and in its state.</summary>
+    /// <summary>
+    /// Whether the rule observes its triggers now: its mode is not Off and its automation is enabled and in its state, which
+    /// is a state of the automation.
+    /// </summary>
     public bool IsActive { get; init; }
 
     public IReadOnlyList<AutomationTriggerTestResult> Triggers { get; init; } = [];

@@ -28,7 +28,7 @@ internal static class RuleTester
         var scope = new ActionScope(automation, rule, evaluation, compiled.AllowsEvent);
         return new AutomationRuleTestResult
         {
-            IsActive = compiled.IsActiveIn(automation.Enabled, automation.CurrentState),
+            IsActive = compiled.IsActiveIn(automation.Enabled, automation.CurrentState) && IsCurrentStateValid(automation),
             Triggers = triggers,
             HasOnlyIf = compiled.OnlyIf is not null,
             OnlyIfResult = onlyIf,
@@ -36,6 +36,10 @@ internal static class RuleTester
             Actions = [.. compiled.Actions.Select(action => executor.Describe(action, scope))]
         };
     }
+
+    // A saved state that the configuration no longer has keeps every rule inactive until a reset.
+    private static bool IsCurrentStateValid(Automation automation) =>
+        automation.CurrentState is not { } state || automation.States.Contains(state, StringComparer.Ordinal);
 
     private static AutomationTriggerTestResult TestPropertyTrigger(CompiledPropertyTrigger trigger, AutomationEvaluation evaluation)
     {

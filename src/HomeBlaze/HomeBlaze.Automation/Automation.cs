@@ -21,23 +21,24 @@ namespace HomeBlaze.Automation;
 [DisplayName("Automation")]
 [SubjectIcon("AutoMode")]
 [InterceptorSubject]
-public partial class Automation : BackgroundService, IConfigurable, IMonitoredService, ITitleProvider, IIconProvider,
-    IObservable<AutomationStateChangedEvent>, ILifecycleHandler
+public partial class Automation : BackgroundService, IConfigurable, IConfigurationIssueReceiver, IMonitoredService, ITitleProvider,
+    IIconProvider, IObservable<AutomationStateChangedEvent>, ILifecycleHandler
 {
     private readonly ILogger<Automation> _logger;
     private readonly Subject<AutomationStateChangedEvent> _stateChanged = new();
     private AutomationRuntime? _runtime;
     private int _configurationVersion;
+    private string[] _configurationIssues = [];
     private volatile bool _isDetached;
 
     /// <summary>Creates an automation with the services it takes, which dependency injection resolves.</summary>
     /// <param name="pathResolver">Resolves the paths of the rules.</param>
-    /// <param name="timeProvider">The clock of <c>now</c>, <c>time</c>, holds and timeouts; its local time zone is that of <c>time</c>.</param>
-    /// <param name="authorizer">Decides which operation calls and property writes the rules may make.</param>
-    /// <param name="serviceProvider">
-    /// Resolves the services that operations take with <c>[FromServices]</c>, and the dispatcher that routes property
-    /// changes to every automation; without a registered dispatcher, the automation routes its changes on its own.
+    /// <param name="timeProvider">
+    /// The clock of <c>now</c>, <c>time</c>, holds and timeouts; its local time zone is that of <c>time</c>. The system clock
+    /// keeps the time zone that the process read first, so a change of the time zone of the host applies after a restart.
     /// </param>
+    /// <param name="authorizer">Decides which operation calls and property writes the rules may make.</param>
+    /// <param name="serviceProvider">Resolves the services that operations take with <c>[FromServices]</c>.</param>
     /// <param name="logger">The logger of the automation.</param>
     public Automation(
         SubjectPathResolver pathResolver,
@@ -117,15 +118,25 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
     /// <summary>Resolves the services that operations take with <c>[FromServices]</c>.</summary>
     internal IServiceProvider ServiceProvider { get; }
 
-    /// <summary>Routes the property changes to the automations: the registered dispatcher, or a dispatcher of its own when none is registered.</summary>
+    /// <summary>Routes the property changes to the automations: the registered dispatcher, or the one that every automation without one shares.</summary>
     internal AutomationChangeDispatcher ChangeDispatcher { get; }
 
     internal int ConfigurationVersion => Volatile.Read(ref _configurationVersion);
 
+    /// <summary>
+    /// The issues of the configuration file the automation was last read from, such as a value that could not be read or
+    /// a key that names no setting, which make its configuration invalid.
+    /// </summary>
+    internal string[] ConfigurationIssues => Volatile.Read(ref _configurationIssues);
+
+    void IConfigurationIssueReceiver.SetConfigurationIssues(string[] issues) => Volatile.Write(ref _configurationIssues, issues);
+
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
+        var runtime = Volatile.Read(ref _runtime);
+        runtime?.MarkConfigurationRequested();
         Interlocked.Increment(ref _configurationVersion);
-        Volatile.Read(ref _runtime)?.RequestConfiguration();
+        runtime?.RequestConfiguration();
         return Task.CompletedTask;
     }
 
@@ -133,8 +144,9 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
 
     /// <summary>
     /// Enters the initial state, clears the last trigger times of the rules and starts every rule that is active in it over,
-    /// as if it entered its state: its triggers take a fresh baseline or evaluate at once according to their activation policy,
-    /// running holds restart and event triggers subscribe again without replaying events. A state change is published only when the state changed.
+    /// as if it entered its state: its triggers take a fresh baseline or evaluate at once according to their activation policy
+    /// and running holds restart. The reset is queued like an input: the events received before it are handled before it,
+    /// and those received after it by the rules active after it. A state change is published only when the state changed.
     /// </summary>
     /// <exception cref="InvalidOperationException">The automation is not running, or the reset could not be queued.</exception>
     [Operation(Title = "Reset State", Description = "Enters the initial state, clears the last trigger times and starts every rule over.", Icon = "RestartAlt", Position = 1)]
@@ -176,7 +188,7 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
     // configuration change or a flush right after the start reaches it.
     public override Task StartAsync(CancellationToken cancellationToken)
     {
-        Volatile.Write(ref _runtime, new AutomationRuntime(this, CheckpointLocation.Of(this, _logger), _logger));
+        Volatile.Write(ref _runtime, new AutomationRuntime(this, _logger));
         Status = ServiceStatus.Starting;
         return base.StartAsync(cancellationToken);
     }
@@ -186,6 +198,10 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
     /// <see cref="AutomationRuntime.StopTimeout"/> passed. A worker that did not end, such as one in an operation that ignores its
     /// cancellation, is abandoned: it changes neither the automation nor its checkpoint anymore, also after a new start.
     /// </summary>
+    /// <remarks>
+    /// The runs that an abandoned worker recorded but had not written yet are lost as after a crash: the next start
+    /// restores the runs, run counts and trigger times written before them.
+    /// </remarks>
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         await AutomationRuntime.WaitForStopAsync(token => base.StopAsync(token), TimeProvider, cancellationToken);
@@ -248,15 +264,7 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         Status = error is null ? ServiceStatus.Stopped : ServiceStatus.Error;
     }
 
-    // Runs once the worker ended or a stop abandoned it, which then no longer owns the file, and only when the graph no
-    // longer holds this automation at the path it started with, so that the path resolves to what took its place.
-    private void OnWorkerEnded(AutomationRuntime runtime)
-    {
-        if (_isDetached || runtime.Location.HasMoved(this))
-        {
-            runtime.Location.DeleteIfOrphaned(this, _logger);
-        }
-    }
+    private void OnWorkerEnded(AutomationRuntime runtime) => runtime.DeleteCheckpointIfOrphaned(_isDetached);
 
     // A configuration file may hold an explicit null, which the runtime never expects.
     partial void OnStatesChanging(ref string[] newValue, ref bool cancel) => newValue ??= [];

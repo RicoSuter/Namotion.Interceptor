@@ -103,6 +103,14 @@ Create subjects by adding JSON files with a `$type` discriminator:
 
 The `$type` property specifies the .NET class to instantiate. Properties marked with `[Configuration]` in the class are automatically persisted. See [Building Subjects](../development/building-subjects.md) for authoring the C# side.
 
+### Values That Cannot Be Read
+
+A value of the wrong type, such as `"targetSpeed": "fast"` for a number or a name that an option does not have, is skipped when the file is read: the subject keeps the default of that property, or the value it had when the file is read again, and takes the other properties. The log names the file and each value that was skipped. While a file has such a value, the subject is not saved: a change in the UI is refused with an error that names the file and the values, and both the subject and the file stay as they are, because saving would replace what could not be read. A device that saves its own settings while it runs, such as the rain totals of a weather station, keeps running and logs once that they are not saved.
+
+A key that names no property, such as a misspelled `enabeld`, is ignored, except by subjects that report it as an error of their configuration, such as automations. Those also show the values that were skipped, and are not saved either until the file is corrected.
+
+To recover, correct the file on disk with any editor: give each named value the type of its property, such as a number for `targetSpeed`, or remove it so that the property keeps its default, and remove or correct each key that names no property. A file in the storage is read again on its own once it changes, right away with file watching and otherwise at the next periodic check, and then the UI saves the subject again. `Root.json` is read only at the start: correct it and restart HomeBlaze, and saving the root configuration works again.
+
 ### Background Services
 
 Subjects that inherit from `BackgroundService` start automatically when loaded. They stop when removed from the graph.

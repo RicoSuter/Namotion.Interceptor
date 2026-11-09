@@ -10,6 +10,9 @@ internal sealed record RuleRunResult(AutomationRunOutcome? Outcome, string Messa
     /// <summary>The longest <see cref="Message"/>, which keeps it within what history stores for a text.</summary>
     public const int MaxMessageLength = 500;
 
+    /// <summary>The states that the run entered and left again, in order, such as <c>On</c> for a run from <c>Off</c> to <c>On</c> and back.</summary>
+    public IReadOnlyList<string> PassedStates { get; init; } = [];
+
     /// <summary>Whether the request ran: it executed its actions, was canceled while it did, or is a dry run.</summary>
     public bool IsRun => Outcome is not null;
 

@@ -19,7 +19,7 @@ namespace HomeBlaze.Automation
     [System.ComponentModel.Category("Automation")]
     [System.ComponentModel.Description("Runs rules on property changes and events, optionally within named states.")]
     [System.ComponentModel.DisplayName("Automation")]
-    public class Automation : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, System.ComponentModel.INotifyPropertyChanged, System.IObservable<HomeBlaze.Automation.AutomationStateChangedEvent>
+    public class Automation : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IConfigurationIssueReceiver, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, System.ComponentModel.INotifyPropertyChanged, System.IObservable<HomeBlaze.Automation.AutomationStateChangedEvent>
     {
         public Automation(HomeBlaze.Services.SubjectPathResolver pathResolver, System.TimeProvider timeProvider, HomeBlaze.Automation.IAutomationAuthorizer authorizer, System.IServiceProvider serviceProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Automation.Automation> logger) { }
         [HomeBlaze.Abstractions.Attributes.State("Current State", IsDiscrete=true, Position=1)]
@@ -63,10 +63,7 @@ namespace HomeBlaze.Automation
         public override System.Threading.Tasks.Task StopAsync(System.Threading.CancellationToken cancellationToken) { }
         public System.IDisposable Subscribe(System.IObserver<HomeBlaze.Automation.AutomationStateChangedEvent> observer) { }
     }
-    [System.Text.Json.Serialization.JsonDerivedType(typeof(HomeBlaze.Automation.ChangeStateAction), "ChangeState")]
-    [System.Text.Json.Serialization.JsonDerivedType(typeof(HomeBlaze.Automation.InvokeOperationAction), "InvokeOperation")]
-    [System.Text.Json.Serialization.JsonDerivedType(typeof(HomeBlaze.Automation.SetPropertyAction), "SetProperty")]
-    [System.Text.Json.Serialization.JsonPolymorphic(TypeDiscriminatorPropertyName="$type", UnknownDerivedTypeHandling=System.Text.Json.Serialization.JsonUnknownDerivedTypeHandling.FailSerialization)]
+    [System.Text.Json.Serialization.JsonConverter(typeof(HomeBlaze.Automation.AutomationActionJsonConverter))]
     public abstract class AutomationAction : System.IEquatable<HomeBlaze.Automation.AutomationAction>
     {
         protected AutomationAction() { }
@@ -77,6 +74,7 @@ namespace HomeBlaze.Automation
     }
     public static class AutomationDuration
     {
+        public static System.TimeSpan Maximum { get; }
         public static string Format(System.TimeSpan duration) { }
         public static bool TryParse(string? text, out System.TimeSpan duration) { }
     }
@@ -187,9 +185,7 @@ namespace HomeBlaze.Automation
         public string? PreviousState { get; init; }
         public required System.DateTimeOffset Timestamp { get; init; }
     }
-    [System.Text.Json.Serialization.JsonDerivedType(typeof(HomeBlaze.Automation.PropertyTrigger), "PropertyTrigger")]
-    [System.Text.Json.Serialization.JsonDerivedType(typeof(HomeBlaze.Automation.SubjectEventTrigger), "SubjectEventTrigger")]
-    [System.Text.Json.Serialization.JsonPolymorphic(TypeDiscriminatorPropertyName="$type", UnknownDerivedTypeHandling=System.Text.Json.Serialization.JsonUnknownDerivedTypeHandling.FailSerialization)]
+    [System.Text.Json.Serialization.JsonConverter(typeof(HomeBlaze.Automation.AutomationTriggerJsonConverter))]
     public abstract class AutomationTrigger : System.IEquatable<HomeBlaze.Automation.AutomationTrigger>
     {
         protected AutomationTrigger() { }

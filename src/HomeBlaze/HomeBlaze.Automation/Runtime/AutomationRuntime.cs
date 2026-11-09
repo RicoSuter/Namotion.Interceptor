@@ -28,9 +28,10 @@ internal sealed class AutomationRuntime
     private int _isTickPending;
     private WakeTimer? _wakeTimer;
 
-    /// <summary>Creates the worker of the automation, whose checkpoint is at <paramref name="location"/>.</summary>
-    public AutomationRuntime(Automation automation, CheckpointLocation location, ILogger logger)
+    /// <summary>Creates the worker of the automation, whose checkpoint is at the path the automation has now.</summary>
+    public AutomationRuntime(Automation automation, ILogger logger)
     {
+        var location = CheckpointLocation.Of(automation, logger);
         _automation = automation;
         _logger = logger;
         _location = location;
@@ -62,6 +63,18 @@ internal sealed class AutomationRuntime
     public void Release() => Location.Store.Release();
 
     /// <summary>
+    /// Deletes the checkpoint file once the worker ended or a stop abandoned it, when the automation is detached or the
+    /// graph no longer holds it at the path of the checkpoint, so that the path resolves to what took its place.
+    /// </summary>
+    public void DeleteCheckpointIfOrphaned(bool isDetached)
+    {
+        if (isDetached || Location.HasMoved(_automation))
+        {
+            Location.DeleteIfOrphaned(_automation, _logger);
+        }
+    }
+
+    /// <summary>
     /// Abandons a worker that did not end when the automation stopped: from now on it changes neither the automation, its
     /// rules nor the checkpoint file, and the rules show that the automation stopped.
     /// </summary>
@@ -70,6 +83,9 @@ internal sealed class AutomationRuntime
         _engine.Abandon();
         Release();
     }
+
+    /// <summary>Has the triggers that the next configuration subscribes handle the events received from now on; called before the configuration version changes.</summary>
+    public void MarkConfigurationRequested() => _queue.MarkConfigurationRequested();
 
     public void RequestConfiguration() => _queue.TryEnqueue(ConfigurationChangedInput.Instance);
 
@@ -163,7 +179,14 @@ internal sealed class AutomationRuntime
         }
 
         _routes.Publish();
-        _engine.RefreshRuleStatuses();
+        try
+        {
+            _engine.RefreshRuleStatuses();
+        }
+        catch (Exception exception)
+        {
+            _engine.ReportUnexpectedError(exception);
+        }
     }
 
     private Task RouteAsync(AutomationInput input, CancellationToken cancellationToken)

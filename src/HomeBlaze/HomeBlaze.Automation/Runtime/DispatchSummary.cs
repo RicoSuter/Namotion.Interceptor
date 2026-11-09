@@ -6,6 +6,7 @@ namespace HomeBlaze.Automation.Runtime;
 internal sealed class DispatchSummary
 {
     private readonly HashSet<CompiledRule> _ran = [];
+    private HashSet<CompiledRule>? _deactivated;
 
     public bool ChangedState { get; private set; }
 
@@ -18,6 +19,22 @@ internal sealed class DispatchSummary
 
     /// <summary>Whether the rule ran for this input already.</summary>
     public bool HasRun(CompiledRule rule) => _ran.Contains(rule);
+
+    /// <summary>Whether a state change of this input deactivated the rule, also when a later one activated it again.</summary>
+    public bool WasDeactivated(CompiledRule rule) => _deactivated?.Contains(rule) == true;
+
+    /// <summary>Records the rules of the requests from <paramref name="start"/> on that are no longer active, after a run changed the state.</summary>
+    public void MarkDeactivated(IReadOnlyList<RunRequest> requests, int start, Func<CompiledRule, bool> isActive)
+    {
+        for (var index = start; index < requests.Count; index++)
+        {
+            var rule = requests[index].Rule;
+            if (!isActive(rule))
+            {
+                (_deactivated ??= []).Add(rule);
+            }
+        }
+    }
 
     public void Add(CompiledRule rule, RuleRunResult result)
     {

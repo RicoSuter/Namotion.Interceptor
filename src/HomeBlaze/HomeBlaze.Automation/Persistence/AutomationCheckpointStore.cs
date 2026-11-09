@@ -13,16 +13,21 @@ namespace HomeBlaze.Automation.Persistence;
 /// <c>AutomationState/Demo/ConveyorGuard.json</c> for <c>/Demo/ConveyorGuard</c>. Each path has a file of its own: a
 /// character that a file name cannot hold, the escape character <c>%</c>, a name that Windows reserves and a folder name
 /// that ends with <c>.json</c> are percent-encoded. Without a path nothing is read or written. A write replaces the file
-/// atomically, so it holds the old or the new checkpoint and never a part of one. A store owns its file from its
+/// atomically with a temporary file flushed to the disk, so that also after a power loss it holds the old or the new
+/// checkpoint and never a part of one. A store owns its file from its
 /// creation until it is released or a later store of the same file is created, process-wide; a store that does not own
 /// its file writes, moves and deletes nothing, so that two workers never write one file.
 /// </summary>
 internal sealed class AutomationCheckpointStore
 {
     private const string Extension = ".json";
+    private const string TemporaryExtension = ".tmp";
+    private const int TemporaryIdLength = 32;
 
     // The Windows set, so that data directories move between platforms without renames, and the escape character.
     private static readonly SearchValues<char> EscapedCharacters = SearchValues.Create("<>:\"\\|?*%");
+
+    private static readonly SearchValues<char> HexDigits = SearchValues.Create("0123456789abcdef");
 
     private static readonly FrozenSet<string> ReservedNames = new[]
     {
@@ -69,12 +74,16 @@ internal sealed class AutomationCheckpointStore
         return Path.Combine([dataDirectory, HomeBlazePaths.AutomationStateDirectory, .. segments]);
     }
 
-    /// <summary>Reads the checkpoint, or null when there is no path or no file.</summary>
+    /// <summary>
+    /// Reads the checkpoint, or null when there is no path or no file. A store that owns its file first deletes the
+    /// temporary files that an interrupted write left next to it, as far as it can.
+    /// </summary>
     /// <exception cref="IOException">The file cannot be read.</exception>
     /// <exception cref="UnauthorizedAccessException">The file cannot be read.</exception>
     /// <exception cref="JsonException">The file holds no checkpoint.</exception>
     public AutomationCheckpoint? Read()
     {
+        DeleteTemporaryFiles();
         if (FilePath is null || !File.Exists(FilePath))
         {
             return null;
@@ -199,13 +208,20 @@ internal sealed class AutomationCheckpointStore
         }
     }
 
+    // Flushed to the disk before the move, since a file system may otherwise persist the move before the content, which
+    // leaves an empty checkpoint after a power loss.
     private static void WriteAtomically(string path, string content)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var temporaryPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        var temporaryPath = path + "." + Guid.NewGuid().ToString("N") + TemporaryExtension;
         try
         {
-            File.WriteAllText(temporaryPath, content);
+            using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(Encoding.UTF8.GetBytes(content));
+                stream.Flush(flushToDisk: true);
+            }
+
             File.Move(temporaryPath, path, overwrite: true);
         }
         finally
@@ -215,6 +231,51 @@ internal sealed class AutomationCheckpointStore
                 File.Delete(temporaryPath);
             }
         }
+    }
+
+    private void DeleteTemporaryFiles()
+    {
+        if (_file is null || Path.GetDirectoryName(FilePath) is not { } directory || !Directory.Exists(directory))
+        {
+            return;
+        }
+
+        var prefix = Path.GetFileName(FilePath) + ".";
+        lock (_file.Lock)
+        {
+            if (!ReferenceEquals(_file.Store, this))
+            {
+                return;
+            }
+
+            try
+            {
+                foreach (var path in Directory.EnumerateFiles(directory, prefix + "*" + TemporaryExtension))
+                {
+                    if (IsTemporaryFile(Path.GetFileName(path.AsSpan()), prefix))
+                    {
+                        File.Delete(path);
+                    }
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // A leftover that cannot be deleted now is deleted at a later start; the checkpoint is read regardless.
+            }
+        }
+    }
+
+    // Only the name of a temporary file of this checkpoint, not one of another checkpoint whose name starts the same.
+    private static bool IsTemporaryFile(ReadOnlySpan<char> name, string prefix)
+    {
+        if (name.Length != prefix.Length + TemporaryIdLength + TemporaryExtension.Length ||
+            !name.StartsWith(prefix, StringComparison.Ordinal) ||
+            !name.EndsWith(TemporaryExtension, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return !name.Slice(prefix.Length, TemporaryIdLength).ContainsAnyExcept(HexDigits);
     }
 
     // Percent-encodes what would make two segments share a file name, or a segment name no file: what a file name cannot

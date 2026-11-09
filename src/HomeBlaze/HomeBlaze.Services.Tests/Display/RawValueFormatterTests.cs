@@ -116,6 +116,19 @@ public class RawValueFormatterTests
     }
 
     [Fact]
+    public void WhenAValueHoldsAMemberExcludedFromExpressions_ThenTextIsEmpty()
+    {
+        // Arrange
+        var message = new Message("hello", "raw-secret");
+
+        // Act
+        var text = RawValueFormatter.Format(message);
+
+        // Assert
+        Assert.Equal(string.Empty, text);
+    }
+
+    [Fact]
     public void WhenAValueHoldsNoSecret_ThenTextIsItsText()
     {
         // Arrange
@@ -133,4 +146,6 @@ public class RawValueFormatterTests
     private sealed record Connection(string Host, Credentials Credentials);
 
     private sealed record Endpoint(string Host, int Port);
+
+    private sealed record Message(string Text, [property: ExcludeFromExpressions] string Raw);
 }

@@ -179,6 +179,10 @@ public class MethodPropertyInitializer : ILifecycleHandler
     /// <summary>The interface maps of a subject type and the traits of its methods, computed once per method.</summary>
     private sealed class SubjectTypeMethods
     {
+        // False when the app turns off NullabilityInfoContextSupport, as trimming does by default.
+        private static readonly bool IsNullabilityInfoSupported =
+            !AppContext.TryGetSwitch("System.Reflection.NullabilityInfoContext.IsSupported", out var isSupported) || isSupported;
+
         private readonly InterfaceMapping[] _interfaceMaps;
         private readonly ConcurrentDictionary<MethodInfo, MethodTraits> _traits = new();
 
@@ -230,12 +234,12 @@ public class MethodPropertyInitializer : ILifecycleHandler
 
             // Owned by this computation rather than shared: the context caches the members it reads, which would keep
             // the types of an unloaded plugin alive, and it is not thread-safe.
-            var nullabilityContext = new NullabilityInfoContext();
+            var nullabilityContext = IsNullabilityInfoSupported ? new NullabilityInfoContext() : null;
             return Array.ConvertAll(parameters, parameter =>
             {
                 var operationParameterAttribute = parameter.GetCustomAttribute<OperationParameterAttribute>();
                 var isNullable = Nullable.GetUnderlyingType(parameter.ParameterType) != null
-                    || nullabilityContext.Create(parameter).WriteState == NullabilityState.Nullable
+                    || IsAnnotatedAsNullable(nullabilityContext, parameter)
                     || parameter is { HasDefaultValue: true, DefaultValue: null };
 
                 return new MethodParameter
@@ -248,6 +252,24 @@ public class MethodPropertyInitializer : ILifecycleHandler
                     IsNullable = isNullable,
                 };
             });
+        }
+
+        private static bool IsAnnotatedAsNullable(NullabilityInfoContext? nullabilityContext, ParameterInfo parameter)
+        {
+            if (nullabilityContext is null)
+            {
+                return false;
+            }
+
+            try
+            {
+                return nullabilityContext.Create(parameter).WriteState == NullabilityState.Nullable;
+            }
+            catch (InvalidOperationException)
+            {
+                // For support turned off in a way that the switch does not show.
+                return false;
+            }
         }
 
         private static string? FindCategory(MethodInfo method, bool isInterfaceMethod, MethodInfo? classMethod, List<MethodInfo> implementedMethods)

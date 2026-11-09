@@ -27,6 +27,9 @@ public partial class RecordingConfigurationStore : IConfigurationWriter
     /// <summary>A task that every write awaits after it started, to act as a writer that takes long.</summary>
     public Task? WriteGate { get; set; }
 
+    /// <summary>A refusal that the check before a write throws, to act as a writer whose file has issues.</summary>
+    public ConfigurationWriteRefusedException? Refusal { get; set; }
+
     public IReadOnlyCollection<IInterceptorSubject> WrittenSubjects => _writtenSubjects;
 
     /// <summary>The speed of every device whose write started, read when the write starts.</summary>
@@ -51,5 +54,13 @@ public partial class RecordingConfigurationStore : IConfigurationWriter
 
         _writtenSubjects.Enqueue(subject);
         return WritesConfiguration;
+    }
+
+    public void ThrowIfWriteRefused(IInterceptorSubject subject)
+    {
+        if (Refusal is not null)
+        {
+            throw Refusal;
+        }
     }
 }
