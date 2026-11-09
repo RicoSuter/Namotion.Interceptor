@@ -74,8 +74,8 @@ internal sealed class StorageReconciler
 
     /// <summary>
     /// Finds the issues of the configuration of the file whose subject is the given one, see
-    /// <see cref="StorageEntry.ConfigurationIssues"/>. Can be called from any thread, and sees the issues that the worker
-    /// set last.
+    /// <see cref="StorageEntry.ConfigurationIssues"/>. Can be called from any thread, for a check before a write, which
+    /// checks the issues again on the worker.
     /// </summary>
     /// <returns>False when the subject is no subject of a file of this connection whose configuration has issues.</returns>
     public bool TryGetConfigurationIssues(IInterceptorSubject subject, out string path, out ImmutableArray<string> issues)

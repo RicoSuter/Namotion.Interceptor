@@ -109,7 +109,7 @@ A value of the wrong type, such as `"targetSpeed": "fast"` for a number or a nam
 
 A key that names no property, such as a misspelled `enabeld`, is ignored, except by subjects that report it as an error of their configuration, such as automations. Those also show the values that were skipped, and are not saved either until the file is corrected.
 
-To recover, correct the file on disk with any editor: give each named value one of the type of its property, or remove it so that the property keeps its default, and remove or correct each key that names no property. A file in the storage is read again on its own once it changes, right away with file watching and otherwise at the next periodic check, and then the UI saves the subject again. `Root.json` is read only at the start: correct it and restart HomeBlaze, and saving the root configuration works again.
+To recover, correct the file on disk with any editor: give each named value the type of its property, such as a number for `targetSpeed`, or remove it so that the property keeps its default, and remove or correct each key that names no property. A file in the storage is read again on its own once it changes, right away with file watching and otherwise at the next periodic check, and then the UI saves the subject again. `Root.json` is read only at the start: correct it and restart HomeBlaze, and saving the root configuration works again.
 
 ### Background Services
 
