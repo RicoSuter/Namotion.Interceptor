@@ -51,10 +51,14 @@ internal sealed class EventTriggerEngine(
         }
     }
 
-    /// <summary>Subscribes the triggers of the listening rules again whose path now leads to another subject.</summary>
+    /// <summary>
+    /// Subscribes the triggers of the listening rules again whose path now leads to another subject, and then records on
+    /// each subscription whether an active rule uses it, see <see cref="RefreshActive"/>.
+    /// </summary>
     public void Rebind(IReadOnlyList<CompiledRule> rules)
     {
         var joinedAfter = queue.LastEventSequence;
+        var isRebound = false;
         foreach (var rule in rules)
         {
             if (!rule.ListensForEvents)
@@ -68,8 +72,15 @@ internal sealed class EventTriggerEngine(
                 {
                     Leave(trigger);
                     Join(trigger, joinedAfter);
+                    isRebound = true;
                 }
             }
+        }
+
+        // A subscription that an active trigger left keeps the flag that the trigger set.
+        if (isRebound)
+        {
+            RefreshActive(rules);
         }
     }
 
@@ -301,6 +312,8 @@ internal sealed class EventTriggerEngine(
             _subscriptions.Remove(subscription.Source);
         }
 
+        // A source can still deliver while or after the subscription ends.
+        subscription.HasActiveTrigger = false;
         try
         {
             subscription.Dispose();

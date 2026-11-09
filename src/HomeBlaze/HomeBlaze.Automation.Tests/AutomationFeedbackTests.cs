@@ -88,6 +88,59 @@ public class AutomationFeedbackTests
     }
 
     [Fact]
+    public async Task WhenAnEventContinuesAChainBeyondTheLimitAfterTheRuleStoppedListening_ThenNoChainIsReported()
+    {
+        // Arrange
+        var source = new TestLeakingEventSource();
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("close", On("Close", OnEvent("/Source", "TestPressEvent"), Invoke("/Blinds/Close")))));
+        host.Graph.Add("Source", source);
+        await host.FlushAsync();
+        host.Rule("close").Mode = AutomationRuleMode.Off;
+        await host.SaveAsync();
+
+        // Act
+        using (AutomationInputQueue.EnterRun(AutomationInputQueue.MaxChainDepth))
+        {
+            source.Press();
+        }
+
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(0, host.Blinds.CloseCount);
+        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
+        Assert.Null(host.Automation.StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenTheActiveRuleOfASharedSubscriptionMovesToAnotherSourceAndAnEventContinuesAChainBeyondTheLimit_ThenNoChainIsReported()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Idle", "Running"];
+            automation.InitialState = "Idle";
+            automation.Rules = Keyed(
+                ("main", On("Main", OnEvent("/Main", "TestPressEvent"), Invoke("/Blinds/Open"))),
+                ("close", Create("Close", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Invoke("/Blinds/Close")], inState: "Running")));
+        });
+        host.Graph.Add("Main", host.Button);
+        await host.FlushAsync();
+        host.Graph.Add("Main", new TestButton());
+        await host.FlushAsync();
+
+        // Act
+        PressInChainBeyondTheLimit(host);
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(0, host.Blinds.CloseCount);
+        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
+        Assert.Null(host.Automation.StatusMessage);
+    }
+
+    [Fact]
     public async Task WhenTheQueueOverflows_ThenTheDropIsReportedAndTheRemainingInputsAreProcessed()
     {
         // Arrange

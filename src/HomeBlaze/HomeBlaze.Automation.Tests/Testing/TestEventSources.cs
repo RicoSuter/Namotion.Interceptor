@@ -61,6 +61,22 @@ public partial class TestFailingUnsubscribeEventSource : IObservable<TestPressEv
     }
 }
 
+/// <summary>An event source whose subscription keeps delivering after it was disposed, as a source that ignores the end of a subscription does.</summary>
+[InterceptorSubject]
+public partial class TestLeakingEventSource : IObservable<TestPressEvent>
+{
+    private readonly EventStream<TestPressEvent> _presses = new();
+
+    public void Press() =>
+        _presses.Publish(new TestPressEvent { Timestamp = DateTimeOffset.UnixEpoch, DeviceId = "source", Gesture = "Release" });
+
+    public IDisposable Subscribe(IObserver<TestPressEvent> observer)
+    {
+        _presses.Subscribe(observer);
+        return System.Reactive.Disposables.Disposable.Empty;
+    }
+}
+
 /// <summary>Delivers published values to the observers subscribed at that moment, on the publishing thread.</summary>
 internal sealed class EventStream<T>
 {
