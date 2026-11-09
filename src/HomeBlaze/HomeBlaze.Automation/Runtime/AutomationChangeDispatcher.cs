@@ -205,6 +205,10 @@ internal sealed class AutomationChangeDispatcher
             }
 
             registration.IsDisposed = true;
+
+            // Pairs with the exchange in OnParentGained: either the mark is set before it is taken here, or OnParentGained
+            // reads the flag and takes the mark itself.
+            Interlocked.MemoryBarrier();
             registration.EndResolving();
             registration.TakeParentGain();
             var source = registration.Source;
@@ -297,7 +301,7 @@ internal sealed class AutomationChangeDispatcher
                 return;
             }
 
-            // Unregister takes the mark after it set the flag, so that a mark set meanwhile is taken here.
+            // Unregister fences after it set the flag and then takes the mark, so that a mark set meanwhile is taken here.
             if (IsDisposed)
             {
                 TakeParentGain();
