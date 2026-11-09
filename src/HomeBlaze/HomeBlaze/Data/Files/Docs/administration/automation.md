@@ -549,7 +549,7 @@ Every run increments the `RunCount` of its rule, also two identical runs in a ro
 - A saved configuration keeps the events that wait to be processed for every event trigger it leaves unchanged.
 - A system clock that is set forward or back is noticed within a minute.
 - A list or dictionary that a device changes in place is not observed: a path through it, such as `/Room/Devices[lamp]/On`, may keep leading to what it found before until a new list or dictionary is assigned.
-- Neither is an attribute whose value a device changes without a write, such as configuration metadata that becomes secret: a path to its property keeps whether it may be read until a subject on the path is replaced.
+- Neither is an attribute whose value a device changes without a write, such as configuration metadata that becomes secret: a path to its property keeps whether it may be read until the automation resolves the path again, such as after a subject on the path is replaced.
 
 ---
 
