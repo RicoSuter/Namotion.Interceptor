@@ -1,4 +1,6 @@
 using System.Globalization;
+using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Devices;
 using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Automation.Tests.Testing;
 using Namotion.Interceptor.Expressions;
@@ -84,6 +86,50 @@ public class AutomationEvaluationTests
 
         // Assert
         Assert.True(result);
+    }
+
+    [Theory]
+    [InlineData("event/Token")]
+    [InlineData("event/Raw")]
+    [InlineData("event/Credentials")]
+    [InlineData("event")]
+    public void WhenAnEventValueIsSecretOrExcludedFromExpressions_ThenItIsMissing(string path)
+    {
+        // Arrange
+        var payload = new SecretEvent
+        {
+            Timestamp = Now,
+            DeviceId = "b1",
+            Token = "token-secret",
+            Raw = "raw-secret",
+            Credentials = new SecretCredentials { Password = "password-secret" }
+        };
+        var evaluation = CreateEvaluation(capturedEvent: new CapturedEvent(_graph.Weather, payload));
+        Assert.True(AutomationExpressionCheck.TryParseTemplate($"{{{{ {path} | raw }}}}", allowsEvent: true, out var template, out var error), error);
+
+        // Act
+        var text = evaluation.Render(template);
+
+        // Assert
+        Assert.Equal(string.Empty, text);
+        Assert.Equal([path], evaluation.MissingPaths.ToArray());
+    }
+
+    public sealed record SecretEvent : DeviceEvent
+    {
+        [Configuration(IsSecret = true)]
+        public string? Token { get; init; }
+
+        [ExcludeFromExpressions]
+        public string? Raw { get; init; }
+
+        public SecretCredentials? Credentials { get; init; }
+    }
+
+    public sealed record SecretCredentials
+    {
+        [Configuration(IsSecret = true)]
+        public string? Password { get; init; }
     }
 
     [Fact]
