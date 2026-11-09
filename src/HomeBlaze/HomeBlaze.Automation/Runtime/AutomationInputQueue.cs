@@ -4,11 +4,11 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// The bounded input queue of one automation. Writers never wait. An input that does not fit, or that continues a
-/// feedback chain beyond <see cref="MaxChainDepth"/>, is dropped and counted, and the worker reports the count and makes
-/// up for what it can with one queued resynchronization; external events are never dropped silently. The chain depth flows with the
-/// asynchronous flow of a run while the run is active, so the property writes, operations and events of a run cause
-/// inputs one deeper than the input of the run. Work that outlives the run, and changes applied later on another flow
-/// (for example a device confirming a write from its own thread), start a new chain.
+/// feedback chain beyond <see cref="MaxChainDepth"/>, is dropped and counted, and the worker reports the count and
+/// makes up for what it can with one queued resynchronization; external events are never dropped silently. The chain
+/// depth flows with the asynchronous flow of a run while the run is active, so the property writes, operations and
+/// events of a run cause inputs one deeper than the input of the run. Work that outlives the run, and changes applied
+/// later on another flow (for example a device confirming a write from its own thread), start a new chain.
 /// </summary>
 internal sealed class AutomationInputQueue
 {

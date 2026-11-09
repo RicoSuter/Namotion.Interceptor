@@ -6,9 +6,9 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// Runs one request of one rule: checks Only if against the graph and does not run a request it rejects, describes the
-/// rendered actions of a dry run, or, in the mode <see cref="AutomationRuleMode.On"/> only, sets the trigger time and runs
-/// the actions in order under their error policy until the automation stops. Logs every failed action with the automation, the rule, the action and
-/// the trigger.
+/// rendered actions of a dry run, or, in the mode <see cref="AutomationRuleMode.On"/> only, sets the trigger time and
+/// runs the actions in order under their error policy until the automation stops. Logs every failed action with the
+/// automation, the rule, the action and the trigger.
 /// </summary>
 internal sealed class RuleRunner(ActionExecutor executor, SubjectPathResolver resolver, TimeProvider timeProvider, ILogger logger)
 {
@@ -29,7 +29,7 @@ internal sealed class RuleRunner(ActionExecutor executor, SubjectPathResolver re
 
         if (request.Rule.Mode == AutomationRuleMode.DryRun)
         {
-            return RuleRunResult.DryRun("Would run " + string.Join("; ", Describe(request, host)));
+            return RuleRunResult.DryRun("Would run " + DescribeActions(request, host));
         }
 
         request.Rule.Rule.LastTriggeredAt = timeProvider.GetUtcNow();
@@ -44,11 +44,10 @@ internal sealed class RuleRunner(ActionExecutor executor, SubjectPathResolver re
         }
     }
 
-    /// <summary>Describes the actions with their rendered arguments, without running them.</summary>
-    public IEnumerable<string> Describe(RunRequest request, IRuleRunHost host)
+    private string DescribeActions(RunRequest request, IRuleRunHost host)
     {
         var scope = CreateScope(request, host);
-        return request.Rule.Actions.Select(action => executor.Describe(action, scope)).ToList();
+        return string.Join("; ", request.Rule.Actions.Select(action => executor.Describe(action, scope)));
     }
 
     // Returns why Only if rejects the request, or null when it passes.

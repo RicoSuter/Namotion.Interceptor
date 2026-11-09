@@ -16,6 +16,7 @@ public sealed record AutomationStateChangedEvent : IEvent
     /// <summary>The state before, or null when the automation was in none.</summary>
     public string? PreviousState { get; init; }
 
+    /// <summary>The state the automation entered.</summary>
     public required string NewState { get; init; }
 
     /// <summary>When the automation entered <see cref="NewState"/>.</summary>
