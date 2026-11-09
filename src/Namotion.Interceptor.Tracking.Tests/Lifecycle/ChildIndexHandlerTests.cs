@@ -268,21 +268,45 @@ public class ChildIndexHandlerTests
     }
 
     [Fact]
-    public void WhenSubjectGainsAnotherKeyEqualToItsFirst_ThenHandlerGetsTheStoredKeyInstance()
+    public void WhenDictionaryReordersTheLaterKeysOfASubject_ThenHandlerGetsItWithItsFirstKey()
     {
         // Arrange
         var (context, handler) = CreateContext();
         var car = new Car();
-        var storedKey = new string('A', 1);
-        var garage = new Garage(context) { CarsByName = new Dictionary<string, Car> { [storedKey] = car } };
+        var garage = new Garage(context)
+        {
+            CarsByName = new Dictionary<string, Car> { ["A"] = car, ["B"] = car, ["C"] = car }
+        };
 
         // Act
-        garage.CarsByName = new Dictionary<string, Car> { [new string('A', 1)] = car, ["B"] = car };
+        garage.CarsByName = new Dictionary<string, Car> { ["A"] = car, ["C"] = car, ["B"] = car };
 
         // Assert
         var call = Assert.Single(handler.Calls);
-        var child = Assert.Single(call.Children);
-        Assert.Same(storedKey, child.Index);
+        Assert.Equal([new SubjectChild(car, "A")], call.Children);
+    }
+
+    [Fact]
+    public void WhenDictionaryComparedByReferenceLosesALaterKeyEqualToTheFirst_ThenHandlerGetsTheSubject()
+    {
+        // Arrange
+        var (context, handler) = CreateContext();
+        var car = new Car();
+        var firstKey = new string('A', 1);
+        var garage = new Garage(context)
+        {
+            CarsByName = new Dictionary<string, Car>(ReferenceEqualityComparer.Instance)
+            {
+                [firstKey] = car, [new string('A', 1)] = car
+            }
+        };
+
+        // Act
+        garage.CarsByName = new Dictionary<string, Car>(ReferenceEqualityComparer.Instance) { [firstKey] = car };
+
+        // Assert
+        var call = Assert.Single(handler.Calls);
+        Assert.Equal([new SubjectChild(car, "A")], call.Children);
     }
 
     [Fact]

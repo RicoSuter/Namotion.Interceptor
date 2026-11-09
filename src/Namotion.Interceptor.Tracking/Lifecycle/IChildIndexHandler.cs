@@ -10,15 +10,21 @@ public interface IChildIndexHandler
     /// <summary>
     /// Called after a structural write that kept subjects in the property, while the lifecycle
     /// interceptor holds its lock, with each kept subject whose key or position changed. A subject held more than once
-    /// also counts as changed when the write only adds, removes or replaces another of its keys or positions.
+    /// also counts as changed when the write only adds, removes, replaces or reorders its later keys or positions.
     /// Not called when there is none. A subject the write attached is not reported, since its
     /// attach carries its index.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// A reported index can equal the stored one, such as for a subject whose later keys or positions changed, and
+    /// can then be another instance of an equal key.
+    /// </para>
+    /// <para>
     /// The handler must not block, must not throw, and must not write the property that was written:
     /// a throwing handler skips the handlers after it. The span is only valid during the call.
+    /// </para>
     /// </remarks>
     /// <param name="property">The property that was written.</param>
-    /// <param name="children">The kept subjects with their key or position in the new value, each once.</param>
+    /// <param name="children">The kept subjects with their first key or position in the new value, each once.</param>
     void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children);
 }
