@@ -367,6 +367,21 @@ internal sealed class AuthenticationTestHost : IAsyncDisposable
         await _application.StopAsync();
         await _application.DisposeAsync();
         AuthenticationDatabasePool.Clear(connectionString);
-        _directory.Delete(recursive: true);
+
+        // A stamp reload that a refused cookie started runs in the background and can still write to the database.
+        await AsyncTestHelpers.WaitUntilAsync(TryDeleteDirectory, () => "The test directory could not be deleted: " + _directory.FullName);
+    }
+
+    private bool TryDeleteDirectory()
+    {
+        try
+        {
+            _directory.Delete(recursive: true);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
     }
 }
