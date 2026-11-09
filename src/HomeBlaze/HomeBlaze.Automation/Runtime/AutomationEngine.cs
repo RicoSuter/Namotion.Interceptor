@@ -35,8 +35,10 @@ internal sealed class AutomationEngine : IRuleRunHost
     private string? _runWriteError;
     private readonly RuleStatusPublisher _statusPublisher = new();
 
-    // Created once, since the worker publishes the rule statuses after every input.
+    // Created once, since the worker uses them after every input.
     private readonly Action _publishRuleStatuses;
+    private readonly Func<CompiledRule, string?> _getInactiveReason;
+    private readonly Func<CompiledRule, bool> _isActive;
 
     /// <summary>
     /// Creates the engine, whose property triggers publish their watched set to <paramref name="changes"/> and whose
@@ -54,6 +56,8 @@ internal sealed class AutomationEngine : IRuleRunHost
         _states = new StateTransitions(automation, keeper, automation.TimeProvider, logger);
         _status = new AutomationStatusReporter(automation, logger);
         _publishRuleStatuses = PublishRuleStatuses;
+        _getInactiveReason = GetInactiveReason;
+        _isActive = IsActive;
     }
 
     public string Name => _automation.Title;
@@ -300,7 +304,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         var notApplied = _hasConfigurationError && _automation.ConfigurationVersion == _appliedConfigurationVersion
             ? RuleStatusPublisher.NotAppliedInvalid
             : RuleStatusPublisher.NotAppliedYet;
-        _statusPublisher.Publish(_automation, _snapshot, GetInactiveReason, notApplied);
+        _statusPublisher.Publish(_automation, _snapshot, _getInactiveReason, notApplied);
     }
 
     private void Stop()
@@ -526,7 +530,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         var hasNewPending = false;
         try
         {
-            summary = await _dispatcher.DispatchAsync(requests, IsActive, cancellationToken);
+            summary = await _dispatcher.DispatchAsync(requests, _isActive, cancellationToken);
         }
         finally
         {
