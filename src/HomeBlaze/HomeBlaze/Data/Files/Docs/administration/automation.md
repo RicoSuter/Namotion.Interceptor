@@ -18,7 +18,11 @@ This page is the operator guide. The syntax of expressions is the one of [page e
 3. Keep the rule in **Dry run** and save. Each time the rule would run, the page lists the run with its actions and their values, and nothing is executed.
 4. Switch the rule to **On** once its runs look right.
 
-The demo data has `Demo/ConveyorGuard`, an automation in dry run over the demo conveyor: both rules are Dry run, which never changes the state, so the automation stays in Normal and shows what it would do: it would slow the conveyor down and enter Hot when the temperature stays above 40 for 30 seconds, and would fire again only after it is below 38. Its rule Back to normal is active only in Hot, so it stays inactive in dry run, and the page says next to the rule that would enter Hot that its dry runs do not change the state to Hot. Its cooldown of 10 minutes applies only once the rule is On, see [Only if and cooldown](#only-if-and-cooldown).
+The demo data has `Demo/ConveyorGuard`, an automation in dry run over the demo conveyor:
+
+- Both rules are Dry run, which never changes the state, so the automation stays in Normal and shows what it would do: it would slow the conveyor down and enter Hot when the temperature stays above 40 for 30 seconds, and would fire again only after it is below 38.
+- Its rule Back to normal is active only in Hot, so it stays inactive in dry run, and the page says next to the rule that would enter Hot that its dry runs do not change the state to Hot.
+- Its cooldown of 10 minutes applies only once the rule is On, see [Only if and cooldown](#only-if-and-cooldown).
 
 ---
 
@@ -88,7 +92,15 @@ classDiagram
 - **Rules** process each input in the order of the Rules tab, and several rules can run for one input, each at most once. Each rule has a key such as `k3f9` that never changes, so that its path, such as `/Automations/Storm/Rules[k3f9]/LastTriggeredAt`, stays the same when the rule is renamed or moved in the list.
 - **States** are optional names, such as `Idle` and `Running`. A rule can be **Active in state**: it observes its triggers only while the automation is in that state, and it starts again with fresh holds each time the automation enters it. A rule without a state is active in every state, also in an automation without states.
 - **The initial state** is the state of a new automation and the state that **Reset state** on the page enters. Reset state enters the initial state, clears the last trigger times and then starts every rule that is active in the initial state over, as if it had just entered its state, also when the state did not change: holds start fresh, **Run if already true** fires again when the condition is still true, **Wait for a change** takes a new baseline. Reset state is queued like any input: the events received before it are handled before it, and those received after it by the rules that are active after the reset.
-- **A state changes** only through a **Change state** action of a rule of the same automation. Once a rule changed the state, it finishes its own actions and the rules after it skip that input; a skipped request is [no run](#only-if-and-cooldown), and the rule status names it, such as `Waiting since 2026-11-06 12:01:00: the state changed to Hot for the same input`. A property condition skipped this way keeps waiting and runs in a later input if its rule is still active then; a rule that the new state deactivates does not run. Each event is an input of its own, so a state change never skips another rule of the same event: a later rule without a state still runs for it, while a rule **Active in state** of the state that was left runs for it only if it handled the event before the state changed, as a rule before the changing rule does. Such a rule does not run for the event even when a later rule of the same event enters its state again, and its triggers start over as on entering the state: holds start fresh and **When the rule starts** applies. The state change event is published once the input is processed and the rules of the new state are active, so they receive it and the rules of the state that was left do not. When one input changes the state several times, its state change events are published in order after all its runs, so a rule of a state that the input entered and left again does not receive the event that entered it. What should happen when a state is entered is an ordinary rule with an event trigger on the state changes of the automation, which can be **Active in state** of the entered state, see [Events](#events).
+- **A state changes** only through a **Change state** action of a rule of the same automation, see [State changes](#state-changes).
+
+### State changes
+
+- **The rules after it skip the input**: once a rule changed the state, it finishes its own actions and the rules after it skip that input. A skipped request is [no run](#only-if-and-cooldown), and the rule status names it, such as `Waiting since 2026-11-06 12:01:00: the state changed to Hot for the same input`.
+- **Property conditions wait**: a property condition skipped this way keeps waiting and runs in a later input if its rule is still active then; a rule that the new state deactivates does not run.
+- **Events**: each event is an input of its own, so a state change never skips another rule of the same event: a later rule without a state still runs for it, while a rule **Active in state** of the state that was left runs for it only if it handled the event before the state changed, as a rule before the changing rule does. Such a rule does not run for the event even when a later rule of the same event enters its state again, and its triggers start over as on entering the state: holds start fresh and **When the rule starts** applies.
+- **State change events**: the state change event is published once the input is processed and the rules of the new state are active, so they receive it and the rules of the state that was left do not. When one input changes the state several times, its state change events are published in order after all its runs, so a rule of a state that the input entered and left again does not receive the event that entered it.
+- **Entering a state**: what should happen when a state is entered is an ordinary rule with an event trigger on the state changes of the automation, which can be **Active in state** of the entered state, see [Events](#events).
 
 ---
 
@@ -161,11 +173,11 @@ Conditions, filters and the arguments of actions are expressions with the syntax
 
 - **Paths** are absolute, such as `/Weather/WS90/WindGust`, or start at the rule: `./LastTriggeredAt` is a property of the rule, and `../CurrentState` or `../StateEnteredAt` one of its automation.
 - **Variables**: `now` is the current instant, `time` the local time of day of the host, `event` the captured event and `subject` its publisher. `event` and `subject` are available in event filters and in the arguments of a rule with an event trigger only; in a rule with both kinds of trigger, they read as missing on a run that a property trigger started.
-- **Arithmetic**: numbers add, subtract, multiply and divide; an instant minus an instant is a duration; an instant plus or minus a duration is an instant. An operator stands between spaces, as in `now - ../StateEnteredAt > 10m`. A `-` directly before a path or a parenthesis negates it, as in `/Heating/Offset > -/Heating/Limit`, and directly before a digit it is the sign of a number, as in `-5`. Whole numbers and numbers with a decimal point, such as `0.1`, compute exactly as long as the result is exact, so `0.1 + 0.2 == 0.3` is true. A division by zero, or any missing operand, is missing.
+- **Arithmetic, comparisons and bare words** follow the [conditions of pages](pages.md#conditions), such as `now - ../StateEnteredAt > 10m`: decimals compute exactly, and a word without `/` right of a comparison is a text, so `/Living/Heating/Mode == Away` compares with the text `Away`, which suits an enum.
 - **Pipes**: conditions, filters and value expressions take no pipes. Only the `{{ }}` of a text template takes the pipes `display` and `raw`, without arguments, as in `{{ ../StateEnteredAt | raw }}`.
 - **Durations** are written with their units from the largest to the smallest: `30s`, `15m`, `2h`, `8h30m`, `1.5d`. Expressions accept decimals, but the duration fields of the editor take whole units, such as `36h` and not `1.5d`. `time >= 8h30m and time < 21h30m` is true during the day.
 - **Secrets**: secret configuration values and properties marked `[ExcludeFromExpressions]` are missing in automations, so that a notification cannot send them.
-- **Bare words are text**: a word without `/` right of a comparison is a text, so `/Living/Heating/Mode == Away` compares with the text `Away`, which suits an enum. `/Door/OpenedAt > Now` compares with the text "Now", not with the time; the variable is `now` in lowercase. The editor warns about such a word when it differs from a variable only in case, or when it is compared with a number, a date, a duration or a boolean.
+- **Variables are lowercase**: `/Door/OpenedAt > Now` compares with the text "Now", not with the time. The editor warns about such a word when it differs from a variable only in case, or when it is compared with a number, a date, a duration or a boolean.
 
 ### Time
 
@@ -218,7 +230,15 @@ Authorization has a seam but no rules yet: every operation the automation can se
 | `LastTriggeredAt` set | No | No | Yes |
 | Run recorded | No | Yes, with the outcome DryRun | Yes |
 
-New rules start in Dry run. A rule in Dry run with a Change state action does not change the state, so the rules of that state become active through it only once it is On; the page and the editor say so next to the rule. **Test now** on the page evaluates a saved rule with the current values: the result of each trigger, of Only if, and the actions with their arguments as they would run now. Its verdict says whether the rule would run with the current values, or why not. When Only if is false or unknown, it adds that a condition that becomes true meanwhile waits until Only if is true, or the status of the automation while it runs no rules, such as while it is stopped; it does not tell whether a condition fired already. An automation that shows an error keeps running its rules, so the verdict is the one of a running automation with a note on the error. It works in every mode and executes and records nothing. It tests the saved rule only; the editor shows the current value and result of every condition instead. Agents get the same result through `invoke_query` on the `TestNow` query of the rule, such as `/Automations/Storm/Rules[k3f9]/TestNow`.
+New rules start in Dry run. A rule in Dry run with a Change state action does not change the state, so the rules of that state become active through it only once it is On; the page and the editor say so next to the rule.
+
+**Test now** on the page evaluates a saved rule with the current values:
+
+- **What it shows**: the result of each trigger, of Only if, and the actions with their arguments as they would run now.
+- **The verdict** says whether the rule would run with the current values, or why not. When Only if is false or unknown, it adds that a condition that becomes true meanwhile waits until Only if is true, or the status of the automation while it runs no rules, such as while it is stopped; it does not tell whether a condition fired already. An automation that shows an error keeps running its rules, so the verdict is the one of a running automation with a note on the error.
+- **Side effects**: none. It works in every mode and executes and records nothing.
+- **Scope**: it tests the saved rule only; the editor shows the current value and result of every condition instead.
+- **Agents** get the same result through `invoke_query` on the `TestNow` query of the rule, such as `/Automations/Storm/Rules[k3f9]/TestNow`.
 
 ---
 
@@ -226,7 +246,7 @@ New rules start in Dry run. A rule in Dry run with a Change state action does no
 
 The page of an automation shows its status and last error, a **Reset state**, which asks for confirmation, and an **Edit** button, the read-only state diagram with the current state and the time it was entered (when the automation has states), the rules with their mode, status, last trigger time, run count and **Test now**, and the recent runs. **Last triggered** is when the first action of the last run that was not a dry run started, so a rule in Dry run can list runs while it shows **Never**.
 
-**Recent runs** lists the runs of the last seven days, at most 20, with the outcome and the message of each run. Runs are the runs that executed actions, including those that failed or that a stop canceled, and dry runs; requests that Only if rejected and requests skipped after a state change are [no runs](#only-if-and-cooldown). The list is read from history, so runs of one rule close together, within about 250 ms, can show as one, and a crash can drop runs; the caption of the list says so. Without a [history store](../architecture/design/history.md), the page shows the last run of each rule.
+**Recent runs** lists the runs of the last seven days, at most 20, with the outcome and the message of each run, read from history, see [Recent runs from history](#recent-runs-from-history). Without a [history store](../architecture/design/history.md), the page shows the last run of each rule.
 
 The widget of an automation, placed on a page, shows its title with a link to its page, its status, its state and since when, and the error of the automation or, when there is none, the first rule that waits for Only if, holds a condition, misses values or did not run its last request.
 
@@ -529,13 +549,22 @@ This section describes how the automation stores, batches and limits its work. I
 
 ### The checkpoint
 
-Each automation keeps its current state, when it entered it, and the last trigger time and last run of each rule in a checkpoint file in the folder `AutomationState` of the [data folder](configuration.md#data-folder), not in its configuration: `/Demo/ConveyorGuard` has `Data/AutomationState/Demo/ConveyorGuard.json`, and a character that a file name cannot hold, such as `:`, is written as `%` and its hexadecimal code. Each write of the checkpoint is flushed to disk, and a state change is written before it is published. The runs, run counts and trigger times are written at most every 5 seconds, with the next state change, and when the automation stops, so a crash or a power loss can lose those of the last 5 seconds, and a cooldown can then end early. When the runs cannot be written, the status reads "The runs could not be saved and are saved again in 5 seconds: ...", which is shown and logged once and stays, also after a successful run, until the runs are written.
+Each automation keeps its current state, when it entered it, and the last trigger time and last run of each rule in a checkpoint file, not in its configuration.
 
-A checkpoint that cannot be read is kept next to it as `ConveyorGuard.json.unreadable-<timestamp>`, and the automation starts from its initial state and shows the error until **Reset state** or a saved valid configuration. If the file cannot be moved aside either, the automation writes no checkpoint and keeps the error until **Reset state**, so that the file is never replaced silently. A checkpoint with a run outcome it does not know keeps its state and run counts, without that outcome. Moving or renaming an automation deletes the checkpoint at the old path, and deleting an automation deletes its checkpoint.
+- **Location**: the folder `AutomationState` of the [data folder](configuration.md#data-folder), at the path of the automation: `/Demo/ConveyorGuard` has `Data/AutomationState/Demo/ConveyorGuard.json`. A character that a file name cannot hold, such as `:`, and `%` itself are written as `%` and their hexadecimal code, so that every path has a file of its own.
+- **Writes**: the file is replaced as a whole, and each write is flushed to disk. A state change is written before it is published. The runs, run counts and trigger times are written at most every 5 seconds, with the next state change, and when the automation stops.
+- **What a crash loses**: a crash or a power loss can lose the runs of the last 5 seconds, with their run counts and trigger times, so a cooldown can end early and the history shows the run count of such a rule drop, as after a reset of a counter.
+- **Failed writes**: when the runs cannot be written, the status reads "The runs could not be saved and are saved again in 5 seconds: ...", which is shown and logged once and stays, also after a successful run, until the runs are written.
+- **Unreadable file**: a checkpoint that cannot be read is kept next to it as `ConveyorGuard.json.unreadable-<timestamp>`, and the automation starts from its initial state and shows the error until **Reset state** or a saved valid configuration. If the file cannot be moved aside either, the automation writes no checkpoint and keeps the error until **Reset state**, so that the file is never replaced silently. A checkpoint with a run outcome it does not know keeps its state and run counts, without that outcome.
+- **Moves and deletes**: moving or renaming an automation deletes the checkpoint at the old path and starts it again from its initial state, and deleting an automation deletes its checkpoint.
+- **Reset by hand**: stop HomeBlaze and delete the file of the automation.
 
 ### Recent runs from history
 
-Every run increments the `RunCount` of its rule, also two identical runs in a row, and the page lists a run for each `RunCount` sample that follows a lower one, with the `LastRunOutcome` and `LastRunMessage` of that time. A count that is lower after a crash starts over without a run. A history store merges the changes of a property within its buffer time, 250 ms by default, so two runs of one rule within that time show as one. The page reads the runs again after new runs, at most every 5 seconds, and while history has not stored a new run count yet, it tries again for up to 30 seconds.
+- **What counts**: the runs that executed actions, including those that failed or that a stop canceled, and dry runs. Requests that Only if rejected and requests skipped after a state change are [no runs](#only-if-and-cooldown).
+- **How runs are found**: every run increments the `RunCount` of its rule, also two identical runs in a row, and the page lists a run for each `RunCount` sample that follows a lower one, with the `LastRunOutcome` and `LastRunMessage` of that time. A count that is lower after a crash starts over without a run, so a crash can drop runs.
+- **Runs close together**: a history store merges the changes of a property within its buffer time, 250 ms by default, so two runs of one rule within that time show as one. The caption of the list says so.
+- **Refresh**: the page reads the runs again after new runs, at most every 5 seconds, and while history has not stored a new run count yet, it tries again for up to 30 seconds.
 
 ### Limits
 

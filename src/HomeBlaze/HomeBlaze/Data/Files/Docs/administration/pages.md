@@ -243,6 +243,7 @@ With the pipe `map` a condition shows the text of a case instead, such as `{{ /D
 - **Logic**: `and` (`&&`), `or` (`||`), `not` (`!`) and parentheses combine comparisons. A missing value makes a comparison unknown, and an unknown part makes the whole unknown unless the rest decides it: `false and unknown` is `false`.
 - **Texts and enums** compare without regard to upper and lower case. A date compares with a text in ISO 8601, such as `'2026-10-01'`.
 - **Arithmetic**: `+`, `-`, `*` and `/` compute with numbers, dates and durations, with a space before and after the operator: `{{ /Demo/Meter/Import - /Demo/Meter/Export }}`. A `-` directly before a path or a parenthesis negates it, as in `{{ -/Demo/Meter/Export }}`, and directly before a digit it is the sign of a number, as in `-5`. A duration is written like `90s`, `15m` or `1h30m`, with lower-case units from the largest to the smallest; a date minus a date is a duration, and a date plus or minus a duration is a date. A computed value is shown without the unit of a property.
+- **Exact numbers**: Whole numbers and numbers with a decimal point, such as `0.1`, compute exactly as long as the result is exact, so `0.1 + 0.2 == 0.3` is true. A division by zero, or any missing operand, is missing.
 - **Errors**: A mistake shows its message and where it is, such as `expected ')' at position 16`, in place of the value. See [Page Errors](page-errors.md#expression-errors).
 
 ### Where an Expression Works
