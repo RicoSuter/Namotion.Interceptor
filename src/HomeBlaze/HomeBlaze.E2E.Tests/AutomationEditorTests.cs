@@ -170,6 +170,93 @@ public class AutomationEditorTests
     }
 
     [Fact]
+    public async Task WhenARowIsAddedAndAnotherRuleIsSelectedAndThenTheFirstAgain_ThenTheConditionIsUnchangedAndSimple()
+    {
+        // Arrange
+        await using var washer = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        var (page, dialog) = await OpenEditorAsync(washer.Name, tab: RulesTab);
+        var field = dialog.GetByTestId("automation-trigger-condition");
+        await Assertions.Expect(dialog.GetByLabel("Rule name")).ToHaveValueAsync("Started", new() { Timeout = Timeout });
+        await field.GetByTestId("automation-trigger-condition-add-row").ClickAsync();
+        await Assertions.Expect(dialog.GetByTestId("automation-pending")).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await SelectRuleAsync(dialog, "Finished");
+        await SelectRuleAsync(dialog, "Started");
+
+        // Assert
+        await Assertions.Expect(page.GetByText("An unfinished condition was discarded.")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(dialog.GetByTestId("automation-pending")).ToHaveCountAsync(0);
+        await AssertSimpleRowAsync(field, "automation-trigger-condition");
+        await Assertions.Expect(dialog.GetByTestId("automation-editor")).ToHaveAttributeAsync("data-dirty", "false");
+        await AssertExpressionAsync(field, "automation-trigger-condition", "/Demo/Motor/Temperature > 1000");
+    }
+
+    [Fact]
+    public async Task WhenAdvancedIsChosenWhileARowIsNotFinished_ThenTheRowIsDroppedAndThatIsReported()
+    {
+        // Arrange
+        await using var washer = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        var (page, dialog) = await OpenEditorAsync(washer.Name, tab: RulesTab);
+        var field = dialog.GetByTestId("automation-trigger-condition");
+        await Assertions.Expect(dialog.GetByLabel("Rule name")).ToHaveValueAsync("Started", new() { Timeout = Timeout });
+        await field.GetByTestId("automation-trigger-condition-add-row").ClickAsync();
+        await Assertions.Expect(dialog.GetByTestId("automation-pending")).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await field.GetByTestId("automation-trigger-condition-advanced").ClickAsync();
+
+        // Assert
+        await Assertions.Expect(page.GetByText("An unfinished condition was discarded.")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(dialog.GetByTestId("automation-pending")).ToHaveCountAsync(0);
+        await Assertions.Expect(field.GetByTestId("automation-trigger-condition-text")).ToHaveValueAsync("/Demo/Motor/Temperature > 1000");
+    }
+
+    [Fact]
+    public async Task WhenARuleIsDeletedAndSaved_ThenTheFileAndThePageNoLongerHaveIt()
+    {
+        // Arrange
+        await using var washer = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        var (page, dialog) = await OpenEditorAsync(washer.Name, tab: RulesTab);
+        await SelectRuleAsync(dialog, "Finished");
+
+        // Act
+        await dialog.GetByTestId("automation-delete-rule").ClickAsync();
+        await Assertions.Expect(dialog.GetByTestId("automation-rule-item")).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        await Assertions.Expect(dialog.GetByLabel("Rule name")).ToHaveValueAsync("Started");
+        await SaveAsync(page, dialog);
+
+        // Assert
+        using var saved = JsonDocument.Parse(await _fixture.ReadFileAsync(washer.FilePath));
+        Assert.Equal(["started"], saved.RootElement.GetProperty("rules").EnumerateObject().Select(rule => rule.Name).ToArray());
+        Assert.Equal(["started"], saved.RootElement.GetProperty("ruleOrder").EnumerateArray().Select(key => key.GetString()!).ToArray());
+        await Assertions.Expect(page.GetByTestId("automation-rule-row")).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("automation-rule-row")).ToContainTextAsync("Started");
+    }
+
+    [Fact]
+    public async Task WhenTheModeOfARuleAndTheOrderOfTheRulesAreChangedAndSaved_ThenTheFileHasThem()
+    {
+        // Arrange
+        await using var washer = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        var (page, dialog) = await OpenEditorAsync(washer.Name, tab: RulesTab);
+        await Assertions.Expect(dialog.GetByLabel("Rule name")).ToHaveValueAsync("Started", new() { Timeout = Timeout });
+
+        // Act
+        await dialog.GetByTestId("automation-rule-mode-Off").ClickAsync();
+        await dialog.GetByTestId("automation-rule-item").Filter(new() { HasTextString = "Finished" })
+            .GetByRole(AriaRole.Button, new() { Name = "Move rule up" }).ClickAsync();
+        await Assertions.Expect(dialog.GetByTestId("automation-rule-item").First).ToContainTextAsync("Finished", new() { Timeout = Timeout });
+        await SaveAsync(page, dialog);
+
+        // Assert
+        using var saved = JsonDocument.Parse(await _fixture.ReadFileAsync(washer.FilePath));
+        Assert.Equal(["finished", "started"], saved.RootElement.GetProperty("ruleOrder").EnumerateArray().Select(key => key.GetString()!).ToArray());
+        Assert.Equal("Off", saved.RootElement.GetProperty("rules").GetProperty("started").GetProperty("mode").GetString());
+        await Assertions.Expect(page.GetByTestId("automation-rule-row").First).ToContainTextAsync("Finished", new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenAPropertyConditionWithAnUnfinishedRowIsRemoved_ThenTheEditorNoLongerBlocksSaving()
     {
         // Arrange
