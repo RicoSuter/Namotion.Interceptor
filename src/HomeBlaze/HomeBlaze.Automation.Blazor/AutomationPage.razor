@@ -87,7 +87,7 @@
                                     <td>@(rule.RunCount ?? 0)</td>
                                     <td>
                                         <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Science"
-                                                   OnClick="@(() => TestAsync(key, rule))" data-testid="automation-test-now">Test now</MudButton>
+                                                   OnClick="@(() => TestAsync(automation, key, rule))" data-testid="automation-test-now">Test now</MudButton>
                                     </td>
                                 </tr>
                             }
@@ -206,8 +206,9 @@
     private static string? GetDryRunHint(AutomationRule rule) =>
         AutomationSummary.GetDryRunHint(rule.Mode, rule.InState, (rule.Actions ?? []).OfType<ChangeStateAction>().Select(action => action.TargetState));
 
-    private async Task TestAsync(string key, AutomationRule rule)
+    private async Task TestAsync(Automation automation, string key, AutomationRule rule)
     {
+        var status = automation.Status;
         AutomationRuleTestResult result;
         try
         {
@@ -224,6 +225,7 @@
         {
             { dialog => dialog.Result, result },
             { dialog => dialog.Rule, rule },
+            { dialog => dialog.Status, status },
             { dialog => dialog.EvaluatedAt, AutomationTime.Format(TimeZone, TimeProvider.GetUtcNow(), TimeProvider.GetUtcNow()) }
         };
 

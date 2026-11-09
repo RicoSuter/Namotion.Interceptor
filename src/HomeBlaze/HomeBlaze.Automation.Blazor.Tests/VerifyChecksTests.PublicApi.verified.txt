@@ -51,6 +51,8 @@ namespace HomeBlaze.Automation.Blazor
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.AutomationRule Rule { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override void OnParametersSet() { }
     }

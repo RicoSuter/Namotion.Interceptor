@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions;
 using HomeBlaze.Automation.Blazor.Runs;
 
 namespace HomeBlaze.Automation.Blazor.Tests.Runs;
@@ -37,9 +38,44 @@ public class RuleTestSummaryTests
         AutomationRuleTestResult result, bool hasEventTrigger, bool wouldRun, string text)
     {
         // Act
-        var verdict = RuleTestSummary.Describe(result, hasEventTrigger);
+        var verdict = RuleTestSummary.Describe(result, hasEventTrigger, ServiceStatus.Running);
 
         // Assert
         Assert.Equal(new RuleTestVerdict(wouldRun, text), verdict);
+    }
+
+    [Theory]
+    [InlineData(ServiceStatus.Stopped, true, "Would not run now: the automation is stopped. A condition and Only if are true.")]
+    [InlineData(ServiceStatus.Error, true, "Would not run now: the automation stopped with an error. A condition and Only if are true.")]
+    [InlineData(ServiceStatus.Starting, false, "Would not run now: the automation is starting. A condition is true.")]
+    public void WhenTheRuleWouldRunButTheAutomationIsNotRunning_ThenTheVerdictSaysSo(ServiceStatus status, bool hasOnlyIf, string text)
+    {
+        // Arrange
+        var result = new AutomationRuleTestResult
+        {
+            IsActive = true,
+            Triggers = [new AutomationTriggerTestResult { Number = 1, Result = true }],
+            HasOnlyIf = hasOnlyIf,
+            OnlyIfResult = true
+        };
+
+        // Act
+        var verdict = RuleTestSummary.Describe(result, false, status);
+
+        // Assert
+        Assert.Equal(new RuleTestVerdict(false, text), verdict);
+    }
+
+    [Fact]
+    public void WhenTheRuleWouldNotRunAndTheAutomationIsStopped_ThenTheVerdictKeepsTheReasonOfTheRule()
+    {
+        // Arrange
+        var result = Result(trigger: false);
+
+        // Act
+        var verdict = RuleTestSummary.Describe(result, false, ServiceStatus.Error);
+
+        // Assert
+        Assert.Equal(new RuleTestVerdict(false, "Would not run now: no condition is true."), verdict);
     }
 }

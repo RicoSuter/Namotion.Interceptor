@@ -59,11 +59,14 @@
 
     [Parameter, EditorRequired] public AutomationRule Rule { get; set; } = null!;
 
+    /// <summary>The status of the automation when the rule was evaluated.</summary>
+    [Parameter] public ServiceStatus Status { get; set; } = ServiceStatus.Running;
+
     /// <summary>When the rule was evaluated, as the viewer reads it.</summary>
     [Parameter] public string EvaluatedAt { get; set; } = string.Empty;
 
     protected override void OnParametersSet() =>
-        _verdict = RuleTestSummary.Describe(Result, Array.Exists(Rule.Triggers, trigger => trigger is SubjectEventTrigger));
+        _verdict = RuleTestSummary.Describe(Result, Array.Exists(Rule.Triggers, trigger => trigger is SubjectEventTrigger), Status);
 
     private void Close() => MudDialog?.Close();
 

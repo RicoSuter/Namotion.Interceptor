@@ -71,6 +71,39 @@ public class AutomationPageTests
     }
 
     [Fact]
+    public async Task WhenTestNowIsClickedForARuleWhoseConditionIsTrue_ThenTheDialogSaysItWouldRun()
+    {
+        // Arrange
+        await using var ready = await _fixture.AddStoredAutomationAsync(created =>
+        {
+            created.Name = "Ready";
+            created.States = ["Idle", "Done"];
+            created.InitialState = "Idle";
+            created.Rules = new Dictionary<string, AutomationRule>
+            {
+                ["ready"] = new()
+                {
+                    Name = "Ready",
+                    Mode = AutomationRuleMode.DryRun,
+                    Triggers = [new PropertyTrigger { Expression = "../Name == Ready" }],
+                    Actions = [new ChangeStateAction { Id = "state-1", TargetState = "Done" }]
+                }
+            };
+        });
+        var page = await _fixture.OpenSubjectPageAsync(ready.Name);
+        await Assertions.Expect(page.GetByTestId("automation-status")).ToHaveTextAsync("Running", new() { Timeout = Timeout });
+
+        // Act
+        await page.GetByTestId("automation-rule-row").First.GetByTestId("automation-test-now").ClickAsync();
+
+        // Assert
+        var dialog = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(dialog.GetByTestId("automation-test-verdict")).ToHaveTextAsync("Would run now.", new() { Timeout = Timeout });
+        await Assertions.Expect(dialog.GetByTestId("automation-test-trigger")).ToContainTextAsync("true");
+        await Assertions.Expect(dialog).ToContainTextAsync("ChangeState(Done)");
+    }
+
+    [Fact]
     public async Task WhenTheAutomationIsShownAsAWidget_ThenItShowsTheCurrentStateAndTheStatus()
     {
         // Arrange
