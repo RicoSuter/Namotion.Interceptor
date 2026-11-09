@@ -28,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       homeblaze: ${{ github.event_name != 'pull_request' || steps.filter.outputs.homeblaze == 'true' }}
+      automation: ${{ github.event_name != 'pull_request' || steps.filter.outputs.automation == 'true' }}
       nugetplugins: ${{ github.event_name != 'pull_request' || steps.filter.outputs.nugetplugins == 'true' }}
       opcua: ${{ github.event_name != 'pull_request' || steps.filter.outputs.opcua == 'true' }}
       websocket: ${{ github.event_name != 'pull_request' || steps.filter.outputs.websocket == 'true' }}
@@ -59,6 +60,14 @@ jobs:
               - 'src/Directory.Packages.props'
               - 'src/Directory.Build.props'
               - 'src/Directory.Build.targets'
+              - '.github/workflows/build.yml'
+            automation:
+              - 'src/HomeBlaze/HomeBlaze.Automation*/**'
+              - 'src/HomeBlaze/HomeBlaze.Services/**'
+              - 'src/Namotion.Interceptor/**'
+              - 'src/Namotion.Interceptor.Tracking/**'
+              - 'src/Namotion.Interceptor.Registry/**'
+              - 'src/Namotion.Interceptor.Expressions/**'
               - '.github/workflows/build.yml'
             nugetplugins:
               - 'src/HomeBlaze/Namotion.NuGet.Plugins/**'
@@ -215,6 +224,39 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: cobertura-coverage-homeblaze-integration-${{ strategy.job-index }}
+          path: '**/TestResults/**/coverage.cobertura.xml'
+          if-no-files-found: warn
+
+  test-automation-integration:
+    timeout-minutes: 40
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.automation == 'true'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build
+        run: dotnet build src/HomeBlaze/HomeBlaze.Automation.Tests --configuration Release
+
+      - name: Run automation integration tests
+        run: |
+          dotnet test src/HomeBlaze/HomeBlaze.Automation.Tests `
+            --configuration Release `
+            --no-build `
+            --filter "Category=Integration" `
+            --results-directory ./TestResults `
+            --collect:"XPlat Code Coverage" `
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+
+      - name: Upload automation integration test coverage
+        uses: actions/upload-artifact@v7
+        with:
+          name: cobertura-coverage-automation-integration
           path: '**/TestResults/**/coverage.cobertura.xml'
           if-no-files-found: warn
 
@@ -469,7 +511,7 @@ jobs:
   ci:
     timeout-minutes: 5
     if: always()
-    needs: [ changes, test, test-homeblaze-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration, test-modbus-integration, container-build ]
+    needs: [ changes, test, test-homeblaze-integration, test-automation-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration, test-modbus-integration, container-build ]
     runs-on: ubuntu-latest
     steps:
       - name: Fail when a needed job failed or was canceled
@@ -487,7 +529,7 @@ jobs:
     concurrency:
       group: container-publish-${{ github.ref }}
       cancel-in-progress: false
-    needs: [ container-build, test, test-homeblaze-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration, test-modbus-integration ]
+    needs: [ container-build, test, test-homeblaze-integration, test-automation-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration, test-modbus-integration ]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -679,7 +721,7 @@ jobs:
     timeout-minutes: 15
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
-    needs: [ validate, test, test-homeblaze-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration, test-modbus-integration ]
+    needs: [ validate, test, test-homeblaze-integration, test-automation-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration, test-modbus-integration ]
     permissions:
       contents: read
       id-token: write # Required for NuGet trusted publishing (OIDC token exchange)

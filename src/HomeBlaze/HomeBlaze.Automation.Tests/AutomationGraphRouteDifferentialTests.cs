@@ -39,9 +39,27 @@ public class AutomationGraphRouteDifferentialTests
 {
     private const int Steps = 40;
 
-    public static TheoryData<int> Seeds => [.. Enumerable.Range(1, 300)];
+    public static TheoryData<int> Seeds => [.. Enumerable.Range(1, 50)];
 
-    public static TheoryData<int> LongSeeds => [.. Enumerable.Range(1001, 2000)];
+    // The seeds after those of the unit tests, and long scenarios of their own seeds.
+    public static TheoryData<int, int> IntegrationSeeds
+    {
+        get
+        {
+            var seeds = new TheoryData<int, int>();
+            for (var seed = 51; seed <= 300; seed++)
+            {
+                seeds.Add(seed, Steps);
+            }
+
+            for (var seed = 1001; seed <= 3000; seed++)
+            {
+                seeds.Add(seed, Steps * 3);
+            }
+
+            return seeds;
+        }
+    }
 
     [Theory]
     [MemberData(nameof(Seeds))]
@@ -49,8 +67,8 @@ public class AutomationGraphRouteDifferentialTests
 
     [Theory]
     [Trait("Category", "Integration")]
-    [MemberData(nameof(LongSeeds))]
-    public Task WhenManyRandomChangesAreApplied_ThenEveryAutomationBehavesAsWithoutGraphRoutes(int seed) => CompareAsync(seed, Steps * 3);
+    [MemberData(nameof(IntegrationSeeds))]
+    public Task WhenManyRandomChangesAreApplied_ThenEveryAutomationBehavesAsWithoutGraphRoutes(int seed, int steps) => CompareAsync(seed, steps);
 
     // The replacing automation stops its chain as without routes. Without routes the others receive the structural writes
     // of the chain too, and one that takes each graph change before the next arrives receives one beyond the limit and

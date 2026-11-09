@@ -4,6 +4,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
+using HomeBlaze.Services;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
@@ -15,11 +16,11 @@ namespace HomeBlaze.Automation.Tests;
 
 /// <summary>
 /// Writers change the structure of the graph concurrently while automations are stopped, started, saved and reset, and
-/// then in short rounds while the automations publish their routes late. After each round a graph change that every
-/// automation is given anyway, as without routes, must change nothing: an automation that missed a structural change
-/// that moves one of its paths would resolve it then. A round where an automation still waits for the next graph change,
-/// for triggers that a refresh outside a graph change resolved differently, is left out, since that graph change changes
-/// it as without routes.
+/// then in short rounds while the automations publish their routes late. Each round ends with a structural write on no
+/// route, at which every automation resolves again without routes, so that every location, property trigger and event
+/// source must equal what a resolver without a cache finds. A graph change that every automation is given then, as
+/// without routes, must change nothing, unless an automation still waits for the next graph change for triggers that a
+/// refresh outside a graph change resolved differently, since that graph change changes it as without routes.
 /// </summary>
 [Trait("Category", "Integration")]
 public class AutomationGraphRouteStressTests(ITestOutputHelper output)
@@ -64,22 +65,27 @@ public class AutomationGraphRouteStressTests(ITestOutputHelper output)
         {
             await Task.WhenAll(world.StartWriters(round + 1, iterations: 10)).WaitAsync(Bound);
             await world.FlushAsync();
+            world.ChangeUnrelated();
+            await world.FlushAsync();
+            var stale = world.FindStale();
             var waits = world.WaitsForGraphChange();
             var before = world.Observe();
             await world.ForceGraphChangeAsync();
             var after = world.Observe();
+
+            // Assert
+            Assert.True(stale.Count == 0, $"Seed {seed}, round {round}:\n{string.Join('\n', stale)}");
             if (waits)
             {
                 skipped++;
                 continue;
             }
 
-            // Assert
             Assert.True(before == after, $"Seed {seed}, round {round}:\n{Difference(before, after)}");
         }
 
         output.WriteLine($"Seed {seed}: {skipped} of 100 rounds waited for a graph change.");
-        world.AssertResolvedFreshly(makesEveryRouteUnbounded);
+        world.AssertPublishedRoutesAreTheUnions(makesEveryRouteUnbounded);
     }
 
     private static string Difference(string before, string after)
@@ -186,6 +192,33 @@ public class AutomationGraphRouteStressTests(ITestOutputHelper output)
 
         public bool WaitsForGraphChange() => _automations.Any(automation => automation.Runtime!.Routes.WaitsForGraphChange);
 
+        public void ChangeUnrelated() => _holder.Sensor = _holder.Sensor is null ? new TestSensor() : null;
+
+        /// <summary>
+        /// Describes each location, property trigger and event source of an active rule that differs from what a resolver
+        /// without a cache finds.
+        /// </summary>
+        public List<string> FindStale()
+        {
+            var fresh = new SubjectPathResolver(() => Graph.Root);
+            var stale = new List<string>();
+            foreach (var automation in _automations)
+            {
+                var runtime = automation.Runtime!;
+                if (fresh.GetPath(automation, PathStyle.Canonical) is { } path && path != runtime.Location.AutomationPath)
+                {
+                    stale.Add($"{automation.Name}: at {runtime.Location.AutomationPath} instead of {path}");
+                }
+
+                foreach (var rule in runtime.Engine.Rules.Where(rule => rule.IsActivated))
+                {
+                    stale.AddRange(FindStaleTriggers(fresh, automation, rule));
+                }
+            }
+
+            return stale;
+        }
+
         public async Task ForceGraphChangeAsync()
         {
             foreach (var automation in _automations)
@@ -223,32 +256,15 @@ public class AutomationGraphRouteStressTests(ITestOutputHelper output)
             return text.ToString();
         }
 
-        public void AssertResolvedFreshly(bool makesEveryRouteUnbounded)
+        public void AssertPublishedRoutesAreTheUnions(bool makesEveryRouteUnbounded)
         {
             foreach (var automation in _automations)
             {
                 var runtime = automation.Runtime!;
-                if (Graph.Resolver.GetPath(automation, PathStyle.Canonical) is { } expectedPath)
-                {
-                    Assert.Equal(expectedPath, runtime.Location.AutomationPath);
-                }
-
                 var registration = runtime.Changes.Registration!;
                 if (!makesEveryRouteUnbounded && !registration.IsUnbounded)
                 {
                     Assert.True(registration.Route.SetEquals(runtime.Routes.Union), $"{automation.Name}: the published route differs from the union");
-                }
-
-                foreach (var rule in runtime.Engine.Rules)
-                {
-                    foreach (var trigger in rule.PropertyTriggers.Where(trigger => trigger.State.Phase != TriggerPhase.Inactive && rule.IsActivated))
-                    {
-                        var fresh = trigger.PropertyPaths
-                            .Select(path => AutomationPaths.ResolveProperty(Graph.Resolver, path, rule.Rule))
-                            .OfType<RegisteredSubjectProperty>()
-                            .Select(property => property.Reference);
-                        Assert.True(fresh.SequenceEqual(trigger.Dependencies), $"{automation.Name}/{rule.Key}: the dependencies are out of date");
-                    }
                 }
             }
         }
@@ -347,7 +363,7 @@ public class AutomationGraphRouteStressTests(ITestOutputHelper output)
             }
             else
             {
-                devices[key] = CreateSensor(random);
+                devices[key] = random.Next(3) == 0 && devices.Count > 0 ? devices.Values.ElementAt(random.Next(devices.Count)) : CreateSensor(random);
             }
 
             room.Devices = devices;
@@ -362,7 +378,7 @@ public class AutomationGraphRouteStressTests(ITestOutputHelper output)
             }
             else
             {
-                items.Insert(random.Next(items.Count + 1), CreateSensor(random));
+                items.Insert(random.Next(items.Count + 1), random.Next(3) == 0 && items.Count > 0 ? items[random.Next(items.Count)] : CreateSensor(random));
             }
 
             room.Items = items;
@@ -519,6 +535,33 @@ public class AutomationGraphRouteStressTests(ITestOutputHelper output)
         };
 
         private string Format(PropertyReference property) => FormatSubject(property.Subject) + "." + property.Name;
+
+        private IEnumerable<string> FindStaleTriggers(SubjectPathResolver fresh, Automation automation, CompiledRule rule)
+        {
+            foreach (var trigger in rule.PropertyTriggers.Where(trigger => trigger.State.Phase != TriggerPhase.Inactive))
+            {
+                var expected = trigger.PropertyPaths
+                    .Select(path => AutomationPaths.ResolveProperty(fresh, path, rule.Rule))
+                    .OfType<RegisteredSubjectProperty>()
+                    .Select(property => property.Reference)
+                    .ToArray();
+                if (!expected.SequenceEqual(trigger.Dependencies))
+                {
+                    yield return $"{automation.Name}/{rule.Key}/p{trigger.Index}: [{string.Join(", ", trigger.Dependencies.Select(Format))}] instead of [{string.Join(", ", expected.Select(Format))}]";
+                }
+            }
+
+            foreach (var trigger in rule.EventTriggers)
+            {
+                var expected = AutomationPaths.ResolveSubject(fresh, trigger.Configuration.SubjectPath, rule.Rule);
+                if (!ReferenceEquals(expected, trigger.Source))
+                {
+                    yield return $"{automation.Name}/{rule.Key}/e{trigger.Index}: {FormatSource(trigger.Source)} instead of {FormatSource(expected)}";
+                }
+            }
+        }
+
+        private string FormatSource(IInterceptorSubject? source) => source is null ? "null" : FormatSubject(source);
 
         private string FormatSubject(IInterceptorSubject subject) =>
             (Graph.Resolver.GetPath(subject, PathStyle.Canonical) ?? "?") + "#" + RuntimeHelpers.GetHashCode(subject);
