@@ -203,7 +203,8 @@ else
 
     private CanvasNode? _pressedNode;
 
-    // The position of each node that moves before the move started, until its release.
+    // The position of each node that moves before the move started, until its release or the next mouse down, as a
+    // release at the start reports no modification.
     private readonly Dictionary<CanvasNode, (int X, int Y)> _moveStarts = new();
 
     private readonly Dictionary<CanvasNode, SubjectComponent> _nodeComponents = new();
@@ -313,6 +314,7 @@ else
     private void OnCanvasMouseDown(MouseEventArgs e)
     {
         _ignoreNextClick = false;
+        _moveStarts.Clear();
     }
 
     private async Task OnCanvasClick(MouseEventArgs e)
@@ -357,6 +359,10 @@ else
             BeforeSave = subject =>
             {
                 if (Canvas == null) return;
+
+                // The file may have been read again with issues while the dialog was open. The dialog shows the refusal
+                // and stays open with its input.
+                RootManager.GetConfigurationWriter(Canvas).ThrowIfWriteRefused(Canvas);
 
                 var node = SubjectFactory.CreateSubject<CanvasNode>();
                 node.X = x;
