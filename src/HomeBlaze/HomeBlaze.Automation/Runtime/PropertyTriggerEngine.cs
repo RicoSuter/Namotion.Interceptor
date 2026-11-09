@@ -23,7 +23,7 @@ internal sealed class PropertyTriggerEngine(
     ILogger logger,
     Func<string> getAutomationName,
     Action<FrozenSet<PropertyReference>> publishWatched,
-    GraphRoutes? routes = null)
+    GraphRoutes routes)
 {
     private readonly ObservedValues _values = new();
     private readonly List<CompiledPropertyTrigger> _pending = [];
@@ -176,7 +176,7 @@ internal sealed class PropertyTriggerEngine(
     {
         _rebound.Clear();
         _reboundOnlyIfRules.Clear();
-        routes?.SetAwaitsGraphChange(false);
+        routes.SetAwaitsGraphChange(false);
     }
 
     /// <summary>Requests the runs of every pending trigger, such as after a state change skipped them.</summary>
@@ -282,7 +282,7 @@ internal sealed class PropertyTriggerEngine(
         }
 
         // The next graph change evaluates them, whatever it changed.
-        routes?.SetAwaitsGraphChange(_rebound.Count > 0 || _reboundOnlyIfRules.Count > 0);
+        routes.SetAwaitsGraphChange(_rebound.Count > 0 || _reboundOnlyIfRules.Count > 0);
         PublishWatched(rules, []);
         return _pending.Count > trackedCount;
     }
@@ -565,7 +565,7 @@ internal sealed class PropertyTriggerEngine(
     // Stores the graph route of the resolution in the slot.
     private PropertyReference[] Resolve(IReadOnlyList<string> paths, AutomationRule rule, GraphRouteSlot route)
     {
-        var recorder = routes?.BeginRoute();
+        var recorder = routes.BeginRoute();
         var resolved = new List<PropertyReference>(paths.Count);
         foreach (var path in paths)
         {
@@ -575,7 +575,7 @@ internal sealed class PropertyTriggerEngine(
             }
         }
 
-        routes?.EndRoute(route);
+        routes.EndRoute(route);
         return [.. resolved];
     }
 

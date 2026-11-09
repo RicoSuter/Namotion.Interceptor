@@ -10,7 +10,7 @@ namespace HomeBlaze.Automation.Runtime;
 /// The event triggers of active rules: subscribes to their sources, follows a source that the graph replaces, and turns
 /// a received event that passes its filter into a run request. Used by the worker only; a subscription only enqueues.
 /// </summary>
-internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvider timeProvider, AutomationInputQueue queue, GraphRoutes? routes = null)
+internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvider timeProvider, AutomationInputQueue queue, GraphRoutes routes)
 {
     /// <summary>Subscribes the triggers of the rule, except one that a Save carried over and whose path still leads to its source.</summary>
     public void Activate(CompiledRule rule)
@@ -74,8 +74,8 @@ internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvi
     // Stores the graph route of the resolution in the trigger.
     private IInterceptorSubject? ResolveSource(CompiledEventTrigger trigger)
     {
-        var source = AutomationPaths.ResolveSubject(resolver, trigger.Configuration.SubjectPath, trigger.Rule.Rule, routes?.BeginRoute());
-        routes?.EndRoute(trigger.SourceRoute);
+        var source = AutomationPaths.ResolveSubject(resolver, trigger.Configuration.SubjectPath, trigger.Rule.Rule, routes.BeginRoute());
+        routes.EndRoute(trigger.SourceRoute);
         return source;
     }
 
@@ -100,8 +100,8 @@ internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvi
 
     private void Subscribe(CompiledEventTrigger trigger)
     {
-        var error = FindSource(resolver, trigger, out var source, out var eventType, routes?.BeginRoute());
-        routes?.EndRoute(trigger.SourceRoute);
+        var error = FindSource(resolver, trigger, out var source, out var eventType, routes.BeginRoute());
+        routes.EndRoute(trigger.SourceRoute);
         trigger.Source = source;
         trigger.SourceError = error;
         if (source is null || eventType is null)

@@ -39,7 +39,7 @@ internal sealed class AutomationEngine : IRuleRunHost
     /// triggers store the graph routes of their resolutions in <paramref name="routes"/>.
     /// </summary>
     public AutomationEngine(
-        Automation automation, AutomationInputQueue queue, AutomationStateKeeper keeper, ILogger logger, AutomationChangeReceiver changes, GraphRoutes? routes = null)
+        Automation automation, AutomationInputQueue queue, AutomationStateKeeper keeper, ILogger logger, AutomationChangeReceiver changes, GraphRoutes routes)
     {
         _automation = automation;
         _keeper = keeper;

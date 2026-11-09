@@ -1,5 +1,4 @@
 using System.Collections.Frozen;
-using HomeBlaze.Services;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -29,7 +28,7 @@ internal sealed class AutomationTriggers
         ILogger logger,
         Func<string> getAutomationName,
         Action<FrozenSet<PropertyReference>> publishWatched,
-        GraphRoutes? routes = null)
+        GraphRoutes routes)
     {
         var registry = ((IInterceptorSubject)automation).Context.TryGetService<ISubjectRegistry>();
         var resolver = automation.PathResolver;
@@ -42,27 +41,11 @@ internal sealed class AutomationTriggers
     }
 
     /// <summary>
-    /// Creates the triggers, whose property triggers publish their watched set to <paramref name="publishWatched"/> and
-    /// whose paths are resolved again on a graph change only when <paramref name="getStructureVersion"/>, the structure
-    /// version of the registry, changed since.
+    /// Creates the triggers of <paramref name="propertyTriggers"/> and <paramref name="eventTriggers"/>, whose paths are
+    /// resolved again on a graph change only when <paramref name="getStructureVersion"/>, the structure version of the
+    /// registry, changed since.
     /// </summary>
     public AutomationTriggers(
-        SubjectPathResolver resolver,
-        TimeProvider timeProvider,
-        AutomationInputQueue queue,
-        ILogger logger,
-        Func<string> getAutomationName,
-        Action<FrozenSet<PropertyReference>> publishWatched,
-        Func<long> getStructureVersion)
-        : this(
-            queue,
-            getStructureVersion,
-            new PropertyTriggerEngine(resolver, timeProvider, logger, getAutomationName, publishWatched),
-            new EventTriggerEngine(resolver, timeProvider, queue))
-    {
-    }
-
-    private AutomationTriggers(
         AutomationInputQueue queue, Func<long> getStructureVersion, PropertyTriggerEngine propertyTriggers, EventTriggerEngine eventTriggers)
     {
         _queue = queue;

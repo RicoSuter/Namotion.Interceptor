@@ -20,7 +20,7 @@ public class PropertyTriggerEngineTests
         var weather = new TestSensor();
         graph.Add("Weather", weather);
         weather.Gust = 3;
-        var engine = new PropertyTriggerEngine(graph.Resolver, new FakeTimeProvider(Now), NullLogger.Instance, () => "Storm", _ => { });
+        var engine = new PropertyTriggerEngine(graph.Resolver, new FakeTimeProvider(Now), NullLogger.Instance, () => "Storm", _ => { }, new GraphRoutes(automation: null, changes: null));
         var rule = Compile("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")));
         var staleChange = new PropertyChangedInput(new PropertyReference(weather, nameof(TestSensor.Gust)), 9.0, 0, 0);
 
@@ -45,7 +45,7 @@ public class PropertyTriggerEngineTests
         var weather = new TestSensor();
         graph.Add("Weather", weather);
         var logger = new MessageLogger();
-        var engine = new PropertyTriggerEngine(graph.Resolver, new FakeTimeProvider(Now), logger, () => "Storm", _ => { });
+        var engine = new PropertyTriggerEngine(graph.Resolver, new FakeTimeProvider(Now), logger, () => "Storm", _ => { }, new GraphRoutes(automation: null, changes: null));
         var rule = Compile("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")));
         rule.IsActivated = true;
 
@@ -69,7 +69,7 @@ public class PropertyTriggerEngineTests
         var weather = new TestSensor { LastUpdated = Now };
         graph.Add("Weather", weather);
         var time = new FakeTimeProvider(Now);
-        var engine = new PropertyTriggerEngine(graph.Resolver, time, NullLogger.Instance, () => "Storm", _ => { });
+        var engine = new PropertyTriggerEngine(graph.Resolver, time, NullLogger.Instance, () => "Storm", _ => { }, new GraphRoutes(automation: null, changes: null));
         var rule = Compile("storm", Create(
             "Storm", AutomationRuleMode.On, [When("/Weather/Gust > 8"), When("/Weather/Rain > 0")], [Invoke("/Blinds/Close")],
             "now - /Weather/LastUpdated > 20s"));
