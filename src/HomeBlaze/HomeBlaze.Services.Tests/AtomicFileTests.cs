@@ -61,6 +61,25 @@ public sealed class AtomicFileTests : IDisposable
         Assert.Empty(Directory.GetFiles(_directory));
     }
 
+    [Fact]
+    public async Task WhenAWriteIsCanceled_ThenItThrowsAndLeavesTheFileAndNoTemporaryFile()
+    {
+        // Arrange
+        var path = Path.Combine(_directory, "file.json");
+        Directory.CreateDirectory(_directory);
+        await File.WriteAllTextAsync(path, "old content");
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => AtomicFile.WriteAllTextAsync(path, "new content", cancellation.Token));
+
+        // Assert
+        Assert.IsAssignableFrom<OperationCanceledException>(exception);
+        Assert.Equal("old content", await File.ReadAllTextAsync(path));
+        Assert.Equal([path], Directory.GetFiles(_directory));
+    }
+
     [Theory]
     [InlineData("file.json.0123456789abcdef0123456789abcdef.tmp", true)]
     [InlineData("file.json.0123456789ABCDEF0123456789ABCDEF.tmp", false)]

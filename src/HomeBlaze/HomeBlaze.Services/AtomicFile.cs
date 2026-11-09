@@ -46,6 +46,7 @@ public static class AtomicFile
     /// <summary>Replaces the file with <paramref name="content"/>.</summary>
     /// <exception cref="IOException">The file cannot be written.</exception>
     /// <exception cref="UnauthorizedAccessException">The file cannot be written.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the file was replaced.</exception>
     public static async Task WriteAllBytesAsync(string path, ReadOnlyMemory<byte> content, CancellationToken cancellationToken)
     {
         var temporaryPath = CreateTemporaryPath(path);
@@ -68,6 +69,7 @@ public static class AtomicFile
     /// <summary>Replaces the file with <paramref name="content"/> encoded as UTF-8 without a byte order mark.</summary>
     /// <exception cref="IOException">The file cannot be written.</exception>
     /// <exception cref="UnauthorizedAccessException">The file cannot be written.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the file was replaced.</exception>
     public static Task WriteAllTextAsync(string path, string content, CancellationToken cancellationToken) =>
         WriteAllBytesAsync(path, Encoding.UTF8.GetBytes(content), cancellationToken);
 

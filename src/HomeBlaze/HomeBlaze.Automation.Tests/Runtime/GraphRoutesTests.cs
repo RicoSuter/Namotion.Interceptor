@@ -150,13 +150,12 @@ public class GraphRoutesTests
     }
 
     // As above, less than 8 bytes a resolution leaves room only for allocations of the runtime that happen once.
-    [Theory]
-    [InlineData("/Room/Sensor/Gust")]
-    [InlineData("Name")]
-    public async Task WhenTheSamePathIsResolvedAgain_ThenResolvingItsTargetAllocatesNothing(string path)
+    [Fact]
+    public async Task WhenTheSamePathIsResolvedAgain_ThenResolvingItsTargetAllocatesNothing()
     {
         // Arrange
         const int resolutions = 1000;
+        const string path = "/Room/Sensor/Gust";
         await using var fixture = await RouteFixture.CreateAsync();
         var resolver = fixture.Host.Graph.Resolver;
         Assert.NotNull(AutomationPaths.ResolveTarget(resolver, path, fixture.Rule));

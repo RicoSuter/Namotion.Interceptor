@@ -64,6 +64,24 @@ public class ExpressionFieldPreviewTests
         Assert.Equal(["now 9, true"], preview.RowTexts.ToArray());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenTheHostGivesHints_ThenTheyAreShownAndADefaultArrayCountsAsNone(bool isDefault)
+    {
+        // Arrange
+        var host = new Host();
+        var preview = new ExpressionFieldPreview();
+        ImmutableArray<string> hostHints = isDefault ? default : ["Gust is in m/s."];
+        string[] expected = isDefault ? [] : ["Gust is in m/s."];
+
+        // Act
+        preview.Update("/Weather/Gust > 8", [], Variables, host.Validate, host.Preview, _ => hostHints);
+
+        // Assert
+        Assert.Equal(expected, preview.Hints.ToArray());
+    }
+
     [Fact]
     public void WhenTheTextChanges_ThenItsErrorIsShownAndNothingIsPreviewed()
     {

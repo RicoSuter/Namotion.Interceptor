@@ -4,6 +4,10 @@ namespace HomeBlaze.Automation.Blazor.Diagram;
 /// Keeps the last layout and returns it again while the states, the initial state and the rules draw the same, so that a
 /// render computes no layout. The current state is not part of the layout.
 /// </summary>
+/// <remarks>
+/// An instance serves one of the overloads of <c>Get</c>: a layout that the other overload built is returned for an
+/// automation whose applied configuration did not change.
+/// </remarks>
 internal sealed class StateDiagramLayoutCache
 {
     private string[] _states = [];

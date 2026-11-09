@@ -37,7 +37,8 @@ internal sealed class ExpressionFieldPreview
 
     /// <summary>
     /// Evaluates the texts when anything they depend on changed. <paramref name="preview"/> prepares an expression or a
-    /// path for evaluation with the current values, or returns null when it cannot be evaluated.
+    /// path for evaluation with the current values, or returns null when it cannot be evaluated. <paramref name="getHints"/>
+    /// gives the hints of the host for a valid expression, which come first; a default array counts as none.
     /// </summary>
     public void Update(
         string text,
@@ -61,7 +62,8 @@ internal sealed class ExpressionFieldPreview
         _getHints = getHints;
         var hasText = !string.IsNullOrWhiteSpace(text);
         Error = hasText ? validate?.Invoke(text) : null;
-        _hostHints = Error is null && hasText && getHints is not null ? getHints(text) : [];
+        var hostHints = Error is null && hasText && getHints is not null ? getHints(text) : [];
+        _hostHints = hostHints.IsDefault ? [] : hostHints;
         _result = hasText && Error is null ? preview?.Invoke(text) : null;
         _rowReaders = new RowReader[_rows.Length];
         _rowTexts = new string[_rows.Length];

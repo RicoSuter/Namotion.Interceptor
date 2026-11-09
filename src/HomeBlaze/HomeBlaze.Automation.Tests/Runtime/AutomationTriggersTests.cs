@@ -30,20 +30,18 @@ public class AutomationTriggersTests
         triggers.Activate([rule], [rule]);
         triggers.GetRequests(new ActivationInput([rule], 0), [rule]);
         triggers.OnGraphChanged([rule]);
-        var trigger = rule.PropertyTriggers[0];
-        var dependenciesAfterTheFirstGraphChange = trigger.Dependencies;
+        var resolutionsAfterTheFirstGraphChange = routes.ResolutionCount;
 
         // Act
         graph.Root.Children = new Dictionary<string, IInterceptorSubject>(graph.Root.Children);
         triggers.OnGraphChanged([rule]);
-        var dependenciesAfterTheSameChildren = trigger.Dependencies;
+        var resolutionsAfterTheSameChildren = routes.ResolutionCount;
         graph.Add("Blinds", new TestBlinds());
         triggers.OnGraphChanged([rule]);
 
         // Assert
-        // Each resolution stores a new array, also for equal dependencies.
-        Assert.Same(dependenciesAfterTheFirstGraphChange, dependenciesAfterTheSameChildren);
-        Assert.NotSame(dependenciesAfterTheFirstGraphChange, trigger.Dependencies);
+        Assert.Equal(resolutionsAfterTheFirstGraphChange, resolutionsAfterTheSameChildren);
+        Assert.True(routes.ResolutionCount > resolutionsAfterTheSameChildren);
     }
 
     [Fact]
