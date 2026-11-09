@@ -183,6 +183,39 @@ public class ChildIndexHandlerTests
     }
 
     [Fact]
+    public void WhenDictionaryReplacesTheSecondKeyOfASubject_ThenHandlerGetsItWithItsFirstKey()
+    {
+        // Arrange
+        var (context, handler) = CreateContext();
+        var car = new Car();
+        var garage = new Garage(context) { CarsByName = new Dictionary<string, Car> { ["First"] = car, ["Second"] = car } };
+
+        // Act
+        garage.CarsByName = new Dictionary<string, Car> { ["First"] = car, ["Third"] = car };
+
+        // Assert
+        var call = Assert.Single(handler.Calls);
+        Assert.Equal([new SubjectChild(car, "First")], call.Children);
+    }
+
+    [Fact]
+    public void WhenListMovesTheSecondPositionOfASubject_ThenHandlerGetsItWithItsFirstPositionAndTheShiftedSubject()
+    {
+        // Arrange
+        var (context, handler) = CreateContext();
+        var car = new Car();
+        var other = new Car();
+        var garage = new Garage(context) { Cars = [car, car, other] };
+
+        // Act
+        garage.Cars = [car, other, car];
+
+        // Assert
+        var call = Assert.Single(handler.Calls);
+        Assert.Equal([new SubjectChild(car, 0), new SubjectChild(other, 1)], call.Children);
+    }
+
+    [Fact]
     public void WhenListHoldingSubjectsTwiceIsReorderedWithoutMovingTheirFirstPositions_ThenHandlerGetsBoth()
     {
         // Arrange

@@ -24,8 +24,8 @@ public interface ISubjectRegistry
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A write that only adds or removes another key or position of a subject the property holds already counts as a
-    /// change of child indices, although the entries, which carry the first of them, can stay as they are.
+    /// A write that only adds, removes or replaces another key or position of a subject the property already holds
+    /// counts as a change of child indices, although the entries, which carry the first of them, can stay as they are.
     /// </para>
     /// <para>
     /// An even number marks the end of one change, not of a whole property write: one write can make several changes,

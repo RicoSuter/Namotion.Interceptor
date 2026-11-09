@@ -116,7 +116,8 @@ internal static class ChildIndexRefresher
     }
 
     // Finds the subjects that gained or lost a key or position, which a subject held more than once can do while its
-    // first one stays. Keys and positions are unique within a value, so each identifies one occurrence.
+    // first one stays. Each position identifies one occurrence, and so does each key unless the dictionary's comparer
+    // tells apart keys that Equals counts as equal.
     private static void CollectSubjectsWithChangedPlaces(
         ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> oldSpan,
         ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> newSpan,

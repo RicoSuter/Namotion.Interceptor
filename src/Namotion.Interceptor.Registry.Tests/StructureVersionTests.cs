@@ -140,6 +140,23 @@ public class StructureVersionTests
     }
 
     [Fact]
+    public void WhenADictionaryReplacesTheSecondKeyOfASubject_ThenStructureVersionRisesAndChildrenKeepTheFirstKey()
+    {
+        // Arrange
+        var (context, registry) = CreateContext();
+        var light = new Light();
+        var group = new LightGroup(context) { LightsByName = new Dictionary<string, Light> { ["a"] = light, ["b"] = light } };
+        var before = registry.StructureVersion;
+
+        // Act
+        group.LightsByName = new Dictionary<string, Light> { ["a"] = light, ["c"] = light };
+
+        // Assert
+        AssertRisenToAnEvenValue(before, registry.StructureVersion);
+        AssertSingleChildAndParent(group, nameof(LightGroup.LightsByName), light, "a");
+    }
+
+    [Fact]
     public void WhenAListGainsAnotherPositionForASubjectItHolds_ThenStructureVersionRisesAndChildrenKeepTheFirstPosition()
     {
         // Arrange
