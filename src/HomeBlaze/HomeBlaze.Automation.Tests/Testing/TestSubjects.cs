@@ -67,6 +67,25 @@ public partial class TestSensorHolder
     public partial TestSensor? Sensor { get; set; }
 }
 
+/// <summary>A subject that leads to a sensor through properties that are no parents of it: a plain one and a derived one.</summary>
+[InterceptorSubject]
+public partial class TestSensorView
+{
+    public TestSensor? Plain { get; set; }
+
+    public partial TestSensorHolder? Source { get; set; }
+
+    [Derived]
+    public TestSensor? Current => Source?.Sensor;
+}
+
+/// <summary>A subject that holds the root, which gives the root a parent.</summary>
+[InterceptorSubject]
+public partial class TestRootHolder
+{
+    public partial TestRoot? Root { get; set; }
+}
+
 /// <summary>A device with a plain property, which expressions read only while it has state metadata.</summary>
 [InterceptorSubject]
 public partial class TestPlainDevice

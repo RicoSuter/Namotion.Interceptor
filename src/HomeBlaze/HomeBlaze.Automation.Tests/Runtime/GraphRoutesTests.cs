@@ -13,8 +13,8 @@ namespace HomeBlaze.Automation.Tests.Runtime;
 public class GraphRoutesTests
 {
     // The root has no property Room, so the route also has the property that, added at run time, would take precedence
-    // over the child of [InlinePaths]. The holder of the sensor also stands for the configuration of Gust, which would hide
-    // it once added as a secret.
+    // over the child of [InlinePaths], and the configuration of Gust, which would hide it once added as a secret, on the
+    // room, which holds the sensor.
     [Theory]
     [InlineData("/Room/Devices[gauge]/Gust", nameof(TestRoom.Devices))]
     [InlineData("/Room/Items[0]/Gust", nameof(TestRoom.Items))]
@@ -30,7 +30,7 @@ public class GraphRoutesTests
         // Assert
         Assert.NotNull(property);
         Assert.Equal(
-            [fixture.RoomName, fixture.RootChildren, new PropertyReference(fixture.Room, holder)],
+            [fixture.RoomName, fixture.RootChildren, new PropertyReference(fixture.Room, holder), new PropertyReference(fixture.Room, GustConfiguration)],
             route.Properties.ToArray());
         Assert.False(route.IsUnbounded);
     }
@@ -79,6 +79,7 @@ public class GraphRoutesTests
         Assert.False(route.IsUnbounded);
     }
 
+    // The path reaches the folder through none of its parents, so the configuration of Level is on the folder.
     [Fact]
     public async Task WhenAPathLeadsUpFromTheRuleAndTheAutomation_ThenTheRouteHasTheirHoldersAndIsBounded()
     {
@@ -94,13 +95,14 @@ public class GraphRoutesTests
             [
                 new PropertyReference(fixture.Automation, nameof(Automation.Rules)),
                 new PropertyReference(fixture.Folder, nameof(TestFolder.Children)),
-                fixture.RootChildren
+                new PropertyReference(fixture.Folder, "Level@HomeBlaze:Configuration")
             ],
             route.Properties.ToArray());
         Assert.False(route.IsUnbounded);
     }
 
-    // The configuration of Gust, which would hide it once added as a secret, is on the route as the holder of the sensor.
+    // The configuration of Gust, which would hide it once added as a secret, is on the route on the room, which holds the
+    // sensor.
     [Fact]
     public async Task WhenTheSubjectAPathEndsAtIsReplaced_ThenTheRouteStaysTheSameInstanceAndNothingIsPublished()
     {
@@ -493,6 +495,8 @@ public class GraphRoutesTests
         Assert.False(hasPublishedTheSameUnion);
         Assert.False(changes.Registration.IsResolving);
     }
+
+    private const string GustConfiguration = "Gust@HomeBlaze:Configuration";
 
     private static void Resolve(RouteFixture fixture, string path, GraphRouteSlot slot)
     {

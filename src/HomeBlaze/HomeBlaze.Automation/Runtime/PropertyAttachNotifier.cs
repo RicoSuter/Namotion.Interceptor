@@ -6,6 +6,7 @@ using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Automation.Runtime;
@@ -14,13 +15,13 @@ namespace HomeBlaze.Automation.Runtime;
 /// Announces a property that is added to a subject at run time, such as a dynamic property or an attribute, to the
 /// automations of a context as a graph change of that property, and an attribute also under the name a route records it
 /// with, since a path that led nowhere or through an [InlinePaths] child may lead to it now. An attribute that decides
-/// whether a path is readable is also announced as a graph change of each parent of its subject. The properties a
-/// subject is attached with by the write of a property that holds subjects, such as its methods and attributes, are
-/// announced by the change of that write instead. Also tells the registration of an automation when the automation or
-/// one of its rules gains a parent, see <see cref="AutomationChangeDispatcher.Registration.OnParentGained"/>. One per
-/// context, added with the first registration of a dispatcher for it and kept, since a service cannot be removed from a
-/// context; it serves the routes of every dispatcher that routes the changes of the context and does nothing while none
-/// does. Runs on the writing thread after the registry registered the property and only enqueues or marks.
+/// whether a path is readable is also announced under that name on the subject of each parent of its subject. The
+/// properties a subject is attached with by the write of a property that holds subjects, such as its methods and
+/// attributes, are announced by the change of that write instead. Also tells the registration of an automation when the
+/// automation or one of its rules gains a parent, see <see cref="AutomationChangeDispatcher.Registration.OnParentGained"/>.
+/// One per context, added with the first registration of a dispatcher for it and kept, since a service cannot be removed
+/// from a context; it serves the routes of every dispatcher that routes the changes of the context and does nothing while
+/// none does. Runs on the writing thread after the registry registered the property and only enqueues or marks.
 /// </summary>
 // Before the method properties are added, so that the subject they are added to is known to be attaching.
 [RunsAfter(typeof(SubjectRegistry), typeof(SubjectPathResolver))]
@@ -123,35 +124,30 @@ internal sealed class PropertyAttachNotifier(ISubjectRegistry? registry) : ILife
     private static void AnnounceAttribute(
         AutomationChangeDispatcher.ChangeSource[] sources, PropertyReference property, RegisteredSubjectProperty attribute)
     {
-        var attributeName = GetAttributeName(attribute);
-        var parents = DecidesReadability(attribute) ? attribute.Parent.Parents : [];
+        // An attribute is found by the property it belongs to whatever its own name, and a route records it under the
+        // name that AutomationPaths gives it.
+        var metadata = attribute.AttributeMetadata;
+        var name = AutomationPaths.GetAttributePropertyName(metadata.PropertyName, metadata.AttributeName);
+        var parents = DecidesReadability(metadata) ? attribute.Parent.Parents : [];
         foreach (var source in sources)
         {
             source.OnPropertyAdded(property);
-            if (attributeName is { } name)
+            if (name != attribute.Name)
             {
-                source.OnPropertyAdded(name);
+                source.OnPropertyAdded(new PropertyReference(attribute.Subject, name));
             }
 
             foreach (var parent in parents)
             {
-                source.OnPropertyAdded(parent.Property.Reference);
+                source.OnPropertyAdded(new PropertyReference(parent.Property.Subject, name));
             }
         }
     }
 
-    // An attribute is found by the property it belongs to whatever its own name, and a route records it under the name
-    // that AddAttribute gives it.
-    private static PropertyReference? GetAttributeName(RegisteredSubjectProperty attribute)
-    {
-        var metadata = attribute.AttributeMetadata;
-        var name = AutomationPaths.GetAttributePropertyName(metadata.PropertyName, metadata.AttributeName);
-        return name == attribute.Name ? null : new PropertyReference(attribute.Subject, name);
-    }
-
-    // A route records such an attribute of a subject with parents as these parents, see AutomationPaths.ResolveProperty.
-    private static bool DecidesReadability(RegisteredSubjectProperty attribute) =>
-        attribute.AttributeMetadata.AttributeName is KnownAttributes.Configuration or KnownAttributes.State;
+    // A route that reached the subject through one of its parents records such an attribute on the subject of that
+    // parent, see AutomationPaths.ResolveProperty.
+    private static bool DecidesReadability(PropertyAttributeAttribute metadata) =>
+        metadata.AttributeName is KnownAttributes.Configuration or KnownAttributes.State;
 
     // A path from a rule or up from an automation depends on its parents, and the property that adds a parent is on no
     // route.

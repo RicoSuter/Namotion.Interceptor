@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Metadata;
+using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Services;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Expressions;
@@ -19,8 +20,8 @@ internal static class AutomationPaths
     /// <summary>The character between the segments of a path.</summary>
     public const char Separator = '/';
 
-    // The names that the attributes of a property of a subject without parents have on the routes, see
-    // GetAttributePropertyName, kept with the property so that recording them again allocates nothing.
+    // The names that the attributes of a property have on the routes, see GetAttributePropertyName, kept with the
+    // property so that recording them again allocates nothing.
     private static readonly ConditionalWeakTable<RegisteredSubjectProperty, string> ConfigurationNames = new();
     private static readonly ConditionalWeakTable<RegisteredSubjectProperty, string> StateNames = new();
     private static readonly ConditionalWeakTable<RegisteredSubjectProperty, string>.CreateValueCallback CreateConfigurationName =
@@ -69,25 +70,35 @@ internal static class AutomationPaths
         return isReadable;
     }
 
-    // The notifier announces such an attribute on the parents of its subject, which stay on the route when another subject
-    // takes the place of this one, so that the route of the path stays the same instance then.
+    // A route that reached the subject through one of its parents records the attribute on the subject of that parent,
+    // which stays the same when another subject takes the place of this one; the notifier announces the attribute on the
+    // subject of each parent. The subject loses that parent by a write of it or the detach of the subject that holds it,
+    // which the path passed. Without such a parent, as through a plain or derived property, the subject can lose all its
+    // parents off the route.
     private static void AddAttribute(
         RegisteredSubjectProperty property,
         ConditionalWeakTable<RegisteredSubjectProperty, string> names,
         ConditionalWeakTable<RegisteredSubjectProperty, string>.CreateValueCallback createName,
         ISubjectPathRecorder recorder)
     {
-        var parents = property.Parent.Parents;
-        if (parents.IsEmpty)
+        var owner = FindParentOnRoute(property.Parent, recorder) ?? property.Subject;
+        recorder.AddProperty(new PropertyReference(owner, names.GetValue(property, createName)));
+    }
+
+    private static IInterceptorSubject? FindParentOnRoute(RegisteredSubject subject, ISubjectPathRecorder recorder)
+    {
+        if (recorder is GraphRouteBuilder builder)
         {
-            recorder.AddProperty(new PropertyReference(property.Subject, names.GetValue(property, createName)));
-            return;
+            foreach (var parent in subject.Parents)
+            {
+                if (builder.Contains(parent.Property.Reference))
+                {
+                    return parent.Property.Subject;
+                }
+            }
         }
 
-        foreach (var parent in parents)
-        {
-            recorder.AddProperty(parent.Property.Reference);
-        }
+        return null;
     }
 
     /// <summary>

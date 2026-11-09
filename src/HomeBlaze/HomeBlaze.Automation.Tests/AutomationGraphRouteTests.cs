@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
@@ -134,7 +135,8 @@ public class AutomationGraphRouteTests
         Assert.Equal(0, host.Blinds.CloseCount);
     }
 
-    // The route records the configuration of Gust as the holder of the sensor, which stays the same when the sensor is replaced.
+    // The route records the configuration of Gust on the holder of the sensor, which stays the same when the sensor is
+    // replaced.
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -162,7 +164,7 @@ public class AutomationGraphRouteTests
         Assert.Equal(0, host.Blinds.CloseCount);
     }
 
-    // The root has no parent, so the route records the configuration of the property under its own name.
+    // An absolute path reaches the root through none of its parents, so the route records the configuration on the root.
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -185,6 +187,167 @@ public class AutomationGraphRouteTests
         // Assert
         Assert.False(isWatchedWhileSecret);
         Assert.Equal(0, host.Blinds.CloseCount);
+    }
+
+    // The holder of the sensor that the route has stands for the configuration of Gust only while the sensor keeps it as
+    // a parent: the plain property is no parent of the sensor, so the sensor loses its holder by the detach of an
+    // ancestor of the holder after it gained another one, both off the route.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenAPathLeadsThroughAPlainPropertyAndItsSubjectChangesItsParentsOffTheRoute_ThenAnAddedSecretConfigurationHidesItAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
+        var sensor = new TestSensor { Gust = 1 };
+        var building = new TestFolder();
+        var floor = new TestFolder();
+        var first = new TestSensorHolder { Sensor = sensor };
+        var second = new TestSensorHolder();
+        host.Graph.Add("Building", building);
+        building.Add("Floor", floor);
+        floor.Add("First", first);
+        building.Add("Second", second);
+        host.Graph.Add("View", new TestSensorView { Plain = sensor });
+        var automation = await host.AddAutomationAsync("Gusts", Rule("/View/Plain/Gust > 5"));
+        second.Sensor = sensor;
+        building.Remove("Floor");
+        await automation.FlushAsync();
+
+        // Act
+        ((IInterceptorSubject)sensor).TryGetRegisteredProperty(nameof(TestSensor.Gust))!
+            .AddAttribute(KnownAttributes.Configuration, typeof(ConfigurationMetadata), _ => new ConfigurationMetadata { IsSecret = true }, null);
+        await automation.FlushAsync();
+        var status = automation.Rules["rule"].Status;
+        sensor.Gust = 9;
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.Contains("missing", status);
+        Assert.Equal(0, host.Blinds.CloseCount);
+    }
+
+    // The derived property is no parent of the sensor and keeps its value when its source is replaced by a holder of the
+    // same sensor, so the sensor loses the holder that it had when the path was resolved without a change on the route.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenAPathLeadsThroughADerivedPropertyWhoseSourceIsReplacedByAHolderOfTheSameSubject_ThenAnAddedSecretConfigurationHidesItAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
+        var sensor = new TestSensor { Gust = 1 };
+        var view = new TestSensorView { Source = new TestSensorHolder { Sensor = sensor } };
+        var building = new TestFolder();
+        host.Graph.Add("Building", building);
+        host.Graph.Add("View", view);
+        var automation = await host.AddAutomationAsync("Gusts", Rule("/View/Current/Gust > 5"));
+        var second = new TestSensorHolder { Sensor = sensor };
+        building.Add("Second", second);
+        view.Source = second;
+        await automation.FlushAsync();
+
+        // Act
+        ((IInterceptorSubject)sensor).TryGetRegisteredProperty(nameof(TestSensor.Gust))!
+            .AddAttribute(KnownAttributes.Configuration, typeof(ConfigurationMetadata), _ => new ConfigurationMetadata { IsSecret = true }, null);
+        await automation.FlushAsync();
+        var status = automation.Rules["rule"].Status;
+        sensor.Gust = 9;
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.Contains("missing", status);
+        Assert.Equal(0, host.Blinds.CloseCount);
+    }
+
+    // An absolute path reaches the root through none of its parents, which it gains and loses off the route.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenTheRootLosesItsParentAfterItGainedAnother_ThenAnAddedSecretConfigurationHidesAPathToItAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
+        double? windValue = 1;
+        var wind = ((IInterceptorSubject)host.Graph.Root).TryGetRegisteredSubject()!
+            .AddProperty("Wind", typeof(double?), _ => windValue, (_, value) => windValue = (double?)value);
+        var building = new TestFolder();
+        host.Graph.Add("Building", building);
+        building.Add("First", new TestRootHolder { Root = host.Graph.Root });
+        var automation = await host.AddAutomationAsync("Winds", Rule("/Wind > 5"));
+        building.Add("Second", new TestRootHolder { Root = host.Graph.Root });
+        building.Remove("First");
+        await automation.FlushAsync();
+
+        // Act
+        wind.AddAttribute(KnownAttributes.Configuration, typeof(ConfigurationMetadata), _ => new ConfigurationMetadata { IsSecret = true }, null);
+        await automation.FlushAsync();
+        var status = automation.Rules["rule"].Status;
+        wind.SetValue(9.0);
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.Contains("missing", status);
+        Assert.Equal(0, host.Blinds.CloseCount);
+    }
+
+    // The path climbs to the folder, whose parents it reaches through none of its steps, and the folder gains another
+    // parent and loses the first one by the detach of its ancestor.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenTheFolderAboveTheAutomationChangesItsParentsOffTheRoute_ThenAnAddedSecretConfigurationHidesAPathToItAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
+        var building = new TestFolder();
+        var annex = new TestFolder();
+        var floor = new TestFolder { Level = 1 };
+        host.Graph.Add("Building", building);
+        host.Graph.Add("Annex", annex);
+        building.Add("Floor", floor);
+        var automation = await host.AddAutomationAsync("Levels", Rule("../../Level > 5"), automation => floor.Add("Levels", automation));
+        annex.Add("Floor", floor);
+        host.Graph.Remove("Building");
+        await automation.FlushAsync();
+
+        // Act
+        ((IInterceptorSubject)floor).TryGetRegisteredProperty(nameof(TestFolder.Level))!
+            .AddAttribute(KnownAttributes.Configuration, typeof(ConfigurationMetadata), _ => new ConfigurationMetadata { IsSecret = true }, null);
+        await automation.FlushAsync();
+        var status = automation.Rules["rule"].Status;
+        floor.Level = 9;
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.Contains("missing", status);
+        Assert.Equal(0, host.Blinds.CloseCount);
+    }
+
+    // The route records the configuration of Gust on the room, which holds the sibling too, under the name of that attribute.
+    [Fact]
+    public async Task WhenASiblingOfTheSubjectAPathEndsAtGainsPropertiesWithStateMetadata_ThenTheAutomationNeitherReceivesAGraphChangeNorResolvesAgain()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { });
+        var sibling = new TestSensor();
+        host.Graph.Add("Room", new TestRoom { Items = [new TestSensor(), sibling] });
+        var (automation, listener) = await AddCountedAsync(host, "Gusts", Rule("/Room/Items[0]/Gust > 5"));
+        listener.Reset();
+        var resolutionsBefore = Routes(automation).ResolutionCount;
+        var registered = ((IInterceptorSubject)sibling).TryGetRegisteredSubject()!;
+
+        // Act
+        for (var index = 0; index < 10; index++)
+        {
+            double? value = null;
+            registered.AddProperty($"Reading{index}", typeof(double?), _ => value, (_, newValue) => value = (double?)newValue, new StateAttribute());
+            await automation.FlushAsync();
+        }
+
+        // Assert
+        Assert.Equal(0, listener.GraphChanges);
+        Assert.Equal(resolutionsBefore, Routes(automation).ResolutionCount);
     }
 
     [Fact]

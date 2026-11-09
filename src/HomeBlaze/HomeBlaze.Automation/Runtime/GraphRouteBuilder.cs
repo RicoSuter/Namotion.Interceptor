@@ -28,6 +28,9 @@ internal sealed class GraphRouteBuilder(IInterceptorSubject automation) : ISubje
         IsUnbounded = false;
     }
 
+    /// <summary>Whether the property was recorded since the last clear.</summary>
+    public bool Contains(PropertyReference property) => _added.Contains(property);
+
     public void AddProperty(PropertyReference property)
     {
         if (_added.Add(property))
