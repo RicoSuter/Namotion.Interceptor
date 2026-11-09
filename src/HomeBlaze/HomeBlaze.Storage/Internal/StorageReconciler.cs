@@ -103,12 +103,42 @@ internal sealed class StorageReconciler
 
         if (issues.IsEmpty)
         {
-            _entriesWithConfigurationIssues.Remove(subject);
+            RemoveConfigurationIssues(subject);
         }
         else
         {
             _entriesWithConfigurationIssues.AddOrUpdate(subject, entry);
         }
+    }
+
+    private void ForgetConfigurationIssues(List<StorageEntry>? removedEntries)
+    {
+        if (removedEntries is null)
+        {
+            return;
+        }
+
+        foreach (var entry in removedEntries)
+        {
+            ForgetConfigurationIssues(entry);
+        }
+    }
+
+    // Called for an entry that leaves the index or its subject. Only while the subject is still found by this entry, so
+    // that a subject that moved keeps the issues of its new entry.
+    private void ForgetConfigurationIssues(StorageEntry entry)
+    {
+        if (entry.Subject is { } subject &&
+            _entriesWithConfigurationIssues.TryGetValue(subject, out var current) &&
+            ReferenceEquals(current, entry))
+        {
+            RemoveConfigurationIssues(subject);
+        }
+    }
+
+    private void RemoveConfigurationIssues(IInterceptorSubject subject)
+    {
+        _entriesWithConfigurationIssues.Remove(subject);
     }
 
     /// <summary>
@@ -144,80 +174,87 @@ internal sealed class StorageReconciler
         _isEveryFileNamedByUnfinishedPass = isKeptAsEveryFile;
 
         var listing = await ListAsync(cancellationToken);
-        var movableEntries = RemoveMissingEntries(listing);
-
-        // In the order of the paths, so that files are loaded in the same order in every pass.
-        var paths = new string[listing.Count];
-        listing.Keys.CopyTo(paths, 0);
-        Array.Sort(paths, StringComparer.Ordinal);
-
-        foreach (var path in paths)
+        var movableEntries = RemoveMissingEntries(listing, out var removedEntries);
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            // In the order of the paths, so that files are loaded in the same order in every pass.
+            var paths = new string[listing.Count];
+            listing.Keys.CopyTo(paths, 0);
+            Array.Sort(paths, StringComparer.Ordinal);
 
-            var listed = listing[path];
-
-            if (listed.IsFolder)
+            foreach (var path in paths)
             {
-                if (!_index.TryGet(listed.Path, out _))
-                {
-                    _index.Set(new StorageEntry { Path = listed.Path, IsFolder = true });
-                }
+                cancellationToken.ThrowIfCancellationRequested();
 
-                continue;
-            }
+                var listed = listing[path];
 
-            try
-            {
-                var isChanged = !_index.TryGet(listed.Path, out var entry) || entry.Version != listed.Version ||
-                                isEveryFileNamed || namedPaths.Contains(listed.Path);
-                if (StorageMetadataPath.IsMetadataFile(listed.Path))
+                if (listed.IsFolder)
                 {
-                    if (isChanged)
+                    if (!_index.TryGet(listed.Path, out _))
                     {
-                        await LoadMetadataAsync(listed, entry, cancellationToken);
+                        _index.Set(new StorageEntry { Path = listed.Path, IsFolder = true });
                     }
+
+                    continue;
                 }
-                // Neither a subject nor metadata: on a file system that ignores case, it is the metadata file of a subject.
-                // Its entry has no subject, so a new version is no change of the tree.
-                else if (StorageMetadataPath.IsReservedSubjectPath(listed.Path))
+
+                try
                 {
-                    if (entry is null || entry.Version != listed.Version)
+                    var isChanged = !_index.TryGet(listed.Path, out var entry) || entry.Version != listed.Version ||
+                                    isEveryFileNamed || namedPaths.Contains(listed.Path);
+                    if (StorageMetadataPath.IsMetadataFile(listed.Path))
                     {
-                        _logger?.LogWarning(
-                            "Ignoring {Path}: rename it to end with .metadata.json in lower case to make it a metadata file",
-                            listed.Path);
-                        if (entry is null)
+                        if (isChanged)
                         {
-                            _index.Set(new StorageEntry { Path = listed.Path, IsFolder = false, Version = listed.Version });
-                        }
-                        else
-                        {
-                            entry.Version = listed.Version;
+                            await LoadMetadataAsync(listed, entry, cancellationToken);
                         }
                     }
-                }
-                else if (entry?.Subject != null)
-                {
-                    if (isChanged)
+                    // Neither a subject nor metadata: on a file system that ignores case, it is the metadata file of a subject.
+                    // Its entry has no subject, so a new version is no change of the tree.
+                    else if (StorageMetadataPath.IsReservedSubjectPath(listed.Path))
                     {
-                        await RefreshAsync(entry, listed.Version, content: null, cancellationToken);
+                        if (entry is null || entry.Version != listed.Version)
+                        {
+                            _logger?.LogWarning(
+                                "Ignoring {Path}: rename it to end with .metadata.json in lower case to make it a metadata file",
+                                listed.Path);
+                            if (entry is null)
+                            {
+                                _index.Set(new StorageEntry { Path = listed.Path, IsFolder = false, Version = listed.Version });
+                            }
+                            else
+                            {
+                                entry.Version = listed.Version;
+                            }
+                        }
+                    }
+                    else if (entry?.Subject != null)
+                    {
+                        if (isChanged)
+                        {
+                            await RefreshAsync(entry, listed.Version, content: null, cancellationToken);
+                        }
+                    }
+                    else if (isChanged || (entry is { IsKeyTaken: true } && IsKeyFree(entry.Parent, entry.Key!)))
+                    {
+                        await AddAsync(listed, movableEntries, cancellationToken);
                     }
                 }
-                else if (isChanged || (entry is { IsKeyTaken: true } && IsKeyFree(entry.Parent, entry.Key!)))
+                // By the token and not by the kind of exception: subject code that gives up throws a cancellation of
+                // its own. A storage that is unresponsive or whose root cannot be examined ends the pass, because
+                // every file after this one would fail as well. Another storage in that state, such as one that is
+                // a file of this one, fails only its file.
+                catch (Exception exception) when (!IsFailureOfOwnStorage(exception) && !cancellationToken.IsCancellationRequested)
                 {
-                    await AddAsync(listed, movableEntries, cancellationToken);
+                    _logger?.LogWarning(exception, "Failed to load: {Path}", listed.Path);
+                    RecordFailure(listed, exception);
                 }
             }
-            // By the token and not by the kind of exception: subject code that gives up throws a cancellation of
-            // its own. A storage that is unresponsive or whose root cannot be examined ends the pass, because
-            // every file after this one would fail as well. Another storage in that state, such as one that is
-            // a file of this one, fails only its file.
-            catch (Exception exception) when (!IsFailureOfOwnStorage(exception) && !cancellationToken.IsCancellationRequested)
-            {
-                _logger?.LogWarning(exception, "Failed to load: {Path}", listed.Path);
-                RecordFailure(listed, exception);
-            }
+        }
+        finally
+        {
+            // Not before the files were added: a subject that moved takes the issues of its removed entry to its new one.
+            ForgetConfigurationIssues(removedEntries);
         }
 
         Apply();
@@ -274,6 +311,7 @@ internal sealed class StorageReconciler
                 }
 
                 _subjectFactory.Release(entry.Subject);
+                ForgetConfigurationIssues(entry);
 
                 entry.Key = key;
                 entry.Subject = null;
@@ -626,7 +664,8 @@ internal sealed class StorageReconciler
     /// is in the tree by content hash: a new file with the same content can be the same subject under a new
     /// path. A subject of the others that never reached the tree is released.
     /// </summary>
-    private Dictionary<string, List<StorageEntry>> RemoveMissingEntries(Dictionary<string, StorageListing> listing)
+    private Dictionary<string, List<StorageEntry>> RemoveMissingEntries(
+        Dictionary<string, StorageListing> listing, out List<StorageEntry>? removedEntries)
     {
         var movableEntries = new Dictionary<string, List<StorageEntry>>(StringComparer.Ordinal);
 
@@ -639,6 +678,7 @@ internal sealed class StorageReconciler
             }
         }
 
+        removedEntries = missingEntries;
         if (missingEntries == null)
         {
             return movableEntries;
@@ -875,6 +915,7 @@ internal sealed class StorageReconciler
         }
 
         _subjectFactory.Release(entry.Subject);
+        ForgetConfigurationIssues(entry);
 
         var replacement = new StorageEntry { Path = entry.Path, IsFolder = false, Version = version, Hash = hash, Subject = subject };
         SetConfigurationIssues(replacement, issues);
