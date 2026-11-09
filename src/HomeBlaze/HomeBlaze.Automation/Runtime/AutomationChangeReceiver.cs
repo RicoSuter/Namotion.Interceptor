@@ -47,12 +47,6 @@ internal sealed class AutomationChangeReceiver(AutomationInputQueue queue) : IAu
     public void EndResolving() => _registration?.EndResolving();
 
     /// <summary>
-    /// Takes the structure version of the last routed write that the registry did not count, or -1 for none, see
-    /// <see cref="AutomationChangeDispatcher.Registration.TakeUncountedVersion"/>. Called by the worker only.
-    /// </summary>
-    public long TakeUncountedVersion() => _registration?.TakeUncountedVersion() ?? -1;
-
-    /// <summary>
     /// Called by the worker when it takes the queued graph change, before it reads the graph, so that the next one is
     /// queued again.
     /// </summary>

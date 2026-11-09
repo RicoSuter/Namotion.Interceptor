@@ -18,8 +18,8 @@ namespace HomeBlaze.Automation.Tests;
 /// then in short rounds while the automations publish their routes late. After each round a graph change that every
 /// automation is given anyway, as without routes, must change nothing: an automation that missed a structural change
 /// that moves one of its paths would resolve it then. A round where an automation still waits for the next graph change,
-/// for triggers that a refresh outside a graph change resolved differently or for resolutions that may be out of date,
-/// is left out, since that graph change changes it as without routes.
+/// for triggers that a refresh outside a graph change resolved differently, is left out, since that graph change changes
+/// it as without routes.
 /// </summary>
 [Trait("Category", "Integration")]
 public class AutomationGraphRouteStressTests(ITestOutputHelper output)

@@ -21,14 +21,9 @@ namespace HomeBlaze.Automation.Tests;
 /// Each step is one change from the test followed by a flush of every automation, so that the inputs of a step are
 /// queued before the workers process them; a move flushes between its two writes. The rules write only properties that no other automation reads, so that the
 /// workers of a step do not race each other. Without routes every automation receives every structural change, also
-/// one that cannot change what its paths resolve to, which differs observably in three ways only, each kept out of the
+/// one that cannot change what its paths resolve to, which differs observably in two ways only, each kept out of the
 /// scenario by the constraint named here:
 /// <list type="bullet">
-/// <item>The registry does not count a write that puts a subject into a collection that holds it already, so resolutions
-/// that the resolver cached at that structure version stay out of date until the next structural change anywhere, when
-/// both hosts resolve again. Without routes every automation resolves at more versions and so caches more of them, and
-/// the hosts can resolve differently until then. A step never adds a sensor to a collection that holds it; the tests of
-/// <see cref="AutomationGraphRouteTests"/> cover such a write.</item>
 /// <item>A structural write that a rule makes reaches every automation at the chain depth of the run, and beyond the
 /// chain limit it is dropped and reported as a stopped feedback chain by an automation that takes no part in the chain,
 /// unless its graph change was still queued. The structural writes of the rules here end after one run;
@@ -406,17 +401,14 @@ public class AutomationGraphRouteDifferentialTests
         private List<TestSensor> SensorsOf(TestRoom room) =>
             [.. room.Devices.Values.Concat(room.Items).Append(room.Sensor).OfType<TestSensor>()];
 
-        // A sensor that is in the graph already, so that it gets a second parent, or a new one; see the remarks of the test
-        // class for why not one that the collection holds already.
-        private TestSensor PickSensor(IEnumerable<TestSensor>? collection = null)
+        // A sensor that is in the graph already, often in the room it is written to, so that it gets a second parent or
+        // another key or position in the same collection, or a new one.
+        private TestSensor PickSensor(TestRoom? target = null)
         {
-            if (_random.Next(3) == 0 && PickRoom() is { } room && SensorsOf(room) is { Count: > 0 } existing)
+            if (_random.Next(3) == 0 && (target is not null && _random.Next(2) == 0 ? target : PickRoom()) is { } room &&
+                SensorsOf(room) is { Count: > 0 } existing)
             {
-                var sensor = existing[_random.Next(existing.Count)];
-                if (collection?.Contains(sensor) != true)
-                {
-                    return sensor;
-                }
+                return existing[_random.Next(existing.Count)];
             }
 
             return CreateSensor();
@@ -437,7 +429,7 @@ public class AutomationGraphRouteDifferentialTests
             }
             else
             {
-                devices[key] = PickSensor(devices.Values);
+                devices[key] = PickSensor(room);
             }
 
             room.Devices = devices;
@@ -463,7 +455,7 @@ public class AutomationGraphRouteDifferentialTests
             }
             else
             {
-                items.Insert(_random.Next(items.Count + 1), PickSensor(items));
+                items.Insert(_random.Next(items.Count + 1), PickSensor(room));
             }
 
             room.Items = items;
@@ -477,7 +469,7 @@ public class AutomationGraphRouteDifferentialTests
                 return "no room for a sensor";
             }
 
-            room.Sensor = _random.Next(3) == 0 ? null : PickSensor();
+            room.Sensor = _random.Next(3) == 0 ? null : PickSensor(room);
             return "sensor";
         }
 

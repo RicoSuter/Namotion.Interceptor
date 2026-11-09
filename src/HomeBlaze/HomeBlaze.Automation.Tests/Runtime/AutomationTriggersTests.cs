@@ -25,8 +25,7 @@ public class AutomationTriggersTests
             queue,
             () => registry.StructureVersion,
             new PropertyTriggerEngine(graph.Resolver, time, NullLogger.Instance, () => "Storm", _ => publishes++, routes),
-            new EventTriggerEngine(graph.Resolver, time, queue, routes),
-            routes);
+            new EventTriggerEngine(graph.Resolver, time, queue, routes));
         var rule = Compile("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")));
         rule.IsActivated = true;
         triggers.Activate([rule], [rule]);
@@ -43,45 +42,6 @@ public class AutomationTriggersTests
         // Assert
         Assert.Equal(publishesAfterTheFirstGraphChange, publishesAfterTheSameChildren);
         Assert.Equal(publishesAfterTheFirstGraphChange + 1, publishes);
-    }
-
-    // The paths that resolve at the same version, or while a change is in progress, may be out of date, as they are
-    // without routes, until a graph change at another version resolves them again.
-    [Theory]
-    [InlineData(2L, 2L)]
-    [InlineData(2L, 3L)]
-    public void WhenAGraphChangeFindsAVersionWhoseResolutionsMayBeOutOfDate_ThenTheRoutesStayUnboundedUntilAnotherVersion(long first, long second)
-    {
-        // Arrange
-        var graph = new TestGraph();
-        graph.Add("Weather", new TestSensor());
-        var version = first;
-        var time = new FakeTimeProvider(AutomationTestHost.Start);
-        var queue = new AutomationInputQueue();
-        var routes = new GraphRoutes(automation: null, changes: null);
-        var triggers = new AutomationTriggers(
-            queue,
-            () => version,
-            new PropertyTriggerEngine(graph.Resolver, time, NullLogger.Instance, () => "Storm", _ => { }, routes),
-            new EventTriggerEngine(graph.Resolver, time, queue, routes),
-            routes);
-        var rule = Compile("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")));
-        rule.IsActivated = true;
-        triggers.Activate([rule], [rule]);
-        triggers.OnGraphChanged([rule]);
-        var isUnboundedAtTheFirstVersion = routes.IsUnbounded;
-
-        // Act
-        version = second;
-        triggers.OnGraphChanged([rule]);
-        var isUnboundedAtTheSecondVersion = routes.IsUnbounded;
-        version = 4;
-        triggers.OnGraphChanged([rule]);
-
-        // Assert
-        Assert.False(isUnboundedAtTheFirstVersion);
-        Assert.True(isUnboundedAtTheSecondVersion);
-        Assert.False(routes.IsUnbounded);
     }
 
     [Fact]

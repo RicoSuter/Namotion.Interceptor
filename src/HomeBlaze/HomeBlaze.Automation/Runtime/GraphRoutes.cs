@@ -28,7 +28,6 @@ internal sealed class GraphRoutes
     // Set when a property enters or leaves the union or the union becomes bounded or unbounded.
     private bool _hasUnionChanged;
     private bool _awaitsGraphChange;
-    private long _staleVersion = -1;
 
     // Unbounded until the first publication, as the dispatcher registers a listener.
     private FrozenSet<PropertyReference> _published = FrozenSet<PropertyReference>.Empty;
@@ -55,7 +54,7 @@ internal sealed class GraphRoutes
     internal bool IsUnbounded => _unboundedCount > 0 || WaitsForGraphChange;
 
     // White-box test hook: whether the next graph change evaluates or resolves something, whatever it changed.
-    internal bool WaitsForGraphChange => _awaitsGraphChange || _staleVersion >= 0;
+    internal bool WaitsForGraphChange => _awaitsGraphChange;
 
     // White-box test hook: the number of resolutions whose route was recorded.
     internal int ResolutionCount { get; private set; }
@@ -103,49 +102,11 @@ internal sealed class GraphRoutes
     }
 
     /// <summary>
-    /// Keeps the union unbounded until the paths are resolved after a graph change at another structure version, since
-    /// what they resolve to at <paramref name="version"/> may be out of date: a write that the registry does not count,
-    /// such as a second key for a subject that a dictionary holds already, leaves the version and the cached resolutions
-    /// as they were, and a change in progress may be half seen. The paths resolve again at the next structural change
-    /// anywhere, which then reaches the automation.
-    /// </summary>
-    public void KeepUnboundedAt(long version)
-    {
-        if (version > _staleVersion)
-        {
-            _staleVersion = version;
-            _hasUnionChanged = true;
-        }
-    }
-
-    /// <summary>
-    /// Tells that the paths were resolved after a graph change at the structure version, see <see cref="KeepUnboundedAt"/>;
-    /// an odd version is a change in progress.
-    /// </summary>
-    public void OnResolvedAt(long version)
-    {
-        if (version % 2 != 0)
-        {
-            KeepUnboundedAt(version);
-        }
-        else if (_staleVersion >= 0 && version != _staleVersion)
-        {
-            _staleVersion = -1;
-            _hasUnionChanged = true;
-        }
-    }
-
-    /// <summary>
     /// Publishes the union of the stored routes when it differs from the one published last, and ends the window that
     /// <see cref="BeginResolving"/> began; allocates nothing when the union did not change. Returns whether it published.
     /// </summary>
     public bool Publish()
     {
-        if (_changes?.TakeUncountedVersion() is >= 0 and var version)
-        {
-            KeepUnboundedAt(version);
-        }
-
         var hasPublished = PublishIfChanged();
         if (_isResolving)
         {

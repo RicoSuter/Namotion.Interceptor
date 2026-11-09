@@ -234,25 +234,18 @@ public class AutomationGraphRouteTests
         Assert.Equal(1, host.Blinds.OpenCount);
     }
 
-    // The registry keeps one parent per property, with the first key, so a second key for a subject the dictionary holds
-    // already leaves the structure version as it was, and the paths resolve as before until the next structural change
-    // anywhere, as without routes.
     [Fact]
-    public async Task WhenADictionaryGainsASecondKeyForASubjectItHolds_ThenThePathsResolveAtTheNextStructuralChangeAnywhere()
+    public async Task WhenADictionaryGainsASecondKeyForASubjectItHolds_ThenThePathThroughTheNewKeyResolves()
     {
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(_ => { });
         var sensor = new TestSensor { Gust = 9 };
         var room = new TestRoom { Devices = new Dictionary<string, TestSensor> { ["d1"] = sensor } };
-        var holder = new TestSensorHolder();
         host.Graph.Add("Room", room);
-        host.Graph.Add("Holder", holder);
         var automation = await host.AddAutomationAsync("Gusts", Rule("/Room/Devices[d2]/Gust > 5"));
 
         // Act
         room.Devices = new Dictionary<string, TestSensor> { ["d1"] = sensor, ["d2"] = sensor };
-        await automation.FlushAsync();
-        holder.Sensor = new TestSensor();
         await automation.FlushAsync();
 
         // Assert
@@ -260,20 +253,18 @@ public class AutomationGraphRouteTests
         Assert.False(Routes(automation).IsUnbounded);
     }
 
-    // The other automation resolves the shared path at the current version after a change on its own route, so the
-    // write that the registry does not count leaves a result in the cache of the resolver that both automations read.
+    // The other automation resolves the shared absolute path after a change on its own route, so that the resolver holds
+    // the result in its cache when the dictionary gains the second key.
     [Fact]
-    public async Task WhenAnotherAutomationCachedAPathBeforeAWriteThatTheRegistryDoesNotCount_ThenBothResolveAtTheNextStructuralChangeAnywhere()
+    public async Task WhenAnotherAutomationCachedAPathBeforeADictionaryGainsASecondKeyForASubjectItHolds_ThenBothResolveThePathThroughTheNewKey()
     {
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(_ => { });
         var sensor = new TestSensor { Gust = 9 };
         var room = new TestRoom { Devices = new Dictionary<string, TestSensor> { ["d1"] = sensor } };
         var other = new TestSensorHolder { Sensor = new TestSensor() };
-        var unrelated = new TestSensorHolder();
         host.Graph.Add("Room", room);
         host.Graph.Add("Other", other);
-        host.Graph.Add("Unrelated", unrelated);
         var first = await host.AddAutomationAsync("First", Rule("/Room/Devices[d2]/Gust > 5"));
         var second = await host.AddAutomationAsync("Second", automation => automation.Rules = Keyed(
             ("rule", On("Rule", When("/Room/Devices[d2]/Gust > 5"), Invoke("/Blinds/Close"))),
@@ -285,12 +276,47 @@ public class AutomationGraphRouteTests
         room.Devices = new Dictionary<string, TestSensor> { ["d1"] = sensor, ["d2"] = sensor };
         await first.FlushAsync();
         await second.FlushAsync();
-        unrelated.Sensor = new TestSensor();
-        await first.FlushAsync();
-        await second.FlushAsync();
 
         // Assert
         Assert.Equal(2, host.Blinds.CloseCount);
+    }
+
+    // A subject attached to the context directly moves the structure version without a write, and the state change of
+    // the other automation caches the absolute path at that version before the dictionary gains the second key.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenTheStructureVersionMovedWithoutAWriteBeforeADictionaryGainsASecondKey_ThenThePathThroughTheNewKeyResolvesAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { });
+        host.ChangeDispatcher.MakesEveryRouteUnbounded = makesEveryRouteUnbounded;
+        var sensor = new TestSensor { Gust = 1 };
+        var room = new TestRoom { Devices = new Dictionary<string, TestSensor> { ["d0"] = sensor } };
+        host.Graph.Add("R0", room);
+        var gusts = await host.AddAutomationAsync("A", Rule("/R0/Devices[d1]/Gust > 5"));
+        var other = await host.AddAutomationAsync("B", automation =>
+        {
+            automation.States = ["Day", "Night"];
+            automation.InitialState = "Day";
+            automation.Rules = Keyed(
+                ("toNight", Create("To night", AutomationRuleMode.On, [When("/Weather/Rain > 5")], [Enter("Night")], inState: "Day")),
+                ("night", Create("Night", AutomationRuleMode.DryRun, [When("/R0/Devices[d1]/Gust > 5")], [Invoke("/Blinds/Open")], inState: "Night")));
+        });
+
+        // Act
+        _ = new TestSensorHolder(host.Graph.Context);
+        host.Weather.Rain = 9;
+        await other.FlushAsync();
+        await other.FlushAsync();
+        room.Devices = new Dictionary<string, TestSensor> { ["d0"] = sensor, ["d1"] = sensor };
+        await gusts.FlushAsync();
+        sensor.Gust = 9;
+        await gusts.FlushAsync();
+
+        // Assert
+        Assert.Equal("Night", other.CurrentState);
+        Assert.Equal(1, host.Blinds.CloseCount);
     }
 
     [Fact]
