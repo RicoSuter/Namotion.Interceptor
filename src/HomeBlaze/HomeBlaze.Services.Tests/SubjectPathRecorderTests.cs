@@ -475,6 +475,55 @@ public class SubjectPathRecorderTests : SubjectPathResolverTestBase
         Assert.Equal(first.ParentSteps.Count, second.ParentSteps.Count);
     }
 
+    // A resolver that is no lifecycle handler keeps the entry of the paths before, whose route has the same holder.
+    [Fact]
+    public void WhenASubjectMovesWithinAList_ThenThePathsBuiltAgainReportItsNewPosition()
+    {
+        // Arrange
+        var first = new TestContainer(Context) { Name = "First" };
+        var second = new TestContainer(Context) { Name = "Second" };
+        var root = new TestContainerWithItemList(Context) { Items = [first, second] };
+        var resolver = new SubjectPathResolver(() => root);
+        var pathBefore = resolver.GetPath(second, PathStyle.Canonical, new RecordedRoute());
+        var route = new RecordedRoute();
+
+        // Act
+        root.Items = [second, first];
+        var path = resolver.GetPath(second, PathStyle.Canonical, route);
+
+        // Assert
+        Assert.Equal("/Items[1]", pathBefore);
+        Assert.Equal("/Items[0]", path);
+        var parent = Assert.Single(Assert.Single(route.ParentSteps).Parents);
+        Assert.Equal(0, parent.Index);
+    }
+
+    // The detached container holds the child either way; only whether it is the root decides whether the route is bounded.
+    [Fact]
+    public void WhenTheAncestorWithoutParentsBecomesTheRoot_ThenThePathsBuiltAgainReportABoundedRoute()
+    {
+        // Arrange
+        var child = new TestContainer(Context) { Name = "Child" };
+        var detached = new TestContainer(Context) { Name = "Detached", Child = child };
+        var root = new TestContainer(Context) { Name = "Root" };
+        var currentRoot = root;
+        var resolver = new SubjectPathResolver(() => currentRoot);
+        var routeBefore = new RecordedRoute();
+        resolver.GetPath(child, PathStyle.Canonical, routeBefore);
+        var route = new RecordedRoute();
+
+        // Act
+        currentRoot = detached;
+        root.Child = new TestContainer(Context);
+        var path = resolver.GetPath(child, PathStyle.Canonical, route);
+
+        // Assert
+        Assert.True(routeBefore.IsUnbounded);
+        Assert.Equal("/Child", path);
+        Assert.Equal(routeBefore.Properties, route.Properties);
+        Assert.False(route.IsUnbounded);
+    }
+
     [Fact]
     public async Task WhenAParentIsDetachedWhileThePathsOfADescendantAreBuilt_ThenNoPathBuildFails()
     {

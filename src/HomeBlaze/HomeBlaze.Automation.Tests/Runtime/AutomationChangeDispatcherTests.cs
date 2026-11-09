@@ -411,6 +411,52 @@ public class AutomationChangeDispatcherTests
         Assert.Equal([3, 0], routed.GraphChainDepths);
     }
 
+    [Fact]
+    public void WhenAListenerRegistersWhileEveryOtherListenerHasAGraphChangeQueued_ThenTheNextGraphChangeReachesIt()
+    {
+        // Arrange
+        var (graph, _) = CreateGraph();
+        var holder = new TestSensorHolder();
+        graph.Add("Holder", holder);
+        var dispatcher = new AutomationChangeDispatcher();
+        var queued = new RecordingListener();
+        using var queuedRegistration = dispatcher.Register(graph.Context, queued);
+        holder.Sensor = new TestSensor();
+        var graphChangesOfTheQueuedListener = queued.GraphChanges;
+        var added = new RecordingListener();
+
+        // Act
+        using var addedRegistration = dispatcher.Register(graph.Context, added);
+        holder.Sensor = new TestSensor();
+
+        // Assert
+        Assert.Equal(1, graphChangesOfTheQueuedListener);
+        Assert.Equal(1, added.GraphChanges);
+    }
+
+    // The properties a subject is attached with are announced by the change of the write that attached it; one added
+    // after that change is announced on its own, also when no other structural change came between.
+    [Fact]
+    public void WhenAPropertyIsAddedToASubjectRightAfterTheWriteThatAttachedIt_ThenItIsAGraphChange()
+    {
+        // Arrange
+        var (graph, _) = CreateGraph();
+        var holder = new TestSensorHolder();
+        graph.Add("Holder", holder);
+        var dispatcher = new AutomationChangeDispatcher();
+        var listener = new RecordingListener();
+        using var registration = dispatcher.Register(graph.Context, listener);
+        var sensor = new TestSensor();
+        holder.Sensor = sensor;
+        registration.OnGraphChangeReleased();
+
+        // Act
+        ((IInterceptorSubject)sensor).TryGetRegisteredSubject()!.AddProperty("Wind", typeof(double?), _ => null, null);
+
+        // Assert
+        Assert.Equal(2, listener.GraphChanges);
+    }
+
     // A subject attached to the context directly gains parents without a write whose change follows.
     [Fact]
     public async Task WhenAListenerGainsAParentWithoutAWriteThatFollows_ThenTheNextGraphChangeOfItsStreamReachesItOnce()

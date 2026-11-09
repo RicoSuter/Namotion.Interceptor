@@ -238,6 +238,30 @@ public class AutomationGraphRouteTests
 
     // The write that gives the rule a second parent also changes a watched property; without routes the watched change
     // of a write is routed before its graph change.
+    // No path leads up from a rule, so the Rules property of the automation is on no route.
+    [Fact]
+    public async Task WhenANewRuleGainsItsFirstParentInTheAutomation_ThenTheAutomationReceivesAGraphChange()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { });
+        var (automation, listener) = await AddCountedAsync(host, "Gusts", Rule("/Weather/Gust > 8"));
+        var rulesOfAutomation = new PropertyReference(automation, nameof(Automation.Rules));
+        var isRulesRouted = Registration(automation).Route.Contains(rulesOfAutomation);
+        listener.Reset();
+
+        // Act
+        automation.Rules = new Dictionary<string, AutomationRule>(automation.Rules)
+        {
+            ["added"] = On("Added", When("/Weather/Rain > 5"), Invoke("/Blinds/Open"))
+        };
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.False(isRulesRouted);
+        Assert.False(Registration(automation).IsUnbounded);
+        Assert.Equal(1, listener.GraphChanges);
+    }
+
     [Fact]
     public async Task WhenAWriteChangesAWatchedPropertyAndGivesARuleASecondParent_ThenTheWatchedChangeComesBeforeTheGraphChange()
     {
@@ -536,6 +560,36 @@ public class AutomationGraphRouteTests
         Assert.DoesNotContain(sensorOfRoom, Routes(automation).Union);
         Assert.DoesNotContain(sensorOfRoom, (IReadOnlySet<PropertyReference>)Registration(automation).Route);
         Assert.Equal(0, host.Blinds.CloseCount);
+    }
+
+    // The run enters a state, whose activation drops the trigger that the run consumed before the run is tracked.
+    [Fact]
+    public async Task WhenARunThatEntersAStateEndsTheWaitOfItsTrigger_ThenTheRouteOfItsOnlyIfLeavesTheUnion()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { });
+        var room = new TestRoom { Sensor = new TestSensor { Power = 0 } };
+        host.Graph.Add("Room", room);
+        var automation = await host.AddAutomationAsync("Guarded", automation =>
+        {
+            automation.States = ["Day", "Night"];
+            automation.InitialState = "Day";
+            automation.Rules = Keyed(
+                ("rule", Create("Guarded", AutomationRuleMode.On, [When("/Weather/Gust > 8")], [Enter("Night")], onlyIf: "/Room/Sensor/Power > 5")));
+        });
+        var sensorOfRoom = new PropertyReference(room, nameof(TestRoom.Sensor));
+        host.Weather.Gust = 9;
+        await automation.FlushAsync();
+        var isRoutedWhileWaiting = Routes(automation).Union.Contains(sensorOfRoom);
+
+        // Act
+        room.Sensor.Power = 9;
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.True(isRoutedWhileWaiting);
+        Assert.Equal("Night", automation.CurrentState);
+        Assert.DoesNotContain(sensorOfRoom, Routes(automation).Union);
     }
 
     // The Save hands each trigger and its route to the trigger of the new rule instance, which the deactivation clears.

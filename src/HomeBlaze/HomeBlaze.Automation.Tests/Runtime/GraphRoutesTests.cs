@@ -114,6 +114,28 @@ public class GraphRoutesTests
         Assert.True(route.IsUnbounded);
     }
 
+    // The other host is no automation that tells the worker when the rule gains a parent.
+    [Fact]
+    public async Task WhenAPathLeadsUpFromARuleThatOnlyAnotherSubjectHolds_ThenTheRouteIsUnbounded()
+    {
+        // Arrange
+        await using var fixture = await RouteFixture.CreateAsync();
+        var otherHost = new TestRuleHost();
+        var hostedRule = On("Hosted", When("/Weather/Gust > 8"), Invoke("/Blinds/Close"));
+        fixture.Host.Graph.Add("OtherHost", otherHost);
+        otherHost.Rules = new Dictionary<string, AutomationRule> { ["hosted"] = hostedRule };
+        var slot = new GraphRouteSlot();
+
+        // Act
+        var property = AutomationPaths.ResolveProperty(fixture.Host.Graph.Resolver, "../Rules", hostedRule, fixture.Routes.BeginRoute());
+        fixture.Routes.EndRoute(slot);
+
+        // Assert
+        Assert.NotNull(property);
+        Assert.Contains(new PropertyReference(otherHost, nameof(TestRuleHost.Rules)), slot.Route.Properties.ToArray());
+        Assert.True(slot.Route.IsUnbounded);
+    }
+
     // Detaching the other host above its Rules property gives the rule a single parent without a change of a holder.
     [Fact]
     public async Task WhenAPathLeadsUpFromARuleWithSeveralParents_ThenTheRouteHasItsHoldersAndIsUnbounded()
