@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.Text.Json;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
@@ -54,10 +53,10 @@ internal sealed class FileSubjectFactory
 
     /// <summary>
     /// Creates the subject of a JSON file from its text: the configurable subject it describes,
-    /// or a <see cref="JsonFile"/> when the text is plain or invalid JSON. Gets the issues of the configuration of the
-    /// subject, see <see cref="ConfigurableSubjectSerializer.ReportIssues"/>, which are logged.
+    /// or a <see cref="JsonFile"/> when the text is plain or invalid JSON. Reports the issues of the configuration of
+    /// the subject, see <see cref="ReportIssues"/>.
     /// </summary>
-    public IInterceptorSubject CreateFromJson(IStorageContainer storage, string path, string json, out ImmutableArray<string> issues)
+    public IInterceptorSubject CreateFromJson(IStorageContainer storage, string path, string json)
     {
         // A configurable subject enters the context when it is created, which runs lifecycle handlers as an
         // assignment to the tree does. With the flow of the caller, work that a handler starts would count as
@@ -67,7 +66,6 @@ internal sealed class FileSubjectFactory
         // Until the subject has its issues, so that a hosted subject that reads them when it starts finds them.
         using var startup = _serviceProvider.GetService<IInterceptorSubjectContext>()?.DeferHostedServiceStarts();
 
-        issues = [];
         try
         {
             var skipped = new List<SkippedConfigurationProperty>();
@@ -75,7 +73,7 @@ internal sealed class FileSubjectFactory
             // Every configurable type is a subject as well.
             if (_serializer.Deserialize(json, created: null, skipped.Add) is IInterceptorSubject subject)
             {
-                issues = ReportIssues(subject, path, json, skipped);
+                ReportIssues(subject, path, json, skipped);
                 return subject;
             }
         }
@@ -96,17 +94,15 @@ internal sealed class FileSubjectFactory
     /// Gets the issues of a configuration that was read into the subject with the given skipped properties, hands them
     /// to the subject, see <see cref="ConfigurableSubjectSerializer.ReportIssues"/>, and logs them.
     /// </summary>
-    public ImmutableArray<string> ReportIssues(IInterceptorSubject subject, string path, string json, IEnumerable<SkippedConfigurationProperty> skipped)
+    public void ReportIssues(IInterceptorSubject subject, string path, string json, IEnumerable<SkippedConfigurationProperty> skipped)
     {
         var issues = _serializer.ReportIssues(subject, json, skipped);
         if (!issues.IsEmpty)
         {
             _logger?.LogWarning(
-                "The configuration of {Path} has issues and is not saved until they are corrected in the file: {Issues}",
+                "The configuration of {Path} has issues that saving it would lose; correct them in the file: {Issues}",
                 path, string.Join("; ", issues));
         }
-
-        return issues;
     }
 
     /// <summary>

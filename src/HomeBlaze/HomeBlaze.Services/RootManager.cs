@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.Configuration;
@@ -26,10 +25,6 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
     // Serializes the writes of the root configuration file. Two at once would both open the file, and the one that
     // serialized the earlier state could write last.
     private readonly SemaphoreSlim _writeLock = new(1, 1);
-
-    // The issues of the root configuration file, which a write would lose. Set under the write lock, before Root, and
-    // read without it by ThrowIfWriteRefused, whose result a write checks again under the lock.
-    private ImmutableArray<string> _configurationIssues = [];
 
     /// <summary>
     /// The root subject loaded from configuration.
@@ -137,14 +132,9 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
         if (!issues.IsEmpty)
         {
             _logger?.LogWarning(
-                "The root configuration has issues and is not saved until they are corrected in the file and HomeBlaze is restarted: {Issues}",
+                "The root configuration has issues that saving it would lose; correct them in the file and restart HomeBlaze: {Issues}",
                 string.Join("; ", issues));
         }
-
-        // Free: nothing is written before Root is set.
-        await _writeLock.WaitAsync(CancellationToken.None);
-        _configurationIssues = issues;
-        _writeLock.Release();
 
         Root = root;
         Root.Context.AddFallbackContext(_context);
@@ -162,11 +152,6 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
     /// Writes the root configuration to disk when the subject is the root or nested in its configuration.
     /// Writes run one after the other.
     /// </summary>
-    /// <exception cref="ConfigurationWriteRefusedException">
-    /// The root configuration file has issues, such as a value that could not be read, which writing it would lose. The
-    /// file is read only at the start, so saving works again once they are corrected in the file and HomeBlaze is
-    /// restarted.
-    /// </exception>
     public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var root = Root;
@@ -176,9 +161,6 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
         await _writeLock.WaitAsync(cancellationToken);
         try
         {
-            if (!_configurationIssues.IsEmpty)
-                throw CreateWriteRefusal(_configurationIssues);
-
             _logger?.LogInformation("Saving root configuration to: {Path}", ConfigurationPath);
 
             var json = _serializer.Serialize(root);
@@ -193,24 +175,4 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
 
         return true;
     }
-
-    /// <summary>
-    /// Throws the refusal that <see cref="WriteConfigurationAsync"/> would throw now when the subject is the root or
-    /// nested in its configuration.
-    /// </summary>
-    /// <exception cref="ConfigurationWriteRefusedException">
-    /// The root configuration file has issues, such as a value that could not be read, which writing it would lose.
-    /// </exception>
-    public void ThrowIfWriteRefused(IInterceptorSubject subject)
-    {
-        var root = Root;
-        var issues = _configurationIssues;
-        if (root != null && !issues.IsEmpty && subject.TryGetConfigurationOwner(candidate => ReferenceEquals(candidate, root)) != null)
-            throw CreateWriteRefusal(issues);
-    }
-
-    private ConfigurationWriteRefusedException CreateWriteRefusal(ImmutableArray<string> issues) => new(
-        $"The configuration is not saved, because the root configuration file '{ConfigurationPath}' has issues that saving would lose: " +
-        $"{string.Join("; ", issues)}. Correct them in the file and restart HomeBlaze, which reads it only at the start; then saving works again.",
-        issues);
 }

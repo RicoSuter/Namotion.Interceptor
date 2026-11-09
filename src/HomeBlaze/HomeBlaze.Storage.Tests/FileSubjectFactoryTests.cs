@@ -31,7 +31,7 @@ public class FileSubjectFactoryTests
             logger);
 
         // Act
-        var subject = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Values.json", json, out _);
+        var subject = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Values.json", json);
 
         // Assert
         Assert.IsType<JsonFile>(subject);
@@ -60,7 +60,7 @@ public class FileSubjectFactoryTests
         var workers = new List<IssueReceivingWorker>();
         for (var attempt = 0; attempt < 100; attempt++)
         {
-            workers.Add(Assert.IsType<IssueReceivingWorker>(factory.CreateFromJson(Mock.Of<IStorageContainer>(), $"/Worker{attempt}.json", json, out _)));
+            workers.Add(Assert.IsType<IssueReceivingWorker>(factory.CreateFromJson(Mock.Of<IStorageContainer>(), $"/Worker{attempt}.json", json)));
         }
 
         var issuesAtStart = await Task.WhenAll(workers.Select(worker => worker.IssuesAtStart)).WaitAsync(TimeSpan.FromSeconds(30));
