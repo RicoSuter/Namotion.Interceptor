@@ -32,6 +32,24 @@ public class AutomationStopTests
     }
 
     [Fact]
+    public async Task WhenAnOperationThrowsAnotherExceptionOnItsCancellationByAStop_ThenTheRunIsRecordedAsCanceled()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("call", On("Call", When("/Weather/Gust > 8"), Invoke("/Blinds/DisconnectOnCancel")))));
+        host.Weather.Gust = 9;
+        await AsyncTestHelpers.WaitUntilAsync(() => host.Blinds.IsDisconnecting);
+
+        // Act
+        await host.StopAsync();
+
+        // Assert
+        Assert.Equal(AutomationRunOutcome.Canceled, host.Rule("call").LastRunOutcome);
+        Assert.Null(host.Automation.StatusMessage);
+        Assert.Equal(ServiceStatus.Stopped, host.Automation.Status);
+    }
+
+    [Fact]
     public async Task WhenTheWorkerDoesNotEndWithinTheStopTimeout_ThenTheStopReturnsAndTheWorkerChangesNothingAfterARestart()
     {
         // Arrange

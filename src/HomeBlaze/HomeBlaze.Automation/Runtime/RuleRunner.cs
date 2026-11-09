@@ -37,8 +37,9 @@ internal sealed class RuleRunner(ActionExecutor executor, SubjectPathResolver re
         {
             return await ExecuteActionsAsync(request, host, cancellationToken);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
         {
+            // An operation may turn its cancellation into another exception, such as a client disposed on cancellation.
             return RuleRunResult.Canceled("Canceled: the automation stopped");
         }
     }

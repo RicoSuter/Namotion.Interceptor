@@ -19,6 +19,7 @@ public partial class TestBlinds
     private volatile bool _isWaiting;
     private volatile bool _isStalled;
     private volatile bool _isBlocked;
+    private volatile bool _isDisconnecting;
     private int _closeCount;
     private int _openCount;
 
@@ -46,6 +47,8 @@ public partial class TestBlinds
     public bool IsStalled => _isStalled;
 
     public bool IsBlocked => _isBlocked;
+
+    public bool IsDisconnecting => _isDisconnecting;
 
     [Derived]
     [PropertyAttribute(nameof(Open), KnownAttributes.IsEnabled)]
@@ -79,6 +82,21 @@ public partial class TestBlinds
         _isWaiting = true;
         await _gate.Task.WaitAsync(cancellationToken);
         _isWaiting = false;
+    }
+
+    /// <summary>Runs until its cancellation, which it turns into another exception, as a client disposed on cancellation does.</summary>
+    [Operation]
+    public async Task DisconnectOnCancelAsync(CancellationToken cancellationToken)
+    {
+        _isDisconnecting = true;
+        try
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new ObjectDisposedException("connection");
+        }
     }
 
     /// <summary>Ends only when the test calls <see cref="EndStall"/>, whatever its caller cancels.</summary>
