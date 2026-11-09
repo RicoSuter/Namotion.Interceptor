@@ -358,6 +358,41 @@ public class SubjectPathRecorderTests : SubjectPathResolverTestBase
         Assert.Equal(0, allocated);
     }
 
+    // Each write moves the structure version, so that both resolvers compute the path again.
+    [Fact]
+    public void WhenAnAbsolutePathIsComputedAgainWithTheSameRoute_ThenTheRecorderAllocatesNothingMore()
+    {
+        // Arrange
+        var other = new TestContainer(Context) { Name = "Other" };
+        var child = new TestContainer(Context) { Name = "Child" };
+        var root = new TestContainer(Context) { Name = "Root", Child = child };
+        RootManager.Root = root;
+        var recorded = new SubjectPathResolver(() => root);
+        var unrecorded = new SubjectPathResolver(() => root);
+        var recorder = new DiscardingRecorder();
+        long withRecorder = 0;
+        long withoutRecorder = 0;
+
+        // Act
+        for (var index = 0; index < 120; index++)
+        {
+            child.Child = index % 2 == 0 ? other : null;
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            recorded.ResolveSubject("/Child/Child", PathStyle.Canonical, null, recorder);
+            var between = GC.GetAllocatedBytesForCurrentThread();
+            unrecorded.ResolveSubject("/Child/Child", PathStyle.Canonical);
+            var after = GC.GetAllocatedBytesForCurrentThread();
+            if (index >= 20)
+            {
+                withRecorder += between - before;
+                withoutRecorder += after - between;
+            }
+        }
+
+        // Assert
+        Assert.Equal(withoutRecorder, withRecorder);
+    }
+
     [Fact]
     public void WhenThePathOfASubjectWithOneParentIsBuilt_ThenTheRouteHasAParentStepAndTheHoldersOfItsAncestors()
     {
@@ -503,5 +538,23 @@ public class SubjectPathRecorderTests : SubjectPathResolverTestBase
         public void AddParentStep(IInterceptorSubject subject, ImmutableArray<SubjectPropertyParent> parents) => ParentSteps.Add((subject, parents));
 
         public void MarkUnbounded() => IsUnbounded = true;
+    }
+
+    private sealed class DiscardingRecorder : ISubjectPathRecorder
+    {
+        public void AddProperty(PropertyReference property)
+        {
+            // The route is not kept.
+        }
+
+        public void AddParentStep(IInterceptorSubject subject, ImmutableArray<SubjectPropertyParent> parents)
+        {
+            // The route is not kept.
+        }
+
+        public void MarkUnbounded()
+        {
+            // The route is not kept.
+        }
     }
 }

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using HomeBlaze.Abstractions;
 using Namotion.Interceptor;
@@ -134,8 +135,20 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                 return cached.Subject;
             }
 
-            var route = recorder is null ? null : new RecordedRoute();
-            var resolved = ResolveInternal(root, path[1..], style, route);
+            IInterceptorSubject? resolved;
+            RecordedRoute? route = null;
+            if (recorder is null)
+            {
+                resolved = ResolveInternal(root, path[1..], style, null);
+            }
+            else
+            {
+                var buffer = RouteBuffer.Take();
+                resolved = ResolveInternal(root, path[1..], style, buffer);
+                route = buffer.ToRoute(cached.Route);
+                RouteBuffer.Return(buffer);
+            }
+
             _resolveCache[key] = (version, resolved, route);
             route?.Replay(recorder);
             return resolved;
@@ -233,8 +246,18 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         var version = GetStructureVersion(_getRoot() ?? subject);
         if (!_canonicalPathsCache.TryGetValue(subject, out var cached) || cached.Version != version || (recorder is not null && cached.Route is null))
         {
-            var route = recorder is null ? null : new RecordedRoute();
-            cached = (version, ComputeCanonicalPaths(subject, route), route);
+            if (recorder is null)
+            {
+                cached = (version, ComputeCanonicalPaths(subject, null), null);
+            }
+            else
+            {
+                var buffer = RouteBuffer.Take();
+                var paths = ComputeCanonicalPaths(subject, buffer);
+                cached = (version, paths, buffer.ToRoute(cached.Route));
+                RouteBuffer.Return(buffer);
+            }
+
             _canonicalPathsCache[subject] = cached;
         }
 
@@ -586,13 +609,62 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
 
     // The route of a cached result, replayed to the recorder of a later call served from the cache: the parent step of
     // the subject of GetPaths, which is the only one a resolution records and comes before its properties, then the
-    // properties, then whether the route is unbounded. Filled before the entry is published and never changed after.
-    private sealed class RecordedRoute : ISubjectPathRecorder
+    // properties, then whether the route is unbounded. Never changed, so that an entry computed again with the same route
+    // keeps the instance of the entry before.
+    private sealed class RecordedRoute(
+        PropertyReference[] properties, IInterceptorSubject? parentStepSubject, ImmutableArray<SubjectPropertyParent> parentStepParents, bool isUnbounded)
     {
+        public PropertyReference[] Properties { get; } = properties;
+
+        public IInterceptorSubject? ParentStepSubject { get; } = parentStepSubject;
+
+        public ImmutableArray<SubjectPropertyParent> ParentStepParents { get; } = parentStepParents;
+
+        public bool IsUnbounded { get; } = isUnbounded;
+
+        public void Replay(ISubjectPathRecorder? recorder)
+        {
+            if (recorder is null)
+                return;
+
+            if (ParentStepSubject is not null)
+                recorder.AddParentStep(ParentStepSubject, ParentStepParents);
+
+            foreach (var property in Properties)
+                recorder.AddProperty(property);
+
+            if (IsUnbounded)
+                recorder.MarkUnbounded();
+        }
+    }
+
+    // Records the route of a cache miss, reused by the thread that takes it until it returns it, so that a route equal to
+    // the one of the entry before allocates nothing.
+    private sealed class RouteBuffer : ISubjectPathRecorder
+    {
+        [ThreadStatic]
+        private static RouteBuffer? _free;
+
         private readonly List<PropertyReference> _properties = [];
         private IInterceptorSubject? _parentStepSubject;
         private ImmutableArray<SubjectPropertyParent> _parentStepParents;
         private bool _isUnbounded;
+
+        public static RouteBuffer Take()
+        {
+            var buffer = _free ?? new RouteBuffer();
+            _free = null;
+            return buffer;
+        }
+
+        public static void Return(RouteBuffer buffer)
+        {
+            buffer._properties.Clear();
+            buffer._parentStepSubject = null;
+            buffer._parentStepParents = default;
+            buffer._isUnbounded = false;
+            _free = buffer;
+        }
 
         public void AddProperty(PropertyReference property) => _properties.Add(property);
 
@@ -606,19 +678,18 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
 
         public void MarkUnbounded() => _isUnbounded = true;
 
-        public void Replay(ISubjectPathRecorder? recorder)
+        public RecordedRoute ToRoute(RecordedRoute? previous)
         {
-            if (recorder is null)
-                return;
+            if (previous is not null &&
+                previous.IsUnbounded == _isUnbounded &&
+                ReferenceEquals(previous.ParentStepSubject, _parentStepSubject) &&
+                previous.ParentStepParents.AsSpan().SequenceEqual(_parentStepParents.AsSpan()) &&
+                previous.Properties.AsSpan().SequenceEqual(CollectionsMarshal.AsSpan(_properties)))
+            {
+                return previous;
+            }
 
-            if (_parentStepSubject is not null)
-                recorder.AddParentStep(_parentStepSubject, _parentStepParents);
-
-            foreach (var property in _properties)
-                recorder.AddProperty(property);
-
-            if (_isUnbounded)
-                recorder.MarkUnbounded();
+            return new RecordedRoute([.. _properties], _parentStepSubject, _parentStepParents, _isUnbounded);
         }
     }
 }
