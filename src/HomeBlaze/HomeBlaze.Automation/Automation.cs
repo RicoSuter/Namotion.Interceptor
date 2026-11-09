@@ -32,12 +32,12 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
 
     /// <summary>Creates an automation with the services it takes, which dependency injection resolves.</summary>
     /// <param name="pathResolver">Resolves the paths of the rules.</param>
-    /// <param name="timeProvider">The clock of <c>now</c>, <c>time</c>, holds and timeouts; its local time zone is that of <c>time</c>.</param>
-    /// <param name="authorizer">Decides which operation calls and property writes the rules may make.</param>
-    /// <param name="serviceProvider">
-    /// Resolves the services that operations take with <c>[FromServices]</c>, and the dispatcher that routes property
-    /// changes to every automation; without a registered dispatcher, the automation routes its changes on its own.
+    /// <param name="timeProvider">
+    /// The clock of <c>now</c>, <c>time</c>, holds and timeouts; its local time zone is that of <c>time</c>. The system clock
+    /// keeps the time zone that the process read first, so a change of the time zone of the host applies after a restart.
     /// </param>
+    /// <param name="authorizer">Decides which operation calls and property writes the rules may make.</param>
+    /// <param name="serviceProvider">Resolves the services that operations take with <c>[FromServices]</c>.</param>
     /// <param name="logger">The logger of the automation.</param>
     public Automation(
         SubjectPathResolver pathResolver,
@@ -117,7 +117,7 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
     /// <summary>Resolves the services that operations take with <c>[FromServices]</c>.</summary>
     internal IServiceProvider ServiceProvider { get; }
 
-    /// <summary>Routes the property changes to the automations: the registered dispatcher, or a dispatcher of its own when none is registered.</summary>
+    /// <summary>Routes the property changes to the automations: the registered dispatcher, or the one that every automation without one shares.</summary>
     internal AutomationChangeDispatcher ChangeDispatcher { get; }
 
     internal int ConfigurationVersion => Volatile.Read(ref _configurationVersion);
@@ -183,6 +183,10 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
     /// <see cref="AutomationRuntime.StopTimeout"/> passed. A worker that did not end, such as one in an operation that ignores its
     /// cancellation, is abandoned: it changes neither the automation nor its checkpoint anymore, also after a new start.
     /// </summary>
+    /// <remarks>
+    /// The runs that an abandoned worker recorded but had not written yet are lost as after a crash: the next start
+    /// restores the runs, run counts and trigger times written before them.
+    /// </remarks>
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         await AutomationRuntime.WaitForStopAsync(token => base.StopAsync(token), TimeProvider, cancellationToken);

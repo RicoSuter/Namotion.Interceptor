@@ -6,7 +6,9 @@ namespace HomeBlaze.Automation.Runtime;
 /// <summary>
 /// The property changes of one automation: registers with <see cref="AutomationChangeDispatcher"/>, publishes the
 /// watched set of the worker to that registration, and enqueues the routed changes on the writing thread, a graph change
-/// only while none is queued yet, which it tells the registration once the graph change is no longer queued.
+/// only while none is queued yet, which it tells the registration once the graph change is no longer queued. A graph
+/// change left out this way does not raise the chain depth of the queued one, so a feedback chain through graph changes
+/// that coincide with others counts from the lower depth; property changes are never left out and keep their depth.
 /// </summary>
 internal sealed class AutomationChangeReceiver(AutomationInputQueue queue) : IAutomationChangeListener
 {
