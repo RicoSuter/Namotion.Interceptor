@@ -83,6 +83,8 @@ namespace HomeBlaze.Automation.Blazor.Diagram
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public System.Threading.Tasks.ValueTask DisposeAsync() { }
         protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
+        protected override void OnParametersSet() { }
+        protected override bool ShouldRender() { }
     }
     public sealed class StateDiagramLayout { }
     public class StateDiagramText : Microsoft.AspNetCore.Components.ComponentBase
