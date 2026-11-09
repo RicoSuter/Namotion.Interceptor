@@ -101,6 +101,16 @@ public class AutomationCompilerTests
             }]),
             "Rule 'Storm': action 'speed': argument 'speed': the value is missing"
         },
+        {
+            [], null,
+            Rule(actions: [new InvokeOperationAction
+            {
+                Id = "speed",
+                OperationPath = "/Motor/SetTargetSpeed",
+                Arguments = new Dictionary<string, string> { ["speed"] = "1", ["Speed"] = "2" }
+            }]),
+            "Rule 'Storm': action 'speed': argument 'Speed' is given twice"
+        },
         { [], null, Rule(triggers: [null!], actions: [null!]), "Rule 'Storm': trigger 1: the type is unknown; action 1: the type is unknown" },
         { [null!], null, Rule(), "A state needs a name; Choose the initial state" },
         { [], null, WithMode(Rule(), (AutomationRuleMode)5), "Rule 'Storm': the mode 5 is not defined" },

@@ -89,7 +89,16 @@ public class ArgumentBinderTests
         {
             Parameter<Notification>("notification"), new() { ["notification"] = "Hi", ["notification.Message"] = "Hi" },
             "The argument 'notification' is given both whole and per member"
-        }
+        },
+        { Parameter<int>("speed"), new() { ["speed"] = "1", ["Speed"] = "2" }, "The argument 'Speed' is given twice" },
+        {
+            Parameter<Notification>("notification"), new() { ["notification.Message"] = "Hi", ["Notification.message"] = "Ho" },
+            "The argument 'Notification.message' is given twice"
+        },
+        { Parameter<TimeSpan>("delay"), new() { ["delay"] = "300" }, "The argument 'delay' cannot be converted to TimeSpan: 300" },
+        { Parameter<int>("speed"), new() { ["speed"] = "0x10" }, "The argument 'speed' is invalid: invalid number '0x10' at position 0" },
+        { Parameter<double>("level"), new() { ["level"] = "1e400" }, "The argument 'level' is invalid: number out of range '1e400' at position 0" },
+        { Parameter<double>("level"), new() { ["level"] = "NaN" }, "The argument 'level' is unknown, missing NaN" }
     };
 
     [Theory]
@@ -199,5 +208,96 @@ public class ArgumentBinderTests
         // Assert
         Assert.True(isBound, error);
         Assert.Equal(NotificationPriority.High, Assert.Single(values!));
+    }
+
+    [Theory]
+    [InlineData("5m", 0, 5, 0, "delay: 5m")]
+    [InlineData("1h30m", 1, 30, 0, "delay: 1h30m")]
+    [InlineData("00:00:30", 0, 0, 30, "delay: 30s")]
+    public void WhenATimeSpanArgumentIsADuration_ThenItIsBound(string text, int hours, int minutes, int seconds, string expectedDisplay)
+    {
+        // Arrange
+        var binder = CreateBinder();
+
+        // Act
+        var isBound = binder.TryBindParameters([Parameter<TimeSpan>("delay")], new Dictionary<string, string> { ["delay"] = text }, out var values, out var error);
+
+        // Assert
+        Assert.True(isBound, error);
+        Assert.Equal(new TimeSpan(hours, minutes, seconds), Assert.Single(values!));
+        Assert.Equal(expectedDisplay, binder.Display);
+    }
+
+    [Theory]
+    [InlineData("now")]
+    [InlineData("2026-11-06T12:00:00")]
+    [InlineData("2026-11-06T13:00:00+01:00")]
+    public void WhenADateTimeArgumentIsAnInstant_ThenItIsBoundInUtc(string text)
+    {
+        // Arrange
+        var binder = CreateBinder();
+
+        // Act
+        var isBound = binder.TryBindParameters([Parameter<DateTime>("at")], new Dictionary<string, string> { ["at"] = text }, out var values, out var error);
+
+        // Assert
+        Assert.True(isBound, error);
+        var at = Assert.IsType<DateTime>(Assert.Single(values!));
+        Assert.Equal(Now.UtcDateTime, at);
+        Assert.Equal(DateTimeKind.Utc, at.Kind);
+    }
+
+    [Fact]
+    public void WhenAnInstantConstantHasNoOffset_ThenItIsReadAsUtcLikeInExpressions()
+    {
+        // Arrange
+        var binder = CreateBinder();
+
+        // Act
+        var isBound = binder.TryBindParameters(
+            [Parameter<DateTimeOffset>("at")], new Dictionary<string, string> { ["at"] = "2026-11-06T12:00:00" }, out var values, out var error);
+
+        // Assert
+        Assert.True(isBound, error);
+        var at = Assert.IsType<DateTimeOffset>(Assert.Single(values!));
+        Assert.Equal(Now, at);
+        Assert.Equal(TimeSpan.Zero, at.Offset);
+    }
+
+    [Theory]
+    [InlineData("2.5", 3)]
+    [InlineData("-2.5", -3)]
+    public void WhenAFractionIsBoundToAnInteger_ThenItIsRoundedHalfAwayFromZero(string text, int expected)
+    {
+        // Arrange
+        var binder = CreateBinder();
+
+        // Act
+        var isBound = binder.TryBindParameters([Parameter<int>("speed")], new Dictionary<string, string> { ["speed"] = text }, out var values, out var error);
+
+        // Assert
+        Assert.True(isBound, error);
+        Assert.Equal(expected, Assert.Single(values!));
+    }
+
+    [Fact]
+    public void WhenARecordMemberTemplateRendersEmpty_ThenTheMemberIsTheEmptyText()
+    {
+        // Arrange
+        var binder = CreateBinder();
+        var arguments = new Dictionary<string, string>
+        {
+            ["notification.Message"] = "{{ /Weather/Rain }}",
+            ["notification.Title"] = "{{ /Weather/Rain }}"
+        };
+
+        // Act
+        var isBound = binder.TryBindParameters([Parameter<Notification>("notification")], arguments, out var values, out var error);
+
+        // Assert
+        Assert.True(isBound, error);
+        var notification = Assert.IsType<Notification>(Assert.Single(values!));
+        Assert.Equal(string.Empty, notification.Message);
+        Assert.Equal(string.Empty, notification.Title);
     }
 }

@@ -128,7 +128,7 @@ public static class ParameterConverter
         Type type, IReadOnlyDictionary<string, string?> inputs, out object? value, out string? error)
     {
         value = null;
-        var json = new JsonObject();
+        var values = new Dictionary<string, object?>();
         foreach (var member in GetObjectMembers(type))
         {
             var input = inputs.GetValueOrDefault(member.Name);
@@ -147,6 +147,35 @@ public static class ParameterConverter
             {
                 error = $"Invalid value for {member.Name}";
                 return false;
+            }
+
+            values[member.Name] = memberValue;
+        }
+
+        return TryCreateObject(type, values, out value, out error);
+    }
+
+    /// <summary>
+    /// Tries to create an object from the values of its members, keyed by <see cref="ObjectParameterMember.Name"/>. A
+    /// value is of the type of its member or null. A member without value keeps its default value; a required member
+    /// without value fails.
+    /// </summary>
+    public static bool TryCreateObject(
+        Type type, IReadOnlyDictionary<string, object?> values, out object? value, out string? error)
+    {
+        value = null;
+        var json = new JsonObject();
+        foreach (var member in GetObjectMembers(type))
+        {
+            if (!values.TryGetValue(member.Name, out var memberValue))
+            {
+                if (member.IsRequired)
+                {
+                    error = $"{member.Name} is required";
+                    return false;
+                }
+
+                continue;
             }
 
             try
@@ -336,12 +365,14 @@ public static class ParameterConverter
     /// <summary>
     /// Tries to convert a value that is not text input, such as the result of an expression, to the target type: a value
     /// of the type as it is, a text or an enum to an enum by the name of a defined member or by the number of one as text,
-    /// a number to another number type (rounded for an integral type), and any value to a text as pages write it raw.
+    /// a finite number to another number type in its range (rounded half away from zero for an integral type), a
+    /// <see cref="DateTimeOffset"/> to a <see cref="DateTime"/> in UTC, a <see cref="DateTime"/> to a
+    /// <see cref="DateTimeOffset"/> by its kind (unspecified is UTC), and any value to a text as pages write it raw.
     /// </summary>
     public static bool TryConvertValue(object value, Type targetType, out object? converted)
     {
         var type = Nullable.GetUnderlyingType(targetType) ?? targetType;
-        if (type.IsInstanceOfType(value))
+        if (type.IsInstanceOfType(value) && IsFinite(value))
         {
             converted = value;
             return true;
@@ -363,7 +394,34 @@ public static class ParameterConverter
             return TryChangeNumberType(value, type, out converted);
         }
 
+        return TryConvertInstant(value, type, out converted);
+    }
+
+    private static bool TryConvertInstant(object value, Type type, out object? converted)
+    {
         converted = null;
+        if (value is DateTimeOffset instant && type == typeof(DateTime))
+        {
+            converted = instant.UtcDateTime;
+            return true;
+        }
+
+        if (value is DateTime dateTime && type == typeof(DateTimeOffset))
+        {
+            try
+            {
+                converted = dateTime.Kind == DateTimeKind.Local
+                    ? new DateTimeOffset(dateTime)
+                    : new DateTimeOffset(DateTime.SpecifyKind(dateTime, DateTimeKind.Utc));
+                return true;
+            }
+            // A local time near the limits of DateTime can be beyond them in UTC.
+            catch (ArgumentOutOfRangeException)
+            {
+                return false;
+            }
+        }
+
         return false;
     }
 
@@ -388,15 +446,46 @@ public static class ParameterConverter
 
     private static bool TryChangeNumberType(object value, Type type, out object? converted)
     {
+        converted = null;
+        if (!IsFinite(value))
+        {
+            return false;
+        }
+
         try
         {
-            converted = Convert.ChangeType(value, type, CultureInfo.InvariantCulture);
-            return true;
+            var number = IsIntegral(type) ? RoundHalfAwayFromZero(value) : value;
+            converted = Convert.ChangeType(number, type, CultureInfo.InvariantCulture);
         }
         catch (OverflowException)
+        {
+            return false;
+        }
+
+        // A double beyond the range of float becomes infinity instead of overflowing.
+        if (!IsFinite(converted))
         {
             converted = null;
             return false;
         }
+
+        return true;
     }
+
+    private static bool IsFinite(object value) => value switch
+    {
+        double number => double.IsFinite(number),
+        float number => float.IsFinite(number),
+        _ => true
+    };
+
+    private static bool IsIntegral(Type type) => Type.GetTypeCode(type) is >= TypeCode.SByte and <= TypeCode.UInt64;
+
+    private static object RoundHalfAwayFromZero(object value) => value switch
+    {
+        decimal number => Math.Round(number, MidpointRounding.AwayFromZero),
+        double number => Math.Round(number, MidpointRounding.AwayFromZero),
+        float number => MathF.Round(number, MidpointRounding.AwayFromZero),
+        _ => value
+    };
 }

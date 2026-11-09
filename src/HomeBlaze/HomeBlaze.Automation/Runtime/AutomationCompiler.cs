@@ -280,8 +280,14 @@ internal static class AutomationCompiler
             return "the arguments are missing";
         }
 
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (name, value) in action.Arguments)
         {
+            if (!names.Add(name))
+            {
+                return $"argument '{name}' is given twice";
+            }
+
             if (CheckValue(value, allowsEvent) is { } error)
             {
                 return $"argument '{name}': {error}";

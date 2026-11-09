@@ -1,4 +1,6 @@
+using System.Collections.Frozen;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Services;
@@ -8,15 +10,43 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// Binds configured texts to the parameters of an operation or to a property. The text of a string is a text template.
-/// Any other text is a constant when it converts to the type, otherwise an expression whose value is converted; an
-/// unknown expression fails. A record parameter binds its members from <c>parameter.Member</c> keys, as the operation
-/// dialog does per member. Keys match without regard to case, and a key that names no parameter or member fails. Values
-/// are the raw stored values, as in expressions and configuration files, so a constant is never scaled by the unit of
-/// its parameter. Collects a display of the bound values.
+/// Any other text is a constant when it converts to the type, otherwise an expression whose value is converted as
+/// <see cref="ParameterConverter.TryConvertValue"/> does; an unknown expression fails. Constants are read as expressions
+/// write them: a duration as <see cref="AutomationDuration"/> reads it or as a <see cref="TimeSpan"/> with a <c>:</c>, so a
+/// bare number is no duration, an instant without offset in UTC, and a number only in decimal notation and finite. A
+/// record parameter binds its members from <c>parameter.Member</c> keys, as the operation dialog does per member. Keys
+/// match without regard to case, and a key that names no parameter or member, or that is given twice, fails. Values are
+/// the raw stored values, as in expressions and configuration files, so a constant is never scaled by the unit of its
+/// parameter. Collects a display of the bound values.
 /// </summary>
 internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allowsEvent)
 {
+    private static readonly CultureInfo Culture = CultureInfo.InvariantCulture;
+
+    // The constants that expressions write differently from the operation dialog, which ParameterConverter.TryConvert reads.
+    private static readonly FrozenDictionary<Type, ConstantParser> ConstantParsers = new Dictionary<Type, ConstantParser>
+    {
+        [typeof(int)] = static (string text, out object? value) =>
+            Box(int.TryParse(text, NumberStyles.Integer, Culture, out var number), number, out value),
+        [typeof(long)] = static (string text, out object? value) =>
+            Box(long.TryParse(text, NumberStyles.Integer, Culture, out var number), number, out value),
+        [typeof(decimal)] = static (string text, out object? value) =>
+            Box(decimal.TryParse(text, NumberStyles.Float, Culture, out var number), number, out value),
+        [typeof(double)] = static (string text, out object? value) =>
+            Box(double.TryParse(text, NumberStyles.Float, Culture, out var number) && double.IsFinite(number), number, out value),
+        [typeof(float)] = static (string text, out object? value) =>
+            Box(float.TryParse(text, NumberStyles.Float, Culture, out var number) && float.IsFinite(number), number, out value),
+        [typeof(DateTime)] = static (string text, out object? value) =>
+            Box(DateTime.TryParse(text, Culture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var instant), instant, out value),
+        [typeof(DateTimeOffset)] = static (string text, out object? value) =>
+            Box(DateTimeOffset.TryParse(text, Culture, DateTimeStyles.AssumeUniversal, out var instant), instant, out value),
+        [typeof(TimeSpan)] = static (string text, out object? value) =>
+            Box(AutomationDuration.TryParse(text, out var duration) || (text.Contains(':') && TimeSpan.TryParse(text, Culture, out duration)), duration, out value)
+    }.ToFrozenDictionary();
+
     private readonly List<string> _display = [];
+
+    private delegate bool ConstantParser(string text, out object? value);
 
     /// <summary>The bound values as <c>name: value</c>, separated by commas, such as <c>speed: 300</c>.</summary>
     public string Display => string.Join(", ", _display);
@@ -59,9 +89,9 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
             return TryRender(name, text, out value, out error);
         }
 
-        if (ParameterConverter.TryConvert(text, type, out value))
+        if (TryParseConstant(text, targetType, out value))
         {
-            _display.Add($"{name}: {text}");
+            _display.Add($"{name}: {Format(value)}");
             error = null;
             return true;
         }
@@ -69,11 +99,24 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
         return TryEvaluate(name, text, type, out value, out error);
     }
 
+    private static bool TryParseConstant(string text, Type type, out object? value) =>
+        ConstantParsers.TryGetValue(type, out var parse) ? parse(text, out value) : ParameterConverter.TryConvert(text, type, out value);
+
+    private static string Format(object? value) =>
+        value is TimeSpan duration ? AutomationDuration.Format(duration) : RawValueFormatter.Format(value);
+
     private static bool TryValidateKeys(
         MethodParameter[] inputs, IReadOnlyDictionary<string, string> arguments, [NotNullWhen(false)] out string? error)
     {
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var key in arguments.Keys)
         {
+            if (!keys.Add(key))
+            {
+                error = $"The argument '{key}' is given twice";
+                return false;
+            }
+
             if (!TryValidateKey(inputs, arguments, key, out error))
             {
                 return false;
@@ -140,7 +183,7 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
     private bool TryBindObject(
         MethodParameter parameter, IReadOnlyDictionary<string, string> arguments, out object? value, [NotNullWhen(false)] out string? error)
     {
-        var inputs = new Dictionary<string, string?>();
+        var members = new Dictionary<string, object?>();
         foreach (var member in ParameterConverter.GetObjectMembers(parameter.Type))
         {
             var key = parameter.Name + "." + member.Name;
@@ -155,10 +198,10 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
                 return false;
             }
 
-            inputs[member.Name] = RawValueFormatter.Format(memberValue);
+            members[member.Name] = memberValue;
         }
 
-        if (ParameterConverter.TryCreateObject(parameter.Type, inputs, out value, out var createError))
+        if (ParameterConverter.TryCreateObject(parameter.Type, members, out value, out var createError))
         {
             error = null;
             return true;
@@ -205,7 +248,7 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
             return false;
         }
 
-        _display.Add($"{name}: {RawValueFormatter.Format(value)}");
+        _display.Add($"{name}: {Format(value)}");
         error = null;
         return true;
     }
@@ -232,4 +275,10 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
 
     private static bool HasMembers(IReadOnlyDictionary<string, string> arguments, string parameterName) =>
         arguments.Keys.Any(key => key.StartsWith(parameterName + ".", StringComparison.OrdinalIgnoreCase));
+
+    private static bool Box<T>(bool isParsed, T parsed, out object? value)
+    {
+        value = isParsed ? parsed : null;
+        return isParsed;
+    }
 }
