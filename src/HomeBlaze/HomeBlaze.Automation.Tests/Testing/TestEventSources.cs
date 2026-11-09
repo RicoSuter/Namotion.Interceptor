@@ -31,6 +31,13 @@ public partial class TestButton : IObservable<TestPressEvent>, IObservable<TestT
     public IDisposable Subscribe(IObserver<TestTiltEvent> observer) => _tilts.Subscribe(observer);
 }
 
+/// <summary>An event source whose subscription fails, as a disposed source does.</summary>
+[InterceptorSubject]
+public partial class TestRefusingEventSource : IObservable<TestPressEvent>
+{
+    public IDisposable Subscribe(IObserver<TestPressEvent> observer) => throw new ObjectDisposedException("events");
+}
+
 /// <summary>Delivers published values to the observers subscribed at that moment, on the publishing thread.</summary>
 internal sealed class EventStream<T>
 {

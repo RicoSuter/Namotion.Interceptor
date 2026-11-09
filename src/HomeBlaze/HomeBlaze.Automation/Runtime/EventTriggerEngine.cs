@@ -1,6 +1,7 @@
 using HomeBlaze.Automation.Events;
 using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Services;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Expressions;
 
@@ -12,7 +13,7 @@ namespace HomeBlaze.Automation.Runtime;
 /// active when the worker processes it, in rule order. Used by the worker only; a subscription only enqueues.
 /// </summary>
 internal sealed class EventTriggerEngine(
-    SubjectPathResolver resolver, TimeProvider timeProvider, AutomationInputQueue queue)
+    SubjectPathResolver resolver, TimeProvider timeProvider, AutomationInputQueue queue, ILogger logger, Func<string> getAutomationName)
 {
     private readonly Dictionary<IInterceptorSubject, List<EventSubscription>> _subscriptions = new(ReferenceEqualityComparer.Instance);
 
@@ -162,7 +163,10 @@ internal sealed class EventTriggerEngine(
 
         // An event that the source publishes while it is subscribed is a new one, so the trigger handles every event.
         trigger.JoinedAfter = 0;
-        Use(trigger, Subscribe(source, eventType));
+        if (Subscribe(trigger, source, eventType) is { } subscription)
+        {
+            Use(trigger, subscription);
+        }
     }
 
     private static void Use(CompiledEventTrigger trigger, EventSubscription subscription)
@@ -172,11 +176,21 @@ internal sealed class EventTriggerEngine(
         trigger.SourceError = null;
     }
 
-    private EventSubscription Subscribe(IInterceptorSubject source, Type eventType)
+    private EventSubscription? Subscribe(CompiledEventTrigger trigger, IInterceptorSubject source, Type eventType)
     {
         var subscription = new EventSubscription(source, eventType);
-        subscription.Handle = EventSources.Subscribe(source, eventType, payload => queue.TryEnqueue(
-            new EventInput(subscription, new CapturedEvent(source, payload), subscription.Receive(), AutomationInputQueue.CausedChainDepth)));
+        try
+        {
+            subscription.Handle = EventSources.Subscribe(source, eventType, payload => queue.TryEnqueue(
+                new EventInput(subscription, new CapturedEvent(source, payload), subscription.Receive(), AutomationInputQueue.CausedChainDepth)));
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "The automation {Automation} could not subscribe to the {EventType} of {Path}.",
+                getAutomationName(), trigger.Configuration.EventType, trigger.Configuration.SubjectPath);
+            trigger.SourceError = $"{trigger.Configuration.SubjectPath} refused the subscription to {trigger.Configuration.EventType}: {exception.Message}";
+            return null;
+        }
 
         if (!_subscriptions.TryGetValue(source, out var subscriptions))
         {

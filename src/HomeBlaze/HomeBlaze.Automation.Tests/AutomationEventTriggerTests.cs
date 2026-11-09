@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions;
 using HomeBlaze.Automation.Tests.Testing;
 using Namotion.Interceptor.Testing;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
@@ -110,6 +111,46 @@ public class AutomationEventTriggerTests
 
         // Assert
         Assert.Equal(0, closesForTheQueuedPress);
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenAnEventSourceRefusesTheSubscriptionAtTheStart_ThenTheOtherRulesRunAndTheRuleSaysWhy()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("close", On("Close", When("/Weather/Gust > 8"), Invoke("/Blinds/Close"))),
+            ("press", On("Press", OnEvent("/Refusing", "TestPressEvent"), Invoke("/Blinds/Open")))));
+        host.Graph.Add("Refusing", new TestRefusingEventSource());
+        await host.RestartAsync();
+
+        // Act
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
+        Assert.StartsWith("On: /Refusing refused the subscription to TestPressEvent", host.Rule("press").Status);
+    }
+
+    [Fact]
+    public async Task WhenAnEventSourceRefusesTheSubscriptionOnASave_ThenTheNewPropertyRulesOfTheSaveRun()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("close", On("Close", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
+        host.Graph.Add("Refusing", new TestRefusingEventSource());
+        await host.FlushAsync();
+
+        // Act
+        await host.SaveAsync(Keyed(
+            ("close", On("Close", When("/Weather/Gust > 9"), Invoke("/Blinds/Close"))),
+            ("press", On("Press", OnEvent("/Refusing", "TestPressEvent"), Invoke("/Blinds/Open")))));
+        host.Weather.Gust = 10;
+        await host.FlushAsync();
+
+        // Assert
         Assert.Equal(1, host.Blinds.CloseCount);
     }
 

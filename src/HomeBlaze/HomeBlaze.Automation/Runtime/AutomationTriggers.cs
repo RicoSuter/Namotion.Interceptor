@@ -45,7 +45,7 @@ internal sealed class AutomationTriggers
         _queue = queue;
         _getStructureVersion = getStructureVersion;
         _propertyTriggers = new PropertyTriggerEngine(resolver, timeProvider, logger, getAutomationName, publishWatched);
-        _eventTriggers = new EventTriggerEngine(resolver, timeProvider, queue);
+        _eventTriggers = new EventTriggerEngine(resolver, timeProvider, queue, logger, getAutomationName);
     }
 
     /// <summary>
