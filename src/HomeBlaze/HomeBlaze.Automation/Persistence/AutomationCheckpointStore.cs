@@ -19,13 +19,9 @@ namespace HomeBlaze.Automation.Persistence;
 internal sealed class AutomationCheckpointStore
 {
     private const string Extension = ".json";
-    private const string TemporaryExtension = ".tmp";
-    private const int TemporaryIdLength = 32;
 
     // The Windows set, so that data directories move between platforms without renames, and the escape character.
     private static readonly SearchValues<char> EscapedCharacters = SearchValues.Create("<>:\"\\|?*%");
-
-    private static readonly SearchValues<char> HexDigits = SearchValues.Create("0123456789abcdef");
 
     private static readonly FrozenSet<string> ReservedNames = new[]
     {
@@ -213,7 +209,7 @@ internal sealed class AutomationCheckpointStore
             return;
         }
 
-        var prefix = Path.GetFileName(FilePath) + ".";
+        var fileName = Path.GetFileName(FilePath);
         lock (_file.Lock)
         {
             if (!ReferenceEquals(_file.Store, this))
@@ -223,9 +219,11 @@ internal sealed class AutomationCheckpointStore
 
             try
             {
-                foreach (var path in Directory.EnumerateFiles(directory, prefix + "*" + TemporaryExtension))
+                // The pattern only narrows the files down; the name decides, so that the temporary files of another
+                // checkpoint whose name starts the same stay.
+                foreach (var path in Directory.EnumerateFiles(directory, fileName + ".*"))
                 {
-                    if (IsTemporaryFile(Path.GetFileName(path.AsSpan()), prefix))
+                    if (AtomicFile.IsTemporaryFile(Path.GetFileName(path.AsSpan()), fileName))
                     {
                         File.Delete(path);
                     }
@@ -236,19 +234,6 @@ internal sealed class AutomationCheckpointStore
                 // A leftover that cannot be deleted now is deleted at a later start; the checkpoint is read regardless.
             }
         }
-    }
-
-    // Only the name of a temporary file of this checkpoint, not one of another checkpoint whose name starts the same.
-    private static bool IsTemporaryFile(ReadOnlySpan<char> name, string prefix)
-    {
-        if (name.Length != prefix.Length + TemporaryIdLength + TemporaryExtension.Length ||
-            !name.StartsWith(prefix, StringComparison.Ordinal) ||
-            !name.EndsWith(TemporaryExtension, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        return !name.Slice(prefix.Length, TemporaryIdLength).ContainsAnyExcept(HexDigits);
     }
 
     // Percent-encodes what would make two segments share a file name, or a segment name no file: what a file name cannot

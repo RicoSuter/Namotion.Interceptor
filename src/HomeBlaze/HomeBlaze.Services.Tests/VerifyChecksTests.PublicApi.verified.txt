@@ -6,6 +6,7 @@ namespace HomeBlaze.Services
 {
     public static class AtomicFile
     {
+        public static bool IsTemporaryFile(System.ReadOnlySpan<char> fileName, System.ReadOnlySpan<char> targetFileName) { }
         public static void WriteAllBytes(string path, System.ReadOnlySpan<byte> content) { }
         public static System.Threading.Tasks.Task WriteAllBytesAsync(string path, System.ReadOnlyMemory<byte> content, System.Threading.CancellationToken cancellationToken) { }
         public static System.Threading.Tasks.Task WriteAllTextAsync(string path, string content, System.Threading.CancellationToken cancellationToken) { }

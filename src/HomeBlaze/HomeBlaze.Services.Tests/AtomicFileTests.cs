@@ -60,4 +60,20 @@ public sealed class AtomicFileTests : IDisposable
         Assert.NotNull(asyncException);
         Assert.Empty(Directory.GetFiles(_directory));
     }
+
+    [Theory]
+    [InlineData("file.json.0123456789abcdef0123456789abcdef.tmp", true)]
+    [InlineData("file.json.0123456789ABCDEF0123456789ABCDEF.tmp", false)]
+    [InlineData("file.json.notes.tmp", false)]
+    [InlineData("file.json.x.json.0123456789abcdef0123456789abcdef.tmp", false)]
+    [InlineData("file.jsonx0123456789abcdef0123456789abcdef.tmp", false)]
+    [InlineData("file.json.0123456789abcdef0123456789abcdef.txt", false)]
+    public void WhenAFileNameIsChecked_ThenOnlyTheNameOfATemporaryFileOfTheTargetIsOne(string fileName, bool isTemporaryFile)
+    {
+        // Act
+        var result = AtomicFile.IsTemporaryFile(fileName, "file.json");
+
+        // Assert
+        Assert.Equal(isTemporaryFile, result);
+    }
 }
