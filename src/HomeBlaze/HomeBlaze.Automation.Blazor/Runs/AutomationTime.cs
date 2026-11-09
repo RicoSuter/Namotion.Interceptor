@@ -9,7 +9,14 @@ internal static class AutomationTime
     /// The time of day for a time on the current day of the viewer, otherwise the date and the time; the placeholder of
     /// <paramref name="timeZone"/> while its zone is not resolved.
     /// </summary>
-    public static string Format(ITimeZoneDisplay timeZone, DateTimeOffset value, DateTimeOffset now)
+    public static string Format(ITimeZoneDisplay timeZone, DateTimeOffset value, DateTimeOffset now) =>
+        FormatZoned(timeZone, value, now, "HH:mm", "g");
+
+    /// <summary>Like <see cref="Format"/>, with the seconds, for times that can lie within one minute of each other.</summary>
+    public static string FormatWithSeconds(ITimeZoneDisplay timeZone, DateTimeOffset value, DateTimeOffset now) =>
+        FormatZoned(timeZone, value, now, "HH:mm:ss", "G");
+
+    private static string FormatZoned(ITimeZoneDisplay timeZone, DateTimeOffset value, DateTimeOffset now, string timeFormat, string dateTimeFormat)
     {
         if (!timeZone.IsResolved)
         {
@@ -17,6 +24,6 @@ internal static class AutomationTime
         }
 
         var zoned = timeZone.ToZoned(value);
-        return zoned.Date == timeZone.ToZoned(now).Date ? zoned.ToString("HH:mm") : zoned.ToString("g");
+        return zoned.Date == timeZone.ToZoned(now).Date ? zoned.ToString(timeFormat) : zoned.ToString(dateTimeFormat);
     }
 }

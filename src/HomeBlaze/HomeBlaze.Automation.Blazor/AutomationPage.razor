@@ -122,7 +122,7 @@
                     @foreach (var run in _recentRuns.Runs)
                     {
                         <div class="d-flex flex-wrap align-center gap-2" data-testid="automation-run">
-                            <MudText Typo="Typo.caption" Style="min-width: 160px;">@FormatInstant(run.At, "Last run")</MudText>
+                            <MudText Typo="Typo.caption" Style="min-width: 160px;">@(run.At is { } at ? AutomationTime.FormatWithSeconds(TimeZone, at, TimeProvider.GetUtcNow()) : "Last run")</MudText>
                             <MudText Typo="Typo.body2" Style="font-weight: 500;">@run.RuleName</MudText>
                             @if (run.Outcome is { } outcome)
                             {

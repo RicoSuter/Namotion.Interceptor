@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Automation;
 using HomeBlaze.E2E.Tests.Infrastructure;
@@ -190,6 +191,7 @@ public class AutomationPageTests
         await Assertions.Expect(run).ToContainTextAsync("Ran");
         await Assertions.Expect(run).ToContainTextAsync("Would have run (dry run)");
         await Assertions.Expect(run).ToContainTextAsync("Would run ChangeState(Done)");
+        await Assertions.Expect(run).ToContainTextAsync(new Regex(@"\d:\d\d:\d\d"));
         await Assertions.Expect(page.GetByText("From history: the runs of the last seven days. Runs within about 250 ms can show as one, and a crash can drop runs.")).ToBeVisibleAsync();
     }
 

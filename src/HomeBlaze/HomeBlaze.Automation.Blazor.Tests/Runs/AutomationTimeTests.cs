@@ -44,6 +44,22 @@ public class AutomationTimeTests
     }
 
     [Fact]
+    public void WhenTheTimeIsShownWithSeconds_ThenTheyAreShownOnTheCurrentDayAndOnAnotherDay()
+    {
+        // Arrange
+        var timeZone = CreateResolved();
+        var value = Now.AddHours(-1).AddSeconds(7);
+
+        // Act
+        var today = AutomationTime.FormatWithSeconds(timeZone, value, Now);
+        var otherDay = AutomationTime.FormatWithSeconds(timeZone, value, Now.AddDays(1));
+
+        // Assert
+        Assert.Equal("13:30:07", today);
+        Assert.Equal(new DateTime(2026, 11, 6, 13, 30, 7, DateTimeKind.Unspecified).ToString("G", CultureInfo.CurrentCulture), otherDay);
+    }
+
+    [Fact]
     public void WhenTheZoneIsNotResolved_ThenThePlaceholderIsShown()
     {
         // Arrange
