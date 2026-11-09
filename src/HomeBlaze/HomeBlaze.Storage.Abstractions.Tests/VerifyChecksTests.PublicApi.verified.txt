@@ -17,11 +17,6 @@ namespace HomeBlaze.Storage.Abstractions
         public System.DateTime? LastModifiedUtc { get; init; }
         public long Size { get; init; }
     }
-    public sealed class ConfigurationWriteRefusedException : System.InvalidOperationException
-    {
-        public ConfigurationWriteRefusedException(string message, System.Collections.Immutable.ImmutableArray<string> issues) { }
-        public System.Collections.Immutable.ImmutableArray<string> Issues { get; }
-    }
     public class CreateSubjectResult : System.IEquatable<HomeBlaze.Storage.Abstractions.CreateSubjectResult>
     {
         public CreateSubjectResult(Namotion.Interceptor.IInterceptorSubject Subject, string? Name) { }
@@ -35,7 +30,6 @@ namespace HomeBlaze.Storage.Abstractions
     }
     public interface IConfigurationWriter
     {
-        void ThrowIfWriteRefused(Namotion.Interceptor.IInterceptorSubject subject);
         System.Threading.Tasks.Task<bool> WriteConfigurationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken);
     }
     public interface IStorageContainer

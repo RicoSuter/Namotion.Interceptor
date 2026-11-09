@@ -203,10 +203,6 @@ else
 
     private CanvasNode? _pressedNode;
 
-    // The position of each node that moves before the move started, until its release or the next mouse down, as a
-    // release at the start reports no modification.
-    private readonly Dictionary<CanvasNode, (int X, int Y)> _moveStarts = new();
-
     private readonly Dictionary<CanvasNode, SubjectComponent> _nodeComponents = new();
 
     [Parameter]
@@ -244,7 +240,6 @@ else
         var intX = SnapToGrid(x);
         var intY = SnapToGrid(y);
 
-        _moveStarts.TryAdd(node, (node.X, node.Y));
         if (node.X != intX) node.X = intX;
         if (node.Y != intY) node.Y = intY;
     }
@@ -259,26 +254,8 @@ else
         // The moved node is saved and not the canvas: on a page a node is a block of its own, and only its
         // line changes.
         IInterceptorSubject moved = Nodes.FirstOrDefault(node => GetNodeId(node) == modifiedNode.Id) ?? (IInterceptorSubject)canvas;
-        var moveStarts = _moveStarts.ToArray();
-        _moveStarts.Clear();
 
-        _ = InvokeAsync(async () =>
-        {
-            // The position follows the mouse before the release, so a save that would be refused moves the nodes back.
-            if (!RootManager.CheckConfigurationWriteOrShowError(moved, Snackbar))
-            {
-                foreach (var (node, (x, y)) in moveStarts)
-                {
-                    node.X = x;
-                    node.Y = y;
-                }
-
-                StateHasChanged();
-                return;
-            }
-
-            await RootManager.WriteConfigurationOrWarnAsync(moved, Snackbar, CancellationToken.None);
-        });
+        _ = InvokeAsync(() => RootManager.WriteConfigurationOrWarnAsync(moved, Snackbar, CancellationToken.None));
     }
 
     // Only an edited canvas has these handlers. A viewed one has none, so that a click or a mouse down in a widget of a node
@@ -314,7 +291,6 @@ else
     private void OnCanvasMouseDown(MouseEventArgs e)
     {
         _ignoreNextClick = false;
-        _moveStarts.Clear();
     }
 
     private async Task OnCanvasClick(MouseEventArgs e)
@@ -349,8 +325,6 @@ else
 
     private async Task AddNodeAtPosition(int x, int y)
     {
-        if (Canvas == null || !RootManager.CheckConfigurationWriteOrShowError(Canvas, Snackbar)) return;
-
         x = SnapToGrid(x);
         y = SnapToGrid(y);
 
@@ -359,10 +333,6 @@ else
             BeforeSave = subject =>
             {
                 if (Canvas == null) return;
-
-                // The file may have been read again with issues while the dialog was open. The dialog shows the refusal
-                // and stays open with its input.
-                RootManager.GetConfigurationWriter(Canvas).ThrowIfWriteRefused(Canvas);
 
                 var node = SubjectFactory.CreateSubject<CanvasNode>();
                 node.X = x;
@@ -390,7 +360,7 @@ else
             yesText: "Delete",
             cancelText: "Cancel");
 
-        if (confirmed == true && RootManager.CheckConfigurationWriteOrShowError(Canvas, Snackbar))
+        if (confirmed == true)
         {
             Canvas.Nodes = Nodes.Where(existing => existing != node).ToArray();
 

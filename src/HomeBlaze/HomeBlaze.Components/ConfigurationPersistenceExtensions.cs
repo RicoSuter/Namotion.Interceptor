@@ -1,5 +1,4 @@
 using HomeBlaze.Services;
-using HomeBlaze.Storage.Abstractions;
 using MudBlazor;
 using Namotion.Interceptor;
 
@@ -11,30 +10,10 @@ namespace HomeBlaze.Components;
 internal static class ConfigurationPersistenceExtensions
 {
     /// <summary>
-    /// Checks whether the configuration writer of the subject, see <see cref="RootManagerExtensions.GetConfigurationWriter"/>,
-    /// would refuse to write the configuration that contains it, see <see cref="IConfigurationWriter.ThrowIfWriteRefused"/>,
-    /// and shows the refusal as an error. Called before the subject is changed, so that a refused save changes nothing.
-    /// </summary>
-    /// <returns>false if the write would be refused.</returns>
-    public static bool CheckConfigurationWriteOrShowError(this RootManager rootManager, IInterceptorSubject subject, ISnackbar snackbar)
-    {
-        try
-        {
-            rootManager.GetConfigurationWriter(subject).ThrowIfWriteRefused(subject);
-            return true;
-        }
-        catch (ConfigurationWriteRefusedException exception)
-        {
-            snackbar.AddConfigurationSaveError(exception.Message);
-            return false;
-        }
-    }
-
-    /// <summary>
     /// Writes the configuration that contains the subject through its configuration writer, see
     /// <see cref="RootManagerExtensions.GetConfigurationWriter"/>, and warns when the writer wrote nothing, in
-    /// which case the change is applied but not saved. A write that fails, also one that the writer refuses, is shown
-    /// as an error and leaves the change applied but not saved; nothing is thrown.
+    /// which case the change is applied but not saved. A write that fails is shown as an error and leaves the change
+    /// applied but not saved; nothing is thrown.
     /// </summary>
     /// <returns>true if the configuration was written.</returns>
     public static async Task<bool> WriteConfigurationOrWarnAsync(

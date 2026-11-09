@@ -92,7 +92,8 @@ public partial class HomeBlazeClient :
 
         var installation = RequiredInstallation;
         installation.ThrowIfNotPartOfInstallation(this);
-        await installation.SetClientNameAsync(this, name.Trim(), cancellationToken);
+        Name = name.Trim();
+        await installation.WriteClientConfigurationAsync(cancellationToken);
     }
 
     [Operation(Title = "Forget", Icon = "Delete", Position = 2, RequiresConfirmation = true,
@@ -101,7 +102,8 @@ public partial class HomeBlazeClient :
     {
         var installation = RequiredInstallation;
         installation.ThrowIfNotPartOfInstallation(this);
-        await installation.SetClientNameAsync(this, string.Empty, cancellationToken);
+        Name = string.Empty;
+        await installation.WriteClientConfigurationAsync(cancellationToken);
     }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
@@ -115,39 +117,6 @@ public partial class HomeBlazeClient :
     /// </summary>
     internal string? GetIssuedToken(string tokenHash) =>
         _issuedToken is { } issued && issued.Hash == tokenHash ? issued.Token : null;
-
-    /// <summary>
-    /// Returns the name of the client with its token, for <see cref="TryRestoreName"/>.
-    /// </summary>
-    internal NameSnapshot CaptureName()
-    {
-        lock (_tokenLock)
-        {
-            return new NameSnapshot(Name, TokenHash, _issuedToken);
-        }
-    }
-
-    /// <summary>
-    /// Restores the name and the token of <paramref name="snapshot"/> unless the name changed from <paramref name="expectedName"/>.
-    /// </summary>
-    /// <returns>Whether the name was restored.</returns>
-    internal bool TryRestoreName(NameSnapshot snapshot, string expectedName)
-    {
-        lock (_tokenLock)
-        {
-            if (Name != expectedName)
-            {
-                return false;
-            }
-
-            // Restored before the name, so the token update of the name change keeps the token instead of issuing a new one.
-            _issuedToken = snapshot.IssuedToken;
-            TokenHash = snapshot.TokenHash;
-        }
-
-        Name = snapshot.Name;
-        return true;
-    }
 
     // Also a name set in the configuration editor reaches the tabs of the client.
     partial void OnNameChanged(string newValue)
@@ -183,9 +152,7 @@ public partial class HomeBlazeClient :
         }
     }
 
-    internal readonly record struct NameSnapshot(string Name, string? TokenHash, IssuedToken? IssuedToken);
-
-    internal sealed class IssuedToken(string token, string hash)
+    private sealed class IssuedToken(string token, string hash)
     {
         public string Token { get; } = token;
 

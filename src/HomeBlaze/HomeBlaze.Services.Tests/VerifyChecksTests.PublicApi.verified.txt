@@ -110,7 +110,6 @@ namespace HomeBlaze.Services
         public Namotion.Interceptor.IInterceptorSubject? Root { get; }
         public System.Threading.Tasks.Task<Namotion.Interceptor.IInterceptorSubject> RootLoaded { get; }
         protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
-        public void ThrowIfWriteRefused(Namotion.Interceptor.IInterceptorSubject subject) { }
         public System.Threading.Tasks.Task<bool> WriteConfigurationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
     }
     public static class RootManagerExtensions

@@ -59,47 +59,6 @@ public class EcowittGatewayConfigurationSaveTests
     }
 
     [Fact]
-    public async Task WhenWriterRefusesRepeatedly_ThenTheSaveDoesNotFailAndTheRefusalIsLoggedOnce()
-    {
-        // Arrange
-        var (gateway, writer, logger) = CreateGatewayWithWriter(isWriting: true);
-        writer.Refusal = new ConfigurationWriteRefusedException("The configuration is not saved", ["the value of 'x' could not be read"]);
-
-        // Act
-        await gateway.SaveConfigurationAsync(CancellationToken.None);
-        await gateway.SaveConfigurationAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(2, writer.WriteCount);
-        var warning = Assert.Single(logger.Warnings);
-        Assert.Contains("not saved", warning);
-        Assert.Contains("The configuration is not saved", warning);
-    }
-
-    [Fact]
-    public async Task WhenWriterAcceptsAgainAfterARefusal_ThenTheSaveWritesWithoutWarningAndALaterRefusalIsLoggedAgain()
-    {
-        // Arrange
-        var (gateway, writer, logger) = CreateGatewayWithWriter(isWriting: true);
-        var refusal = new ConfigurationWriteRefusedException("The configuration is not saved", ["the value of 'x' could not be read"]);
-        writer.Refusal = refusal;
-        await gateway.SaveConfigurationAsync(CancellationToken.None);
-        writer.Refusal = null;
-
-        // Act
-        await gateway.SaveConfigurationAsync(CancellationToken.None);
-        var warningCountAfterRecovery = logger.Warnings.Count;
-        writer.Refusal = refusal;
-        await gateway.SaveConfigurationAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(3, writer.WriteCount);
-        Assert.Equal(1, warningCountAfterRecovery);
-        Assert.Equal(2, logger.Warnings.Count);
-        Assert.All(logger.Warnings, warning => Assert.Contains("The configuration is not saved", warning));
-    }
-
-    [Fact]
     public async Task WhenWriterWrites_ThenNothingIsLogged()
     {
         // Arrange
@@ -135,11 +94,9 @@ public partial class TestConfigurationWriter : IConfigurationWriter
 
     public partial EcowittGateway? Gateway { get; set; }
 
-    public ConfigurationWriteRefusedException? Refusal { get; set; }
-
     public Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         WriteCount++;
-        return Refusal is { } refusal ? Task.FromException<bool>(refusal) : Task.FromResult(IsWriting);
+        return Task.FromResult(IsWriting);
     }
 }
