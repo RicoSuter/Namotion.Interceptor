@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
 using Namotion.Interceptor;
@@ -13,36 +14,65 @@ namespace HomeBlaze.Automation.Tests;
 /// <summary>
 /// Runs the same seeded scenario on two hosts, one with graph routes and one whose dispatcher treats every route as
 /// unbounded, which is the dispatch without routes, and compares everything observable after each step: the statuses,
-/// states and state changes of the automations, the runs of every rule and what the runs changed in the graph. Any
-/// difference is a behavior that the routes changed.
+/// states, state changes and checkpoint locations of the automations, the runs of every rule and what the runs changed
+/// in the graph. Any difference is a behavior that the routes changed.
 /// </summary>
 /// <remarks>
-/// Each step is one change from the test, or a change and the write that the constraint below requires, followed by a
-/// flush of every automation, so that the inputs of a step are queued before the workers process them. The rules write
-/// only properties that no other automation reads, so that the workers of a step do not race each other.
-/// Differences inherent to the routes are kept out of the scenario, each by the constraint named here:
+/// Each step is one change from the test followed by a flush of every automation, so that the inputs of a step are
+/// queued before the workers process them. The rules write only properties that no other automation reads, so that the
+/// workers of a step do not race each other. Without routes every automation receives every structural change, also
+/// one that cannot change what its paths resolve to, which differs observably in two ways only, each kept out of the
+/// scenario by the constraint named here:
 /// <list type="bullet">
-/// <item>Without routes, the attach of a property that holds no subjects queues no graph change, so a path to it resolves
-/// at the next graph change anywhere, while with routes the attach is a graph change for the paths that looked for it.
-/// The scenario follows the addition of such a property with a structural change elsewhere in the same step, so that both
-/// hosts resolve in that step.</item>
-/// <item>Without routes, every automation receives the graph change of a structural write that a rule makes, at the chain
-/// depth of the run, and one beyond the chain limit is dropped and reported as a stopped feedback chain by automations
-/// that take no part in it. The structural writes of the rules end after one run, so that they stay within the limit;
-/// the feedback chains beyond the limit write values.</item>
-/// <item>A full queue drops inputs by their order, and without routes a queued graph change takes a place. The step that
-/// overloads a queue writes no structure, and the steps before it are flushed.</item>
+/// <item>A structural write that a rule makes reaches every automation at the chain depth of the run, and beyond the
+/// chain limit it is dropped and reported as a stopped feedback chain by an automation that takes no part in the chain,
+/// unless its graph change was still queued. The structural writes of the rules here end after one run;
+/// <see cref="WhenARuleReplacesTheSubjectItReadsEndlessly_ThenTheChainStopsAsWithoutGraphRoutesAndOnlyTheOtherAutomationsDiffer"/>
+/// covers a chain beyond the limit.</item>
+/// <item>A full queue drops inputs in their order, and without routes a queued graph change takes a place in it, so
+/// that the number of dropped inputs and which ones differ. The step that overloads a queue writes no structure, and
+/// the steps before it are flushed.</item>
 /// </list>
 /// </remarks>
 public class AutomationGraphRouteDifferentialTests
 {
-    private const int Steps = 60;
+    private const int Steps = 40;
 
-    public static TheoryData<int> Seeds => [.. Enumerable.Range(1, 32)];
+    public static TheoryData<int> Seeds => [.. Enumerable.Range(1, 300)];
+
+    public static TheoryData<int> LongSeeds => [.. Enumerable.Range(1001, 2000)];
 
     [Theory]
     [MemberData(nameof(Seeds))]
-    public async Task WhenRandomChangesAreApplied_ThenEveryAutomationBehavesAsWithoutGraphRoutes(int seed)
+    public Task WhenRandomChangesAreApplied_ThenEveryAutomationBehavesAsWithoutGraphRoutes(int seed) => CompareAsync(seed, Steps);
+
+    [Theory]
+    [Trait("Category", "Integration")]
+    [MemberData(nameof(LongSeeds))]
+    public Task WhenManyRandomChangesAreApplied_ThenEveryAutomationBehavesAsWithoutGraphRoutes(int seed) => CompareAsync(seed, Steps * 3);
+
+    // The replacing automation stops its chain as without routes. Without routes the others receive the structural writes
+    // of the chain too, and one that takes each graph change before the next arrives receives one beyond the limit and
+    // reports a stopped chain that it takes no part in; one whose graph change is still queued coalesces the later ones.
+    [Fact]
+    public async Task WhenARuleReplacesTheSubjectItReadsEndlessly_ThenTheChainStopsAsWithoutGraphRoutesAndOnlyTheOtherAutomationsDiffer()
+    {
+        // Arrange
+        await using var routed = await ReplacingWorld.CreateAsync(makesEveryRouteUnbounded: false);
+        await using var unrouted = await ReplacingWorld.CreateAsync(makesEveryRouteUnbounded: true);
+
+        // Act
+        await routed.StartChainAsync();
+        await unrouted.StartChainAsync();
+
+        // Assert
+        Assert.Equal(unrouted.DescribeReplacing(), routed.DescribeReplacing());
+        Assert.StartsWith("A feedback chain of more than 16 inputs was stopped", routed.Replacing.StatusMessage);
+        Assert.Equal(routed.DescribeOthers(), unrouted.DescribeOthers(withoutChainReport: true));
+        Assert.All(routed.Others, other => Assert.Null(other.StatusMessage));
+    }
+
+    private static async Task CompareAsync(int seed, int steps)
     {
         // Arrange
         await using var routed = await World.CreateAsync(seed, makesEveryRouteUnbounded: false);
@@ -51,7 +81,7 @@ public class AutomationGraphRouteDifferentialTests
         var filteredSteps = 0;
         AssertSame(routed, unrouted, seed, -1, log);
 
-        for (var step = 0; step < Steps; step++)
+        for (var step = 0; step < steps; step++)
         {
             // Act
             var isBounded = routed.GetBoundedAutomations();
@@ -86,7 +116,7 @@ public class AutomationGraphRouteDifferentialTests
             }
         }
 
-        Assert.NotEqual(0, filteredSteps);
+        Assert.True(filteredSteps > 0, $"Seed {seed}: no step was filtered.\n{string.Join('\n', log)}");
     }
 
     private static void AssertSame(World routed, World unrouted, int seed, int step, List<string> log)
@@ -114,9 +144,10 @@ public class AutomationGraphRouteDifferentialTests
     /// <summary>
     /// Rooms at <c>/R0</c> to <c>/R2</c> with sensors by key, by position and by reference and a button, folders
     /// <c>/F0</c>, <c>/F0/F2</c> and <c>/F1</c> of [InlinePaths] with a level, an unrelated holder, a rule host, and three
-    /// automations with the states Day and Night, one in each folder at first. Each automation has a sensor <c>/C{i}</c>
-    /// for its feedback chains and a replacer <c>/P{i}</c> whose operation replaces its sensor, which no other automation
-    /// reads.
+    /// automations with the states Day and Night, one in each folder at first, each with a random part of the rules, so
+    /// that the route of one rule does not hide a missing property in the route of another. Each automation has a sensor
+    /// <c>/C{i}</c> for its feedback chains and a replacer <c>/P{i}</c> whose operation replaces its sensor, which no other
+    /// automation reads.
     /// </summary>
     private sealed class World : IAsyncDisposable
     {
@@ -167,7 +198,7 @@ public class AutomationGraphRouteDifferentialTests
                 return await OverloadAsync();
             }
 
-            return _random.Next(24) switch
+            return _random.Next(25) switch
             {
                 0 => ChangeDevices(),
                 1 => ChangeItems(),
@@ -190,6 +221,7 @@ public class AutomationGraphRouteDifferentialTests
                 19 => Advance(),
                 20 => Touch(),
                 21 => await ChangeConfigurationAsync(),
+                22 => DetachFolder(),
                 _ => WriteValue()
             };
         }
@@ -214,6 +246,7 @@ public class AutomationGraphRouteDifferentialTests
             {
                 text.Append(automation.Name).Append(": ").Append(automation.Status).Append(", ").Append(automation.StatusMessage)
                     .Append(", state ").Append(automation.CurrentState).Append(" since ").Append(automation.StateEnteredAt)
+                    .Append(", at ").Append(automation.Runtime?.Location.AutomationPath)
                     .Append(", changes [").AppendJoin("; ", _stateChanges[automation]).Append(']').Append('\n');
                 foreach (var (key, rule) in automation.Rules.OrderBy(rule => rule.Key, StringComparer.Ordinal))
                 {
@@ -263,13 +296,14 @@ public class AutomationGraphRouteDifferentialTests
             for (var index = 0; index < AutomationCount; index++)
             {
                 var container = index;
+                var rules = ChooseRules(CreateRules(index));
                 var automation = await _host.AddAutomationAsync(
                     "A" + index,
                     automation =>
                     {
                         automation.States = ["Day", "Night"];
                         automation.InitialState = "Day";
-                        automation.Rules = CreateRules(index);
+                        automation.Rules = rules;
                     },
                     automation => AddTo(container, automation));
                 var changes = new ConcurrentQueue<string>();
@@ -327,6 +361,28 @@ public class AutomationGraphRouteDifferentialTests
             }
 
             return rules;
+        }
+
+        // Whole groups, since the rules of a group drive each other, and the rules that overload the queue in the first
+        // automation always.
+        private Dictionary<string, AutomationRule> ChooseRules(Dictionary<string, AutomationRule> rules)
+        {
+            string[][] groups =
+            [
+                ["keyed"], ["mixed"], ["inline"], ["level"], ["dynamic"], ["extra"], ["press"], ["sibling"], ["entered"], ["guarded"],
+                ["rearm"], ["hold"], ["stale"], ["self"], ["night", "toNight", "toDay"], ["ping", "pong"], ["a", "b", "c"], ["replace"],
+                ["above"]
+            ];
+            var chosen = new HashSet<string>(["wait", "gust"]);
+            foreach (var group in groups)
+            {
+                if (_random.Next(5) < 3)
+                {
+                    chosen.UnionWith(group);
+                }
+            }
+
+            return rules.Where(rule => chosen.Contains(rule.Key)).ToDictionary();
         }
 
         private TestRoom CreateRoom() => new()
@@ -475,8 +531,7 @@ public class AutomationGraphRouteDifferentialTests
             return $"move {automation.Name} to {target}, in [{string.Join(", ", containers)}]";
         }
 
-        // A property that holds no subjects, added at run time with a value or with none; the structural change elsewhere is
-        // the constraint of the remarks of the test class.
+        // A property that holds no subjects, added at run time with a value or with none.
         private string AddWind()
         {
             if (PickRoom()?.Sensor is not { } sensor ||
@@ -488,7 +543,6 @@ public class AutomationGraphRouteDifferentialTests
 
             var wind = _random.Next(2) == 0 ? null : (double?)_random.Next(10);
             _winds.Add(registered.AddProperty("Wind", typeof(double?), _ => wind, (_, value) => wind = (double?)value));
-            ChangeUnrelated();
             return $"wind {wind?.ToString() ?? "null"}";
         }
 
@@ -507,7 +561,11 @@ public class AutomationGraphRouteDifferentialTests
         // A property added at run time in the middle of a path, which takes precedence over a child of [InlinePaths].
         private string AddExtra()
         {
-            var registered = ((IInterceptorSubject)_folders[1]).TryGetRegisteredSubject()!;
+            if (((IInterceptorSubject)_folders[1]).TryGetRegisteredSubject() is not { } registered)
+            {
+                return "no attached folder for extra";
+            }
+
             if (registered.TryGetProperty("Extra") is not null)
             {
                 return "extra exists";
@@ -521,9 +579,10 @@ public class AutomationGraphRouteDifferentialTests
         private string ChangeRuleHost()
         {
             var automation = _automations[_random.Next(_automations.Count)];
+            var shared = automation.Rules.GetValueOrDefault("level") ?? automation.Rules.MinBy(rule => rule.Key, StringComparer.Ordinal).Value;
             _ruleHost.Rules = _random.Next(2) == 0
                 ? new Dictionary<string, AutomationRule>()
-                : new Dictionary<string, AutomationRule> { ["shared"] = automation.Rules["level"] };
+                : new Dictionary<string, AutomationRule> { ["shared"] = shared };
             return $"rule host {_ruleHost.Rules.Count} of {automation.Name}";
         }
 
@@ -535,6 +594,22 @@ public class AutomationGraphRouteDifferentialTests
             target.Add("F2", inner);
             source.Remove("F2");
             return "move F2";
+        }
+
+        // Detaches an outer folder from the root, which gives an automation in it and in another container a single parent
+        // without a change of a property that holds the automation, or attaches it again.
+        private string DetachFolder()
+        {
+            var index = _random.Next(2);
+            var key = "F" + index;
+            if (Graph.Root.Children.ContainsKey(key))
+            {
+                Graph.Remove(key);
+                return $"detach {key}";
+            }
+
+            Graph.Add(key, _folders[index]);
+            return $"attach {key}";
         }
 
         private string ChangeUnrelated()
@@ -667,10 +742,16 @@ public class AutomationGraphRouteDifferentialTests
             }
         }
 
-        // The first automation waits in an operation while the queue overflows with changes of a property it watches.
+        // The first automation waits in an operation while the queue overflows with changes of a property it watches; a
+        // disabled automation runs no operation.
         private async Task<string> OverloadAsync()
         {
             _hasOverloaded = true;
+            if (!_automations[0].Enabled)
+            {
+                return "no overload while disabled";
+            }
+
             _host.Weather.Rain = 1;
             await AsyncTestHelpers.WaitUntilAsync(() => _host.Blinds.IsWaiting);
             for (var gust = 1; gust <= AutomationInputQueue.Capacity + 100; gust++)
@@ -720,6 +801,76 @@ public class AutomationGraphRouteDifferentialTests
             public void OnCompleted()
             {
                 // The automation never completes its observers.
+            }
+        }
+    }
+
+    /// <summary>
+    /// An automation whose rules replace the sensor of <c>/Replacer</c> when its gust is high and when it is low, a
+    /// structural write on their route, and two automations whose rules read only <c>/Weather</c>.
+    /// </summary>
+    private sealed class ReplacingWorld : IAsyncDisposable
+    {
+        private const string ChainReport = "A feedback chain of more than 16 inputs was stopped";
+
+        private readonly AutomationTestHost _host;
+        private readonly TestReplacer _replacer = new() { Sensor = new TestSensor { Gust = 5 } };
+
+        private ReplacingWorld(AutomationTestHost host)
+        {
+            _host = host;
+        }
+
+        public Automation Replacing { get; private set; } = null!;
+
+        public List<Automation> Others { get; } = [];
+
+        public static async Task<ReplacingWorld> CreateAsync(bool makesEveryRouteUnbounded)
+        {
+            var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+                ("gusts", On("Gusts", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
+            host.ChangeDispatcher.MakesEveryRouteUnbounded = makesEveryRouteUnbounded;
+            var world = new ReplacingWorld(host);
+            host.Graph.Add("Replacer", world._replacer);
+            world.Others.Add(host.Automation);
+            world.Others.Add(await host.AddAutomationAsync("Rain", automation => automation.Rules = Keyed(
+                ("rain", On("Rain", When("/Weather/Rain > 0"), Invoke("/Blinds/Open"))))));
+            world.Replacing = await host.AddAutomationAsync("Replacing", automation => automation.Rules = Keyed(
+                ("high", On("High", When("/Replacer/Sensor/Gust > 8"), Invoke("/Replacer/Replace"))),
+                ("low", On("Low", When("/Replacer/Sensor/Gust < 5"), Invoke("/Replacer/Replace")))));
+            await world.FlushAsync();
+            return world;
+        }
+
+        public async Task StartChainAsync()
+        {
+            _replacer.Sensor!.Gust = 9;
+            await FlushAsync();
+            await FlushAsync();
+        }
+
+        public string DescribeReplacing() =>
+            $"{Describe(Replacing, withoutChainReport: false)}; replacements {_replacer.Replacements}, gust {_replacer.Sensor?.Gust}";
+
+        public string DescribeOthers(bool withoutChainReport = false) =>
+            string.Join('\n', Others.Select(other => Describe(other, withoutChainReport))) +
+            $"\nBlinds: {_host.Blinds.CloseCount}, {_host.Blinds.OpenCount}";
+
+        public ValueTask DisposeAsync() => _host.DisposeAsync();
+
+        private static string Describe(Automation automation, bool withoutChainReport)
+        {
+            var isChainReport = withoutChainReport && automation.StatusMessage?.StartsWith(ChainReport, StringComparison.Ordinal) == true;
+            var status = isChainReport ? $"{ServiceStatus.Running}, " : $"{automation.Status}, {automation.StatusMessage}";
+            return $"{automation.Name}: {status}, " + string.Join("; ", automation.Rules.OrderBy(rule => rule.Key, StringComparer.Ordinal)
+                .Select(rule => $"{rule.Key}: {rule.Value.Status}, runs {rule.Value.RunCount}, {rule.Value.LastRunOutcome}"));
+        }
+
+        private async Task FlushAsync()
+        {
+            foreach (var automation in Others.Append(Replacing))
+            {
+                await automation.FlushAsync().WaitAsync(TimeSpan.FromSeconds(30));
             }
         }
     }
