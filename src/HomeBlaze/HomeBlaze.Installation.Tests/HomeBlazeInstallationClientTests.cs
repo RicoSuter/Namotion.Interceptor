@@ -2,6 +2,7 @@ using HomeBlaze.Abstractions.Messaging;
 using HomeBlaze.Installation.Tests.Testing;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Clients;
+using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Testing;
@@ -185,6 +186,49 @@ public class HomeBlazeInstallationClientTests
 
         // Assert
         Assert.Equal(connection.ConnectionId, Assert.Single(_installation.Clients).Key);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenTheConfigurationIsRefused_ThenRenamingThrowsTheRefusalAndTheClientKeepsItsName(bool isRefusalFoundOnlyByWrite)
+    {
+        // Arrange
+        var callbacks = new FakeClientCallbacks();
+        var connection = _connections.Connect(null, callbacks);
+        _installation.ReconcileClients();
+        var client = _installation.Clients[connection.ConnectionId];
+        _root.Refusal = new ConfigurationWriteRefusedException("refused", ["the value of 'x' could not be read"]);
+        _root.IsRefusalFoundOnlyByWrite = isRefusalFoundOnlyByWrite;
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => client.RenameAsync("Hall", CancellationToken.None));
+
+        // Assert
+        Assert.Same(_root.Refusal, exception);
+        Assert.False(client.IsNamed);
+        Assert.Null(client.TokenHash);
+        Assert.Equal(string.Empty, connection.ClientName);
+        Assert.Empty(_root.Written);
+    }
+
+    [Fact]
+    public async Task WhenTheConfigurationIsRefused_ThenForgettingThrowsTheRefusalAndTheClientKeepsItsName()
+    {
+        // Arrange
+        var connection = _connections.Connect(null, new FakeClientCallbacks());
+        _installation.ReconcileClients();
+        var client = _installation.Clients[connection.ConnectionId];
+        await client.RenameAsync("Hall", CancellationToken.None);
+        _root.Refusal = new ConfigurationWriteRefusedException("refused", ["the value of 'x' could not be read"]);
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => client.ForgetAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Same(_root.Refusal, exception);
+        Assert.Equal("Hall", client.Name);
+        Assert.Equal("Hall", connection.ClientName);
     }
 
     [Fact]

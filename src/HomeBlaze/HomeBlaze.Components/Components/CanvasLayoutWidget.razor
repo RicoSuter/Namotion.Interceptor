@@ -203,6 +203,9 @@ else
 
     private CanvasNode? _pressedNode;
 
+    // The position of each node that moves before the move started, until its release.
+    private readonly Dictionary<CanvasNode, (int X, int Y)> _moveStarts = new();
+
     private readonly Dictionary<CanvasNode, SubjectComponent> _nodeComponents = new();
 
     [Parameter]
@@ -240,6 +243,7 @@ else
         var intX = SnapToGrid(x);
         var intY = SnapToGrid(y);
 
+        _moveStarts.TryAdd(node, (node.X, node.Y));
         if (node.X != intX) node.X = intX;
         if (node.Y != intY) node.Y = intY;
     }
@@ -254,17 +258,25 @@ else
         // The moved node is saved and not the canvas: on a page a node is a block of its own, and only its
         // line changes.
         IInterceptorSubject moved = Nodes.FirstOrDefault(node => GetNodeId(node) == modifiedNode.Id) ?? (IInterceptorSubject)canvas;
+        var moveStarts = _moveStarts.ToArray();
+        _moveStarts.Clear();
 
         _ = InvokeAsync(async () =>
         {
-            try
+            // The position follows the mouse before the release, so a save that would be refused moves the nodes back.
+            if (!RootManager.CheckConfigurationWriteOrShowError(moved, Snackbar))
             {
-                await RootManager.WriteConfigurationOrWarnAsync(moved, Snackbar, CancellationToken.None);
+                foreach (var (node, (x, y)) in moveStarts)
+                {
+                    node.X = x;
+                    node.Y = y;
+                }
+
+                StateHasChanged();
+                return;
             }
-            catch (Exception exception)
-            {
-                Console.Error.WriteLine($"Failed to persist canvas layout: {exception.Message}");
-            }
+
+            await RootManager.WriteConfigurationOrWarnAsync(moved, Snackbar, CancellationToken.None);
         });
     }
 
@@ -335,6 +347,8 @@ else
 
     private async Task AddNodeAtPosition(int x, int y)
     {
+        if (Canvas == null || !RootManager.CheckConfigurationWriteOrShowError(Canvas, Snackbar)) return;
+
         x = SnapToGrid(x);
         y = SnapToGrid(y);
 
@@ -370,7 +384,7 @@ else
             yesText: "Delete",
             cancelText: "Cancel");
 
-        if (confirmed == true)
+        if (confirmed == true && RootManager.CheckConfigurationWriteOrShowError(Canvas, Snackbar))
         {
             Canvas.Nodes = Nodes.Where(existing => existing != node).ToArray();
 

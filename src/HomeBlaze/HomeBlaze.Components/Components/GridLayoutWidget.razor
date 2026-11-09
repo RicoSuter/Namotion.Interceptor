@@ -188,6 +188,8 @@ else
 
     private async Task AddCellAt(int row, int column)
     {
+        if (Grid == null || !RootManager.CheckConfigurationWriteOrShowError(Grid, Snackbar)) return;
+
         await SubjectSetupDialog.ShowAsync(DialogService, new SubjectSetupOptions
         {
             BeforeSave = subject =>
@@ -220,7 +222,7 @@ else
             yesText: "Delete",
             cancelText: "Cancel");
 
-        if (confirmed == true)
+        if (confirmed == true && RootManager.CheckConfigurationWriteOrShowError(Grid, Snackbar))
         {
             Grid.Cells = Cells.Where(existing => existing != cell).ToArray();
 

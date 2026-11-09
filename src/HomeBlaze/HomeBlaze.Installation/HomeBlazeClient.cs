@@ -92,8 +92,7 @@ public partial class HomeBlazeClient :
 
         var installation = RequiredInstallation;
         installation.ThrowIfNotPartOfInstallation(this);
-        Name = name.Trim();
-        await installation.WriteClientConfigurationAsync(cancellationToken);
+        await installation.SetClientNameAsync(this, name.Trim(), cancellationToken);
     }
 
     [Operation(Title = "Forget", Icon = "Delete", Position = 2, RequiresConfirmation = true,
@@ -102,8 +101,7 @@ public partial class HomeBlazeClient :
     {
         var installation = RequiredInstallation;
         installation.ThrowIfNotPartOfInstallation(this);
-        Name = string.Empty;
-        await installation.WriteClientConfigurationAsync(cancellationToken);
+        await installation.SetClientNameAsync(this, string.Empty, cancellationToken);
     }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)

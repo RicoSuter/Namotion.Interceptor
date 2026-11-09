@@ -138,12 +138,31 @@ public partial class HomeBlazeInstallation
         }
     }
 
-    internal async Task WriteClientConfigurationAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Names the client and writes the configuration of the installation, which holds the names of its clients.
+    /// </summary>
+    /// <exception cref="ConfigurationWriteRefusedException">
+    /// The writer refuses to write the configuration; the client keeps its name.
+    /// </exception>
+    internal async Task SetClientNameAsync(HomeBlazeClient client, string name, CancellationToken cancellationToken)
     {
         var configurationWriter = this.TryGetFirstParent<IConfigurationWriter>();
-        if (configurationWriter is null || !await configurationWriter.WriteConfigurationAsync(this, cancellationToken))
+        configurationWriter?.ThrowIfWriteRefused(this);
+
+        var previousName = client.Name;
+        client.Name = name;
+        try
         {
-            _logger.LogWarning("The client names of the installation were not saved and will be lost on restart");
+            if (configurationWriter is null || !await configurationWriter.WriteConfigurationAsync(this, cancellationToken))
+            {
+                _logger.LogWarning("The client names of the installation were not saved and will be lost on restart");
+            }
+        }
+        catch (ConfigurationWriteRefusedException)
+        {
+            // Refused after the check above, when the file was read again in between.
+            client.Name = previousName;
+            throw;
         }
     }
 
