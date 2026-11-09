@@ -14,7 +14,8 @@ public class AutomationDurationTests
         { TimeSpan.FromTicks(5000), "0.5ms" },
         { TimeSpan.FromTicks(15000), "1.5ms" },
         { TimeSpan.FromDays(1) + TimeSpan.FromTicks(1), "1d0.0001ms" },
-        { -TimeSpan.FromTicks(12345), "-1.2345ms" }
+        { -TimeSpan.FromTicks(12345), "-1.2345ms" },
+        { TimeSpan.MinValue, "-10675199d2h48m5s477.5808ms" }
     };
 
     [Theory]
@@ -61,6 +62,19 @@ public class AutomationDurationTests
 
         // Assert
         Assert.False(isParsed);
+    }
+
+    [Theory]
+    [InlineData("36501d")]
+    [InlineData("-36501d")]
+    public void WhenTheDurationIsLongerThanTheMaximum_ThenItIsNotParsedAndIsZero(string text)
+    {
+        // Act
+        var isParsed = AutomationDuration.TryParse(text, out var duration);
+
+        // Assert
+        Assert.False(isParsed);
+        Assert.Equal(TimeSpan.Zero, duration);
     }
 
     [Fact]
