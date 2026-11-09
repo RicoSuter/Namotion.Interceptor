@@ -156,18 +156,8 @@ internal sealed partial class ExpressionClock
     // A strict comparison changes one tick after the boundary, for example now - x > d at x + d plus one tick.
     private static TimeSpan GetOffset(Match match) => match.Groups["operator"].Value is ">" or "<=" ? TimeSpan.FromTicks(1) : TimeSpan.Zero;
 
-    private static TimeSpan? ReadDuration(string text)
-    {
-        if (!ParsedExpression.TryParse(text, AutomationPaths.Separator, AutomationVariables.All, out var expression, out _) ||
-            !expression.Paths.IsEmpty)
-        {
-            return null;
-        }
-
-        // A longer duration added to an instant can leave the range of DateTimeOffset; it is evaluated every second.
-        var context = new ConstantContext();
-        return expression.Evaluate(ref context).Value is TimeSpan duration && AutomationDuration.IsWithinMaximum(duration) ? duration : null;
-    }
+    // A longer duration added to an instant can leave the range of DateTimeOffset; it is evaluated every second.
+    private static TimeSpan? ReadDuration(string text) => AutomationDuration.TryParse(text, out var duration) ? duration : null;
 
     [GeneratedRegex(@"(?<=(^|\(|\band|\bor|&&|\|\|)\s*)(?<![\w./])now\s+-\s+(?<path>[^\s()]+)\s*(?<operator>>=|<=|>|<)\s*(?<duration>[0-9][0-9A-Za-z.]*)(?=\s*($|\)|and\b|or\b|&&|\|\|))")]
     private static partial Regex ElapsedComparisonPattern();
@@ -186,15 +176,4 @@ internal sealed partial class ExpressionClock
 
     /// <summary>A comparison <c>time op duration</c>, which changes when the local time of day passes <see cref="TimeOfDay"/>.</summary>
     internal readonly record struct TimeOfDayComparison(TimeSpan TimeOfDay);
-
-    private readonly struct ConstantContext : IExpressionContext
-    {
-        public ExpressionValue ResolvePath(string path) => ExpressionValue.Missing;
-
-        public ExpressionValue ResolveVariable(string variable, string? memberPath) => ExpressionValue.Missing;
-
-        public ExpressionValue ApplyPipe(string name, ImmutableArray<string> arguments, ExpressionValue input) => ExpressionValue.Missing;
-
-        public string ToText(ExpressionValue result) => string.Empty;
-    }
 }
