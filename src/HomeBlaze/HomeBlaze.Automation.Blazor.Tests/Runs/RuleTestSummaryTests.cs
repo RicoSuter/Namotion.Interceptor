@@ -46,8 +46,8 @@ public class RuleTestSummaryTests
 
     [Theory]
     [InlineData(ServiceStatus.Stopped, true, "Would not run now: the automation is stopped. A condition and Only if are true.")]
-    [InlineData(ServiceStatus.Error, true, "Would not run now: the automation stopped with an error. A condition and Only if are true.")]
     [InlineData(ServiceStatus.Starting, false, "Would not run now: the automation is starting. A condition is true.")]
+    [InlineData(ServiceStatus.Stopping, false, "Would not run now: the automation is stopping. A condition is true.")]
     public void WhenTheRuleWouldRunButTheAutomationIsNotRunning_ThenTheVerdictSaysSo(ServiceStatus status, bool hasOnlyIf, string text)
     {
         // Arrange
@@ -68,7 +68,7 @@ public class RuleTestSummaryTests
 
     [Theory]
     [InlineData(false, ServiceStatus.Stopped, "Would not run now: Only if is false, and the automation is stopped.")]
-    [InlineData(null, ServiceStatus.Error, "Would not run now: Only if is unknown, and the automation stopped with an error.")]
+    [InlineData(null, ServiceStatus.Stopping, "Would not run now: Only if is unknown, and the automation is stopping.")]
     public void WhenOnlyIfIsNotTrueAndTheAutomationIsNotRunning_ThenTheVerdictGivesTheStatusInsteadOfWaiting(bool? onlyIf, ServiceStatus status, string text)
     {
         // Arrange
@@ -79,6 +79,21 @@ public class RuleTestSummaryTests
 
         // Assert
         Assert.Equal(new RuleTestVerdict(false, text), verdict);
+    }
+
+    [Theory]
+    [InlineData(true, true, "Would run now. The automation shows an error.")]
+    [InlineData(false, false, "Would not run now: Only if is false. A condition that becomes true while Only if is false waits until Only if is true. The automation shows an error.")]
+    public void WhenTheAutomationShowsAnError_ThenTheVerdictSaysWhatTheRunningRulesDoAndNotesTheError(bool onlyIf, bool wouldRun, string text)
+    {
+        // Arrange
+        var result = Result(onlyIf: onlyIf);
+
+        // Act
+        var verdict = RuleTestSummary.Describe(result, false, ServiceStatus.Error);
+
+        // Assert
+        Assert.Equal(new RuleTestVerdict(wouldRun, text), verdict);
     }
 
     [Fact]
@@ -101,7 +116,7 @@ public class RuleTestSummaryTests
         var result = Result(trigger: false);
 
         // Act
-        var verdict = RuleTestSummary.Describe(result, false, ServiceStatus.Error);
+        var verdict = RuleTestSummary.Describe(result, false, ServiceStatus.Stopped);
 
         // Assert
         Assert.Equal(new RuleTestVerdict(false, "Would not run now: no condition is true."), verdict);
