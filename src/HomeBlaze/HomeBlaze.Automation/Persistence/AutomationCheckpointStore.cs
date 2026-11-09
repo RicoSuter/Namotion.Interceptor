@@ -133,7 +133,7 @@ internal sealed class AutomationCheckpointStore
         {
             if (!_isDeleted && ReferenceEquals(_file.Store, this))
             {
-                WriteAtomically(FilePath!, JsonSerializer.Serialize(checkpoint, AutomationCheckpointJsonContext.Default.AutomationCheckpoint));
+                AtomicFile.WriteAllBytes(FilePath!, JsonSerializer.SerializeToUtf8Bytes(checkpoint, AutomationCheckpointJsonContext.Default.AutomationCheckpoint));
             }
         }
     }
@@ -205,31 +205,6 @@ internal sealed class AutomationCheckpointStore
             }
 
             return file;
-        }
-    }
-
-    // Flushed to the disk before the move, since a file system may otherwise persist the move before the content, which
-    // leaves an empty checkpoint after a power loss.
-    private static void WriteAtomically(string path, string content)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var temporaryPath = path + "." + Guid.NewGuid().ToString("N") + TemporaryExtension;
-        try
-        {
-            using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                stream.Write(Encoding.UTF8.GetBytes(content));
-                stream.Flush(flushToDisk: true);
-            }
-
-            File.Move(temporaryPath, path, overwrite: true);
-        }
-        finally
-        {
-            if (File.Exists(temporaryPath))
-            {
-                File.Delete(temporaryPath);
-            }
         }
     }
 
