@@ -13,7 +13,7 @@ namespace HomeBlaze.Automation.Tests.Runtime;
 public class GraphRoutesTests
 {
     // The root has no property Room, so the route also has the property that, added at run time, would take precedence
-    // over the child of [InlinePaths].
+    // over the child of [InlinePaths], and the configuration of Gust, which would hide it once added as a secret.
     [Theory]
     [InlineData("/Room/Devices[gauge]/Gust", nameof(TestRoom.Devices))]
     [InlineData("/Room/Items[0]/Gust", nameof(TestRoom.Items))]
@@ -28,7 +28,9 @@ public class GraphRoutesTests
 
         // Assert
         Assert.NotNull(property);
-        Assert.Equal([fixture.RoomName, fixture.RootChildren, new PropertyReference(fixture.Room, holder)], route.Properties.ToArray());
+        Assert.Equal(
+            [fixture.RoomName, fixture.RootChildren, new PropertyReference(fixture.Room, holder), GustConfiguration(property)],
+            route.Properties.ToArray());
         Assert.False(route.IsUnbounded);
     }
 
@@ -88,7 +90,11 @@ public class GraphRoutesTests
         // Assert
         Assert.NotNull(property);
         Assert.Equal(
-            [new PropertyReference(fixture.Automation, nameof(Automation.Rules)), new PropertyReference(fixture.Folder, nameof(TestFolder.Children))],
+            [
+                new PropertyReference(fixture.Automation, nameof(Automation.Rules)),
+                new PropertyReference(fixture.Folder, nameof(TestFolder.Children)),
+                new PropertyReference(fixture.Folder, "Level@HomeBlaze:Configuration")
+            ],
             route.Properties.ToArray());
         Assert.False(route.IsUnbounded);
     }
@@ -349,6 +355,8 @@ public class GraphRoutesTests
         Assert.False(hasPublishedTheSameUnion);
         Assert.False(changes.Registration.IsResolving);
     }
+
+    private static PropertyReference GustConfiguration(RegisteredSubjectProperty gust) => new(gust.Subject, "Gust@HomeBlaze:Configuration");
 
     private static void Resolve(RouteFixture fixture, string path, GraphRouteSlot slot)
     {

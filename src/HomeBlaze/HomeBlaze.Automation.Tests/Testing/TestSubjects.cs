@@ -67,6 +67,13 @@ public partial class TestSensorHolder
     public partial TestSensor? Sensor { get; set; }
 }
 
+/// <summary>A device with a plain property, which expressions read only while it has state metadata.</summary>
+[InterceptorSubject]
+public partial class TestPlainDevice
+{
+    public double? Level { get; set; }
+}
+
 /// <summary>A parent of rules with a state entry time, standing in for an automation.</summary>
 [InterceptorSubject]
 public partial class TestRuleHost

@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
 using Namotion.Interceptor;
@@ -83,6 +85,54 @@ public class AutomationGraphRouteTests
 
         // Assert
         Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenAPlainPropertyGainsStateMetadataAtRunTime_ThenAPathToItBecomesReadableAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { });
+        host.ChangeDispatcher.MakesEveryRouteUnbounded = makesEveryRouteUnbounded;
+        var device = new TestPlainDevice { Level = 9 };
+        host.Graph.Add("Device", device);
+        var automation = await host.AddAutomationAsync("Levels", Rule("/Device/Level > 5"));
+        var closesWhileUnreadable = host.Blinds.CloseCount;
+
+        // Act
+        ((IInterceptorSubject)device).TryGetRegisteredProperty(nameof(TestPlainDevice.Level))!
+            .AddAttribute(KnownAttributes.State, typeof(StateMetadata), _ => new StateMetadata(), null);
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.Equal(0, closesWhileUnreadable);
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenAPropertyGainsASecretConfigurationAtRunTime_ThenAPathToItIsNoLongerReadAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { });
+        host.ChangeDispatcher.MakesEveryRouteUnbounded = makesEveryRouteUnbounded;
+        double? windValue = 1;
+        var wind = ((IInterceptorSubject)host.Weather).TryGetRegisteredSubject()!
+            .AddProperty("Wind", typeof(double?), _ => windValue, (_, value) => windValue = (double?)value);
+        var automation = await host.AddAutomationAsync("Winds", Rule("/Weather/Wind > 5"));
+
+        // Act
+        wind.AddAttribute(KnownAttributes.Configuration, typeof(ConfigurationMetadata), _ => new ConfigurationMetadata { IsSecret = true }, null);
+        await automation.FlushAsync();
+        var isWatchedWhileSecret = Registration(automation).Watched.Contains(wind.Reference);
+        wind.SetValue(9.0);
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.False(isWatchedWhileSecret);
+        Assert.Equal(0, host.Blinds.CloseCount);
     }
 
     [Fact]

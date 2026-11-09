@@ -1,4 +1,5 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Expressions;
@@ -23,10 +24,36 @@ internal static class AutomationPaths
     /// </summary>
     public static RegisteredSubjectProperty? ResolveProperty(SubjectPathResolver resolver, string path, IInterceptorSubject rule, ISubjectPathRecorder? recorder = null)
     {
-        // A secret or excluded property is one by its attributes, so no change makes it readable.
         var property = ResolveTarget(resolver, path, rule, recorder);
-        return property is not null && property.IsDisplayable() ? property : null;
+        return property is not null && IsReadable(property, recorder) ? property : null;
     }
+
+    private static bool IsReadable(RegisteredSubjectProperty property, ISubjectPathRecorder? recorder)
+    {
+        var isReadable = property.IsDisplayable();
+        if (recorder is null)
+        {
+            return isReadable;
+        }
+
+        // Added at run time, a secret configuration hides the property and state metadata shows a plain one.
+        var configuration = property.TryGetAttribute(KnownAttributes.Configuration);
+        if (configuration is null)
+        {
+            AddAttribute(property, KnownAttributes.Configuration, recorder);
+        }
+
+        if (!isReadable && configuration?.GetValue() is not ConfigurationMetadata { IsSecret: true } &&
+            property.TryGetAttribute(KnownAttributes.State) is null)
+        {
+            AddAttribute(property, KnownAttributes.State, recorder);
+        }
+
+        return isReadable;
+    }
+
+    private static void AddAttribute(RegisteredSubjectProperty property, string attributeName, ISubjectPathRecorder recorder) =>
+        recorder.AddProperty(new PropertyReference(property.Subject, $"{property.Name}@{attributeName}"));
 
     /// <summary>
     /// Resolves the property or operation a path ends at: the last segment names it, the part before it leads to its subject.
