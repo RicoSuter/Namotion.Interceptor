@@ -8,12 +8,6 @@ namespace HomeBlaze.Automation
         Continue = 0,
         StopRule = 1,
     }
-    public sealed class AllowAllAutomationAuthorizer : HomeBlaze.Automation.IAutomationAuthorizer
-    {
-        public AllowAllAutomationAuthorizer() { }
-        public string? GetOperationDenial(Namotion.Interceptor.IInterceptorSubject automation, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty operation) { }
-        public string? GetPropertyWriteDenial(Namotion.Interceptor.IInterceptorSubject automation, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
-    }
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("AutoMode")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     [System.ComponentModel.Category("Automation")]
@@ -46,7 +40,7 @@ namespace HomeBlaze.Automation
         [HomeBlaze.Abstractions.Attributes.State(Position=4)]
         public string? StatusMessage { get; }
         [Namotion.Interceptor.Attributes.Derived]
-        public string? Title { get; }
+        public string Title { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
@@ -82,26 +76,14 @@ namespace HomeBlaze.Automation
     {
         public const string OwnAutomationPath = "..";
         public static System.Collections.Generic.IReadOnlyList<System.Type> GetEventTypes(System.Type subjectType) { }
-        public static System.Collections.Generic.IReadOnlyList<string> GetPayloadFields(System.Type eventType) { }
+        public static System.Collections.Immutable.ImmutableArray<string> GetPayloadFields(System.Type eventType) { }
         public static Namotion.Interceptor.IInterceptorSubject? ResolveSource(HomeBlaze.Automation.Automation automation, string? ruleKey, string? subjectPath) { }
-    }
-    public sealed class AutomationExpressionPreview : System.IEquatable<HomeBlaze.Automation.AutomationExpressionPreview>
-    {
-        public AutomationExpressionPreview() { }
-        public string? Error { get; init; }
-        public bool? Result { get; init; }
-        public string? Text { get; init; }
-        public object? Value { get; init; }
     }
     public static class AutomationPreview
     {
-        public static HomeBlaze.Automation.AutomationExpressionPreview Evaluate(HomeBlaze.Automation.Automation automation, string? ruleKey, Namotion.Interceptor.Expressions.ParsedExpression expression, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone = null) { }
-        public static HomeBlaze.Automation.AutomationExpressionPreview Evaluate(HomeBlaze.Automation.Automation automation, string? ruleKey, string? expression, bool allowsEvent, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone = null) { }
-        public static HomeBlaze.Automation.AutomationExpressionPreview Render(HomeBlaze.Automation.Automation automation, string? ruleKey, Namotion.Interceptor.Expressions.TextTemplate template) { }
-        public static HomeBlaze.Automation.AutomationExpressionPreview Render(HomeBlaze.Automation.Automation automation, string? ruleKey, string? template, bool allowsEvent) { }
+        public static HomeBlaze.Components.Abstractions.Expressions.ExpressionPreview Evaluate(HomeBlaze.Automation.Automation automation, string? ruleKey, Namotion.Interceptor.Expressions.ParsedExpression expression, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone = null) { }
+        public static string Render(HomeBlaze.Automation.Automation automation, string? ruleKey, Namotion.Interceptor.Expressions.TextTemplate template) { }
         public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveTarget(HomeBlaze.Automation.Automation automation, string? ruleKey, string? path) { }
-        public static bool TryParseExpression(string? expression, bool allowsEvent, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Expressions.ParsedExpression? parsed, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
-        public static bool TryParseTemplate(string? template, bool allowsEvent, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Expressions.TextTemplate? parsed, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
     }
     [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
@@ -153,7 +135,7 @@ namespace HomeBlaze.Automation
     }
     public static class AutomationRuleOrder
     {
-        public static System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string, HomeBlaze.Automation.AutomationRule>> GetRulesInOrder(this HomeBlaze.Automation.Automation automation) { }
+        public static System.Collections.Immutable.ImmutableArray<System.Collections.Generic.KeyValuePair<string, HomeBlaze.Automation.AutomationRule>> GetRulesInOrder(this HomeBlaze.Automation.Automation automation) { }
     }
     public sealed class AutomationRuleTestResult : System.IEquatable<HomeBlaze.Automation.AutomationRuleTestResult>
     {
@@ -206,16 +188,11 @@ namespace HomeBlaze.Automation
     }
     public static class AutomationValidator
     {
-        public const string ClockEqualityHint = "The clock never equals a value exactly, so now or time with == or != does not mat" +
-            "ch a moment: use >=, such as time >= 7h.";
-        public const string EverySecondHint = "Checked every second, because when this use of the clock changes cannot be comput" +
-            "ed. A comparison such as now - ./LastTriggeredAt > 30m or time >= 7h is checked " +
-            "only when its result can change.";
         public static System.Collections.Immutable.ImmutableArray<string> Variables { get; }
-        public static System.Collections.Generic.IReadOnlyList<string> GetConditionHints(string? text) { }
-        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.AutomationValidationError> Validate(System.Collections.Generic.IReadOnlyList<string> states, string? initialState, System.Collections.Generic.IReadOnlyDictionary<string, HomeBlaze.Automation.AutomationRule> rules, System.Collections.Generic.IReadOnlyList<string> ruleOrder) { }
-        public static string? ValidateExpression(string? text, bool allowsEvent) { }
-        public static string? ValidateTemplate(string? text, bool allowsEvent) { }
+        public static System.Collections.Immutable.ImmutableArray<string> GetConditionHints(string? text) { }
+        public static bool TryParseExpression(string? text, bool allowsEvent, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Expressions.ParsedExpression? parsed, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
+        public static bool TryParseTemplate(string? text, bool allowsEvent, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Expressions.TextTemplate? parsed, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
+        public static System.Collections.Immutable.ImmutableArray<HomeBlaze.Automation.AutomationValidationError> Validate(System.Collections.Generic.IReadOnlyList<string> states, string? initialState, System.Collections.Generic.IReadOnlyDictionary<string, HomeBlaze.Automation.AutomationRule> rules, System.Collections.Generic.IReadOnlyList<string> ruleOrder) { }
     }
     public sealed class ChangeStateAction : HomeBlaze.Automation.AutomationAction, System.IEquatable<HomeBlaze.Automation.ChangeStateAction>
     {

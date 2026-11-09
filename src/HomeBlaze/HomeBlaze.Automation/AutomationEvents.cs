@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using HomeBlaze.Automation.Events;
 using HomeBlaze.Automation.Expressions;
 using Namotion.Interceptor;
@@ -16,7 +17,7 @@ public static class AutomationEvents
     public static IReadOnlyList<Type> GetEventTypes(Type subjectType) => EventSources.GetEventTypes(subjectType);
 
     /// <summary>The names of the fields of a payload type, ordered by name.</summary>
-    public static IReadOnlyList<string> GetPayloadFields(Type eventType) =>
+    public static ImmutableArray<string> GetPayloadFields(Type eventType) =>
         [.. EventPayloadReader.GetMembers(eventType).Values.Select(member => member.Name).Order(StringComparer.Ordinal)];
 
     /// <summary>

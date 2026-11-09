@@ -50,11 +50,11 @@
                         }
                     </div>
                     <div style="flex: 2 1 220px; min-width: 0;">
-                        @if (Fields is { } fields)
+                        @if (!Fields.IsDefault)
                         {
                             <MudAutocomplete T="string" Label="Field" Dense="true" Value="@row.Path" CoerceValue="true" Error="@(pathError is not null)" ErrorText="@pathError"
                                              ValueChanged="@(value => SetRowAsync(key, row with { Path = value ?? string.Empty }))"
-                                             SearchFunc="@((text, _) => SearchFieldsAsync(fields, text))" />
+                                             SearchFunc="@((text, _) => SearchFieldsAsync(Fields, text))" />
                         }
                         else
                         {
@@ -106,10 +106,16 @@
     private bool _hasPendingRow;
     private TestIds _testIds = new("expression-field");
 
+    /// <summary>The expression text; null or white space for none.</summary>
     [Parameter] public string? Value { get; set; }
 
+    /// <summary>
+    /// Raised with the new expression text after an edit changed it. A row that is invalid or not finished stays out of the
+    /// text until it is complete.
+    /// </summary>
     [Parameter] public EventCallback<string?> ValueChanged { get; set; }
 
+    /// <summary>The caption above the field.</summary>
     [Parameter] public string Label { get; set; } = "Condition";
 
     /// <summary>The word in front of the first row, such as "When" or "Check".</summary>
@@ -122,32 +128,38 @@
     /// Prepares an expression or a path for evaluation: returns a function that evaluates it with the current values each
     /// time it is called, or null when it cannot be evaluated. Called for the valid expression, the path and the condition
     /// of each row and the paths of the hints whenever the text, the rows, the variables or one of the delegate parameters
-    /// changes, so pass delegates that keep their identity across renders. Without it, no values are shown.
+    /// changes. The delegate parameters are compared with <see cref="Delegate.Equals(object?)"/>, so a method group of the
+    /// same instance counts as unchanged, while a lambda that captures is a new delegate on each render and prepares
+    /// everything again. Without it, no values are shown.
     /// </summary>
     [Parameter] public Func<string, Func<ExpressionPreview>?>? Preview { get; set; }
 
-    /// <summary>Gets the hints of the host for a valid expression, which the field shows as warnings; asked again only when the text changes.</summary>
-    [Parameter] public Func<string, IReadOnlyList<string>>? Hints { get; set; }
+    /// <summary>
+    /// Gets the hints of the host for a valid expression, which the field shows as warnings. Asked when the text, the rows,
+    /// the variables or a delegate parameter changes, not when the values are read again.
+    /// </summary>
+    [Parameter] public Func<string, ImmutableArray<string>>? Hints { get; set; }
 
-    /// <summary>The fields a row offers, such as the fields of an event; without them, a row picks a subject path.</summary>
-    [Parameter] public IReadOnlyList<string>? Fields { get; set; }
+    /// <summary>The fields a row offers, such as the fields of an event; default for none, in which case a row picks a subject path.</summary>
+    [Parameter] public ImmutableArray<string> Fields { get; set; }
 
     /// <summary>
     /// Raised with true while a row holds an edit that is not part of <see cref="Value"/>, because it is invalid or not
     /// finished, or a row has no path or no value yet, which <see cref="Value"/> leaves out, and with false when none does.
     /// A host blocks saving while it is true.
     /// </summary>
-    [Parameter] public EventCallback<bool> HasPendingRowChanged { get; set; }
+    [Parameter] public EventCallback<bool> OnPendingRowChanged { get; set; }
 
     /// <summary>
     /// Raised when switching to the text drops a row edit that is not part of <see cref="Value"/>, before
-    /// <see cref="HasPendingRowChanged"/> is raised with false.
+    /// <see cref="OnPendingRowChanged"/> is raised with false.
     /// </summary>
     [Parameter] public EventCallback PendingRowDiscarded { get; set; }
 
     /// <summary>The variables the host declares for its expressions; default stands for <c>value</c> and <c>subject</c>.</summary>
     [Parameter] public ImmutableArray<string> Variables { get; set; }
 
+    /// <summary>The <c>data-testid</c> of the field, and the prefix of the test ids of its parts.</summary>
     [Parameter] public string TestId { get; set; } = "expression-field";
 
     protected override async Task OnParametersSetAsync()
@@ -237,7 +249,7 @@
         if (_hasPendingRow != _model.HasPendingRow)
         {
             _hasPendingRow = _model.HasPendingRow;
-            await HasPendingRowChanged.InvokeAsync(_hasPendingRow);
+            await OnPendingRowChanged.InvokeAsync(_hasPendingRow);
         }
     }
 
@@ -269,7 +281,7 @@
         public string Result { get; } = $"{field}-result";
     }
 
-    private static Task<IEnumerable<string>> SearchFieldsAsync(IReadOnlyList<string> fields, string? text) =>
+    private static Task<IEnumerable<string>> SearchFieldsAsync(ImmutableArray<string> fields, string? text) =>
         Task.FromResult(string.IsNullOrWhiteSpace(text)
             ? fields.AsEnumerable()
             : fields.Where(field => field.Contains(text, StringComparison.OrdinalIgnoreCase)));

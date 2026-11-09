@@ -17,7 +17,7 @@
         {
             <MudAlert Severity="Severity.Info" Dense="true" data-testid="automation-notices">@notice</MudAlert>
         }
-        @if (_errors.Count > 0)
+        @if (_errors.Length > 0)
         {
             <MudAlert Severity="Severity.Warning" Dense="true" Class="automation-errors" data-testid="automation-errors">
                 <MudText Typo="Typo.body2">Fix these before saving:</MudText>
@@ -51,7 +51,7 @@
 
     private readonly PendingRows _pendingRows = new();
     private AutomationDraft? _draft;
-    private IReadOnlyList<AutomationValidationError> _errors = [];
+    private ImmutableArray<AutomationValidationError> _errors = [];
     private int _validatedInputErrorVersion;
     private int _tabIndex;
     private string? _selectedRuleKey;
@@ -73,7 +73,7 @@
 
     // The errors are validated after each edit and after a render in which an input changed its error, such as one that
     // was disposed, not on every read: the host reads this on every input event.
-    public bool IsValid => _draft is not null && !_pendingRows.Any && _errors.Count == 0;
+    public bool IsValid => _draft is not null && !_pendingRows.Any && _errors.Length == 0;
 
     private Automation? Automation => Subject as Automation;
 

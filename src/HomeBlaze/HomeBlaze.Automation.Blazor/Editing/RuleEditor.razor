@@ -109,7 +109,7 @@
 
     [Parameter, EditorRequired] public RuleDraft Rule { get; set; } = null!;
 
-    [Parameter] public IReadOnlyList<AutomationValidationError> Errors { get; set; } = [];
+    [Parameter] public ImmutableArray<AutomationValidationError> Errors { get; set; } = [];
 
     [Parameter] public EventCallback Changed { get; set; }
 

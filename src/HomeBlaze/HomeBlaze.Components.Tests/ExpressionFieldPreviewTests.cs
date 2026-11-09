@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using HomeBlaze.Components.Abstractions.Expressions;
 using HomeBlaze.Components.Inputs;
 using Xunit;
 
@@ -162,7 +163,7 @@ public class ExpressionFieldPreviewTests
         var host = new Host();
         var preview = new ExpressionFieldPreview();
         var hintCount = 0;
-        IReadOnlyList<string> GetHints(string text)
+        ImmutableArray<string> GetHints(string text)
         {
             hintCount++;
             return text.Contains("==") ? ["Use >="] : [];

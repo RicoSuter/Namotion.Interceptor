@@ -1,3 +1,4 @@
+using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Automation.Tests.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -60,7 +61,7 @@ public class AutomationValidatorTests
         var errors = AutomationValidator.Validate([], null, rules, []);
 
         // Assert
-        Assert.Equal(2, errors.Count);
+        Assert.Equal(2, errors.Length);
         Assert.All(errors, error => Assert.Equal("a", error.RuleKey));
         Assert.StartsWith("Only if: ", errors[0].Message);
         Assert.Equal("it has no action", errors[1].Message);
@@ -162,7 +163,7 @@ public class AutomationValidatorTests
     public void WhenAnExpressionIsValidated_ThenTheVariableRulesOfAutomationsApply(string expression, bool allowsEvent, string? expected)
     {
         // Act
-        var error = AutomationValidator.ValidateExpression(expression, allowsEvent);
+        AutomationValidator.TryParseExpression(expression, allowsEvent, out _, out var error);
 
         // Assert
         Assert.Equal(expected, error);
@@ -188,20 +189,22 @@ public class AutomationValidatorTests
         var hints = AutomationValidator.GetConditionHints(condition);
 
         // Assert
-        Assert.Equal(hasEqualityHint, hints.Contains(AutomationValidator.ClockEqualityHint));
-        Assert.Equal(hasEverySecondHint, hints.Contains(AutomationValidator.EverySecondHint));
-        Assert.Equal(Convert.ToInt32(hasEqualityHint) + Convert.ToInt32(hasEverySecondHint), hints.Count);
+        Assert.Equal(hasEqualityHint, hints.Contains(ConditionHints.ClockEquality));
+        Assert.Equal(hasEverySecondHint, hints.Contains(ConditionHints.EverySecond));
+        Assert.Equal(Convert.ToInt32(hasEqualityHint) + Convert.ToInt32(hasEverySecondHint), hints.Length);
     }
 
     [Fact]
     public void WhenATemplateIsValidated_ThenItsExpressionsAreChecked()
     {
         // Act
-        var valid = AutomationValidator.ValidateTemplate("Gust {{ /Weather/Gust }} m/s", allowsEvent: false);
-        var invalid = AutomationValidator.ValidateTemplate("Gust {{ event/Gust }}", allowsEvent: false);
+        var isValid = AutomationValidator.TryParseTemplate("Gust {{ /Weather/Gust }} m/s", allowsEvent: false, out _, out var valid);
+        var isInvalid = !AutomationValidator.TryParseTemplate("Gust {{ event/Gust }}", allowsEvent: false, out _, out var invalid);
 
         // Assert
+        Assert.True(isValid);
         Assert.Null(valid);
+        Assert.True(isInvalid);
         Assert.Equal(EventOnly, invalid);
     }
 

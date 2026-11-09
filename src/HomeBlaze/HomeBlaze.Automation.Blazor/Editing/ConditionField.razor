@@ -2,7 +2,7 @@
 
 @* An ExpressionField that tells the editor while a row holds an unfinished or invalid edit, and stops doing so when it goes away. *@
 <ExpressionField Value="@Value" ValueChanged="ValueChanged" Label="@Label" Lead="@Lead" Validate="@Validate" Preview="@Preview" Hints="@Hints"
-                 Fields="@Fields" Variables="@AutomationValidator.Variables" TestId="@TestId" HasPendingRowChanged="@ReportPending"
+                 Fields="@Fields" Variables="@AutomationValidator.Variables" TestId="@TestId" OnPendingRowChanged="@ReportPending"
                  PendingRowDiscarded="@(() => _tracker?.Discard())" />
 
 @code {
@@ -22,9 +22,9 @@
 
     [Parameter] public Func<string, Func<ExpressionPreview>?>? Preview { get; set; }
 
-    [Parameter] public Func<string, IReadOnlyList<string>>? Hints { get; set; }
+    [Parameter] public Func<string, ImmutableArray<string>>? Hints { get; set; }
 
-    [Parameter] public IReadOnlyList<string>? Fields { get; set; }
+    [Parameter] public ImmutableArray<string> Fields { get; set; }
 
     [Parameter] public string TestId { get; set; } = "expression-field";
 

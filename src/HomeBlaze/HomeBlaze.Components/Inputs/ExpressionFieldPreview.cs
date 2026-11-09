@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using HomeBlaze.Components.Abstractions.Expressions;
 
 namespace HomeBlaze.Components.Inputs;
 
@@ -18,8 +19,8 @@ internal sealed class ExpressionFieldPreview
     private ImmutableArray<string> _variables;
     private Func<string, string?>? _validate;
     private Func<string, Func<ExpressionPreview>?>? _preview;
-    private Func<string, IReadOnlyList<string>>? _getHints;
-    private IReadOnlyList<string> _hostHints = [];
+    private Func<string, ImmutableArray<string>>? _getHints;
+    private ImmutableArray<string> _hostHints = [];
     private Func<ExpressionPreview>? _result;
     private RowReader[] _rowReaders = [];
     private string[] _rowTexts = [];
@@ -46,7 +47,7 @@ internal sealed class ExpressionFieldPreview
         ImmutableArray<string> variables,
         Func<string, string?>? validate,
         Func<string, Func<ExpressionPreview>?>? preview,
-        Func<string, IReadOnlyList<string>>? getHints = null)
+        Func<string, ImmutableArray<string>>? getHints = null)
     {
         if (_text == text && _variables == variables && Equals(_validate, validate) &&
             Equals(_preview, preview) && Equals(_getHints, getHints) && HasRows(rows))

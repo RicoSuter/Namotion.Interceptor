@@ -35,7 +35,7 @@ public class RuleExpressionsTests
         // Act
         var inAction = expressions.Validate("event/State == On");
         var inCondition = RuleExpressions.ValidateCondition("event/State == On");
-        var conditionPreview = expressions.PreviewCondition("event/State == On");
+        var conditionPreview = expressions.PrepareConditionPreview("event/State == On");
 
         // Assert
         Assert.Null(inAction);
@@ -50,8 +50,8 @@ public class RuleExpressionsTests
         var expressions = TestAutomations.Expressions();
 
         // Act
-        var valid = expressions.PreviewCondition("2 > 1");
-        var invalid = expressions.PreviewCondition("2 >");
+        var valid = expressions.PrepareConditionPreview("2 > 1");
+        var invalid = expressions.PrepareConditionPreview("2 >");
 
         // Assert
         Assert.NotNull(valid);
@@ -66,8 +66,8 @@ public class RuleExpressionsTests
         var expressions = TestAutomations.Expressions();
 
         // Act
-        var valid = expressions.Template("Sum {{ 1 + 2 | raw }}");
-        var invalid = expressions.Template("Sum {{ 1 +");
+        var valid = expressions.PrepareTemplatePreview("Sum {{ 1 + 2 | raw }}");
+        var invalid = expressions.PrepareTemplatePreview("Sum {{ 1 +");
 
         // Assert
         Assert.NotNull(valid);
@@ -87,13 +87,13 @@ public class RuleExpressionsTests
         var withViewerZone = new RuleExpressions(automation, "rule", allowsEvent: false, viewerZone);
 
         // Act
-        var relative = withViewerZone.PreviewCondition("./Name == Rule")?.Invoke();
-        var viewer = withViewerZone.PreviewCondition("now")?.Invoke();
-        var server = new RuleExpressions(automation, "rule", allowsEvent: false).PreviewCondition("now")?.Invoke();
+        var relative = withViewerZone.PrepareConditionPreview("./Name == Rule")?.Invoke();
+        var viewer = withViewerZone.PrepareConditionPreview("now")?.Invoke();
+        var server = new RuleExpressions(automation, "rule", allowsEvent: false).PrepareConditionPreview("now")?.Invoke();
 
         // Assert
         Assert.True(relative?.Result);
-        Assert.Equal("Rule", withViewerZone.Template("{{ ./Name }}")?.Invoke());
+        Assert.Equal("Rule", withViewerZone.PrepareTemplatePreview("{{ ./Name }}")?.Invoke());
         Assert.NotNull(viewer);
         Assert.NotNull(server);
         Assert.Contains("+05:00", viewer.Text);
