@@ -228,11 +228,35 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
         if (observation.Value is null || isRearmUnknown)
         {
             UnknownSince ??= now;
-            MissingPaths = observation.MissingPaths;
+
+            // Every evaluation lists the paths anew, so equal paths keep the list and the version stays.
+            if (!AreEqual(MissingPaths, observation.MissingPaths))
+            {
+                MissingPaths = observation.MissingPaths;
+            }
+
             return;
         }
 
         UnknownSince = null;
         MissingPaths = [];
+    }
+
+    private static bool AreEqual(IReadOnlyList<string> first, IReadOnlyList<string> second)
+    {
+        if (first.Count != second.Count)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < first.Count; index++)
+        {
+            if (!string.Equals(first[index], second[index], StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

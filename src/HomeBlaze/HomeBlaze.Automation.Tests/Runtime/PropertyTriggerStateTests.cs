@@ -216,6 +216,25 @@ public class PropertyTriggerStateTests
     }
 
     [Fact]
+    public void WhenTheValueStaysUnknownWithTheSameMissingPaths_ThenTheVersionStays()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(hold: null, hasRearm: false);
+        state.Activate(TriggerActivation.EvaluateImmediately, Unknown("/Weather/Gust"), At(0));
+        var versionAfterTheFirstObservation = state.Version;
+
+        // Act
+        state.Observe(Unknown("/Weather/Gust"), At(1));
+        var versionAfterTheSamePaths = state.Version;
+        state.Observe(Unknown("/Weather/Rain"), At(2));
+
+        // Assert
+        Assert.Equal(versionAfterTheFirstObservation, versionAfterTheSamePaths);
+        Assert.NotEqual(versionAfterTheSamePaths, state.Version);
+        Assert.Equal(["/Weather/Rain"], state.MissingPaths);
+    }
+
+    [Fact]
     public void WhenAHoldWouldEndAfterTheLatestInstant_ThenItsEndIsTheLatestInstant()
     {
         // Arrange
