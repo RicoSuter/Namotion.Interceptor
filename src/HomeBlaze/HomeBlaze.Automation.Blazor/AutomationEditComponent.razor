@@ -113,8 +113,9 @@
         return Task.CompletedTask;
     }
 
-    // A field that goes away reports from its disposal, which runs during a render of this component, so the update is
-    // queued instead of rendering in the middle of it.
+    // A field reports from its event handlers and from its disposal during a render, both on the dispatcher, where
+    // InvokeAsync runs the update at once. StateHasChanged during a render queues another render instead of rendering
+    // in the middle of it.
     private void OnPendingRowsChanged() => _ = InvokeAsync(() =>
     {
         if (!_isDisposed)
