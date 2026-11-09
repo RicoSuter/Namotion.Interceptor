@@ -6,6 +6,7 @@ using HomeBlaze.Storage.Files;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Storage.Internal;
@@ -62,6 +63,9 @@ internal sealed class FileSubjectFactory
         // assignment to the tree does. With the flow of the caller, work that a handler starts would count as
         // part of the work item that creates the subject, and its calls into the storage would be refused.
         using var suppressedFlow = ExecutionContext.SuppressFlow();
+
+        // Until the subject has its issues, so that a hosted subject that reads them when it starts finds them.
+        using var startup = _serviceProvider.GetService<IInterceptorSubjectContext>()?.DeferHostedServiceStarts();
 
         issues = [];
         try
