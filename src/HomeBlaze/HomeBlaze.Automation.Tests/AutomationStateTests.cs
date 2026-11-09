@@ -201,6 +201,62 @@ public class AutomationStateTests
     }
 
     [Fact]
+    public async Task WhenOneEventLeavesAndEntersAStateAgain_ThenALaterRuleOfThatStateDoesNotRunForTheEvent()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Off", "On"];
+            automation.InitialState = "Off";
+            automation.RuleOrder = ["toggle", "back", "offOnly"];
+            automation.Rules = Keyed(
+                ("toggle", Create("Toggle", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Enter("On")], inState: "Off")),
+                ("back", Create("Back", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Enter("Off")])),
+                ("offOnly", Create("Off only", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Invoke("/Blinds/Close")], inState: "Off")));
+        });
+
+        // Act
+        host.Button.Press("Release");
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal("Off", host.Automation.CurrentState);
+        Assert.Equal(0, host.Blinds.CloseCount);
+        Assert.Equal(0L, host.Rule("offOnly").RunCount);
+    }
+
+    [Fact]
+    public async Task WhenOneEventLeavesAndEntersAStateAgainWhileAHoldOfThatStateRuns_ThenTheHoldRestarts()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Off", "On"];
+            automation.InitialState = "Off";
+            automation.RuleOrder = ["toggle", "back", "retract"];
+            automation.Rules = Keyed(
+                ("toggle", Create("Toggle", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Enter("On")], inState: "Off")),
+                ("back", Create("Back", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Enter("Off")])),
+                ("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Gust > 5", TimeSpan.FromMinutes(10))], [Invoke("/Blinds/Close")], inState: "Off")));
+        });
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromMinutes(6));
+
+        // Act
+        host.Button.Press("Release");
+        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromMinutes(6));
+        var runsBeforeTheNewHoldEnds = host.Rule("retract").RunCount;
+        await host.AdvanceAsync(TimeSpan.FromMinutes(4));
+
+        // Assert
+        Assert.Equal("Off", host.Automation.CurrentState);
+        Assert.Equal(0L, runsBeforeTheNewHoldEnds);
+        Assert.Equal(1L, host.Rule("retract").RunCount);
+    }
+
+    [Fact]
     public async Task WhenTheButtonIsPressedAgainWhileTheFirstPressRuns_ThenTheSecondPressIsHandledInTheNewState()
     {
         // Arrange

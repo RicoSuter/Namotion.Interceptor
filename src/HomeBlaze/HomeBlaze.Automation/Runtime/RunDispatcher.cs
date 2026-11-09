@@ -10,8 +10,9 @@ namespace HomeBlaze.Automation.Runtime;
 /// recorded: one that Only if rejects, and,
 /// once a rule changed the state, the remaining requests of a property input; the rule shows why and the log says it
 /// once per reason, and its property trigger stays pending. The requests of an event still run after a state change,
-/// except those of the rules that the change deactivated. A request of a rule that is no longer active is dropped, and
-/// so are the requests after a run that a stop canceled. Used by the worker only.
+/// except those of the rules that a state change of the event deactivated, also when a later one activated them again.
+/// A request of a rule that is no longer active is dropped, and so are the requests after a run that a stop canceled.
+/// Used by the worker only.
 /// </summary>
 internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, AutomationStateKeeper keeper, ILogger logger)
 {
@@ -21,7 +22,7 @@ internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, Au
         IReadOnlyList<RunRequest> requests, Func<CompiledRule, bool> isActive, CancellationToken cancellationToken)
     {
         var summary = new DispatchSummary();
-        foreach (var request in requests)
+        for (var index = 0; index < requests.Count; index++)
         {
             // A stop ends the input: the requests after a canceled run do not run.
             if (cancellationToken.IsCancellationRequested)
@@ -29,7 +30,10 @@ internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, Au
                 break;
             }
 
-            await DispatchOneAsync(request, isActive, summary, cancellationToken);
+            if (await DispatchOneAsync(requests[index], isActive, summary, cancellationToken))
+            {
+                summary.MarkDeactivated(requests, index + 1, isActive);
+            }
         }
 
         return summary;
@@ -44,26 +48,27 @@ internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, Au
         }
     }
 
-    private async Task DispatchOneAsync(
+    // Returns whether the request ran and changed the state.
+    private async Task<bool> DispatchOneAsync(
         RunRequest request, Func<CompiledRule, bool> isActive, DispatchSummary summary, CancellationToken cancellationToken)
     {
         if (summary.ChangedState && request.Event is null)
         {
             summary.SkippedForStateChange = true;
             Skip(request, $"the state changed to {host.CurrentState} for the same input");
-            return;
+            return false;
         }
 
-        if (!request.Rule.IsActivated || !isActive(request.Rule) || summary.HasRun(request.Rule))
+        if (!request.Rule.IsActivated || !isActive(request.Rule) || summary.HasRun(request.Rule) || summary.WasDeactivated(request.Rule))
         {
-            return;
+            return false;
         }
 
         if (request.EventInput is not null)
         {
             if (EventTriggerEngine.CheckFilters(automation.PathResolver, automation.TimeProvider, request) is not { } passed)
             {
-                return;
+                return false;
             }
 
             request = passed;
@@ -71,6 +76,7 @@ internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, Au
 
         var result = await _runner.RunAsync(request, host, cancellationToken);
         host.RunUnlessAbandoned(() => Complete(request, result, summary));
+        return result.ChangedState;
     }
 
     private void Complete(RunRequest request, RuleRunResult result, DispatchSummary summary)

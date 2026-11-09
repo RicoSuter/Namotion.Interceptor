@@ -457,11 +457,13 @@ internal sealed class AutomationEngine : IRuleRunHost
         return _triggers.Activate(pending, _snapshot.Rules);
     }
 
+    // Called after a state change, which left the state of every activated rule of a state, so such a rule starts over
+    // like a rule that entered its state, also when a later change of the same input entered its state again.
     private bool ApplyScopeChange()
     {
         foreach (var rule in _snapshot.Rules)
         {
-            if (rule.IsActivated && !IsActive(rule))
+            if (rule.IsActivated && (rule.InState is not null || !IsActive(rule)))
             {
                 Deactivate(rule);
             }
@@ -529,8 +531,8 @@ internal sealed class AutomationEngine : IRuleRunHost
         });
     }
 
-    // The rules of the entered state are activated first, so that they receive the event of entering it. Returns whether
-    // a pending property trigger began to be tracked.
+    // The rules of the entered state are activated first, so that their activation is queued before the events of
+    // entering it. Returns whether a pending property trigger began to be tracked.
     private bool PublishStateChanges()
     {
         if (!_states.HasPendingChanges)
