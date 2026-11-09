@@ -23,6 +23,11 @@ public partial class TestBlinds
     private int _closeCount;
     private int _openCount;
 
+    public TestBlinds()
+    {
+        Presets = [];
+    }
+
     [State]
     public partial bool IsMoving { get; set; }
 
@@ -37,6 +42,12 @@ public partial class TestBlinds
 
     [State]
     public partial double? Tilt { get; set; }
+
+    [State]
+    public partial int[] Presets { get; set; }
+
+    [State]
+    public partial int[]? LastPresets { get; set; }
 
     [Configuration]
     public partial string? Label { get; set; }

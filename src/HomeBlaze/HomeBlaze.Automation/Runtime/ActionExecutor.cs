@@ -185,7 +185,7 @@ internal sealed class ActionExecutor(
         }
 
         var binder = new ArgumentBinder(scope.Evaluation, scope.AllowsEvent);
-        if (!binder.TryBindValue(property.Name, action.Value, property.Type, out var value, out error))
+        if (!binder.TryBindProperty(property, action.Value, out var value, out error))
         {
             return false;
         }
