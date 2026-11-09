@@ -161,8 +161,9 @@ internal sealed partial class ExpressionClock
             return null;
         }
 
+        // A longer duration added to an instant can leave the range of DateTimeOffset; it is evaluated every second.
         var context = new ConstantContext();
-        return expression.Evaluate(ref context).Value is TimeSpan duration ? duration : null;
+        return expression.Evaluate(ref context).Value is TimeSpan duration && AutomationDuration.IsWithinMaximum(duration) ? duration : null;
     }
 
     [GeneratedRegex(@"(?<=(^|\(|\band|\bor|&&|\|\|)\s*)(?<![\w./])now\s+-\s+(?<path>[^\s()]+)\s*(?<operator>>=|<=|>|<)\s*(?<duration>[0-9][0-9A-Za-z.]*)(?=\s*($|\)|and\b|or\b|&&|\|\|))")]

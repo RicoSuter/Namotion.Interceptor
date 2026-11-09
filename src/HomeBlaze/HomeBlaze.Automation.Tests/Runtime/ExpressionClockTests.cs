@@ -39,6 +39,8 @@ public class ExpressionClockTests
     [InlineData("now > ../StateEnteredAt + 5m")]
     [InlineData("now - ./LastTriggeredAt > 10m or now == ../StateEnteredAt")]
     [InlineData("now - ./LastTriggeredAt > 600")]
+    [InlineData("now - ./LastTriggeredAt > 10675199d")]
+    [InlineData("time < 36501d")]
     public void WhenAnExpressionReadsTheClockOtherwise_ThenItIsEvaluatedEverySecond(string text)
     {
         // Act

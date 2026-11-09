@@ -200,6 +200,11 @@ internal static class AutomationCompiler
             return "the hold cannot be negative";
         }
 
+        if (trigger.For > AutomationDuration.Maximum)
+        {
+            return $"the hold cannot be longer than {AutomationDuration.Format(AutomationDuration.Maximum)}";
+        }
+
         if (!Enum.IsDefined(trigger.OnActivation))
         {
             return $"the activation policy {trigger.OnActivation} is not defined";

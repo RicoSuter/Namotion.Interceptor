@@ -74,6 +74,7 @@ namespace HomeBlaze.Automation
     }
     public static class AutomationDuration
     {
+        public static System.TimeSpan Maximum { get; }
         public static string Format(System.TimeSpan duration) { }
         public static bool TryParse(string? text, out System.TimeSpan duration) { }
     }
