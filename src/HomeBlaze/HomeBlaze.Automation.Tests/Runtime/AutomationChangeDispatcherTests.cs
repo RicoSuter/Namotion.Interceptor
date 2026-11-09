@@ -349,6 +349,34 @@ public class AutomationChangeDispatcherTests
         Assert.True(dispatcher.IsRoutedAsGraphChange(graph.Context, listener, ChildrenOf(graph)));
     }
 
+    // A second notification of the same change would be counted as a second dropped input when the queue is full.
+    [Fact]
+    public void WhenAnUnboundedListenerHasThePropertyOnItsRoute_ThenAGraphChangeNotifiesItOnce()
+    {
+        // Arrange
+        var (graph, _) = CreateGraph();
+        var holder = new TestSensorHolder();
+        graph.Add("Holder", holder);
+        var dispatcher = new AutomationChangeDispatcher();
+        var listener = new RecordingListener();
+        var other = new RecordingListener();
+        using var registration = dispatcher.Register(graph.Context, listener);
+        using var otherRegistration = dispatcher.Register(graph.Context, other);
+        registration.PublishRoute(Watch(SensorOf(holder)), isUnbounded: false);
+        otherRegistration.PublishRoute(Watch(ChildrenOf(graph)), isUnbounded: false);
+
+        // Act
+        registration.PublishRoute(Watch(SensorOf(holder)), isUnbounded: true);
+        holder.Sensor = new TestSensor();
+        registration.OnGraphChangeReleased();
+        registration.PublishRoute(Watch(SensorOf(holder)), isUnbounded: false);
+        holder.Sensor = new TestSensor();
+
+        // Assert
+        Assert.Equal(2, listener.GraphChanges);
+        Assert.Equal(0, other.GraphChanges);
+    }
+
     [Fact]
     public void WhenAListenerResolves_ThenItReceivesAGraphChangeOffItsRouteUntilItEndsToResolve()
     {

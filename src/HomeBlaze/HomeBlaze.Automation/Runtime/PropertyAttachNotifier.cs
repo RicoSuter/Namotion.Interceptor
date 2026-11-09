@@ -13,7 +13,9 @@ namespace HomeBlaze.Automation.Runtime;
 /// automations of a context as a graph change of that property, since a path that led nowhere or through an [InlinePaths] child may lead
 /// to it now. The properties a subject is attached with by the write of a property that holds subjects, such as its
 /// methods and attributes, are announced by the change of that write instead. One per context, added with the first
-/// registration of a dispatcher for it and kept, since a service cannot be removed from a context; it serves the routes
+/// registration of a dispatcher for it and kept, since a service cannot be removed from a context; it also tells the
+/// dispatcher that an automation or a rule gained a parent, which the change of that write then gives the automation as
+/// a graph change. It serves the routes
 /// of every dispatcher that routes the changes of the context and does nothing while none does. Runs on the writing
 /// thread after the registry registered the property and only enqueues.
 /// </summary>
@@ -67,7 +69,17 @@ internal sealed class PropertyAttachNotifier(ISubjectRegistry? registry) : ILife
 
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
-        if (!change.IsContextAttach || Volatile.Read(ref _sources).Length == 0 || registry is null)
+        if (Volatile.Read(ref _sources).Length == 0)
+        {
+            return;
+        }
+
+        if (change.IsPropertyReferenceAdded)
+        {
+            AddParentGains(change.Subject);
+        }
+
+        if (!change.IsContextAttach || registry is null)
         {
             return;
         }
@@ -96,6 +108,33 @@ internal sealed class PropertyAttachNotifier(ISubjectRegistry? registry) : ILife
         foreach (var source in sources)
         {
             source.OnPropertyAdded(change.Property);
+        }
+    }
+
+    // A path up from an automation or a rule depends on its parents, and the property that adds a parent is on no route.
+    private static void AddParentGains(IInterceptorSubject subject)
+    {
+        if (subject is Automation automation)
+        {
+            AddParentGain(automation);
+        }
+        else if (subject is AutomationRule && subject.TryGetRegisteredSubject() is { } registered)
+        {
+            foreach (var parent in registered.Parents)
+            {
+                if (parent.Property.Subject is Automation owner)
+                {
+                    AddParentGain(owner);
+                }
+            }
+        }
+    }
+
+    private static void AddParentGain(Automation automation)
+    {
+        if (automation.Runtime?.Changes.Registration is { } registration)
+        {
+            AutomationChangeDispatcher.ChangeSource.AddParentGain(registration);
         }
     }
 

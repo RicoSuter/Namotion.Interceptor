@@ -186,6 +186,33 @@ public class AutomationGraphRouteTests
         Assert.Contains("missing ../Enabled", host.Rule("rule").Status);
     }
 
+    // The write that gives the rule a second parent also changes a watched property; without routes the watched change
+    // of a write is routed before its graph change.
+    [Fact]
+    public async Task WhenAWriteChangesAWatchedPropertyAndGivesARuleASecondParent_ThenTheWatchedChangeComesBeforeTheGraphChange()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { });
+        var otherHost = new TestRuleHost();
+        host.Graph.Add("OtherHost", otherHost);
+        var (automation, listener) = await AddCountedAsync(host, "Rules", automation => automation.Rules = Keyed(
+            ("rule", On("Rule", When("/OtherHost/Rules != null and ../Enabled == true"), Invoke("/Blinds/Close")))));
+        var rulesOfOtherHost = new PropertyReference(otherHost, nameof(TestRuleHost.Rules));
+        var isWatched = Registration(automation).Watched.Contains(rulesOfOtherHost);
+        var isRouted = Registration(automation).Route.Contains(rulesOfOtherHost);
+        listener.Reset();
+
+        // Act
+        otherHost.Rules = new Dictionary<string, AutomationRule> { ["copy"] = automation.Rules["rule"] };
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.True(isWatched);
+        Assert.False(isRouted);
+        Assert.Equal(["watched", "graph"], listener.Calls);
+        Assert.Contains("missing ../Enabled", automation.Rules["rule"].Status);
+    }
+
     [Fact]
     public async Task WhenAnEntryOfADictionaryOrACollectionChanges_ThenThePathsFollowIt()
     {
@@ -370,18 +397,30 @@ public class AutomationGraphRouteTests
     private sealed class CountingListener(IAutomationChangeListener inner) : IAutomationChangeListener
     {
         private readonly ConcurrentQueue<int> _graphChanges = new();
+        private readonly ConcurrentQueue<string> _calls = new();
 
         public int GraphChanges => _graphChanges.Count;
 
         public int[] ChainDepths => [.. _graphChanges];
 
-        public void Reset() => _graphChanges.Clear();
+        public string[] Calls => [.. _calls];
 
-        public void OnWatchedPropertyChanged(PropertyChangedInput input) => inner.OnWatchedPropertyChanged(input);
+        public void Reset()
+        {
+            _graphChanges.Clear();
+            _calls.Clear();
+        }
+
+        public void OnWatchedPropertyChanged(PropertyChangedInput input)
+        {
+            _calls.Enqueue("watched");
+            inner.OnWatchedPropertyChanged(input);
+        }
 
         public void OnGraphChanged(int chainDepth)
         {
             _graphChanges.Enqueue(chainDepth);
+            _calls.Enqueue("graph");
             inner.OnGraphChanged(chainDepth);
         }
     }

@@ -14,10 +14,11 @@ namespace HomeBlaze.Automation.Runtime;
 /// stream shared by all of them: a change of a property to the listeners that watch it, and a change of a property that
 /// holds subjects or a property added at run time, which <see cref="PropertyAttachNotifier"/> reports, as a graph change
 /// to the listeners whose graph route has the property and to every listener whose graph route is unbounded or not
-/// published yet, left out while every listener still has one queued. A listener that resolves receives every graph
-/// change until it published the route of what it resolved, see <see cref="Registration.BeginResolving"/>. The
-/// subscription starts with the first
-/// registration for a stream and ends with the last one, so that the dispatcher holds no context without automations.
+/// published yet, each once and left out while every listener still has one queued. A listener that resolves receives
+/// every graph change until it published the route of what it resolved, see <see cref="Registration.BeginResolving"/>,
+/// and a listener whose automation or rule gained a parent receives the graph change of the write that added it. The
+/// subscription starts with the first registration for a stream and ends with the last one, so that the dispatcher holds
+/// no context without automations.
 /// Changes are routed synchronously on the writing thread, where the chain depth of the writing flow is read.
 /// Thread-safe.
 /// </summary>
@@ -295,6 +296,11 @@ internal sealed class AutomationChangeDispatcher
     /// <summary>The routes of one change stream. Changed under the lock of the dispatcher and read lock-free by writers.</summary>
     internal sealed class ChangeSource(PropertyChangeInterceptor interceptor) : IObserver<SubjectPropertyChange>
     {
+        // The registrations whose automation or rule gained a parent on this thread, until the change of the write that
+        // added the parent is routed.
+        [ThreadStatic]
+        private static List<Registration>? _parentGains;
+
         private readonly List<Registration> _registrations = [];
         private readonly List<PropertyAttachNotifier> _notifiers = [];
         private Routes _routes = Routes.Empty;
@@ -326,8 +332,21 @@ internal sealed class AutomationChangeDispatcher
             }
 
             var routes = Volatile.Read(ref _routes);
-            return (routes.Graph.TryGetValue(property, out var listeners) && Array.IndexOf(listeners, listener) >= 0) ||
-                Array.IndexOf(routes.Unbounded, listener) >= 0;
+            return (routes.Graph.TryGetValue(property, out var routed) && Array.Exists(routed, registration => registration.Listener == listener)) ||
+                Array.Exists(routes.Unbounded, registration => registration.Listener == listener);
+        }
+
+        /// <summary>
+        /// Gives the registration a graph change with the change of the write that runs on this thread, after its watched
+        /// changes, since its automation or one of its rules gained a parent, which no route has.
+        /// </summary>
+        public static void AddParentGain(Registration registration)
+        {
+            var parentGains = _parentGains ??= [];
+            if (!parentGains.Contains(registration))
+            {
+                parentGains.Add(registration);
+            }
         }
 
         public void Add(Registration registration)
@@ -335,7 +354,7 @@ internal sealed class AutomationChangeDispatcher
             _registrations.Add(registration);
             Volatile.Write(ref _registrationSnapshot, [.. _registrations]);
             var routes = _routes;
-            Publish(routes.With(listeners: [.. routes.Listeners, registration.Listener], unbounded: [.. routes.Unbounded, registration.Listener]));
+            Publish(routes.With(unbounded: [.. routes.Unbounded, registration], count: _registrations.Count));
 
             // After the routes, so that a notification that reads the new count gives the new listener a graph change.
             OnGraphChangeReleased();
@@ -372,12 +391,11 @@ internal sealed class AutomationChangeDispatcher
             _registrations.Remove(registration);
             Volatile.Write(ref _registrationSnapshot, [.. _registrations]);
             var routes = _routes;
-            var listener = registration.Listener;
             Publish(new Routes(
-                UpdateIndex(routes.Watchers, listener, registration.Watched, FrozenSet<PropertyReference>.Empty),
-                UpdateIndex(routes.Graph, listener, registration.Route, FrozenSet<PropertyReference>.Empty),
-                Without(routes.Unbounded, listener),
-                Without(routes.Listeners, listener)));
+                UpdateIndex(routes.Watchers, registration.Listener, registration.Watched, FrozenSet<PropertyReference>.Empty),
+                UpdateIndex(routes.Graph, registration, GetIndexed(registration.Route, registration.IsUnbounded), FrozenSet<PropertyReference>.Empty),
+                Without(routes.Unbounded, registration),
+                _registrations.Count));
         }
 
         public void SetWatched(Registration registration, FrozenSet<PropertyReference> watched)
@@ -393,6 +411,7 @@ internal sealed class AutomationChangeDispatcher
             Publish(routes.With(watchers: UpdateIndex(routes.Watchers, registration.Listener, previous, watched)));
         }
 
+        // The index has the routes of the bounded registrations only, so that an unbounded one is notified once.
         public void SetRoute(Registration registration, FrozenSet<PropertyReference> route, bool isUnbounded)
         {
             var previous = registration.Route;
@@ -405,14 +424,14 @@ internal sealed class AutomationChangeDispatcher
             }
 
             var routes = _routes;
-            var listener = registration.Listener;
             var unbounded = routes.Unbounded;
             if (wasUnbounded != isUnbounded)
             {
-                unbounded = isUnbounded ? [.. unbounded, listener] : Without(unbounded, listener);
+                unbounded = isUnbounded ? [.. unbounded, registration] : Without(unbounded, registration);
             }
 
-            Publish(routes.With(graph: UpdateIndex(routes.Graph, listener, previous, route), unbounded: unbounded));
+            var graph = UpdateIndex(routes.Graph, registration, GetIndexed(previous, wasUnbounded), GetIndexed(route, isUnbounded));
+            Publish(routes.With(graph: graph, unbounded: unbounded));
         }
 
         public void OnNext(SubjectPropertyChange value)
@@ -442,17 +461,20 @@ internal sealed class AutomationChangeDispatcher
             }
         }
 
-        // Gives a graph change to the listeners whose route has the property, to every unbounded listener and to every
-        // listener that resolves, unless each listener has one queued: no listener released its graph change since every
-        // listener was given one, so each takes it after this change. One write that changes the graph several times, such
-        // as the attach of a subject with its methods and attributes, gives each listener one graph change.
+        // Gives a graph change to the listeners whose route has the property, to every unbounded listener, to every
+        // listener that resolves and to every listener whose automation gained a parent in this write, each once, unless
+        // each listener has one queued: no listener released its graph change since every listener was given one, so each
+        // takes it after this change. One write that changes the graph several times, such as the attach of a subject with
+        // its methods and attributes, gives each listener one graph change.
         private void NotifyGraphChanged(PropertyReference property)
         {
+            var parentGains = TakeParentGains();
+
             // The change was committed and fenced before, and a listener that begins to resolve raises the count with a full
             // fence before it reads the graph: either the count read here is raised or the listener reads the change.
             if (Volatile.Read(ref _resolvingCount) == 0)
             {
-                NotifyGraphChanged(property, [], []);
+                NotifyGraphChanged(property, [], [], parentGains);
                 return;
             }
 
@@ -467,7 +489,7 @@ internal sealed class AutomationChangeDispatcher
 
             try
             {
-                NotifyGraphChanged(property, registrations, isResolving);
+                NotifyGraphChanged(property, registrations, isResolving, parentGains);
             }
             finally
             {
@@ -478,7 +500,8 @@ internal sealed class AutomationChangeDispatcher
             }
         }
 
-        private void NotifyGraphChanged(PropertyReference property, Registration[] registrations, ReadOnlySpan<bool> isResolving)
+        private void NotifyGraphChanged(
+            PropertyReference property, Registration[] registrations, ReadOnlySpan<bool> isResolving, ReadOnlySpan<Registration> parentGains)
         {
             // The change was committed and fenced before, as the registry fences a property it registers, and a listener
             // raises the count with a full fence before it reads the graph: either the count read here is the new one or
@@ -493,29 +516,67 @@ internal sealed class AutomationChangeDispatcher
             var routes = Volatile.Read(ref _routes);
             var chainDepth = AutomationInputQueue.CausedChainDepth;
             routes.Graph.TryGetValue(property, out var routed);
-            Notify(routed ?? [], chainDepth);
+            routed ??= [];
+            Notify(routed, chainDepth);
             Notify(routes.Unbounded, chainDepth);
-            for (var index = 0; index < registrations.Length; index++)
-            {
-                var listener = registrations[index].Listener;
-                if (isResolving[index] && (routed is null || Array.IndexOf(routed, listener) < 0) && Array.IndexOf(routes.Unbounded, listener) < 0)
-                {
-                    listener.OnGraphChanged(chainDepth);
-                }
-            }
+            NotifyOthers(routed, routes.Unbounded, registrations, isResolving, parentGains, chainDepth);
 
             // A concurrent notification may write an older count, which only notifies the next change again.
-            if (routes.Unbounded.Length == routes.Listeners.Length)
+            if (routes.Unbounded.Length == routes.Count)
             {
                 Volatile.Write(ref _notifiedAt, releaseCount);
             }
         }
 
-        private static void Notify(IAutomationChangeListener[] listeners, int chainDepth)
+        // The resolving registrations and those whose automation gained a parent, unless the routes notified them.
+        private static void NotifyOthers(
+            Registration[] routed,
+            Registration[] unbounded,
+            Registration[] registrations,
+            ReadOnlySpan<bool> isResolving,
+            ReadOnlySpan<Registration> parentGains,
+            int chainDepth)
         {
-            foreach (var listener in listeners)
+            for (var index = 0; index < registrations.Length; index++)
             {
-                listener.OnGraphChanged(chainDepth);
+                if (isResolving[index] && IsNotNotified(registrations[index], routed, unbounded))
+                {
+                    registrations[index].Listener.OnGraphChanged(chainDepth);
+                }
+            }
+
+            foreach (var registration in parentGains)
+            {
+                var index = Array.IndexOf(registrations, registration);
+                if ((index < 0 || !isResolving[index]) && IsNotNotified(registration, routed, unbounded) && !registration.IsDisposed)
+                {
+                    registration.Listener.OnGraphChanged(chainDepth);
+                }
+            }
+        }
+
+        private static bool IsNotNotified(Registration registration, Registration[] routed, Registration[] unbounded) =>
+            Array.IndexOf(routed, registration) < 0 && Array.IndexOf(unbounded, registration) < 0;
+
+        // Takes the parent gains of this stream, leaving those of another one for its own change.
+        private Registration[] TakeParentGains()
+        {
+            var parentGains = _parentGains;
+            if (parentGains is not { Count: > 0 })
+            {
+                return [];
+            }
+
+            var taken = parentGains.FindAll(registration => registration.Source == this);
+            parentGains.RemoveAll(registration => registration.Source == this || registration.IsDisposed);
+            return [.. taken];
+        }
+
+        private static void Notify(Registration[] registrations, int chainDepth)
+        {
+            foreach (var registration in registrations)
+            {
+                registration.Listener.OnGraphChanged(chainDepth);
             }
         }
 
@@ -537,23 +598,24 @@ internal sealed class AutomationChangeDispatcher
             Interlocked.MemoryBarrier();
         }
 
-        private static Dictionary<PropertyReference, IAutomationChangeListener[]> UpdateIndex(
-            Dictionary<PropertyReference, IAutomationChangeListener[]> index,
-            IAutomationChangeListener listener,
-            FrozenSet<PropertyReference> previous,
-            FrozenSet<PropertyReference> current)
+        private static FrozenSet<PropertyReference> GetIndexed(FrozenSet<PropertyReference> route, bool isUnbounded) =>
+            isUnbounded ? FrozenSet<PropertyReference>.Empty : route;
+
+        private static Dictionary<PropertyReference, T[]> UpdateIndex<T>(
+            Dictionary<PropertyReference, T[]> index, T item, FrozenSet<PropertyReference> previous, FrozenSet<PropertyReference> current)
+            where T : class
         {
             if (previous.Count == 0 && current.Count == 0)
             {
                 return index;
             }
 
-            var updated = new Dictionary<PropertyReference, IAutomationChangeListener[]>(index);
+            var updated = new Dictionary<PropertyReference, T[]>(index);
             foreach (var property in previous)
             {
                 if (!current.Contains(property))
                 {
-                    RemoveListener(updated, property, listener);
+                    RemoveItem(updated, property, item);
                 }
             }
 
@@ -561,22 +623,22 @@ internal sealed class AutomationChangeDispatcher
             {
                 if (!previous.Contains(property))
                 {
-                    updated[property] = updated.TryGetValue(property, out var listeners) ? [.. listeners, listener] : [listener];
+                    updated[property] = updated.TryGetValue(property, out var items) ? [.. items, item] : [item];
                 }
             }
 
             return updated;
         }
 
-        private static void RemoveListener(
-            Dictionary<PropertyReference, IAutomationChangeListener[]> index, PropertyReference property, IAutomationChangeListener listener)
+        private static void RemoveItem<T>(Dictionary<PropertyReference, T[]> index, PropertyReference property, T item)
+            where T : class
         {
-            if (!index.TryGetValue(property, out var listeners))
+            if (!index.TryGetValue(property, out var items))
             {
                 return;
             }
 
-            var remaining = Without(listeners, listener);
+            var remaining = Without(items, item);
             if (remaining.Length == 0)
             {
                 index.Remove(property);
@@ -587,28 +649,29 @@ internal sealed class AutomationChangeDispatcher
             }
         }
 
-        private static IAutomationChangeListener[] Without(IAutomationChangeListener[] listeners, IAutomationChangeListener listener)
+        private static T[] Without<T>(T[] items, T item)
+            where T : class
         {
-            var index = Array.IndexOf(listeners, listener);
+            var index = Array.IndexOf(items, item);
             if (index < 0)
             {
-                return listeners;
+                return items;
             }
 
-            var remaining = new IAutomationChangeListener[listeners.Length - 1];
-            Array.Copy(listeners, remaining, index);
-            Array.Copy(listeners, index + 1, remaining, index, listeners.Length - index - 1);
+            var remaining = new T[items.Length - 1];
+            Array.Copy(items, remaining, index);
+            Array.Copy(items, index + 1, remaining, index, items.Length - index - 1);
             return remaining;
         }
     }
 
     private sealed class Routes(
         Dictionary<PropertyReference, IAutomationChangeListener[]> watchers,
-        Dictionary<PropertyReference, IAutomationChangeListener[]> graph,
-        IAutomationChangeListener[] unbounded,
-        IAutomationChangeListener[] listeners)
+        Dictionary<PropertyReference, Registration[]> graph,
+        Registration[] unbounded,
+        int count)
     {
-        public static Routes Empty { get; } = new([], [], [], []);
+        public static Routes Empty { get; } = new([], [], [], 0);
 
         /// <summary>
         /// The listeners of each watched property, in the order they registered. Never changed once published, so that
@@ -616,20 +679,20 @@ internal sealed class AutomationChangeDispatcher
         /// </summary>
         public Dictionary<PropertyReference, IAutomationChangeListener[]> Watchers { get; } = watchers;
 
-        /// <summary>The listeners whose graph route has the property, in the order they published it.</summary>
-        public Dictionary<PropertyReference, IAutomationChangeListener[]> Graph { get; } = graph;
+        /// <summary>The bounded registrations whose graph route has the property, in the order they published it.</summary>
+        public Dictionary<PropertyReference, Registration[]> Graph { get; } = graph;
 
-        /// <summary>The listeners whose graph route is unbounded or not published yet, which receive every graph change.</summary>
-        public IAutomationChangeListener[] Unbounded { get; } = unbounded;
+        /// <summary>The registrations whose graph route is unbounded or not published yet, which receive every graph change.</summary>
+        public Registration[] Unbounded { get; } = unbounded;
 
-        /// <summary>Every registered listener, in the order they registered.</summary>
-        public IAutomationChangeListener[] Listeners { get; } = listeners;
+        /// <summary>The number of registrations.</summary>
+        public int Count { get; } = count;
 
         public Routes With(
             Dictionary<PropertyReference, IAutomationChangeListener[]>? watchers = null,
-            Dictionary<PropertyReference, IAutomationChangeListener[]>? graph = null,
-            IAutomationChangeListener[]? unbounded = null,
-            IAutomationChangeListener[]? listeners = null) =>
-            new(watchers ?? Watchers, graph ?? Graph, unbounded ?? Unbounded, listeners ?? Listeners);
+            Dictionary<PropertyReference, Registration[]>? graph = null,
+            Registration[]? unbounded = null,
+            int? count = null) =>
+            new(watchers ?? Watchers, graph ?? Graph, unbounded ?? Unbounded, count ?? Count);
     }
 }

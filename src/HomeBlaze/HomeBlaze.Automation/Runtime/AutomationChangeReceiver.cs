@@ -14,8 +14,8 @@ internal sealed class AutomationChangeReceiver(AutomationInputQueue queue) : IAu
     private AutomationChangeDispatcher.Registration? _registration;
     private int _isGraphChangePending;
 
-    // White-box test hook: the registration, with the watched set and the graph route last published.
-    internal AutomationChangeDispatcher.Registration? Registration => _registration;
+    /// <summary>The registration, with the watched set and the graph route last published, or null before the registration.</summary>
+    internal AutomationChangeDispatcher.Registration? Registration => Volatile.Read(ref _registration);
 
     /// <summary>
     /// Registers for the changes of the context until the returned registration is disposed. Called by the worker before
@@ -52,17 +52,9 @@ internal sealed class AutomationChangeReceiver(AutomationInputQueue queue) : IAu
     /// </summary>
     public void OnGraphChangeTaken() => ReleaseGraphChange();
 
-    /// <summary>
-    /// Queues a graph change caused at <paramref name="chainDepth"/> unless one is queued, for a change that the dispatcher
-    /// does not route. Thread-safe.
-    /// </summary>
-    public void RequestGraphChange(int chainDepth) => EnqueueGraphChange(chainDepth);
-
     void IAutomationChangeListener.OnWatchedPropertyChanged(PropertyChangedInput input) => queue.TryEnqueue(input);
 
-    void IAutomationChangeListener.OnGraphChanged(int chainDepth) => EnqueueGraphChange(chainDepth);
-
-    private void EnqueueGraphChange(int chainDepth)
+    void IAutomationChangeListener.OnGraphChanged(int chainDepth)
     {
         if (Interlocked.Exchange(ref _isGraphChangePending, 1) == 0 && !queue.TryEnqueue(new GraphChangedInput(chainDepth)))
         {
