@@ -13,7 +13,8 @@ namespace HomeBlaze.Automation.Tests.Runtime;
 public class GraphRoutesTests
 {
     // The root has no property Room, so the route also has the property that, added at run time, would take precedence
-    // over the child of [InlinePaths], and the configuration of Gust, which would hide it once added as a secret.
+    // over the child of [InlinePaths]. The holder of the sensor also stands for the configuration of Gust, which would hide
+    // it once added as a secret.
     [Theory]
     [InlineData("/Room/Devices[gauge]/Gust", nameof(TestRoom.Devices))]
     [InlineData("/Room/Items[0]/Gust", nameof(TestRoom.Items))]
@@ -29,7 +30,7 @@ public class GraphRoutesTests
         // Assert
         Assert.NotNull(property);
         Assert.Equal(
-            [fixture.RoomName, fixture.RootChildren, new PropertyReference(fixture.Room, holder), GustConfiguration(property)],
+            [fixture.RoomName, fixture.RootChildren, new PropertyReference(fixture.Room, holder)],
             route.Properties.ToArray());
         Assert.False(route.IsUnbounded);
     }
@@ -93,10 +94,74 @@ public class GraphRoutesTests
             [
                 new PropertyReference(fixture.Automation, nameof(Automation.Rules)),
                 new PropertyReference(fixture.Folder, nameof(TestFolder.Children)),
-                new PropertyReference(fixture.Folder, "Level@HomeBlaze:Configuration")
+                fixture.RootChildren
             ],
             route.Properties.ToArray());
         Assert.False(route.IsUnbounded);
+    }
+
+    // The configuration of Gust, which would hide it once added as a secret, is on the route as the holder of the sensor.
+    [Fact]
+    public async Task WhenTheSubjectAPathEndsAtIsReplaced_ThenTheRouteStaysTheSameInstanceAndNothingIsPublished()
+    {
+        // Arrange
+        await using var fixture = await RouteFixture.CreateAsync();
+        var (_, route) = fixture.ResolveProperty("/Room/Sensor/Gust");
+        fixture.Routes.Publish();
+        fixture.Room.Sensor = new TestSensor();
+
+        // Act
+        var (property, routeAfterReplace) = fixture.ResolveProperty("/Room/Sensor/Gust");
+        var hasPublished = fixture.Routes.Publish();
+
+        // Assert
+        Assert.Same(fixture.Room.Sensor, property?.Subject);
+        Assert.Same(route, routeAfterReplace);
+        Assert.False(hasPublished);
+    }
+
+    // Another automation resolves the path first, so that the resolver and the registry allocated their caches for the
+    // replaced sensor, and the allocations of the same resolution without a route are subtracted; the smallest object
+    // takes 24 bytes, so less than 8 bytes a resolution leaves room only for allocations of the runtime that happen once.
+    [Fact]
+    public async Task WhenTheSubjectAPathEndsAtIsReplaced_ThenRecordingTheSameRouteAgainAllocatesNothing()
+    {
+        // Arrange
+        const int resolutions = 1000;
+        await using var fixture = await RouteFixture.CreateAsync();
+        var other = new GraphRoutes(fixture.Automation, changes: new AutomationChangeReceiver(new AutomationInputQueue()));
+        TestSensor[] sensors = [new(), new()];
+        for (var index = 0; index < 100; index++)
+        {
+            ReplaceAndResolve(fixture, other, sensors[index % 2]);
+        }
+
+        // Act
+        var allocated = 0L;
+        for (var index = 0; index < resolutions; index++)
+        {
+            allocated += ReplaceAndResolve(fixture, other, sensors[index % 2]);
+        }
+
+        // Assert
+        Assert.True(allocated < resolutions * 8, $"{allocated} bytes for {resolutions} resolutions");
+    }
+
+    private static long ReplaceAndResolve(RouteFixture fixture, GraphRoutes other, TestSensor sensor)
+    {
+        const string path = "/Room/Sensor/Gust";
+        var resolver = fixture.Host.Graph.Resolver;
+        fixture.Room.Sensor = sensor;
+        AutomationPaths.ResolveProperty(resolver, path, fixture.Rule, other.BeginRoute());
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        AutomationPaths.ResolveProperty(resolver, path, fixture.Rule);
+        var withoutRoute = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        before = GC.GetAllocatedBytesForCurrentThread();
+        fixture.ResolveProperty(path);
+        fixture.Routes.Publish();
+        return GC.GetAllocatedBytesForCurrentThread() - before - withoutRoute;
     }
 
     // Removing the rule from the automation and putting it back is a write of the Rules property, which detaches and
@@ -428,8 +493,6 @@ public class GraphRoutesTests
         Assert.False(hasPublishedTheSameUnion);
         Assert.False(changes.Registration.IsResolving);
     }
-
-    private static PropertyReference GustConfiguration(RegisteredSubjectProperty gust) => new(gust.Subject, "Gust@HomeBlaze:Configuration");
 
     private static void Resolve(RouteFixture fixture, string path, GraphRouteSlot slot)
     {

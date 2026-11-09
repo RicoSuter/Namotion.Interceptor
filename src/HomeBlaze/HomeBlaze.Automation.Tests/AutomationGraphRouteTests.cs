@@ -134,6 +134,59 @@ public class AutomationGraphRouteTests
         Assert.Equal(0, host.Blinds.CloseCount);
     }
 
+    // The route records the configuration of Gust as the holder of the sensor, which stays the same when the sensor is replaced.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenTheSubjectAPathEndsAtIsReplacedAndGainsASecretConfiguration_ThenThePathIsNoLongerReadAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
+        var holder = new TestSensorHolder { Sensor = new TestSensor { Gust = 1 } };
+        host.Graph.Add("Holder", holder);
+        var automation = await host.AddAutomationAsync("Gusts", Rule("/Holder/Sensor/Gust > 5"));
+        var sensor = new TestSensor { Gust = 1 };
+        holder.Sensor = sensor;
+        await automation.FlushAsync();
+
+        // Act
+        var gust = ((IInterceptorSubject)sensor).TryGetRegisteredProperty(nameof(TestSensor.Gust))!;
+        gust.AddAttribute(KnownAttributes.Configuration, typeof(ConfigurationMetadata), _ => new ConfigurationMetadata { IsSecret = true }, null);
+        await automation.FlushAsync();
+        var isWatchedWhileSecret = Registration(automation).Watched.Contains(gust.Reference);
+        sensor.Gust = 9;
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.False(isWatchedWhileSecret);
+        Assert.Equal(0, host.Blinds.CloseCount);
+    }
+
+    // The root has no parent, so the route records the configuration of the property under its own name.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenAPropertyOfTheRootGainsASecretConfigurationAtRunTime_ThenAPathToItIsNoLongerReadAsWithoutGraphRoutes(bool makesEveryRouteUnbounded)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
+        double? windValue = 1;
+        var wind = ((IInterceptorSubject)host.Graph.Root).TryGetRegisteredSubject()!
+            .AddProperty("Wind", typeof(double?), _ => windValue, (_, value) => windValue = (double?)value);
+        var automation = await host.AddAutomationAsync("Winds", Rule("/Wind > 5"));
+
+        // Act
+        wind.AddAttribute(KnownAttributes.Configuration, typeof(ConfigurationMetadata), _ => new ConfigurationMetadata { IsSecret = true }, null);
+        await automation.FlushAsync();
+        var isWatchedWhileSecret = Registration(automation).Watched.Contains(wind.Reference);
+        wind.SetValue(9.0);
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.False(isWatchedWhileSecret);
+        Assert.Equal(0, host.Blinds.CloseCount);
+    }
+
     [Fact]
     public async Task WhenAWatchedPropertyChanges_ThenNoPathIsResolved()
     {

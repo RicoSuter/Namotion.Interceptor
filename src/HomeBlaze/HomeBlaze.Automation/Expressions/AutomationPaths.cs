@@ -19,8 +19,8 @@ internal static class AutomationPaths
     /// <summary>The character between the segments of a path.</summary>
     public const char Separator = '/';
 
-    // The names that the attributes of a property have on the routes, see GetAttributePropertyName, kept with the
-    // property so that recording them again allocates nothing.
+    // The names that the attributes of a property of a subject without parents have on the routes, see
+    // GetAttributePropertyName, kept with the property so that recording them again allocates nothing.
     private static readonly ConditionalWeakTable<RegisteredSubjectProperty, string> ConfigurationNames = new();
     private static readonly ConditionalWeakTable<RegisteredSubjectProperty, string> StateNames = new();
     private static readonly ConditionalWeakTable<RegisteredSubjectProperty, string>.CreateValueCallback CreateConfigurationName =
@@ -57,16 +57,37 @@ internal static class AutomationPaths
         var configuration = property.TryGetAttribute(KnownAttributes.Configuration);
         if (configuration is null)
         {
-            recorder.AddProperty(new PropertyReference(property.Subject, ConfigurationNames.GetValue(property, CreateConfigurationName)));
+            AddAttribute(property, ConfigurationNames, CreateConfigurationName, recorder);
         }
 
         if (!isReadable && configuration?.GetValue() is not ConfigurationMetadata { IsSecret: true } &&
             property.TryGetAttribute(KnownAttributes.State) is null)
         {
-            recorder.AddProperty(new PropertyReference(property.Subject, StateNames.GetValue(property, CreateStateName)));
+            AddAttribute(property, StateNames, CreateStateName, recorder);
         }
 
         return isReadable;
+    }
+
+    // The notifier announces such an attribute on the parents of its subject, which stay on the route when another subject
+    // takes the place of this one, so that the route of the path stays the same instance then.
+    private static void AddAttribute(
+        RegisteredSubjectProperty property,
+        ConditionalWeakTable<RegisteredSubjectProperty, string> names,
+        ConditionalWeakTable<RegisteredSubjectProperty, string>.CreateValueCallback createName,
+        ISubjectPathRecorder recorder)
+    {
+        var parents = property.Parent.Parents;
+        if (parents.IsEmpty)
+        {
+            recorder.AddProperty(new PropertyReference(property.Subject, names.GetValue(property, createName)));
+            return;
+        }
+
+        foreach (var parent in parents)
+        {
+            recorder.AddProperty(parent.Property.Reference);
+        }
     }
 
     /// <summary>
