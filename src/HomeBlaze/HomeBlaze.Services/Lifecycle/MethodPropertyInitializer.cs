@@ -179,6 +179,10 @@ public class MethodPropertyInitializer : ILifecycleHandler
     /// <summary>The interface maps of a subject type and the traits of its methods, computed once per method.</summary>
     private sealed class SubjectTypeMethods
     {
+        // False when the app turns off NullabilityInfoContextSupport, as trimming does by default.
+        private static readonly bool IsNullabilityInfoSupported =
+            !AppContext.TryGetSwitch("System.Reflection.NullabilityInfoContext.IsSupported", out var isSupported) || isSupported;
+
         private readonly InterfaceMapping[] _interfaceMaps;
         private readonly ConcurrentDictionary<MethodInfo, MethodTraits> _traits = new();
 
@@ -230,7 +234,7 @@ public class MethodPropertyInitializer : ILifecycleHandler
 
             // Owned by this computation rather than shared: the context caches the members it reads, which would keep
             // the types of an unloaded plugin alive, and it is not thread-safe.
-            var nullabilityContext = new NullabilityInfoContext();
+            var nullabilityContext = IsNullabilityInfoSupported ? new NullabilityInfoContext() : null;
             return Array.ConvertAll(parameters, parameter =>
             {
                 var operationParameterAttribute = parameter.GetCustomAttribute<OperationParameterAttribute>();
@@ -250,15 +254,20 @@ public class MethodPropertyInitializer : ILifecycleHandler
             });
         }
 
-        private static bool IsAnnotatedAsNullable(NullabilityInfoContext nullabilityContext, ParameterInfo parameter)
+        private static bool IsAnnotatedAsNullable(NullabilityInfoContext? nullabilityContext, ParameterInfo parameter)
         {
+            if (nullabilityContext is null)
+            {
+                return false;
+            }
+
             try
             {
                 return nullabilityContext.Create(parameter).WriteState == NullabilityState.Nullable;
             }
             catch (InvalidOperationException)
             {
-                // An app that turns off NullabilityInfoContextSupport, as trimming does by default, cannot read annotations.
+                // For support turned off in a way that the switch does not show.
                 return false;
             }
         }

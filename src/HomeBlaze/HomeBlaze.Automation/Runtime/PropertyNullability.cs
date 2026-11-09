@@ -13,6 +13,10 @@ internal static class PropertyNullability
     private static readonly object True = true;
     private static readonly object False = false;
 
+    // False when the app turns off NullabilityInfoContextSupport, as trimming does by default.
+    private static readonly bool IsNullabilityInfoSupported =
+        !AppContext.TryGetSwitch("System.Reflection.NullabilityInfoContext.IsSupported", out var isSupported) || isSupported;
+
     /// <summary>Whether the type is a reference type or a nullable value type.</summary>
     public static bool AcceptsNull(Type type) => !type.IsValueType || Nullable.GetUnderlyingType(type) is not null;
 
@@ -31,13 +35,18 @@ internal static class PropertyNullability
             return AcceptsNull(propertyInfo.PropertyType) ? True : False;
         }
 
+        if (!IsNullabilityInfoSupported)
+        {
+            return True;
+        }
+
         try
         {
             return new NullabilityInfoContext().Create(propertyInfo).WriteState == NullabilityState.NotNull ? False : True;
         }
         catch (InvalidOperationException)
         {
-            // An app that turns off NullabilityInfoContextSupport, as trimming does by default, cannot read annotations.
+            // For support turned off in a way that the switch does not show.
             return True;
         }
     }
