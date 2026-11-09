@@ -5,12 +5,10 @@ using Namotion.Interceptor;
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// The worker of one automation. Callbacks on writing threads only enqueue: a change of a watched property and a graph
-/// change (coalesced), a change of a property that holds subjects or a property added at run time, both routed by
-/// <see cref="AutomationChangeDispatcher"/>, and a tick
-/// (coalesced) from <see cref="WakeTimer"/>, which the worker sets after every input to when the engine is due next and
-/// stops while nothing is due. The worker processes one input at a time with
-/// <see cref="AutomationEngine"/>, so no rule runs inside a property setter.
+/// The worker of one automation. Callbacks on writing threads only enqueue: property and graph changes from
+/// <see cref="AutomationChangeReceiver"/> and ticks from <see cref="WakeTimer"/>. The worker processes one input at a time
+/// with <see cref="AutomationEngine"/>, so no rule runs inside a property setter, and sets the timer after each input to
+/// when the engine is due next.
 /// </summary>
 internal sealed class AutomationRuntime
 {
@@ -220,12 +218,11 @@ internal sealed class AutomationRuntime
         await _engine.ResynchronizeAsync(dropped, cancellationToken);
     }
 
-    // The checkpoint belongs to the path, so an automation that moved, such as a file moved to another folder, starts
-    // again as a new automation at the new path, and the file at the old path is deleted. Checked on graph changes, which
-    // are queued after the write that moved it, and not on its own lifecycle changes, which come before that write took
-    // effect. A move adds the automation to its new parent before it removes it from the old one: a check between the two
-    // writes may still see the old path, and a check after the second, which the coalesced graph change guarantees, sees
-    // the new one; once moved, further checks find nothing to do.
+    // The checkpoint belongs to the path: an automation that moved starts again as a new automation at the new path, and
+    // the file at the old path is deleted. Checked on graph changes, which are queued after the write that moved it, not on
+    // its own lifecycle changes, which come before that write took effect. A move adds to the new parent before it removes
+    // from the old one, so a check between the two writes may still see the old path; the coalesced graph change
+    // guarantees a check after the second.
     private void FollowPath()
     {
         var hasMoved = Location.HasMoved(_automation, _routes.BeginRoute());
