@@ -153,6 +153,21 @@ public class ActionExecutorTests
         Assert.Equal(18, _graph.Blinds.Position);
     }
 
+    [Fact]
+    public void WhenANullablePropertyIsWrittenWithAnEmptyValue_ThenItIsCleared()
+    {
+        // Arrange
+        var executor = CreateExecutor();
+        _graph.Blinds.Tilt = 0.5;
+
+        // Act
+        var result = executor.SetProperty(new SetPropertyAction { PropertyPath = "/Blinds/Tilt", Value = "" }, CreateScope());
+
+        // Assert
+        Assert.True(result.IsSuccess, result.Message);
+        Assert.Null(_graph.Blinds.Tilt);
+    }
+
     [Theory]
     [InlineData("/Blinds/Level", "/Blinds/Level is read-only")]
     [InlineData("/Blinds/Label", "/Blinds/Label is configuration, which an automation cannot change")]

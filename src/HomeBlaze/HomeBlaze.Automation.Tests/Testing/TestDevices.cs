@@ -34,6 +34,9 @@ public partial class TestBlinds
     [State]
     public partial int Level { get; internal set; }
 
+    [State]
+    public partial double? Tilt { get; set; }
+
     [Configuration]
     public partial string? Label { get; set; }
 

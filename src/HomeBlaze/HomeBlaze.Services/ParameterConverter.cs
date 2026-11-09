@@ -364,10 +364,12 @@ public static class ParameterConverter
 
     /// <summary>
     /// Tries to convert a value that is not text input, such as the result of an expression, to the target type: a value
-    /// of the type as it is, a text or an enum to an enum by the name of a defined member or by the number of one as text,
-    /// a finite number to another number type in its range (rounded half away from zero for an integral type), a
-    /// <see cref="DateTimeOffset"/> to a <see cref="DateTime"/> in UTC, a <see cref="DateTime"/> to a
-    /// <see cref="DateTimeOffset"/> by its kind (unspecified is UTC), and any value to a text as pages write it raw.
+    /// of the type as it is, except a non-finite <see cref="double"/> or <see cref="float"/>, which fails; a text or an
+    /// enum to an enum by the name of a defined member, by the number of one as text, or by the names of defined members
+    /// separated by commas only for a flags enum; a finite number to another number type in its range (rounded half away
+    /// from zero for an integral type); a <see cref="DateTimeOffset"/> to a <see cref="DateTime"/> in UTC; a
+    /// <see cref="DateTime"/> to a <see cref="DateTimeOffset"/> by its kind (unspecified is UTC); and any value to a text
+    /// as pages write it raw.
     /// </summary>
     public static bool TryConvertValue(object value, Type targetType, out object? converted)
     {
@@ -428,7 +430,8 @@ public static class ParameterConverter
     private static bool TryConvertEnumValue(object value, Type type, out object? converted)
     {
         var name = value is string or Enum ? value.ToString() : null;
-        if (name is not null && Enum.TryParse(type, name, ignoreCase: true, out var parsed) && NamesMembers(parsed))
+        if (name is not null && (!name.Contains(',') || type.IsDefined(typeof(FlagsAttribute), false)) &&
+            Enum.TryParse(type, name, ignoreCase: true, out var parsed) && NamesMembers(parsed))
         {
             converted = parsed;
             return true;

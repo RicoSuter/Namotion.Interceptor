@@ -31,6 +31,7 @@ public class ParameterConverterValueTests
     [InlineData(1.5, typeof(DateTimeOffset))]
     [InlineData("7", typeof(NotificationPriority))]
     [InlineData("-1", typeof(NotificationPriority))]
+    [InlineData("Low, Normal", typeof(NotificationPriority))]
     [InlineData(double.NaN, typeof(double))]
     [InlineData(double.PositiveInfinity, typeof(decimal))]
     [InlineData(float.NegativeInfinity, typeof(float))]
@@ -108,5 +109,24 @@ public class ParameterConverterValueTests
         // Assert
         Assert.True(isConverted);
         Assert.Equal(new DateTimeOffset(dateTime), converted);
+    }
+
+    [Fact]
+    public void WhenTheNamesOfMembersOfAFlagsEnumAreConverted_ThenTheyAreCombined()
+    {
+        // Act
+        var isConverted = ParameterConverter.TryConvertValue("Monday, Tuesday", typeof(Weekdays), out var converted);
+
+        // Assert
+        Assert.True(isConverted);
+        Assert.Equal(Weekdays.Monday | Weekdays.Tuesday, converted);
+    }
+
+    [Flags]
+    public enum Weekdays
+    {
+        None = 0,
+        Monday = 1,
+        Tuesday = 2
     }
 }
