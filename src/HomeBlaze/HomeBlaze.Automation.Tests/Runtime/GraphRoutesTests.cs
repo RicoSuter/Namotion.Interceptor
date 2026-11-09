@@ -1,8 +1,10 @@
+using System.Collections.Immutable;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
@@ -127,6 +129,93 @@ public class GraphRoutesTests
         Assert.True(route.IsUnbounded);
     }
 
+    // Detaching an ancestor of one of the folders gives the automation a single parent without a change of a holder.
+    [Fact]
+    public async Task WhenAPathLeadsUpFromAnAutomationWithSeveralParents_ThenTheRouteIsUnbounded()
+    {
+        // Arrange
+        await using var fixture = await RouteFixture.CreateAsync();
+        var other = new TestFolder();
+        fixture.Host.Graph.Add("Other", other);
+        other.Add("Automation", fixture.Automation);
+
+        // Act
+        var (property, route) = fixture.ResolveProperty("../../Level");
+
+        // Assert
+        Assert.Null(property);
+        Assert.Contains(new PropertyReference(other, nameof(TestFolder.Children)), route.Properties.ToArray());
+        Assert.True(route.IsUnbounded);
+    }
+
+    // A getter that fails may succeed later without a change, so a path whose resolution fails depends on any change.
+    [Fact]
+    public async Task WhenTheResolutionOfAPathFails_ThenTheRouteIsUnbounded()
+    {
+        // Arrange
+        await using var fixture = await RouteFixture.CreateAsync();
+        var fails = false;
+        ((IInterceptorSubject)fixture.Room).TryGetRegisteredSubject()!.AddProperty(
+            "Broken", typeof(TestSensor), _ => fails ? throw new InvalidOperationException("The getter fails.") : null, null);
+        fails = true;
+
+        // Act
+        var (property, route) = fixture.ResolveProperty("/Room/Broken/Gust");
+
+        // Assert
+        Assert.Null(property);
+        Assert.True(route.IsUnbounded);
+    }
+
+    [Fact]
+    public void WhenARouteBecomesUnboundedWithTheSameProperties_ThenTheBuilderGivesANewRoute()
+    {
+        // Arrange
+        var builder = new GraphRouteBuilder(automation: null);
+        var property = new PropertyReference(new TestSensor(), nameof(TestSensor.Gust));
+        builder.AddProperty(property);
+        var bounded = builder.ToRoute(GraphRoute.Empty);
+
+        // Act
+        builder.Clear();
+        builder.AddProperty(property);
+        builder.MarkUnbounded();
+        var unbounded = builder.ToRoute(bounded);
+
+        // Assert
+        Assert.False(bounded.IsUnbounded);
+        Assert.True(unbounded.IsUnbounded);
+        Assert.Equal([property], unbounded.Properties.ToArray());
+    }
+
+    // The other slot keeps the property in the union, so only the unbounded count tells that the union changed.
+    [Fact]
+    public async Task WhenAStoredRouteBecomesUnboundedWithPropertiesThatStayInTheUnion_ThenTheUnboundedUnionIsPublished()
+    {
+        // Arrange
+        await using var fixture = await RouteFixture.CreateAsync();
+        var dispatcher = new AutomationChangeDispatcher();
+        var changes = new AutomationChangeReceiver(new AutomationInputQueue());
+        using var registration = changes.Register(dispatcher, fixture.Host.Graph.Context);
+        var routes = new GraphRoutes(fixture.Automation, changes);
+        var first = new GraphRouteSlot();
+        var second = new GraphRouteSlot();
+        var properties = ImmutableArray.Create(new PropertyReference(fixture.Room, nameof(TestRoom.Sensor)));
+        first.Store(routes, new GraphRoute(properties, isUnbounded: false));
+        second.Store(routes, new GraphRoute(properties, isUnbounded: false));
+        routes.Publish();
+        var isUnboundedBefore = changes.Registration!.IsUnbounded;
+
+        // Act
+        first.Store(routes, new GraphRoute(properties, isUnbounded: true));
+        var hasPublished = routes.Publish();
+
+        // Assert
+        Assert.False(isUnboundedBefore);
+        Assert.True(hasPublished);
+        Assert.True(changes.Registration.IsUnbounded);
+    }
+
     [Fact]
     public async Task WhenTheRoutesAreForNoAutomation_ThenAPathThatLeadsUpHasAnUnboundedRoute()
     {
@@ -209,6 +298,24 @@ public class GraphRoutesTests
         Assert.True(isUnboundedAfterTheStepAbove);
         Assert.Empty(routes.Union);
         Assert.False(routes.IsUnbounded);
+    }
+
+    [Fact]
+    public async Task WhenARouteIsMovedToASlotThatHoldsOne_ThenTheRouteItHeldLeavesTheUnion()
+    {
+        // Arrange
+        await using var fixture = await RouteFixture.CreateAsync();
+        var source = new GraphRouteSlot();
+        var target = new GraphRouteSlot();
+        Resolve(fixture, "/Room/Sensor/Gust", source);
+        Resolve(fixture, "/Room/Items[0]/Gust", target);
+
+        // Act
+        source.MoveTo(target);
+
+        // Assert
+        Assert.Contains(new PropertyReference(fixture.Room, nameof(TestRoom.Sensor)), fixture.Routes.Union);
+        Assert.DoesNotContain(new PropertyReference(fixture.Room, nameof(TestRoom.Items)), fixture.Routes.Union);
     }
 
     [Fact]

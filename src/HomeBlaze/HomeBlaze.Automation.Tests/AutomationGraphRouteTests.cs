@@ -411,6 +411,32 @@ public class AutomationGraphRouteTests
         Assert.Equal(0, listener.GraphChanges);
     }
 
+    // No other rule reads the sensor of the room, so only the rearm expression puts its holder on the route.
+    [Fact]
+    public async Task WhenTheSubjectThatARearmExpressionReadsIsReplaced_ThenTheTriggerRearmsOnIt()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { });
+        var room = new TestRoom { Sensor = new TestSensor { Rain = 5 } };
+        host.Graph.Add("Room", room);
+        var automation = await host.AddAutomationAsync("Rearm", automation => automation.Rules = Keyed(
+            ("rule", On("Rule", When("/Weather/Gust > 8", rearm: "/Room/Sensor/Rain < 3"), Invoke("/Blinds/Close")))));
+        host.Weather.Gust = 9;
+        await automation.FlushAsync();
+        host.Weather.Gust = 0;
+        await automation.FlushAsync();
+
+        // Act
+        room.Sensor = new TestSensor { Rain = 1 };
+        await automation.FlushAsync();
+        host.Weather.Gust = 9;
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.Contains(new PropertyReference(room, nameof(TestRoom.Sensor)), Routes(automation).Union);
+        Assert.Equal(2, host.Blinds.CloseCount);
+    }
+
     [Fact]
     public async Task WhenATriggerStopsWaiting_ThenTheRouteOfItsOnlyIfLeavesTheUnion()
     {
