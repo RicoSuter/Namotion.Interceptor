@@ -15,6 +15,9 @@ public partial class HomeBlazeInstallation
     private readonly Lock _clientsLock = new();
     private Dictionary<string, HomeBlazeClient>? _pendingClients;
 
+    // Counts the reloads of Clients, so a refused name change does not restore a client that a reload removed meanwhile.
+    private int _clientsReloadCount;
+
     /// <summary>
     /// The connected and the named clients by id. Only named clients persist.
     /// </summary>
@@ -45,6 +48,7 @@ public partial class HomeBlazeInstallation
             lock (_clientsLock)
             {
                 _pendingClients = newValue;
+                _clientsReloadCount++;
             }
         }
     }
@@ -150,6 +154,7 @@ public partial class HomeBlazeInstallation
         configurationWriter?.ThrowIfWriteRefused(this);
 
         var previous = client.CaptureName();
+        var reloadCount = Volatile.Read(ref _clientsReloadCount);
         client.Name = name;
         try
         {
@@ -163,7 +168,7 @@ public partial class HomeBlazeInstallation
             // Refused after the check above, when the file was read again in between. A later name wins over the restore.
             if (client.TryRestoreName(previous, name))
             {
-                RestoreRemovedClient(client);
+                RestoreRemovedClient(client, reloadCount);
             }
 
             throw;
@@ -171,14 +176,15 @@ public partial class HomeBlazeInstallation
     }
 
     /// <summary>
-    /// Adds the client back to <see cref="Clients"/> when the reconcile of its forgetting removed it and nothing took its id since.
+    /// Adds the client back to <see cref="Clients"/> when the reconcile of its forgetting removed it, nothing took its id
+    /// and no reload replaced the clients since <paramref name="reloadCount"/> was read.
     /// </summary>
-    private void RestoreRemovedClient(HomeBlazeClient client)
+    private void RestoreRemovedClient(HomeBlazeClient client, int reloadCount)
     {
         lock (_clientsLock)
         {
             // A pending reload replaces the clients, so the restored client must not come back into them.
-            if (!client.IsNamed || _pendingClients is not null || Clients.ContainsKey(client.Id))
+            if (!client.IsNamed || _pendingClients is not null || _clientsReloadCount != reloadCount || Clients.ContainsKey(client.Id))
             {
                 return;
             }

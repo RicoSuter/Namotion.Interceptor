@@ -248,6 +248,35 @@ public class HomeBlazeInstallationClientTests
     }
 
     [Fact]
+    public async Task WhenAReloadRemovesAClientWhileItsForgettingIsRefused_ThenTheClientIsNotRestored()
+    {
+        // Arrange
+        var connection = _connections.Connect(null, new FakeClientCallbacks());
+        _installation.ReconcileClients();
+        var client = _installation.Clients[connection.ConnectionId];
+        await client.RenameAsync("Hall", CancellationToken.None);
+        _connections.Disconnect(connection);
+        _installation.ReconcileClients();
+        var loadedClient = new HomeBlazeClient { Name = "Kitchen" };
+        _root.Refusal = new ConfigurationWriteRefusedException("refused", ["the value of 'x' could not be read"]);
+        _root.IsRefusalFoundOnlyByWrite = true;
+        _root.DuringWrite = () =>
+        {
+            _installation.Clients = new Dictionary<string, HomeBlazeClient> { ["loaded123456"] = loadedClient };
+            _installation.ReconcileClients();
+        };
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => client.ForgetAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Same(_root.Refusal, exception);
+        var remaining = Assert.Single(_installation.Clients);
+        Assert.Equal("loaded123456", remaining.Key);
+        Assert.Same(loadedClient, remaining.Value);
+    }
+
+    [Fact]
     public async Task WhenANamedClientIsForgotten_ThenItIsRemovedAndItsTabIsAnonymousAgain()
     {
         // Arrange

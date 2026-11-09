@@ -40,8 +40,12 @@ public partial class TestRoot : IConfigurationWriter
     /// <summary>Whether only a write throws <see cref="Refusal"/>, as when the file was read again after the check.</summary>
     public bool IsRefusalFoundOnlyByWrite { get; set; }
 
+    /// <summary>Runs at the start of each write, as something that happens while the storage writes.</summary>
+    public Action? DuringWrite { get; set; }
+
     public Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
+        DuringWrite?.Invoke();
         if (Refusal is { } refusal)
         {
             throw refusal;
