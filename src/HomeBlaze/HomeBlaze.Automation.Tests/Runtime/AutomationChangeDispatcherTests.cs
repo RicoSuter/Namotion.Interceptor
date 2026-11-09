@@ -411,7 +411,9 @@ public class AutomationChangeDispatcherTests
         Assert.Equal([3, 0], routed.GraphChainDepths);
     }
 
-    // Writes alternate between two subjects that stay attached elsewhere, so that the registry allocates the same for each.
+    // Writes alternate between two subjects that stay attached elsewhere, so that the registry allocates the same for each;
+    // the smallest object takes 24 bytes, so less than 8 bytes a write leaves room only for allocations of the runtime
+    // that happen once.
     [Fact]
     public void WhenAPropertyOffEveryRouteChangesWhileNoListenerResolves_ThenTheDispatcherAllocatesNothing()
     {
@@ -436,7 +438,7 @@ public class AutomationChangeDispatcherTests
 
         // Assert
         Assert.Equal(0, listener.GraphChanges);
-        Assert.True(withListener - withoutListener < writes, $"{withListener - withoutListener} bytes for {writes} writes");
+        Assert.True(withListener - withoutListener < writes * 8, $"{withListener - withoutListener} bytes for {writes} writes");
     }
 
     private static long MeasureAllocations(int writes, TestSensorHolder holder, TestSensor first, TestSensor second)
