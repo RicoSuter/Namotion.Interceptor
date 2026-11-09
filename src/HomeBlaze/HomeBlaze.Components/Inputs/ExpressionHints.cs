@@ -7,7 +7,7 @@ namespace HomeBlaze.Components.Inputs;
 /// differs from a variable the host declares only in case, and a word compared with a value that is a number, a date, a duration or a
 /// boolean, which a text never equals. A word compared with a text or an enum, as in <c>Mode == Away</c>, is meant as text.
 /// Also warns about a path that starts with a variable in another case, as in <c>Value &gt; 5</c>, while it leads to no
-/// value: a property with such a name is common, and a path that leads to one is meant as written.
+/// value.
 /// </summary>
 internal static class ExpressionHints
 {
@@ -44,30 +44,6 @@ internal static class ExpressionHints
         }
 
         return hints ?? [];
-    }
-
-    /// <summary>The hints as they are shown with the current values.</summary>
-    /// <param name="text">The expression.</param>
-    /// <param name="variables">The variables the host declares for its expressions.</param>
-    /// <param name="readValue">Reads the current value of a path, or null when the host has no values.</param>
-    public static IReadOnlyList<string> GetBareWordHints(string? text, ImmutableArray<string> variables, Func<string, object?>? readValue)
-    {
-        var hints = Find(text, variables);
-        if (hints.Count == 0)
-        {
-            return [];
-        }
-
-        var shown = new List<string>(hints.Count);
-        foreach (var hint in hints)
-        {
-            if (hint.IsShown(hint.Path is null ? null : readValue?.Invoke(hint.Path), readValue is not null))
-            {
-                shown.Add(hint.Text);
-            }
-        }
-
-        return shown;
     }
 
     // Parentheses around a condition are not part of its tokens.

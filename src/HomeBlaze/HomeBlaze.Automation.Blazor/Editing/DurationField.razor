@@ -61,7 +61,7 @@
         if (!DurationInput.TryParse(text, out var duration))
         {
             // A number or a literal that still lacks its unit is being typed; the error shows when the field is left.
-            return IsInProgress(text) ? Task.CompletedTask : RejectAsync(FormatError);
+            return DurationInput.IsMissingUnit(text) ? Task.CompletedTask : RejectAsync(FormatError);
         }
 
         return MustBePositive && duration <= TimeSpan.Zero ? RejectAsync(PositiveError) : AcceptAsync(duration);
@@ -69,8 +69,6 @@
 
     private Task OnBlurAsync() =>
         string.IsNullOrWhiteSpace(_text) || DurationInput.TryParse(_text, out _) || _error is not null ? Task.CompletedTask : RejectAsync(FormatError);
-
-    private static bool IsInProgress(string text) => DurationInput.IsMissingUnit(text);
 
     private Task RejectAsync(string error)
     {

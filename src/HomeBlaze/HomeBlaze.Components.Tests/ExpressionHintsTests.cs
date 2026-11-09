@@ -14,7 +14,7 @@ public class ExpressionHintsTests
     public void WhenABareWordDiffersFromAVariableOnlyInCase_ThenTheHintNamesTheVariable(string text)
     {
         // Act
-        var hints = ExpressionHints.GetBareWordHints(text, Variables, readValue: null);
+        var hints = GetShownHints(text, Variables, readValue: null);
 
         // Assert
         Assert.Equal(["'Now' is read as the text \"Now\". The variable is written in lowercase: now."], hints.ToArray());
@@ -24,7 +24,7 @@ public class ExpressionHintsTests
     public void WhenABareWordIsComparedWithANumber_ThenTheHintSaysItNeverMatches()
     {
         // Act
-        var hints = ExpressionHints.GetBareWordHints("/Weather/Temperature > Limit", Variables, path => path == "/Weather/Temperature" ? 21.5 : null);
+        var hints = GetShownHints("/Weather/Temperature > Limit", Variables, path => path == "/Weather/Temperature" ? 21.5 : null);
 
         // Assert
         Assert.Equal(
@@ -47,7 +47,7 @@ public class ExpressionHintsTests
     public void WhenTheRightSideIsMeantAsWritten_ThenThereIsNoHint(string text)
     {
         // Act
-        var hints = ExpressionHints.GetBareWordHints(text, Variables, path => path == "/Door/State" ? DayOfWeek.Monday : null);
+        var hints = GetShownHints(text, Variables, path => path == "/Door/State" ? DayOfWeek.Monday : null);
 
         // Assert
         Assert.Empty(hints);
@@ -64,8 +64,8 @@ public class ExpressionHintsTests
     public void WhenAPathStartsWithAVariableInAnotherCase_ThenTheHintNamesTheVariable(string text, string word)
     {
         // Act
-        var withoutValues = ExpressionHints.GetBareWordHints(text, Variables, readValue: null);
-        var withoutValueAtThePath = ExpressionHints.GetBareWordHints(text, Variables, _ => null);
+        var withoutValues = GetShownHints(text, Variables, readValue: null);
+        var withoutValueAtThePath = GetShownHints(text, Variables, _ => null);
 
         // Assert
         Assert.Equal([$"'{word}' is not the variable {word.ToLowerInvariant()}: variables are written in lowercase."], withoutValues.ToArray());
@@ -80,7 +80,7 @@ public class ExpressionHintsTests
     public void WhenAPathThatStartsWithAVariableInAnotherCaseLeadsToAValue_ThenThereIsNoHint(string text, string path)
     {
         // Act
-        var hints = ExpressionHints.GetBareWordHints(text, Variables, read => read == path ? 1 : null);
+        var hints = GetShownHints(text, Variables, read => read == path ? 1 : null);
 
         // Assert
         Assert.Empty(hints);
@@ -93,7 +93,7 @@ public class ExpressionHintsTests
         var readPaths = new List<string>();
 
         // Act
-        var hints = ExpressionHints.GetBareWordHints("(/Weather/Temperature > Limit)", Variables, path =>
+        var hints = GetShownHints("(/Weather/Temperature > Limit)", Variables, path =>
         {
             readPaths.Add(path);
             return 21.5;
@@ -108,9 +108,17 @@ public class ExpressionHintsTests
     public void WhenAWordMatchesAVariableTheHostDoesNotDeclare_ThenThereIsNoVariableHint()
     {
         // Act
-        var hints = ExpressionHints.GetBareWordHints("/Door/OpenedAt > Now and Now/Offset > 1", ["value", "subject"], readValue: null);
+        var hints = GetShownHints("/Door/OpenedAt > Now and Now/Offset > 1", ["value", "subject"], readValue: null);
 
         // Assert
         Assert.Empty(hints);
     }
+
+    // The hints as the field shows them with the values that readValue gives, or without values when it is null.
+    private static List<string> GetShownHints(string text, ImmutableArray<string> variables, Func<string, object?>? readValue) =>
+    [
+        .. ExpressionHints.Find(text, variables)
+            .Where(hint => hint.IsShown(hint.Path is null ? null : readValue?.Invoke(hint.Path), readValue is not null))
+            .Select(hint => hint.Text)
+    ];
 }
