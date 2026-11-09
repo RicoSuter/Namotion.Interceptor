@@ -200,14 +200,7 @@ internal sealed class AutomationTriggers
         }
 
         _boundStructureVersion = version % 2 == 0 ? version : -1;
-        if (version % 2 == 0)
-        {
-            _routes.OnResolvedAt(version);
-        }
-        else
-        {
-            _routes.KeepUnboundedAt(version);
-        }
+        _routes.OnResolvedAt(version);
 
         _eventTriggers.Rebind(rules);
         return _propertyTriggers.OnGraphChanged(rules, evaluateAll: false);

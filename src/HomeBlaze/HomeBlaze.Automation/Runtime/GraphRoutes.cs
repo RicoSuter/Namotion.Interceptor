@@ -115,10 +115,17 @@ internal sealed class GraphRoutes
         }
     }
 
-    /// <summary>Tells that the paths were resolved after a graph change at the structure version, see <see cref="KeepUnboundedAt"/>.</summary>
+    /// <summary>
+    /// Tells that the paths were resolved after a graph change at the structure version, see <see cref="KeepUnboundedAt"/>;
+    /// an odd version is a change in progress.
+    /// </summary>
     public void OnResolvedAt(long version)
     {
-        if (_staleVersion >= 0 && version != _staleVersion)
+        if (version % 2 != 0)
+        {
+            KeepUnboundedAt(version);
+        }
+        else if (_staleVersion >= 0 && version != _staleVersion)
         {
             _staleVersion = -1;
             _hasUnionChanged = true;
