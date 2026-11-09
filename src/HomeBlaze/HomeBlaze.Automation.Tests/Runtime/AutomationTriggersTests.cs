@@ -17,31 +17,33 @@ public class AutomationTriggersTests
         var graph = new TestGraph();
         graph.Add("Weather", new TestSensor());
         var registry = graph.Context.GetService<ISubjectRegistry>();
-        var publishes = 0;
         var time = new FakeTimeProvider(AutomationTestHost.Start);
         var queue = new AutomationInputQueue();
         var routes = new GraphRoutes(automation: new TestSensor(), changes: new AutomationChangeReceiver(new AutomationInputQueue()));
         var triggers = new AutomationTriggers(
             queue,
             () => registry.StructureVersion,
-            new PropertyTriggerEngine(graph.Resolver, time, NullLogger.Instance, () => "Storm", _ => publishes++, routes),
+            new PropertyTriggerEngine(graph.Resolver, time, NullLogger.Instance, () => "Storm", _ => { }, routes),
             new EventTriggerEngine(graph.Resolver, queue, NullLogger.Instance, () => "Storm", routes));
         var rule = Compile("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")));
         rule.IsActivated = true;
         triggers.Activate([rule], [rule]);
+        triggers.GetRequests(new ActivationInput([rule], 0), [rule]);
         triggers.OnGraphChanged([rule]);
-        var publishesAfterTheFirstGraphChange = publishes;
+        var trigger = rule.PropertyTriggers[0];
+        var dependenciesAfterTheFirstGraphChange = trigger.Dependencies;
 
         // Act
         graph.Root.Children = new Dictionary<string, IInterceptorSubject>(graph.Root.Children);
         triggers.OnGraphChanged([rule]);
-        var publishesAfterTheSameChildren = publishes;
+        var dependenciesAfterTheSameChildren = trigger.Dependencies;
         graph.Add("Blinds", new TestBlinds());
         triggers.OnGraphChanged([rule]);
 
         // Assert
-        Assert.Equal(publishesAfterTheFirstGraphChange, publishesAfterTheSameChildren);
-        Assert.Equal(publishesAfterTheFirstGraphChange + 1, publishes);
+        // Each resolution stores a new array, also for equal dependencies.
+        Assert.Same(dependenciesAfterTheFirstGraphChange, dependenciesAfterTheSameChildren);
+        Assert.NotSame(dependenciesAfterTheFirstGraphChange, trigger.Dependencies);
     }
 
     [Fact]

@@ -39,6 +39,9 @@ internal sealed class PropertyTriggerEngine(
     private readonly HashSet<CompiledRule> _reboundOnlyIfRules = [];
     private FrozenSet<PropertyReference> _watched = FrozenSet<PropertyReference>.Empty;
 
+    // Reused by every publication of the watched set, which is frozen only when it changed.
+    private readonly HashSet<PropertyReference> _nextWatched = [];
+
     /// <summary>
     /// Activates the inactive triggers of the rules that are still activated and among <paramref name="allRules"/>, such
     /// as rules whose activation was queued, and returns the runs they request at once.
@@ -408,11 +411,6 @@ internal sealed class PropertyTriggerEngine(
     private bool TryObserve(PropertyChangedInput change) =>
         _watched.Contains(change.Property) && _values.TryApply(change.Property, change.Value, change.Revision);
 
-    private static IEnumerable<CompiledPropertyTrigger> ActiveTriggers(IReadOnlyList<CompiledRule> rules) =>
-        rules.Where(rule => rule.IsActivated)
-            .SelectMany(rule => rule.PropertyTriggers)
-            .Where(trigger => trigger.State.Phase != TriggerPhase.Inactive);
-
     // A trigger that stays pending requests its run again where requestPending allows it. Allocates nothing when no
     // trigger matches, as long as the callers pass static lambdas with the state they read.
     private IReadOnlyList<RunRequest> ObserveWhere<TState>(
@@ -622,18 +620,73 @@ internal sealed class PropertyTriggerEngine(
         return [.. resolved];
     }
 
-    private void PublishWatched(IReadOnlyList<CompiledRule> rules, IEnumerable<CompiledPropertyTrigger> activating)
+    private void PublishWatched(IReadOnlyList<CompiledRule> rules, IReadOnlyList<CompiledPropertyTrigger> activating)
     {
-        var watched = ActiveTriggers(rules).Concat(activating).SelectMany(trigger => trigger.Dependencies)
-            .Concat(_pending.SelectMany(trigger => trigger.Rule.OnlyIfDependencies))
-            .ToFrozenSet();
+        var next = _nextWatched;
+        next.Clear();
+        for (var ruleIndex = 0; ruleIndex < rules.Count; ruleIndex++)
+        {
+            var rule = rules[ruleIndex];
+            if (!rule.IsActivated)
+            {
+                continue;
+            }
+
+            foreach (var trigger in rule.PropertyTriggers)
+            {
+                if (trigger.State.Phase != TriggerPhase.Inactive)
+                {
+                    AddAll(next, trigger.Dependencies);
+                }
+            }
+        }
+
+        for (var index = 0; index < activating.Count; index++)
+        {
+            AddAll(next, activating[index].Dependencies);
+        }
+
+        foreach (var trigger in _pending)
+        {
+            AddAll(next, trigger.Rule.OnlyIfDependencies);
+        }
+
         var previous = _watched;
-        _watched = watched;
-        publishWatched(watched);
+        if (!IsEqual(previous, next))
+        {
+            _watched = next.ToFrozenSet();
+            publishWatched(_watched);
+        }
 
         // A value read while its property was not watched may have changed since without a queued change, so a property
         // that becomes watched is read from the graph again.
-        _values.Retain(watched, previous);
+        _values.Retain(_watched, previous);
+    }
+
+    private static void AddAll(HashSet<PropertyReference> set, PropertyReference[] properties)
+    {
+        foreach (var property in properties)
+        {
+            set.Add(property);
+        }
+    }
+
+    private static bool IsEqual(FrozenSet<PropertyReference> previous, HashSet<PropertyReference> next)
+    {
+        if (previous.Count != next.Count)
+        {
+            return false;
+        }
+
+        foreach (var property in next)
+        {
+            if (!previous.Contains(property))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static RunRequest CreateRequest(CompiledPropertyTrigger trigger) => new(trigger.Rule, null, trigger.Description, trigger);

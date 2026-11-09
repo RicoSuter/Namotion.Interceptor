@@ -127,4 +127,28 @@ public class PropertyTriggerEngineTests
         // Assert
         Assert.Equal(0, allocated);
     }
+
+    [Fact]
+    public void WhenAGraphChangeLeavesTheWatchedPropertiesAsTheyWere_ThenTheWatchedSetIsNotPublishedAgain()
+    {
+        // Arrange
+        var graph = new TestGraph();
+        var weather = new TestSensor();
+        graph.Add("Weather", weather);
+        var published = new List<IReadOnlySet<PropertyReference>>();
+        var engine = new PropertyTriggerEngine(graph.Resolver, new FakeTimeProvider(Now), NullLogger.Instance, () => "Storm", published.Add, new GraphRoutes(automation: new TestSensor(), changes: new AutomationChangeReceiver(new AutomationInputQueue())));
+        var rule = Compile("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")));
+        rule.IsActivated = true;
+        engine.Activate([rule], [rule]);
+
+        // Act
+        graph.Add("Holder", new TestSensorHolder());
+        engine.OnGraphChanged([rule], evaluateAll: false);
+        graph.Add("Garden", new TestSensor());
+        engine.OnGraphChanged([rule], evaluateAll: true);
+
+        // Assert
+        var watched = Assert.Single(published);
+        Assert.Equal([new PropertyReference(weather, nameof(TestSensor.Gust))], watched.ToArray());
+    }
 }
