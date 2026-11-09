@@ -24,7 +24,7 @@ internal sealed class RuleStatusPublisher
     {
         var rules = automation.Rules;
         var shown = (snapshot, rules, automation.Enabled, automation.CurrentState, notApplied);
-        var writesEvery = !shown.Equals(_shown);
+        var writesEvery = _shown is not { } previous || !shown.Equals(previous);
         _shown = shown;
         var timeZone = automation.TimeProvider.LocalTimeZone;
         foreach (var (key, subject) in rules)
