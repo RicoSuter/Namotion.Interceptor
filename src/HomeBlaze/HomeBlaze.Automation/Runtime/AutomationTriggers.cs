@@ -116,6 +116,9 @@ internal sealed class AutomationTriggers
     /// <summary>Subscribes the event triggers of the rule to the events after <paramref name="joinedAfter"/>, unless it listens already.</summary>
     public void Listen(CompiledRule rule, long joinedAfter) => _eventTriggers.Listen(rule, joinedAfter);
 
+    /// <summary>Records on each event subscription whether an active rule uses it.</summary>
+    public void RefreshActiveSubscriptions(IReadOnlyList<CompiledRule> rules) => _eventTriggers.RefreshActive(rules);
+
     /// <summary>Gives up the subscriptions of the event triggers of the rule.</summary>
     public void StopListening(CompiledRule rule) => _eventTriggers.StopListening(rule);
 

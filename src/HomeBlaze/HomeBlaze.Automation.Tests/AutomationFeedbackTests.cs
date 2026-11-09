@@ -1,4 +1,5 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
 using Namotion.Interceptor.Testing;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
@@ -48,6 +49,45 @@ public class AutomationFeedbackTests
     }
 
     [Fact]
+    public async Task WhenAnEventContinuesAChainBeyondTheLimitAndARuleHandlesIt_ThenTheChainIsStoppedAndReported()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("close", On("Close", OnEvent("/Button", "TestPressEvent"), Invoke("/Blinds/Close")))));
+
+        // Act
+        PressInChainBeyondTheLimit(host);
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(0, host.Blinds.CloseCount);
+        Assert.Equal(ServiceStatus.Error, host.Automation.Status);
+        Assert.StartsWith("A feedback chain of more than 16 inputs was stopped", host.Automation.StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenAnEventContinuesAChainBeyondTheLimitAndOnlyARuleOfAnotherStateListens_ThenNoChainIsReported()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Idle", "Running"];
+            automation.InitialState = "Idle";
+            automation.Rules = Keyed(
+                ("close", Create("Close", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Invoke("/Blinds/Close")], inState: "Running")));
+        });
+
+        // Act
+        PressInChainBeyondTheLimit(host);
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(0, host.Blinds.CloseCount);
+        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
+        Assert.Null(host.Automation.StatusMessage);
+    }
+
+    [Fact]
     public async Task WhenTheQueueOverflows_ThenTheDropIsReportedAndTheRemainingInputsAreProcessed()
     {
         // Arrange
@@ -71,5 +111,11 @@ public class AutomationFeedbackTests
         Assert.Equal(ServiceStatus.Error, host.Automation.Status);
         Assert.StartsWith("The input queue overflowed", host.Automation.StatusMessage);
         Assert.Equal(1L, host.Rule("gust").RunCount);
+    }
+
+    private static void PressInChainBeyondTheLimit(AutomationTestHost host)
+    {
+        using var run = AutomationInputQueue.EnterRun(AutomationInputQueue.MaxChainDepth);
+        host.Button.Press("Release");
     }
 }

@@ -9,6 +9,8 @@ namespace HomeBlaze.Automation.Runtime;
 /// </summary>
 internal sealed class EventSubscription(IInterceptorSubject source, Type eventType) : IDisposable
 {
+    private bool _hasActiveTrigger;
+
     public IInterceptorSubject Source { get; } = source;
 
     public Type EventType { get; } = eventType;
@@ -17,6 +19,19 @@ internal sealed class EventSubscription(IInterceptorSubject source, Type eventTy
 
     /// <summary>The number of event triggers that use the subscription.</summary>
     public int TriggerCount { get; set; }
+
+    /// <summary>
+    /// Whether a trigger of an active rule used the subscription when the worker last activated or deactivated rules; read
+    /// on the thread that publishes an event.
+    /// </summary>
+    public bool HasActiveTrigger
+    {
+        get => Volatile.Read(ref _hasActiveTrigger);
+        set => Volatile.Write(ref _hasActiveTrigger, value);
+    }
+
+    /// <summary>Set by <see cref="EventTriggerEngine.RefreshActive"/> while it finds the subscriptions of the active rules.</summary>
+    public bool IsUsedByActiveRule { get; set; }
 
     public void Dispose() => Handle?.Dispose();
 }

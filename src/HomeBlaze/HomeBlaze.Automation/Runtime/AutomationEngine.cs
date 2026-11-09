@@ -404,6 +404,7 @@ internal sealed class AutomationEngine : IRuleRunHost
 
         // The rule instances changed, so the relative paths of the kept rules resolve again.
         _triggers.Rebind(_snapshot.Rules);
+        _triggers.RefreshActiveSubscriptions(_snapshot.Rules);
     }
 
     // A property trigger that stays the same in a rule that stays active keeps its state, so that a Save does not run it
@@ -455,6 +456,7 @@ internal sealed class AutomationEngine : IRuleRunHost
             pending.Add(rule);
         }
 
+        _triggers.RefreshActiveSubscriptions(_snapshot.Rules);
         return _triggers.Activate(pending, _snapshot.Rules);
     }
 

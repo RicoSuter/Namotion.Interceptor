@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Messaging;
 using HomeBlaze.Automation.Events;
 using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Services;
@@ -183,8 +184,41 @@ internal sealed class EventTriggerEngine(
         }
     }
 
+    /// <summary>
+    /// Records on each subscription whether an active rule uses it, so that an event beyond the chain limit that no
+    /// active rule handles is not reported as a stopped feedback chain.
+    /// </summary>
+    public void RefreshActive(IReadOnlyList<CompiledRule> rules)
+    {
+        foreach (var rule in rules)
+        {
+            if (!rule.IsActivated)
+            {
+                continue;
+            }
+
+            foreach (var trigger in rule.EventTriggers)
+            {
+                if (trigger.Subscription is { } subscription)
+                {
+                    subscription.IsUsedByActiveRule = true;
+                }
+            }
+        }
+
+        foreach (var subscriptions in _subscriptions.Values)
+        {
+            foreach (var subscription in subscriptions)
+            {
+                subscription.HasActiveTrigger = subscription.IsUsedByActiveRule;
+                subscription.IsUsedByActiveRule = false;
+            }
+        }
+    }
+
     private static void Use(CompiledEventTrigger trigger, EventSubscription subscription)
     {
+        subscription.HasActiveTrigger |= trigger.Rule.IsActivated;
         subscription.TriggerCount++;
         trigger.Subscription = subscription;
         trigger.SourceError = null;
@@ -195,8 +229,7 @@ internal sealed class EventTriggerEngine(
         var subscription = new EventSubscription(source, eventType);
         try
         {
-            subscription.Handle = EventSources.Subscribe(source, eventType, payload => queue.TryEnqueue(
-                new EventInput(subscription, new CapturedEvent(source, payload), queue.NextEventSequence(), AutomationInputQueue.CausedChainDepth)));
+            subscription.Handle = EventSources.Subscribe(source, eventType, payload => Receive(subscription, payload));
         }
         catch (Exception exception)
         {
@@ -214,6 +247,19 @@ internal sealed class EventTriggerEngine(
 
         subscriptions.Add(subscription);
         return subscription;
+    }
+
+    // Called on the thread that publishes the event. An event beyond the chain limit that no active rule handles would
+    // continue no chain, so it is dropped without being counted as one.
+    private void Receive(EventSubscription subscription, IEvent payload)
+    {
+        var chainDepth = AutomationInputQueue.CausedChainDepth;
+        if (chainDepth > AutomationInputQueue.MaxChainDepth && !subscription.HasActiveTrigger)
+        {
+            return;
+        }
+
+        queue.TryEnqueue(new EventInput(subscription, new CapturedEvent(subscription.Source, payload), queue.NextEventSequence(), chainDepth));
     }
 
     private EventSubscription? Find(IInterceptorSubject source, Type eventType)
