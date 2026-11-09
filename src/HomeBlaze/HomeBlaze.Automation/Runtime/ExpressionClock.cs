@@ -156,7 +156,8 @@ internal sealed partial class ExpressionClock
     // A strict comparison changes one tick after the boundary, for example now - x > d at x + d plus one tick.
     private static TimeSpan GetOffset(Match match) => match.Groups["operator"].Value is ">" or "<=" ? TimeSpan.FromTicks(1) : TimeSpan.Zero;
 
-    // A longer duration added to an instant can leave the range of DateTimeOffset; it is evaluated every second.
+    // TryParse refuses a duration beyond AutomationDuration.Maximum, which added to an instant can leave the range of
+    // DateTimeOffset; such a comparison is evaluated every second.
     private static TimeSpan? ReadDuration(string text) => AutomationDuration.TryParse(text, out var duration) ? duration : null;
 
     [GeneratedRegex(@"(?<=(^|\(|\band|\bor|&&|\|\|)\s*)(?<![\w./])now\s+-\s+(?<path>[^\s()]+)\s*(?<operator>>=|<=|>|<)\s*(?<duration>[0-9][0-9A-Za-z.]*)(?=\s*($|\)|and\b|or\b|&&|\|\|))")]

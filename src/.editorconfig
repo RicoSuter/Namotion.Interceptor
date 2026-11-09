@@ -49,10 +49,10 @@ dotnet_diagnostic.S2326.severity = none
 dotnet_diagnostic.S1135.severity = none
 
 # S8970: Null-forgiving operators should not be used when nullable warnings are disabled.
-# Disabled in Razor projects with <NoWarn>$(NoWarn);S8970</NoWarn> in their project file, since .editorconfig sections
-# do not reach source-generated Razor files. Sonar reads Razor-generated code as nullable-disabled, but the compiler
-# reports CS8618/CS8625 there without the null-forgiving operator.
-# When reusing: set it in each Razor project that references SonarAnalyzer.CSharp. Other code remains checked.
+# Disabled per project in a Razor project that reports it, with <NoWarn>$(NoWarn);S8970</NoWarn> in its project file,
+# since .editorconfig sections do not reach source-generated Razor files. Sonar reads Razor-generated code as
+# nullable-disabled, but the compiler reports CS8618/CS8625 there without the null-forgiving operator.
+# When reusing: suppress it only in a Razor project whose generated code reports it. Other code remains checked.
 
 # Test-specific overrides match directory names, not MSBuild IsTestProject.
 # Adapt this pattern when reusing; shared .Testing libraries and benchmarks are not included.

@@ -40,7 +40,7 @@ public sealed record AutomationTriggerTestResult
     /// <summary>The expression of a property trigger: true, false or null for unknown. Null for an event trigger.</summary>
     public bool? Result { get; init; }
 
-    /// <summary>The distinct paths that led to no value when <see cref="Result"/> is unknown, else empty.</summary>
+    /// <summary>The distinct paths that led to no value when the expression of a property trigger is unknown, else empty.</summary>
     public IReadOnlyList<string> MissingPaths { get; init; } = [];
 
     /// <summary>The hold a property trigger needs, or what an event trigger waits for.</summary>
