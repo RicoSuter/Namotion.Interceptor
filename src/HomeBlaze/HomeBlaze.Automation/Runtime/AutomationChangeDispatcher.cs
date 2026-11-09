@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Frozen;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
@@ -13,7 +14,9 @@ namespace HomeBlaze.Automation.Runtime;
 /// stream shared by all of them: a change of a property to the listeners that watch it, and a change of a property that
 /// holds subjects or a property added at run time, which <see cref="PropertyAttachNotifier"/> reports, as a graph change
 /// to the listeners whose graph route has the property and to every listener whose graph route is unbounded or not
-/// published yet, left out while every listener still has one queued. The subscription starts with the first
+/// published yet, left out while every listener still has one queued. A listener that resolves receives every graph
+/// change until it published the route of what it resolved, see <see cref="Registration.BeginResolving"/>. The
+/// subscription starts with the first
 /// registration for a stream and ends with the last one, so that the dispatcher holds no context without automations.
 /// Changes are routed synchronously on the writing thread, where the chain depth of the writing flow is read.
 /// Thread-safe.
@@ -200,6 +203,7 @@ internal sealed class AutomationChangeDispatcher
             }
 
             registration.IsDisposed = true;
+            registration.EndResolving();
             var source = registration.Source;
             source.Remove(registration);
             registration.Watched = FrozenSet<PropertyReference>.Empty;
@@ -219,6 +223,7 @@ internal sealed class AutomationChangeDispatcher
     internal sealed class Registration : IDisposable
     {
         private readonly AutomationChangeDispatcher _dispatcher;
+        private int _isResolving;
 
         internal Registration(AutomationChangeDispatcher dispatcher, ChangeSource source, IAutomationChangeListener listener)
         {
@@ -241,6 +246,8 @@ internal sealed class AutomationChangeDispatcher
 
         internal bool IsDisposed { get; set; }
 
+        internal bool IsResolving => Volatile.Read(ref _isResolving) != 0;
+
         /// <summary>
         /// Routes the changes of exactly these properties to the listener from now on. When this returns, a change that
         /// commits later is routed by the new set, so that a value read afterwards misses no change.
@@ -253,6 +260,28 @@ internal sealed class AutomationChangeDispatcher
         /// the new route.
         /// </summary>
         public void PublishRoute(FrozenSet<PropertyReference> route, bool isUnbounded) => _dispatcher.PublishRoute(this, route, isUnbounded);
+
+        /// <summary>
+        /// Routes every graph change to the listener until <see cref="EndResolving"/>, as an unbounded route does, while
+        /// the listener resolves results whose route is not published yet. When this returns, a change that commits later
+        /// reaches the listener.
+        /// </summary>
+        public void BeginResolving()
+        {
+            if (Interlocked.Exchange(ref _isResolving, 1) == 0)
+            {
+                Source.OnResolvingChanged(1);
+            }
+        }
+
+        /// <summary>Ends <see cref="BeginResolving"/>, once the route of the results is published.</summary>
+        public void EndResolving()
+        {
+            if (Interlocked.Exchange(ref _isResolving, 0) == 1)
+            {
+                Source.OnResolvingChanged(-1);
+            }
+        }
 
         /// <summary>
         /// Tells that the listener no longer has a graph change queued, because it took it or the queue refused it, so that
@@ -269,6 +298,10 @@ internal sealed class AutomationChangeDispatcher
         private readonly List<Registration> _registrations = [];
         private readonly List<PropertyAttachNotifier> _notifiers = [];
         private Routes _routes = Routes.Empty;
+
+        // The registrations, read lock-free before the routes, and how many of them resolve, see NotifyGraphChanged.
+        private Registration[] _registrationSnapshot = [];
+        private int _resolvingCount;
 
         // Raised after a listener is added and whenever a listener releases its graph change, see NotifyGraphChanged.
         private long _releaseCount;
@@ -300,6 +333,7 @@ internal sealed class AutomationChangeDispatcher
         public void Add(Registration registration)
         {
             _registrations.Add(registration);
+            Volatile.Write(ref _registrationSnapshot, [.. _registrations]);
             var routes = _routes;
             Publish(routes.With(listeners: [.. routes.Listeners, registration.Listener], unbounded: [.. routes.Unbounded, registration.Listener]));
 
@@ -328,12 +362,15 @@ internal sealed class AutomationChangeDispatcher
 
         public void OnGraphChangeReleased() => Interlocked.Increment(ref _releaseCount);
 
+        public void OnResolvingChanged(int delta) => Interlocked.Add(ref _resolvingCount, delta);
+
         /// <summary>Gives a graph change for a property that the registry registered at run time.</summary>
         public void OnPropertyAdded(PropertyReference property) => NotifyGraphChanged(property);
 
         public void Remove(Registration registration)
         {
             _registrations.Remove(registration);
+            Volatile.Write(ref _registrationSnapshot, [.. _registrations]);
             var routes = _routes;
             var listener = registration.Listener;
             Publish(new Routes(
@@ -405,11 +442,43 @@ internal sealed class AutomationChangeDispatcher
             }
         }
 
-        // Gives a graph change to the listeners whose route has the property and to every unbounded listener, unless each
-        // listener has one queued: no listener released its graph change since every listener was given one, so each
-        // takes it after this change. One write that changes the graph several times, such as the attach of a subject with
-        // its methods and attributes, gives each listener one graph change.
+        // Gives a graph change to the listeners whose route has the property, to every unbounded listener and to every
+        // listener that resolves, unless each listener has one queued: no listener released its graph change since every
+        // listener was given one, so each takes it after this change. One write that changes the graph several times, such
+        // as the attach of a subject with its methods and attributes, gives each listener one graph change.
         private void NotifyGraphChanged(PropertyReference property)
+        {
+            // The change was committed and fenced before, and a listener that begins to resolve raises the count with a full
+            // fence before it reads the graph: either the count read here is raised or the listener reads the change.
+            if (Volatile.Read(ref _resolvingCount) == 0)
+            {
+                NotifyGraphChanged(property, [], []);
+                return;
+            }
+
+            // Read before the routes: a listener ends to resolve after it published the route that covers what it read.
+            var registrations = Volatile.Read(ref _registrationSnapshot);
+            var rented = registrations.Length <= 64 ? null : ArrayPool<bool>.Shared.Rent(registrations.Length);
+            var isResolving = rented is null ? stackalloc bool[registrations.Length] : rented.AsSpan(0, registrations.Length);
+            for (var index = 0; index < registrations.Length; index++)
+            {
+                isResolving[index] = registrations[index].IsResolving;
+            }
+
+            try
+            {
+                NotifyGraphChanged(property, registrations, isResolving);
+            }
+            finally
+            {
+                if (rented is not null)
+                {
+                    ArrayPool<bool>.Shared.Return(rented);
+                }
+            }
+        }
+
+        private void NotifyGraphChanged(PropertyReference property, Registration[] registrations, ReadOnlySpan<bool> isResolving)
         {
             // The change was committed and fenced before, as the registry fences a property it registers, and a listener
             // raises the count with a full fence before it reads the graph: either the count read here is the new one or
@@ -423,23 +492,30 @@ internal sealed class AutomationChangeDispatcher
             // Read after the count, which a listener raises after it was added to the routes.
             var routes = Volatile.Read(ref _routes);
             var chainDepth = AutomationInputQueue.CausedChainDepth;
-            if (routes.Graph.TryGetValue(property, out var routed))
+            routes.Graph.TryGetValue(property, out var routed);
+            Notify(routed ?? [], chainDepth);
+            Notify(routes.Unbounded, chainDepth);
+            for (var index = 0; index < registrations.Length; index++)
             {
-                foreach (var listener in routed)
+                var listener = registrations[index].Listener;
+                if (isResolving[index] && (routed is null || Array.IndexOf(routed, listener) < 0) && Array.IndexOf(routes.Unbounded, listener) < 0)
                 {
                     listener.OnGraphChanged(chainDepth);
                 }
-            }
-
-            foreach (var listener in routes.Unbounded)
-            {
-                listener.OnGraphChanged(chainDepth);
             }
 
             // A concurrent notification may write an older count, which only notifies the next change again.
             if (routes.Unbounded.Length == routes.Listeners.Length)
             {
                 Volatile.Write(ref _notifiedAt, releaseCount);
+            }
+        }
+
+        private static void Notify(IAutomationChangeListener[] listeners, int chainDepth)
+        {
+            foreach (var listener in listeners)
+            {
+                listener.OnGraphChanged(chainDepth);
             }
         }
 

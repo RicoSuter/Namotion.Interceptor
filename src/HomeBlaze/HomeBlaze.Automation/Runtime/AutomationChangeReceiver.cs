@@ -40,6 +40,12 @@ internal sealed class AutomationChangeReceiver(AutomationInputQueue queue) : IAu
     /// </summary>
     public void PublishRoute(FrozenSet<PropertyReference> route, bool isUnbounded) => _registration?.PublishRoute(route, isUnbounded);
 
+    /// <summary>Routes every graph change to the automation until <see cref="EndResolving"/>. Called by the worker only.</summary>
+    public void BeginResolving() => _registration?.BeginResolving();
+
+    /// <summary>Ends <see cref="BeginResolving"/>, once the route of what the worker resolved is published. Called by the worker only.</summary>
+    public void EndResolving() => _registration?.EndResolving();
+
     /// <summary>
     /// Called by the worker when it takes the queued graph change, before it reads the graph, so that the next one is
     /// queued again.

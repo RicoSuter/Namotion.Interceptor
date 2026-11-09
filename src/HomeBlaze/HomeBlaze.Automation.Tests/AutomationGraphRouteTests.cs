@@ -230,34 +230,42 @@ public class AutomationGraphRouteTests
         Assert.Equal(1, host.Blinds.CloseCount);
     }
 
-    // The write runs on the worker after the paths were resolved and before the union that has the new sensor holder is
-    // published, so that the dispatcher routes it by the union before, which does not have that holder.
+    // The write runs after the paths were resolved and before the union that has the new sensor holder is published, so
+    // that the union before, which does not have that holder, does not route it.
     [Fact]
-    public async Task WhenAPropertyOnlyTheNewRouteHasChangesBeforeTheRouteIsPublished_ThenThePathsAreResolvedAgain()
+    public async Task WhenAPropertyOnlyTheNewRouteHasChangesBeforeTheRouteIsPublished_ThenItIsAGraphChangeAtTheChainDepthOfTheWriter()
     {
         // Arrange
-        await using var host = await AutomationTestHost.StartAsync(Rule("/Room/Sensor/Gust > 8"));
+        await using var host = await AutomationTestHost.StartAsync(_ => { });
         host.Graph.Add("Room", new TestRoom { Sensor = new TestSensor { Gust = 3 } });
-        await host.FlushAsync();
+        var (automation, listener) = await AddCountedAsync(host, "Gusts", Rule("/Room/Sensor/Gust > 8"));
         var replacement = new TestRoom { Sensor = new TestSensor { Gust = 4 } };
         var windy = new TestSensor { Gust = 9 };
-        var routes = Routes(host.Automation);
+        var routes = Routes(automation);
         var sensorOfReplacement = new PropertyReference(replacement, nameof(TestRoom.Sensor));
         var wasRoutedAtTheWrite = true;
         routes.BeforePublication = () =>
         {
             routes.BeforePublication = null;
-            wasRoutedAtTheWrite = Registration(host.Automation).Route.Contains(sensorOfReplacement);
-            replacement.Sensor = windy;
+            wasRoutedAtTheWrite = Registration(automation).Route.Contains(sensorOfReplacement);
+            var writer = new Thread(() =>
+            {
+                using var run = AutomationInputQueue.EnterRun(5);
+                replacement.Sensor = windy;
+            });
+            writer.Start();
+            writer.Join();
         };
+        listener.Reset();
 
         // Act
         host.Graph.Add("Room", replacement);
-        await host.FlushAsync();
+        await automation.FlushAsync();
 
         // Assert
         Assert.False(wasRoutedAtTheWrite);
-        var trigger = host.Automation.Runtime!.Engine.Rules[0].PropertyTriggers[0];
+        Assert.Equal([0, 6], listener.ChainDepths);
+        var trigger = automation.Runtime!.Engine.Rules[0].PropertyTriggers[0];
         Assert.Equal([new PropertyReference(windy, nameof(TestSensor.Gust))], trigger.Dependencies);
         Assert.Equal(1, host.Blinds.CloseCount);
     }
@@ -364,6 +372,8 @@ public class AutomationGraphRouteTests
         private readonly ConcurrentQueue<int> _graphChanges = new();
 
         public int GraphChanges => _graphChanges.Count;
+
+        public int[] ChainDepths => [.. _graphChanges];
 
         public void Reset() => _graphChanges.Clear();
 

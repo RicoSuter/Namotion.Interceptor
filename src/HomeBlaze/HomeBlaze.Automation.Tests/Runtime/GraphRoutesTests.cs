@@ -132,7 +132,7 @@ public class GraphRoutesTests
     {
         // Arrange
         await using var fixture = await RouteFixture.CreateAsync();
-        var routes = new GraphRoutes(automation: null);
+        var routes = new GraphRoutes(automation: null, changes: null);
         var slot = new GraphRouteSlot();
 
         // Act
@@ -211,76 +211,36 @@ public class GraphRoutesTests
         Assert.False(routes.IsUnbounded);
     }
 
-    [Theory]
-    [InlineData(4, true)]
-    [InlineData(2, false)]
-    public async Task WhenAChangedUnionIsPublished_ThenAGraphChangeIsQueuedOnlyWhenTheStructureMovedSinceTheResolution(long versionAtPublication, bool isQueued)
+    [Fact]
+    public async Task WhenAResolutionBegins_ThenTheAutomationReceivesEveryGraphChangeUntilThePublication()
     {
         // Arrange
         await using var fixture = await RouteFixture.CreateAsync();
-        var version = 2L;
-        var queue = new AutomationInputQueue();
-        var routes = new GraphRoutes(fixture.Automation, new AutomationChangeReceiver(queue), () => version);
+        var dispatcher = new AutomationChangeDispatcher();
+        var changes = new AutomationChangeReceiver(new AutomationInputQueue());
+        using var registration = changes.Register(dispatcher, fixture.Host.Graph.Context);
+        var routes = new GraphRoutes(fixture.Automation, changes);
         var slot = new GraphRouteSlot();
-        AutomationPaths.ResolveProperty(fixture.Host.Graph.Resolver, "/Room/Sensor/Gust", fixture.Rule, routes.BeginRoute());
-        routes.EndRoute(slot);
-        version = versionAtPublication;
+        routes.Publish();
+        var isResolvingBefore = changes.Registration!.IsResolving;
 
         // Act
-        var hasPublished = routes.Publish(chainDepth: 3);
+        AutomationPaths.ResolveProperty(fixture.Host.Graph.Resolver, "/Room/Sensor/Gust", fixture.Rule, routes.BeginRoute());
+        routes.EndRoute(slot);
+        var isResolvingWhileResolving = changes.Registration.IsResolving;
+        var hasPublished = routes.Publish();
+        var isResolvingAfterThePublication = changes.Registration.IsResolving;
+        AutomationPaths.ResolveProperty(fixture.Host.Graph.Resolver, "/Room/Sensor/Gust", fixture.Rule, routes.BeginRoute());
+        routes.EndRoute(slot);
+        var hasPublishedTheSameUnion = routes.Publish();
 
         // Assert
+        Assert.False(isResolvingBefore);
+        Assert.True(isResolvingWhileResolving);
         Assert.True(hasPublished);
-        Assert.Equal(isQueued, queue.HasWork);
-        if (isQueued)
-        {
-            Assert.Equal(3, Assert.IsType<GraphChangedInput>(await queue.ReadAsync(CancellationToken.None)).ChainDepth);
-        }
-    }
-
-    [Fact]
-    public async Task WhenAChangeIsInProgressAtTheResolution_ThenThePublicationQueuesAGraphChange()
-    {
-        // Arrange
-        await using var fixture = await RouteFixture.CreateAsync();
-        var version = 3L;
-        var queue = new AutomationInputQueue();
-        var routes = new GraphRoutes(fixture.Automation, new AutomationChangeReceiver(queue), () => version);
-        AutomationPaths.ResolveProperty(fixture.Host.Graph.Resolver, "/Room/Sensor/Gust", fixture.Rule, routes.BeginRoute());
-        routes.EndRoute(new GraphRouteSlot());
-        version = 4;
-
-        // Act
-        routes.Publish(chainDepth: 0);
-
-        // Assert
-        Assert.True(queue.HasWork);
-    }
-
-    // The union published before has every property that can change the stored results, so a change during the
-    // resolution is routed by it.
-    [Fact]
-    public async Task WhenTheUnionDidNotChange_ThenNeitherIsItPublishedNorAGraphChangeQueuedAfterTheStructureMoved()
-    {
-        // Arrange
-        await using var fixture = await RouteFixture.CreateAsync();
-        var version = 2L;
-        var queue = new AutomationInputQueue();
-        var routes = new GraphRoutes(fixture.Automation, new AutomationChangeReceiver(queue), () => version);
-        var slot = new GraphRouteSlot();
-        AutomationPaths.ResolveProperty(fixture.Host.Graph.Resolver, "/Room/Sensor/Gust", fixture.Rule, routes.BeginRoute());
-        routes.EndRoute(slot);
-        routes.Publish(chainDepth: 0);
-        AutomationPaths.ResolveProperty(fixture.Host.Graph.Resolver, "/Room/Sensor/Gust", fixture.Rule, routes.BeginRoute());
-        routes.EndRoute(slot);
-        version = 6;
-
-        // Act
-        var hasPublished = routes.Publish(chainDepth: 0);
-
-        // Assert
-        Assert.False(hasPublished);
-        Assert.False(queue.HasWork);
+        Assert.False(isResolvingAfterThePublication);
+        Assert.False(hasPublishedTheSameUnion);
+        Assert.False(changes.Registration.IsResolving);
     }
 
     private static void Resolve(RouteFixture fixture, string path, GraphRouteSlot slot)
@@ -312,7 +272,7 @@ public class GraphRoutesTests
             host.Graph.Add("Room", Room);
             host.Graph.Add("Folder", Folder);
             Folder.Add("Automation", Automation);
-            Routes = new GraphRoutes(Automation);
+            Routes = new GraphRoutes(Automation, changes: null);
         }
 
         public AutomationTestHost Host { get; }

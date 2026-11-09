@@ -6,6 +6,7 @@ using Namotion.Interceptor;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Automation.Tests.Runtime;
@@ -346,6 +347,84 @@ public class AutomationChangeDispatcherTests
         // Assert
         Assert.Equal(2, listener.GraphChanges);
         Assert.True(dispatcher.IsRoutedAsGraphChange(graph.Context, listener, ChildrenOf(graph)));
+    }
+
+    [Fact]
+    public void WhenAListenerResolves_ThenItReceivesAGraphChangeOffItsRouteUntilItEndsToResolve()
+    {
+        // Arrange
+        var (graph, weather) = CreateGraph();
+        var holder = new TestSensorHolder();
+        graph.Add("Holder", holder);
+        var dispatcher = new AutomationChangeDispatcher();
+        var resolving = new RecordingListener();
+        var routed = new RecordingListener();
+        using var resolvingRegistration = dispatcher.Register(graph.Context, resolving);
+        using var routedRegistration = dispatcher.Register(graph.Context, routed);
+        resolvingRegistration.PublishRoute(Watch(Gust(weather)), isUnbounded: false);
+        routedRegistration.PublishRoute(Watch(SensorOf(holder)), isUnbounded: false);
+
+        // Act
+        resolvingRegistration.BeginResolving();
+        routedRegistration.BeginResolving();
+        using (AutomationInputQueue.EnterRun(2))
+        {
+            holder.Sensor = new TestSensor();
+        }
+
+        resolvingRegistration.EndResolving();
+        routedRegistration.EndResolving();
+        resolvingRegistration.OnGraphChangeReleased();
+        routedRegistration.OnGraphChangeReleased();
+        holder.Sensor = new TestSensor();
+
+        // Assert
+        Assert.Equal([3], resolving.GraphChainDepths);
+        Assert.Equal([3, 0], routed.GraphChainDepths);
+    }
+
+    // Writes alternate between two subjects that stay attached elsewhere, so that the registry allocates the same for each.
+    [Fact]
+    public void WhenAPropertyOffEveryRouteChangesWhileNoListenerResolves_ThenTheDispatcherAllocatesNothing()
+    {
+        // Arrange
+        const int writes = 1000;
+        var (graph, weather) = CreateGraph();
+        var holder = new TestSensorHolder();
+        var first = new TestSensor();
+        var second = new TestSensor();
+        graph.Add("Holder", holder);
+        graph.Add("First", first);
+        graph.Add("Second", second);
+        using var observer = graph.Context.GetService<PropertyChangeInterceptor>().Subscribe(_ => { });
+        var dispatcher = new AutomationChangeDispatcher();
+        var listener = new RecordingListener();
+        var withoutListener = MeasureAllocations(writes, holder, first, second);
+        using var registration = dispatcher.Register(graph.Context, listener);
+        registration.PublishRoute(Watch(Gust(weather)), isUnbounded: false);
+
+        // Act
+        var withListener = MeasureAllocations(writes, holder, first, second);
+
+        // Assert
+        Assert.Equal(0, listener.GraphChanges);
+        Assert.True(withListener - withoutListener < writes, $"{withListener - withoutListener} bytes for {writes} writes");
+    }
+
+    private static long MeasureAllocations(int writes, TestSensorHolder holder, TestSensor first, TestSensor second)
+    {
+        for (var index = 0; index < 100; index++)
+        {
+            holder.Sensor = index % 2 == 0 ? first : second;
+        }
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var index = 0; index < writes; index++)
+        {
+            holder.Sensor = index % 2 == 0 ? first : second;
+        }
+
+        return GC.GetAllocatedBytesForCurrentThread() - before;
     }
 
     [Fact]
