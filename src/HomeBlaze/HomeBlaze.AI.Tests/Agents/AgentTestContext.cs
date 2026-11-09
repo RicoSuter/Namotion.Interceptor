@@ -248,7 +248,9 @@ internal sealed class AgentTestContext<TAgent> : IAsyncDisposable
     private async Task StartAgentAsync()
     {
         await ((IHostedService)Agent).StartAsync(CancellationToken.None);
+        // The status is written before its message, which every started status has, so both are waited for.
         await AsyncTestHelpers.WaitUntilAsync(
-            () => Agent.Status is not (ServiceStatus.Stopped or ServiceStatus.Starting), message: "The agent should finish starting.");
+            () => Agent.Status is not (ServiceStatus.Stopped or ServiceStatus.Starting) && Agent.StatusMessage is not null,
+            message: "The agent should finish starting.");
     }
 }
