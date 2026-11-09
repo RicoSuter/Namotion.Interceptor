@@ -190,9 +190,31 @@ internal static class AutomationPaths
     /// <summary>Reads the property at a path that starts at the subject, when an expression may read it.</summary>
     public static ExpressionValue ReadFrom(SubjectPathResolver resolver, string path, IInterceptorSubject subject)
     {
-        var relativePath = path.StartsWith("./", StringComparison.Ordinal) ? path : "./" + path;
-        var property = ResolveProperty(resolver, relativePath, subject);
-        return property is null ? ExpressionValue.Missing : ExpressionValue.FromProperty(property, property.GetValue());
+        var property = ResolveFrom(resolver, path, subject);
+        return property is not null && IsReadable(property, recorder: null)
+            ? ExpressionValue.FromProperty(property, property.GetValue())
+            : ExpressionValue.Missing;
+    }
+
+    // Not through the split cache of ResolveTarget: the callers cut a new string from the expression on each evaluation,
+    // which would only add an entry to it every time.
+    private static RegisteredSubjectProperty? ResolveFrom(SubjectPathResolver resolver, string path, IInterceptorSubject subject)
+    {
+        var start = path.StartsWith("./", StringComparison.Ordinal) ? 2 : 0;
+        var lastSeparator = path.LastIndexOf(Separator);
+        if (lastSeparator == path.Length - 1)
+        {
+            return null;
+        }
+
+        if (lastSeparator < start)
+        {
+            return FindProperty(subject, start == 0 ? path : path[start..], recorder: null);
+        }
+
+        var subjectPath = start == 0 ? string.Concat("./", path.AsSpan(0, lastSeparator)) : path[..lastSeparator];
+        var owner = ResolveSubject(resolver, subjectPath, subject);
+        return owner is null ? null : FindProperty(owner, path[(lastSeparator + 1)..], recorder: null);
     }
 
     private sealed class PathParts(string subjectPath, string name)
