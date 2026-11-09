@@ -220,10 +220,13 @@ public class HomeBlazeInstallationClientTests
     public async Task WhenTheConfigurationIsRefused_ThenForgettingThrowsTheRefusalAndTheClientKeepsItsNameAndToken(bool isRefusalFoundOnlyByWrite, bool isConnected)
     {
         // Arrange
-        var connection = _connections.Connect(null, new FakeClientCallbacks());
+        var callbacks = new FakeClientCallbacks();
+        var connection = _connections.Connect(null, callbacks);
         _installation.ReconcileClients();
         var client = _installation.Clients[connection.ConnectionId];
         await client.RenameAsync("Hall", CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => callbacks.StoredTokens.Count == 1, message: "The token was not stored");
+        var token = callbacks.StoredTokens[0];
         if (!isConnected)
         {
             _connections.Disconnect(connection);
@@ -236,6 +239,9 @@ public class HomeBlazeInstallationClientTests
 
         // Act
         var exception = await Record.ExceptionAsync(() => client.ForgetAsync(CancellationToken.None));
+        var isConnectedAfterRefusal = client.IsConnected;
+        var later = _connections.Connect(token, new FakeClientCallbacks());
+        _installation.ReconcileClients();
 
         // Assert
         Assert.Same(_root.Refusal, exception);
@@ -243,8 +249,10 @@ public class HomeBlazeInstallationClientTests
         Assert.NotNull(tokenHash);
         Assert.Equal(tokenHash, client.TokenHash);
         Assert.Same(client, _installation.Clients[client.Id]);
-        Assert.Equal(isConnected, client.IsConnected);
+        Assert.Equal(isConnected, isConnectedAfterRefusal);
         Assert.Equal("Hall", connection.ClientName);
+        Assert.Equal(client.Id, later.ClientId);
+        Assert.Equal("Hall", later.ClientName);
     }
 
     [Fact]
