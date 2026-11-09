@@ -563,6 +563,31 @@ public class AutomationChangeDispatcherTests
         Assert.Equal(0, registration.Source.ParentGainCount);
     }
 
+    [Fact]
+    public void WhenAListenerGainsAParentWhileItResolves_ThenTheGraphChangeThatReachesItMeanwhileTakesTheMark()
+    {
+        // Arrange
+        var (graph, weather) = CreateGraph();
+        var holder = new TestSensorHolder();
+        graph.Add("Holder", holder);
+        var dispatcher = new AutomationChangeDispatcher();
+        var listener = new RecordingListener();
+        using var registration = dispatcher.Register(graph.Context, listener);
+        registration.PublishRoute(Watch(Gust(weather)), isUnbounded: false);
+        registration.BeginResolving();
+        registration.OnParentGained();
+
+        // Act
+        holder.Sensor = new TestSensor();
+        registration.OnGraphChangeReleased();
+        registration.EndResolving();
+        holder.Sensor = new TestSensor();
+
+        // Assert
+        Assert.Equal(1, listener.GraphChanges);
+        Assert.Equal(0, registration.Source.ParentGainCount);
+    }
+
     // Writes alternate between two subjects that stay attached elsewhere, so that the registry allocates the same for each;
     // the smallest object takes 24 bytes, so less than 8 bytes a write leaves room only for allocations of the runtime
     // that happen once.
