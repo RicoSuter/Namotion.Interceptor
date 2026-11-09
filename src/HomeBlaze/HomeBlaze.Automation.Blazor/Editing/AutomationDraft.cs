@@ -12,6 +12,7 @@ public sealed class AutomationDraft
 {
     private readonly Dictionary<string, AutomationValidationError> _inputErrors = new(StringComparer.Ordinal);
     private Automation? _automation;
+    private (string State, Regex Word)? _mentionPattern;
 
     internal AutomationDraft()
     {
@@ -171,7 +172,12 @@ public sealed class AutomationDraft
     /// </summary>
     internal List<RuleDraft> FindRulesMentioning(string state)
     {
-        var word = new Regex($@"(?<!\w){Regex.Escape(state)}(?!\w)", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+        if (_mentionPattern?.State != state)
+        {
+            _mentionPattern = (state, new Regex($@"(?<!\w){Regex.Escape(state)}(?!\w)", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)));
+        }
+
+        var word = _mentionPattern.Value.Word;
         return Rules.FindAll(rule => rule.Texts.Any(word.IsMatch));
     }
 
