@@ -65,6 +65,7 @@ public class FluentStorageContainerConfigurationIssueTests : StorageTestBase
         // Assert
         Assert.IsType<ConfigurationWriteRefusedException>(refusalBefore);
         Assert.Null(Record.Exception(() => writer.ThrowIfWriteRefused(motor)));
+        Assert.False(storage.Connection.Reconciler.HasConfigurationIssues);
     }
 
     [Fact]
@@ -186,6 +187,25 @@ public class FluentStorageContainerConfigurationIssueTests : StorageTestBase
         // Assert: like the write, which finds no file for the subject.
         Assert.Null(Record.Exception(() => ((IConfigurationWriter)storage).ThrowIfWriteRefused(motor)));
         Assert.False(await storage.WriteConfigurationAsync(motor, CancellationToken.None));
+        Assert.False(storage.Connection.Reconciler.HasConfigurationIssues);
+    }
+
+    [Fact]
+    public async Task WhenASubjectWithIssuesIsDeletedThroughTheStorage_ThenTheStorageHasNoConfigurationIssues()
+    {
+        // Arrange
+        WriteFile("Motor.json", $$"""{ "$type": "{{MotorType}}", "name": "Belt", "targetSpeed": "fast" }""");
+        var storage = await ConnectAsync();
+        var motor = Assert.IsType<Samples.Motor>(storage.Children["Motor"]);
+        var hadIssues = storage.Connection.Reconciler.HasConfigurationIssues;
+
+        // Act
+        await storage.DeleteSubjectAsync(motor, CancellationToken.None);
+
+        // Assert
+        Assert.True(hadIssues);
+        Assert.False(File.Exists(GetFullPath("Motor.json")));
+        Assert.False(storage.Connection.Reconciler.HasConfigurationIssues);
     }
 
     [Fact]
@@ -228,6 +248,29 @@ public class FluentStorageContainerConfigurationIssueTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenTheNewFileOfAMovedSubjectWithIssuesIsCorrected_ThenTheStorageHasNoConfigurationIssues()
+    {
+        // Arrange
+        WriteFile("Motor.json", $$"""{ "$type": "{{MotorType}}", "name": "Belt", "targetSpeed": "fast" }""");
+        var storage = await ConnectAsync();
+        var motor = Assert.IsType<Samples.Motor>(storage.Children["Motor"]);
+        Directory.CreateDirectory(GetFullPath("Devices"));
+        File.Move(GetFullPath("Motor.json"), GetFullPath("Devices/Engine.json"));
+        await storage.ReconcileAsync();
+        var devices = Assert.IsType<VirtualFolder>(storage.Children["Devices"]);
+        var isMoved = ReferenceEquals(motor, devices.Children["Engine"]);
+        WriteFile("Devices/Engine.json", $$"""{ "$type": "{{MotorType}}", "name": "Belt", "targetSpeed": 1200 }""");
+
+        // Act
+        await storage.ReconcileAsync(Named("Devices/Engine.json"));
+
+        // Assert
+        Assert.True(isMoved);
+        Assert.False(storage.Connection.Reconciler.HasConfigurationIssues);
+        Assert.True(await storage.WriteConfigurationAsync(motor, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task WhenTheFileOfASubjectWithIssuesIsReplacedByASubjectOfAnotherType_ThenNeitherSubjectIsRefused()
     {
         // Arrange
@@ -245,6 +288,7 @@ public class FluentStorageContainerConfigurationIssueTests : StorageTestBase
         Assert.Null(Record.Exception(() => writer.ThrowIfWriteRefused(replacement)));
         Assert.Null(Record.Exception(() => writer.ThrowIfWriteRefused(motor)));
         Assert.True(await storage.WriteConfigurationAsync(replacement, CancellationToken.None));
+        Assert.False(storage.Connection.Reconciler.HasConfigurationIssues);
     }
 }
 

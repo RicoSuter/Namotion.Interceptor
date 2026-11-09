@@ -117,7 +117,7 @@ internal sealed class StorageReconciler
         }
         else
         {
-            // Counted before the entry is added, so that a reader that finds the entry also sees the count.
+            // Counted before the entry is added and uncounted after it is removed, so the count is never below the entries.
             if (!_entriesWithConfigurationIssues.TryGetValue(subject, out _))
             {
                 Interlocked.Increment(ref _configurationIssueEntryCount);
@@ -125,6 +125,20 @@ internal sealed class StorageReconciler
 
             _entriesWithConfigurationIssues.AddOrUpdate(subject, entry);
         }
+    }
+
+    /// <summary>
+    /// Removes the entry at the path from the index together with the issues of its configuration, see
+    /// <see cref="HasConfigurationIssues"/>. Use it, not the index, to remove an entry.
+    /// </summary>
+    public void RemoveEntry(string path)
+    {
+        if (_index.TryGet(path, out var entry))
+        {
+            ForgetConfigurationIssues(entry);
+        }
+
+        _index.Remove(path);
     }
 
     private void ForgetConfigurationIssues(List<StorageEntry>? removedEntries)
@@ -561,6 +575,7 @@ internal sealed class StorageReconciler
             // here. Not for a subject that moved: the tree still holds it, and it was not released.
             if (entry is { IsPlaced: false, Subject: not null } && entry.Subject.GetReferenceCount() == 0)
             {
+                ForgetConfigurationIssues(entry);
                 entry.Subject = null;
                 entry.Version = default;
                 entry.Hash = null;
@@ -705,6 +720,7 @@ internal sealed class StorageReconciler
 
         foreach (var entry in missingEntries)
         {
+            // Not through RemoveEntry: ReconcileAsync forgets the issues after the files were added.
             _index.Remove(entry.Path);
 
             if (entry is { IsFolder: false, Subject: IConfigurable, Hash: not null } && entry.Subject.GetReferenceCount() > 0)

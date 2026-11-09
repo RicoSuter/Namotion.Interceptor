@@ -1102,7 +1102,7 @@ public partial class FluentStorageContainer :
             }
         }
 
-        connection.Index.Remove(entry.Path);
+        connection.Reconciler.RemoveEntry(entry.Path);
         connection.Reconciler.Apply();
         _subjectFactory.Release(entry.Subject);
 
@@ -1169,7 +1169,7 @@ public partial class FluentStorageContainer :
         // Before the tree follows, so that a failure of the tree cannot leave the metadata file behind.
         await MetadataStore.DeleteSidecarAsync(connection, entry, isFileKnownGone: true);
 
-        connection.Index.Remove(entry.Path);
+        connection.Reconciler.RemoveEntry(entry.Path);
         connection.Reconciler.Apply();
         _subjectFactory.Release(entry.Subject);
 
