@@ -1,5 +1,4 @@
 using System.Collections.Frozen;
-using HomeBlaze.Services;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Automation.Runtime;
@@ -75,7 +74,7 @@ internal sealed class GraphRoutes
     internal Action? BeforePublication { get; set; }
 
     /// <summary>Starts a resolution whose result is stored, which records its route with the returned recorder.</summary>
-    public ISubjectPathRecorder BeginRoute()
+    public GraphRouteBuilder BeginRoute()
     {
         ResolutionCount++;
         BeginResolving();

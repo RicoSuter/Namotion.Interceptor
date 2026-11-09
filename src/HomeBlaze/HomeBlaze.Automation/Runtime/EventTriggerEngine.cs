@@ -166,7 +166,7 @@ internal sealed class EventTriggerEngine(
     /// <paramref name="recorder"/>; returns why the trigger receives no events, or null.
     /// </summary>
     public static string? FindSource(
-        SubjectPathResolver resolver, CompiledEventTrigger trigger, out IInterceptorSubject? source, out Type? eventType, ISubjectPathRecorder? recorder = null)
+        SubjectPathResolver resolver, CompiledEventTrigger trigger, out IInterceptorSubject? source, out Type? eventType, GraphRouteBuilder? recorder = null)
     {
         var configuration = trigger.Configuration;
         eventType = null;
