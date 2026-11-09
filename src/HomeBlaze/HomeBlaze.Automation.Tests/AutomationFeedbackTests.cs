@@ -107,7 +107,8 @@ public class AutomationFeedbackTests
                 ("high", On("High", When("/Replacer/Sensor/Gust > 8"), Invoke("/Button/Press", ("gesture", "single")))),
                 ("pressed", Create("Pressed", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [replace])),
                 ("low", On("Low", When("/Replacer/Sensor/Gust < 5"), replace))),
-            _ => CreateStateRules(automation, replace)
+            "rule in a state the chain enters" => CreateStateRules(automation, replace),
+            _ => throw new ArgumentOutOfRangeException(nameof(shape), shape, "The shape has no rules.")
         };
     }
 

@@ -85,6 +85,7 @@ public class AutomationGraphRouteStressTests(ITestOutputHelper output)
         }
 
         output.WriteLine($"Seed {seed}: {skipped} of 100 rounds waited for a graph change.");
+        Assert.True(skipped < 100, $"Seed {seed}: every round waited for a graph change, so none was compared.");
         world.AssertPublishedRoutesAreTheUnions(makesEveryRouteUnbounded);
     }
 
