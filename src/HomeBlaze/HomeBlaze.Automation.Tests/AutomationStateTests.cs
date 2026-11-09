@@ -358,6 +358,32 @@ public class AutomationStateTests
     }
 
     [Fact]
+    public async Task WhenEveryStateWasRemoved_ThenNoRuleRunsUntilTheResetLeavesTheSavedState()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(WashingMachine());
+        await SetPowerAsync(host, 600);
+        host.Automation.States = [];
+        host.Automation.InitialState = null;
+        host.Automation.RuleOrder = [];
+        await host.SaveAsync(Keyed(("close", On("Close", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
+
+        // Act
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        var closesBeforeTheReset = host.Blinds.CloseCount;
+        var messageBeforeTheReset = host.Automation.StatusMessage;
+        await host.ResetAsync();
+
+        // Assert
+        Assert.Equal(0, closesBeforeTheReset);
+        Assert.StartsWith("The saved state 'Running' is not a state of the automation, which has no states anymore", messageBeforeTheReset);
+        Assert.Null(host.Automation.CurrentState);
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
+    }
+
+    [Fact]
     public async Task WhenTheResetCannotBeSaved_ThenTheStateAndTheTriggerTimesStayAndTheErrorIsShown()
     {
         // Arrange
