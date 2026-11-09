@@ -172,7 +172,7 @@ public sealed class AgentRolesTests : IAsyncLifetime
         await AsyncTestHelpers.WaitUntilAsync(() => agent.RunCount > 0 && !agent.IsBusy);
 
         // Assert
-        var stateLines = agent.Requests[^1].UserMessage.Split('\n')
+        var stateLines = agent.Requests[^1].UserMessage.ReplaceLineEndings("\n").Split('\n')
             .SkipWhile(line => line != "```jsonl").Skip(1).TakeWhile(line => line != "```")
             .Select(line => JsonDocument.Parse(line).RootElement)
             .ToList();
