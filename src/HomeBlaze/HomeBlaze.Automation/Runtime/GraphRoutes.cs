@@ -26,7 +26,7 @@ internal sealed class GraphRoutes
     private int _unboundedCount;
 
     // Set when a property enters or leaves the union or the union becomes bounded or unbounded, and before the first
-    // publication, also of an empty union.
+    // publication, so that a first union that is empty and bounded is published too.
     private bool _hasUnionChanged = true;
     private bool _awaitsGraphChange;
 
