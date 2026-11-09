@@ -503,6 +503,64 @@ public class AutomationChangeDispatcherTests
 
         // Assert
         Assert.Equal(0, listener.GraphChanges);
+        Assert.Equal(0, registration.Source.ParentGainCount);
+    }
+
+    // A writer reads the count before the marks, so a mark that another thread takes while the gain is marked must
+    // never leave a mark that the count does not cover.
+    [Fact]
+    public void WhenAMarkIsTakenWhileAParentGainIsMarked_ThenTheCountCoversEveryMark()
+    {
+        // Arrange
+        var (graph, weather) = CreateGraph();
+        var dispatcher = new AutomationChangeDispatcher();
+        using var registration = dispatcher.Register(graph.Context, new RecordingListener());
+        registration.PublishRoute(Watch(Gust(weather)), isUnbounded: false);
+        var source = registration.Source;
+        bool? isTakenWhileMarking = null;
+        var lowestCount = int.MaxValue;
+        source.ParentGainCountChanging = delta =>
+        {
+            if (delta > 0 && isTakenWhileMarking is null)
+            {
+                isTakenWhileMarking = registration.TakeParentGain();
+            }
+
+            lowestCount = Math.Min(lowestCount, source.ParentGainCount);
+        };
+
+        // Act
+        registration.OnParentGained();
+        source.ParentGainCountChanging = null;
+        var countAfterTheGain = source.ParentGainCount;
+        var isTakenAfterTheGain = registration.TakeParentGain();
+
+        // Assert
+        Assert.False(isTakenWhileMarking);
+        Assert.True(lowestCount >= 0, $"The count fell to {lowestCount}.");
+        Assert.Equal(1, countAfterTheGain);
+        Assert.True(isTakenAfterTheGain);
+        Assert.Equal(0, source.ParentGainCount);
+    }
+
+    [Fact]
+    public void WhenAListenerGainsAParentTwiceBeforeAGraphChange_ThenOneMarkIsCounted()
+    {
+        // Arrange
+        var (graph, weather) = CreateGraph();
+        var dispatcher = new AutomationChangeDispatcher();
+        using var registration = dispatcher.Register(graph.Context, new RecordingListener());
+        registration.PublishRoute(Watch(Gust(weather)), isUnbounded: false);
+
+        // Act
+        registration.OnParentGained();
+        registration.OnParentGained();
+        var countAfterTheGains = registration.Source.ParentGainCount;
+        registration.TakeParentGain();
+
+        // Assert
+        Assert.Equal(1, countAfterTheGains);
+        Assert.Equal(0, registration.Source.ParentGainCount);
     }
 
     // Writes alternate between two subjects that stay attached elsewhere, so that the registry allocates the same for each;

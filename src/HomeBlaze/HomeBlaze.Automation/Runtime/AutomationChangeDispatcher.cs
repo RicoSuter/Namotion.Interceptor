@@ -285,20 +285,22 @@ internal sealed class AutomationChangeDispatcher
 
         /// <summary>
         /// Gives the listener the next graph change of its change stream, also one off its route, since its automation or
-        /// one of its rules gained a parent, which no route has. On the thread of the write that added the parent, that is
-        /// the change of the write, after its watched changes. Thread-safe.
+        /// one of its rules gained a parent, which no route has. Thread-safe.
         /// </summary>
         public void OnParentGained()
         {
-            if (Interlocked.Exchange(ref _hasParentGain, 1) == 0)
+            // Counted before the mark is set, so that a writer that reads no count finds no mark.
+            Source.OnParentGainChanged(1);
+            if (Interlocked.Exchange(ref _hasParentGain, 1) != 0)
             {
-                Source.OnParentGainChanged(1);
+                Source.OnParentGainChanged(-1);
+                return;
+            }
 
-                // Unregister takes the mark after it set the flag, so that a mark set meanwhile is taken here.
-                if (IsDisposed)
-                {
-                    TakeParentGain();
-                }
+            // Unregister takes the mark after it set the flag, so that a mark set meanwhile is taken here.
+            if (IsDisposed)
+            {
+                TakeParentGain();
             }
         }
 
@@ -406,7 +408,17 @@ internal sealed class AutomationChangeDispatcher
 
         public void OnResolvingChanged(int delta) => Interlocked.Add(ref _resolvingCount, delta);
 
-        public void OnParentGainChanged(int delta) => Interlocked.Add(ref _parentGainCount, delta);
+        // White-box test hook: the number of parent-gain marks counted, which a writer reads before the marks.
+        internal int ParentGainCount => Volatile.Read(ref _parentGainCount);
+
+        // White-box test hook: runs before the number of parent-gain marks changes by the given amount.
+        internal Action<int>? ParentGainCountChanging { get; set; }
+
+        public void OnParentGainChanged(int delta)
+        {
+            ParentGainCountChanging?.Invoke(delta);
+            Interlocked.Add(ref _parentGainCount, delta);
+        }
 
         /// <summary>Gives a graph change for a property that the registry registered at run time.</summary>
         public void OnPropertyAdded(PropertyReference property) => NotifyGraphChanged(property);
