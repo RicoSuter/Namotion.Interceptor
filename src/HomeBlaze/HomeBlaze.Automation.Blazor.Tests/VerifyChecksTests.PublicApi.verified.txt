@@ -44,6 +44,8 @@ namespace HomeBlaze.Automation.Blazor
         public RuleTestDialog() { }
         [Microsoft.AspNetCore.Components.Parameter]
         public string EvaluatedAt { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool IsRunningRules { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.AutomationRuleTestResult Result { get; set; }

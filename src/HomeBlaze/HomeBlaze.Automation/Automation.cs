@@ -95,6 +95,12 @@ public partial class Automation : BackgroundService, IConfigurable, IConfigurati
     [State(Position = 4)]
     public partial string? StatusMessage { get; internal set; }
 
+    /// <summary>
+    /// Whether the worker runs the rules: while the automation is running, or shows an error while its worker runs, such as
+    /// after a failed action. Not while it is starting, stopping or stopped, nor after its worker ended with an error.
+    /// </summary>
+    public bool IsRunningRules => Volatile.Read(ref _runtime) is not null && Status is ServiceStatus.Running or ServiceStatus.Error;
+
     [Derived]
     public string Title => Name ?? "Automation";
 

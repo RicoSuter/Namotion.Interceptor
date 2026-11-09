@@ -235,7 +235,7 @@ New rules start in Dry run. A rule in Dry run with a Change state action does no
 **Test now** on the page evaluates a saved rule with the current values:
 
 - **What it shows**: the result of each trigger, of Only if, and the actions with their arguments as they would run now.
-- **The verdict** says whether the rule would run with the current values, or why not. When Only if is false or unknown, it adds that a condition that becomes true meanwhile waits until Only if is true, or the status of the automation while it runs no rules, such as while it is stopped; it does not tell whether a condition fired already. An automation that shows an error keeps running its rules, so the verdict is the one of a running automation with a note on the error.
+- **The verdict** says whether the rule would run with the current values, or why not. When Only if is false or unknown, it adds that a condition that becomes true meanwhile waits until Only if is true, or the status of the automation while it runs no rules, such as while it is stopped; it does not tell whether a condition fired already. An automation that shows an error while its worker runs, such as after a failed action, keeps running its rules, so the verdict is the one of a running automation with a note on the error. One whose worker ended with an error runs no rules, and the verdict says that it stopped after an error.
 - **Side effects**: none. It works in every mode and executes and records nothing.
 - **Scope**: it tests the saved rule only; the editor shows the current value and result of every condition instead.
 - **Agents** get the same result through `invoke_query` on the `TestNow` query of the rule, such as `/Automations/Storm/Rules[k3f9]/TestNow`.

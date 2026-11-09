@@ -62,11 +62,14 @@
     /// <summary>The status of the automation when the rule was evaluated.</summary>
     [Parameter] public ServiceStatus Status { get; set; } = ServiceStatus.Running;
 
+    /// <summary>Whether the worker of the automation ran the rules when the rule was evaluated.</summary>
+    [Parameter] public bool IsRunningRules { get; set; } = true;
+
     /// <summary>When the rule was evaluated, as the viewer reads it.</summary>
     [Parameter] public string EvaluatedAt { get; set; } = string.Empty;
 
     protected override void OnParametersSet() =>
-        _verdict = RuleTestSummary.Describe(Result, Array.Exists(Rule.Triggers, trigger => trigger is SubjectEventTrigger), Status);
+        _verdict = RuleTestSummary.Describe(Result, Array.Exists(Rule.Triggers, trigger => trigger is SubjectEventTrigger), Status, IsRunningRules);
 
     private void Close() => MudDialog?.Close();
 

@@ -208,6 +208,7 @@
     private async Task TestAsync(Automation automation, string key, AutomationRule rule)
     {
         var status = automation.Status;
+        var isRunningRules = automation.IsRunningRules;
         AutomationRuleTestResult result;
         try
         {
@@ -225,6 +226,7 @@
             { dialog => dialog.Result, result },
             { dialog => dialog.Rule, rule },
             { dialog => dialog.Status, status },
+            { dialog => dialog.IsRunningRules, isRunningRules },
             { dialog => dialog.EvaluatedAt, AutomationTime.Format(TimeZone, TimeProvider.GetUtcNow(), TimeProvider.GetUtcNow()) }
         };
 

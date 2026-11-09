@@ -38,7 +38,7 @@ public class RuleTestSummaryTests
         AutomationRuleTestResult result, bool hasEventTrigger, bool wouldRun, string text)
     {
         // Act
-        var verdict = RuleTestSummary.Describe(result, hasEventTrigger, ServiceStatus.Running);
+        var verdict = RuleTestSummary.Describe(result, hasEventTrigger, ServiceStatus.Running, isRunningRules: true);
 
         // Assert
         Assert.Equal(new RuleTestVerdict(wouldRun, text), verdict);
@@ -60,7 +60,7 @@ public class RuleTestSummaryTests
         };
 
         // Act
-        var verdict = RuleTestSummary.Describe(result, false, status);
+        var verdict = RuleTestSummary.Describe(result, false, status, isRunningRules: false);
 
         // Assert
         Assert.Equal(new RuleTestVerdict(false, text), verdict);
@@ -75,7 +75,7 @@ public class RuleTestSummaryTests
         var result = Result(onlyIf: onlyIf);
 
         // Act
-        var verdict = RuleTestSummary.Describe(result, false, status);
+        var verdict = RuleTestSummary.Describe(result, false, status, isRunningRules: false);
 
         // Assert
         Assert.Equal(new RuleTestVerdict(false, text), verdict);
@@ -90,10 +90,25 @@ public class RuleTestSummaryTests
         var result = Result(onlyIf: onlyIf);
 
         // Act
-        var verdict = RuleTestSummary.Describe(result, false, ServiceStatus.Error);
+        var verdict = RuleTestSummary.Describe(result, false, ServiceStatus.Error, isRunningRules: true);
 
         // Assert
         Assert.Equal(new RuleTestVerdict(wouldRun, text), verdict);
+    }
+
+    [Theory]
+    [InlineData(true, "Would not run now: the automation stopped after an error. A condition and Only if are true.")]
+    [InlineData(false, "Would not run now: Only if is false, and the automation stopped after an error.")]
+    public void WhenTheWorkerEndedWithAnError_ThenTheVerdictSaysTheAutomationStoppedInsteadOfWhatTheRulesDo(bool onlyIf, string text)
+    {
+        // Arrange
+        var result = Result(onlyIf: onlyIf);
+
+        // Act
+        var verdict = RuleTestSummary.Describe(result, false, ServiceStatus.Error, isRunningRules: false);
+
+        // Assert
+        Assert.Equal(new RuleTestVerdict(false, text), verdict);
     }
 
     [Fact]
@@ -103,7 +118,7 @@ public class RuleTestSummaryTests
         var result = Result(onlyIf: null, onlyIfMissingPaths: "/Blinds/IsMoving");
 
         // Act
-        var verdict = RuleTestSummary.Describe(result, false, ServiceStatus.Starting);
+        var verdict = RuleTestSummary.Describe(result, false, ServiceStatus.Starting, isRunningRules: false);
 
         // Assert
         Assert.Equal(new RuleTestVerdict(false, "Would not run now: Only if is unknown, missing /Blinds/IsMoving, and the automation is starting."), verdict);
@@ -116,7 +131,7 @@ public class RuleTestSummaryTests
         var result = Result(trigger: false);
 
         // Act
-        var verdict = RuleTestSummary.Describe(result, false, ServiceStatus.Stopped);
+        var verdict = RuleTestSummary.Describe(result, false, ServiceStatus.Stopped, isRunningRules: false);
 
         // Assert
         Assert.Equal(new RuleTestVerdict(false, "Would not run now: no condition is true."), verdict);

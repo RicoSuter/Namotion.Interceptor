@@ -25,6 +25,7 @@ namespace HomeBlaze.Automation
         public string? IconName { get; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? InitialState { get; set; }
+        public bool IsRunningRules { get; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Name { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]

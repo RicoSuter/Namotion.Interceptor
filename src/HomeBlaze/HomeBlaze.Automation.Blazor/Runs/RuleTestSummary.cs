@@ -12,8 +12,9 @@ internal static class RuleTestSummary
 {
     /// <param name="result">The result of Test now.</param>
     /// <param name="hasEventTrigger">Whether the rule has an event trigger.</param>
-    /// <param name="status">The status of the automation, which runs its rules while it is running or shows an error.</param>
-    public static RuleTestVerdict Describe(AutomationRuleTestResult result, bool hasEventTrigger, ServiceStatus status)
+    /// <param name="status">The status of the automation.</param>
+    /// <param name="isRunningRules">Whether the worker of the automation runs the rules, see <see cref="Automation.IsRunningRules"/>.</param>
+    public static RuleTestVerdict Describe(AutomationRuleTestResult result, bool hasEventTrigger, ServiceStatus status, bool isRunningRules)
     {
         if (result.Error is { } error)
         {
@@ -32,27 +33,28 @@ internal static class RuleTestSummary
                 : "Would not run now: no condition is true.");
         }
 
-        return DescribeOnlyIf(result, status);
+        return DescribeOnlyIf(result, status, isRunningRules);
     }
 
-    private static RuleTestVerdict DescribeOnlyIf(AutomationRuleTestResult result, ServiceStatus status) =>
+    private static RuleTestVerdict DescribeOnlyIf(AutomationRuleTestResult result, ServiceStatus status, bool isRunningRules) =>
         result.OnlyIfResult switch
         {
-            false => new RuleTestVerdict(false, $"Would not run now: Only if is false{GetOnlyIfSuffix("false", status)}"),
+            false => new RuleTestVerdict(false, $"Would not run now: Only if is false{GetOnlyIfSuffix("false", status, isRunningRules)}"),
             null when result.OnlyIfMissingPaths.Count > 0 => new RuleTestVerdict(
-                false, $"Would not run now: Only if is unknown, missing {string.Join(", ", result.OnlyIfMissingPaths)}{GetOnlyIfSuffix("unknown", status)}"),
-            null => new RuleTestVerdict(false, $"Would not run now: Only if is unknown{GetOnlyIfSuffix("unknown", status)}"),
-            _ when !RunsRules(status) => new RuleTestVerdict(
-                false, $"Would not run now: the automation is {status.ToString().ToLowerInvariant()}. {(result.HasOnlyIf ? "A condition and Only if are true." : "A condition is true.")}"),
+                false, $"Would not run now: Only if is unknown, missing {string.Join(", ", result.OnlyIfMissingPaths)}{GetOnlyIfSuffix("unknown", status, isRunningRules)}"),
+            null => new RuleTestVerdict(false, $"Would not run now: Only if is unknown{GetOnlyIfSuffix("unknown", status, isRunningRules)}"),
+            _ when !isRunningRules => new RuleTestVerdict(
+                false, $"Would not run now: the automation {DescribeStatus(status)}. {(result.HasOnlyIf ? "A condition and Only if are true." : "A condition is true.")}"),
             _ => new RuleTestVerdict(true, $"Would run now.{GetErrorNote(status)}")
         };
 
-    // An automation that shows an error keeps running its rules, such as after a failed action or dropped inputs.
-    private static bool RunsRules(ServiceStatus status) => status is ServiceStatus.Running or ServiceStatus.Error;
+    // An error while the worker runs, such as after a failed action, leaves the rules running; one after the worker ended does not.
+    private static string DescribeStatus(ServiceStatus status) =>
+        status == ServiceStatus.Error ? "stopped after an error" : $"is {status.ToString().ToLowerInvariant()}";
 
     private static string GetErrorNote(ServiceStatus status) => status == ServiceStatus.Error ? " The automation shows an error." : string.Empty;
 
-    private static string GetOnlyIfSuffix(string onlyIfResult, ServiceStatus status) => RunsRules(status)
+    private static string GetOnlyIfSuffix(string onlyIfResult, ServiceStatus status, bool isRunningRules) => isRunningRules
         ? $". A condition that becomes true while Only if is {onlyIfResult} waits until Only if is true.{GetErrorNote(status)}"
-        : $", and the automation is {status.ToString().ToLowerInvariant()}.";
+        : $", and the automation {DescribeStatus(status)}.";
 }
