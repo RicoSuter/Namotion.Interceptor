@@ -279,6 +279,36 @@ public class AutomationEditorTests
     }
 
     [Fact]
+    public async Task WhenACooldownOrAHoldIsRejected_ThenTheRuleIsUnchangedAndTheDialogStaysClean()
+    {
+        // Arrange
+        const string onlyIf = "(/Demo/Motor/Temperature > 1) and (./LastTriggeredAt == null or now - ./LastTriggeredAt > 30m)";
+        await using var washer = await _fixture.AddStoredAutomationAsync(configured =>
+        {
+            WasherAutomation.Configure(configured);
+            configured.Rules["started"].OnlyIf = onlyIf;
+        });
+        var (_, dialog) = await OpenEditorAsync(washer.Name, tab: RulesTab);
+        var editor = dialog.GetByTestId("automation-editor");
+        await Assertions.Expect(dialog.GetByLabel("At most once every")).ToHaveValueAsync("30m", new() { Timeout = Timeout });
+
+        // Act
+        await dialog.GetByLabel("At most once every").FillAsync("abc");
+        await dialog.GetByLabel("For at least").FillAsync("20s + 1m");
+
+        // Assert
+        await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToContainTextAsync("At most once every", new() { Timeout = Timeout });
+        await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToContainTextAsync("For at least", new() { Timeout = Timeout });
+        await Assertions.Expect(SaveButton(dialog)).ToBeDisabledAsync();
+        await Assertions.Expect(editor).ToHaveAttributeAsync("data-dirty", "false");
+        await dialog.GetByLabel("At most once every").FillAsync("30m");
+        await dialog.GetByLabel("For at least").FillAsync(string.Empty);
+        await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await Assertions.Expect(SaveButton(dialog)).ToBeEnabledAsync();
+        await Assertions.Expect(editor).ToHaveAttributeAsync("data-dirty", "false");
+    }
+
+    [Fact]
     public async Task WhenARuleWithOnlyIfAndACooldownIsOpenedAndSaved_ThenItsOnlyIfTextIsUnchanged()
     {
         // Arrange

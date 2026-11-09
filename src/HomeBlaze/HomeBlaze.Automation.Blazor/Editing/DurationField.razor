@@ -20,6 +20,9 @@
 
     [Parameter] public EventCallback<TimeSpan?> ValueChanged { get; set; }
 
+    /// <summary>Raised when the field shows an error for a text it rejects, which leaves <see cref="Value"/> as it is.</summary>
+    [Parameter] public EventCallback ErrorChanged { get; set; }
+
     [Parameter, EditorRequired] public AutomationDraft Draft { get; set; } = null!;
 
     /// <summary>The rule an error of the field belongs to.</summary>
@@ -70,17 +73,22 @@
     {
         _error = error;
         Draft.SetInputError(_inputId, new AutomationValidationError(RuleKey, $"{Label}: {error}"));
-
-        // Passes the unchanged value on, so that the editor validates the draft again, now with the error of this field.
-        return ValueChanged.InvokeAsync(Value);
+        return ErrorChanged.InvokeAsync();
     }
 
+    // A text that gives the value the field already has, such as the one typed again after an error, is no edit.
     private Task AcceptAsync(TimeSpan? value)
     {
+        var hadError = _error is not null;
         _error = null;
         _shownValue = value;
         Draft.SetInputError(_inputId, null);
-        return ValueChanged.InvokeAsync(value);
+        if (value != Value)
+        {
+            return ValueChanged.InvokeAsync(value);
+        }
+
+        return hadError ? ErrorChanged.InvokeAsync() : Task.CompletedTask;
     }
 
     public void Dispose()

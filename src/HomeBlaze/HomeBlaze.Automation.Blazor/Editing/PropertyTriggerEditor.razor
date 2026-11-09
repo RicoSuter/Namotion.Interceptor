@@ -9,7 +9,7 @@
                     TestId="automation-trigger-condition" />
     <div class="d-flex flex-wrap gap-3 mt-2">
         <div style="flex: 1 1 160px;">
-            <DurationField Label="For at least" Value="@_trigger.For" ValueChanged="SetHoldAsync" Draft="Draft" RuleKey="@RuleKey"
+            <DurationField Label="For at least" Value="@_trigger.For" ValueChanged="SetHoldAsync" ErrorChanged="InputChanged" Draft="Draft" RuleKey="@RuleKey"
                            HelperText="Empty: fires at once" />
         </div>
         <div style="flex: 1 1 200px;">
@@ -53,6 +53,9 @@
     [Parameter] public EventCallback<AutomationTrigger> TriggerChanged { get; set; }
 
     [Parameter] public EventCallback Removed { get; set; }
+
+    /// <summary>Raised when the errors may have changed without an edit, such as when the hold input rejects its text.</summary>
+    [Parameter] public EventCallback InputChanged { get; set; }
 
     // The component renders again after each edit, before its parent passes the new trigger down. A stale value in that
     // render would make the expression field reload its text and lose a row that is not finished.
