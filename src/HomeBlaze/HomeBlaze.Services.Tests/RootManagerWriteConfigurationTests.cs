@@ -1,4 +1,5 @@
 using HomeBlaze.Services.Tests.Serialization;
+using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -100,11 +101,42 @@ public class RootManagerWriteConfigurationTests : IDisposable
         var root = await _rootManager.RootLoaded.WaitAsync(DeadlockTimeout);
 
         // Act
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => _rootManager.WriteConfigurationAsync(root, CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<ConfigurationWriteRefusedException>(() => _rootManager.WriteConfigurationAsync(root, CancellationToken.None));
 
         // Assert
         Assert.Contains("the value of 'child' could not be read", exception.Message);
+        Assert.Contains("restart HomeBlaze", exception.Message);
         Assert.Equal(content, await File.ReadAllTextAsync(_configurationFilePath));
+    }
+
+    [Fact]
+    public async Task WhenAValueOfTheRootConfigurationCannotBeRead_ThenTheCheckThrowsTheRefusal()
+    {
+        // Arrange
+        await File.WriteAllTextAsync(_configurationFilePath, $$"""{ "$type": "{{typeof(ParentWithChildSubject).FullName}}", "name": "root", "child": 5 }""");
+        await _rootManager.StartAsync(CancellationToken.None);
+        var root = await _rootManager.RootLoaded.WaitAsync(DeadlockTimeout);
+
+        // Act
+        var exception = Assert.Throws<ConfigurationWriteRefusedException>(() => _rootManager.ThrowIfWriteRefused(root));
+
+        // Assert
+        Assert.Contains("the value of 'child' could not be read", exception.Message);
+    }
+
+    [Fact]
+    public async Task WhenTheRootConfigurationIsReadInFull_ThenTheCheckDoesNotThrow()
+    {
+        // Arrange
+        await File.WriteAllTextAsync(_configurationFilePath, $$"""{ "$type": "{{typeof(ParentWithChildSubject).FullName}}", "name": "root" }""");
+        await _rootManager.StartAsync(CancellationToken.None);
+        var root = await _rootManager.RootLoaded.WaitAsync(DeadlockTimeout);
+
+        // Act
+        var exception = Record.Exception(() => _rootManager.ThrowIfWriteRefused(root));
+
+        // Assert
+        Assert.Null(exception);
     }
 
     /// <summary>Blocks the thread of the next read of one property of one subject, after the value was read, until it is released.</summary>

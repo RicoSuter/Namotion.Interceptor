@@ -1,5 +1,7 @@
+using System.Text;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Storage.Abstractions;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Storage.Tests;
@@ -19,11 +21,69 @@ public class FluentStorageContainerConfigurationIssueTests : StorageTestBase
         motor.Name = "Changed";
 
         // Act
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => storage.WriteConfigurationAsync(motor, CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<ConfigurationWriteRefusedException>(() => storage.WriteConfigurationAsync(motor, CancellationToken.None));
 
         // Assert
         Assert.Contains("the value of 'targetSpeed' could not be read", exception.Message);
+        Assert.Contains("Correct them in the file; the storage reads it again once it changes", exception.Message);
+        Assert.Single(exception.Issues);
         Assert.Equal(content, await File.ReadAllTextAsync(GetFullPath("Motor.json")));
+    }
+
+    [Fact]
+    public async Task WhenAValueOfAFileCannotBeRead_ThenTheCheckOfASubjectNestedInItsConfigurationThrowsTheRefusal()
+    {
+        // Arrange
+        var nestedType = typeof(ConfigurationWriterTestSubject).FullName;
+        WriteFile("Layout.json", $$"""{ "$type": "{{nestedType}}", "name": 5, "items": [ { "$type": "{{nestedType}}", "name": "nested" } ] }""");
+        var storage = await ConnectAsync();
+        var file = Assert.IsType<ConfigurationWriterTestSubject>(storage.Children["Layout"]);
+        var nested = Assert.Single(file.Items);
+
+        // Act
+        var exception = Assert.Throws<ConfigurationWriteRefusedException>(() => ((IConfigurationWriter)storage).ThrowIfWriteRefused(nested));
+
+        // Assert
+        Assert.Contains("'Layout.json'", exception.Message);
+        Assert.Contains("the value of 'name' could not be read", exception.Message);
+    }
+
+    [Fact]
+    public async Task WhenTheValueIsCorrectedInTheFile_ThenTheCheckNoLongerThrows()
+    {
+        // Arrange
+        WriteFile("Motor.json", $$"""{ "$type": "{{MotorType}}", "name": "Belt", "targetSpeed": "fast" }""");
+        var storage = await ConnectAsync();
+        var motor = Assert.IsType<Samples.Motor>(storage.Children["Motor"]);
+        var writer = (IConfigurationWriter)storage;
+        var refusalBefore = Record.Exception(() => writer.ThrowIfWriteRefused(motor));
+        WriteFile("Motor.json", $$"""{ "$type": "{{MotorType}}", "name": "Belt", "targetSpeed": 1200 }""");
+
+        // Act
+        await storage.ReconcileAsync(Named("Motor.json"));
+
+        // Assert
+        Assert.IsType<ConfigurationWriteRefusedException>(refusalBefore);
+        Assert.Null(Record.Exception(() => writer.ThrowIfWriteRefused(motor)));
+    }
+
+    [Fact]
+    public async Task WhenTheCorrectedFileIsWrittenThroughTheStorage_ThenTheSubjectIsSavedAgain()
+    {
+        // Arrange
+        WriteFile("Motor.json", $$"""{ "$type": "{{MotorType}}", "name": "Belt", "targetSpeed": "fast" }""");
+        var storage = await ConnectAsync();
+        var motor = Assert.IsType<Samples.Motor>(storage.Children["Motor"]);
+
+        // Act
+        await storage.WriteBlobAsync(
+            "Motor.json", Encoding.UTF8.GetBytes($$"""{ "$type": "{{MotorType}}", "name": "Belt", "targetSpeed": 1200 }"""), CancellationToken.None);
+        motor.Name = "Changed";
+        var isWritten = await storage.WriteConfigurationAsync(motor, CancellationToken.None);
+
+        // Assert
+        Assert.True(isWritten);
+        Assert.Contains("\"name\": \"Changed\"", await File.ReadAllTextAsync(GetFullPath("Motor.json")));
     }
 
     [Fact]
@@ -59,7 +119,7 @@ public class FluentStorageContainerConfigurationIssueTests : StorageTestBase
 
         // Act & Assert
         Assert.Same(motor, storage.Children["Motor"]);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => storage.WriteConfigurationAsync(motor, CancellationToken.None));
+        await Assert.ThrowsAsync<ConfigurationWriteRefusedException>(() => storage.WriteConfigurationAsync(motor, CancellationToken.None));
     }
 
     [Fact]
@@ -90,7 +150,7 @@ public class FluentStorageContainerConfigurationIssueTests : StorageTestBase
 
         // Assert
         Assert.Equal(["'nmae' is no setting of IssueReceivingSubject"], subject.Issues);
-        await Assert.ThrowsAsync<InvalidOperationException>(save);
+        await Assert.ThrowsAsync<ConfigurationWriteRefusedException>(save);
     }
 
     [Fact]

@@ -530,9 +530,9 @@ public partial class FluentStorageContainer :
     /// </summary>
     /// <returns>False when no file in this storage contains the subject as configuration, such as a subject of a
     /// document or of a file that is no configurable subject, or the storage is not connected.</returns>
-    /// <exception cref="InvalidOperationException">
+    /// <exception cref="ConfigurationWriteRefusedException">
     /// The configuration in the file has issues, such as a value that could not be read, which writing it would lose;
-    /// they are corrected in the file first.
+    /// saving works again once they are corrected in the file and the storage read it again.
     /// </exception>
     public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
@@ -553,9 +553,7 @@ public partial class FluentStorageContainer :
                     return;
 
                 if (!entry.ConfigurationIssues.IsEmpty)
-                    throw new InvalidOperationException(
-                        $"The configuration is not saved, because '{entry.Path}' has issues that saving would lose. " +
-                        $"Correct them in the file first: {string.Join("; ", entry.ConfigurationIssues)}");
+                    throw CreateWriteRefusal(entry.Path, entry.ConfigurationIssues);
 
                 await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_serializer.Serialize(fileSubject)), token);
                 isWritten = true;
@@ -570,6 +568,30 @@ public partial class FluentStorageContainer :
 
         return isWritten;
     }
+
+    /// <summary>
+    /// IConfigurationWriter - Throws the refusal that <see cref="WriteConfigurationAsync"/> would throw now for the file
+    /// whose configuration contains the subject.
+    /// </summary>
+    /// <exception cref="ConfigurationWriteRefusedException">
+    /// The configuration in the file has issues, such as a value that could not be read, which writing it would lose.
+    /// </exception>
+    public void ThrowIfWriteRefused(IInterceptorSubject subject)
+    {
+        var connection = _connection;
+        if (connection is null or { IsEnded: true })
+            return;
+
+        var path = string.Empty;
+        ImmutableArray<string> issues = [];
+        if (subject.TryGetConfigurationOwner(candidate => connection.Reconciler.TryGetConfigurationIssues(candidate, out path, out issues)) is not null)
+            throw CreateWriteRefusal(path, issues);
+    }
+
+    private static ConfigurationWriteRefusedException CreateWriteRefusal(string path, ImmutableArray<string> issues) => new(
+        $"The configuration is not saved, because '{path}' has issues that saving would lose: {string.Join("; ", issues)}. " +
+        "Correct them in the file; the storage reads it again once it changes, and saving works again.",
+        issues);
 
     /// <summary>
     /// Adds a new subject to storage at the specified path.

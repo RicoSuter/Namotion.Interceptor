@@ -27,7 +27,8 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
     // serialized the earlier state could write last.
     private readonly SemaphoreSlim _writeLock = new(1, 1);
 
-    // The issues of the root configuration file, which a write would lose. Set and read under the write lock.
+    // The issues of the root configuration file, which a write would lose. Set under the write lock, before Root, and
+    // read without it by ThrowIfWriteRefused, whose result a write checks again under the lock.
     private ImmutableArray<string> _configurationIssues = [];
 
     /// <summary>
@@ -136,7 +137,7 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
         if (!issues.IsEmpty)
         {
             _logger?.LogWarning(
-                "The root configuration has issues and is not saved until they are corrected in the file: {Issues}",
+                "The root configuration has issues and is not saved until they are corrected in the file and HomeBlaze is restarted: {Issues}",
                 string.Join("; ", issues));
         }
 
@@ -161,9 +162,10 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
     /// Writes the root configuration to disk when the subject is the root or nested in its configuration.
     /// Writes run one after the other.
     /// </summary>
-    /// <exception cref="InvalidOperationException">
-    /// The root configuration file has issues, such as a value that could not be read, which writing it would lose;
-    /// they are corrected in the file first.
+    /// <exception cref="ConfigurationWriteRefusedException">
+    /// The root configuration file has issues, such as a value that could not be read, which writing it would lose. The
+    /// file is read only at the start, so saving works again once they are corrected in the file and HomeBlaze is
+    /// restarted.
     /// </exception>
     public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
@@ -175,9 +177,7 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
         try
         {
             if (!_configurationIssues.IsEmpty)
-                throw new InvalidOperationException(
-                    "The configuration is not saved, because the root configuration file has issues that saving would lose. " +
-                    $"Correct them in the file first: {string.Join("; ", _configurationIssues)}");
+                throw CreateWriteRefusal(_configurationIssues);
 
             _logger?.LogInformation("Saving root configuration to: {Path}", ConfigurationPath);
 
@@ -193,4 +193,24 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
 
         return true;
     }
+
+    /// <summary>
+    /// Throws the refusal that <see cref="WriteConfigurationAsync"/> would throw now when the subject is the root or
+    /// nested in its configuration.
+    /// </summary>
+    /// <exception cref="ConfigurationWriteRefusedException">
+    /// The root configuration file has issues, such as a value that could not be read, which writing it would lose.
+    /// </exception>
+    public void ThrowIfWriteRefused(IInterceptorSubject subject)
+    {
+        var root = Root;
+        var issues = _configurationIssues;
+        if (root != null && !issues.IsEmpty && subject.TryGetConfigurationOwner(candidate => ReferenceEquals(candidate, root)) != null)
+            throw CreateWriteRefusal(issues);
+    }
+
+    private ConfigurationWriteRefusedException CreateWriteRefusal(ImmutableArray<string> issues) => new(
+        $"The configuration is not saved, because the root configuration file '{ConfigurationPath}' has issues that saving would lose: " +
+        $"{string.Join("; ", issues)}. Correct them in the file and restart HomeBlaze, which reads it only at the start; then saving works again.",
+        issues);
 }

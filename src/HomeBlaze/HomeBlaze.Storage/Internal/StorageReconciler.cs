@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using System.Text;
 using FluentStorage.Storage;
 using HomeBlaze.Abstractions;
@@ -18,7 +19,9 @@ namespace HomeBlaze.Storage.Internal;
 /// compares the listing with the index of what was applied last, loads what is new or changed, and assigns
 /// the children of each changed folder once.
 /// </summary>
-/// <remarks>Not thread-safe. Every member runs on the <see cref="StorageWorker"/>.</remarks>
+/// <remarks>
+/// Not thread-safe. Every member runs on the <see cref="StorageWorker"/>, except <see cref="TryGetConfigurationIssues"/>.
+/// </remarks>
 internal sealed class StorageReconciler
 {
     internal const int MaximumUnfinishedNamedPathCount = 1000;
@@ -43,6 +46,10 @@ internal sealed class StorageReconciler
     // True from the move of a subject to another entry until the tree was assigned from the index.
     private bool _hasUnappliedMove;
 
+    // The entry of each subject whose configuration has issues, read off the worker. Weak keys, so that a released
+    // subject leaves it.
+    private readonly ConditionalWeakTable<IInterceptorSubject, StorageEntry> _entriesWithConfigurationIssues = new();
+
     public StorageReconciler(
         IStore client,
         FluentStorageContainer storage,
@@ -63,6 +70,45 @@ internal sealed class StorageReconciler
         _logger = logger;
         _isOnDisk = isOnDisk;
         _connectionToken = connectionToken;
+    }
+
+    /// <summary>
+    /// Finds the issues of the configuration of the file whose subject is the given one, see
+    /// <see cref="StorageEntry.ConfigurationIssues"/>. Can be called from any thread, and sees the issues that the worker
+    /// set last.
+    /// </summary>
+    /// <returns>False when the subject is no subject of a file of this connection whose configuration has issues.</returns>
+    public bool TryGetConfigurationIssues(IInterceptorSubject subject, out string path, out ImmutableArray<string> issues)
+    {
+        if (_entriesWithConfigurationIssues.TryGetValue(subject, out var entry))
+        {
+            issues = entry.ConfigurationIssues;
+            path = entry.Path;
+            return !issues.IsEmpty;
+        }
+
+        path = string.Empty;
+        issues = [];
+        return false;
+    }
+
+    // Every change of the issues of an entry goes through here, so that TryGetConfigurationIssues follows it.
+    private void SetConfigurationIssues(StorageEntry entry, ImmutableArray<string> issues)
+    {
+        entry.ConfigurationIssues = issues;
+        if (entry.Subject is not { } subject)
+        {
+            return;
+        }
+
+        if (issues.IsEmpty)
+        {
+            _entriesWithConfigurationIssues.Remove(subject);
+        }
+        else
+        {
+            _entriesWithConfigurationIssues.AddOrUpdate(subject, entry);
+        }
     }
 
     /// <summary>
@@ -638,13 +684,13 @@ internal sealed class StorageReconciler
                 candidates[0].Parent != entry.Parent)
             {
                 entry.Subject = candidates[0].Subject;
-                entry.ConfigurationIssues = candidates[0].ConfigurationIssues;
+                SetConfigurationIssues(entry, candidates[0].ConfigurationIssues);
                 _hasUnappliedMove = true;
             }
             else
             {
                 entry.Subject = CreateFromJson(listed.Path, DecodeText(content), listed.Version, out var issues);
-                entry.ConfigurationIssues = issues;
+                SetConfigurationIssues(entry, issues);
             }
         }
         else
@@ -807,7 +853,7 @@ internal sealed class StorageReconciler
             {
                 var skipped = new List<SkippedConfigurationProperty>();
                 _serializer.UpdateConfiguration(entry.Subject, json, skipped.Add);
-                entry.ConfigurationIssues = _subjectFactory.ReportIssues(entry.Subject, entry.Path, json, skipped);
+                SetConfigurationIssues(entry, _subjectFactory.ReportIssues(entry.Subject, entry.Path, json, skipped));
             }
 
             await configurable.ApplyConfigurationAsync(cancellationToken);
@@ -830,7 +876,9 @@ internal sealed class StorageReconciler
 
         _subjectFactory.Release(entry.Subject);
 
-        _index.Set(new StorageEntry { Path = entry.Path, IsFolder = false, Version = version, Hash = hash, Subject = subject, ConfigurationIssues = issues });
+        var replacement = new StorageEntry { Path = entry.Path, IsFolder = false, Version = version, Hash = hash, Subject = subject };
+        SetConfigurationIssues(replacement, issues);
+        _index.Set(replacement);
         _logger?.LogInformation("Replaced the subject of: {Path}", entry.Path);
         return true;
     }

@@ -48,7 +48,7 @@ internal sealed class StorageEntry
     /// <summary>
     /// The issues of the configuration that the subject last took from its file, such as a value that could not be read;
     /// none for a file that is no configuration. The configuration is not saved while there are any, as the file would
-    /// lose what the subject could not take.
+    /// lose what the subject could not take. Set by the reconciler only, which also tracks it for reads off the worker.
     /// </summary>
     public ImmutableArray<string> ConfigurationIssues { get; set; } = [];
 

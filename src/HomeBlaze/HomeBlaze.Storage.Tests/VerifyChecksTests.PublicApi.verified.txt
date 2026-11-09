@@ -204,6 +204,7 @@ namespace HomeBlaze.Storage
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
         public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }
         public override System.Threading.Tasks.Task StopAsync(System.Threading.CancellationToken cancellationToken) { }
+        public void ThrowIfWriteRefused(Namotion.Interceptor.IInterceptorSubject subject) { }
         public System.Threading.Tasks.Task WriteBlobAsync(string path, System.IO.Stream content, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task WriteBlobAsync(string path, System.ReadOnlyMemory<byte> content, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task<bool> WriteConfigurationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
