@@ -414,6 +414,38 @@ public class AutomationStateTests
     }
 
     [Fact]
+    public async Task WhenASaveAddsTheSavedStateBack_ThenTheErrorIsClearedAndTheRulesRun()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Idle", "Running"];
+            automation.InitialState = "Idle";
+            automation.Rules = Keyed(
+                ("started", Create("Started", AutomationRuleMode.On, [When("/Weather/Power > 500")], [Enter("Running")], inState: "Idle")),
+                ("close", On("Close", When("/Weather/Gust > 8"), Invoke("/Blinds/Close"))));
+        });
+        await SetPowerAsync(host, 600);
+        host.Automation.States = ["Idle"];
+        host.Automation.RuleOrder = [];
+        await host.SaveAsync(Keyed(("close", On("Close", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
+        var statusWhileTheStateIsMissing = host.Automation.Status;
+
+        // Act
+        host.Automation.States = ["Idle", "Running"];
+        await host.SaveAsync();
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, statusWhileTheStateIsMissing);
+        Assert.Equal("Running", host.Automation.CurrentState);
+        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
+        Assert.Null(host.Automation.StatusMessage);
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
     public async Task WhenEveryStateWasRemoved_ThenNoRuleRunsUntilTheResetLeavesTheSavedState()
     {
         // Arrange
