@@ -17,37 +17,37 @@ public sealed class RuleDraft
         Key = key;
     }
 
-    public string Key { get; }
+    internal string Key { get; }
 
-    public string? Name { get; set; }
+    internal string? Name { get; set; }
 
-    public AutomationRuleMode Mode { get; set; }
+    internal AutomationRuleMode Mode { get; set; }
 
-    public string? InState { get; set; }
+    internal string? InState { get; set; }
 
-    public string? OnlyIf { get; set; }
+    internal string? OnlyIf { get; set; }
 
-    public List<DraftItem<AutomationTrigger>> Triggers { get; } = [];
+    internal List<DraftItem<AutomationTrigger>> Triggers { get; } = [];
 
-    public List<DraftItem<AutomationAction>> Actions { get; } = [];
+    internal List<DraftItem<AutomationAction>> Actions { get; } = [];
 
     /// <summary>The name, or the key of a rule without a name.</summary>
-    public string DisplayName => string.IsNullOrWhiteSpace(Name) ? Key : Name;
+    internal string DisplayName => string.IsNullOrWhiteSpace(Name) ? Key : Name;
 
     /// <summary>Whether the rule has an event trigger, so that its arguments may read <c>event</c> and <c>subject</c>.</summary>
-    public bool AllowsEvent => Triggers.Exists(trigger => trigger.Value is SubjectEventTrigger);
+    internal bool AllowsEvent => Triggers.Exists(trigger => trigger.Value is SubjectEventTrigger);
 
     /// <summary>The states the actions of the rule change to.</summary>
-    public IEnumerable<string> TargetStates =>
+    internal IEnumerable<string> TargetStates =>
         Actions.Select(action => action.Value).OfType<ChangeStateAction>().Select(action => action.TargetState);
 
     /// <summary>The texts the rule evaluates: the expressions of its triggers and Only if, the filters, and the arguments and values of its actions.</summary>
-    public IEnumerable<string> Texts => Triggers.Select(trigger => trigger.Value).SelectMany(GetTexts)
+    internal IEnumerable<string> Texts => Triggers.Select(trigger => trigger.Value).SelectMany(GetTexts)
         .Append(OnlyIf)
         .Concat(Actions.Select(action => action.Value).SelectMany(GetTexts))
         .OfType<string>();
 
-    public static RuleDraft From(string key, AutomationRule rule)
+    internal static RuleDraft From(string key, AutomationRule rule)
     {
         var draft = new RuleDraft(key) { Name = rule.Name, Mode = rule.Mode, InState = rule.InState, OnlyIf = rule.OnlyIf };
         draft.Triggers.AddRange((rule.Triggers ?? []).OfType<AutomationTrigger>().Select(trigger => new DraftItem<AutomationTrigger>(WithoutNulls(trigger))));
@@ -56,29 +56,29 @@ public sealed class RuleDraft
     }
 
     /// <summary>A new rule in dry run with one empty property condition, so that it acts on nothing before it is switched on.</summary>
-    public static RuleDraft Create(string key, string name)
+    internal static RuleDraft Create(string key, string name)
     {
         var draft = new RuleDraft(key) { Name = name, Mode = AutomationRuleMode.DryRun };
         draft.AddTrigger(new PropertyTrigger());
         return draft;
     }
 
-    public void AddTrigger(AutomationTrigger trigger) => Triggers.Add(new DraftItem<AutomationTrigger>(trigger));
+    internal void AddTrigger(AutomationTrigger trigger) => Triggers.Add(new DraftItem<AutomationTrigger>(trigger));
 
-    public void AddCallOperation() => AddAction(new InvokeOperationAction(), CallPrefix);
+    internal void AddCallOperation() => AddAction(new InvokeOperationAction(), CallPrefix);
 
-    public void AddSetProperty() => AddAction(new SetPropertyAction(), SetPrefix);
+    internal void AddSetProperty() => AddAction(new SetPropertyAction(), SetPrefix);
 
-    public void AddChangeState(string targetState) => AddAction(new ChangeStateAction { TargetState = targetState }, StatePrefix);
+    internal void AddChangeState(string targetState) => AddAction(new ChangeStateAction { TargetState = targetState }, StatePrefix);
 
-    public void MoveAction(DraftItem<AutomationAction> action, int offset) => DraftLists.Move(Actions, action, offset);
+    internal void MoveAction(DraftItem<AutomationAction> action, int offset) => DraftLists.Move(Actions, action, offset);
 
     /// <summary>
     /// The rule as it is saved: a blank name, Only if, rearm or filter is none. An operation action whose operation was changed
     /// keeps only the arguments that its operation, looked up by its path, takes, which the binder requires, and all of them
     /// when the path leads to no operation. Any other action is saved as it was loaded.
     /// </summary>
-    public AutomationRule ToRule(Func<string, MethodMetadata?> getMethod) => new()
+    internal AutomationRule ToRule(Func<string, MethodMetadata?> getMethod) => new()
     {
         Name = string.IsNullOrWhiteSpace(Name) ? null : Name.Trim(),
         Mode = Mode,

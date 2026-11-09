@@ -10,11 +10,11 @@ namespace HomeBlaze.Automation.Blazor.Diagram;
 /// </summary>
 public sealed class StateDiagramLayout
 {
-    public const double NodeWidth = 150;
-    public const double NodeHeight = 64;
+    internal const double NodeWidth = 150;
+    internal const double NodeHeight = 64;
 
     /// <summary>The most edges the diagram draws; the rules after them are listed in <see cref="OtherRules"/>.</summary>
-    public const int MaxEdges = 40;
+    internal const int MaxEdges = 40;
 
     private const double Margin = 16;
     private const double Gap = 110;
@@ -31,18 +31,18 @@ public sealed class StateDiagramLayout
         Height = height;
     }
 
-    public IReadOnlyList<StateDiagramNode> Nodes { get; }
+    internal IReadOnlyList<StateDiagramNode> Nodes { get; }
 
-    public IReadOnlyList<StateDiagramEdge> Edges { get; }
+    internal IReadOnlyList<StateDiagramEdge> Edges { get; }
 
     /// <summary>The rules that are no edge: without a state change, with several, or with one the diagram cannot show.</summary>
-    public IReadOnlyList<StateDiagramRule> OtherRules { get; }
+    internal IReadOnlyList<StateDiagramRule> OtherRules { get; }
 
-    public double Width { get; }
+    internal double Width { get; }
 
-    public double Height { get; }
+    internal double Height { get; }
 
-    public static StateDiagramLayout Create(IReadOnlyList<string> states, string? initialState, IReadOnlyList<StateDiagramRule> rules)
+    internal static StateDiagramLayout Create(IReadOnlyList<string> states, string? initialState, IReadOnlyList<StateDiagramRule> rules)
     {
         var transitions = new List<Transition>();
         var others = new List<StateDiagramRule>();

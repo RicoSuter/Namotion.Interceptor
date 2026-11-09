@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text.RegularExpressions;
 
 namespace HomeBlaze.Automation.Blazor.Editing;
@@ -12,18 +13,22 @@ public sealed class AutomationDraft
     private readonly Dictionary<string, AutomationValidationError> _inputErrors = new(StringComparer.Ordinal);
     private Automation? _automation;
 
-    public string? Name { get; set; }
+    internal AutomationDraft()
+    {
+    }
 
-    public bool Enabled { get; set; } = true;
+    internal string? Name { get; set; }
 
-    public List<string> States { get; } = [];
+    internal bool Enabled { get; set; } = true;
 
-    public string? InitialState { get; set; }
+    internal List<string> States { get; } = [];
+
+    internal string? InitialState { get; set; }
 
     /// <summary>The rules in the order they process an input.</summary>
-    public List<RuleDraft> Rules { get; } = [];
+    internal List<RuleDraft> Rules { get; } = [];
 
-    public static AutomationDraft From(Automation automation)
+    internal static AutomationDraft From(Automation automation)
     {
         var draft = new AutomationDraft { Name = automation.Name, Enabled = automation.Enabled, InitialState = automation.InitialState, _automation = automation };
         draft.States.AddRange(automation.States);
@@ -35,7 +40,7 @@ public sealed class AutomationDraft
     /// Writes the configuration to the automation, the rules last, so that the automation reads a complete configuration
     /// when it applies it. New rule instances take the run properties of the instances they replace.
     /// </summary>
-    public void ApplyTo(Automation automation)
+    internal void ApplyTo(Automation automation)
     {
         automation.Name = string.IsNullOrWhiteSpace(Name) ? null : Name.Trim();
         automation.Enabled = Enabled;
@@ -46,7 +51,7 @@ public sealed class AutomationDraft
     }
 
     /// <summary>The errors of the configuration as the automation and the editor check it, and the errors of inputs that do not parse.</summary>
-    public IReadOnlyList<AutomationValidationError> Validate() =>
+    internal ImmutableArray<AutomationValidationError> Validate() =>
     [
         .. AutomationValidator.Validate(
             States,
@@ -69,10 +74,10 @@ public sealed class AutomationDraft
             });
 
     /// <summary>Increases whenever an input error is set or cleared, so that a cached result of <see cref="Validate"/> can tell it is stale.</summary>
-    public int InputErrorVersion { get; private set; }
+    internal int InputErrorVersion { get; private set; }
 
     /// <summary>Sets or clears the error of an input whose text does not parse, such as a duration, so that the draft cannot be saved meanwhile.</summary>
-    public void SetInputError(string inputId, AutomationValidationError? error)
+    internal void SetInputError(string inputId, AutomationValidationError? error)
     {
         var isChanged = error is null
             ? _inputErrors.Remove(inputId)
@@ -88,10 +93,10 @@ public sealed class AutomationDraft
         }
     }
 
-    public RuleDraft? FindRule(string? key) => key is null ? null : Rules.Find(rule => rule.Key == key);
+    internal RuleDraft? FindRule(string? key) => key is null ? null : Rules.Find(rule => rule.Key == key);
 
     /// <summary>Adds a rule named "Rule n" with a number that no other rule has, as the editor compares names without regard to case.</summary>
-    public RuleDraft AddRule()
+    internal RuleDraft AddRule()
     {
         var number = Rules.Count + 1;
         while (Rules.Exists(rule => string.Equals(rule.Name?.Trim(), $"Rule {number}", StringComparison.OrdinalIgnoreCase)))
@@ -104,12 +109,12 @@ public sealed class AutomationDraft
         return added;
     }
 
-    public void RemoveRule(RuleDraft rule) => Rules.Remove(rule);
+    internal void RemoveRule(RuleDraft rule) => Rules.Remove(rule);
 
-    public void MoveRule(RuleDraft rule, int offset) => DraftLists.Move(Rules, rule, offset);
+    internal void MoveRule(RuleDraft rule, int offset) => DraftLists.Move(Rules, rule, offset);
 
     /// <summary>Adds a state named "State n"; the first state of an automation becomes its initial state.</summary>
-    public string AddState()
+    internal string AddState()
     {
         var number = States.Count + 1;
         while (States.Contains($"State {number}"))
@@ -127,7 +132,7 @@ public sealed class AutomationDraft
     /// Renames a state and every reference to it: the initial state, the state scope of rules and their state changes.
     /// False for a blank name or one that another state has.
     /// </summary>
-    public bool RenameState(string state, string newName)
+    internal bool RenameState(string state, string newName)
     {
         var name = newName.Trim();
         var index = States.IndexOf(state);
@@ -171,7 +176,7 @@ public sealed class AutomationDraft
     }
 
     /// <summary>Removes a state that no rule uses; the first remaining state becomes initial when it was the initial state.</summary>
-    public bool RemoveState(string state)
+    internal bool RemoveState(string state)
     {
         if (GetStateUsage(state).IsUsed || !States.Remove(state))
         {

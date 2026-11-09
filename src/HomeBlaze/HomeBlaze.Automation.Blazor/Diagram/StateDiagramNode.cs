@@ -5,4 +5,4 @@ namespace HomeBlaze.Automation.Blazor.Diagram;
 /// <param name="IsInitial">Whether it is the initial state.</param>
 /// <param name="X">The left edge.</param>
 /// <param name="Y">The top edge.</param>
-public sealed record StateDiagramNode(string? State, bool IsInitial, double X, double Y);
+internal sealed record StateDiagramNode(string? State, bool IsInitial, double X, double Y);
