@@ -1845,6 +1845,11 @@ namespace HomeBlaze.Components.Inputs
         public string? Text { get; init; }
         public object? Value { get; init; }
     }
+    public struct ExpressionScanner
+    {
+        public bool IsOpen { get; }
+        public bool Read(char character) { }
+    }
     public sealed class PreviewTicker : System.IDisposable
     {
         public PreviewTicker(System.TimeProvider timeProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Components.Inputs.PreviewTicker> logger) { }

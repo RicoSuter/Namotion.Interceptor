@@ -22,6 +22,22 @@ public class OnlyIfCooldownTests
     }
 
     [Theory]
+    [InlineData("/Rooms[Bob's room]/Temperature > 1 or /c/D", "(/Rooms[Bob's room]/Temperature > 1 or /c/D) and (" + Cooldown30 + ")")]
+    [InlineData("/Rooms[a or b]/Temperature > 1", "/Rooms[a or b]/Temperature > 1 and (" + Cooldown30 + ")")]
+    [InlineData("/Rooms[(]/Temperature > 1 or /c/D", "(/Rooms[(]/Temperature > 1 or /c/D) and (" + Cooldown30 + ")")]
+    public void WhenAConditionHasAKeyInBrackets_ThenItsQuotesWordsAndParenthesesAreReadAsPartOfThePath(string condition, string expected)
+    {
+        // Act
+        var onlyIf = OnlyIfCooldown.Combine(condition, TimeSpan.FromMinutes(30));
+        var (splitCondition, cooldown) = OnlyIfCooldown.Split(onlyIf);
+
+        // Assert
+        Assert.Equal(expected, onlyIf);
+        Assert.Equal(condition, splitCondition);
+        Assert.Equal(TimeSpan.FromMinutes(30), cooldown);
+    }
+
+    [Theory]
     [InlineData("not /Blinds/IsMoving")]
     [InlineData("/a/B or /c/D")]
     [InlineData("(/a/B) and /c/D")]

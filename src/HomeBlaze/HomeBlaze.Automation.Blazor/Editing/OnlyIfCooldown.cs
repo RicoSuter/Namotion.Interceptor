@@ -1,3 +1,5 @@
+using HomeBlaze.Components.Inputs;
+
 namespace HomeBlaze.Automation.Blazor.Editing;
 
 /// <summary>
@@ -98,23 +100,18 @@ internal static class OnlyIfCooldown
         return depth == 0;
     }
 
-    /// <summary>The characters outside quotes with the depth of parentheses they stand in; a parenthesis belongs to its inside.</summary>
+    /// <summary>
+    /// The characters outside quotes and the brackets of paths with the depth of parentheses they stand in; a parenthesis
+    /// belongs to its inside.
+    /// </summary>
     private static IEnumerable<(int Index, char Value, int Depth)> Unquoted(string text)
     {
         var depth = 0;
-        var quote = '\0';
+        var scanner = new ExpressionScanner();
         for (var index = 0; index < text.Length; index++)
         {
             var character = text[index];
-            if (quote != '\0')
-            {
-                quote = character == quote ? '\0' : quote;
-            }
-            else if (character is '"' or '\'')
-            {
-                quote = character;
-            }
-            else
+            if (scanner.Read(character))
             {
                 depth += character == '(' ? 1 : 0;
                 yield return (index, character, depth);
