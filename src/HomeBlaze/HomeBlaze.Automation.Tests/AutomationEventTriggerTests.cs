@@ -1,5 +1,7 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Testing;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
@@ -231,4 +233,161 @@ public class AutomationEventTriggerTests
         // Assert
         Assert.Equal("On: No subject at /Doorbell", host.Rule("press").Status);
     }
+
+    // A rule of a state that is not current keeps listening for events, so that it follows a change of its source too.
+    [Theory]
+    [InlineData("replace the button", false)]
+    [InlineData("replace the button", true)]
+    [InlineData("add the button", false)]
+    [InlineData("add the button", true)]
+    [InlineData("replace the room", false)]
+    [InlineData("replace the room", true)]
+    public async Task WhenTheSourceOfAnEventRuleChangesWhileItsStateIsNotCurrent_ThenTheRuleHandlesTheEventsOfTheNewSourceInItsStateAsWithoutGraphRoutes(
+        string change, bool makesEveryRouteUnbounded)
+    {
+        // Arrange
+        var room = new TestRoom { Button = change == "add the button" ? null : new TestButton() };
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
+        var automation = await AddNightPressAsync(host, room, CreateNightPressRules());
+        var oldButton = room.Button;
+        var button = new TestButton();
+
+        // Act
+        if (change == "replace the room")
+        {
+            host.Graph.Add("Room", new TestRoom { Button = button });
+        }
+        else
+        {
+            room.Button = button;
+        }
+
+        await automation.FlushAsync();
+        await EnterNightAsync(host, automation);
+        oldButton?.Press("single");
+        button.Press("single");
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Theory]
+    [InlineData("save", false)]
+    [InlineData("save", true)]
+    [InlineData("reset", false)]
+    [InlineData("reset", true)]
+    [InlineData("disable and enable", false)]
+    [InlineData("disable and enable", true)]
+    [InlineData("switch on by a save", false)]
+    [InlineData("switch on by a save", true)]
+    [InlineData("start in dry run", false)]
+    [InlineData("start in dry run", true)]
+    public async Task WhenTheSourceOfAnEventRuleWhoseStateIsNotCurrentIsReplacedAfterAConfigurationChange_ThenTheRuleHandlesTheEventsOfTheNewSourceAsWithoutGraphRoutes(
+        string before, bool makesEveryRouteUnbounded)
+    {
+        // Arrange
+        var room = new TestRoom { Button = new TestButton() };
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, makesEveryRouteUnbounded: makesEveryRouteUnbounded);
+        var mode = before switch
+        {
+            "switch on by a save" => AutomationRuleMode.Off,
+            "start in dry run" => AutomationRuleMode.DryRun,
+            _ => AutomationRuleMode.On
+        };
+        var automation = await AddNightPressAsync(host, room, CreateNightPressRules(mode));
+        switch (before)
+        {
+            case "save" or "switch on by a save":
+                await SaveAsync(automation, CreateNightPressRules());
+                break;
+            case "reset":
+                automation.ResetState();
+                await automation.FlushAsync();
+                break;
+            case "disable and enable":
+                automation.Enabled = false;
+                await SaveAsync(automation);
+                break;
+        }
+
+        var button = new TestButton();
+
+        // Act
+        room.Button = button;
+        await automation.FlushAsync();
+        if (!automation.Enabled)
+        {
+            automation.Enabled = true;
+            await SaveAsync(automation);
+        }
+
+        await EnterNightAsync(host, automation);
+        button.Press("single");
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.Equal(1L, automation.Rules["night"].RunCount);
+    }
+
+    [Fact]
+    public async Task WhenAnEventRuleWhoseStateIsNotCurrentListens_ThenThePropertyThatHoldsItsSourceStaysInTheUnionUntilTheRuleIsOff()
+    {
+        // Arrange
+        var room = new TestRoom { Button = new TestButton() };
+        await using var host = await AutomationTestHost.StartAsync(_ => { });
+        var automation = await AddNightPressAsync(host, room, CreateNightPressRules());
+        var buttonOfRoom = new PropertyReference(room, nameof(TestRoom.Button));
+        var isInTheUnionAtTheStart = Routes(automation).Union.Contains(buttonOfRoom);
+
+        // Act
+        await SaveAsync(automation, CreateNightPressRules());
+        var isInTheUnionAfterASave = Routes(automation).Union.Contains(buttonOfRoom);
+        automation.ResetState();
+        await automation.FlushAsync();
+        var isInTheUnionAfterAReset = Routes(automation).Union.Contains(buttonOfRoom);
+        await SaveAsync(automation, CreateNightPressRules(AutomationRuleMode.Off));
+
+        // Assert
+        Assert.True(isInTheUnionAtTheStart);
+        Assert.True(isInTheUnionAfterASave);
+        Assert.True(isInTheUnionAfterAReset);
+        Assert.False(Routes(automation).IsUnbounded);
+        Assert.DoesNotContain(buttonOfRoom, Routes(automation).Union);
+    }
+
+    private static Dictionary<string, AutomationRule> CreateNightPressRules(AutomationRuleMode mode = AutomationRuleMode.On) => Keyed(
+        ("night", Create("Night", mode, [OnEvent("/Room/Button", "TestPressEvent")], [Invoke("/Blinds/Close")], inState: "Night")),
+        ("toNight", Create("To night", AutomationRuleMode.On, [When("/Weather/Power > 5")], [Enter("Night")], inState: "Day")));
+
+    private static async Task<Automation> AddNightPressAsync(AutomationTestHost host, TestRoom room, Dictionary<string, AutomationRule> rules)
+    {
+        host.Graph.Add("Room", room);
+        return await host.AddAutomationAsync("NightPress", automation =>
+        {
+            automation.States = ["Day", "Night"];
+            automation.InitialState = "Day";
+            automation.Rules = rules;
+        });
+    }
+
+    private static async Task EnterNightAsync(AutomationTestHost host, Automation automation)
+    {
+        host.Weather.Power = 9;
+        await automation.FlushAsync();
+        Assert.Equal("Night", automation.CurrentState);
+    }
+
+    private static async Task SaveAsync(Automation automation, Dictionary<string, AutomationRule>? rules = null)
+    {
+        if (rules is not null)
+        {
+            automation.Rules = rules;
+        }
+
+        await automation.ApplyConfigurationAsync(CancellationToken.None);
+        await automation.FlushAsync();
+    }
+
+    private static GraphRoutes Routes(Automation automation) => automation.Runtime!.Routes;
 }

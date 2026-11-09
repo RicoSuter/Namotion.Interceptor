@@ -338,8 +338,8 @@ public class AutomationGraphRouteDifferentialTests
 
         // Every family of paths: absolute paths through references, lists, dictionaries and [InlinePaths], paths relative to
         // the rule and up through the automation, a dynamic property and a dynamic holder, rearm, a hold, Only if, the clock,
-        // event triggers on a device, on a sibling of the folder and on the automation, states, feedback chains of values and
-        // a structural write of a rule.
+        // event triggers on a device, on a sibling of the folder and on the automation, states, event rules of the other state
+        // that keep listening, feedback chains of values and a structural write of a rule.
         private static Dictionary<string, AutomationRule> CreateRules(int index)
         {
             var chain = $"/C{index}";
@@ -362,6 +362,9 @@ public class AutomationGraphRouteDifferentialTests
                 ("night", Create("Night", AutomationRuleMode.On, [When("/R0/Devices[d1]/Rain > 5")], [Invoke("/Blinds/Close")], inState: "Night")),
                 ("toNight", Create("To night", AutomationRuleMode.On, [When("/R2/Level > 4")], [Enter("Night")], inState: "Day")),
                 ("toDay", Create("To day", AutomationRuleMode.On, [When("/R2/Level <= 4")], [Enter("Day")], inState: "Night")),
+                ("nightPress", Create("Night press", AutomationRuleMode.On, [OnEvent("/R2/Button", "TestPressEvent")], [Invoke("/Blinds/Open")], inState: "Night")),
+                ("dayPress", Create("Day press", AutomationRuleMode.DryRun, [OnEvent("/R0/Button", "TestPressEvent", "/R0/Level > 3")], [Invoke("/Blinds/Close")], inState: "Day")),
+                ("sharedPress", Create("Shared press", AutomationRuleMode.On, [OnEvent("/R1/Button", "TestPressEvent")], [Invoke("/Blinds/Close")], inState: "Night")),
                 ("ping", On("Ping", When($"{chain}/Name == ping"), Set($"{chain}/Name", "pong"))),
                 ("pong", On("Pong", When($"{chain}/Name == pong"), Set($"{chain}/Name", "ping"))),
                 ("a", On("A", When($"{chain}/Name == a"), Set($"{chain}/Name", "b"))),
@@ -390,7 +393,7 @@ public class AutomationGraphRouteDifferentialTests
             string[][] groups =
             [
                 ["keyed"], ["mixed"], ["inline"], ["level"], ["dynamic"], ["extra"], ["press"], ["sibling"], ["entered"], ["guarded"],
-                ["rearm"], ["hold"], ["stale"], ["self"], ["night", "toNight", "toDay"], ["ping", "pong"], ["a", "b", "c"], ["replace"],
+                ["rearm"], ["hold"], ["stale"], ["self"], ["night", "toNight", "toDay", "nightPress", "dayPress", "sharedPress"], ["ping", "pong"], ["a", "b", "c"], ["replace"],
                 ["above"]
             ];
             var chosen = new HashSet<string>(["wait", "gust"]);
