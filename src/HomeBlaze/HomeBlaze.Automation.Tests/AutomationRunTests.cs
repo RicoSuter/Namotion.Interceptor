@@ -2,6 +2,8 @@ using System.Reactive;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Automation.Tests.Testing;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Testing;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
@@ -106,6 +108,30 @@ public class AutomationRunTests
         Assert.Equal("Night", host.Automation.CurrentState);
         Assert.Equal(AutomationRunOutcome.Succeeded, host.Rule("night").LastRunOutcome);
         Assert.Equal("Ran ChangeState(Night)", host.Rule("night").LastRunMessage);
+    }
+
+    [Fact]
+    public async Task WhenWritingARuleStatusFails_ThenTheErrorIsShownAndTheAutomationKeepsRunning()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("close", On("Close", When("/Weather/Gust > 8", rearm: "/Weather/Gust < 6"), Invoke("/Blinds/Close")))));
+        var failingWrite = new FailingStatusWrite();
+        host.Graph.Context.AddService<IWriteInterceptor>(failingWrite);
+
+        // Act
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        var messageAfterTheFailure = host.Automation.StatusMessage;
+        host.Weather.Gust = 5;
+        await host.FlushAsync();
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal("The status could not be recorded.", messageAfterTheFailure);
+        Assert.Equal(2, host.Blinds.CloseCount);
+        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
     }
 
     [Fact]
@@ -358,5 +384,21 @@ public class AutomationRunTests
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => flushes.IsCompleted, timeout: TimeSpan.FromSeconds(5));
         Assert.True(flushes.IsCompletedSuccessfully);
+    }
+
+    // Fails the first write of a rule status, as a failing interceptor of the graph does.
+    private sealed class FailingStatusWrite : IWriteInterceptor
+    {
+        private int _isFailing = 1;
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (context.Property.Name == nameof(AutomationRule.Status) && Interlocked.Exchange(ref _isFailing, 0) == 1)
+            {
+                throw new InvalidOperationException("The status could not be recorded.");
+            }
+
+            next(ref context);
+        }
     }
 }

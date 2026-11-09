@@ -150,7 +150,14 @@ internal sealed class AutomationRuntime
             _engine.ReportUnexpectedError(exception);
         }
 
-        _engine.RefreshRuleStatuses();
+        try
+        {
+            _engine.RefreshRuleStatuses();
+        }
+        catch (Exception exception)
+        {
+            _engine.ReportUnexpectedError(exception);
+        }
     }
 
     private Task RouteAsync(AutomationInput input, CancellationToken cancellationToken)
