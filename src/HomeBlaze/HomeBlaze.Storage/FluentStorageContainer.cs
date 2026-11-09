@@ -530,6 +530,10 @@ public partial class FluentStorageContainer :
     /// </summary>
     /// <returns>False when no file in this storage contains the subject as configuration, such as a subject of a
     /// document or of a file that is no configurable subject, or the storage is not connected.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The configuration in the file has issues, such as a value that could not be read, which writing it would lose;
+    /// they are corrected in the file first.
+    /// </exception>
     public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var connection = _connection;
@@ -547,6 +551,11 @@ public partial class FluentStorageContainer :
                 // Only configuration is written here. A document, such as a Markdown page, writes itself, under its own rules.
                 if (fileSubject is not IConfigurable || fileSubject is IStorageFile || entry is null)
                     return;
+
+                if (!entry.ConfigurationIssues.IsEmpty)
+                    throw new InvalidOperationException(
+                        $"The configuration is not saved, because '{entry.Path}' has issues that saving would lose. " +
+                        $"Correct them in the file first: {string.Join("; ", entry.ConfigurationIssues)}");
 
                 await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_serializer.Serialize(fileSubject)), token);
                 isWritten = true;

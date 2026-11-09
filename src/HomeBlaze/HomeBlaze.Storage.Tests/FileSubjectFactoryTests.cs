@@ -29,7 +29,7 @@ public class FileSubjectFactoryTests
             logger);
 
         // Act
-        var subject = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Values.json", json);
+        var subject = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Values.json", json, out _);
 
         // Assert
         Assert.IsType<JsonFile>(subject);

@@ -11,7 +11,13 @@ namespace HomeBlaze.Automation;
 /// </summary>
 public static class AutomationDuration
 {
-    private static readonly (long Ticks, string Suffix)[] Units =
+    /// <summary>
+    /// The longest duration an automation takes, 36500 days (about 100 years), so that a hold or a cooldown added to the
+    /// current time stays within the range of <see cref="DateTimeOffset"/>.
+    /// </summary>
+    public static TimeSpan Maximum { get; } = TimeSpan.FromDays(36500);
+
+    private static readonly (ulong Ticks, string Suffix)[] Units =
     [
         (TimeSpan.TicksPerDay, "d"),
         (TimeSpan.TicksPerHour, "h"),
@@ -20,23 +26,43 @@ public static class AutomationDuration
         (TimeSpan.TicksPerMillisecond, "ms")
     ];
 
-    /// <summary>Formats the duration with its units, such as <c>1h30m</c>; parts below a millisecond are left out, and zero is <c>0s</c>.</summary>
+    /// <summary>
+    /// Formats the duration with its units, such as <c>1h30m</c>; a part below a millisecond is a fraction of the
+    /// milliseconds, such as <c>1.5ms</c>, and zero is <c>0s</c>.
+    /// </summary>
     public static string Format(TimeSpan duration)
     {
         var ticks = duration.Ticks;
         if (ticks < 0)
         {
-            return "-" + FormatTicks(ticks == long.MinValue ? long.MaxValue : -ticks);
+            // Unsigned, since the magnitude of long.MinValue is beyond long.MaxValue.
+            return "-" + FormatTicks((ulong)-(ticks + 1) + 1);
         }
 
-        return FormatTicks(ticks);
+        return FormatTicks((ulong)ticks);
     }
 
     /// <summary>
     /// Reads a duration literal such as <c>20s</c> or <c>1h30m</c>, also a sum of such literals; white space around it is
-    /// ignored. A text without a unit, a path or a variable is no duration.
+    /// ignored. A text without a unit, a path or a variable is no duration, and neither is a duration longer than
+    /// <see cref="Maximum"/> in either direction; the duration is then zero.
     /// </summary>
     public static bool TryParse(string? text, out TimeSpan duration)
+    {
+        if (TryParseUnlimited(text, out duration) && IsWithinMaximum(duration))
+        {
+            return true;
+        }
+
+        duration = TimeSpan.Zero;
+        return false;
+    }
+
+    /// <summary>Whether the duration is at most <see cref="Maximum"/> in either direction.</summary>
+    internal static bool IsWithinMaximum(TimeSpan duration) => duration <= Maximum && duration >= -Maximum;
+
+    /// <summary>Reads a duration literal as <see cref="TryParse"/> does, without the limit of <see cref="Maximum"/>.</summary>
+    internal static bool TryParseUnlimited(string? text, out TimeSpan duration)
     {
         duration = TimeSpan.Zero;
         if (string.IsNullOrWhiteSpace(text) ||
@@ -57,17 +83,22 @@ public static class AutomationDuration
         return true;
     }
 
-    private static string FormatTicks(long ticks)
+    private static string FormatTicks(ulong ticks)
     {
         var builder = new StringBuilder();
         var rest = ticks;
         foreach (var (unitTicks, suffix) in Units)
         {
             var count = rest / unitTicks;
-            if (count > 0)
+            rest -= count * unitTicks;
+            if (unitTicks == TimeSpan.TicksPerMillisecond && rest > 0)
+            {
+                builder.Append(count.ToString(CultureInfo.InvariantCulture)).Append('.')
+                    .Append(rest.ToString("D4", CultureInfo.InvariantCulture).TrimEnd('0')).Append(suffix);
+            }
+            else if (count > 0)
             {
                 builder.Append(count.ToString(CultureInfo.InvariantCulture)).Append(suffix);
-                rest -= count * unitTicks;
             }
         }
 

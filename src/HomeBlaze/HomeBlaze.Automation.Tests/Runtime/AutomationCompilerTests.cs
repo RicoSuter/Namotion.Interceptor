@@ -63,6 +63,11 @@ public class AutomationCompilerTests
         { [], null, Rule(name: null, triggers: []), "Rule 'storm': it has no trigger" },
         { [], null, Rule(triggers: [new PropertyTrigger { Expression = "event/Gesture == Release" }]), "Rule 'Storm': trigger 1: " + EventOnly },
         { [], null, Rule(triggers: [new PropertyTrigger { Expression = "/Weather/Gust > 8", For = TimeSpan.FromSeconds(-1) }]), "Rule 'Storm': trigger 1: the hold cannot be negative" },
+        {
+            [], null,
+            Rule(triggers: [new PropertyTrigger { Expression = "/Weather/Gust > 8", For = TimeSpan.FromDays(36501) }]),
+            "Rule 'Storm': trigger 1: the hold cannot be longer than 36500d"
+        },
         { [], null, Rule(triggers: [new SubjectEventTrigger { SubjectPath = "/Button" }]), "Rule 'Storm': trigger 1: the event type is missing" },
         { [], null, Rule(triggers: [new PropertyTrigger { Expression = "" }]), "Rule 'Storm': trigger 1: expected a value at position 0" },
         { [], null, Rule(triggers: [new PropertyTrigger { Expression = "   " }]), "Rule 'Storm': trigger 1: expected a value at position 3" },
@@ -100,6 +105,16 @@ public class AutomationCompilerTests
                 Arguments = new Dictionary<string, string> { ["speed"] = null! }
             }]),
             "Rule 'Storm': action 'speed': argument 'speed': the value is missing"
+        },
+        {
+            [], null,
+            Rule(actions: [new InvokeOperationAction
+            {
+                Id = "speed",
+                OperationPath = "/Motor/SetTargetSpeed",
+                Arguments = new Dictionary<string, string> { ["speed"] = "1", ["Speed"] = "2" }
+            }]),
+            "Rule 'Storm': action 'speed': argument 'Speed' is given twice"
         },
         { [], null, Rule(triggers: [null!], actions: [null!]), "Rule 'Storm': trigger 1: the type is unknown; action 1: the type is unknown" },
         { [null!], null, Rule(), "A state needs a name; Choose the initial state" },

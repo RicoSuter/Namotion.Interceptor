@@ -59,7 +59,7 @@ internal readonly struct AutomationExpressionContext(AutomationEvaluation evalua
         }
 
         return memberPath is null
-            ? ExpressionValue.FromValue(captured.Payload)
+            ? EventPayloadReader.Read(captured.Payload)
             : EventPayloadReader.Read(captured.Payload, memberPath, evaluation.Resolver);
     }
 

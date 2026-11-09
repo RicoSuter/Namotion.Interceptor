@@ -187,14 +187,17 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
     }
 
     // A minus that is no sign of a number negates the operand after it and binds tighter than '*' and '/'. A chain of '-'
-    // recurses once per character, so it counts against the nesting limit like a parenthesis.
-    private NegationNode ParseNegation(int start)
+    // recurses once per character, so it counts against the nesting limit like a parenthesis. A negated number or
+    // duration literal, such as -(5) or - 5m, is a literal, so that an evaluation boxes no result for it.
+    private ExpressionNode ParseNegation(int start)
     {
         EnterNesting(start);
         _position++;
         var operand = ParseOperand("-", bareWordIsText: false);
         _nestingDepth--;
-        return new NegationNode(operand);
+        return operand is LiteralNode { Value: { } value } && ExpressionArithmetic.Negate(value) is { } negated
+            ? new LiteralNode(negated)
+            : new NegationNode(operand);
     }
 
     private ExpressionNode ParseGroup(int start)

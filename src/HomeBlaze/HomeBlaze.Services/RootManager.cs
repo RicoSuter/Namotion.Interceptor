@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.Configuration;
@@ -25,6 +26,9 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
     // Serializes the writes of the root configuration file. Two at once would both open the file, and the one that
     // serialized the earlier state could write last.
     private readonly SemaphoreSlim _writeLock = new(1, 1);
+
+    // The issues of the root configuration file, which a write would lose. Set and read under the write lock.
+    private ImmutableArray<string> _configurationIssues = [];
 
     /// <summary>
     /// The root subject loaded from configuration.
@@ -123,10 +127,25 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
 
         var json = await File.ReadAllTextAsync(ConfigurationPath, cancellationToken);
         using var startup = _context.DeferHostedServiceStarts();
-        var root = _serializer.Deserialize(json);
+        var skipped = new List<SkippedConfigurationProperty>();
 
         // All IConfigurable implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
-        Root = root as IInterceptorSubject ?? throw new InvalidOperationException("Failed to deserialize root configuration");
+        var root = _serializer.Deserialize(json, created: null, skipped.Add) as IInterceptorSubject ??
+            throw new InvalidOperationException("Failed to deserialize root configuration");
+        var issues = _serializer.ReportIssues(root, json, skipped);
+        if (!issues.IsEmpty)
+        {
+            _logger?.LogWarning(
+                "The root configuration has issues and is not saved until they are corrected in the file: {Issues}",
+                string.Join("; ", issues));
+        }
+
+        // Free: nothing is written before Root is set.
+        await _writeLock.WaitAsync(CancellationToken.None);
+        _configurationIssues = issues;
+        _writeLock.Release();
+
+        Root = root;
         Root.Context.AddFallbackContext(_context);
 
         _logger?.LogInformation("Root loaded: {Type}", Root.GetType().FullName);
@@ -142,6 +161,10 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
     /// Writes the root configuration to disk when the subject is the root or nested in its configuration.
     /// Writes run one after the other.
     /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The root configuration file has issues, such as a value that could not be read, which writing it would lose;
+    /// they are corrected in the file first.
+    /// </exception>
     public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var root = Root;
@@ -151,6 +174,11 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
         await _writeLock.WaitAsync(cancellationToken);
         try
         {
+            if (!_configurationIssues.IsEmpty)
+                throw new InvalidOperationException(
+                    "The configuration is not saved, because the root configuration file has issues that saving would lose. " +
+                    $"Correct them in the file first: {string.Join("; ", _configurationIssues)}");
+
             _logger?.LogInformation("Saving root configuration to: {Path}", ConfigurationPath);
 
             var json = _serializer.Serialize(root);

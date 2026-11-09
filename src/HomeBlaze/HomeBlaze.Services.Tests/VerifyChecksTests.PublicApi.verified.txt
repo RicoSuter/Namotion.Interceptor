@@ -69,6 +69,7 @@ namespace HomeBlaze.Services
         public HomeBlaze.Abstractions.IConfigurable? Deserialize(string json, System.Action<Namotion.Interceptor.IInterceptorSubject>? created, System.Action<HomeBlaze.Services.SkippedConfigurationProperty>? skipped, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public System.Text.Json.JsonElement? GetDefaultConfiguration(System.Type type, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public void Release(Namotion.Interceptor.IInterceptorSubject subject) { }
+        public System.Collections.Immutable.ImmutableArray<string> ReportIssues(Namotion.Interceptor.IInterceptorSubject subject, string json, System.Collections.Generic.IEnumerable<HomeBlaze.Services.SkippedConfigurationProperty> skipped, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public string Serialize(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public string Serialize(Namotion.Interceptor.IInterceptorSubject subject, System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, bool> isExcluded, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public void UpdateConfiguration(Namotion.Interceptor.IInterceptorSubject subject, string json, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
@@ -125,6 +126,7 @@ namespace HomeBlaze.Services
         public static bool TryConvert(string? input, System.Type targetType, out object? value) { }
         public static bool TryConvert(string? input, System.Type targetType, HomeBlaze.Abstractions.Attributes.StateUnit? unit, out object? value) { }
         public static bool TryConvertValue(object value, System.Type targetType, out object? converted) { }
+        public static bool TryCreateObject(System.Type type, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, out object? value, out string? error) { }
         public static bool TryCreateObject(System.Type type, System.Collections.Generic.IReadOnlyDictionary<string, string?> inputs, out object? value, out string? error) { }
         public static bool TryParseJson(string? input, System.Type type, bool isNullable, out object? value, out string? error) { }
     }
@@ -399,6 +401,11 @@ namespace HomeBlaze.Services.Display
     public static class RawValueFormatter
     {
         public static string Format(object? value) { }
+    }
+    public static class SecretValueTypes
+    {
+        public static bool HoldsSecret(object value) { }
+        public static bool IsSecret(System.Reflection.PropertyInfo property) { }
     }
     public static class StateUnitExtensions
     {

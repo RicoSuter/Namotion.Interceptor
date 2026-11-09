@@ -1,4 +1,6 @@
+using System.Collections.Frozen;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Services;
@@ -8,15 +10,56 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// Binds configured texts to the parameters of an operation or to a property. The text of a string is a text template.
-/// Any other text is a constant when it converts to the type, otherwise an expression whose value is converted; an
-/// unknown expression fails. A record parameter binds its members from <c>parameter.Member</c> keys, as the operation
-/// dialog does per member. Keys match without regard to case, and a key that names no parameter or member fails. Values
-/// are the raw stored values, as in expressions and configuration files, so a constant is never scaled by the unit of
-/// its parameter. Collects a display of the bound values.
+/// An empty text, also one of white space only, is null for a parameter or property that accepts null. Any other text
+/// is a constant when it converts to the type, otherwise an expression whose value is converted as
+/// <see cref="ParameterConverter.TryConvertValue"/> does; an unknown expression fails. Constants are read as expressions
+/// write them: a duration as <see cref="AutomationDuration"/> reads it or as a <see cref="TimeSpan"/> with a <c>:</c>, so a
+/// bare number is no duration; an instant in ISO 8601 with a date, such as <c>2026-11-06T10:00</c>, in UTC without an
+/// offset, or as a time of day alone, such as <c>10:00</c>, in UTC on the UTC date of <c>now</c>; a number in the
+/// invariant culture, also with an exponent, and finite; an enum by the name of a member, the number of a member, or the
+/// names of members only of a flags enum. A duration longer than <see cref="AutomationDuration.Maximum"/> in either
+/// direction fails, also as the value of an expression. A record parameter binds its members from
+/// <c>parameter.Member</c> keys, as the operation dialog does per member. Keys match without regard to case, and a key
+/// that names no parameter or member, or that is given twice, fails. Values are the raw stored values, as in
+/// expressions and configuration files, so a constant is never scaled by the unit of its parameter. Collects a display
+/// of the bound values.
 /// </summary>
 internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allowsEvent)
 {
+    private static readonly CultureInfo Culture = CultureInfo.InvariantCulture;
+
+    // The constants that expressions write differently from the operation dialog, which ParameterConverter.TryConvert reads.
+    private static readonly FrozenDictionary<Type, ConstantParser> ConstantParsers = new Dictionary<Type, ConstantParser>
+    {
+        [typeof(int)] = static (string text, out object? value) =>
+            Box(int.TryParse(text, NumberStyles.Integer, Culture, out var number), number, out value),
+        [typeof(long)] = static (string text, out object? value) =>
+            Box(long.TryParse(text, NumberStyles.Integer, Culture, out var number), number, out value),
+        [typeof(decimal)] = static (string text, out object? value) =>
+            Box(decimal.TryParse(text, NumberStyles.Float, Culture, out var number), number, out value),
+        [typeof(double)] = static (string text, out object? value) =>
+            Box(double.TryParse(text, NumberStyles.Float, Culture, out var number) && double.IsFinite(number), number, out value),
+        [typeof(float)] = static (string text, out object? value) =>
+            Box(float.TryParse(text, NumberStyles.Float, Culture, out var number) && float.IsFinite(number), number, out value),
+        [typeof(TimeSpan)] = static (string text, out object? value) =>
+            Box(AutomationDuration.TryParse(text, out var duration) || (text.Contains(':') && TimeSpan.TryParse(text, Culture, out duration)), duration, out value)
+    }.ToFrozenDictionary();
+
+    // Only formats with the full date: a parse that has to complete the date takes it from the clock of the machine.
+    private static readonly string[] InstantFormats =
+    [
+        "yyyy-MM-dd",
+        "yyyy-MM-dd'T'HH:mmK",
+        "yyyy-MM-dd'T'HH:mm:ss.FFFFFFFK",
+        "yyyy-MM-dd' 'HH:mmK",
+        "yyyy-MM-dd' 'HH:mm:ss.FFFFFFFK"
+    ];
+
+    private static readonly string[] TimeOfDayFormats = ["HH:mm", "HH:mm:ss.FFFFFFF"];
+
     private readonly List<string> _display = [];
+
+    private delegate bool ConstantParser(string text, out object? value);
 
     /// <summary>The bound values as <c>name: value</c>, separated by commas, such as <c>speed: 300</c>.</summary>
     public string Display => string.Join(", ", _display);
@@ -50,8 +93,11 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
         return true;
     }
 
-    /// <summary>Binds one text to a value of the type.</summary>
-    public bool TryBindValue(string name, string text, Type type, out object? value, [NotNullWhen(false)] out string? error)
+    /// <summary>Binds one text to a value of the type, which accepts null when it is a reference or a nullable value type.</summary>
+    public bool TryBindValue(string name, string text, Type type, out object? value, [NotNullWhen(false)] out string? error) =>
+        TryBindValue(name, text, type, acceptsNull: AcceptsNull(type), out value, out error);
+
+    private bool TryBindValue(string name, string text, Type type, bool acceptsNull, out object? value, [NotNullWhen(false)] out string? error)
     {
         var targetType = Nullable.GetUnderlyingType(type) ?? type;
         if (targetType == typeof(string))
@@ -59,21 +105,79 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
             return TryRender(name, text, out value, out error);
         }
 
-        if (ParameterConverter.TryConvert(text, type, out value))
+        if (acceptsNull && string.IsNullOrWhiteSpace(text))
         {
-            _display.Add($"{name}: {text}");
-            error = null;
-            return true;
+            value = null;
+        }
+        else if (!TryParseConstant(text, targetType, out value) && !TryEvaluate(name, text, type, out value, out error))
+        {
+            return false;
         }
 
-        return TryEvaluate(name, text, type, out value, out error);
+        if (value is TimeSpan duration && !AutomationDuration.IsWithinMaximum(duration))
+        {
+            value = null;
+            error = $"The argument '{name}' is longer than {AutomationDuration.Format(AutomationDuration.Maximum)}";
+            return false;
+        }
+
+        _display.Add($"{name}: {(value is null ? "null" : Format(value))}");
+        error = null;
+        return true;
     }
+
+    private static bool AcceptsNull(Type type) => !type.IsValueType || Nullable.GetUnderlyingType(type) is not null;
+
+    private bool TryParseConstant(string text, Type type, out object? value)
+    {
+        if (ConstantParsers.TryGetValue(type, out var parse))
+        {
+            return parse(text, out value);
+        }
+
+        if (type == typeof(DateTimeOffset) || type == typeof(DateTime))
+        {
+            return TryParseInstant(text, type, out value);
+        }
+
+        return type.IsEnum
+            ? ParameterConverter.TryConvertValue(text, type, out value)
+            : ParameterConverter.TryConvert(text, type, out value);
+    }
+
+    private bool TryParseInstant(string text, Type type, out object? value)
+    {
+        value = null;
+        DateTimeOffset instant;
+        if (TimeOnly.TryParseExact(text, TimeOfDayFormats, Culture, DateTimeStyles.AllowWhiteSpaces, out var timeOfDay))
+        {
+            instant = new DateTimeOffset(evaluation.Now.UtcDateTime.Date + timeOfDay.ToTimeSpan(), TimeSpan.Zero);
+        }
+        // An offset that moves the instant beyond the range of DateTime fails here instead of wrapping around.
+        else if (!DateTimeOffset.TryParseExact(text, InstantFormats, Culture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AllowWhiteSpaces, out instant))
+        {
+            return false;
+        }
+
+        value = type == typeof(DateTime) ? (object)instant.UtcDateTime : instant;
+        return true;
+    }
+
+    private static string Format(object? value) =>
+        value is TimeSpan duration ? AutomationDuration.Format(duration) : RawValueFormatter.Format(value);
 
     private static bool TryValidateKeys(
         MethodParameter[] inputs, IReadOnlyDictionary<string, string> arguments, [NotNullWhen(false)] out string? error)
     {
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var key in arguments.Keys)
         {
+            if (!keys.Add(key))
+            {
+                error = $"The argument '{key}' is given twice";
+                return false;
+            }
+
             if (!TryValidateKey(inputs, arguments, key, out error))
             {
                 return false;
@@ -118,7 +222,8 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
     {
         if (TryFind(arguments, parameter.Name, out var text))
         {
-            return TryBindValue(parameter.Name, text, parameter.Type, out value, out error);
+            var acceptsNull = parameter.IsNullable || Nullable.GetUnderlyingType(parameter.Type) is not null;
+            return TryBindValue(parameter.Name, text, parameter.Type, acceptsNull, out value, out error);
         }
 
         if (ParameterConverter.IsSupportedObject(parameter.Type) && HasMembers(arguments, parameter.Name))
@@ -140,7 +245,7 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
     private bool TryBindObject(
         MethodParameter parameter, IReadOnlyDictionary<string, string> arguments, out object? value, [NotNullWhen(false)] out string? error)
     {
-        var inputs = new Dictionary<string, string?>();
+        var members = new Dictionary<string, object?>();
         foreach (var member in ParameterConverter.GetObjectMembers(parameter.Type))
         {
             var key = parameter.Name + "." + member.Name;
@@ -155,10 +260,10 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
                 return false;
             }
 
-            inputs[member.Name] = RawValueFormatter.Format(memberValue);
+            members[member.Name] = memberValue;
         }
 
-        if (ParameterConverter.TryCreateObject(parameter.Type, inputs, out value, out var createError))
+        if (ParameterConverter.TryCreateObject(parameter.Type, members, out value, out var createError))
         {
             error = null;
             return true;
@@ -205,7 +310,6 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
             return false;
         }
 
-        _display.Add($"{name}: {RawValueFormatter.Format(value)}");
         error = null;
         return true;
     }
@@ -232,4 +336,10 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
 
     private static bool HasMembers(IReadOnlyDictionary<string, string> arguments, string parameterName) =>
         arguments.Keys.Any(key => key.StartsWith(parameterName + ".", StringComparison.OrdinalIgnoreCase));
+
+    private static bool Box<T>(bool isParsed, T parsed, out object? value)
+    {
+        value = isParsed ? parsed : null;
+        return isParsed;
+    }
 }

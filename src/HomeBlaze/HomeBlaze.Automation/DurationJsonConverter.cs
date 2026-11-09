@@ -19,7 +19,7 @@ internal sealed class DurationJsonConverter : JsonConverter<TimeSpan?>
         }
 
         var text = reader.TokenType == JsonTokenType.String ? reader.GetString() : null;
-        if (AutomationDuration.TryParse(text, out var duration) ||
+        if (AutomationDuration.TryParseUnlimited(text, out var duration) ||
             (text is not null && text.Contains(':') && TimeSpan.TryParseExact(text, "c", CultureInfo.InvariantCulture, out duration)))
         {
             return duration;

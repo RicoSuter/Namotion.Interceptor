@@ -1,15 +1,15 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Automation;
 
 /// <summary>
-/// Something that requests a run of a rule. Serialized with a stable <c>$type</c> discriminator; an unknown
-/// discriminator is rejected.
+/// Something that requests a run of a rule. Serialized with a stable <c>$type</c> discriminator. A trigger that cannot be
+/// read, such as one with an unknown discriminator or a key that names no setting, makes its rule invalid and is saved
+/// back as it was written.
 /// </summary>
-[JsonPolymorphic(TypeDiscriminatorPropertyName = "$type", UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization)]
-[JsonDerivedType(typeof(PropertyTrigger), "PropertyTrigger")]
-[JsonDerivedType(typeof(SubjectEventTrigger), "SubjectEventTrigger")]
+[JsonConverter(typeof(AutomationTriggerJsonConverter))]
 public abstract record AutomationTrigger;
 
 /// <summary>
@@ -58,3 +58,6 @@ public sealed record SubjectEventTrigger : AutomationTrigger
     [Configuration]
     public string? Filter { get; init; }
 }
+
+/// <summary>A trigger that could not be read: the element as it was written and the reason.</summary>
+internal sealed record UnreadableTrigger(JsonElement Json, string Error) : AutomationTrigger;

@@ -93,8 +93,8 @@ internal sealed partial class ExpressionClock
     /// Gets the next instant after <paramref name="now"/> at which a comparison can change, with the instants the paths
     /// lead to now and the local time of <paramref name="timeZone"/>; null when none can change before one of the
     /// instants does. Also gets whether a comparison changed already before <paramref name="now"/>, which a wall clock set
-    /// back can undo. False when a path leads to a value that is no instant, so that the expression is evaluated every
-    /// second.
+    /// back can undo. An instant whose change is beyond the range of <see cref="DateTimeOffset"/> never changes. False
+    /// when a path leads to a value that is no instant, so that the expression is evaluated every second.
     /// </summary>
     public bool TryGetNextChange(
         Func<string, object?> readInstant, DateTimeOffset now, TimeZoneInfo timeZone, out DateTimeOffset? nextChange, out bool hasChanged)
@@ -106,6 +106,9 @@ internal sealed partial class ExpressionClock
             switch (readInstant(comparison.Path))
             {
                 case null:
+                    continue;
+                // A change beyond the range of DateTimeOffset never comes.
+                case DateTimeOffset instant when DateTimeOffset.MaxValue.UtcTicks - instant.UtcTicks < comparison.Duration.Ticks:
                     continue;
                 case DateTimeOffset instant:
                     hasChanged |= instant + comparison.Duration <= now;
@@ -161,8 +164,9 @@ internal sealed partial class ExpressionClock
             return null;
         }
 
+        // A longer duration added to an instant can leave the range of DateTimeOffset; it is evaluated every second.
         var context = new ConstantContext();
-        return expression.Evaluate(ref context).Value is TimeSpan duration ? duration : null;
+        return expression.Evaluate(ref context).Value is TimeSpan duration && AutomationDuration.IsWithinMaximum(duration) ? duration : null;
     }
 
     [GeneratedRegex(@"(?<=(^|\(|\band|\bor|&&|\|\|)\s*)(?<![\w./])now\s+-\s+(?<path>[^\s()]+)\s*(?<operator>>=|<=|>|<)\s*(?<duration>[0-9][0-9A-Za-z.]*)(?=\s*($|\)|and\b|or\b|&&|\|\|))")]
