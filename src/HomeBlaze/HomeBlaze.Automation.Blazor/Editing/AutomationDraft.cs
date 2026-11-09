@@ -10,7 +10,6 @@ namespace HomeBlaze.Automation.Blazor.Editing;
 /// </summary>
 public sealed class AutomationDraft
 {
-    private readonly Dictionary<string, AutomationValidationError> _inputErrors = new(StringComparer.Ordinal);
     private Automation? _automation;
     private (string State, Regex Word)? _mentionPattern;
 
@@ -51,7 +50,7 @@ public sealed class AutomationDraft
         automation.Rules = Rules.ToDictionary(rule => rule.Key, rule => rule.ToRule(path => ActionInputs.GetMethod(automation, rule.Key, path)));
     }
 
-    /// <summary>The errors of the configuration as the automation and the editor check it, and the errors of inputs that do not parse.</summary>
+    /// <summary>The errors of the configuration as the automation and the editor check it.</summary>
     internal ImmutableArray<AutomationValidationError> Validate() =>
     [
         .. AutomationValidator.Validate(
@@ -59,8 +58,7 @@ public sealed class AutomationDraft
             States.Count == 0 ? null : InitialState,
             Rules.ToDictionary(rule => rule.Key, rule => rule.ToRule(path => _automation is null ? null : ActionInputs.GetMethod(_automation, rule.Key, path))),
             [.. Rules.Select(rule => rule.Key)]),
-        .. CheckActionInputs(),
-        .. _inputErrors.Values
+        .. CheckActionInputs()
     ];
 
     // The inputs of the actions are checked against the operations and properties they target, wherever the editor is showing.
@@ -73,26 +71,6 @@ public sealed class AutomationDraft
                 return rule.Actions.SelectMany((item, index) => ActionInputs.Check(item.Value, automation, rule.Key, expressions)
                     .Select(error => new AutomationValidationError(rule.Key, $"{ActionInputs.Name(item.Value, index)}: {error.Label}: {error.Error}")));
             });
-
-    /// <summary>Increases whenever an input error is set or cleared, so that a cached result of <see cref="Validate"/> can tell it is stale.</summary>
-    internal int InputErrorVersion { get; private set; }
-
-    /// <summary>Sets or clears the error of an input whose text does not parse, such as a duration, so that the draft cannot be saved meanwhile.</summary>
-    internal void SetInputError(string inputId, AutomationValidationError? error)
-    {
-        var isChanged = error is null
-            ? _inputErrors.Remove(inputId)
-            : !_inputErrors.TryGetValue(inputId, out var previous) || previous != error;
-        if (error is not null)
-        {
-            _inputErrors[inputId] = error;
-        }
-
-        if (isChanged)
-        {
-            InputErrorVersion++;
-        }
-    }
 
     internal RuleDraft? FindRule(string? key) => key is null ? null : Rules.Find(rule => rule.Key == key);
 

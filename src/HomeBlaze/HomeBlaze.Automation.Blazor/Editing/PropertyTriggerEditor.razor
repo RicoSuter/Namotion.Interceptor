@@ -9,7 +9,7 @@
                     TestId="automation-trigger-condition" />
     <div class="d-flex flex-wrap gap-3 mt-2">
         <div style="flex: 1 1 160px;">
-            <DurationField Label="For at least" Value="@_trigger.For" ValueChanged="SetHoldAsync" ErrorChanged="InputChanged" Draft="Draft" RuleKey="@RuleKey"
+            <DurationField Label="For at least" Value="@_trigger.For" ValueChanged="SetHoldAsync" RuleKey="@RuleKey"
                            HelperText="Empty: fires at once" />
         </div>
         <div style="flex: 1 1 200px;">
@@ -46,16 +46,11 @@
 
     [Parameter, EditorRequired] public RuleExpressions Expressions { get; set; } = null!;
 
-    [Parameter, EditorRequired] public AutomationDraft Draft { get; set; } = null!;
-
     [Parameter, EditorRequired] public string RuleKey { get; set; } = string.Empty;
 
     [Parameter] public EventCallback<AutomationTrigger> TriggerChanged { get; set; }
 
     [Parameter] public EventCallback Removed { get; set; }
-
-    /// <summary>Raised when the errors may have changed without an edit, such as when the hold input rejects its text.</summary>
-    [Parameter] public EventCallback InputChanged { get; set; }
 
     // Kept for the render before the parent passes the edit down, as in ActionEditor.
     protected override void OnParametersSet() => _trigger = Trigger;

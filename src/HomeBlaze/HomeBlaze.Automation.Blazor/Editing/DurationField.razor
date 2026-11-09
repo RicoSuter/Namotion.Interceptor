@@ -12,21 +12,13 @@
     private string? _error;
     private TimeSpan? _shownValue;
 
-    [CascadingParameter] private PendingRows? PendingRows { get; set; }
+    [CascadingParameter] private UnappliedInputs? Inputs { get; set; }
 
     [Parameter] public string Label { get; set; } = string.Empty;
 
     [Parameter] public TimeSpan? Value { get; set; }
 
     [Parameter] public EventCallback<TimeSpan?> ValueChanged { get; set; }
-
-    /// <summary>
-    /// Raised when the error of the field may have changed without a change of <see cref="Value"/>: it rejects a text, or a
-    /// text gives <see cref="Value"/> again after an error.
-    /// </summary>
-    [Parameter] public EventCallback ErrorChanged { get; set; }
-
-    [Parameter, EditorRequired] public AutomationDraft Draft { get; set; } = null!;
 
     /// <summary>The rule an error of the field belongs to.</summary>
     [Parameter] public string? RuleKey { get; set; }
@@ -73,32 +65,26 @@
     private Task RejectAsync(string error)
     {
         _error = error;
-        Draft.SetInputError(_inputId, new AutomationValidationError(RuleKey, $"{Label}: {error}"));
-        return ErrorChanged.InvokeAsync();
+        Inputs?.SetError(_inputId, new AutomationValidationError(RuleKey, $"{Label}: {error}"));
+        return Task.CompletedTask;
     }
 
     // A text that gives the value the field already has, such as the one typed again after an error, is no edit.
     private Task AcceptAsync(TimeSpan? value)
     {
-        var hadError = _error is not null;
         _error = null;
         _shownValue = value;
-        Draft.SetInputError(_inputId, null);
-        if (value != Value)
-        {
-            return ValueChanged.InvokeAsync(value);
-        }
-
-        return hadError ? ErrorChanged.InvokeAsync() : Task.CompletedTask;
+        Inputs?.SetError(_inputId, null);
+        return value != Value ? ValueChanged.InvokeAsync(value) : Task.CompletedTask;
     }
 
     public void Dispose()
     {
         if (_error is not null)
         {
-            PendingRows?.Discard($"An invalid duration in '{Label}'");
+            Inputs?.Discard($"An invalid duration in '{Label}'");
         }
 
-        Draft.SetInputError(_inputId, null);
+        Inputs?.SetError(_inputId, null);
     }
 }

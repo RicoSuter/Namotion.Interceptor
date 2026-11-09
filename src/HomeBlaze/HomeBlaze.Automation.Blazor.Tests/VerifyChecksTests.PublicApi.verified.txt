@@ -18,7 +18,6 @@ namespace HomeBlaze.Automation.Blazor
         public event System.Action<bool>? IsValidChanged;
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public void Dispose() { }
-        protected override void OnAfterRender(bool firstRender) { }
         protected override void OnInitialized() { }
         public System.Threading.Tasks.Task SaveAsync(System.Threading.CancellationToken cancellationToken) { }
     }
@@ -174,11 +173,6 @@ namespace HomeBlaze.Automation.Blazor.Editing
     public class DurationField : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public DurationField() { }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public HomeBlaze.Automation.Blazor.Editing.AutomationDraft Draft { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback ErrorChanged { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? HelperText { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -233,12 +227,7 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public Microsoft.AspNetCore.Components.EventCallback Changed { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
-        public HomeBlaze.Automation.Blazor.Editing.AutomationDraft Draft { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.Blazor.Editing.RuleExpressions Expressions { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback InputChanged { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public System.DateTimeOffset? LastTriggeredAt { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
@@ -252,12 +241,7 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public PropertyTriggerEditor() { }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
-        public HomeBlaze.Automation.Blazor.Editing.AutomationDraft Draft { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.Blazor.Editing.RuleExpressions Expressions { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback InputChanged { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback Removed { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
@@ -331,8 +315,6 @@ namespace HomeBlaze.Automation.Blazor.Editing
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.Blazor.Editing.AutomationDraft Draft { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback InputChanged { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<string> RuleOpened { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }

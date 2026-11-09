@@ -7,7 +7,7 @@
 {
     <div class="automation-editor">
     <MudStack Spacing="2" Class="automation-stack" data-testid="automation-editor" data-dirty="@(_isDirty ? "true" : "false")">
-        @if (_pendingRows.Any)
+        @if (_inputs.HasPendingRow)
         {
             <MudAlert Severity="Severity.Warning" Dense="true" data-testid="automation-pending">
                 A condition is not finished. Complete or remove it before saving.
@@ -29,7 +29,7 @@
                 </ul>
             </MudAlert>
         }
-        <CascadingValue Value="_pendingRows">
+        <CascadingValue Value="_inputs">
             <MudTabs Elevation="0" Border="true" Class="automation-tabs" ActivePanelIndex="_tabIndex" ActivePanelIndexChanged="OnTabChanged" TabPanelsClass="automation-tab-panels pt-3">
                 <MudTabPanel Text="General">
                     <GeneralTab Draft="draft" Changed="OnChanged" />
@@ -38,7 +38,7 @@
                     <RulesTab Automation="Automation" Draft="draft" Errors="_errors" SelectedRuleKey="@_selectedRuleKey" SelectedRuleKeyChanged="OnRuleSelected" Changed="OnChanged" InputChanged="Revalidate" />
                 </MudTabPanel>
                 <MudTabPanel Text="States">
-                    <StatesTab Automation="Automation" Draft="draft" Changed="OnChanged" InputChanged="Revalidate" RuleOpened="OpenRule" />
+                    <StatesTab Automation="Automation" Draft="draft" Changed="OnChanged" RuleOpened="OpenRule" />
                 </MudTabPanel>
             </MudTabs>
         </CascadingValue>
@@ -49,10 +49,9 @@
 @code {
     private const int RulesTabIndex = 1;
 
-    private readonly PendingRows _pendingRows = new();
+    private readonly UnappliedInputs _inputs = new();
     private AutomationDraft? _draft;
     private ImmutableArray<AutomationValidationError> _errors = [];
-    private int _validatedInputErrorVersion;
     private int _tabIndex;
     private string? _selectedRuleKey;
     private bool _isDirty;
@@ -71,9 +70,9 @@
 
     public bool IsDirty => _isDirty;
 
-    // The errors are validated after each edit and after a render in which an input changed its error, such as one that
-    // was disposed, not on every read: the host reads this on every input event.
-    public bool IsValid => _draft is not null && !_pendingRows.Any && _errors.Length == 0;
+    // The errors are validated after each edit and each change of the unapplied inputs, not on every read: the host reads
+    // this on every input event.
+    public bool IsValid => _draft is not null && !_inputs.HasPendingRow && _errors.Length == 0;
 
     private Automation? Automation => Subject as Automation;
 
@@ -87,8 +86,8 @@
         }
 
         _wasValid = IsValid;
-        _pendingRows.Changed += OnPendingRowsChanged;
-        _pendingRows.Discarded += OnInputDiscarded;
+        _inputs.Changed += OnInputsChanged;
+        _inputs.Discarded += OnInputDiscarded;
     }
 
     // Errors that depend on the live graph, such as the arguments of an operation that appeared after the last edit in a
@@ -113,14 +112,14 @@
         return Task.CompletedTask;
     }
 
-    // A field reports from its event handlers and from its disposal during a render, both on the dispatcher, where
+    // An input reports from its event handlers and from its disposal during a render, both on the dispatcher, where
     // InvokeAsync runs the update at once. StateHasChanged during a render queues another render instead of rendering
-    // in the middle of it.
-    private void OnPendingRowsChanged() => _ = InvokeAsync(() =>
+    // in the middle of it. This is no edit, so the dialog does not become dirty.
+    private void OnInputsChanged() => _ = InvokeAsync(() =>
     {
         if (!_isDisposed)
         {
-            ReportValidity();
+            Revalidate();
             StateHasChanged();
         }
     });
@@ -143,23 +142,6 @@
 
     private void OnRuleSelected(string? key) => _selectedRuleKey = key;
 
-    // An input that shows an error clears it when it is disposed, which happens in the render after a selection or an edit
-    // that removed it, so the errors are read again after that render. This is no edit, so the dialog does not become dirty.
-    protected override void OnAfterRender(bool firstRender)
-    {
-        if (_draft is null || _draft.InputErrorVersion == _validatedInputErrorVersion)
-        {
-            return;
-        }
-
-        var previous = _errors;
-        Revalidate();
-        if (!previous.SequenceEqual(_errors))
-        {
-            StateHasChanged();
-        }
-    }
-
     /// <summary>Every tab raises this after each edit of the draft, so that the errors and the validity follow it.</summary>
     private void OnChanged()
     {
@@ -179,8 +161,7 @@
     {
         if (_draft is { } draft)
         {
-            _errors = draft.Validate();
-            _validatedInputErrorVersion = draft.InputErrorVersion;
+            _errors = [.. draft.Validate(), .. _inputs.Errors];
         }
     }
 
@@ -207,8 +188,8 @@
     public void Dispose()
     {
         _isDisposed = true;
-        _pendingRows.Changed -= OnPendingRowsChanged;
-        _pendingRows.Discarded -= OnInputDiscarded;
+        _inputs.Changed -= OnInputsChanged;
+        _inputs.Discarded -= OnInputDiscarded;
     }
 
     private void SetDirty(bool isDirty)

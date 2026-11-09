@@ -2,41 +2,41 @@ using HomeBlaze.Automation.Blazor.Editing;
 
 namespace HomeBlaze.Automation.Blazor.Tests.Editing;
 
-public class PendingRowsTests
+public class UnappliedInputsTests
 {
     [Fact]
-    public void WhenAFieldHasAPendingRow_ThenAnyIsTrueUntilItIsCleared()
+    public void WhenAFieldHasAPendingRow_ThenHasPendingRowIsTrueUntilItIsCleared()
     {
         // Arrange
-        var pending = new PendingRows();
+        var pending = new UnappliedInputs();
 
         // Act
-        var isMarked = pending.Set("rule-1/trigger", true);
-        var wasPending = pending.Any;
-        var isUnmarked = pending.Set("rule-1/trigger", false);
+        var isMarked = pending.SetPendingRow("rule-1/trigger", true);
+        var wasPending = pending.HasPendingRow;
+        var isUnmarked = pending.SetPendingRow("rule-1/trigger", false);
 
         // Assert
         Assert.True(isMarked);
         Assert.True(wasPending);
         Assert.True(isUnmarked);
-        Assert.False(pending.Any);
+        Assert.False(pending.HasPendingRow);
     }
 
     [Fact]
     public void WhenTheSameStateIsSetAgain_ThenNothingChangesAndChangedIsRaisedOncePerChange()
     {
         // Arrange
-        var pending = new PendingRows();
+        var pending = new UnappliedInputs();
         var raised = 0;
         pending.Changed += () => raised++;
-        pending.Set("a", true);
+        pending.SetPendingRow("a", true);
 
         // Act
-        var marked = pending.Set("a", true);
-        var unmarked = pending.Set("b", false);
-        var isStillPending = pending.Any;
-        pending.Set("a", false);
-        var clearedAgain = pending.Set("a", false);
+        var marked = pending.SetPendingRow("a", true);
+        var unmarked = pending.SetPendingRow("b", false);
+        var isStillPending = pending.HasPendingRow;
+        pending.SetPendingRow("a", false);
+        var clearedAgain = pending.SetPendingRow("a", false);
 
         // Assert
         Assert.False(marked);
@@ -50,7 +50,7 @@ public class PendingRowsTests
     public void WhenTheTrackerIsDisposed_ThenItsFieldIsCleared()
     {
         // Arrange
-        var pending = new PendingRows();
+        var pending = new UnappliedInputs();
         var tracker = new PendingRowTracker(pending, "rule-1/trigger/t1/condition");
         tracker.Report(true);
 
@@ -58,14 +58,14 @@ public class PendingRowsTests
         tracker.Dispose();
 
         // Assert
-        Assert.False(pending.Any);
+        Assert.False(pending.HasPendingRow);
     }
 
     [Fact]
     public void WhenATrackerWithAPendingRowIsDisposed_ThenTheDiscardedInputIsReported()
     {
         // Arrange
-        var pending = new PendingRows();
+        var pending = new UnappliedInputs();
         var discarded = new List<string>();
         pending.Discarded += discarded.Add;
         var finished = new PendingRowTracker(pending, "a");
@@ -84,7 +84,7 @@ public class PendingRowsTests
     public void WhenTheFieldDropsAnEditWhileItStays_ThenTheDiscardedInputIsReported()
     {
         // Arrange
-        var pending = new PendingRows();
+        var pending = new UnappliedInputs();
         var discarded = new List<string>();
         pending.Discarded += discarded.Add;
         var tracker = new PendingRowTracker(pending, "a");
@@ -97,7 +97,7 @@ public class PendingRowsTests
 
         // Assert
         Assert.Equal(["An unfinished condition"], discarded.ToArray());
-        Assert.False(pending.Any);
+        Assert.False(pending.HasPendingRow);
     }
 
     [Fact]
@@ -116,5 +116,27 @@ public class PendingRowsTests
 
         // Assert
         Assert.Null(exception);
+    }
+
+    [Fact]
+    public void WhenAnInputErrorIsSetAgainOrClearedTwice_ThenItIsListedUntilItIsClearedAndChangedIsRaisedOncePerChange()
+    {
+        // Arrange
+        var inputs = new UnappliedInputs();
+        var raised = 0;
+        inputs.Changed += () => raised++;
+        var error = new AutomationValidationError("finished", "For at least: use a duration such as 20s");
+
+        // Act
+        inputs.SetError("hold", error);
+        inputs.SetError("hold", error);
+        var withError = inputs.Errors.ToArray();
+        inputs.SetError("hold", null);
+        inputs.SetError("hold", null);
+
+        // Assert
+        Assert.Equal(error, Assert.Single(withError));
+        Assert.Empty(inputs.Errors);
+        Assert.Equal(2, raised);
     }
 }

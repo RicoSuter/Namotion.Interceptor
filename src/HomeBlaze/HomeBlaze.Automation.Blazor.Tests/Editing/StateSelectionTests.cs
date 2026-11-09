@@ -17,7 +17,8 @@ public class StateSelectionTests
     {
         // Arrange
         var draft = CreateDraft();
-        var selection = new StateSelection(draft);
+        var inputs = new UnappliedInputs();
+        var selection = new StateSelection(draft, inputs);
         selection.Select("Running");
 
         // Act
@@ -26,7 +27,7 @@ public class StateSelectionTests
         // Assert
         Assert.False(isChanged);
         Assert.Equal("'Idle' is already a state", selection.RenameError);
-        Assert.Contains(draft.Validate(), error => error.Message == "State name: 'Idle' is already a state");
+        Assert.Contains(inputs.Errors, error => error.Message == "State name: 'Idle' is already a state");
     }
 
     [Fact]
@@ -34,7 +35,8 @@ public class StateSelectionTests
     {
         // Arrange
         var draft = CreateDraft();
-        var selection = new StateSelection(draft);
+        var inputs = new UnappliedInputs();
+        var selection = new StateSelection(draft, inputs);
         var added = draft.AddState();
         selection.Select(added);
         selection.Rename("Idle");
@@ -46,7 +48,7 @@ public class StateSelectionTests
         Assert.True(isRemoved);
         Assert.Null(selection.SelectedState);
         Assert.Null(selection.RenameError);
-        Assert.Empty(draft.Validate());
+        Assert.Empty(inputs.Errors);
     }
 
     [Theory]
@@ -57,7 +59,8 @@ public class StateSelectionTests
     {
         // Arrange
         var draft = CreateDraft();
-        var selection = new StateSelection(draft);
+        var inputs = new UnappliedInputs();
+        var selection = new StateSelection(draft, inputs);
         selection.Select("Running");
 
         // Act
@@ -76,7 +79,8 @@ public class StateSelectionTests
     {
         // Arrange
         var draft = CreateDraft();
-        var selection = new StateSelection(draft);
+        var inputs = new UnappliedInputs();
+        var selection = new StateSelection(draft, inputs);
         selection.Select("Running");
 
         // Act
@@ -90,20 +94,20 @@ public class StateSelectionTests
     }
 
     [Fact]
-    public void WhenAnotherStateIsSelectedAfterARejectedRename_ThenTheErrorIsClearedAndReportedAsAChange()
+    public void WhenAnotherStateIsSelectedAfterARejectedRename_ThenTheErrorIsCleared()
     {
         // Arrange
         var draft = CreateDraft();
-        var selection = new StateSelection(draft);
+        var inputs = new UnappliedInputs();
+        var selection = new StateSelection(draft, inputs);
         selection.Select("Running");
         selection.Rename(" ");
 
         // Act
-        var hadError = selection.Select("Idle");
+        selection.Select("Idle");
 
         // Assert
-        Assert.True(hadError);
         Assert.Null(selection.RenameError);
-        Assert.Empty(draft.Validate());
+        Assert.Empty(inputs.Errors);
     }
 }

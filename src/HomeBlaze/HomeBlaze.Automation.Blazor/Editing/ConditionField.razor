@@ -8,7 +8,7 @@
 @code {
     private PendingRowTracker? _tracker;
 
-    [CascadingParameter] private PendingRows? Registry { get; set; }
+    [CascadingParameter] private UnappliedInputs? Inputs { get; set; }
 
     [Parameter] public string? Value { get; set; }
 
@@ -28,7 +28,7 @@
 
     [Parameter] public string TestId { get; set; } = "expression-field";
 
-    protected override void OnInitialized() => _tracker = new PendingRowTracker(Registry, Guid.NewGuid().ToString("N"));
+    protected override void OnInitialized() => _tracker = new PendingRowTracker(Inputs, Guid.NewGuid().ToString("N"));
 
     private void ReportPending(bool hasPendingRow) => _tracker?.Report(hasPendingRow);
 
