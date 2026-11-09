@@ -27,9 +27,10 @@ internal sealed class AutomationRuntime
     private int _isTickPending;
     private WakeTimer? _wakeTimer;
 
-    /// <summary>Creates the worker of the automation, whose checkpoint is at <paramref name="location"/>.</summary>
-    public AutomationRuntime(Automation automation, CheckpointLocation location, ILogger logger)
+    /// <summary>Creates the worker of the automation, whose checkpoint is at the path the automation has now.</summary>
+    public AutomationRuntime(Automation automation, ILogger logger)
     {
+        var location = CheckpointLocation.Of(automation, logger);
         _automation = automation;
         _logger = logger;
         _location = location;
@@ -55,6 +56,18 @@ internal sealed class AutomationRuntime
 
     /// <summary>Gives up the checkpoint file once the worker ended, so that another worker of the path owns it.</summary>
     public void Release() => Location.Store.Release();
+
+    /// <summary>
+    /// Deletes the checkpoint file once the worker ended or a stop abandoned it, when the automation is detached or the
+    /// graph no longer holds it at the path of the checkpoint, so that the path resolves to what took its place.
+    /// </summary>
+    public void DeleteCheckpointIfOrphaned(bool isDetached)
+    {
+        if (isDetached || Location.HasMoved(_automation))
+        {
+            Location.DeleteIfOrphaned(_automation, _logger);
+        }
+    }
 
     /// <summary>
     /// Abandons a worker that did not end when the automation stopped: from now on it changes neither the automation, its

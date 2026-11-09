@@ -21,13 +21,14 @@ namespace HomeBlaze.Automation;
 [DisplayName("Automation")]
 [SubjectIcon("AutoMode")]
 [InterceptorSubject]
-public partial class Automation : BackgroundService, IConfigurable, IMonitoredService, ITitleProvider, IIconProvider,
-    IObservable<AutomationStateChangedEvent>, ILifecycleHandler
+public partial class Automation : BackgroundService, IConfigurable, IConfigurationIssueReceiver, IMonitoredService, ITitleProvider,
+    IIconProvider, IObservable<AutomationStateChangedEvent>, ILifecycleHandler
 {
     private readonly ILogger<Automation> _logger;
     private readonly Subject<AutomationStateChangedEvent> _stateChanged = new();
     private AutomationRuntime? _runtime;
     private int _configurationVersion;
+    private string[] _configurationIssues = [];
     private volatile bool _isDetached;
 
     /// <summary>Creates an automation with the services it takes, which dependency injection resolves.</summary>
@@ -122,6 +123,14 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
 
     internal int ConfigurationVersion => Volatile.Read(ref _configurationVersion);
 
+    /// <summary>
+    /// The issues of the configuration file the automation was last read from, such as a value that could not be read or
+    /// a key that names no setting, which make its configuration invalid.
+    /// </summary>
+    internal string[] ConfigurationIssues => Volatile.Read(ref _configurationIssues);
+
+    void IConfigurationIssueReceiver.SetConfigurationIssues(string[] issues) => Volatile.Write(ref _configurationIssues, issues);
+
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _configurationVersion);
@@ -173,7 +182,7 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
     // configuration change or a flush right after the start reaches it.
     public override Task StartAsync(CancellationToken cancellationToken)
     {
-        Volatile.Write(ref _runtime, new AutomationRuntime(this, CheckpointLocation.Of(this, _logger), _logger));
+        Volatile.Write(ref _runtime, new AutomationRuntime(this, _logger));
         Status = ServiceStatus.Starting;
         return base.StartAsync(cancellationToken);
     }
@@ -245,15 +254,7 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         Status = error is null ? ServiceStatus.Stopped : ServiceStatus.Error;
     }
 
-    // Runs once the worker ended or a stop abandoned it, which then no longer owns the file, and only when the graph no
-    // longer holds this automation at the path it started with, so that the path resolves to what took its place.
-    private void OnWorkerEnded(AutomationRuntime runtime)
-    {
-        if (_isDetached || runtime.Location.HasMoved(this))
-        {
-            runtime.Location.DeleteIfOrphaned(this, _logger);
-        }
-    }
+    private void OnWorkerEnded(AutomationRuntime runtime) => runtime.DeleteCheckpointIfOrphaned(_isDetached);
 
     // A configuration file may hold an explicit null, which the runtime never expects.
     partial void OnStatesChanging(ref string[] newValue, ref bool cancel) => newValue ??= [];

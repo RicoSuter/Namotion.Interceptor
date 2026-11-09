@@ -18,9 +18,24 @@ internal static class AutomationCompiler
         IReadOnlyDictionary<string, AutomationRule> rules,
         IReadOnlyList<string> ruleOrder,
         [NotNullWhen(true)] out CompiledAutomation? compiled,
+        [NotNullWhen(false)] out string? error) =>
+        TryCompile(states, initialState, rules, ruleOrder, configurationIssues: [], out compiled, out error);
+
+    /// <summary>
+    /// Compiles as the overload without <paramref name="configurationIssues"/> does; each issue of the configuration
+    /// file, see <see cref="Automation.ConfigurationIssues"/>, is an error before those of the states and the rules.
+    /// </summary>
+    public static bool TryCompile(
+        IReadOnlyList<string> states,
+        string? initialState,
+        IReadOnlyDictionary<string, AutomationRule> rules,
+        IReadOnlyList<string> ruleOrder,
+        IReadOnlyList<string> configurationIssues,
+        [NotNullWhen(true)] out CompiledAutomation? compiled,
         [NotNullWhen(false)] out string? error)
     {
-        var errors = CheckStates(states, initialState);
+        var errors = new List<string>(configurationIssues);
+        errors.AddRange(CheckStates(states, initialState));
         var compiledRules = new List<CompiledRule>();
         foreach (var key in OrderKeys(rules.Keys, ruleOrder))
         {
