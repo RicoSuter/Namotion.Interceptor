@@ -133,8 +133,9 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
 
     /// <summary>
     /// Enters the initial state, clears the last trigger times of the rules and starts every rule that is active in it over,
-    /// as if it entered its state: its triggers take a fresh baseline or evaluate at once according to their activation policy,
-    /// running holds restart and event triggers ignore the events received before the reset. A state change is published only when the state changed.
+    /// as if it entered its state: its triggers take a fresh baseline or evaluate at once according to their activation policy
+    /// and running holds restart. The reset is queued like an input: the events received before it are handled before it,
+    /// and those received after it by the rules active after it. A state change is published only when the state changed.
     /// </summary>
     /// <exception cref="InvalidOperationException">The automation is not running, or the reset could not be queued.</exception>
     [Operation(Title = "Reset State", Description = "Enters the initial state, clears the last trigger times and starts every rule over.", Icon = "RestartAlt", Position = 1)]

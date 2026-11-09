@@ -1,4 +1,5 @@
 using HomeBlaze.Automation.Tests.Testing;
+using Namotion.Interceptor.Testing;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
 namespace HomeBlaze.Automation.Tests;
@@ -116,5 +117,26 @@ public class AutomationResetTests
 
         // Assert
         Assert.Equal(1L, host.Rule("retract").RunCount);
+    }
+
+    [Fact]
+    public async Task WhenTheButtonIsPressedAfterTheResetWasRequested_ThenThePressIsHandledAfterTheReset()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("wait", On("Wait", OnEvent("/Button", "TestTiltEvent"), Invoke("/Blinds/Wait"))),
+            ("close", On("Close", OnEvent("/Button", "TestPressEvent"), Invoke("/Blinds/Close")))));
+        host.Button.Tilt(1);
+        await AsyncTestHelpers.WaitUntilAsync(() => host.Blinds.IsWaiting);
+
+        // Act
+        host.Automation.ResetState();
+        host.Button.Press("Release");
+        host.Blinds.Release();
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(1L, host.Rule("close").RunCount);
     }
 }

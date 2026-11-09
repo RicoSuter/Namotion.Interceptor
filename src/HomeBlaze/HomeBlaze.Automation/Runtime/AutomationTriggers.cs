@@ -119,9 +119,6 @@ internal sealed class AutomationTriggers
     /// <summary>Gives up the subscriptions of the event triggers of the rule.</summary>
     public void StopListening(CompiledRule rule) => _eventTriggers.StopListening(rule);
 
-    /// <summary>Has the event triggers of the rule ignore the events received so far, as if they subscribed now.</summary>
-    public static void SkipReceivedEvents(CompiledRule rule) => EventTriggerEngine.SkipReceived(rule);
-
     /// <summary>
     /// Hands the state of each property trigger of the old rule to a trigger with an equal configuration, wherever it
     /// moved in the rule: each new trigger takes the first old one with an equal configuration that no earlier new trigger

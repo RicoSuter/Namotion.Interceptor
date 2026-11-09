@@ -49,18 +49,6 @@ internal sealed class EventTriggerEngine(
         }
     }
 
-    /// <summary>Has the triggers of the rule ignore the events received so far, as if they subscribed now.</summary>
-    public static void SkipReceived(CompiledRule rule)
-    {
-        foreach (var trigger in rule.EventTriggers)
-        {
-            if (trigger.Subscription is { } subscription)
-            {
-                trigger.JoinedAfter = subscription.Received;
-            }
-        }
-    }
-
     /// <summary>Subscribes the triggers of the listening rules again whose path now leads to another subject.</summary>
     public void Rebind(IReadOnlyList<CompiledRule> rules)
     {

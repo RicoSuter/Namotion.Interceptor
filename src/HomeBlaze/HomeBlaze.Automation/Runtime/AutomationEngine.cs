@@ -204,9 +204,10 @@ internal sealed class AutomationEngine : IRuleRunHost
 
     /// <summary>
     /// Enters the initial state, clears the trigger times and starts every active rule over as if it entered its state:
-    /// fresh holds, the activation policy of its triggers applies again and the event triggers of every rule ignore the events
-    /// received before, also when the state did not change. A saved reset clears the error shown unless the configuration is invalid, since a reset is how
-    /// an automation leaves a saved state that its configuration no longer has.
+    /// fresh holds and the activation policy of its triggers applies again, also when the state did not change. The events
+    /// queued before the reset were handled before it, and those queued after it are handled by the rules active after it.
+    /// A saved reset clears the error shown unless the configuration is invalid, since a reset is how an automation leaves
+    /// a saved state that its configuration no longer has.
     /// </summary>
     public void ResetState()
     {
@@ -231,7 +232,6 @@ internal sealed class AutomationEngine : IRuleRunHost
         foreach (var rule in _snapshot.Rules)
         {
             Deactivate(rule);
-            AutomationTriggers.SkipReceivedEvents(rule);
         }
 
         ActivateRules();
