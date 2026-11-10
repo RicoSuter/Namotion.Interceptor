@@ -70,7 +70,7 @@ namespace HomeBlaze.Services
     }
     public static class LocalClock
     {
-        public static System.DateTimeOffset? GetOffsetChange(System.TimeZoneInfo timeZone, System.TimeSpan offset, System.DateTimeOffset now, System.DateTimeOffset limit) { }
+        public static System.DateTimeOffset? GetOffsetChange(System.TimeZoneInfo timeZone, System.TimeSpan offset, System.DateTimeOffset start, System.DateTimeOffset limit) { }
         public static System.TimeSpan GetTimeOfDay(System.DateTimeOffset instant, System.TimeZoneInfo timeZone) { }
     }
     public sealed class ObjectParameterMember : System.IEquatable<HomeBlaze.Services.ObjectParameterMember>

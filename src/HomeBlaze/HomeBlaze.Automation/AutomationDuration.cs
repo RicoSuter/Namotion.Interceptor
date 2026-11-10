@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
+using HomeBlaze.Services;
 using Namotion.Interceptor.Expressions;
 
 namespace HomeBlaze.Automation;
@@ -66,7 +67,7 @@ public static class AutomationDuration
     {
         duration = TimeSpan.Zero;
         if (string.IsNullOrWhiteSpace(text) ||
-            !ParsedExpression.TryParse(text.Trim(), '/', out var expression, out _) ||
+            !ParsedExpression.TryParse(text.Trim(), SubjectPathResolver.Separator, out var expression, out _) ||
             expression.Paths.Length > 0 ||
             expression.Pipes.Length > 0)
         {
