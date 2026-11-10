@@ -191,6 +191,69 @@ public class RepeatedChildTests
         AssertChildrenAndParents(father, nameof(Person.Children), (child, 0), (child, 1));
     }
 
+    [Fact]
+    public void WhenSubjectHoldingAChildUnderTwoKeysIsAttached_ThenTheChildHasAnEntryPerKeyInAttachOrder()
+    {
+        // Arrange
+        var light = new Light();
+        var group = new LightGroup
+        {
+            LightsByName = new Dictionary<string, Light> { ["b"] = light, ["a"] = light }
+        };
+        var room = new Room(CreateContext());
+
+        // Act
+        room.Group = group;
+
+        // Assert
+        AssertChildrenAndParents(group, nameof(LightGroup.LightsByName), (light, "b"), (light, "a"));
+    }
+
+    [Fact]
+    public void WhenSubjectWithTwoPropertiesThatRepeatAChildIsAttached_ThenBothPropertiesHaveAnEntryPerPlace()
+    {
+        // Arrange
+        var listed = new Light();
+        var named = new Light();
+        var group = new LightGroup
+        {
+            Lights = [listed, listed],
+            LightsByName = new Dictionary<string, Light> { ["x"] = named, ["y"] = named }
+        };
+        var room = new Room(CreateContext());
+
+        // Act
+        room.Group = group;
+
+        // Assert
+        AssertChildrenAndParents(group, nameof(LightGroup.Lights), (listed, 0), (listed, 1));
+        AssertChildrenAndParents(group, nameof(LightGroup.LightsByName), (named, "x"), (named, "y"));
+    }
+
+    [Fact]
+    public void WhenParentHoldingAChildTwiceIsDetached_ThenTheChildIsUnregisteredAndANewParentHoldingItOnceHasOneEntry()
+    {
+        // Arrange
+        var child = new Person();
+        var father = new Person { Children = [child, child] };
+        var root = new Person(CreateContext()) { Father = father };
+
+        // Act
+        root.Father = null;
+
+        // Assert
+        Assert.Null(child.TryGetRegisteredSubject());
+        Assert.Null(father.TryGetRegisteredSubject());
+
+        // Act
+        var newFather = new Person { Children = [child] };
+        root.Father = newFather;
+
+        // Assert
+        AssertChildrenAndParents(newFather, nameof(Person.Children), (child, 0));
+        Assert.Single(child.TryGetRegisteredSubject()!.Parents);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

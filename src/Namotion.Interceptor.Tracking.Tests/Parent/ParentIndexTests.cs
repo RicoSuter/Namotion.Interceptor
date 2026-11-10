@@ -224,6 +224,21 @@ public class ParentIndexTests
     }
 
     [Fact]
+    public void WhenSubjectHoldingAChildTwiceIsAttached_ThenTheChildHasAParentEntryPerPosition()
+    {
+        // Arrange
+        var car = new Car();
+        var garage = new Garage { Cars = [car, car] };
+        var holder = new BroadlyDeclaredHolder(CreateContext());
+
+        // Act
+        holder.BroadCars = garage;
+
+        // Assert
+        Assert.Equal<SubjectParent>([Parent(garage, nameof(Garage.Cars), 0), Parent(garage, nameof(Garage.Cars), 1)], car.GetParents());
+    }
+
+    [Fact]
     public void WhenRetainedSubjectIsAlsoAppended_ThenItGainsAParentEntryForThePosition()
     {
         // Arrange
