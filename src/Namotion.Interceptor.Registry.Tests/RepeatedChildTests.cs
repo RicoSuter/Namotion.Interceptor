@@ -190,4 +190,42 @@ public class RepeatedChildTests
         // Assert
         AssertChildrenAndParents(father, nameof(Person.Children), (child, 0), (child, 1));
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void WhenPlacesOfAChildChange_ThenItsParentEntryOfAnotherPropertyKeepsItsPosition(bool fatherIsFirst)
+    {
+        // Arrange
+        var child = new Person();
+        var other = new Person();
+        var root = new Person(CreateContext());
+        if (fatherIsFirst)
+        {
+            root.Father = child;
+            root.Children = [child, child];
+        }
+        else
+        {
+            root.Children = [child, child];
+            root.Father = child;
+        }
+
+        Person[][] values = [[other, child, child], [child, other, child, child], [child], [child, child]];
+        foreach (var value in values)
+        {
+            // Act
+            root.Children = value;
+
+            // Assert
+            var childrenEntries = value
+                .Select((person, index) => (Person: person, Index: index))
+                .Where(entry => entry.Person == child)
+                .Select(entry => (nameof(Person.Children), (object?)entry.Index));
+            (string, object?)[] fatherEntry = [(nameof(Person.Father), null)];
+            Assert.Equal(
+                fatherIsFirst ? fatherEntry.Concat(childrenEntries) : childrenEntries.Concat(fatherEntry),
+                child.TryGetRegisteredSubject()!.Parents.Select(parent => (parent.Property.Name, parent.Index)));
+        }
+    }
 }

@@ -217,39 +217,68 @@ public class RegisteredSubject
         }
     }
 
-    // Replaces the entries of the property with one per place, at the position of its first entry.
+    // Replaces the entries of the property with one per place (at least one), at the position of its first entry.
     internal void ReplaceParentIndices(RegisteredSubjectProperty property, ReadOnlySpan<SubjectChild> places)
     {
         lock (_lock)
         {
-            if (_firstParent.Property is null)
+            var firstIsProperty = _firstParent.Property == property;
+            var position = IndexOfAdditionalParent(property);
+            if (!firstIsProperty && position < 0)
                 return;
 
-            // The inline first entry joins the list for the duration, so positions count from it.
-            var parents = _additionalParents ??= [];
-            parents.Insert(0, _firstParent);
-
-            var position = -1;
-            for (var i = parents.Count - 1; i >= 0; i--)
+            // The first place overwrites the first entry, so one entry and one place need no list.
+            var entry = new SubjectPropertyParent { Property = property, Index = places[0].Index };
+            int next;
+            if (firstIsProperty)
             {
-                if (parents[i].Property == property)
-                {
-                    parents.RemoveAt(i);
-                    position = i;
-                }
+                _firstParent = entry;
+                next = 0;
+            }
+            else
+            {
+                _additionalParents![position] = entry;
+                next = position + 1;
             }
 
-            if (position >= 0)
-            {
-                for (var i = 0; i < places.Length; i++)
-                {
-                    parents.Insert(position + i, new SubjectPropertyParent { Property = property, Index = places[i].Index });
-                }
-            }
-
-            _firstParent = parents[0];
-            parents.RemoveAt(0);
+            RemoveAdditionalParents(property, next);
+            InsertAdditionalParents(next, property, places[1..]);
             InvalidateParentsSnapshot();
+        }
+    }
+
+    // Removes the entries of the property from the overflow list, starting at the given position, keeping the order
+    // of the others. Caller must hold _lock.
+    private void RemoveAdditionalParents(RegisteredSubjectProperty property, int start)
+    {
+        var parents = _additionalParents;
+        if (parents is null)
+            return;
+
+        var kept = start;
+        for (var i = start; i < parents.Count; i++)
+        {
+            if (parents[i].Property != property)
+                parents[kept++] = parents[i];
+        }
+
+        parents.RemoveRange(kept, parents.Count - kept);
+    }
+
+    // Caller must hold _lock.
+    private void InsertAdditionalParents(int position, RegisteredSubjectProperty property, ReadOnlySpan<SubjectChild> places)
+    {
+        if (places.IsEmpty)
+            return;
+
+        var parents = _additionalParents ??= [];
+        var count = parents.Count;
+        CollectionsMarshal.SetCount(parents, count + places.Length);
+        var span = CollectionsMarshal.AsSpan(parents);
+        span[position..count].CopyTo(span[(position + places.Length)..]);
+        for (var i = 0; i < places.Length; i++)
+        {
+            span[position + i] = new SubjectPropertyParent { Property = property, Index = places[i].Index };
         }
     }
 
