@@ -22,8 +22,8 @@ public class RegisteredSubjectProperty
     private readonly List<SubjectPropertyChild> _children = [];
     private ImmutableArray<SubjectPropertyChild> _childrenCache;
 
-    // Entries beyond the first of each subject. While zero, an index change updates entries in place. Written under the
-    // _children lock; HasRepeatedChildren reads it without.
+    // Entries beyond the first of each subject. While zero, no reported subject can have more than one entry. Written
+    // under the _children lock; HasRepeatedChildren reads it without.
     private int _repeatedChildCount;
 
     private readonly PropertyAttributeAttribute? _attributeMetadata;
@@ -453,7 +453,9 @@ public class RegisteredSubjectProperty
     {
         lock (_children)
         {
-            if (_repeatedChildCount > 0 || HasRepeatedSubject(children))
+            // The update in place moves one entry per reported subject, so it serves any change that reports no subject
+            // with more than one place or entry, whatever other subjects repeat.
+            if (HasRepeatedSubject(children) || (_repeatedChildCount > 0 && HasChildWithSeveralEntries(children)))
             {
                 ReplaceChildPlaces(children, knownSubjects);
                 return;
@@ -499,6 +501,45 @@ public class RegisteredSubjectProperty
         }
 
         return false;
+    }
+
+    // Whether a reported subject has more than one entry. Must be called under the _children lock.
+    private bool HasChildWithSeveralEntries(ReadOnlySpan<SubjectChild> children)
+    {
+        if (children.Length == 1)
+        {
+            var subject = children[0].Subject;
+            var count = 0;
+            foreach (var child in _children)
+            {
+                if (child.Subject == subject && ++count > 1)
+                    return true;
+            }
+
+            return false;
+        }
+
+        var counts = _reusableChildPositions ??= new Dictionary<IInterceptorSubject, int>(ReferenceEqualityComparer.Instance);
+        foreach (var child in children)
+        {
+            counts[child.Subject] = 0;
+        }
+
+        var hasSeveral = false;
+        foreach (var child in _children)
+        {
+            ref var count = ref CollectionsMarshal.GetValueRefOrNullRef(counts, child.Subject);
+            if (!Unsafe.IsNullRef(ref count) && ++count > 1)
+            {
+                hasSeveral = true;
+                break;
+            }
+        }
+
+        // Release references so subjects can be GC'd on idle threads, and leave the map empty for the update. Nothing
+        // above runs user code or throws.
+        counts.Clear();
+        return hasSeveral;
     }
 
     // Replaces the entries of each reported subject with its run of places. Must be called under the _children lock.
