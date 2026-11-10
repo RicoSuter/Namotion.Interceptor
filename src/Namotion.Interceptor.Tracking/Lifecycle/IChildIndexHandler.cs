@@ -9,16 +9,16 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 public interface IChildIndexHandler
 {
     /// <summary>
-    /// Called after a structural write, while the lifecycle interceptor holds its lock, with each kept subject whose
-    /// keys or positions changed in number, value or order, and each subject the write attached at more than one of
-    /// them. Also called when a subject is attached whose property holds a child at more than one key or position.
-    /// Not called when there is none. A subject attached at one key or position is not reported, since its attach
-    /// carries it.
+    /// Called after a structural write, while the lifecycle interceptor holds its lock, with the subjects whose stored
+    /// keys or positions have to change: each kept subject whose keys or positions changed in number, value or order,
+    /// and each subject attached at more than one of them, since its attach carries only the first. That includes a
+    /// child of a subject attached later whose property holds the child more than once. Not called when no stored key
+    /// or position has to change. A subject attached at one key or position is not passed, since its attach carries it.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The span holds every key or position of each reported subject in the new value, in order, as one consecutive
-    /// run. Replace the entries stored for the subject and the property with the run; a subject that is not reported
+    /// The span holds every key or position of each of these subjects in the new value, in order, as one consecutive
+    /// run. Replace the entries stored for the subject and the property with the run; a subject that is not in the span
     /// keeps its entries.
     /// </para>
     /// <para>
@@ -26,7 +26,7 @@ public interface IChildIndexHandler
     /// a throwing handler skips the handlers after it. The span is only valid during the call.
     /// </para>
     /// </remarks>
-    /// <param name="property">The property that was written, or the property of an attached subject that holds the reported subjects.</param>
-    /// <param name="children">The reported subjects with every key or position they have in the new value.</param>
+    /// <param name="property">The property that was written, or the property of an attached subject that holds the subjects.</param>
+    /// <param name="children">The subjects whose stored keys or positions have to change, with every key or position they have in the new value.</param>
     void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children);
 }
