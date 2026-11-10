@@ -244,6 +244,32 @@ public class MovedChildConsistencyTests
     }
 
     [Fact]
+    public void WhenHandlerRewritesALaterPropertyWhileARootAttaches_ThenEveryCopyMatchesBothValues()
+    {
+        // Arrange
+        var handler = new PropertyWritingLifecycleHandler(nameof(Garage.Cars));
+        var context = CreateContext().WithService(() => handler);
+        var cars = CreateHeldCars(context, 2);
+        var garage = new Garage
+        {
+            Cars = [cars[0], cars[0]],
+            CarsByName = new Dictionary<string, Car> { ["A"] = cars[0] }
+        };
+        handler.NestedWrite = () => garage.CarsByName = new Dictionary<string, Car>
+        {
+            ["New"] = cars[1], ["Other"] = cars[1], ["Z"] = cars[0]
+        };
+
+        // Act: the garage is a root, so the nested write finds it not attached yet and the attach reads it again later.
+        ((IInterceptorSubject)garage).Context.AddFallbackContext(context);
+
+        // Assert
+        Assert.Null(handler.NestedWrite);
+        AssertEveryCopyMatchesValue(garage, nameof(Garage.Cars), cars);
+        AssertEveryCopyMatchesValue(garage, nameof(Garage.CarsByName), cars);
+    }
+
+    [Fact]
     public void WhenHandlerRewritesAnEarlierPropertyWhileTheAttachRepeatsCars_ThenEveryCopyMatchesBothValues()
     {
         // Arrange
