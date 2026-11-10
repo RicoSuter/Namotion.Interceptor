@@ -11,10 +11,10 @@ public readonly struct SubjectLifecycleChange
     /// <summary>Gets the property which has been changed.</summary>
     public PropertyReference? Property { get; init; }
 
-    /// <summary>Gets the index defining the place of the subject in the property's dictionary or collection.</summary>
+    /// <summary>Gets the index defining the place of the subject in the property's dictionary or collection, its first one when the value holds it more than once.</summary>
     /// <remarks>
-    /// On detach, this need not be the index last reported for the subject, so remove a stored index
-    /// by subject and property.
+    /// On detach, this need not be an index stored for the subject, so remove every stored index of the subject
+    /// for the property.
     /// </remarks>
     public object? Index { get; init; }
 
