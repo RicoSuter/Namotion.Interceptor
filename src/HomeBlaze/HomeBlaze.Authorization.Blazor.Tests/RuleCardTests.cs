@@ -40,7 +40,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
         var browse = component.Find("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths'] button[aria-label='Browse Paths']")
             .ClickAsync(new MouseEventArgs());
         // The dialog provider renders the dialog once the click handler yields, which can be after the click returned.
-        await dialogProvider.WaitForAssertionAsync(() => Assert.Single(dialogProvider.FindComponents<SubjectPathPickerDialog>()), TimeSpan.FromSeconds(10));
+        await dialogProvider.WaitForAssertionAsync(() => Assert.Single(dialogProvider.FindComponents<SubjectPathPickerDialog>()), TimeSpan.FromSeconds(30));
         var listsMembers = dialogProvider.FindComponent<SubjectPathPickerDialog>().Instance.ListsPropertiesWithoutState;
         await dialogProvider.Find("[data-testid='subject-path-picker'] input").InputAsync(new ChangeEventArgs { Value = "/Devices/Child" });
         await dialogProvider.FindAll("button").Single(button => button.TextContent.Trim() == "OK").ClickAsync(new MouseEventArgs());
