@@ -44,7 +44,6 @@ namespace Namotion.Interceptor.Registry.Abstractions
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Registry.Abstractions.SubjectPropertyChild> Children { get; }
         public bool HasGetter { get; }
         public bool HasPublicSetter { get; }
-        public bool HasRepeatedChildren { get; }
         public bool HasSetter { get; }
         public bool IsAttribute { get; }
         public bool IsSubjectCollection { get; }

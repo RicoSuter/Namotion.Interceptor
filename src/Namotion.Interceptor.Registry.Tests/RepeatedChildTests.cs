@@ -378,64 +378,6 @@ public class RepeatedChildTests
     }
 
     [Fact]
-    public void WhenNoChildIsRepeated_ThenPropertyHasNoRepeatedChildren()
-    {
-        // Arrange
-        var group = new LightGroup(CreateContext()) { Lights = [new Light(), new Light()] };
-
-        // Act
-        var property = group.TryGetRegisteredSubject()!.TryGetProperty(nameof(LightGroup.Lights))!;
-
-        // Assert
-        Assert.False(property.HasRepeatedChildren);
-    }
-
-    [Fact]
-    public void WhenAChildIsRepeated_ThenPropertyHasRepeatedChildren()
-    {
-        // Arrange
-        var light = new Light();
-        var group = new LightGroup(CreateContext()) { Lights = [light, new Light()] };
-        var property = group.TryGetRegisteredSubject()!.TryGetProperty(nameof(LightGroup.Lights))!;
-
-        // Act
-        group.Lights = [light, group.Lights[1], light];
-
-        // Assert
-        Assert.True(property.HasRepeatedChildren);
-    }
-
-    [Fact]
-    public void WhenAChildIsAttachedTwice_ThenPropertyHasRepeatedChildren()
-    {
-        // Arrange
-        var group = new LightGroup(CreateContext());
-        var property = group.TryGetRegisteredSubject()!.TryGetProperty(nameof(LightGroup.Lights))!;
-        var light = new Light();
-
-        // Act
-        group.Lights = [light, new Light(), light];
-
-        // Assert
-        Assert.True(property.HasRepeatedChildren);
-    }
-
-    [Fact]
-    public void WhenSubjectWhosePropertyRepeatsAChildIsAttached_ThenThePropertyHasRepeatedChildren()
-    {
-        // Arrange
-        var light = new Light();
-        var group = new LightGroup { Lights = [light, light] };
-        var room = new Room(CreateContext());
-
-        // Act
-        room.Group = group;
-
-        // Assert
-        Assert.True(group.TryGetRegisteredSubject()!.TryGetProperty(nameof(LightGroup.Lights))!.HasRepeatedChildren);
-    }
-
-    [Fact]
     public void WhenDictionaryAttachesAChildUnderTwoKeysAroundAnother_ThenItsEntriesAreConsecutiveAtItsFirstEntry()
     {
         // Arrange
@@ -463,39 +405,6 @@ public class RepeatedChildTests
 
         // Assert
         AssertChildrenAndParents(group, nameof(LightGroup.Lights), (repeated, 0), (other, 1), (repeated, 2));
-    }
-
-    [Fact]
-    public void WhenTheRepeatGoes_ThenPropertyHasNoRepeatedChildrenAgain()
-    {
-        // Arrange
-        var light = new Light();
-        var other = new Light();
-        var group = new LightGroup(CreateContext()) { Lights = [light, other, light] };
-        var property = group.TryGetRegisteredSubject()!.TryGetProperty(nameof(LightGroup.Lights))!;
-        Assert.True(property.HasRepeatedChildren);
-
-        // Act
-        group.Lights = [other, light];
-
-        // Assert
-        Assert.False(property.HasRepeatedChildren);
-    }
-
-    [Fact]
-    public void WhenTheRepeatedChildLeaves_ThenPropertyHasNoRepeatedChildrenAgain()
-    {
-        // Arrange
-        var light = new Light();
-        var other = new Light();
-        var group = new LightGroup(CreateContext()) { Lights = [light, other, light] };
-        var property = group.TryGetRegisteredSubject()!.TryGetProperty(nameof(LightGroup.Lights))!;
-
-        // Act
-        group.Lights = [other];
-
-        // Assert
-        Assert.False(property.HasRepeatedChildren);
     }
 
     [Fact]
