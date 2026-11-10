@@ -363,7 +363,9 @@ public class AutomationGraphRouteStressTests(ITestOutputHelper output)
             }
             else
             {
-                devices[key] = CreateSensor(random);
+                devices[key] = devices.Count > 0 && random.Next(3) == 0
+                    ? devices.Values.ElementAt(random.Next(devices.Count))
+                    : CreateSensor(random);
             }
 
             room.Devices = devices;
@@ -378,7 +380,8 @@ public class AutomationGraphRouteStressTests(ITestOutputHelper output)
             }
             else
             {
-                items.Insert(random.Next(items.Count + 1), CreateSensor(random));
+                var item = items.Count > 0 && random.Next(3) == 0 ? items[random.Next(items.Count)] : CreateSensor(random);
+                items.Insert(random.Next(items.Count + 1), item);
             }
 
             room.Items = items;
