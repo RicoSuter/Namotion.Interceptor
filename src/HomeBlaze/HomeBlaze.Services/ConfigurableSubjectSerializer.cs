@@ -401,6 +401,17 @@ public class ConfigurableSubjectSerializer
     }
 
     /// <summary>
+    /// Describes the properties that the callback for the skipped properties of <see cref="Deserialize(string, Action{IInterceptorSubject}, Action{SkippedConfigurationProperty}, ConfigurationNaming)"/>
+    /// or <see cref="UpdateConfiguration(IInterceptorSubject, string, Action{SkippedConfigurationProperty}, ConfigurationNaming)"/>
+    /// got, each by its key in JSON with the given naming.
+    /// </summary>
+    public static string DescribeSkippedProperties(
+        IEnumerable<SkippedConfigurationProperty> skipped,
+        ConfigurationNaming naming = ConfigurationNaming.JsonProperty) =>
+        string.Join("; ", skipped.Select(property =>
+            $"the value of '{GetJsonName(property.PropertyName, naming)}' could not be read: {property.Exception.Message}"));
+
+    /// <summary>
     /// Checks whether a JSON value converts to the given property type with the options that
     /// <see cref="Deserialize(string, ConfigurationNaming)"/> and
     /// <see cref="UpdateConfiguration(IInterceptorSubject, string, ConfigurationNaming)"/> use

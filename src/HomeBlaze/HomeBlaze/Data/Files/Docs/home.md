@@ -37,6 +37,7 @@ Setup, deployment, and runtime configuration for operators and administrators.
 - [Monitoring](administration/monitoring.md): Health endpoints, OpenTelemetry and Seq
 - [AI Agents](administration/ai-agents.md): Built-in agents on a Claude subscription or the Anthropic API: triggers, chat, memory and permissions
 - [Authorization](administration/authorization.md): Roles that decide what agents and MCP clients may read, change, run and read the history of
+- [Automations](administration/automation.md): Rules on property conditions and events with named states, their page and their editor
 - [Version and Updates](administration/updates.md): Running version, build and update check
 
 ### Development
