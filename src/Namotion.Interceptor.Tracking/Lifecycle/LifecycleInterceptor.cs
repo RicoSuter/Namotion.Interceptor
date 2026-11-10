@@ -80,6 +80,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             lock (_attachedSubjects)
             {
+                // A subject attached through a property is already tracked; a root is tracked once its children are.
+                var isRoot = !_attachedSubjects.ContainsKey(subject);
+
                 // Each property is read and seeded when its turn comes, so that a handler that writes a later property
                 // during an attach reconciles it before it is read here, which then finds its children attached.
                 foreach (var property in subject.Properties)
@@ -96,10 +99,19 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
                     FindSubjectsInProperty(propertyReference, value, children, null);
                     AttachChildren(subject.Context, children, null, children.Count > 1 && HasRepeatedSubject(children));
+
+                    // A handler detached the subject during this attach. Its detach removed the baselines seeded so far
+                    // and the children attached before it; detach the ones attached after it and seed nothing more.
+                    if (!isRoot && !_attachedSubjects.ContainsKey(subject))
+                    {
+                        DetachChildren(subject.Context, children);
+                        break;
+                    }
+
                     children.Clear();
                 }
 
-                if (!_attachedSubjects.ContainsKey(subject))
+                if (isRoot)
                 {
                     AttachToContext(subject, subject.Context);
                 }
@@ -108,6 +120,17 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         finally
         {
             ReturnList(children);
+        }
+    }
+
+    // Detaches in reverse order, which RemoveChild finds fastest. A child the property does not hold raises nothing.
+    private void DetachChildren(IInterceptorSubjectContext context,
+        List<(IInterceptorSubject subject, PropertyReference property, object? index)> children)
+    {
+        for (var i = children.Count - 1; i >= 0; i--)
+        {
+            var (subject, property, index) = children[i];
+            DetachFromProperty(subject, context, property, index);
         }
     }
 

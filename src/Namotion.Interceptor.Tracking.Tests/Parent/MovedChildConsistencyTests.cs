@@ -293,6 +293,49 @@ public class MovedChildConsistencyTests
     }
 
     [Fact]
+    public void WhenHandlerDetachesTheSubjectDuringTheAttachOfAProperty_ThenTheRestOfItsAttachAttachesNothing()
+    {
+        // Arrange
+        var handler = new PropertyWritingLifecycleHandler(nameof(Garage.Cars));
+        var context = CreateContext().WithService(() => handler);
+        var lifecycle = context.TryGetLifecycleInterceptor()!;
+        var earlierCar = new Car { Name = "Earlier" };
+        var nextCar = new Car { Name = "Next" };
+        var laterCar = new Car { Name = "Later" };
+        var garage = new Garage
+        {
+            Cars = [earlierCar, nextCar],
+            CarsByName = new Dictionary<string, Car> { ["A"] = laterCar }
+        };
+        var inner = new BroadlyDeclaredHolder { BroadCars = garage };
+        var outer = new BroadlyDeclaredHolder(context);
+        handler.NestedWrite = () => inner.BroadCars = null;
+
+        // Act: the attach of the inner holder attaches the garage, whose attach of its first car removes it from the
+        // inner holder before the next car of Cars and the car of the later CarsByName.
+        outer.BroadCars = inner;
+
+        // Assert
+        Assert.Null(handler.NestedWrite);
+        Assert.Empty(inner.TryGetRegisteredSubject()!.TryGetProperty(nameof(BroadlyDeclaredHolder.BroadCars))!.Children);
+        foreach (var subject in new IInterceptorSubject[] { garage, earlierCar, nextCar, laterCar })
+        {
+            Assert.False(lifecycle.TryRunWhileAttached(subject, () => { }));
+            Assert.Equal(0, subject.GetReferenceCount());
+            Assert.Empty(subject.GetParents());
+            Assert.Null(subject.TryGetRegisteredSubject());
+        }
+
+        // Act: attaching the garage again finds no state its detach left behind.
+        inner.BroadCars = garage;
+
+        // Assert
+        Assert.All(new[] { earlierCar, nextCar, laterCar }, car => Assert.Equal(1, car.GetReferenceCount()));
+        AssertEveryCopyMatchesValue(garage, nameof(Garage.Cars), [earlierCar, nextCar, laterCar]);
+        AssertEveryCopyMatchesValue(garage, nameof(Garage.CarsByName), [earlierCar, nextCar, laterCar]);
+    }
+
+    [Fact]
     public void WhenKeyEqualsThrowsWhileTheValueRepeatsACar_ThenTheNextWriteIsReconciled()
     {
         // Arrange
