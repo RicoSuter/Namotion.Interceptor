@@ -46,7 +46,7 @@ internal static class ChildIndexRefresher
         try
         {
             CollectMovedChildren(oldChildren, newChildren, oldSubjects, newSubjects, buffers);
-            Report(property, handlers, buffers);
+            ReportChangedChildren(property, buffers.Changes, handlers);
         }
         finally
         {
@@ -86,7 +86,7 @@ internal static class ChildIndexRefresher
                 if (end - start > 1)
                 {
                     CollectSubjectsWithChangedPlaces([], span[start..end], buffers);
-                    Report(property, handlers, buffers);
+                    ReportChangedChildren(property, buffers.Changes, handlers);
                     buffers.Changes.Clear();
                     buffers.Cursors.Clear();
                 }
@@ -100,14 +100,16 @@ internal static class ChildIndexRefresher
         }
     }
 
-    private static void Report(PropertyReference property, ImmutableArray<IChildIndexHandler> handlers, Buffers buffers)
+    // Hands the children whose places changed, if any, to every handler.
+    private static void ReportChangedChildren(
+        PropertyReference property, List<SubjectChild> changedChildren, ImmutableArray<IChildIndexHandler> handlers)
     {
-        if (buffers.Changes.Count == 0)
+        if (changedChildren.Count == 0)
         {
             return;
         }
 
-        var span = CollectionsMarshal.AsSpan(buffers.Changes);
+        var span = CollectionsMarshal.AsSpan(changedChildren);
         for (var i = 0; i < handlers.Length; i++)
         {
             handlers[i].HandleChildIndexChanges(property, span);
