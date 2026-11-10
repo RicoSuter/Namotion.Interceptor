@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using HomeBlaze.Services;
 using HomeBlaze.Services.Display;
 using Namotion.Interceptor.Expressions;
 
@@ -12,7 +13,7 @@ internal readonly struct AutomationExpressionContext(AutomationEvaluation evalua
 {
     public ExpressionValue ResolvePath(string path)
     {
-        if (AutomationPaths.ResolveProperty(evaluation.Resolver, path, evaluation.Rule) is not { } property)
+        if (evaluation.Resolver.ResolveProperty(path, evaluation.Rule) is not { } property)
         {
             evaluation.AddMissingPath(path);
             return ExpressionValue.Missing;
@@ -40,7 +41,7 @@ internal readonly struct AutomationExpressionContext(AutomationEvaluation evalua
 
         if (value.IsMissing)
         {
-            evaluation.AddMissingPath(memberPath is null ? variable : variable + AutomationPaths.Separator + memberPath);
+            evaluation.AddMissingPath(memberPath is null ? variable : variable + SubjectPathResolver.Separator + memberPath);
         }
 
         return value;
@@ -72,6 +73,6 @@ internal readonly struct AutomationExpressionContext(AutomationEvaluation evalua
 
         return memberPath is null
             ? ExpressionValue.FromValue(captured.Source)
-            : AutomationPaths.ReadFrom(evaluation.Resolver, memberPath, captured.Source);
+            : evaluation.Resolver.ReadFrom(memberPath, captured.Source);
     }
 }

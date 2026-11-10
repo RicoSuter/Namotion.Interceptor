@@ -64,10 +64,10 @@ public static class AutomationPreview
     /// display only: callers must not read or write its value, which may be secret.
     /// </summary>
     public static RegisteredSubjectProperty? ResolveTarget(Automation automation, string? ruleKey, string? path) =>
-        string.IsNullOrWhiteSpace(path) ? null : AutomationPaths.ResolveTarget(automation.PathResolver, path, GetAnchor(automation, ruleKey));
+        string.IsNullOrWhiteSpace(path) ? null : automation.PathResolver.ResolveTarget(path, GetAnchor(automation, ruleKey));
 
     /// <summary>The saved rule with the key, or a rule outside the graph, from which relative paths lead nowhere.</summary>
-    internal static IInterceptorSubject GetAnchor(Automation automation, string? ruleKey) =>
+    internal static AutomationRule GetAnchor(Automation automation, string? ruleKey) =>
         ruleKey is not null && automation.Rules.TryGetValue(ruleKey, out var rule) ? rule : UnsavedRuleAnchor;
 
     // A getter or a text of a device value that throws is a fault of that device, which the preview names in place of the value.

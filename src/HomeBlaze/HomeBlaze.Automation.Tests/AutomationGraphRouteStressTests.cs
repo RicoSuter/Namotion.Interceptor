@@ -541,7 +541,7 @@ public class AutomationGraphRouteStressTests(ITestOutputHelper output)
             foreach (var trigger in rule.PropertyTriggers.Where(trigger => trigger.State.Phase != TriggerPhase.Inactive))
             {
                 var expected = trigger.PropertyPaths
-                    .Select(path => AutomationPaths.ResolveProperty(fresh, path, rule.Rule))
+                    .Select(path => fresh.ResolveProperty(path, rule.Rule))
                     .OfType<RegisteredSubjectProperty>()
                     .Select(property => property.Reference)
                     .ToArray();
@@ -553,7 +553,7 @@ public class AutomationGraphRouteStressTests(ITestOutputHelper output)
 
             foreach (var trigger in rule.EventTriggers)
             {
-                var expected = AutomationPaths.ResolveSubject(fresh, trigger.Configuration.SubjectPath, rule.Rule);
+                var expected = fresh.ResolveSubject(trigger.Configuration.SubjectPath, rule.Rule);
                 if (!ReferenceEquals(expected, trigger.Source))
                 {
                     yield return $"{automation.Name}/{rule.Key}/e{trigger.Index}: {FormatSource(trigger.Source)} instead of {FormatSource(expected)}";

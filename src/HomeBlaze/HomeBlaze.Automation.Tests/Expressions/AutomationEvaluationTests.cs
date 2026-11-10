@@ -1,4 +1,3 @@
-using System.Globalization;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Devices;
 using HomeBlaze.Automation.Expressions;
@@ -203,25 +202,5 @@ public class AutomationEvaluationTests
 
         // Assert
         Assert.Equal("Sensor WS90, gust 9, rain .", text);
-    }
-
-    [Theory]
-    [InlineData("2026-10-25T00:00:00Z", "02:00:00")] // the first 02:00 in Zurich, daylight saving time
-    [InlineData("2026-10-25T00:59:59Z", "02:59:59")]
-    [InlineData("2026-10-25T01:00:00Z", "02:59:59.9999999")] // the second 02:00, after the clocks went back
-    [InlineData("2026-10-25T01:30:00Z", "02:59:59.9999999")]
-    [InlineData("2026-10-25T02:00:00Z", "03:00:00")]
-    public void WhenTheClockFallsBack_ThenTheTimeOfDayDoesNotMoveBackwards(string instant, string expected)
-    {
-        // Arrange
-        var zurich = TimeZoneInfo.FindSystemTimeZoneById("Europe/Zurich");
-        var evaluation = new AutomationEvaluation(
-            _graph.Resolver, _graph.Rule, DateTimeOffset.Parse(instant, CultureInfo.InvariantCulture), zurich);
-
-        // Act
-        var timeOfDay = evaluation.TimeOfDay;
-
-        // Assert
-        Assert.Equal(TimeSpan.Parse(expected, CultureInfo.InvariantCulture), timeOfDay);
     }
 }

@@ -76,7 +76,7 @@ namespace HomeBlaze.Automation
     public static class AutomationEvents
     {
         public const string OwnAutomationPath = "..";
-        public static System.Collections.Generic.IReadOnlyList<System.Type> GetEventTypes(System.Type subjectType) { }
+        public static System.Collections.Immutable.ImmutableArray<System.Type> GetEventTypes(System.Type subjectType) { }
         public static System.Collections.Immutable.ImmutableArray<string> GetPayloadFields(System.Type eventType) { }
         public static Namotion.Interceptor.IInterceptorSubject? ResolveSource(HomeBlaze.Automation.Automation automation, string? ruleKey, string? subjectPath) { }
     }

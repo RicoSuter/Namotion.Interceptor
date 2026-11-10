@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
-using HomeBlaze.Automation.Events;
 using HomeBlaze.Automation.Expressions;
+using HomeBlaze.Services.Messaging;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Automation;
@@ -14,7 +14,7 @@ public static class AutomationEvents
     /// <summary>The path of the automation seen from one of its rules, whose events are its state changes.</summary>
     public const string OwnAutomationPath = "..";
 
-    public static IReadOnlyList<Type> GetEventTypes(Type subjectType) => EventSources.GetEventTypes(subjectType);
+    public static ImmutableArray<Type> GetEventTypes(Type subjectType) => SubjectEvents.GetEventTypes(subjectType);
 
     /// <summary>The names of the fields of a payload type, ordered by name.</summary>
     public static ImmutableArray<string> GetPayloadFields(Type eventType) =>
@@ -38,6 +38,6 @@ public static class AutomationEvents
             return automation;
         }
 
-        return AutomationPaths.ResolveSubject(automation.PathResolver, subjectPath, AutomationPreview.GetAnchor(automation, ruleKey));
+        return automation.PathResolver.ResolveSubject(subjectPath, AutomationPreview.GetAnchor(automation, ruleKey));
     }
 }

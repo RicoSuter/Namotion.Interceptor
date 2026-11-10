@@ -158,13 +158,13 @@ public class GraphRoutesTests
         const string path = "/Room/Sensor/Gust";
         await using var fixture = await RouteFixture.CreateAsync();
         var resolver = fixture.Host.Graph.Resolver;
-        Assert.NotNull(AutomationPaths.ResolveTarget(resolver, path, fixture.Rule));
+        Assert.NotNull(resolver.ResolveTarget(path, fixture.Rule));
 
         // Act
         var before = GC.GetAllocatedBytesForCurrentThread();
         for (var index = 0; index < resolutions; index++)
         {
-            AutomationPaths.ResolveTarget(resolver, path, fixture.Rule);
+            resolver.ResolveTarget(path, fixture.Rule);
         }
 
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
@@ -189,13 +189,13 @@ public class GraphRoutesTests
         fixture.Room.Sensor!.Name = "gauge";
         IInterceptorSubject subject = startsAtTheRoom ? fixture.Room : fixture.Room.Sensor;
         var paths = Enumerable.Range(0, reads).Select(_ => new string(path.AsSpan())).ToArray();
-        Assert.Equal("gauge", AutomationPaths.ReadFrom(resolver, path, subject).Value);
+        Assert.Equal("gauge", resolver.ReadFrom(path, subject).Value);
 
         // Act
         var before = GC.GetAllocatedBytesForCurrentThread();
         foreach (var instance in paths)
         {
-            AutomationPaths.ReadFrom(resolver, instance, subject);
+            resolver.ReadFrom(instance, subject);
         }
 
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
@@ -209,10 +209,10 @@ public class GraphRoutesTests
         const string path = "/Room/Sensor/Gust";
         var resolver = fixture.Host.Graph.Resolver;
         fixture.Room.Sensor = sensor;
-        AutomationPaths.ResolveProperty(resolver, path, fixture.Rule, other.BeginRoute());
+        resolver.ResolveProperty(path, fixture.Rule, other.BeginRoute());
 
         var before = GC.GetAllocatedBytesForCurrentThread();
-        AutomationPaths.ResolveProperty(resolver, path, fixture.Rule);
+        resolver.ResolveProperty(path, fixture.Rule);
         var withoutRoute = GC.GetAllocatedBytesForCurrentThread() - before;
 
         before = GC.GetAllocatedBytesForCurrentThread();
@@ -248,7 +248,7 @@ public class GraphRoutesTests
         var slot = new GraphRouteSlot();
 
         // Act
-        var subject = AutomationPaths.ResolveSubject(fixture.Host.Graph.Resolver, ".", fixture.Rule, fixture.Routes.BeginRoute());
+        var subject = fixture.Host.Graph.Resolver.ResolveSubject(".", fixture.Rule, fixture.Routes.BeginRoute());
         fixture.Routes.EndRoute(slot);
 
         // Assert
@@ -266,7 +266,7 @@ public class GraphRoutesTests
         var slot = new GraphRouteSlot();
 
         // Act
-        AutomationPaths.ResolveSubject(fixture.Host.Graph.Resolver, ".", detachedRule, fixture.Routes.BeginRoute());
+        fixture.Host.Graph.Resolver.ResolveSubject(".", detachedRule, fixture.Routes.BeginRoute());
         fixture.Routes.EndRoute(slot);
 
         // Assert
@@ -301,7 +301,7 @@ public class GraphRoutesTests
         var slot = new GraphRouteSlot();
 
         // Act
-        var property = AutomationPaths.ResolveProperty(fixture.Host.Graph.Resolver, "../Rules", hostedRule, fixture.Routes.BeginRoute());
+        var property = fixture.Host.Graph.Resolver.ResolveProperty("../Rules", hostedRule, fixture.Routes.BeginRoute());
         fixture.Routes.EndRoute(slot);
 
         // Assert
@@ -533,12 +533,12 @@ public class GraphRoutesTests
         var isResolvingBefore = changes.Registration!.IsResolving;
 
         // Act
-        AutomationPaths.ResolveProperty(fixture.Host.Graph.Resolver, "/Room/Sensor/Gust", fixture.Rule, routes.BeginRoute());
+        fixture.Host.Graph.Resolver.ResolveProperty("/Room/Sensor/Gust", fixture.Rule, routes.BeginRoute());
         routes.EndRoute(slot);
         var isResolvingWhileResolving = changes.Registration.IsResolving;
         var hasPublished = routes.Publish();
         var isResolvingAfterThePublication = changes.Registration.IsResolving;
-        AutomationPaths.ResolveProperty(fixture.Host.Graph.Resolver, "/Room/Sensor/Gust", fixture.Rule, routes.BeginRoute());
+        fixture.Host.Graph.Resolver.ResolveProperty("/Room/Sensor/Gust", fixture.Rule, routes.BeginRoute());
         routes.EndRoute(slot);
         var hasPublishedTheSameUnion = routes.Publish();
 
@@ -555,7 +555,7 @@ public class GraphRoutesTests
 
     private static void Resolve(RouteFixture fixture, string path, GraphRouteSlot slot)
     {
-        AutomationPaths.ResolveProperty(fixture.Host.Graph.Resolver, path, fixture.Rule, fixture.Routes.BeginRoute());
+        fixture.Host.Graph.Resolver.ResolveProperty(path, fixture.Rule, fixture.Routes.BeginRoute());
         fixture.Routes.EndRoute(slot);
     }
 
@@ -605,7 +605,7 @@ public class GraphRoutesTests
 
         public (RegisteredSubjectProperty? Property, GraphRoute Route) ResolveProperty(string path)
         {
-            var property = AutomationPaths.ResolveProperty(Host.Graph.Resolver, path, Rule, Routes.BeginRoute());
+            var property = Host.Graph.Resolver.ResolveProperty(path, Rule, Routes.BeginRoute());
             Routes.EndRoute(_slot);
             return (property, _slot.Route);
         }

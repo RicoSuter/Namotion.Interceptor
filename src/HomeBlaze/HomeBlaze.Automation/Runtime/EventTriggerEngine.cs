@@ -1,7 +1,7 @@
 using HomeBlaze.Abstractions.Messaging;
-using HomeBlaze.Automation.Events;
 using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Messaging;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Expressions;
@@ -156,7 +156,7 @@ internal sealed class EventTriggerEngine(
 
     private IInterceptorSubject? ResolveSource(CompiledEventTrigger trigger)
     {
-        var source = AutomationPaths.ResolveSubject(resolver, trigger.Configuration.SubjectPath, trigger.Rule.Rule, routes.BeginRoute());
+        var source = resolver.ResolveSubject(trigger.Configuration.SubjectPath, trigger.Rule.Rule, routes.BeginRoute());
         routes.EndRoute(trigger.SourceRoute);
         return source;
     }
@@ -170,13 +170,13 @@ internal sealed class EventTriggerEngine(
     {
         var configuration = trigger.Configuration;
         eventType = null;
-        source = AutomationPaths.ResolveSubject(resolver, configuration.SubjectPath, trigger.Rule.Rule, recorder);
+        source = resolver.ResolveSubject(configuration.SubjectPath, trigger.Rule.Rule, recorder);
         if (source is null)
         {
             return $"No subject at {configuration.SubjectPath}";
         }
 
-        eventType = EventSources.FindEventType(source.GetType(), configuration.EventType);
+        eventType = SubjectEvents.FindEventType(source.GetType(), configuration.EventType);
         return eventType is null ? $"{configuration.SubjectPath} publishes no {configuration.EventType}" : null;
     }
 
@@ -251,7 +251,7 @@ internal sealed class EventTriggerEngine(
         var subscription = new EventSubscription(source, eventType);
         try
         {
-            subscription.Handle = EventSources.Subscribe(source, eventType, payload => Receive(subscription, payload));
+            subscription.Handle = SubjectEvents.Subscribe(source, eventType, payload => Receive(subscription, payload));
         }
         catch (Exception exception)
         {
