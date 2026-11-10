@@ -228,14 +228,12 @@ public class MethodPropertyInitializer : ILifecycleHandler
                 return [];
             }
 
-            // Owned by this computation rather than shared: the context caches the members it reads, which would keep
-            // the types of an unloaded plugin alive, and it is not thread-safe.
-            var nullabilityContext = new NullabilityInfoContext();
+            var nullabilityContext = MemberNullability.TryCreateContext();
             return Array.ConvertAll(parameters, parameter =>
             {
                 var operationParameterAttribute = parameter.GetCustomAttribute<OperationParameterAttribute>();
                 var isNullable = Nullable.GetUnderlyingType(parameter.ParameterType) != null
-                    || nullabilityContext.Create(parameter).WriteState == NullabilityState.Nullable
+                    || MemberNullability.GetWriteState(nullabilityContext, parameter) == NullabilityState.Nullable
                     || parameter is { HasDefaultValue: true, DefaultValue: null };
 
                 return new MethodParameter

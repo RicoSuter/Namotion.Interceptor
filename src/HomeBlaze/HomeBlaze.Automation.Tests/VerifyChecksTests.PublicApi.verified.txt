@@ -1,0 +1,227 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.Automation.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace HomeBlaze.Automation
+{
+    public enum ActionErrorPolicy
+    {
+        Continue = 0,
+        StopRule = 1,
+    }
+    public sealed class AllowAllAutomationAuthorizer : HomeBlaze.Automation.IAutomationAuthorizer
+    {
+        public AllowAllAutomationAuthorizer() { }
+        public string? GetOperationDenial(Namotion.Interceptor.IInterceptorSubject automation, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty operation) { }
+        public string? GetPropertyWriteDenial(Namotion.Interceptor.IInterceptorSubject automation, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("AutoMode")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("Automation")]
+    [System.ComponentModel.Description("Runs rules on property changes and events, optionally within named states.")]
+    [System.ComponentModel.DisplayName("Automation")]
+    public class Automation : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, System.ComponentModel.INotifyPropertyChanged, System.IObservable<HomeBlaze.Automation.AutomationStateChangedEvent>
+    {
+        public Automation(HomeBlaze.Services.SubjectPathResolver pathResolver, System.TimeProvider timeProvider, HomeBlaze.Automation.IAutomationAuthorizer authorizer, System.IServiceProvider serviceProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Automation.Automation> logger) { }
+        [HomeBlaze.Abstractions.Attributes.State("Current State", IsDiscrete=true, Position=1)]
+        public string? CurrentState { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool Enabled { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        public string? IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? InitialState { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Name { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string[] RuleOrder { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.Collections.Generic.Dictionary<string, HomeBlaze.Automation.AutomationRule> Rules { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State("State Entered", Position=2)]
+        public System.DateTimeOffset? StateEnteredAt { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string[] States { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=3)]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=4)]
+        public string? StatusMessage { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Enters the initial state, clears the last trigger times and starts every rule ove" +
+            "r.", Icon="RestartAlt", Position=1, Title="Reset State")]
+        public void ResetState() { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }
+        public override System.Threading.Tasks.Task StopAsync(System.Threading.CancellationToken cancellationToken) { }
+        public System.IDisposable Subscribe(System.IObserver<HomeBlaze.Automation.AutomationStateChangedEvent> observer) { }
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(HomeBlaze.Automation.AutomationActionJsonConverter))]
+    public abstract class AutomationAction : System.IEquatable<HomeBlaze.Automation.AutomationAction>
+    {
+        protected AutomationAction() { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string Id { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public HomeBlaze.Automation.ActionErrorPolicy OnError { get; init; }
+    }
+    public static class AutomationDuration
+    {
+        public static System.TimeSpan Maximum { get; }
+        public static string Format(System.TimeSpan duration) { }
+        public static bool TryParse(string? text, out System.TimeSpan duration) { }
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class AutomationRule : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public AutomationRule() { }
+        public AutomationRule(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public HomeBlaze.Automation.AutomationAction[] Actions { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? InState { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State("Last Message", Position=5)]
+        public string? LastRunMessage { get; }
+        [HomeBlaze.Abstractions.Attributes.State("Last Outcome", IsDiscrete=true, Position=4)]
+        public HomeBlaze.Automation.AutomationRunOutcome? LastRunOutcome { get; }
+        [HomeBlaze.Abstractions.Attributes.State("Last Triggered", Position=2)]
+        public System.DateTimeOffset? LastTriggeredAt { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public HomeBlaze.Automation.AutomationRuleMode Mode { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Name { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? OnlyIf { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State("Runs", IsCumulative=true, Position=3)]
+        public long? RunCount { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=1)]
+        public string? Status { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public HomeBlaze.Automation.AutomationTrigger[] Triggers { get; set; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        [HomeBlaze.Abstractions.Attributes.Query(Description="Evaluates the triggers and Only if against the current values and shows the actio" +
+            "ns with their arguments. Executes and records nothing.", Icon="Science", Position=1, Title="Test Now")]
+        public HomeBlaze.Automation.AutomationRuleTestResult TestNow() { }
+    }
+    public enum AutomationRuleMode
+    {
+        Off = 0,
+        DryRun = 1,
+        On = 2,
+    }
+    public sealed class AutomationRuleTestResult : System.IEquatable<HomeBlaze.Automation.AutomationRuleTestResult>
+    {
+        public AutomationRuleTestResult() { }
+        public System.Collections.Generic.IReadOnlyList<string> Actions { get; init; }
+        public string? Error { get; init; }
+        public bool HasOnlyIf { get; init; }
+        public bool IsActive { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> OnlyIfMissingPaths { get; init; }
+        public bool? OnlyIfResult { get; init; }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.AutomationTriggerTestResult> Triggers { get; init; }
+    }
+    public enum AutomationRunOutcome
+    {
+        Succeeded = 0,
+        CompletedWithErrors = 1,
+        StoppedAfterError = 2,
+        DryRun = 3,
+        Canceled = 4,
+    }
+    public static class AutomationServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddHomeBlazeAutomation(this Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
+    }
+    public sealed class AutomationStateChangedEvent : HomeBlaze.Abstractions.Messaging.IEvent, HomeBlaze.Abstractions.Messaging.IMessage, System.IEquatable<HomeBlaze.Automation.AutomationStateChangedEvent>
+    {
+        public AutomationStateChangedEvent() { }
+        public required string NewState { get; init; }
+        public string? PreviousState { get; init; }
+        public required System.DateTimeOffset Timestamp { get; init; }
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(HomeBlaze.Automation.AutomationTriggerJsonConverter))]
+    public abstract class AutomationTrigger : System.IEquatable<HomeBlaze.Automation.AutomationTrigger>
+    {
+        protected AutomationTrigger() { }
+    }
+    public sealed class AutomationTriggerTestResult : System.IEquatable<HomeBlaze.Automation.AutomationTriggerTestResult>
+    {
+        public AutomationTriggerTestResult() { }
+        public System.Collections.Generic.IReadOnlyList<string> MissingPaths { get; init; }
+        public string? Note { get; init; }
+        public required int Number { get; init; }
+        public bool? Result { get; init; }
+    }
+    public sealed class ChangeStateAction : HomeBlaze.Automation.AutomationAction, System.IEquatable<HomeBlaze.Automation.ChangeStateAction>
+    {
+        public ChangeStateAction() { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string TargetState { get; init; }
+    }
+    public interface IAutomationAuthorizer
+    {
+        string? GetOperationDenial(Namotion.Interceptor.IInterceptorSubject automation, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty operation);
+        string? GetPropertyWriteDenial(Namotion.Interceptor.IInterceptorSubject automation, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property);
+    }
+    public sealed class InvokeOperationAction : HomeBlaze.Automation.AutomationAction, System.IEquatable<HomeBlaze.Automation.InvokeOperationAction>
+    {
+        public InvokeOperationAction() { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.Collections.Generic.IReadOnlyDictionary<string, string> Arguments { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string OperationPath { get; init; }
+    }
+    public sealed class PropertyTrigger : HomeBlaze.Automation.AutomationTrigger, System.IEquatable<HomeBlaze.Automation.PropertyTrigger>
+    {
+        public PropertyTrigger() { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string Expression { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        [System.Text.Json.Serialization.JsonConverter(typeof(HomeBlaze.Automation.DurationJsonConverter))]
+        public System.TimeSpan? For { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public HomeBlaze.Automation.TriggerActivation OnActivation { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Rearm { get; init; }
+    }
+    public sealed class SetPropertyAction : HomeBlaze.Automation.AutomationAction, System.IEquatable<HomeBlaze.Automation.SetPropertyAction>
+    {
+        public SetPropertyAction() { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string PropertyPath { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string Value { get; init; }
+    }
+    public sealed class SubjectEventTrigger : HomeBlaze.Automation.AutomationTrigger, System.IEquatable<HomeBlaze.Automation.SubjectEventTrigger>
+    {
+        public SubjectEventTrigger() { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string EventType { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Filter { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string SubjectPath { get; init; }
+    }
+    public enum TriggerActivation
+    {
+        EvaluateImmediately = 0,
+        WaitForFalseToTrue = 1,
+    }
+}

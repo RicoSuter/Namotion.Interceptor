@@ -1738,7 +1738,6 @@ public class ChangeQueueProcessorTests
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => Volatile.Read(ref writeAttempts) == 2,
-            timeout: TimeSpan.FromSeconds(2),
             message: "Periodic flushing stopped after the delegated handler threw.");
 
         await cancellation.CancelAsync();

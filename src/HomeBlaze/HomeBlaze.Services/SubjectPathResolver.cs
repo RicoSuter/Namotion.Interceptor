@@ -22,6 +22,9 @@ namespace HomeBlaze.Services;
 [RunsAfter(typeof(SubjectRegistry))]
 public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler, IChildIndexHandler, ISubjectPathResolver
 {
+    /// <summary>The character between the segments of a path, in both <see cref="PathStyle"/> values.</summary>
+    public const char Separator = '/';
+
     private readonly Func<IInterceptorSubject?> _getRoot;
 
     // Subject → canonical paths cache (with leading /), see GetStructureVersion for the version
@@ -251,7 +254,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         foreach (var ch in canonicalPath)
         {
             if (ch == '[')
-                sb.Append('/');
+                sb.Append(Separator);
             else if (ch != ']')
                 sb.Append(ch);
         }
@@ -267,7 +270,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         if (registry == null)
             return null;
 
-        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var segments = path.Split(Separator, StringSplitOptions.RemoveEmptyEntries);
         var current = baseSubject;
 
         for (var i = 0; i < segments.Length; i++)
@@ -383,7 +386,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             if (BuildPathRecursive(subject, parent, pathSegments, visited, registry, root))
             {
                 pathSegments.Reverse();
-                paths.Add("/" + string.Join("/", pathSegments));
+                paths.Add("/" + string.Join(Separator, pathSegments));
             }
         }
 
@@ -398,7 +401,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                     var depth = 0;
                     foreach (var ch in path)
                     {
-                        if (ch == '/') depth++;
+                        if (ch == Separator) depth++;
                     }
                     return depth;
                 })
