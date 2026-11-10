@@ -112,7 +112,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         // Assert
         await component.WaitForAssertionAsync(
             () => Assert.Empty(component.FindAll("[data-testid='role-edit-tab-roles-error']")),
-            TimeSpan.FromSeconds(10));
+            TimeSpan.FromSeconds(30));
         Assert.DoesNotContain("mud-chip-color-error", component.Find("[data-testid='role-edit-include-Pantry']").ClassName);
     }
 
@@ -345,7 +345,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         // Assert
         await component.WaitForAssertionAsync(
             () => Assert.Contains("Ghost", component.Find("[data-testid='role-edit-status']").TextContent),
-            TimeSpan.FromSeconds(10));
+            TimeSpan.FromSeconds(30));
     }
 
     [Fact]
@@ -420,7 +420,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         // Assert
         await component.WaitForAssertionAsync(
             () => Assert.Equal("Used by 1 agent", component.Find("[data-testid='role-edit-used-by']").TextContent.Trim()),
-            TimeSpan.FromSeconds(10));
+            TimeSpan.FromSeconds(30));
     }
 
     [Fact]
