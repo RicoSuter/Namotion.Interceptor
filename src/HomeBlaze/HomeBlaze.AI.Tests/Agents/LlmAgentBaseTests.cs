@@ -863,13 +863,15 @@ public class LlmAgentBaseTests
         await ((IHostedService)test.Agent).StartAsync(CancellationToken.None);
         release.SetResult();
         await staleRun;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => test.Agent.Status == ServiceStatus.Running && test.Agent.StatusMessage == "Idle",
+            message: "The new run should finish starting.");
+
+        // Requested once: a request while a run is busy queues another run, so the count would pass 2.
+        await test.RunNowAndWaitAsync();
 
         // Assert
-        await AsyncTestHelpers.WaitUntilAsync(() =>
-        {
-            test.Agent.RunNow();
-            return test.Agent.RunCount == 2 && !test.Agent.IsBusy;
-        });
+        Assert.Equal(2, test.Agent.RunCount);
         Assert.Equal(ServiceStatus.Running, test.Agent.Status);
         Assert.Equal("Idle", test.Agent.StatusMessage);
     }

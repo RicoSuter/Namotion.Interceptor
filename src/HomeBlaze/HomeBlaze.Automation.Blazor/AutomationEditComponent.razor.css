@@ -1,0 +1,79 @@
+.automation-editor {
+    height: calc(100vh - 240px);
+    min-height: 360px;
+}
+
+.automation-editor ::deep .automation-stack {
+    height: 100%;
+}
+
+.automation-editor ::deep .automation-errors {
+    flex: 0 0 auto;
+    max-height: 8.5rem;
+    overflow-y: auto;
+}
+
+.automation-editor ::deep .automation-errors .mud-alert-message {
+    min-width: 0;
+}
+
+.automation-editor ::deep .automation-tabs {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.automation-editor ::deep .automation-tab-panels {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.automation-editor ::deep .automation-tab {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.automation-editor ::deep .automation-columns {
+    display: flex;
+    gap: 24px;
+    overflow: hidden;
+}
+
+.automation-editor ::deep .automation-column {
+    min-height: 0;
+    min-width: 0;
+    overflow-y: auto;
+}
+
+.automation-editor ::deep .automation-rule-list {
+    flex: 0 0 240px;
+}
+
+.automation-editor ::deep .automation-rule-select {
+    display: block;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+}
+
+.automation-editor ::deep .automation-rule-details,
+.automation-editor ::deep .automation-state-diagram {
+    flex: 1 1 480px;
+}
+
+.automation-editor ::deep .automation-state-panel {
+    flex: 0 1 300px;
+    align-self: flex-start;
+    max-height: 100%;
+}

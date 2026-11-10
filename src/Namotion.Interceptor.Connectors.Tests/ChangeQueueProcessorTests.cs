@@ -14,9 +14,6 @@ namespace Namotion.Interceptor.Connectors.Tests;
 public class ChangeQueueProcessorTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
-    // For the stop bound under test only. Waiting for a callback to be reached takes several thread
-    // pool dispatches that stall on a loaded runner, so those waits use TestTimeout.
-    private static readonly TimeSpan TeardownWaitTimeout = TimeSpan.FromSeconds(10);
 
     [Fact]
     public void WhenReadingTheTeardownFlushBound_ThenItMatchesTheDocumentedContract()
@@ -1382,6 +1379,7 @@ public class ChangeQueueProcessorTests
         var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var writeFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        var clock = new ManualTeardownClock();
         using var processor = new ChangeQueueProcessor(
             source: new object(),
             context: context,
@@ -1395,7 +1393,10 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.Zero,
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale)
+        {
+            TeardownTimeProvider = clock
+        };
 
         using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var watchdogRegistration = watchdog.Token.Register(() => releaseWrite.TrySetResult());
@@ -1408,7 +1409,8 @@ public class ChangeQueueProcessorTests
         {
             // Act
             await cancellation.CancelAsync();
-            await processing.WaitAsync(TeardownWaitTimeout);
+            await clock.AdvanceWhenArmedAsync(ChangeQueueProcessor.TeardownFlushBound);
+            await processing.WaitAsync(TestTimeout);
 
             // Assert
             Assert.Equal(1, processor.DropCount);
@@ -1499,6 +1501,7 @@ public class ChangeQueueProcessorTests
         var completionReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var writeHandlerEntered = false;
 
+        var clock = new ManualTeardownClock();
         using var processor = new ChangeQueueProcessor(
             source: new object(),
             subscription: subscription,
@@ -1521,7 +1524,10 @@ public class ChangeQueueProcessorTests
             {
                 completionReached.TrySetResult();
                 return ValueTask.CompletedTask;
-            });
+            })
+        {
+            TeardownTimeProvider = clock
+        };
 
         using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var watchdogRegistration = watchdog.Token.Register(() => releaseFilter.TrySetResult());
@@ -1534,7 +1540,8 @@ public class ChangeQueueProcessorTests
         {
             // Act
             await cancellation.CancelAsync();
-            await processing.WaitAsync(TeardownWaitTimeout);
+            await clock.AdvanceWhenArmedAsync(ChangeQueueProcessor.TeardownFlushBound);
+            await processing.WaitAsync(TestTimeout);
             processor.Dispose();
             releaseFilter.TrySetResult();
             await completionReached.Task.WaitAsync(TestTimeout);
@@ -1567,6 +1574,7 @@ public class ChangeQueueProcessorTests
         var property = new PropertyReference(subject, nameof(Person.FirstName));
         var writeHandlerEntered = false;
 
+        var clock = new ManualTeardownClock();
         using var processor = new ChangeQueueProcessor(
             source: new object(),
             subscription: subscription,
@@ -1584,7 +1592,10 @@ public class ChangeQueueProcessorTests
             {
                 completionReached.TrySetResult();
                 return ValueTask.CompletedTask;
-            });
+            })
+        {
+            TeardownTimeProvider = clock
+        };
 
         EnqueueChange(processor, property, "old", "late", revision: 1);
         using var cancellation = new CancellationTokenSource();
@@ -1595,7 +1606,8 @@ public class ChangeQueueProcessorTests
         {
             // Act
             await cancellation.CancelAsync();
-            await processing.WaitAsync(TeardownWaitTimeout);
+            await clock.AdvanceWhenArmedAsync(ChangeQueueProcessor.TeardownFlushBound);
+            await processing.WaitAsync(TestTimeout);
 
             // Assert
             Assert.False(releaseDataAccess.Task.IsCompleted);
@@ -1726,7 +1738,6 @@ public class ChangeQueueProcessorTests
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => Volatile.Read(ref writeAttempts) == 2,
-            timeout: TimeSpan.FromSeconds(2),
             message: "Periodic flushing stopped after the delegated handler threw.");
 
         await cancellation.CancelAsync();
@@ -1843,6 +1854,7 @@ public class ChangeQueueProcessorTests
         var completionReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var terminalInvocationCount = 0;
 
+        var clock = new ManualTeardownClock();
         using var processor = new ChangeQueueProcessor(
             source: new object(),
             subscription: subscription,
@@ -1867,7 +1879,10 @@ public class ChangeQueueProcessorTests
             {
                 completionReached.TrySetResult();
                 return ValueTask.CompletedTask;
-            });
+            })
+        {
+            TeardownTimeProvider = clock
+        };
 
         using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var watchdogRegistration = watchdog.Token.Register(() =>
@@ -1880,6 +1895,7 @@ public class ChangeQueueProcessorTests
         subject.FirstName = "blocked";
         await writeEntered.Task.WaitAsync(TestTimeout);
         await cancellation.CancelAsync();
+        await clock.AdvanceWhenArmedAsync(ChangeQueueProcessor.TeardownFlushBound);
         await terminalEntered.Task.WaitAsync(TestTimeout);
 
         var disposing = Task.Run(processor.Dispose);
@@ -2088,6 +2104,7 @@ public class ChangeQueueProcessorTests
         var filterCalls = 0;
         var filterFailed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var writeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var clock = new ManualTeardownClock();
         using var processor = new ChangeQueueProcessor(
             source: new object(),
             context: context,
@@ -2109,7 +2126,10 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.FromMilliseconds(10),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale)
+        {
+            TeardownTimeProvider = clock
+        };
         using var cancellation = new CancellationTokenSource();
         var processing = processor.ProcessAsync(cancellation.Token);
         subject.FirstName = "first";
@@ -2120,6 +2140,7 @@ public class ChangeQueueProcessorTests
         try
         {
             // Act & Assert
+            await clock.AdvanceWhenArmedAsync(ChangeQueueProcessor.TeardownFlushBound);
             await Assert.ThrowsAsync<FilterException>(() => processing.WaitAsync(TestTimeout));
         }
         finally
@@ -2152,6 +2173,7 @@ public class ChangeQueueProcessorTests
         var writeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var completionCancellation = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        var clock = new ManualTeardownClock();
         using var processor = new ChangeQueueProcessor(
             source: new object(),
             subscription: subscription,
@@ -2169,7 +2191,10 @@ public class ChangeQueueProcessorTests
             {
                 completionCancellation.TrySetResult(teardownToken.IsCancellationRequested);
                 return ValueTask.CompletedTask;
-            });
+            })
+        {
+            TeardownTimeProvider = clock
+        };
 
         using var cancellation = new CancellationTokenSource();
         var processing = processor.ProcessAsync(cancellation.Token);
@@ -2181,7 +2206,8 @@ public class ChangeQueueProcessorTests
         // Act
         await cancellation.CancelAsync();
         await writeEntered.Task.WaitAsync(TestTimeout);
-        await processing.WaitAsync(TeardownWaitTimeout);
+        await clock.AdvanceWhenArmedAsync(ChangeQueueProcessor.TeardownFlushBound);
+        await processing.WaitAsync(TestTimeout);
 
         // Assert
         Assert.True(await completionCancellation.Task.WaitAsync(TestTimeout));
@@ -2325,6 +2351,7 @@ public class ChangeQueueProcessorTests
         var completionReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var terminalInvocationCount = 0;
 
+        var clock = new ManualTeardownClock();
         using var processor = new ChangeQueueProcessor(
             source: new object(),
             subscription: subscription,
@@ -2356,7 +2383,10 @@ public class ChangeQueueProcessorTests
             {
                 completionReached.TrySetResult();
                 return ValueTask.CompletedTask;
-            });
+            })
+        {
+            TeardownTimeProvider = clock
+        };
 
         var firstName = new PropertyReference(subject, nameof(Person.FirstName));
         var lastName = new PropertyReference(subject, nameof(Person.LastName));
@@ -2373,7 +2403,8 @@ public class ChangeQueueProcessorTests
         // Act
         await cancellation.CancelAsync();
         await cancellationObserved.Task.WaitAsync(TestTimeout);
-        await processing.WaitAsync(TeardownWaitTimeout);
+        await clock.AdvanceWhenArmedAsync(ChangeQueueProcessor.TeardownFlushBound);
+        await processing.WaitAsync(TestTimeout);
         await completionReached.Task.WaitAsync(TestTimeout);
         processor.Dispose();
 
@@ -2396,6 +2427,7 @@ public class ChangeQueueProcessorTests
         var dropCallbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseDropCallback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        var clock = new ManualTeardownClock();
         using var processor = new ChangeQueueProcessor(
             source: new object(),
             context: context,
@@ -2416,7 +2448,10 @@ public class ChangeQueueProcessorTests
                     dropCallbackEntered.TrySetResult();
                     releaseDropCallback.Task.GetAwaiter().GetResult();
                 }
-            });
+            })
+        {
+            TeardownTimeProvider = clock
+        };
 
         using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var watchdogRegistration = watchdog.Token.Register(() =>
@@ -2433,7 +2468,8 @@ public class ChangeQueueProcessorTests
         {
             // Act
             await cancellation.CancelAsync();
-            await processing.WaitAsync(TeardownWaitTimeout);
+            await clock.AdvanceWhenArmedAsync(ChangeQueueProcessor.TeardownFlushBound);
+            await processing.WaitAsync(TestTimeout);
             await dropCallbackEntered.Task.WaitAsync(TestTimeout);
 
             // Assert
@@ -2460,6 +2496,7 @@ public class ChangeQueueProcessorTests
         var cancellationCallbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseCancellationCallback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        var clock = new ManualTeardownClock();
         using var processor = new ChangeQueueProcessor(
             source: new object(),
             context: context,
@@ -2477,7 +2514,10 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.Zero,
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale)
+        {
+            TeardownTimeProvider = clock
+        };
 
         using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var watchdogRegistration = watchdog.Token.Register(() =>
@@ -2495,7 +2535,8 @@ public class ChangeQueueProcessorTests
             // Act
             var cancelling = cancellation.CancelAsync();
             await cancellationCallbackEntered.Task.WaitAsync(TestTimeout);
-            await Task.WhenAll(cancelling, processing).WaitAsync(TeardownWaitTimeout);
+            await clock.AdvanceWhenArmedAsync(ChangeQueueProcessor.TeardownFlushBound);
+            await Task.WhenAll(cancelling, processing).WaitAsync(TestTimeout);
 
             // Assert
             Assert.False(releaseCancellationCallback.Task.IsCompleted);
@@ -2521,6 +2562,7 @@ public class ChangeQueueProcessorTests
         var cancellationCallbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseCancellationCallback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        var clock = new ManualTeardownClock();
         using var processor = new ChangeQueueProcessor(
             source: new object(),
             context: context,
@@ -2533,7 +2575,10 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.Zero,
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale)
+        {
+            TeardownTimeProvider = clock
+        };
 
         using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var watchdogRegistration = watchdog.Token.Register(() =>
@@ -2557,7 +2602,8 @@ public class ChangeQueueProcessorTests
         {
             // Act
             await cancellationCallbackEntered.Task.WaitAsync(TestTimeout);
-            await processing.WaitAsync(TeardownWaitTimeout);
+            await clock.AdvanceWhenArmedAsync(ChangeQueueProcessor.TeardownFlushBound);
+            await processing.WaitAsync(TestTimeout);
 
             // Assert
             Assert.False(releaseCancellationCallback.Task.IsCompleted);
@@ -2585,6 +2631,7 @@ public class ChangeQueueProcessorTests
         var releaseLogger = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var logger = new BlockingTeardownLogger(loggerEntered, releaseLogger);
 
+        var clock = new ManualTeardownClock();
         using var processor = new ChangeQueueProcessor(
             source: new object(),
             context: context,
@@ -2597,7 +2644,10 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.Zero,
             maxQueueDepth: null,
             logger: logger,
-            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale)
+        {
+            TeardownTimeProvider = clock
+        };
 
         using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var watchdogRegistration = watchdog.Token.Register(() =>
@@ -2614,7 +2664,8 @@ public class ChangeQueueProcessorTests
         {
             // Act
             await cancellation.CancelAsync();
-            await processing.WaitAsync(TeardownWaitTimeout);
+            await clock.AdvanceWhenArmedAsync(ChangeQueueProcessor.TeardownFlushBound);
+            await processing.WaitAsync(TestTimeout);
             await loggerEntered.Task.WaitAsync(TestTimeout);
 
             // Assert
@@ -2643,6 +2694,7 @@ public class ChangeQueueProcessorTests
         var writeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        var clock = new ManualTeardownClock();
         using var processor = new ChangeQueueProcessor(
             source: new object(),
             context: context,
@@ -2656,7 +2708,10 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.FromMinutes(5),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale)
+        {
+            TeardownTimeProvider = clock
+        };
 
         // Lets the handler out even when nothing else does, so a regression of the bound fails this test
         // instead of wedging the run on a permanently blocked thread.
@@ -2675,8 +2730,9 @@ public class ChangeQueueProcessorTests
         {
             // Act
             await cancellation.CancelAsync();
-            await writeEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
-            await processing.WaitAsync(TimeSpan.FromSeconds(30));
+            await writeEntered.Task.WaitAsync(TestTimeout);
+            await clock.AdvanceWhenArmedAsync(ChangeQueueProcessor.TeardownFlushBound);
+            await processing.WaitAsync(TestTimeout);
 
             // Assert: the stop completed while the handler was still inside the write, which nothing but
             // an externally enforced deadline can do.
@@ -2784,6 +2840,7 @@ public class ChangeQueueProcessorTests
         var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var filterCalls = 0;
 
+        var clock = new ManualTeardownClock();
         using var processor = new ChangeQueueProcessor(
             source: new object(),
             context: context,
@@ -2798,7 +2855,10 @@ public class ChangeQueueProcessorTests
             deliveryRule: ChangeDeliveryRule.SourceValuesAreSettled,
             bufferTime: TimeSpan.FromMilliseconds(8),
             maxQueueDepth: null,
-            logger: NullLogger.Instance);
+            logger: NullLogger.Instance)
+        {
+            TeardownTimeProvider = clock
+        };
 
         using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var watchdogRegistration = watchdog.Token.Register(() => releaseWrite.TrySetResult());
@@ -2812,10 +2872,11 @@ public class ChangeQueueProcessorTests
         {
             // Act
             subject.LastName = "throws";
+            await clock.AdvanceWhenArmedAsync(ChangeQueueProcessor.TeardownFlushBound);
 
             // Assert
             var failure = await Assert.ThrowsAsync<InvalidOperationException>(
-                () => processing.WaitAsync(TeardownWaitTimeout));
+                () => processing.WaitAsync(TestTimeout));
             Assert.Equal("filter refused the property", failure.Message);
         }
         finally
@@ -2892,7 +2953,7 @@ public class ChangeQueueProcessorTests
         finally
         {
             await cancellation.CancelAsync();
-            try { await processing.WaitAsync(TeardownWaitTimeout); } catch (TimeoutException) { }
+            try { await processing.WaitAsync(TestTimeout); } catch (TimeoutException) { }
         }
     }
 

@@ -38,6 +38,8 @@
   <Folder Name="/HomeBlaze/">
     <Project Path="HomeBlaze/HomeBlaze.AI/HomeBlaze.AI.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.AI.Blazor/HomeBlaze.AI.Blazor.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Automation/HomeBlaze.Automation.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Automation.Blazor/HomeBlaze.Automation.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Components/HomeBlaze.Components.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Host.Services/HomeBlaze.Host.Services.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Host/HomeBlaze.Host.csproj" />
@@ -132,6 +134,8 @@
   </Folder>
   <Folder Name="/HomeBlaze/Tests/">
     <Project Path="HomeBlaze/HomeBlaze.AI.Tests/HomeBlaze.AI.Tests.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Automation.Tests/HomeBlaze.Automation.Tests.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Automation.Blazor.Tests/HomeBlaze.Automation.Blazor.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.E2E.Tests/HomeBlaze.E2E.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Host.Services.Tests/HomeBlaze.Host.Services.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Installation.Tests/HomeBlaze.Installation.Tests.csproj" />
