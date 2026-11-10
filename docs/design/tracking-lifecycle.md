@@ -56,12 +56,14 @@ This asymmetry is the key insight: the old value comes from our private ledger, 
 
 ### 1. Seeded on attach
 
-When a subject enters the graph via `AttachSubjectToContext`, `FindSubjectsInProperties` runs with `LastProcessedValuesMode.Seed`. It reads each structural property's current backing store value and stores it:
+When a subject enters the graph via `AttachSubjectToContext`, it reads each structural property's current backing store value, stores it, and attaches the children of that property before it reads the next one:
 
 ```
 _lastProcessedValues[(subject, "Collection")] = current collection reference
 _lastProcessedValues[(subject, "ObjectRef")]   = current child subject
 ```
+
+A handler that writes a later property while an earlier one attaches its children reconciles that property from no baseline, attaching its new children, and the attach then reads the written value and finds those children attached. Reading every property up front would attach the children of the value the handler replaced.
 
 This establishes the initial baseline. Without seeding, the first `WriteProperty` would fall back to `null` (meaning "nothing was ever processed"), which triggers a full diff against the backing store. That is correct but slightly more work than diffing against a known baseline.
 
