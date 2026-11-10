@@ -82,7 +82,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
 
                 // A property that holds a child more than once attaches it at its first place, and the attach of a later
-                // place finds the link already there.
+                // place finds the link already there, as does a child attached before.
                 var hasRepeatedChildren = false;
                 foreach (var child in collectedSubjects)
                 {

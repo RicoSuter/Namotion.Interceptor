@@ -16,9 +16,6 @@ public class RegisteredSubjectProperty
     private static Dictionary<IInterceptorSubject, int>? _reusableChildPositions;
 
     [ThreadStatic]
-    private static Dictionary<IInterceptorSubject, (int Start, int Length)>? _reusableRuns;
-
-    [ThreadStatic]
     private static List<SubjectPropertyChild>? _reusableChildren;
 
     private readonly List<SubjectPropertyChild> _children = [];
@@ -404,8 +401,7 @@ public class RegisteredSubjectProperty
     {
         lock (_children)
         {
-            // Searches backwards because a reconciled write detaches in reverse order, which finds each
-            // child removed from the end of the value at the end of the list.
+            // Searches backwards, as IndexOfChild does.
             var removed = 0;
             for (var i = _children.Count - 1; i >= 0 && removed < count; i--)
             {
@@ -487,58 +483,54 @@ public class RegisteredSubjectProperty
     // Replaces the entries of each reported subject with its run of places. Must be called under the _children lock.
     private void ReplaceChildPlaces(ReadOnlySpan<SubjectChild> children, Dictionary<IInterceptorSubject, RegisteredSubject> knownSubjects)
     {
-        var runs = _reusableRuns ??= new Dictionary<IInterceptorSubject, (int Start, int Length)>(ReferenceEqualityComparer.Instance);
-        var start = 0;
-        while (start < children.Length)
+        // The first place of each reported subject, where its run starts.
+        var starts = _reusableChildPositions ??= new Dictionary<IInterceptorSubject, int>(ReferenceEqualityComparer.Instance);
+        for (var i = 0; i < children.Length; i++)
         {
-            var end = start + 1;
-            while (end < children.Length && ReferenceEquals(children[end].Subject, children[start].Subject))
-            {
-                end++;
-            }
-
-            runs[children[start].Subject] = (start, end - start);
-            start = end;
+            starts.TryAdd(children[i].Subject, i);
         }
 
         // A run takes the place of its subject's first entry, which keeps dictionary children in attach order;
         // collection children are sorted by position afterwards.
         var replaced = _reusableChildren ??= [];
-        var removed = 0;
-        var inserted = 0;
         foreach (var child in _children)
         {
-            ref var run = ref CollectionsMarshal.GetValueRefOrNullRef(runs, child.Subject);
-            if (Unsafe.IsNullRef(ref run))
+            ref var start = ref CollectionsMarshal.GetValueRefOrNullRef(starts, child.Subject);
+            if (Unsafe.IsNullRef(ref start))
             {
                 replaced.Add(child);
                 continue;
             }
 
-            removed++;
-            if (run.Length == 0)
+            // A later entry of a subject whose run is already in.
+            if (start < 0)
                 continue;
 
-            var places = children.Slice(run.Start, run.Length);
+            var end = start + 1;
+            while (end < children.Length && ReferenceEquals(children[end].Subject, child.Subject))
+            {
+                end++;
+            }
+
+            var places = children[start..end];
             foreach (var place in places)
             {
                 replaced.Add(new SubjectPropertyChild { Subject = place.Subject, Index = place.Index });
             }
 
             knownSubjects.GetValueOrDefault(child.Subject)?.ReplaceParentIndices(this, places);
-            inserted += run.Length;
-            run.Length = 0;
+            start = -1;
         }
 
+        _repeatedChildCount += replaced.Count - _children.Count;
         _children.Clear();
         _children.AddRange(replaced);
-        _repeatedChildCount += inserted - removed;
         SortByPosition();
         _childrenCache = default;
 
         // Release references so subjects can be GC'd on idle threads. Nothing above runs user code or throws.
         replaced.Clear();
-        runs.Clear();
+        starts.Clear();
     }
 
     // Searches backwards because a reconciled write detaches in reverse order, which finds each

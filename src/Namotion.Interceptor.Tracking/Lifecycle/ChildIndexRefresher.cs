@@ -63,11 +63,6 @@ internal static class ChildIndexRefresher
         List<(IInterceptorSubject subject, PropertyReference property, object? index)> children)
     {
         var span = CollectionsMarshal.AsSpan(children);
-        if (span.Length < 2)
-        {
-            return;
-        }
-
         var handlers = span[0].property.Subject.Context.GetServices<IChildIndexHandler>();
         if (handlers.Length == 0)
         {
@@ -176,21 +171,24 @@ internal static class ChildIndexRefresher
         ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> newSpan,
         Buffers buffers)
     {
-        var next = LinkOldPlaces(oldSpan, buffers);
-        var nextNew = MatchNewPlaces(oldSpan, newSpan, next, buffers);
+        // The links of the old places, then those of the new places.
+        var nextPlaces = buffers.NextPlaces;
+        CollectionsMarshal.SetCount(nextPlaces, oldSpan.Length + newSpan.Length);
+        var next = CollectionsMarshal.AsSpan(nextPlaces)[..oldSpan.Length];
+        var nextNew = CollectionsMarshal.AsSpan(nextPlaces)[oldSpan.Length..];
+
+        LinkOldPlaces(oldSpan, next, buffers.Cursors);
+        MatchNewPlaces(oldSpan, newSpan, next, nextNew, buffers.Cursors);
         AddChangedSubjects(newSpan, nextNew, buffers);
     }
 
-    // Each subject of the old value gets a cursor on its next place in oldSpan to compare, and the returned span links
+    // Each subject of the old value gets a cursor on its next place in oldSpan to compare, and next links
     // each place to the next one of the same subject.
-    private static Span<int> LinkOldPlaces(
+    private static void LinkOldPlaces(
         ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> oldSpan,
-        Buffers buffers)
+        Span<int> next,
+        Dictionary<IInterceptorSubject, PlaceCursor> cursors)
     {
-        var cursors = buffers.Cursors;
-        var nextPlaces = buffers.NextPlaces;
-        CollectionsMarshal.SetCount(nextPlaces, oldSpan.Length);
-        var next = CollectionsMarshal.AsSpan(nextPlaces);
         for (var i = oldSpan.Length - 1; i >= 0; i--)
         {
             ref var cursor = ref CollectionsMarshal.GetValueRefOrAddDefault(cursors, oldSpan[i].subject, out var exists);
@@ -198,22 +196,17 @@ internal static class ChildIndexRefresher
             cursor.Next = i;
             cursor.LastNewPlace = NoNextPlace;
         }
-
-        return next;
     }
 
     // Advances the cursor of each subject along its places in the new value, and links each of them to the next one of
-    // the same subject in the returned span, for the report.
-    private static Span<int> MatchNewPlaces(
+    // the same subject in nextNew, for the report.
+    private static void MatchNewPlaces(
         ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> oldSpan,
         ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> newSpan,
         ReadOnlySpan<int> next,
-        Buffers buffers)
+        Span<int> nextNew,
+        Dictionary<IInterceptorSubject, PlaceCursor> cursors)
     {
-        var cursors = buffers.Cursors;
-        var nextNewPlaces = buffers.NextNewPlaces;
-        CollectionsMarshal.SetCount(nextNewPlaces, newSpan.Length);
-        var nextNew = CollectionsMarshal.AsSpan(nextNewPlaces);
         for (var i = 0; i < newSpan.Length; i++)
         {
             var (subject, _, index) = newSpan[i];
@@ -235,8 +228,6 @@ internal static class ChildIndexRefresher
             nextNew[i] = NoNextPlace;
             cursor.LastNewPlace = i;
         }
-
-        return nextNew;
     }
 
     // Each subject whose places differed, or whose cursor is still on a place the new value lost, is reported at its
@@ -304,7 +295,5 @@ internal static class ChildIndexRefresher
         public Dictionary<IInterceptorSubject, PlaceCursor> Cursors { get; } = new(ReferenceEqualityComparer.Instance);
 
         public List<int> NextPlaces { get; } = [];
-
-        public List<int> NextNewPlaces { get; } = [];
     }
 }

@@ -168,19 +168,7 @@ public class RegisteredSubject
     {
         lock (_lock)
         {
-            var removed = 0;
-            if (_additionalParents is not null)
-            {
-                for (var i = _additionalParents.Count - 1; i >= 0; i--)
-                {
-                    if (_additionalParents[i].Property == property)
-                    {
-                        _additionalParents.RemoveAt(i);
-                        removed++;
-                    }
-                }
-            }
-
+            var removed = RemoveAdditionalParents(property, 0);
             if (_firstParent.Property == property)
             {
                 PromoteFirstParentFromAdditional();
@@ -222,21 +210,20 @@ public class RegisteredSubject
     {
         lock (_lock)
         {
-            var firstIsProperty = _firstParent.Property == property;
-            var position = IndexOfAdditionalParent(property);
-            if (!firstIsProperty && position < 0)
-                return;
-
             // The first place overwrites the first entry, so one entry and one place need no list.
             var entry = new SubjectPropertyParent { Property = property, Index = places[0].Index };
             int next;
-            if (firstIsProperty)
+            if (_firstParent.Property == property)
             {
                 _firstParent = entry;
                 next = 0;
             }
             else
             {
+                var position = IndexOfAdditionalParent(property);
+                if (position < 0)
+                    return;
+
                 _additionalParents![position] = entry;
                 next = position + 1;
             }
@@ -248,21 +235,24 @@ public class RegisteredSubject
     }
 
     // Removes the entries of the property from the overflow list, starting at the given position, keeping the order
-    // of the others. Caller must hold _lock.
-    private void RemoveAdditionalParents(RegisteredSubjectProperty property, int start)
+    // of the others, and returns how many. Caller must hold _lock.
+    private int RemoveAdditionalParents(RegisteredSubjectProperty property, int start)
     {
         var parents = _additionalParents;
         if (parents is null)
-            return;
+            return 0;
 
+        var span = CollectionsMarshal.AsSpan(parents);
         var kept = start;
-        for (var i = start; i < parents.Count; i++)
+        for (var i = start; i < span.Length; i++)
         {
-            if (parents[i].Property != property)
-                parents[kept++] = parents[i];
+            if (span[i].Property != property)
+                span[kept++] = span[i];
         }
 
-        parents.RemoveRange(kept, parents.Count - kept);
+        var removed = span.Length - kept;
+        parents.RemoveRange(kept, removed);
+        return removed;
     }
 
     // Caller must hold _lock.
