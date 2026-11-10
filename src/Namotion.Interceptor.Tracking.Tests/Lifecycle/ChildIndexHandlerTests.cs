@@ -1,4 +1,6 @@
 using System.Reactive.Concurrency;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -480,6 +482,27 @@ public class ChildIndexHandlerTests
         var call = Assert.Single(handler.Calls);
         Assert.Equal(new PropertyReference(garage, nameof(Garage.Cars)), call.Property);
         Assert.Equal([new SubjectChild(car, 0), new SubjectChild(car, 1)], call.Children);
+    }
+
+    [Fact]
+    public void WhenSubjectHoldingASubjectTwiceIsAttachedAgainThroughAnotherFallbackContext_ThenNothingIsReported()
+    {
+        // Arrange
+        var (context, handler) = CreateContext();
+        var registry = context.WithRegistry().GetService<ISubjectRegistry>();
+        var car = new Car();
+        var garage = new Garage(context) { Cars = [car, car] };
+        var otherContext = InterceptorSubjectContext.Create();
+        otherContext.AddFallbackContext(context);
+        handler.Calls.Clear();
+        var structureVersion = registry.StructureVersion;
+
+        // Act: the other context reaches the same lifecycle interceptor, which attaches the subject again.
+        ((IInterceptorSubject)garage).Context.AddFallbackContext(otherContext);
+
+        // Assert
+        Assert.Empty(handler.Calls);
+        Assert.Equal(structureVersion, registry.StructureVersion);
     }
 
     [Fact]
