@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Collections.Immutable;
 using System.Text;
 using HomeBlaze.Abstractions;
 using Namotion.Interceptor;
@@ -125,7 +124,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                 var parents = registered.Parents;
                 if (parents.Length == 0)
                     return null;
-                if (HasSeveralParentProperties(parents))
+                if (parents.Length > 1 && parents.CountProperties() > 1)
                     return null; // Ambiguous - multiple parents
 
                 current = parents[0].Property.Subject;
@@ -145,18 +144,6 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
 
             return ResolveInternal(baseSubject, path, style);
         }
-    }
-
-    // A subject held at several keys or positions of one property has one entry per place and still one parent.
-    private static bool HasSeveralParentProperties(ImmutableArray<SubjectPropertyParent> parents)
-    {
-        for (var index = 1; index < parents.Length; index++)
-        {
-            if (parents[index].Property != parents[0].Property)
-                return true;
-        }
-
-        return false;
     }
 
     /// <summary>

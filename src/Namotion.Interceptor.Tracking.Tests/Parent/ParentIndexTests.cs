@@ -596,4 +596,51 @@ public class ParentIndexTests
         // Assert
         Assert.Equal<SubjectParent>([Parent(garage, nameof(Garage.CarsByName), "Motor")], car.GetParents());
     }
+
+    [Fact]
+    public void WhenSubjectHasNoParent_ThenItCountsNoProperty()
+    {
+        // Arrange
+        var car = new Car(CreateContext());
+
+        // Act
+        var count = car.GetParents().CountProperties();
+
+        // Assert
+        Assert.Equal(0, count);
+    }
+
+    [Fact]
+    public void WhenOnePropertyHoldsSubjectAtSeveralPlaces_ThenItCountsOneProperty()
+    {
+        // Arrange
+        var car = new Car();
+        _ = new Garage(CreateContext()) { Cars = [car, car] };
+
+        // Act
+        var parents = car.GetParents();
+
+        // Assert
+        Assert.Equal(2, parents.Length);
+        Assert.Equal(1, parents.CountProperties());
+    }
+
+    [Fact]
+    public void WhenSeveralPropertiesHoldSubject_ThenItCountsEachPropertyOnce()
+    {
+        // Arrange
+        var car = new Car();
+        _ = new Garage(CreateContext())
+        {
+            Cars = [car, car],
+            CarsByName = new Dictionary<string, Car> { ["Motor"] = car }
+        };
+
+        // Act
+        var parents = car.GetParents();
+
+        // Assert
+        Assert.Equal(3, parents.Length);
+        Assert.Equal(2, parents.CountProperties());
+    }
 }

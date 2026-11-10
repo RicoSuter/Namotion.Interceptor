@@ -376,4 +376,51 @@ public class RepeatedChildTests
                 child.TryGetRegisteredSubject()!.Parents.Select(parent => (parent.Property.Name, parent.Index)));
         }
     }
+
+    [Fact]
+    public void WhenSubjectHasNoParent_ThenItCountsNoProperty()
+    {
+        // Arrange
+        var group = new LightGroup(CreateContext());
+
+        // Act
+        var count = group.TryGetRegisteredSubject()!.Parents.CountProperties();
+
+        // Assert
+        Assert.Equal(0, count);
+    }
+
+    [Fact]
+    public void WhenOnePropertyHoldsSubjectAtSeveralPlaces_ThenItCountsOneProperty()
+    {
+        // Arrange
+        var light = new Light();
+        _ = new LightGroup(CreateContext()) { Lights = [light, new Light(), light] };
+
+        // Act
+        var parents = light.TryGetRegisteredSubject()!.Parents;
+
+        // Assert
+        Assert.Equal(2, parents.Length);
+        Assert.Equal(1, parents.CountProperties());
+    }
+
+    [Fact]
+    public void WhenSeveralPropertiesHoldSubject_ThenItCountsEachPropertyOnce()
+    {
+        // Arrange
+        var light = new Light();
+        _ = new LightGroup(CreateContext())
+        {
+            Lights = [light, light],
+            LightsByName = new Dictionary<string, Light> { ["a"] = light }
+        };
+
+        // Act
+        var parents = light.TryGetRegisteredSubject()!.Parents;
+
+        // Assert
+        Assert.Equal(3, parents.Length);
+        Assert.Equal(2, parents.CountProperties());
+    }
 }

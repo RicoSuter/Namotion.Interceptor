@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -101,7 +100,7 @@ public partial class Widget : ITitleProvider, IConfigurable
                 return false;
             }
 
-            if (HasSeveralParentProperties(parents))
+            if (parents.Length > 1 && parents.CountProperties() > 1)
             {
                 break;
             }
@@ -110,18 +109,6 @@ public partial class Widget : ITitleProvider, IConfigurable
         }
 
         return IsSelfOrAncestorInAnyBranch(current, subject);
-    }
-
-    // A subject held at several keys or positions of one property has an entry for each, all leading to the same parent.
-    private static bool HasSeveralParentProperties(ImmutableArray<SubjectParent> parents)
-    {
-        for (var index = 1; index < parents.Length; index++)
-        {
-            if (parents[index].Property != parents[0].Property)
-                return true;
-        }
-
-        return false;
     }
 
     private static bool IsSelfOrAncestorInAnyBranch(IInterceptorSubject start, IInterceptorSubject subject)

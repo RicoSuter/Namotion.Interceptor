@@ -526,7 +526,7 @@ public static class PathExtensions
                 return rootSubject is null;
             }
 
-            if (rootSubject is not null && HasSeveralParentProperties(parents))
+            if (rootSubject is not null && parents.Length > 1 && parents.CountProperties() > 1)
             {
                 // First parent may not reach the root, so search all parents from the leaf.
                 frames.Reset();
@@ -548,18 +548,6 @@ public static class PathExtensions
             frames.Add((parent.Property, parent.Index, parentSegment));
             current = parent.Property;
         }
-    }
-
-    // A subject held at several keys or positions of one property has an entry for each, all leading to the same owner.
-    private static bool HasSeveralParentProperties(ImmutableArray<SubjectPropertyParent> parents)
-    {
-        for (var index = 1; index < parents.Length; index++)
-        {
-            if (parents[index].Property != parents[0].Property)
-                return true;
-        }
-
-        return false;
     }
 
     /// <summary>

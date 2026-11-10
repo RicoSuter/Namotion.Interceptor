@@ -175,6 +175,32 @@ public static class ParentsHandlerExtensions
     }
 
     /// <summary>
+    /// Gets the number of distinct properties that hold the subject, which is less than the number of entries when a
+    /// property holds the subject at more than one key or position.
+    /// </summary>
+    /// <param name="parents">The parents, as <see cref="GetParents"/> returns them, with the entries of a property adjacent.</param>
+    /// <returns>The number of properties.</returns>
+    public static int CountProperties(this ImmutableArray<SubjectParent> parents)
+    {
+        var span = parents.AsSpan();
+        if (span.IsEmpty)
+        {
+            return 0;
+        }
+
+        var count = 1;
+        for (var i = 1; i < span.Length; i++)
+        {
+            if (span[i].Property != span[i - 1].Property)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    /// <summary>
     /// Thread-safe collection with O(1) writes and zero-allocation reads via cached ImmutableArray.
     /// </summary>
     private sealed class ParentsSet

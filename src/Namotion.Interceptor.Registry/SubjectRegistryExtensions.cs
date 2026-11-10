@@ -1,4 +1,5 @@
-﻿using System.Linq.Expressions;
+﻿using System.Collections.Immutable;
+using System.Linq.Expressions;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -140,6 +141,32 @@ public static class SubjectRegistryExtensions
         return registry?.TryGetRegisteredSubject(subject);
     }
     
+    /// <summary>
+    /// Gets the number of distinct properties that hold the subject, which is less than the number of entries when a
+    /// property holds the subject at more than one key or position.
+    /// </summary>
+    /// <param name="parents">The parents, as <see cref="RegisteredSubject.Parents"/> returns them, with the entries of a property adjacent.</param>
+    /// <returns>The number of properties.</returns>
+    public static int CountProperties(this ImmutableArray<SubjectPropertyParent> parents)
+    {
+        var span = parents.AsSpan();
+        if (span.IsEmpty)
+        {
+            return 0;
+        }
+
+        var count = 1;
+        for (var i = 1; i < span.Length; i++)
+        {
+            if (span[i].Property != span[i - 1].Property)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
     /// <summary>
     /// Gets the registered property selected by a member-access expression (e.g. <c>x =&gt; x.Child.Value</c>).
     /// Unwraps boxing conversions (so value-typed members work) and resolves intermediate subjects of any

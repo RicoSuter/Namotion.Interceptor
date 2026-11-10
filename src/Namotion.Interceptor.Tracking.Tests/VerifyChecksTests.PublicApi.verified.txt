@@ -239,6 +239,7 @@ namespace Namotion.Interceptor.Tracking.Parent
     }
     public static class ParentsHandlerExtensions
     {
+        public static int CountProperties(this System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Tracking.Parent.SubjectParent> parents) { }
         public static System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Tracking.Parent.SubjectParent> GetParents(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static TRoot? TryGetFirstParent<TRoot>(this Namotion.Interceptor.IInterceptorSubject subject)
             where TRoot :  class { }

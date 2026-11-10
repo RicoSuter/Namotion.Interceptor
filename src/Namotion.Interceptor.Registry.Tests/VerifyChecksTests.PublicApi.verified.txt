@@ -119,6 +119,7 @@ namespace Namotion.Interceptor.Registry
     }
     public static class SubjectRegistryExtensions
     {
+        public static int CountProperties(this System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Registry.Abstractions.SubjectPropertyParent> parents) { }
         public static System.Collections.Generic.IEnumerable<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty> GetAllProperties(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
         public static string GetOrAddSubjectId(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty GetRegisteredProperty(this Namotion.Interceptor.PropertyReference propertyReference) { }
