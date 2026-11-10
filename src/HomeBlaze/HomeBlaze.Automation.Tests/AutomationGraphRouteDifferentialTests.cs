@@ -123,7 +123,12 @@ public class AutomationGraphRouteDifferentialTests
             AssertSame(routed, unrouted, seed, step, log);
             var routedResolutions = routed.GetResolutionCounts();
             var unroutedResolutions = unrouted.GetResolutionCounts();
-            if (routedResolutions.Sum() - routedBefore.Sum() < unroutedResolutions.Sum() - unroutedBefore.Sum())
+            // Filtered when an automation resolved paths without routes and none with them. A smaller number of
+            // resolutions proves nothing: the graph changes of one write, such as a property added with a subject,
+            // coalesce while one is queued, so how often an automation resolves for that write depends on whether its
+            // worker took the first change before the next arrived, in either host.
+            if (Enumerable.Range(0, routedResolutions.Length).Any(index =>
+                routedResolutions[index] == routedBefore[index] && unroutedResolutions[index] > unroutedBefore[index]))
             {
                 filteredSteps++;
             }
