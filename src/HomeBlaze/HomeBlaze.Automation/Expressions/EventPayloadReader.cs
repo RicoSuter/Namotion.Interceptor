@@ -47,7 +47,7 @@ internal static class EventPayloadReader
         }
 
         return value is IInterceptorSubject subject
-            ? AutomationPaths.ReadFrom(resolver, memberPath[(separator + 1)..], subject)
+            ? resolver.ReadFrom(memberPath[(separator + 1)..], subject)
             : ExpressionValue.Missing;
     }
 

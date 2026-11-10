@@ -153,14 +153,14 @@ internal sealed class EventTriggerEngine(
     }
 
     private IInterceptorSubject? ResolveSource(CompiledEventTrigger trigger) =>
-        AutomationPaths.ResolveSubject(resolver, trigger.Configuration.SubjectPath, trigger.Rule.Rule);
+        resolver.ResolveSubject(trigger.Configuration.SubjectPath, trigger.Rule.Rule);
 
     /// <summary>Resolves the source of the trigger and the type of its event; returns why the trigger receives no events, or null.</summary>
     public static string? FindSource(SubjectPathResolver resolver, CompiledEventTrigger trigger, out IInterceptorSubject? source, out Type? eventType)
     {
         var configuration = trigger.Configuration;
         eventType = null;
-        source = AutomationPaths.ResolveSubject(resolver, configuration.SubjectPath, trigger.Rule.Rule);
+        source = resolver.ResolveSubject(configuration.SubjectPath, trigger.Rule.Rule);
         if (source is null)
         {
             return $"No subject at {configuration.SubjectPath}";

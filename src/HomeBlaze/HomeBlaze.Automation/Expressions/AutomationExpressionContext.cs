@@ -13,7 +13,7 @@ internal readonly struct AutomationExpressionContext(AutomationEvaluation evalua
 {
     public ExpressionValue ResolvePath(string path)
     {
-        if (AutomationPaths.ResolveProperty(evaluation.Resolver, path, evaluation.Rule) is not { } property)
+        if (evaluation.Resolver.ResolveProperty(path, evaluation.Rule) is not { } property)
         {
             evaluation.AddMissingPath(path);
             return ExpressionValue.Missing;
@@ -73,6 +73,6 @@ internal readonly struct AutomationExpressionContext(AutomationEvaluation evalua
 
         return memberPath is null
             ? ExpressionValue.FromValue(captured.Source)
-            : AutomationPaths.ReadFrom(evaluation.Resolver, memberPath, captured.Source);
+            : evaluation.Resolver.ReadFrom(memberPath, captured.Source);
     }
 }

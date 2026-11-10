@@ -465,7 +465,7 @@ internal sealed class PropertyTriggerEngine(
     private static DateTimeOffset CheckForSetBackClock(DateTimeOffset now) => now + WakeTimer.MaxWakeInterval;
 
     private object? ReadObserved(string path, AutomationRule rule) =>
-        AutomationPaths.ResolveProperty(resolver, path, rule) is { } property ? _values.GetValue(property) : null;
+        resolver.ResolveProperty(path, rule) is { } property ? _values.GetValue(property) : null;
 
     // Adds the requests of the pending triggers that match and have none yet, in rule order.
     private IReadOnlyList<RunRequest> AddPendingRequests(
@@ -518,7 +518,7 @@ internal sealed class PropertyTriggerEngine(
 
         if (clock.IsEverySecond ||
             !clock.TryGetNextChange(
-                path => AutomationPaths.ResolveProperty(resolver, path, rule.Rule)?.GetValue(), now, timeProvider.LocalTimeZone, out var nextChange, out var hasChanged))
+                path => resolver.ResolveProperty(path, rule.Rule)?.GetValue(), now, timeProvider.LocalTimeZone, out var nextChange, out var hasChanged))
         {
             rule.RechecksOnlyIfEverySecond = true;
             return;
@@ -563,7 +563,7 @@ internal sealed class PropertyTriggerEngine(
         var resolved = new List<PropertyReference>(paths.Count);
         foreach (var path in paths)
         {
-            if (AutomationPaths.ResolveProperty(resolver, path, rule) is { } property)
+            if (resolver.ResolveProperty(path, rule) is { } property)
             {
                 resolved.Add(property.Reference);
             }
