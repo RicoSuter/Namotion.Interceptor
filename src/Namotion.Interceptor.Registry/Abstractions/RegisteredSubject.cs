@@ -145,7 +145,8 @@ public class RegisteredSubject
                     this, p.Key, p.Value.Type, p.Value.Attributes));
     }
 
-    internal void AddParent(RegisteredSubjectProperty parent, object? index)
+    // Adds an entry per place, the index first, after the entries of the other properties.
+    internal void AddParent(RegisteredSubjectProperty parent, object? index, ImmutableArray<object?> additionalIndices)
     {
         lock (_lock)
         {
@@ -159,6 +160,16 @@ public class RegisteredSubject
                 _additionalParents ??= [];
                 _additionalParents.Add(entry);
             }
+
+            if (additionalIndices.Length > 0)
+            {
+                _additionalParents ??= [];
+                foreach (var additionalIndex in additionalIndices)
+                {
+                    _additionalParents.Add(new SubjectPropertyParent { Property = parent, Index = additionalIndex });
+                }
+            }
+
             InvalidateParentsSnapshot();
         }
     }

@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Namotion.Interceptor.Interceptors;
@@ -74,78 +75,107 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
     public void AttachSubjectToContext(IInterceptorSubject subject)
     {
-        var collectedSubjects = GetList();
+        var children = GetList();
         try
         {
             lock (_attachedSubjects)
             {
-                FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
-
-                // A property that holds a child more than once attaches it at its first place, and the attach of a later
-                // place finds the link already there, as does a child linked before this call. When every link existed
-                // before, an earlier attach or write reported the places already.
-                var alreadyHeld = 0;
-                foreach (var child in collectedSubjects)
+                // Each property is read and seeded when its turn comes, so that a handler that writes a later property
+                // during an attach reconciles it before it is read here, which then finds its children attached.
+                foreach (var property in subject.Properties)
                 {
-                    if (!AttachToProperty(child.subject, subject.Context, child.property, child.index))
+                    var metadata = property.Value;
+                    if (!metadata.IsIntercepted || !metadata.Type.CanContainSubjects())
                     {
-                        alreadyHeld++;
+                        continue;
                     }
+
+                    var propertyReference = new PropertyReference(subject, property.Key);
+                    var value = metadata.GetValue?.Invoke(subject);
+                    _lastProcessedValues[propertyReference] = value;
+
+                    FindSubjectsInProperty(propertyReference, value, children, null);
+                    AttachChildren(subject.Context, children, null, children.Count > 1 && HasRepeatedSubject(children));
+                    children.Clear();
                 }
 
                 if (!_attachedSubjects.ContainsKey(subject))
                 {
                     AttachToContext(subject, subject.Context);
                 }
-
-                if (alreadyHeld > 0 && alreadyHeld < collectedSubjects.Count)
-                {
-                    RefreshRepeatedChildren(collectedSubjects);
-                }
             }
         }
         finally
         {
-            ReturnList(collectedSubjects);
+            ReturnList(children);
         }
     }
 
-    // Reports the places of each property that holds more than one subject, scanned again from its baseline: a child
-    // index handler may write another property of the subject in between, which leaves the attach scan stale.
-    private void RefreshRepeatedChildren(
-        List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects)
+    // Attaches the children of one property, except the subjects in kept, which the property held before. A child
+    // linked before, or at an earlier place, raises nothing.
+    private void AttachChildren(IInterceptorSubjectContext context,
+        List<(IInterceptorSubject subject, PropertyReference property, object? index)> children,
+        HashSet<IInterceptorSubject>? kept, bool hasRepeatedSubject)
     {
-        List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
+        if (hasRepeatedSubject)
+        {
+            AttachRepeatedChildren(context, children, kept);
+            return;
+        }
+
+        for (var i = 0; i < children.Count; i++)
+        {
+            var (subject, property, index) = children[i];
+            if (kept is null || !kept.Contains(subject))
+            {
+                AttachToProperty(subject, context, property, index, default);
+            }
+        }
+    }
+
+    private static bool HasRepeatedSubject(
+        List<(IInterceptorSubject subject, PropertyReference property, object? index)> children)
+    {
+        var subjects = GetSubjectHashSet();
         try
         {
-            var start = 0;
-            while (start < collectedSubjects.Count)
+            foreach (var child in children)
             {
-                var property = collectedSubjects[start].property;
-                var end = start + 1;
-                while (end < collectedSubjects.Count && collectedSubjects[end].property.Equals(property))
+                if (!subjects.Add(child.subject))
                 {
-                    end++;
+                    return true;
                 }
+            }
 
-                // No baseline: a handler detached the subject meanwhile.
-                if (end - start > 1 && _lastProcessedValues.TryGetValue(property, out var value))
+            return false;
+        }
+        finally
+        {
+            ReturnSubjectHashSet(subjects);
+        }
+    }
+
+    // Attaches each subject at its first key or position with its later ones.
+    private void AttachRepeatedChildren(IInterceptorSubjectContext context,
+        List<(IInterceptorSubject subject, PropertyReference property, object? index)> children,
+        HashSet<IInterceptorSubject>? kept)
+    {
+        // Rented per call: the handlers of an attach can start a nested write on this thread.
+        var additionalIndices = AdditionalIndexCollector.Rent(CollectionsMarshal.AsSpan(children));
+        try
+        {
+            for (var i = 0; i < children.Count; i++)
+            {
+                var (subject, property, index) = children[i];
+                if (kept is null || !kept.Contains(subject))
                 {
-                    children ??= GetList();
-                    children.Clear();
-                    FindSubjectsInProperty(property, value, children, null);
-                    ChildIndexRefresher.RefreshRepeatedChildren(property, children);
+                    AttachToProperty(subject, context, property, index, additionalIndices[i]);
                 }
-
-                start = end;
             }
         }
         finally
         {
-            if (children is not null)
-            {
-                ReturnList(children);
-            }
+            AdditionalIndexCollector.Return(additionalIndices);
         }
     }
 
@@ -156,7 +186,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             lock (_attachedSubjects)
             {
-                FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Use);
+                FindAttachedSubjectsInProperties(subject, collectedSubjects);
 
                 foreach (var child in collectedSubjects)
                 {
@@ -203,17 +233,17 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     }
 
     /// <summary>
-    /// Attaches a subject via a property reference. Returns false when the property already held it.
+    /// Attaches a subject via a property reference, unless the property already holds it.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private bool AttachToProperty(IInterceptorSubject subject, IInterceptorSubjectContext context,
-        PropertyReference property, object? index)
+    private void AttachToProperty(IInterceptorSubject subject, IInterceptorSubjectContext context,
+        PropertyReference property, object? index, ImmutableArray<object?> additionalIndices)
     {
         ref var set = ref CollectionsMarshal.GetValueRefOrAddDefault(_attachedSubjects, subject, out var existed);
         var isFirstAttach = !existed;
         if (!set.Add(property))
         {
-            return false;
+            return;
         }
 
         var count = subject.IncrementReferenceCount();
@@ -222,6 +252,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             Subject = subject,
             Property = property,
             Index = index,
+            AdditionalIndices = additionalIndices,
             ReferenceCount = count,
             IsContextAttach = isFirstAttach,
             IsPropertyReferenceAdded = true
@@ -239,8 +270,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
             }
         }
-
-        return true;
     }
     
     private static void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
@@ -462,14 +491,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 }
             }
 
-            for (var i = 0; i < newCollectedSubjects.Count; i++)
-            {
-                var (subject, property, index) = newCollectedSubjects[i];
-                if (!oldTouchedSubjects.Contains(subject))
-                {
-                    AttachToProperty(subject, context.Property.Subject.Context, property, index);
-                }
-            }
+            AttachChildren(context.Property.Subject.Context, newCollectedSubjects, oldTouchedSubjects,
+                newTouchedSubjects.Count != newCollectedSubjects.Count);
 
             _lastProcessedValues[context.Property] = newValue;
 
@@ -483,7 +506,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 return;
             }
 
-            // Report subjects whose keys or positions changed. A write between two single references
+            // Report kept subjects whose keys or positions changed. A write between two single references
             // keeps no subject, since writing the same one again returns early.
             if (lastProcessed is IEnumerable || newValue is IEnumerable)
             {
@@ -514,22 +537,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
     }
 
-    private enum LastProcessedValuesMode
-    {
-        /// <summary>Read property values from the backing store (default).</summary>
-        None,
-
-        /// <summary>Read from backing store and seed _lastProcessedValues (used during attach).</summary>
-        Seed,
-
-        /// <summary>Read from _lastProcessedValues instead of backing store (used during detach).</summary>
-        Use
-    }
-
-    private void FindSubjectsInProperties(IInterceptorSubject subject,
-        List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
-        HashSet<IInterceptorSubject>? touchedSubjects,
-        LastProcessedValuesMode lastProcessedValuesMode = LastProcessedValuesMode.None)
+    // Reads each property from its baseline, which holds the subjects the property has attached.
+    private void FindAttachedSubjectsInProperties(IInterceptorSubject subject,
+        List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects)
     {
         foreach (var property in subject.Properties)
         {
@@ -541,18 +551,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             }
 
             var propertyReference = new PropertyReference(subject, property.Key);
-            var propertyValue = lastProcessedValuesMode == LastProcessedValuesMode.Use && _lastProcessedValues.TryGetValue(propertyReference, out var lastProcessed)
+            var propertyValue = _lastProcessedValues.TryGetValue(propertyReference, out var lastProcessed)
                 ? lastProcessed
                 : metadata.GetValue?.Invoke(subject);
 
-            if (lastProcessedValuesMode == LastProcessedValuesMode.Seed)
-            {
-                _lastProcessedValues[propertyReference] = propertyValue;
-            }
-
             if (propertyValue is not null)
             {
-                FindSubjectsInProperty(propertyReference, propertyValue, collectedSubjects, touchedSubjects);
+                FindSubjectsInProperty(propertyReference, propertyValue, collectedSubjects, null);
             }
         }
     }

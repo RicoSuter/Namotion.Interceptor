@@ -1,11 +1,12 @@
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 /// <summary>
 /// Tells the <see cref="IChildIndexHandler"/> services of a context which children a structural
-/// write left under other keys or positions, and which children an attach placed at more than one.
+/// write left under other keys or positions.
 /// </summary>
 internal static class ChildIndexRefresher
 {
@@ -16,12 +17,11 @@ internal static class ChildIndexRefresher
 
     private const int AllPlacesMatched = -1;
     private const int PlacesDiffer = -2;
-    private const int AttachedOnce = -3;
     private const int NoNextPlace = -1;
 
     /// <summary>
-    /// Reports every subject both values hold whose keys or positions differ between them, and every subject the new
-    /// value holds more than once that the write attached, with all of its keys or positions in the new value.
+    /// Reports every subject both values hold whose keys or positions differ between them, with all of its keys or
+    /// positions in the new value.
     /// </summary>
     /// <param name="property">The written property.</param>
     /// <param name="oldChildren">The subjects the old value held, as the lifecycle interceptor scanned them.</param>
@@ -46,35 +46,6 @@ internal static class ChildIndexRefresher
         try
         {
             CollectMovedChildren(oldChildren, newChildren, oldSubjects, newSubjects, buffers);
-            ReportChangedChildren(property, buffers.Changes, handlers);
-        }
-        finally
-        {
-            ReturnBuffers(buffers);
-        }
-    }
-
-    /// <summary>
-    /// Reports every subject that a property holds at more than one key or position, with all of them, since its attach
-    /// carries only the first.
-    /// </summary>
-    /// <param name="property">The property of the attached subject.</param>
-    /// <param name="children">The subjects the property holds, as the lifecycle interceptor scanned them.</param>
-    public static void RefreshRepeatedChildren(
-        PropertyReference property,
-        List<(IInterceptorSubject subject, PropertyReference property, object? index)> children)
-    {
-        var handlers = property.Subject.Context.GetServices<IChildIndexHandler>();
-        if (handlers.Length == 0)
-        {
-            return;
-        }
-
-        var buffers = _reusableBuffers ?? new Buffers();
-        _reusableBuffers = null;
-        try
-        {
-            CollectSubjectsWithChangedPlaces([], CollectionsMarshal.AsSpan(children), buffers);
             ReportChangedChildren(property, buffers.Changes, handlers);
         }
         finally
@@ -149,8 +120,8 @@ internal static class ChildIndexRefresher
     }
 
     // Compares the keys or positions of each kept subject in order, the n-th in the new value with the n-th in the old
-    // one, and reports each subject whose places differ, or which this write attached at more than one place, with all
-    // of its places in the new value as one run, at its first place.
+    // one, and reports each subject whose places differ with all of its places in the new value as one run, at its first
+    // place.
     private static void CollectSubjectsWithChangedPlaces(
         ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> oldSpan,
         ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> newSpan,
@@ -183,8 +154,9 @@ internal static class ChildIndexRefresher
         }
     }
 
-    // Advances the cursor of each subject along its places in the new value, and links each of them to the next one of
-    // the same subject in nextNew, for the report.
+    // Advances the cursor of each kept subject along its places in the new value, and links each of them to the next one
+    // of the same subject in nextNew, for the report. A subject without a cursor was attached by this write, which
+    // carries all of its places.
     private static void MatchNewPlaces(
         ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> oldSpan,
         ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> newSpan,
@@ -195,19 +167,16 @@ internal static class ChildIndexRefresher
         for (var i = 0; i < newSpan.Length; i++)
         {
             var (subject, _, index) = newSpan[i];
-            ref var cursor = ref CollectionsMarshal.GetValueRefOrAddDefault(cursors, subject, out var exists);
-            if (!exists)
+            ref var cursor = ref CollectionsMarshal.GetValueRefOrNullRef(cursors, subject);
+            if (Unsafe.IsNullRef(ref cursor))
             {
-                // Attached by this write: its attach carries the first place, so only a second one is reported.
-                cursor.Next = AttachedOnce;
+                continue;
             }
-            else
+
+            cursor.Next = cursor.Next >= 0 && Equals(oldSpan[cursor.Next].index, index) ? next[cursor.Next] : PlacesDiffer;
+            if (cursor.LastNewPlace != NoNextPlace)
             {
-                cursor.Next = cursor.Next >= 0 && Equals(oldSpan[cursor.Next].index, index) ? next[cursor.Next] : PlacesDiffer;
-                if (cursor.LastNewPlace != NoNextPlace)
-                {
-                    nextNew[cursor.LastNewPlace] = i;
-                }
+                nextNew[cursor.LastNewPlace] = i;
             }
 
             nextNew[i] = NoNextPlace;
@@ -227,7 +196,7 @@ internal static class ChildIndexRefresher
         {
             var subject = newSpan[i].subject;
             ref var cursor = ref CollectionsMarshal.GetValueRefOrNullRef(cursors, subject);
-            if (cursor.Next is AllPlacesMatched or AttachedOnce)
+            if (Unsafe.IsNullRef(ref cursor) || cursor.Next == AllPlacesMatched)
             {
                 continue;
             }
@@ -264,7 +233,7 @@ internal static class ChildIndexRefresher
 
     private struct PlaceCursor
     {
-        // The next place in the old value to compare, or one of AllPlacesMatched, PlacesDiffer and AttachedOnce.
+        // The next place in the old value to compare, or one of AllPlacesMatched and PlacesDiffer.
         public int Next;
 
         // The last place of the subject in the new value seen so far, or NoNextPlace.

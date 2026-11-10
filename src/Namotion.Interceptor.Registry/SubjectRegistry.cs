@@ -184,12 +184,8 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                 var registeredProperty = parentRegisteredSubject.TryGetProperty(property.Name) ??
                     throw new InvalidOperationException($"Property '{property.Name}' not found.");
 
-                registeredSubject.AddParent(registeredProperty, change.Index);
-                registeredProperty.AddChild(new SubjectPropertyChild
-                {
-                    Index = change.Index,
-                    Subject = change.Subject,
-                });
+                registeredSubject.AddParent(registeredProperty, change.Index, change.AdditionalIndices);
+                registeredProperty.AddChild(change.Subject, change.Index, change.AdditionalIndices);
             }
 
             return;

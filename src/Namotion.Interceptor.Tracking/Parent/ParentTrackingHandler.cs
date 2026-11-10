@@ -18,7 +18,7 @@ public class ParentTrackingHandler : ILifecycleHandler, IChildIndexHandler
         // Add parent on attach or reference added
         if (change.IsContextAttach || change.IsPropertyReferenceAdded)
         {
-            change.Subject.AddParent(change.Property.Value, change.Index);
+            change.Subject.AddParent(change.Property.Value, change.Index, change.AdditionalIndices);
             return;
         }
 

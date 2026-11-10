@@ -220,10 +220,10 @@ public class MovedChildConsistencyTests
     }
 
     [Fact]
-    public void WhenHandlerRewritesAnotherPropertyWhileTheAttachReportsRepeatedCars_ThenEveryCopyMatchesBothValues()
+    public void WhenHandlerRewritesALaterPropertyWhileTheAttachRepeatsCars_ThenEveryCopyMatchesBothValues()
     {
         // Arrange
-        var handler = new PropertyWritingChildIndexHandler(nameof(Garage.Cars));
+        var handler = new PropertyWritingLifecycleHandler(nameof(Garage.Cars));
         var context = CreateContext().WithService(() => handler);
         var cars = CreateHeldCars(context, 1);
         var car = cars[0];
@@ -234,7 +234,7 @@ public class MovedChildConsistencyTests
         };
         handler.NestedWrite = () => garage.CarsByName = new Dictionary<string, Car> { ["New"] = car };
 
-        // Act: the attach reports the places of Cars first, and the handler then writes CarsByName.
+        // Act: the attach of the car to Cars comes first, and the handler then writes CarsByName.
         new BroadlyDeclaredHolder(context).BroadCars = garage;
 
         // Assert
@@ -244,10 +244,33 @@ public class MovedChildConsistencyTests
     }
 
     [Fact]
-    public void WhenHandlerRewritesAnotherPropertyKeepingItsRepeatedCarWhileTheAttachReports_ThenEveryCopyMatchesBothValues()
+    public void WhenHandlerRewritesAnEarlierPropertyWhileTheAttachRepeatsCars_ThenEveryCopyMatchesBothValues()
     {
         // Arrange
-        var handler = new PropertyWritingChildIndexHandler(nameof(Garage.Cars));
+        var handler = new PropertyWritingLifecycleHandler(nameof(Garage.CarsByName));
+        var context = CreateContext().WithService(() => handler);
+        var cars = CreateHeldCars(context, 2);
+        var garage = new Garage
+        {
+            Cars = [cars[0], cars[0]],
+            CarsByName = new Dictionary<string, Car> { ["A"] = cars[0], ["B"] = cars[0] }
+        };
+        handler.NestedWrite = () => garage.Cars = [cars[1], cars[0], cars[1]];
+
+        // Act: the attach of the car to CarsByName comes after Cars, which the handler then writes.
+        new BroadlyDeclaredHolder(context).BroadCars = garage;
+
+        // Assert
+        Assert.Null(handler.NestedWrite);
+        AssertEveryCopyMatchesValue(garage, nameof(Garage.Cars), cars);
+        AssertEveryCopyMatchesValue(garage, nameof(Garage.CarsByName), cars);
+    }
+
+    [Fact]
+    public void WhenHandlerRewritesALaterPropertyKeepingItsRepeatedCarWhileTheAttachRepeatsCars_ThenEveryCopyMatchesBothValues()
+    {
+        // Arrange
+        var handler = new PropertyWritingLifecycleHandler(nameof(Garage.Cars));
         var context = CreateContext().WithService(() => handler);
         var cars = CreateHeldCars(context, 2);
         var garage = new Garage
@@ -260,7 +283,7 @@ public class MovedChildConsistencyTests
             ["A"] = cars[0], ["B"] = cars[0], ["C"] = cars[1]
         };
 
-        // Act: the nested write keeps both keys of the repeated car, so it reports nothing.
+        // Act: the nested write keeps both keys of the repeated car.
         new BroadlyDeclaredHolder(context).BroadCars = garage;
 
         // Assert
@@ -481,15 +504,15 @@ public class MovedChildConsistencyTests
     }
 
     /// <summary>
-    /// A child index handler that runs a write once, the first time it is called for the property of the given name.
+    /// A lifecycle handler that runs a write once, the first time a subject is attached to the property of the given name.
     /// </summary>
-    private sealed class PropertyWritingChildIndexHandler(string propertyName) : IChildIndexHandler
+    private sealed class PropertyWritingLifecycleHandler(string propertyName) : ILifecycleHandler
     {
         public Action? NestedWrite { get; set; }
 
-        public void ReplaceChildIndices(PropertyReference property, ReadOnlySpan<SubjectChild> children)
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
         {
-            if (property.Name != propertyName)
+            if (!change.IsPropertyReferenceAdded || change.Property?.Name != propertyName)
                 return;
 
             var nestedWrite = NestedWrite;

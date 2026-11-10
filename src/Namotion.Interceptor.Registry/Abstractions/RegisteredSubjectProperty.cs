@@ -397,12 +397,19 @@ public class RegisteredSubjectProperty
         }
     }
 
-    internal void AddChild(SubjectPropertyChild child)
+    // Adds an entry per place, the index first. No Contains check needed: the lifecycle attaches a subject to a property
+    // once, with all of its places.
+    internal void AddChild(IInterceptorSubject subject, object? index, ImmutableArray<object?> additionalIndices)
     {
         lock (_children)
         {
-            // No Contains check needed: the lifecycle attaches a subject to a property once, at its first place.
-            _children.Insert(GetInsertPosition(child.Index), child);
+            _children.Insert(GetInsertPosition(index), new SubjectPropertyChild { Subject = subject, Index = index });
+            foreach (var additionalIndex in additionalIndices)
+            {
+                _children.Insert(GetInsertPosition(additionalIndex), new SubjectPropertyChild { Subject = subject, Index = additionalIndex });
+            }
+
+            _repeatedChildCount += additionalIndices.Length;
             _childrenCache = default;
         }
     }

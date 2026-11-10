@@ -406,6 +406,66 @@ public class RepeatedChildTests
     }
 
     [Fact]
+    public void WhenAChildIsAttachedTwice_ThenPropertyHasRepeatedChildren()
+    {
+        // Arrange
+        var group = new LightGroup(CreateContext());
+        var property = group.TryGetRegisteredSubject()!.TryGetProperty(nameof(LightGroup.Lights))!;
+        var light = new Light();
+
+        // Act
+        group.Lights = [light, new Light(), light];
+
+        // Assert
+        Assert.True(property.HasRepeatedChildren);
+    }
+
+    [Fact]
+    public void WhenSubjectWhosePropertyRepeatsAChildIsAttached_ThenThePropertyHasRepeatedChildren()
+    {
+        // Arrange
+        var light = new Light();
+        var group = new LightGroup { Lights = [light, light] };
+        var room = new Room(CreateContext());
+
+        // Act
+        room.Group = group;
+
+        // Assert
+        Assert.True(group.TryGetRegisteredSubject()!.TryGetProperty(nameof(LightGroup.Lights))!.HasRepeatedChildren);
+    }
+
+    [Fact]
+    public void WhenDictionaryAttachesAChildUnderTwoKeysAroundAnother_ThenItsEntriesAreConsecutiveAtItsFirstEntry()
+    {
+        // Arrange
+        var repeated = new Light();
+        var other = new Light();
+        var group = new LightGroup(CreateContext());
+
+        // Act
+        group.LightsByName = new Dictionary<string, Light> { ["A"] = repeated, ["B"] = other, ["C"] = repeated };
+
+        // Assert
+        AssertChildrenAndParents(group, nameof(LightGroup.LightsByName), (repeated, "A"), (repeated, "C"), (other, "B"));
+    }
+
+    [Fact]
+    public void WhenListAttachesAChildAtTwoPositionsAroundAnother_ThenEntriesAreInPositionOrder()
+    {
+        // Arrange
+        var repeated = new Light();
+        var other = new Light();
+        var group = new LightGroup(CreateContext());
+
+        // Act
+        group.Lights = [repeated, other, repeated];
+
+        // Assert
+        AssertChildrenAndParents(group, nameof(LightGroup.Lights), (repeated, 0), (other, 1), (repeated, 2));
+    }
+
+    [Fact]
     public void WhenTheRepeatGoes_ThenPropertyHasNoRepeatedChildrenAgain()
     {
         // Arrange

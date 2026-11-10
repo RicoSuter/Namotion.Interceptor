@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 /// <summary>
@@ -17,6 +19,17 @@ public readonly struct SubjectLifecycleChange
     /// per key or position and this is only one of them.
     /// </remarks>
     public object? Index { get; init; }
+
+    /// <summary>
+    /// Gets the later keys or positions of the subject in the property's value, in order, when an added property
+    /// reference finds it at more than one; otherwise empty. Together with <see cref="Index"/> they are every key or
+    /// position of the subject in the value.
+    /// </summary>
+    public ImmutableArray<object?> AdditionalIndices
+    {
+        get => field.IsDefault ? [] : field;
+        init => field = value;
+    }
 
     /// <summary>Gets the number of properties pointing to the referenced subject.</summary>
     public required int ReferenceCount { get; init; }

@@ -212,6 +212,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
     }
     public readonly struct SubjectLifecycleChange
     {
+        public System.Collections.Immutable.ImmutableArray<object?> AdditionalIndices { get; init; }
         public object? Index { get; init; }
         public bool IsContextAttach { get; init; }
         public bool IsContextDetach { get; init; }

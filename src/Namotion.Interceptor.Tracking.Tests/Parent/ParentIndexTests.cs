@@ -538,6 +538,42 @@ public class ParentIndexTests
     }
 
     [Fact]
+    public void WhenCollectionIsClearedInPlaceAndAssignedWithTheSubjectTwice_ThenItKeepsOnlyItsOldIndex()
+    {
+        // Arrange
+        var context = CreateContext().WithRegistry();
+        var car = new Car();
+        var assigned = new List<Car> { car };
+        var garage = new Garage(context) { Cars = assigned };
+
+        // Act: the car is neither kept, since the cleared old value lacks it, nor attached, since its link exists.
+        assigned.Clear();
+        garage.Cars = new List<Car> { car, car };
+
+        // Assert
+        Assert.Equal(Parent(garage, nameof(Garage.Cars), 0), Assert.Single(car.GetParents()));
+        Assert.Equal(0, Assert.Single(garage.TryGetRegisteredProperty(g => g.Cars)!.Children).Index);
+    }
+
+    [Fact]
+    public void WhenSubjectIsAddedAgainInPlaceAndAssignedTwice_ThenItKeepsOnlyItsFirstIndex()
+    {
+        // Arrange
+        var context = CreateContext().WithRegistry();
+        var car = new Car();
+        var assigned = new List<Car> { car };
+        var garage = new Garage(context) { Cars = assigned };
+
+        // Act: the old value is read as it is now, so it already holds the car twice and nothing changed.
+        assigned.Add(car);
+        garage.Cars = new List<Car> { car, car };
+
+        // Assert
+        Assert.Equal(Parent(garage, nameof(Garage.Cars), 0), Assert.Single(car.GetParents()));
+        Assert.Equal(0, Assert.Single(garage.TryGetRegisteredProperty(g => g.Cars)!.Children).Index);
+    }
+
+    [Fact]
     public void WhenHandlerGetsSeveralPlacesOfASubject_ThenItHasAParentEntryPerPlace()
     {
         // Arrange

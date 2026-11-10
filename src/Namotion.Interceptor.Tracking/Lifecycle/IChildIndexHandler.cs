@@ -8,9 +8,10 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 public interface IChildIndexHandler
 {
     /// <summary>
-    /// Called after a structural write, while the lifecycle interceptor holds its lock, with each subject whose stored
-    /// keys or positions have to change, such as a kept subject whose keys or positions changed in number, value or
-    /// order. Not called when there is none.
+    /// Called after a structural write, while the lifecycle interceptor holds its lock, with each subject the write kept
+    /// whose keys or positions changed in number, value or order. A subject the write attached is not passed: its attach
+    /// carries all of its keys or positions (<see cref="SubjectLifecycleChange.Index"/> and
+    /// <see cref="SubjectLifecycleChange.AdditionalIndices"/>). Not called when there is none.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -25,6 +26,6 @@ public interface IChildIndexHandler
     /// </para>
     /// </remarks>
     /// <param name="property">The property whose value holds the subjects.</param>
-    /// <param name="children">The subjects whose stored keys or positions have to change, with every key or position they have in the new value.</param>
+    /// <param name="children">The kept subjects whose keys or positions changed, with every key or position they have in the new value.</param>
     void ReplaceChildIndices(PropertyReference property, ReadOnlySpan<SubjectChild> children);
 }

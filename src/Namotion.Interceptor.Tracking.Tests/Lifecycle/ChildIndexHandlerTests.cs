@@ -142,7 +142,6 @@ public class ChildIndexHandlerTests
         var (context, handler) = CreateContext();
         var car = new Car();
         var garage = new Garage(context) { CarsByName = new Dictionary<string, Car> { ["First"] = car, ["Second"] = car } };
-        handler.Calls.Clear();
 
         // Act
         garage.CarsByName = new Dictionary<string, Car> { ["First"] = car };
@@ -176,7 +175,6 @@ public class ChildIndexHandlerTests
         var (context, handler) = CreateContext();
         var car = new Car();
         var garage = new Garage(context) { Cars = [car, car] };
-        handler.Calls.Clear();
 
         // Act
         garage.Cars = [car];
@@ -193,7 +191,6 @@ public class ChildIndexHandlerTests
         var (context, handler) = CreateContext();
         var car = new Car();
         var garage = new Garage(context) { CarsByName = new Dictionary<string, Car> { ["First"] = car, ["Second"] = car } };
-        handler.Calls.Clear();
 
         // Act
         garage.CarsByName = new Dictionary<string, Car> { ["First"] = car, ["Third"] = car };
@@ -211,7 +208,6 @@ public class ChildIndexHandlerTests
         var car = new Car();
         var other = new Car();
         var garage = new Garage(context) { Cars = [car, car, other] };
-        handler.Calls.Clear();
 
         // Act
         garage.Cars = [car, other, car];
@@ -229,7 +225,6 @@ public class ChildIndexHandlerTests
         var first = new Car();
         var second = new Car();
         var garage = new Garage(context) { Cars = [first, second, second, first] };
-        handler.Calls.Clear();
 
         // Act
         garage.Cars = [first, second, first, second];
@@ -247,7 +242,6 @@ public class ChildIndexHandlerTests
         var car = new Car();
         var other = new Car();
         var garage = new Garage(context) { Cars = [car, other, car] };
-        handler.Calls.Clear();
 
         // Act
         garage.Cars = [car, other, car];
@@ -267,7 +261,6 @@ public class ChildIndexHandlerTests
         {
             CarsByName = new Dictionary<string, Car> { ["A"] = car, ["B"] = car, ["C"] = other }
         };
-        handler.Calls.Clear();
 
         // Act
         garage.CarsByName = new Dictionary<string, Car> { ["A"] = car, ["C"] = other, ["B"] = car };
@@ -286,7 +279,6 @@ public class ChildIndexHandlerTests
         {
             CarsByName = new Dictionary<string, Car> { ["A"] = car, ["B"] = car, ["C"] = car }
         };
-        handler.Calls.Clear();
 
         // Act
         garage.CarsByName = new Dictionary<string, Car> { ["A"] = car, ["C"] = car, ["B"] = car };
@@ -310,7 +302,6 @@ public class ChildIndexHandlerTests
                 [firstKey] = car, [new string('A', 1)] = car
             }
         };
-        handler.Calls.Clear();
 
         // Act
         garage.CarsByName = new Dictionary<string, Car>(ReferenceEqualityComparer.Instance) { [firstKey] = car };
@@ -374,7 +365,6 @@ public class ChildIndexHandlerTests
         {
             CarsByName = new Dictionary<string, Car> { ["P"] = car, ["Q"] = car }
         };
-        handler.Calls.Clear();
 
         // Act
         garage.CarsByName = new Dictionary<string, Car> { ["Q"] = car, ["P"] = car };
@@ -411,7 +401,7 @@ public class ChildIndexHandlerTests
     }
 
     [Fact]
-    public void WhenSubjectIsAttachedAtTwoPositions_ThenHandlerGetsBothPositions()
+    public void WhenSubjectIsAttachedAtTwoPositions_ThenHandlerIsNotCalled()
     {
         // Arrange
         var (context, handler) = CreateContext();
@@ -422,13 +412,12 @@ public class ChildIndexHandlerTests
         // Act
         garage.Cars = [other, car, car];
 
-        // Assert
-        var call = Assert.Single(handler.Calls);
-        Assert.Equal([new SubjectChild(car, 1), new SubjectChild(car, 2)], call.Children);
+        // Assert: the attach carries both positions.
+        Assert.Empty(handler.Calls);
     }
 
     [Fact]
-    public void WhenSubjectIsAttachedAtTwoKeys_ThenHandlerGetsBothKeys()
+    public void WhenSubjectIsAttachedAtTwoKeys_ThenHandlerIsNotCalled()
     {
         // Arrange
         var (context, handler) = CreateContext();
@@ -438,9 +427,25 @@ public class ChildIndexHandlerTests
         // Act
         garage.CarsByName = new Dictionary<string, Car> { ["A"] = car, ["B"] = car };
 
+        // Assert: the attach carries both keys.
+        Assert.Empty(handler.Calls);
+    }
+
+    [Fact]
+    public void WhenKeptSubjectMovesWhileAnotherIsAttachedTwice_ThenHandlerGetsOnlyTheKeptSubject()
+    {
+        // Arrange
+        var (context, handler) = CreateContext();
+        var kept = new Car();
+        var attached = new Car();
+        var garage = new Garage(context) { Cars = [kept] };
+
+        // Act
+        garage.Cars = [attached, kept, attached];
+
         // Assert
         var call = Assert.Single(handler.Calls);
-        Assert.Equal([new SubjectChild(car, "A"), new SubjectChild(car, "B")], call.Children);
+        Assert.Equal([new SubjectChild(kept, 1)], call.Children);
     }
 
     private sealed class CastingKey
@@ -467,7 +472,7 @@ public class ChildIndexHandlerTests
     }
 
     [Fact]
-    public void WhenParentHoldingASubjectTwiceIsAttached_ThenHandlerGetsBothPositions()
+    public void WhenParentHoldingASubjectTwiceIsAttached_ThenHandlerIsNotCalled()
     {
         // Arrange
         var (context, handler) = CreateContext();
@@ -478,10 +483,8 @@ public class ChildIndexHandlerTests
         // Act
         holder.BroadCars = garage;
 
-        // Assert
-        var call = Assert.Single(handler.Calls);
-        Assert.Equal(new PropertyReference(garage, nameof(Garage.Cars)), call.Property);
-        Assert.Equal([new SubjectChild(car, 0), new SubjectChild(car, 1)], call.Children);
+        // Assert: the attach carries both positions.
+        Assert.Empty(handler.Calls);
     }
 
     [Fact]
@@ -494,7 +497,6 @@ public class ChildIndexHandlerTests
         var garage = new Garage(context) { Cars = [car, car] };
         var otherContext = InterceptorSubjectContext.Create();
         otherContext.AddFallbackContext(context);
-        handler.Calls.Clear();
         var structureVersion = registry.StructureVersion;
 
         // Act: the other context reaches the same lifecycle interceptor, which attaches the subject again.

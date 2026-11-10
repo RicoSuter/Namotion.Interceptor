@@ -9,10 +9,11 @@ public static class ParentsHandlerExtensions
 {
     private const string ParentsKey = "ni.parents";
 
-    internal static void AddParent(this IInterceptorSubject subject, PropertyReference parent, object? index)
+    internal static void AddParent(this IInterceptorSubject subject, PropertyReference parent, object? index,
+        ImmutableArray<object?> additionalIndices = default)
     {
         var parentsSet = (ParentsSet)subject.Data.GetOrAdd((null, ParentsKey), _ => new ParentsSet())!;
-        parentsSet.Add(parent, index);
+        parentsSet.Add(parent, index, additionalIndices);
     }
 
     internal static void RemoveParent(this IInterceptorSubject subject, PropertyReference parent)
@@ -212,11 +213,20 @@ public static class ParentsHandlerExtensions
         private readonly Dictionary<PropertyReference, object?> _indices = [];
         private volatile ImmutableArray<SubjectParent>[]? _cache; // Box in array for volatile
 
-        public void Add(PropertyReference parent, object? index)
+        public void Add(PropertyReference parent, object? index, ImmutableArray<object?> additionalIndices)
         {
+            object? stored = index;
+            if (!additionalIndices.IsDefaultOrEmpty)
+            {
+                var indices = new object?[additionalIndices.Length + 1];
+                indices[0] = index;
+                additionalIndices.CopyTo(indices, 1);
+                stored = new Places(indices);
+            }
+
             lock (_lock)
             {
-                _indices[parent] = index;
+                _indices[parent] = stored;
                 _cache = null; // Invalidate cache
             }
         }
