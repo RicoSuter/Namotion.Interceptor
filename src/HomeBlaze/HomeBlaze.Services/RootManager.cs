@@ -126,17 +126,15 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
         var skipped = new List<SkippedConfigurationProperty>();
 
         // All IConfigurable implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
-        var root = _serializer.Deserialize(json, created: null, skipped.Add) as IInterceptorSubject ??
+        Root = _serializer.Deserialize(json, created: null, skipped.Add) as IInterceptorSubject ??
             throw new InvalidOperationException("Failed to deserialize root configuration");
-        var issues = _serializer.ReportIssues(root, json, skipped);
-        if (!issues.IsEmpty)
+        if (skipped.Count > 0)
         {
             _logger?.LogWarning(
                 "The root configuration has issues that saving it would lose; correct them in the file and restart HomeBlaze: {Issues}",
-                string.Join("; ", issues));
+                ConfigurableSubjectSerializer.DescribeSkippedProperties(skipped));
         }
 
-        Root = root;
         Root.Context.AddFallbackContext(_context);
 
         _logger?.LogInformation("Root loaded: {Type}", Root.GetType().FullName);

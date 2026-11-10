@@ -1,7 +1,5 @@
-using System.Text.Json.Nodes;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Automation.Tests.Testing;
-using HomeBlaze.Services;
 using Namotion.Interceptor.Testing;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
@@ -98,62 +96,6 @@ public class AutomationConfigurationTests
         // Assert
         Assert.Equal(2, host.Blinds.CloseCount);
         Assert.Equal(2L, host.Rule("retract").RunCount);
-    }
-
-    [Fact]
-    public async Task WhenTheFileOfTheAutomationHasIssues_ThenTheStatusShowsThemAndNoRuleRuns()
-    {
-        // Arrange
-        await using var host = await AutomationTestHost.StartAsync(automation =>
-        {
-            automation.Rules = Keyed(("retract", Retract()));
-            ((IConfigurationIssueReceiver)automation).SetConfigurationIssues(["'enabeld' is no setting of Automation"]);
-        });
-
-        // Act
-        host.Weather.Gust = 9;
-        await host.FlushAsync();
-
-        // Assert
-        Assert.Equal(ServiceStatus.Error, host.Automation.Status);
-        Assert.Contains("'enabeld' is no setting of Automation", host.Automation.StatusMessage);
-        Assert.Equal(0, host.Blinds.CloseCount);
-    }
-
-    [Fact]
-    public async Task WhenTheFileOfTheAutomationIsReadAgainWithAnIssueAndThenCorrected_ThenTheErrorIsShownUntilTheCorrectedFileApplies()
-    {
-        // Arrange
-        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(("retract", Retract())));
-        var serializer = new ConfigurableSubjectSerializer(new TypeProvider().AddAssembly(typeof(Automation).Assembly), host.ServiceProvider);
-        var correctJson = serializer.Serialize(host.Automation);
-        var json = JsonNode.Parse(correctJson)!;
-        json["enabled"] = "yes";
-        var jsonWithIssue = json.ToJsonString();
-
-        // Act
-        await ReadFileAgainAsync(host, serializer, jsonWithIssue);
-        var statusWithIssue = host.Automation.Status;
-        var messageWithIssue = host.Automation.StatusMessage;
-        await ReadFileAgainAsync(host, serializer, correctJson);
-        host.Weather.Gust = 9;
-        await host.FlushAsync();
-
-        // Assert
-        Assert.Equal(ServiceStatus.Error, statusWithIssue);
-        Assert.StartsWith("The configuration is invalid and was not applied; the previous one keeps running: the value of 'enabled' could not be read", messageWithIssue);
-        Assert.Equal(ServiceStatus.Running, host.Automation.Status);
-        Assert.Null(host.Automation.StatusMessage);
-        Assert.Equal(1, host.Blinds.CloseCount);
-    }
-
-    // Reads the file into the automation and applies it, as the storage does when the file changes.
-    private static async Task ReadFileAgainAsync(AutomationTestHost host, ConfigurableSubjectSerializer serializer, string json)
-    {
-        var skipped = new List<SkippedConfigurationProperty>();
-        serializer.UpdateConfiguration(host.Automation, json, skipped.Add);
-        serializer.ReportIssues(host.Automation, json, skipped);
-        await host.SaveAsync();
     }
 
     [Fact]

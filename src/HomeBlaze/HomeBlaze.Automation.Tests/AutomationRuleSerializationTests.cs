@@ -142,34 +142,6 @@ public sealed class AutomationRuleSerializationTests : IDisposable
         }
         """;
 
-    [Fact]
-    public void WhenTheAutomationFileHasAKeyThatNamesNoSettingAndAValueThatCannotBeRead_ThenTheyAreConfigurationErrors()
-    {
-        // Arrange
-        var serializer = CreateSerializer();
-        var json = """
-            {
-              "$type": "HomeBlaze.Automation.Automation",
-              "enabeld": false,
-              "rules": { "retract": { "name": "Retract", "mode": "Sometimes" } }
-            }
-            """;
-        var skipped = new List<SkippedConfigurationProperty>();
-        using var automation = (Automation)serializer.Deserialize(json, created: null, skipped.Add)!;
-
-        // Act
-        serializer.ReportIssues(automation, json, skipped);
-
-        // Assert
-        Assert.Equal(2, automation.ConfigurationIssues.Length);
-        Assert.StartsWith("the value of 'rules' could not be read: ", automation.ConfigurationIssues[0]);
-        Assert.Equal("'enabeld' is no setting of Automation", automation.ConfigurationIssues[1]);
-        Assert.False(AutomationCompiler.TryCompile(
-            automation.States, automation.InitialState, automation.Rules, automation.RuleOrder, automation.ConfigurationIssues, out _, out var error));
-        Assert.StartsWith("the value of 'rules' could not be read: ", error);
-        Assert.EndsWith("; 'enabeld' is no setting of Automation", error);
-    }
-
     private static string? GetConfigurationError(Automation automation)
     {
         AutomationCompiler.TryCompile(automation.States, automation.InitialState, automation.Rules, automation.RuleOrder, out _, out var error);

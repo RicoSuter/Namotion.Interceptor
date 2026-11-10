@@ -143,7 +143,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         var rules = _automation.Rules;
         TakeRunsOfReplacedRules(rules);
         _keeper.RestoreRules(rules);
-        if (AutomationCompiler.TryCompile(_automation.States, _automation.InitialState, rules, _automation.RuleOrder, _automation.ConfigurationIssues, out var compiled, out var error))
+        if (AutomationCompiler.TryCompile(_automation.States, _automation.InitialState, rules, _automation.RuleOrder, out var compiled, out var error))
         {
             Replace(compiled, requestedAt);
         }
