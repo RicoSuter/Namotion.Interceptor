@@ -37,6 +37,8 @@ public class StructuralWriteBenchmark
     private Car[] _itemsWithFirstRepeated;
     private Car[] _itemsWithFirstRepeatedCopy;
     private Car[] _itemsWithSecondRepeated;
+    private Car[] _itemsAroundRepeated;
+    private Car[] _itemsRotatedAroundRepeated;
 
     private Dictionary<string, Car> _entries;
     private Dictionary<string, Car> _entriesCopy;
@@ -68,6 +70,10 @@ public class StructuralWriteBenchmark
         _itemsWithFirstRepeated = [.. _items, _items[0]];
         _itemsWithFirstRepeatedCopy = [.. _itemsWithFirstRepeated];
         _itemsWithSecondRepeated = [.. _items, _items[1]];
+
+        var repeated = new Car();
+        _itemsAroundRepeated = [repeated, .. _items, repeated];
+        _itemsRotatedAroundRepeated = [repeated, .. _itemsRotated, repeated];
 
         _entries = Enumerable.Range(0, EntryCount).ToDictionary(index => $"Car{index}", _ => new Car());
         _entriesCopy = new Dictionary<string, Car>(_entries);
@@ -132,6 +138,16 @@ public class StructuralWriteBenchmark
     {
         _toggle = !_toggle;
         _car.PreviousCars = _toggle ? _itemsWithSecondRepeated : _itemsWithFirstRepeated;
+    }
+
+    /// <summary>
+    /// Every item stays and moves to another position, except an item held twice, which stays at both of its positions.
+    /// </summary>
+    [Benchmark]
+    public void MoveCollectionItemsAroundAnItemHeldTwice()
+    {
+        _toggle = !_toggle;
+        _car.PreviousCars = _toggle ? _itemsRotatedAroundRepeated : _itemsAroundRepeated;
     }
 
     /// <summary>
