@@ -1,25 +1,23 @@
+using System.Collections.Immutable;
 using System.Globalization;
 
 namespace Namotion.Interceptor.Expressions;
 
 internal abstract class ExpressionNode;
 
-/// <summary>A number (a boxed <see cref="double"/>), a duration (a boxed <see cref="TimeSpan"/>), a boolean, a text or null.</summary>
-internal sealed class LiteralNode(object? value, string? bareWord = null) : ExpressionNode
+/// <summary>A number (a boxed <see cref="decimal"/> when it is exact, otherwise a boxed <see cref="double"/>), a duration (a boxed <see cref="TimeSpan"/>), a boolean, a text or null.</summary>
+internal sealed class LiteralNode(object? value) : ExpressionNode
 {
     public object? Value { get; } = value;
-
-    /// <summary>The word when the literal is a bare word after a comparison operator, which arithmetic reads as a path.</summary>
-    public string? BareWord { get; } = bareWord;
 }
 
 internal sealed class PathNode : ExpressionNode
 {
-    public PathNode(string path, char pathSeparator)
+    public PathNode(string path, char pathSeparator, ImmutableArray<string> variables)
     {
         Path = path;
         // Split once here, so that an evaluation allocates no part of the path.
-        if (ExpressionVariables.TryGetVariable(path, pathSeparator, out var variable, out var memberPath))
+        if (ExpressionVariables.TryGetVariable(path, pathSeparator, variables, out var variable, out var memberPath))
         {
             Variable = variable;
             MemberPath = memberPath;
@@ -33,6 +31,11 @@ internal sealed class PathNode : ExpressionNode
 
     /// <summary>The rest of the path after the variable and its separator, or null for the variable alone or a path without one.</summary>
     public string? MemberPath { get; }
+}
+
+internal sealed class NegationNode(ExpressionNode operand) : ExpressionNode
+{
+    public ExpressionNode Operand { get; } = operand;
 }
 
 internal sealed class NotNode(ExpressionNode operand) : ExpressionNode
@@ -74,15 +77,32 @@ internal sealed class ComparisonNode(ExpressionNode left, ComparisonOperator com
 
     public bool IsEquality => Operator is ComparisonOperator.Equal or ComparisonOperator.NotEqual;
 
-    /// <summary>The instant of a text literal on the left, parsed once, for the comparison with a date.</summary>
-    public DateTimeOffset? LeftInstant { get; } = TryParseInstant(left);
+    /// <summary>The conversions of a literal on the left, done once.</summary>
+    public ConvertedLiteral LeftLiteral { get; } = ConvertedLiteral.Create(left);
 
-    /// <summary>The instant of a text literal on the right, parsed once, for the comparison with a date.</summary>
-    public DateTimeOffset? RightInstant { get; } = TryParseInstant(right);
+    /// <summary>The conversions of a literal on the right, done once.</summary>
+    public ConvertedLiteral RightLiteral { get; } = ConvertedLiteral.Create(right);
+}
+
+/// <summary>The conversions of a literal operand of a comparison that would otherwise repeat at every evaluation.</summary>
+internal readonly struct ConvertedLiteral
+{
+    /// <summary>The instant of a text literal that is a date, for the comparison with a date; otherwise null.</summary>
+    public DateTimeOffset? Instant { get; private init; }
+
+    /// <summary>The double of a number literal, for the comparison with a double or a float; otherwise null.</summary>
+    public double? Number { get; private init; }
+
+    public static ConvertedLiteral Create(ExpressionNode node) => node switch
+    {
+        LiteralNode { Value: string text } => new ConvertedLiteral { Instant = TryParseInstant(text) },
+        LiteralNode { Value: decimal number } => new ConvertedLiteral { Number = (double)number },
+        LiteralNode { Value: double number } => new ConvertedLiteral { Number = number },
+        _ => default
+    };
 
     // A text without an offset is read as UTC.
-    private static DateTimeOffset? TryParseInstant(ExpressionNode node) =>
-        node is LiteralNode { Value: string text } &&
+    private static DateTimeOffset? TryParseInstant(string text) =>
         DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var instant)
             ? instant
             : null;
