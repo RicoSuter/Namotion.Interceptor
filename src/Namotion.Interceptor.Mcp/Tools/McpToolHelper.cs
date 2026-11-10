@@ -2,6 +2,7 @@ using System.Text.Json;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Models;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mcp.Tools;
@@ -218,8 +219,18 @@ internal static class McpToolHelper
         // The registry checks inclusion in the walk that builds the text, so a subject moved on it while a call runs
         // cannot put the name of a hidden property into the text.
         var pathProvider = configuration.ToolPathProvider;
+        RegisteredSubjectProperty? previousProperty = null;
         foreach (var parent in subject.Parents)
         {
+            // The entries of a property are adjacent, and a path that fails for one of its keys or positions fails for
+            // all, except under an [InlinePaths] property, where the key's text decides whether the path can name it.
+            if (parent.Property == previousProperty &&
+                !InlinePathsAttribute.IsInlinePathsProperty(parent.Property.Subject.GetType(), parent.Property.Name))
+            {
+                continue;
+            }
+
+            previousProperty = parent.Property;
             if (parent.Property.TryGetPath(pathProvider, rootSubject, parent.Index) is { } path)
             {
                 return $"{pathPrefix}{path}";
