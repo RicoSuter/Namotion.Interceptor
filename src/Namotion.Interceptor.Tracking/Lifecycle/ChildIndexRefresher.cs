@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
@@ -14,18 +13,14 @@ internal static class ChildIndexRefresher
     [ThreadStatic]
     private static Buffers? _reusableBuffers;
 
-    private const int AllPlacesMatched = -1;
-    private const int PlacesDiffer = -2;
-
     /// <summary>
-    /// Reports every subject both values hold whose keys or positions differ between them, with the first of them in
-    /// the new value.
+    /// Reports every subject both values hold whose first key or position differs between them.
     /// </summary>
     /// <param name="property">The written property.</param>
     /// <param name="oldChildren">The subjects the old value held, as the lifecycle interceptor scanned them.</param>
     /// <param name="newChildren">The subjects the new value holds, scanned the same way.</param>
     /// <param name="oldSubjects">The distinct subjects in <paramref name="oldChildren"/>.</param>
-    /// <param name="newSubjects">The distinct subjects in <paramref name="newChildren"/>.</param>
+    /// <param name="newSubjects">The distinct subjects in <paramref name="newChildren"/>. The set is used up and must not be read afterwards.</param>
     public static void RefreshMovedChildren(
         PropertyReference property,
         List<(IInterceptorSubject subject, PropertyReference property, object? index)> oldChildren,
@@ -60,7 +55,6 @@ internal static class ChildIndexRefresher
             // Release references so subjects can be GC'd on idle threads
             buffers.Changes.Clear();
             buffers.OldIndices.Clear();
-            buffers.Cursors.Clear();
             _reusableBuffers = buffers;
         }
     }
@@ -76,18 +70,16 @@ internal static class ChildIndexRefresher
         var newSpan = CollectionsMarshal.AsSpan(newChildren);
 
         // A subject held more than once is known by its first key or position, which a comparison
-        // by place cannot tell from a later one, and its later ones can change while the first stays.
-        if (oldSubjects.Count != oldSpan.Length || newSubjects.Count != newSpan.Length)
-        {
-            CollectSubjectsWithChangedPlaces(oldSpan, newSpan, buffers);
-            return;
-        }
+        // by place cannot tell from a later one, so every first occurrence is looked up instead.
+        var holdsDuplicates = oldSubjects.Count != oldSpan.Length || newSubjects.Count != newSpan.Length;
 
         var oldIndices = buffers.OldIndices;
         for (var i = 0; i < newSpan.Length; i++)
         {
             var (subject, _, index) = newSpan[i];
-            if (IsWhereItWas(oldSpan, i, subject, index))
+
+            // Taking a subject out of the set is what skips its later occurrences.
+            if (holdsDuplicates ? !newSubjects.Remove(subject) : IsWhereItWas(oldSpan, i, subject, index))
                 continue;
 
             // A subject this write attached already carries its index.
@@ -102,49 +94,6 @@ internal static class ChildIndexRefresher
             if (!Equals(oldIndices[subject], index))
             {
                 buffers.Changes.Add(new SubjectChild(subject, index));
-            }
-        }
-    }
-
-    // Compares the keys or positions of each kept subject in order, the n-th in the new value with the n-th in the old
-    // one, and reports the subject with its first one when they differ.
-    private static void CollectSubjectsWithChangedPlaces(
-        ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> oldSpan,
-        ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> newSpan,
-        Buffers buffers)
-    {
-        // Each subject of the old value has a cursor on its next place in oldSpan to compare, and nextPlaces links
-        // each place to the next one of the same subject.
-        var cursors = buffers.Cursors;
-        var nextPlaces = buffers.NextPlaces;
-        CollectionsMarshal.SetCount(nextPlaces, oldSpan.Length);
-        var next = CollectionsMarshal.AsSpan(nextPlaces);
-        for (var i = oldSpan.Length - 1; i >= 0; i--)
-        {
-            ref var cursor = ref CollectionsMarshal.GetValueRefOrAddDefault(cursors, oldSpan[i].subject, out var exists);
-            next[i] = exists ? cursor : AllPlacesMatched;
-            cursor = i;
-        }
-
-        // A subject this write attached has no cursor, since its attach carries its index.
-        foreach (var (subject, _, index) in newSpan)
-        {
-            ref var cursor = ref CollectionsMarshal.GetValueRefOrNullRef(cursors, subject);
-            if (!Unsafe.IsNullRef(ref cursor))
-            {
-                cursor = cursor >= 0 && Equals(oldSpan[cursor].index, index) ? next[cursor] : PlacesDiffer;
-            }
-        }
-
-        // Each subject whose places differed, or whose cursor is still on a place the new value lost, is reported once,
-        // at its first place.
-        foreach (var (subject, _, index) in newSpan)
-        {
-            ref var cursor = ref CollectionsMarshal.GetValueRefOrNullRef(cursors, subject);
-            if (!Unsafe.IsNullRef(ref cursor) && cursor != AllPlacesMatched)
-            {
-                buffers.Changes.Add(new SubjectChild(subject, index));
-                cursor = AllPlacesMatched;
             }
         }
     }
@@ -175,9 +124,5 @@ internal static class ChildIndexRefresher
         public List<SubjectChild> Changes { get; } = [];
 
         public Dictionary<IInterceptorSubject, object?> OldIndices { get; } = new(ReferenceEqualityComparer.Instance);
-
-        public Dictionary<IInterceptorSubject, int> Cursors { get; } = new(ReferenceEqualityComparer.Instance);
-
-        public List<int> NextPlaces { get; } = [];
     }
 }

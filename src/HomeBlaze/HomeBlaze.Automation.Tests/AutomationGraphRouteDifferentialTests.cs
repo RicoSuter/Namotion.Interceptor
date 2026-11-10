@@ -22,8 +22,12 @@ namespace HomeBlaze.Automation.Tests;
 /// queued before the workers process them; a move flushes between its two writes. The rules write only properties that
 /// no other automation reads, so that the workers of a step do not race each other. Without routes every automation
 /// receives every structural change, also one that cannot change what its paths resolve to, which differs observably
-/// in two ways only, each kept out of the scenario by the constraint named here:
+/// in three ways only, each kept out of the scenario by the constraint named here:
 /// <list type="bullet">
+/// <item>The registry does not count a write that only adds, removes, replaces or reorders a later key or position of a
+/// subject that a collection holds more than once, so a path through such a key or position can keep what it resolved
+/// to before: with routes until the structure on the path changes again, without routes until the next structural
+/// change anywhere. A step never makes a collection hold a sensor more than once.</item>
 /// <item>A structural write that a rule makes reaches every automation at the chain depth of the run, and beyond the
 /// chain limit it is dropped and reported as a stopped feedback chain by an automation that takes no part in the chain,
 /// unless its graph change was still queued, and counted among the dropped inputs of an automation in the chain whose
@@ -425,13 +429,18 @@ public class AutomationGraphRouteDifferentialTests
             [.. room.Devices.Values.Concat(room.Items).Append(room.Sensor).OfType<TestSensor>()];
 
         // A sensor that is in the graph already, often in the room it is written to, so that it gets a second parent or
-        // another key or position in the same collection, or a new one.
-        private TestSensor PickSensor(TestRoom? target = null)
+        // another property of the same room, or a new one; see the remarks of the test class for why not one that the
+        // collection holds already.
+        private TestSensor PickSensor(TestRoom? target = null, IEnumerable<TestSensor>? collection = null)
         {
             if (_random.Next(3) == 0 && (target is not null && _random.Next(2) == 0 ? target : PickRoom()) is { } room &&
                 SensorsOf(room) is { Count: > 0 } existing)
             {
-                return existing[_random.Next(existing.Count)];
+                var sensor = existing[_random.Next(existing.Count)];
+                if (collection?.Contains(sensor) != true)
+                {
+                    return sensor;
+                }
             }
 
             return CreateSensor();
@@ -452,7 +461,7 @@ public class AutomationGraphRouteDifferentialTests
             }
             else
             {
-                devices[key] = PickSensor(room);
+                devices[key] = PickSensor(room, devices.Values);
             }
 
             room.Devices = devices;
@@ -478,7 +487,7 @@ public class AutomationGraphRouteDifferentialTests
             }
             else
             {
-                items.Insert(_random.Next(items.Count + 1), PickSensor(room));
+                items.Insert(_random.Next(items.Count + 1), PickSensor(room, items));
             }
 
             room.Items = items;

@@ -25,10 +25,6 @@ public interface ISubjectRegistry
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A write that only adds, removes, replaces or reorders the later keys or positions of a subject the property holds
-    /// counts as a change of child indices, although the entries, which carry the first of them, keep an equal index.
-    /// </para>
-    /// <para>
     /// An even number marks the end of one change, not of a whole property write: one write can make several changes,
     /// such as detaching a subtree or replacing the items of a collection, and the number is even between them.
     /// </para>

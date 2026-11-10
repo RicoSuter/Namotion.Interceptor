@@ -34,16 +34,11 @@ public class StructuralWriteBenchmark
     private Car[] _itemsCopy;
     private Car[] _itemsRotated;
     private Car[] _otherItems;
-    private Car[] _itemsWithFirstRepeated;
-    private Car[] _itemsWithFirstRepeatedCopy;
-    private Car[] _itemsWithSecondRepeated;
 
     private Dictionary<string, Car> _entries;
     private Dictionary<string, Car> _entriesCopy;
     private Dictionary<string, Car> _entriesWithOneAdded;
     private Dictionary<string, Car> _entriesWithOneReKeyed;
-    private Dictionary<string, Car> _entriesWithAlias;
-    private Dictionary<string, Car> _entriesWithAliasCopy;
 
     private bool _toggle;
 
@@ -65,9 +60,6 @@ public class StructuralWriteBenchmark
         _itemsCopy = [.. _items];
         _itemsRotated = [.. _items.Skip(1), _items[0]];
         _otherItems = Enumerable.Range(0, EntryCount).Select(_ => new Car()).ToArray();
-        _itemsWithFirstRepeated = [.. _items, _items[0]];
-        _itemsWithFirstRepeatedCopy = [.. _itemsWithFirstRepeated];
-        _itemsWithSecondRepeated = [.. _items, _items[1]];
 
         _entries = Enumerable.Range(0, EntryCount).ToDictionary(index => $"Car{index}", _ => new Car());
         _entriesCopy = new Dictionary<string, Car>(_entries);
@@ -76,9 +68,6 @@ public class StructuralWriteBenchmark
         _entriesWithOneReKeyed = new Dictionary<string, Car>(_entries);
         _entriesWithOneReKeyed.Remove($"Car{EntryCount / 2}", out var reKeyed);
         _entriesWithOneReKeyed["Renamed"] = reKeyed!;
-
-        _entriesWithAlias = new Dictionary<string, Car>(_entries) { ["Alias"] = _entries["Car0"] };
-        _entriesWithAliasCopy = new Dictionary<string, Car>(_entriesWithAlias);
 
         _car = new Car(context) { PreviousCars = _items };
         _garage = new Garage(context) { ByName = _entries };
@@ -115,26 +104,6 @@ public class StructuralWriteBenchmark
     }
 
     /// <summary>
-    /// Every item stays at its positions, one of them at two.
-    /// </summary>
-    [Benchmark]
-    public void ReplaceCollectionHoldingAnItemTwice()
-    {
-        _toggle = !_toggle;
-        _car.PreviousCars = _toggle ? _itemsWithFirstRepeatedCopy : _itemsWithFirstRepeated;
-    }
-
-    /// <summary>
-    /// Every item stays at its first position, and the last position goes from one item held twice to another.
-    /// </summary>
-    [Benchmark]
-    public void ChangeRepeatedCollectionItem()
-    {
-        _toggle = !_toggle;
-        _car.PreviousCars = _toggle ? _itemsWithSecondRepeated : _itemsWithFirstRepeated;
-    }
-
-    /// <summary>
     /// Every entry stays under its key.
     /// </summary>
     [Benchmark]
@@ -162,25 +131,5 @@ public class StructuralWriteBenchmark
     {
         _toggle = !_toggle;
         _garage.ByName = _toggle ? _entriesWithOneReKeyed : _entries;
-    }
-
-    /// <summary>
-    /// Every entry stays under its key, one subject under two.
-    /// </summary>
-    [Benchmark]
-    public void ReplaceDictionaryHoldingASubjectTwice()
-    {
-        _toggle = !_toggle;
-        _garage.ByName = _toggle ? _entriesWithAliasCopy : _entriesWithAlias;
-    }
-
-    /// <summary>
-    /// A subject gains or loses a second key and the rest stay.
-    /// </summary>
-    [Benchmark]
-    public void AddOrRemoveSecondKeyOfASubject()
-    {
-        _toggle = !_toggle;
-        _garage.ByName = _toggle ? _entriesWithAlias : _entries;
     }
 }
