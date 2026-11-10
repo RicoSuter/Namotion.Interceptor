@@ -1,12 +1,11 @@
-using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 /// <summary>
-/// Tells the <see cref="IChildIndexHandler"/> services of a context which children a structural
-/// write left under other keys or positions.
+/// Tells the <see cref="IChildIndexHandler"/> services of a context which children a structural write left under other
+/// keys or positions.
 /// </summary>
 internal static class ChildIndexRefresher
 {
@@ -45,57 +44,44 @@ internal static class ChildIndexRefresher
         _reusableBuffers = null;
         try
         {
-            CollectMovedChildren(oldChildren, newChildren, oldSubjects, newSubjects, buffers);
-            ReportChangedChildren(property, buffers.Changes, handlers);
+            var oldSpan = CollectionsMarshal.AsSpan(oldChildren);
+            var newSpan = CollectionsMarshal.AsSpan(newChildren);
+
+            // A subject held more than once has several places, which a comparison of first places cannot follow.
+            if (oldSubjects.Count != oldSpan.Length || newSubjects.Count != newSpan.Length)
+            {
+                CollectSubjectsWithChangedPlaces(oldSpan, newSpan, buffers);
+            }
+            else
+            {
+                CollectMovedChildren(oldSpan, newSpan, oldSubjects, buffers);
+            }
+
+            if (buffers.Changes.Count > 0)
+            {
+                var changes = CollectionsMarshal.AsSpan(buffers.Changes);
+                for (var i = 0; i < handlers.Length; i++)
+                {
+                    handlers[i].ReplaceChildIndices(property, changes);
+                }
+            }
         }
         finally
         {
-            ReturnBuffers(buffers);
+            // Release references so subjects can be GC'd on idle threads
+            buffers.Changes.Clear();
+            buffers.OldIndices.Clear();
+            buffers.Cursors.Clear();
+            _reusableBuffers = buffers;
         }
-    }
-
-    // Hands the children whose places changed, if any, to every handler.
-    private static void ReportChangedChildren(
-        PropertyReference property, List<SubjectChild> changedChildren, ImmutableArray<IChildIndexHandler> handlers)
-    {
-        if (changedChildren.Count == 0)
-        {
-            return;
-        }
-
-        var span = CollectionsMarshal.AsSpan(changedChildren);
-        for (var i = 0; i < handlers.Length; i++)
-        {
-            handlers[i].ReplaceChildIndices(property, span);
-        }
-    }
-
-    private static void ReturnBuffers(Buffers buffers)
-    {
-        // Release references so subjects can be GC'd on idle threads
-        buffers.Changes.Clear();
-        buffers.OldIndices.Clear();
-        buffers.Cursors.Clear();
-        _reusableBuffers = buffers;
     }
 
     private static void CollectMovedChildren(
-        List<(IInterceptorSubject subject, PropertyReference property, object? index)> oldChildren,
-        List<(IInterceptorSubject subject, PropertyReference property, object? index)> newChildren,
+        ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> oldSpan,
+        ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> newSpan,
         HashSet<IInterceptorSubject> oldSubjects,
-        HashSet<IInterceptorSubject> newSubjects,
         Buffers buffers)
     {
-        var oldSpan = CollectionsMarshal.AsSpan(oldChildren);
-        var newSpan = CollectionsMarshal.AsSpan(newChildren);
-
-        // A subject held more than once has several places, which a comparison of first places cannot follow.
-        if (oldSubjects.Count != oldSpan.Length || newSubjects.Count != newSpan.Length)
-        {
-            CollectSubjectsWithChangedPlaces(oldSpan, newSpan, buffers);
-            return;
-        }
-
         var oldIndices = buffers.OldIndices;
         for (var i = 0; i < newSpan.Length; i++)
         {
