@@ -445,6 +445,15 @@ namespace HomeBlaze.Services.Lifecycle
         public void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
     }
 }
+namespace HomeBlaze.Services.Messaging
+{
+    public static class SubjectEvents
+    {
+        public static System.Type? FindEventType(System.Type subjectType, string name) { }
+        public static System.Collections.Immutable.ImmutableArray<System.Type> GetEventTypes(System.Type subjectType) { }
+        public static System.IDisposable Subscribe(object source, System.Type eventType, System.Action<HomeBlaze.Abstractions.Messaging.IEvent> onEvent) { }
+    }
+}
 namespace HomeBlaze.Services.Metadata
 {
     public static class ChildOrdering
