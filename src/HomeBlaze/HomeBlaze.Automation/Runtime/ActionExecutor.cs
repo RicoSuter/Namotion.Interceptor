@@ -115,7 +115,7 @@ internal sealed class ActionExecutor(
     {
         operation = null;
         var path = action.OperationPath;
-        var property = AutomationPaths.ResolveTarget(resolver, path, scope.Rule);
+        var property = resolver.ResolveTarget(path, scope.Rule);
         if (property?.TryGetMethodMetadata() is not { } method)
         {
             error = $"No operation at {path}";
@@ -146,7 +146,7 @@ internal sealed class ActionExecutor(
     {
         write = null;
         var path = action.PropertyPath;
-        if (AutomationPaths.ResolveTarget(resolver, path, scope.Rule) is not { } property)
+        if (resolver.ResolveTarget(path, scope.Rule) is not { } property)
         {
             error = $"No property at {path}";
             return false;

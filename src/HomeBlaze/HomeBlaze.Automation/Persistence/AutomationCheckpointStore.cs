@@ -56,7 +56,7 @@ internal sealed class AutomationCheckpointStore
             return null;
         }
 
-        var names = automationPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var names = automationPath.Split(SubjectPathResolver.Separator, StringSplitOptions.RemoveEmptyEntries);
         var segments = new string[names.Length == 0 ? 1 : names.Length];
         for (var index = 0; index < names.Length; index++)
         {

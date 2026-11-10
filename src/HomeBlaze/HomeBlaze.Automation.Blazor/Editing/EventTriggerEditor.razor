@@ -127,8 +127,8 @@
 
     private Task SetFilterAsync(string? filter) => UpdateAsync(_trigger with { Filter = filter });
 
-    private IReadOnlyList<Type> GetEventTypes(string? path) =>
+    private ImmutableArray<Type> GetEventTypes(string? path) =>
         AutomationEvents.ResolveSource(Automation, RuleKey, path) is { } source ? AutomationEvents.GetEventTypes(source.GetType()) : [];
 
-    private static bool HasEvents(IInterceptorSubject subject) => AutomationEvents.GetEventTypes(subject.GetType()).Count > 0;
+    private static bool HasEvents(IInterceptorSubject subject) => !AutomationEvents.GetEventTypes(subject.GetType()).IsEmpty;
 }

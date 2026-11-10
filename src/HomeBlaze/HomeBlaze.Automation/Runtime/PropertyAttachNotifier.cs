@@ -125,9 +125,9 @@ internal sealed class PropertyAttachNotifier(ISubjectRegistry? registry) : ILife
         AutomationChangeDispatcher.ChangeSource[] sources, PropertyReference property, RegisteredSubjectProperty attribute)
     {
         // An attribute is found by the property it belongs to whatever its own name, and a route records it under the
-        // name that AutomationPaths gives it.
+        // name that SubjectPathResolverAutomationExtensions gives it.
         var metadata = attribute.AttributeMetadata;
-        var name = AutomationPaths.GetAttributePropertyName(metadata.PropertyName, metadata.AttributeName);
+        var name = SubjectPathResolverAutomationExtensions.GetAttributePropertyName(metadata.PropertyName, metadata.AttributeName);
         var parents = DecidesReadability(metadata) ? attribute.Parent.Parents : [];
         foreach (var source in sources)
         {
@@ -145,7 +145,7 @@ internal sealed class PropertyAttachNotifier(ISubjectRegistry? registry) : ILife
     }
 
     // A route that reached the subject through one of its parents records such an attribute on the subject of that
-    // parent, see AutomationPaths.ResolveProperty.
+    // parent, see SubjectPathResolverAutomationExtensions.ResolveProperty.
     private static bool DecidesReadability(PropertyAttributeAttribute metadata) =>
         metadata.AttributeName is KnownAttributes.Configuration or KnownAttributes.State;
 

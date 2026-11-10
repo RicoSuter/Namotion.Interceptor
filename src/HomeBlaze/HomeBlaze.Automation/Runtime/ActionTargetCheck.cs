@@ -16,12 +16,12 @@ internal sealed class ActionTargetCheck
 {
     private readonly SubjectPathResolver _resolver;
     private readonly IAutomationPermissions _permissions;
-    private readonly Func<string, IInterceptorSubject> _getAnchor;
+    private readonly Func<string, AutomationRule> _getAnchor;
 
     /// <param name="resolver">Resolves the paths of the targets.</param>
     /// <param name="permissions">What the roles allow.</param>
     /// <param name="getAnchor">The subject that relative paths of the rule with the key start at.</param>
-    public ActionTargetCheck(SubjectPathResolver resolver, IAutomationPermissions permissions, Func<string, IInterceptorSubject> getAnchor)
+    public ActionTargetCheck(SubjectPathResolver resolver, IAutomationPermissions permissions, Func<string, AutomationRule> getAnchor)
     {
         _resolver = resolver;
         _permissions = permissions;
@@ -63,5 +63,5 @@ internal sealed class ActionTargetCheck
     private string? CheckRoles(Func<string?> check) => _permissions.Error is null ? check() : null;
 
     private RegisteredSubjectProperty? Resolve(string ruleKey, string path) =>
-        string.IsNullOrWhiteSpace(path) ? null : AutomationPaths.ResolveTarget(_resolver, path, _getAnchor(ruleKey));
+        string.IsNullOrWhiteSpace(path) ? null : _resolver.ResolveTarget(path, _getAnchor(ruleKey));
 }

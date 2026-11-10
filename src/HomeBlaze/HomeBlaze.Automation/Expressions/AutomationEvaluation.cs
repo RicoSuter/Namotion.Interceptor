@@ -1,5 +1,4 @@
 using HomeBlaze.Services;
-using Namotion.Interceptor;
 using Namotion.Interceptor.Expressions;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -29,7 +28,7 @@ internal sealed class AutomationEvaluation
     /// </param>
     public AutomationEvaluation(
         SubjectPathResolver resolver,
-        IInterceptorSubject rule,
+        AutomationRule rule,
         DateTimeOffset now,
         TimeZoneInfo timeZone,
         CapturedEvent? capturedEvent = null,
@@ -47,7 +46,7 @@ internal sealed class AutomationEvaluation
 
     public SubjectPathResolver Resolver { get; }
 
-    public IInterceptorSubject Rule { get; }
+    public AutomationRule Rule { get; }
 
     public DateTimeOffset Now { get; }
 
