@@ -77,6 +77,7 @@ public class ArgumentBinderTests
     {
         { Parameter<int>("speed"), new() { ["speed"] = "/Weather/Rain + 1" }, "The argument 'speed' is unknown, missing /Weather/Rain" },
         { Parameter<int>("speed"), [], "The argument 'speed' is missing" },
+        { Parameter<int>("speed"), new() { ["speed"] = " " }, "The argument 'speed' is invalid: the value is empty" },
         {
             Parameter<string>("message"), new() { ["message"] = "{{ event/Gesture }}" },
             "The argument 'message' is invalid: 'event' is only available in event filters and in the arguments of a rule with an event trigger"
@@ -99,7 +100,7 @@ public class ArgumentBinderTests
         { Parameter<int>("speed"), new() { ["speed"] = "0x10" }, "The argument 'speed' is invalid: invalid number '0x10' at position 0" },
         { Parameter<double>("level"), new() { ["level"] = "1e400" }, "The argument 'level' is invalid: number out of range '1e400' at position 0" },
         { Parameter<double>("level"), new() { ["level"] = "NaN" }, "The argument 'level' is unknown, missing NaN" },
-        { Parameter<int>("speed"), new() { ["speed"] = "" }, "The argument 'speed' is invalid: expected a value at position 0" },
+        { Parameter<int>("speed"), new() { ["speed"] = "" }, "The argument 'speed' is invalid: the value is empty" },
         { Parameter<NotificationPriority>("priority"), new() { ["priority"] = "7" }, "The argument 'priority' cannot be converted to NotificationPriority: 7" },
         { Parameter<NotificationPriority>("priority"), new() { ["priority"] = "Low, Normal" }, "The argument 'priority' is invalid: unexpected 'N' at position 5" },
         { Parameter<TimeSpan>("delay"), new() { ["delay"] = "36501d" }, "The argument 'delay' is longer than 36500d" },

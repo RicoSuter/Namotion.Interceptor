@@ -1,0 +1,203 @@
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Automation))]
+@implements ISubjectEditComponent
+@implements IDisposable
+@inject ISnackbar Snackbar
+
+@if (Automation is not null && _draft is { } draft)
+{
+    <div class="automation-editor">
+    <MudStack Spacing="2" Class="automation-stack" data-testid="automation-editor" data-dirty="@(_isDirty ? "true" : "false")">
+        @if (_inputs.HasPendingRow)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" data-testid="automation-pending">
+                A condition is not finished. Complete or remove it before saving.
+            </MudAlert>
+        }
+        @if (GetCurrentStateNotice(draft) is { } notice)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" data-testid="automation-notices">@notice</MudAlert>
+        }
+        @if (_errors.Length > 0)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="automation-errors" data-testid="automation-errors">
+                <MudText Typo="Typo.body2">Fix these before saving:</MudText>
+                <ul class="pl-4">
+                    @foreach (var error in _errors)
+                    {
+                        <li><MudText Typo="Typo.body2">@Describe(draft, error)</MudText></li>
+                    }
+                </ul>
+            </MudAlert>
+        }
+        <CascadingValue Value="_inputs">
+            <MudTabs Elevation="0" Border="true" Class="automation-tabs" ActivePanelIndex="_tabIndex" ActivePanelIndexChanged="OnTabChanged" TabPanelsClass="automation-tab-panels pt-3">
+                <MudTabPanel Text="General">
+                    <GeneralTab Draft="draft" Changed="OnChanged" />
+                </MudTabPanel>
+                <MudTabPanel Text="Rules">
+                    <RulesTab Automation="Automation" Draft="draft" Errors="_errors" SelectedRuleKey="@_selectedRuleKey" SelectedRuleKeyChanged="OnRuleSelected" Changed="OnChanged" InputChanged="Revalidate" />
+                </MudTabPanel>
+                <MudTabPanel Text="States">
+                    <StatesTab Automation="Automation" Draft="draft" Changed="OnChanged" RuleOpened="OpenRule" />
+                </MudTabPanel>
+            </MudTabs>
+        </CascadingValue>
+    </MudStack>
+    </div>
+}
+
+@code {
+    private const int RulesTabIndex = 1;
+
+    private readonly UnappliedInputs _inputs = new();
+    private AutomationDraft? _draft;
+    private ImmutableArray<AutomationValidationError> _errors = [];
+    private int _tabIndex;
+    private string? _selectedRuleKey;
+    private bool _isDirty;
+    private bool _wasValid = true;
+    private bool _isDisposed;
+
+    [Parameter] public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter] public bool IsCreating { get; set; }
+
+    public event Action<bool>? IsValidChanged;
+
+    public event Action<bool>? IsDirtyChanged;
+
+    public string PreferredDialogSize => "Large";
+
+    public bool IsDirty => _isDirty;
+
+    // The errors are validated after each edit and each change of the unapplied inputs, not on every read: the host reads
+    // this on every input event.
+    public bool IsValid => _draft is not null && !_inputs.HasPendingRow && _errors.Length == 0;
+
+    private Automation? Automation => Subject as Automation;
+
+    protected override void OnInitialized()
+    {
+        if (Automation is { } automation)
+        {
+            _draft = AutomationDraft.From(automation);
+            Validate();
+            _selectedRuleKey = _draft.Rules.Count > 0 ? _draft.Rules[0].Key : null;
+        }
+
+        _wasValid = IsValid;
+        _inputs.Changed += OnInputsChanged;
+        _inputs.Discarded += OnInputDiscarded;
+    }
+
+    // Errors that depend on the live graph, such as the arguments of an operation that appeared after the last edit in a
+    // rule that is not shown, can show up only here. The host shows the exception and keeps the dialog open instead of
+    // persisting without the edits.
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (Automation is { } automation && _draft is { } draft)
+        {
+            Validate();
+            if (!IsValid)
+            {
+                ReportValidity();
+                StateHasChanged();
+                throw new InvalidOperationException("Fix the errors listed in the editor before saving.");
+            }
+
+            draft.ApplyTo(automation);
+            SetDirty(false);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    // An input reports from its event handlers and from its disposal during a render, both on the dispatcher, where
+    // InvokeAsync runs the update at once. StateHasChanged during a render queues another render instead of rendering
+    // in the middle of it. This is no edit, so the dialog does not become dirty.
+    private void OnInputsChanged() => _ = InvokeAsync(() =>
+    {
+        if (!_isDisposed)
+        {
+            Revalidate();
+            StateHasChanged();
+        }
+    });
+
+    private void OnInputDiscarded(string input) => _ = InvokeAsync(() =>
+    {
+        if (!_isDisposed)
+        {
+            Snackbar.Add($"{input} was discarded.", Severity.Warning);
+        }
+    });
+
+    private void OnTabChanged(int index) => _tabIndex = index;
+
+    private void OpenRule(string ruleKey)
+    {
+        _selectedRuleKey = ruleKey;
+        _tabIndex = RulesTabIndex;
+    }
+
+    private void OnRuleSelected(string? key) => _selectedRuleKey = key;
+
+    /// <summary>Every tab raises this after each edit of the draft, so that the errors and the validity follow it.</summary>
+    private void OnChanged()
+    {
+        Validate();
+        SetDirty(true);
+        ReportValidity();
+    }
+
+    /// <summary>Raised when an input changed its error without an edit of the draft, which keeps the dialog as dirty as it was.</summary>
+    private void Revalidate()
+    {
+        Validate();
+        ReportValidity();
+    }
+
+    private void Validate()
+    {
+        if (_draft is { } draft)
+        {
+            _errors = [.. draft.Validate(), .. _inputs.Errors];
+        }
+    }
+
+    // Raised on transitions only, because the host renders its save button again on each event.
+    private void ReportValidity()
+    {
+        var isValid = IsValid;
+        if (isValid != _wasValid)
+        {
+            _wasValid = isValid;
+            IsValidChanged?.Invoke(isValid);
+        }
+    }
+
+    // Not an error, because the automation is still saved; it then stops until its state is reset.
+    private string? GetCurrentStateNotice(AutomationDraft draft) =>
+        Automation?.CurrentState is { } current && !draft.States.Contains(current)
+            ? $"The current state '{current}' is renamed or removed. After saving, the automation stops with an error until its state is reset."
+            : null;
+
+    private static string Describe(AutomationDraft draft, AutomationValidationError error) =>
+        draft.FindRule(error.RuleKey) is { } rule ? $"Rule '{rule.DisplayName}': {error.Message}" : error.Message;
+
+    public void Dispose()
+    {
+        _isDisposed = true;
+        _inputs.Changed -= OnInputsChanged;
+        _inputs.Discarded -= OnInputDiscarded;
+    }
+
+    private void SetDirty(bool isDirty)
+    {
+        if (_isDirty != isDirty)
+        {
+            _isDirty = isDirty;
+            IsDirtyChanged?.Invoke(isDirty);
+        }
+    }
+}

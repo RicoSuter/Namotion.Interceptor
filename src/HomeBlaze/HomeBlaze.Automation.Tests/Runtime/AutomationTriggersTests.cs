@@ -17,25 +17,31 @@ public class AutomationTriggersTests
         var graph = new TestGraph();
         graph.Add("Weather", new TestSensor());
         var registry = graph.Context.GetService<ISubjectRegistry>();
-        var publishes = 0;
+        var time = new FakeTimeProvider(AutomationTestHost.Start);
+        var queue = new AutomationInputQueue();
+        var routes = new GraphRoutes(automation: new TestSensor(), changes: new AutomationChangeReceiver(new AutomationInputQueue()));
         var triggers = new AutomationTriggers(
-            graph.Resolver, new FakeTimeProvider(AutomationTestHost.Start), new AutomationInputQueue(), NullLogger.Instance, () => "Storm", _ => publishes++, () => registry.StructureVersion);
+            queue,
+            () => registry.StructureVersion,
+            new PropertyTriggerEngine(graph.Resolver, time, NullLogger.Instance, () => "Storm", _ => { }, routes),
+            new EventTriggerEngine(graph.Resolver, queue, NullLogger.Instance, () => "Storm", routes));
         var rule = Compile("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")));
         rule.IsActivated = true;
         triggers.Activate([rule], [rule]);
+        triggers.GetRequests(new ActivationInput([rule], 0), [rule]);
         triggers.OnGraphChanged([rule]);
-        var publishesAfterTheFirstGraphChange = publishes;
+        var resolutionsAfterTheFirstGraphChange = routes.ResolutionCount;
 
         // Act
         graph.Root.Children = new Dictionary<string, IInterceptorSubject>(graph.Root.Children);
         triggers.OnGraphChanged([rule]);
-        var publishesAfterTheSameChildren = publishes;
+        var resolutionsAfterTheSameChildren = routes.ResolutionCount;
         graph.Add("Blinds", new TestBlinds());
         triggers.OnGraphChanged([rule]);
 
         // Assert
-        Assert.Equal(publishesAfterTheFirstGraphChange, publishesAfterTheSameChildren);
-        Assert.Equal(publishesAfterTheFirstGraphChange + 1, publishes);
+        Assert.Equal(resolutionsAfterTheFirstGraphChange, resolutionsAfterTheSameChildren);
+        Assert.True(routes.ResolutionCount > resolutionsAfterTheSameChildren);
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Automation.Persistence;
+using HomeBlaze.Services;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 
@@ -39,11 +40,12 @@ internal sealed class CheckpointLocation
     }
 
     /// <summary>
-    /// Whether the automation has a path that is not <see cref="AutomationPath"/>. While a subject is added to its new
-    /// parent before it is removed from the old one, it may still resolve to the old path; the removal brings the new one.
+    /// Whether the automation has a path that is not <see cref="AutomationPath"/>, reporting the graph route of its path to
+    /// <paramref name="recorder"/>. While a subject is added to its new parent before it is removed from the old one, it
+    /// may still resolve to the old path; the removal brings the new one.
     /// </summary>
-    public bool HasMoved(Automation automation) =>
-        automation.PathResolver.GetPath(automation, PathStyle.Canonical) is { } currentPath &&
+    public bool HasMoved(Automation automation, ISubjectPathRecorder? recorder = null) =>
+        automation.PathResolver.GetPath(automation, PathStyle.Canonical, recorder) is { } currentPath &&
         !string.Equals(currentPath, AutomationPath, StringComparison.Ordinal);
 
     /// <summary>Deletes the file unless another automation has <see cref="AutomationPath"/> now; logs an I/O error.</summary>

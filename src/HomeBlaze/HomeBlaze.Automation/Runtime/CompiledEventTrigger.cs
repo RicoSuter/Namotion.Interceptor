@@ -20,6 +20,9 @@ internal sealed class CompiledEventTrigger(CompiledRule rule, int index, Subject
 
     public IInterceptorSubject? Source { get; set; }
 
+    /// <summary>The graph route of the last resolution of the path of <see cref="Source"/>.</summary>
+    public GraphRouteSlot SourceRoute { get; } = new();
+
     public EventSubscription? Subscription { get; set; }
 
     /// <summary>

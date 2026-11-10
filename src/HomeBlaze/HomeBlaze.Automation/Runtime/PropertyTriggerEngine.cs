@@ -7,22 +7,20 @@ using Namotion.Interceptor;
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// The property triggers of active rules: resolves the properties they read and publishes them as the watched set to
-/// <paramref name="publishWatched"/>, evaluates them against the observed values on changes, graph changes and ticks,
-/// and returns the run requests of the triggers that fire. A tick evaluates only the triggers that are due: a hold that
-/// ends, or a trigger whose expressions can change with the clock at the instant <see cref="ExpressionClock"/> derives,
-/// every second only for a read of the clock that it cannot derive; <see cref="GetNextDueAt"/> tells when the next one
-/// is due. A trigger whose run did not run stays pending, and its rule requests the run again only when its Only if can
-/// have changed: on a change of a property Only if reads, which is watched only while a trigger is pending, at the
-/// instant derived for an Only if that reads the clock, and on a change of the trigger's own properties for a rule
-/// without Only if. Rules without a pending trigger cost nothing for this. Used by the worker only.
+/// The property triggers of active rules: resolves the properties they read, publishes them as the watched set to
+/// <paramref name="publishWatched"/>, evaluates the triggers on changes, graph changes and ticks, and returns the run
+/// requests of those that fire. A tick evaluates only the triggers that are due, see <see cref="GetNextDueAt"/>. A trigger
+/// whose run did not run stays pending, and its rule requests the run again only when its Only if can have changed: on a
+/// change of a property Only if reads, which is watched only while a trigger is pending, when an Only if that reads the
+/// clock is due, and on a change of the trigger's own properties for a rule without Only if. Used by the worker only.
 /// </summary>
 internal sealed class PropertyTriggerEngine(
     SubjectPathResolver resolver,
     TimeProvider timeProvider,
     ILogger logger,
     Func<string> getAutomationName,
-    Action<FrozenSet<PropertyReference>> publishWatched)
+    Action<FrozenSet<PropertyReference>> publishWatched,
+    GraphRoutes routes)
 {
     private readonly ObservedValues _values = new();
     private readonly long _startedAt = timeProvider.GetTimestamp();
@@ -37,6 +35,9 @@ internal sealed class PropertyTriggerEngine(
     private readonly HashSet<CompiledPropertyTrigger> _rebound = [];
     private readonly HashSet<CompiledRule> _reboundOnlyIfRules = [];
     private FrozenSet<PropertyReference> _watched = FrozenSet<PropertyReference>.Empty;
+
+    // Reused by every publication of the watched set, which is frozen only when it changed.
+    private readonly HashSet<PropertyReference> _nextWatched = [];
 
     /// <summary>
     /// Activates the inactive triggers of the rules that are still activated and among <paramref name="allRules"/>, such
@@ -82,10 +83,11 @@ internal sealed class PropertyTriggerEngine(
         }
 
         var property = input.Property;
-        var requests = ObserveWhere(rules, trigger => Array.IndexOf(trigger.Dependencies, property) >= 0, trigger => trigger.Rule.OnlyIf is null);
+        var requests = ObserveWhere(
+            rules, property, static (trigger, property) => Array.IndexOf(trigger.Dependencies, property) >= 0, static trigger => trigger.Rule.OnlyIf is null);
         return _pending.Count == 0
             ? requests
-            : AddPendingRequests(rules, requests, trigger => Array.IndexOf(trigger.Rule.OnlyIfDependencies, property) >= 0);
+            : AddPendingRequests(rules, requests, property, static (trigger, property) => Array.IndexOf(trigger.Rule.OnlyIfDependencies, property) >= 0);
     }
 
     /// <summary>
@@ -101,14 +103,16 @@ internal sealed class PropertyTriggerEngine(
             _derivedAt = now;
         }
 
-        var requests = ObserveWhere(rules, trigger => trigger.NextCheckAt is { } checkAt && (checkAt <= now || isClockSetBack));
+        // After the clock was set back, every instant derived before is due.
+        var dueBy = isClockSetBack ? DateTimeOffset.MaxValue : now;
+        var requests = ObserveWhere(rules, dueBy, static (trigger, dueBy) => trigger.NextCheckAt <= dueBy);
         if (_pending.Count == 0)
         {
             return requests;
         }
 
-        return AddPendingRequests(rules, requests, trigger =>
-            trigger.Rule.RechecksOnlyIfEverySecond || trigger.Rule.OnlyIfRecheckAt <= now || (isClockSetBack && trigger.Rule.OnlyIfRecheckAt is not null));
+        return AddPendingRequests(
+            rules, requests, dueBy, static (trigger, dueBy) => trigger.Rule.RechecksOnlyIfEverySecond || trigger.Rule.OnlyIfRecheckAt <= dueBy);
     }
 
     /// <summary>
@@ -118,8 +122,9 @@ internal sealed class PropertyTriggerEngine(
     public DateTimeOffset? GetNextDueAt(IReadOnlyList<CompiledRule> rules, DateTimeOffset now)
     {
         DateTimeOffset? next = null;
-        foreach (var rule in rules)
+        for (var ruleIndex = 0; ruleIndex < rules.Count; ruleIndex++)
         {
+            var rule = rules[ruleIndex];
             if (!rule.IsActivated)
             {
                 continue;
@@ -127,20 +132,17 @@ internal sealed class PropertyTriggerEngine(
 
             foreach (var trigger in rule.PropertyTriggers)
             {
-                next = Earliest(next, trigger.NextCheckAt);
+                next = AutomationTriggers.Earliest(next, trigger.NextCheckAt);
             }
         }
 
         foreach (var trigger in _pending)
         {
-            next = Earliest(next, trigger.Rule.RechecksOnlyIfEverySecond ? ExpressionClock.GetNextSecond(now) : trigger.Rule.OnlyIfRecheckAt);
+            next = AutomationTriggers.Earliest(next, trigger.Rule.RechecksOnlyIfEverySecond ? ExpressionClock.GetNextSecond(now) : trigger.Rule.OnlyIfRecheckAt);
         }
 
         return next;
     }
-
-    private static DateTimeOffset? Earliest(DateTimeOffset? current, DateTimeOffset? candidate) =>
-        candidate is { } instant && (current is null || instant < current) ? instant : current;
 
     /// <summary>
     /// Resolves the properties again, since paths may lead elsewhere now, and evaluates the triggers whose properties
@@ -154,13 +156,13 @@ internal sealed class PropertyTriggerEngine(
         {
             if (evaluateAll)
             {
-                return ObserveWhere(rules, _ => true, _ => true);
+                return ObserveWhere(rules, 0, static (_, _) => true, static _ => true);
             }
 
-            var requests = _rebound.Count == 0 ? [] : ObserveWhere(rules, _rebound.Contains, _ => true);
+            var requests = _rebound.Count == 0 ? [] : ObserveWhere(rules, _rebound, static (trigger, rebound) => rebound.Contains(trigger), static _ => true);
             return _reboundOnlyIfRules.Count == 0 || _pending.Count == 0
                 ? requests
-                : AddPendingRequests(rules, requests, trigger => _reboundOnlyIfRules.Contains(trigger.Rule));
+                : AddPendingRequests(rules, requests, _reboundOnlyIfRules, static (trigger, reboundRules) => reboundRules.Contains(trigger.Rule));
         }
         finally
         {
@@ -176,11 +178,12 @@ internal sealed class PropertyTriggerEngine(
     {
         _rebound.Clear();
         _reboundOnlyIfRules.Clear();
+        routes.AwaitsGraphChange = false;
     }
 
     /// <summary>Requests the runs of every pending trigger, such as after a state change skipped them.</summary>
     public IReadOnlyList<RunRequest> RequestPendingRuns(IReadOnlyList<CompiledRule> rules) =>
-        _pending.Count == 0 ? [] : AddPendingRequests(rules, [], _ => true);
+        _pending.Count == 0 ? [] : AddPendingRequests(rules, [], 0, static (_, _) => true);
 
     /// <summary>Whether a trigger is pending.</summary>
     public bool HasPending => _pending.Count > 0;
@@ -199,7 +202,7 @@ internal sealed class PropertyTriggerEngine(
             return false;
         }
 
-        var hasRemoved = _pending.RemoveAll(trigger => !IsPending(trigger)) > 0;
+        var hasRemoved = RemoveEndedPending(rules);
         var hasAdded = false;
         var now = timeProvider.GetUtcNow();
         foreach (var request in requests)
@@ -244,7 +247,20 @@ internal sealed class PropertyTriggerEngine(
 
     /// <summary>Evaluates the active triggers that read one of the properties.</summary>
     public IReadOnlyList<RunRequest> ObserveReaders(IReadOnlyList<CompiledRule> rules, IReadOnlySet<PropertyReference> properties) =>
-        properties.Count == 0 ? [] : ObserveWhere(rules, trigger => trigger.Dependencies.Any(properties.Contains));
+        properties.Count == 0 ? [] : ObserveWhere(rules, properties, static (trigger, properties) => ReadsAny(trigger, properties));
+
+    private static bool ReadsAny(CompiledPropertyTrigger trigger, IReadOnlySet<PropertyReference> properties)
+    {
+        foreach (var dependency in trigger.Dependencies)
+        {
+            if (properties.Contains(dependency))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Resolves the properties of the active triggers and of Only if of the rules of their pending triggers again, tracks
@@ -256,14 +272,7 @@ internal sealed class PropertyTriggerEngine(
     /// </summary>
     public bool Refresh(IReadOnlyList<CompiledRule> rules)
     {
-        for (var index = _pending.Count - 1; index >= 0; index--)
-        {
-            if (!IsPending(_pending[index]))
-            {
-                _pending.RemoveAt(index);
-            }
-        }
-
+        RemoveEndedPending(rules);
         DateTimeOffset? now = null;
         var trackedCount = _pending.Count;
         foreach (var rule in rules)
@@ -280,6 +289,8 @@ internal sealed class PropertyTriggerEngine(
             }
         }
 
+        // The next graph change evaluates them, whatever it changed.
+        routes.AwaitsGraphChange = _rebound.Count > 0 || _reboundOnlyIfRules.Count > 0;
         PublishWatched(rules, []);
         return _pending.Count > trackedCount;
     }
@@ -320,7 +331,7 @@ internal sealed class PropertyTriggerEngine(
         _rebound.Add(trigger);
         if (trigger.Clock is not null)
         {
-            trigger.NextCheckAt = Earliest(trigger.NextCheckAt, now ??= timeProvider.GetUtcNow());
+            trigger.NextCheckAt = AutomationTriggers.Earliest(trigger.NextCheckAt, now ??= timeProvider.GetUtcNow());
         }
     }
 
@@ -340,7 +351,7 @@ internal sealed class PropertyTriggerEngine(
         }
         else if (isRebound && rule.OnlyIfClock is { IsEverySecond: false })
         {
-            rule.OnlyIfRecheckAt = Earliest(rule.OnlyIfRecheckAt, now ??= timeProvider.GetUtcNow());
+            rule.OnlyIfRecheckAt = AutomationTriggers.Earliest(rule.OnlyIfRecheckAt, now ??= timeProvider.GetUtcNow());
         }
     }
 
@@ -358,16 +369,38 @@ internal sealed class PropertyTriggerEngine(
         return false;
     }
 
+    // Returns whether a trigger was no longer pending. Only if of a rule without a tracked pending trigger is resolved
+    // again when one becomes tracked.
+    private bool RemoveEndedPending(IReadOnlyList<CompiledRule> rules)
+    {
+        if (_pending.RemoveAll(static trigger => !IsPending(trigger)) == 0)
+        {
+            return false;
+        }
+
+        foreach (var rule in rules)
+        {
+            if (!rule.OnlyIfRoute.IsEmpty && !IsTracked(rule))
+            {
+                rule.OnlyIfRoute.Clear();
+            }
+        }
+
+        return true;
+    }
+
     public static void Deactivate(CompiledRule rule)
     {
         foreach (var trigger in rule.PropertyTriggers)
         {
             trigger.State.Deactivate();
             trigger.Dependencies = [];
+            trigger.DependencyRoute.Clear();
             trigger.NextCheckAt = null;
         }
 
         rule.OnlyIfDependencies = [];
+        rule.OnlyIfRoute.Clear();
     }
 
     // A change queued while its property was watched may arrive after it no longer is; kept, it would hide the current
@@ -375,22 +408,19 @@ internal sealed class PropertyTriggerEngine(
     private bool TryObserve(PropertyChangedInput change) =>
         _watched.Contains(change.Property) && _values.TryApply(change.Property, change.Value, change.Revision);
 
-    private static IEnumerable<CompiledPropertyTrigger> ActiveTriggers(IReadOnlyList<CompiledRule> rules) =>
-        rules.Where(rule => rule.IsActivated)
-            .SelectMany(rule => rule.PropertyTriggers)
-            .Where(trigger => trigger.State.Phase != TriggerPhase.Inactive);
-
     // A trigger that stays pending requests its run again where requestPending allows it. Allocates nothing when no
-    // trigger matches.
-    private IReadOnlyList<RunRequest> ObserveWhere(
+    // trigger matches, as long as the callers pass static lambdas with the state they read.
+    private IReadOnlyList<RunRequest> ObserveWhere<TState>(
         IReadOnlyList<CompiledRule> rules,
-        Func<CompiledPropertyTrigger, bool> predicate,
+        TState state,
+        Func<CompiledPropertyTrigger, TState, bool> predicate,
         Func<CompiledPropertyTrigger, bool>? requestPending = null)
     {
         List<RunRequest>? requests = null;
         TriggerTime? time = null;
-        foreach (var rule in rules)
+        for (var ruleIndex = 0; ruleIndex < rules.Count; ruleIndex++)
         {
+            var rule = rules[ruleIndex];
             if (!rule.IsActivated)
             {
                 continue;
@@ -398,7 +428,7 @@ internal sealed class PropertyTriggerEngine(
 
             foreach (var trigger in rule.PropertyTriggers)
             {
-                if (trigger.State.Phase != TriggerPhase.Inactive && predicate(trigger) &&
+                if (trigger.State.Phase != TriggerPhase.Inactive && predicate(trigger, state) &&
                     ObserveOne(trigger, time ??= GetTime(), requestPending) is { } request)
                 {
                     (requests ??= []).Add(request);
@@ -449,7 +479,7 @@ internal sealed class PropertyTriggerEngine(
                 change = CheckForSetBackClock(now);
             }
 
-            next = Earliest(next, change);
+            next = AutomationTriggers.Earliest(next, change);
         }
 
         trigger.NextCheckAt = next;
@@ -468,13 +498,13 @@ internal sealed class PropertyTriggerEngine(
         resolver.ResolveProperty(path, rule) is { } property ? _values.GetValue(property) : null;
 
     // Adds the requests of the pending triggers that match and have none yet, in rule order.
-    private IReadOnlyList<RunRequest> AddPendingRequests(
-        IReadOnlyList<CompiledRule> rules, IReadOnlyList<RunRequest> requests, Func<CompiledPropertyTrigger, bool> predicate)
+    private IReadOnlyList<RunRequest> AddPendingRequests<TState>(
+        IReadOnlyList<CompiledRule> rules, IReadOnlyList<RunRequest> requests, TState state, Func<CompiledPropertyTrigger, TState, bool> predicate)
     {
         List<RunRequest>? added = null;
         foreach (var trigger in _pending)
         {
-            if (IsPending(trigger) && predicate(trigger) && !requests.Any(request => ReferenceEquals(request.Trigger, trigger)))
+            if (IsPending(trigger) && predicate(trigger, state) && !HasRequest(requests, trigger))
             {
                 (added ??= []).Add(CreateRequest(trigger));
             }
@@ -483,6 +513,19 @@ internal sealed class PropertyTriggerEngine(
         return added is null
             ? requests
             : [.. requests.Concat(added).OrderBy(request => AutomationTriggers.IndexOf(rules, request.Rule))];
+    }
+
+    private static bool HasRequest(IReadOnlyList<RunRequest> requests, CompiledPropertyTrigger trigger)
+    {
+        for (var index = 0; index < requests.Count; index++)
+        {
+            if (ReferenceEquals(requests[index].Trigger, trigger))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // The wait ended without a run, so the reason it did not run no longer applies and a new wait is logged again.
@@ -501,7 +544,7 @@ internal sealed class PropertyTriggerEngine(
     private bool ResolveOnlyIfDependencies(CompiledRule rule)
     {
         var previous = rule.OnlyIfDependencies;
-        rule.OnlyIfDependencies = Resolve(rule.OnlyIfPropertyPaths, rule.Rule);
+        rule.OnlyIfDependencies = Resolve(rule.OnlyIfPropertyPaths, rule.Rule, rule.OnlyIfRoute);
         return !rule.OnlyIfDependencies.AsSpan().SequenceEqual(previous);
     }
 
@@ -554,36 +597,93 @@ internal sealed class PropertyTriggerEngine(
     private bool ResolveDependencies(CompiledPropertyTrigger trigger)
     {
         var previous = trigger.Dependencies;
-        trigger.Dependencies = Resolve(trigger.PropertyPaths, trigger.Rule.Rule);
+        trigger.Dependencies = Resolve(trigger.PropertyPaths, trigger.Rule.Rule, trigger.DependencyRoute);
         return !trigger.Dependencies.AsSpan().SequenceEqual(previous);
     }
 
-    private PropertyReference[] Resolve(IReadOnlyList<string> paths, AutomationRule rule)
+    private PropertyReference[] Resolve(IReadOnlyList<string> paths, AutomationRule rule, GraphRouteSlot route)
     {
+        var recorder = routes.BeginRoute();
         var resolved = new List<PropertyReference>(paths.Count);
         foreach (var path in paths)
         {
-            if (resolver.ResolveProperty(path, rule) is { } property)
+            if (resolver.ResolveProperty(path, rule, recorder) is { } property)
             {
                 resolved.Add(property.Reference);
             }
         }
 
+        routes.EndRoute(route);
         return [.. resolved];
     }
 
-    private void PublishWatched(IReadOnlyList<CompiledRule> rules, IEnumerable<CompiledPropertyTrigger> activating)
+    private void PublishWatched(IReadOnlyList<CompiledRule> rules, IReadOnlyList<CompiledPropertyTrigger> activating)
     {
-        var watched = ActiveTriggers(rules).Concat(activating).SelectMany(trigger => trigger.Dependencies)
-            .Concat(_pending.SelectMany(trigger => trigger.Rule.OnlyIfDependencies))
-            .ToFrozenSet();
+        var next = _nextWatched;
+        next.Clear();
+        for (var ruleIndex = 0; ruleIndex < rules.Count; ruleIndex++)
+        {
+            var rule = rules[ruleIndex];
+            if (!rule.IsActivated)
+            {
+                continue;
+            }
+
+            foreach (var trigger in rule.PropertyTriggers)
+            {
+                if (trigger.State.Phase != TriggerPhase.Inactive)
+                {
+                    AddAll(next, trigger.Dependencies);
+                }
+            }
+        }
+
+        for (var index = 0; index < activating.Count; index++)
+        {
+            AddAll(next, activating[index].Dependencies);
+        }
+
+        foreach (var trigger in _pending)
+        {
+            AddAll(next, trigger.Rule.OnlyIfDependencies);
+        }
+
         var previous = _watched;
-        _watched = watched;
-        publishWatched(watched);
+        if (!IsEqual(previous, next))
+        {
+            _watched = next.ToFrozenSet();
+            publishWatched(_watched);
+        }
 
         // A value read while its property was not watched may have changed since without a queued change, so a property
         // that becomes watched is read from the graph again.
-        _values.Retain(watched, previous);
+        _values.Retain(_watched, previous);
+    }
+
+    private static void AddAll(HashSet<PropertyReference> set, PropertyReference[] properties)
+    {
+        foreach (var property in properties)
+        {
+            set.Add(property);
+        }
+    }
+
+    private static bool IsEqual(FrozenSet<PropertyReference> previous, HashSet<PropertyReference> next)
+    {
+        if (previous.Count != next.Count)
+        {
+            return false;
+        }
+
+        foreach (var property in next)
+        {
+            if (!previous.Contains(property))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static RunRequest CreateRequest(CompiledPropertyTrigger trigger) => new(trigger.Rule, null, trigger.Description, trigger);

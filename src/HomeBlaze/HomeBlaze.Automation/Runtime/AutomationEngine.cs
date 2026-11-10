@@ -35,28 +35,39 @@ internal sealed class AutomationEngine : IRuleRunHost
     private string? _runWriteError;
     private readonly RuleStatusPublisher _statusPublisher = new();
 
-    // Created once, since the worker publishes the rule statuses after every input.
+    // Created once, since the worker uses them after every input.
     private readonly Action _publishRuleStatuses;
+    private readonly Func<CompiledRule, string?> _getInactiveReason;
+    private readonly Func<CompiledRule, bool> _isActive;
 
-    /// <summary>Creates the engine, whose property triggers publish their watched set to <paramref name="changes"/>.</summary>
-    public AutomationEngine(Automation automation, AutomationInputQueue queue, AutomationStateKeeper keeper, ILogger logger, AutomationChangeReceiver changes)
+    /// <summary>
+    /// Creates the engine, whose property triggers publish their watched set to <paramref name="changes"/> and whose
+    /// triggers store the graph routes of their resolutions in <paramref name="routes"/>.
+    /// </summary>
+    public AutomationEngine(
+        Automation automation, AutomationInputQueue queue, AutomationStateKeeper keeper, ILogger logger, AutomationChangeReceiver changes, GraphRoutes routes)
     {
         _automation = automation;
         _keeper = keeper;
         _queue = queue;
         _logger = logger;
-        _triggers = AutomationTriggers.For(automation, queue, logger, () => Name, changes.PublishWatched);
+        _triggers = AutomationTriggers.For(automation, queue, logger, () => Name, changes.PublishWatched, routes);
         _dispatcher = new RunDispatcher(this, automation, keeper, logger);
         _states = new StateTransitions(automation, keeper, automation.TimeProvider, logger);
         _status = new AutomationStatusReporter(automation, logger);
         _publishRuleStatuses = PublishRuleStatuses;
+        _getInactiveReason = GetInactiveReason;
+        _isActive = IsActive;
     }
 
-    public string Name => _automation.Title ?? "Automation";
+    public string Name => _automation.Title;
 
     IInterceptorSubject IRuleRunHost.Automation => _automation;
 
     public string? CurrentState => _automation.CurrentState;
+
+    // White-box test hook: the compiled rules applied last.
+    internal IReadOnlyList<CompiledRule> Rules => _snapshot.Rules;
 
     public bool RunUnlessAbandoned(Action write)
     {
@@ -159,10 +170,8 @@ internal sealed class AutomationEngine : IRuleRunHost
     /// </summary>
     public DateTimeOffset? GetNextDueAt(DateTimeOffset now)
     {
-        return Earliest(Earliest(_triggers.GetNextDueAt(_snapshot.Rules, now), _keeper.RunsDueAt), _status.UnloggedFaultsDueAt);
+        return AutomationTriggers.Earliest(AutomationTriggers.Earliest(_triggers.GetNextDueAt(_snapshot.Rules, now), _keeper.RunsDueAt), _status.UnloggedFaultsDueAt);
     }
-
-    private static DateTimeOffset? Earliest(DateTimeOffset? first, DateTimeOffset? second) => first is null || second < first ? second : first;
 
     /// <summary>
     /// Runs the requests of an input of the triggers: a property change, a tick, which also writes the runs that are due,
@@ -293,7 +302,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         var notApplied = _hasConfigurationError && _automation.ConfigurationVersion == _appliedConfigurationVersion
             ? RuleStatusPublisher.NotAppliedInvalid
             : RuleStatusPublisher.NotAppliedYet;
-        _statusPublisher.Publish(_automation, _snapshot, GetInactiveReason, notApplied);
+        _statusPublisher.Publish(_automation, _snapshot, _getInactiveReason, notApplied);
     }
 
     private void Stop()
@@ -519,7 +528,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         var hasNewPending = false;
         try
         {
-            summary = await _dispatcher.DispatchAsync(requests, IsActive, cancellationToken);
+            summary = await _dispatcher.DispatchAsync(requests, _isActive, cancellationToken);
         }
         finally
         {

@@ -1,5 +1,4 @@
 using System.Collections.Frozen;
-using HomeBlaze.Services;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -19,33 +18,43 @@ internal sealed class AutomationTriggers
     private readonly Func<long> _getStructureVersion;
     private long _boundStructureVersion = -1;
 
-    /// <summary>Creates the triggers of the automation, with the structure version of the registry of its context.</summary>
-    public static AutomationTriggers For(
-        Automation automation, AutomationInputQueue queue, ILogger logger, Func<string> getAutomationName, Action<FrozenSet<PropertyReference>> publishWatched)
-    {
-        var registry = ((IInterceptorSubject)automation).Context.TryGetService<ISubjectRegistry>();
-        return new AutomationTriggers(
-            automation.PathResolver, automation.TimeProvider, queue, logger, getAutomationName, publishWatched, () => registry?.StructureVersion ?? -1);
-    }
-
     /// <summary>
-    /// Creates the triggers, whose property triggers publish their watched set to <paramref name="publishWatched"/> and
-    /// whose paths are resolved again on a graph change only when <paramref name="getStructureVersion"/>, the structure
-    /// version of the registry, changed since.
+    /// Creates the triggers of the automation, with the structure version of the registry of its context, which store the
+    /// graph routes of their resolutions in <paramref name="routes"/>.
     /// </summary>
-    public AutomationTriggers(
-        SubjectPathResolver resolver,
-        TimeProvider timeProvider,
+    public static AutomationTriggers For(
+        Automation automation,
         AutomationInputQueue queue,
         ILogger logger,
         Func<string> getAutomationName,
         Action<FrozenSet<PropertyReference>> publishWatched,
-        Func<long> getStructureVersion)
+        GraphRoutes routes)
+    {
+        var registry = ((IInterceptorSubject)automation).Context.TryGetService<ISubjectRegistry>();
+        var resolver = automation.PathResolver;
+        var timeProvider = automation.TimeProvider;
+        return new AutomationTriggers(
+            queue,
+            () => registry?.StructureVersion ?? -1,
+            new PropertyTriggerEngine(resolver, timeProvider, logger, getAutomationName, publishWatched, routes),
+            new EventTriggerEngine(resolver, queue, logger, getAutomationName, routes));
+    }
+
+    /// <summary>
+    /// Creates the triggers of <paramref name="propertyTriggers"/> and <paramref name="eventTriggers"/>, whose paths are
+    /// resolved again on a graph change only when <paramref name="getStructureVersion"/>, the structure version of the
+    /// registry, changed since.
+    /// </summary>
+    public AutomationTriggers(
+        AutomationInputQueue queue,
+        Func<long> getStructureVersion,
+        PropertyTriggerEngine propertyTriggers,
+        EventTriggerEngine eventTriggers)
     {
         _queue = queue;
         _getStructureVersion = getStructureVersion;
-        _propertyTriggers = new PropertyTriggerEngine(resolver, timeProvider, logger, getAutomationName, publishWatched);
-        _eventTriggers = new EventTriggerEngine(resolver, queue, logger, getAutomationName);
+        _propertyTriggers = propertyTriggers;
+        _eventTriggers = eventTriggers;
     }
 
     /// <summary>
@@ -209,6 +218,10 @@ internal sealed class AutomationTriggers
 
     /// <summary>Gets when the next property trigger or Only if is due for a tick, or null when none is.</summary>
     public DateTimeOffset? GetNextDueAt(IReadOnlyList<CompiledRule> rules, DateTimeOffset now) => _propertyTriggers.GetNextDueAt(rules, now);
+
+    /// <summary>The earlier of two due times, ignoring one that is null; null when both are.</summary>
+    public static DateTimeOffset? Earliest(DateTimeOffset? first, DateTimeOffset? second) =>
+        second is { } instant && (first is null || instant < first) ? instant : first;
 
     /// <summary>Whether a property trigger is pending.</summary>
     public bool HasPending => _propertyTriggers.HasPending;

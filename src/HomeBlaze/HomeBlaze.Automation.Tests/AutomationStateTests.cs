@@ -562,7 +562,7 @@ public class AutomationStateTests
         await host.StopAsync();
 
         // Assert
-        Assert.Equal("On: Holding since 12:00:00 for 00:00:30", holding);
+        Assert.Equal("On: Holding since 12:00:00 for 30s", holding);
         Assert.Equal("On: Inactive: the automation is stopped", host.Rule("retract").Status);
         Assert.Equal("DryRun: Inactive: the automation is stopped", host.Rule("rain").Status);
         Assert.Equal("Off", host.Rule("off").Status);

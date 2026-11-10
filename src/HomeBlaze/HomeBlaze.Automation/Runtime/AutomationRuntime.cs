@@ -5,12 +5,10 @@ using Namotion.Interceptor;
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// The worker of one automation. Callbacks on writing threads only enqueue: a change of a watched property and a graph
-/// change (coalesced), a change of a property that holds subjects or a property added at run time, both routed by
-/// <see cref="AutomationChangeDispatcher"/>, and a tick
-/// (coalesced) from <see cref="WakeTimer"/>, which the worker sets after every input to when the engine is due next and
-/// stops while nothing is due. The worker processes one input at a time with
-/// <see cref="AutomationEngine"/>, so no rule runs inside a property setter.
+/// The worker of one automation. Callbacks on writing threads only enqueue: property and graph changes from
+/// <see cref="AutomationChangeReceiver"/> and ticks from <see cref="WakeTimer"/>. The worker processes one input at a time
+/// with <see cref="AutomationEngine"/>, so no rule runs inside a property setter, and sets the timer after each input to
+/// when the engine is due next.
 /// </summary>
 internal sealed class AutomationRuntime
 {
@@ -23,6 +21,7 @@ internal sealed class AutomationRuntime
     private readonly AutomationInputQueue _queue = new();
     private readonly AutomationEngine _engine;
     private readonly AutomationChangeReceiver _changes;
+    private readonly GraphRoutes _routes;
     private CheckpointLocation _location;
     private int _isTickPending;
     private WakeTimer? _wakeTimer;
@@ -36,8 +35,12 @@ internal sealed class AutomationRuntime
         _location = location;
         _keeper = new AutomationStateKeeper(location.Store);
         _changes = new AutomationChangeReceiver(_queue);
-        _engine = new AutomationEngine(automation, _queue, _keeper, logger, _changes);
+        _routes = new GraphRoutes(automation, _changes);
+        _engine = new AutomationEngine(automation, _queue, _keeper, logger, _changes, _routes);
     }
+
+    // White-box test hook: the graph routes of the stored resolutions.
+    internal GraphRoutes Routes => _routes;
 
     /// <summary>The checkpoint of the automation: where it started, or where it moved to later. Changed by the worker only.</summary>
     public CheckpointLocation Location
@@ -46,6 +49,7 @@ internal sealed class AutomationRuntime
         private set => Volatile.Write(ref _location, value);
     }
 
+    // Keeps the token sources out of the automation, which is at the coupling limit of the analyzer.
     /// <summary>Runs the stop with a token that is canceled with <paramref name="cancellationToken"/> or after <see cref="StopTimeout"/>.</summary>
     public static async Task WaitForStopAsync(Func<CancellationToken, Task> stop, TimeProvider timeProvider, CancellationToken cancellationToken)
     {
@@ -83,6 +87,12 @@ internal sealed class AutomationRuntime
     public void MarkConfigurationRequested() => _queue.MarkConfigurationRequested();
 
     public void RequestConfiguration() => _queue.TryEnqueue(ConfigurationChangedInput.Instance);
+
+    /// <summary>The receiver of the property changes of the automation.</summary>
+    internal AutomationChangeReceiver Changes => _changes;
+
+    // White-box test hook: the engine of the rules.
+    internal AutomationEngine Engine => _engine;
 
     /// <summary>Queues a reset; false when the queue is full or closed, or the reset continues a feedback chain beyond the limit.</summary>
     public bool RequestReset()
@@ -122,8 +132,9 @@ internal sealed class AutomationRuntime
 
             // A move between the start and the registration queued no graph change.
             FollowPath();
+            _routes.Publish();
             _engine.RefreshRuleStatuses();
-            using var wakeTimer = new WakeTimer(_automation.TimeProvider, () => EnqueueOnce(ref _isTickPending, TickInput.Instance));
+            using var wakeTimer = new WakeTimer(_automation.TimeProvider, EnqueueTick);
             _wakeTimer = wakeTimer;
             ScheduleWake();
             while (!cancellationToken.IsCancellationRequested)
@@ -166,6 +177,7 @@ internal sealed class AutomationRuntime
             _engine.ReportUnexpectedError(exception);
         }
 
+        _routes.Publish();
         try
         {
             _engine.RefreshRuleStatuses();
@@ -207,15 +219,16 @@ internal sealed class AutomationRuntime
         await _engine.ResynchronizeAsync(dropped, cancellationToken);
     }
 
-    // The checkpoint belongs to the path, so an automation that moved, such as a file moved to another folder, starts
-    // again as a new automation at the new path, and the file at the old path is deleted. Checked on graph changes, which
-    // are queued after the write that moved it, and not on its own lifecycle changes, which come before that write took
-    // effect. A move adds the automation to its new parent before it removes it from the old one: a check between the two
-    // writes may still see the old path, and a check after the second, which the coalesced graph change guarantees, sees
-    // the new one; once moved, further checks find nothing to do.
+    // The checkpoint belongs to the path: an automation that moved starts again as a new automation at the new path, and
+    // the file at the old path is deleted. Checked on graph changes, which are queued after the write that moved it, not on
+    // its own lifecycle changes, which come before that write took effect. A move adds to the new parent before it removes
+    // from the old one, so a check between the two writes may still see the old path; the coalesced graph change
+    // guarantees a check after the second.
     private void FollowPath()
     {
-        if (!Location.HasMoved(_automation))
+        var hasMoved = Location.HasMoved(_automation, _routes.BeginRoute());
+        _routes.EndRoute(_routes.Location);
+        if (!hasMoved)
         {
             return;
         }
@@ -256,15 +269,16 @@ internal sealed class AutomationRuntime
         }
         else if (input is GraphChangedInput)
         {
+            _routes.BeginResolving();
             _changes.OnGraphChangeTaken();
         }
     }
 
-    private void EnqueueOnce(ref int isPending, AutomationInput input)
+    private void EnqueueTick()
     {
-        if (Interlocked.Exchange(ref isPending, 1) == 0 && !_queue.TryEnqueue(input))
+        if (Interlocked.Exchange(ref _isTickPending, 1) == 0 && !_queue.TryEnqueue(TickInput.Instance))
         {
-            Volatile.Write(ref isPending, 0);
+            Volatile.Write(ref _isTickPending, 0);
         }
     }
 

@@ -236,7 +236,7 @@ public class AutomationWakeUpTests
         await AdvanceAsync(host, TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(1));
 
         // Assert
-        Assert.Equal("On: Holding since 12:00:00 for 00:10:00", statusBeforeTheCorrection);
-        Assert.Equal("On: Holding since 11:40:00 for 00:10:00", host.Rule("finished").Status);
+        Assert.Equal("On: Holding since 12:00:00 for 10m", statusBeforeTheCorrection);
+        Assert.Equal("On: Holding since 11:40:00 for 10m", host.Rule("finished").Status);
     }
 }

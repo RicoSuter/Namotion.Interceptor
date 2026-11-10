@@ -69,8 +69,8 @@ public class AutomationCompilerTests
             "Rule 'Storm': trigger 1: the hold cannot be longer than 36500d"
         },
         { [], null, Rule(triggers: [new SubjectEventTrigger { SubjectPath = "/Button" }]), "Rule 'Storm': trigger 1: the event type is missing" },
-        { [], null, Rule(triggers: [new PropertyTrigger { Expression = "" }]), "Rule 'Storm': trigger 1: expected a value at position 0" },
-        { [], null, Rule(triggers: [new PropertyTrigger { Expression = "   " }]), "Rule 'Storm': trigger 1: expected a value at position 3" },
+        { [], null, Rule(triggers: [new PropertyTrigger { Expression = "" }]), "Rule 'Storm': trigger 1: the condition is empty" },
+        { [], null, Rule(triggers: [new PropertyTrigger { Expression = "   " }]), "Rule 'Storm': trigger 1: the condition is empty" },
         { [], null, Rule(onlyIf: "event/Gesture == Release"), "Rule 'Storm': Only if: " + EventOnly },
         { [], null, Rule(actions: [new InvokeOperationAction { OperationPath = "" }]), "Rule 'Storm': action 1: the operation path is missing" },
         { [], null, Rule(actions: [new SetPropertyAction { Id = "set", PropertyPath = "", Value = "1" }]), "Rule 'Storm': action 'set': the property path is missing" },

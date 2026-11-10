@@ -11,11 +11,12 @@ namespace HomeBlaze.Automation.Runtime;
 /// <summary>
 /// The event triggers of the rules that listen for events: shares one subscription per source and event type among
 /// them, follows a source that the graph replaces, and turns a received event into the run requests of the rules that are
-/// active when the worker processes it, in rule order, whose filters are checked when each rule is about to run. Used by
-/// the worker only; a subscription only enqueues.
+/// active when the worker processes it, in rule order, whose filters are checked when each rule is about to run. Stores
+/// the graph route of each resolution of a source path in its trigger. Used by the worker only; a subscription only
+/// enqueues.
 /// </summary>
 internal sealed class EventTriggerEngine(
-    SubjectPathResolver resolver, AutomationInputQueue queue, ILogger logger, Func<string> getAutomationName)
+    SubjectPathResolver resolver, AutomationInputQueue queue, ILogger logger, Func<string> getAutomationName, GraphRoutes routes)
 {
     private readonly Dictionary<IInterceptorSubject, List<EventSubscription>> _subscriptions = new(ReferenceEqualityComparer.Instance);
 
@@ -48,6 +49,7 @@ internal sealed class EventTriggerEngine(
         foreach (var trigger in rule.EventTriggers)
         {
             Leave(trigger);
+            trigger.SourceRoute.Clear();
         }
     }
 
@@ -152,15 +154,23 @@ internal sealed class EventTriggerEngine(
         return evaluation.EvaluateCondition(filter) == true;
     }
 
-    private IInterceptorSubject? ResolveSource(CompiledEventTrigger trigger) =>
-        resolver.ResolveSubject(trigger.Configuration.SubjectPath, trigger.Rule.Rule);
+    private IInterceptorSubject? ResolveSource(CompiledEventTrigger trigger)
+    {
+        var source = resolver.ResolveSubject(trigger.Configuration.SubjectPath, trigger.Rule.Rule, routes.BeginRoute());
+        routes.EndRoute(trigger.SourceRoute);
+        return source;
+    }
 
-    /// <summary>Resolves the source of the trigger and the type of its event; returns why the trigger receives no events, or null.</summary>
-    public static string? FindSource(SubjectPathResolver resolver, CompiledEventTrigger trigger, out IInterceptorSubject? source, out Type? eventType)
+    /// <summary>
+    /// Resolves the source of the trigger and the type of its event, reporting the graph route of the source to
+    /// <paramref name="recorder"/>; returns why the trigger receives no events, or null.
+    /// </summary>
+    public static string? FindSource(
+        SubjectPathResolver resolver, CompiledEventTrigger trigger, out IInterceptorSubject? source, out Type? eventType, GraphRouteBuilder? recorder = null)
     {
         var configuration = trigger.Configuration;
         eventType = null;
-        source = resolver.ResolveSubject(configuration.SubjectPath, trigger.Rule.Rule);
+        source = resolver.ResolveSubject(configuration.SubjectPath, trigger.Rule.Rule, recorder);
         if (source is null)
         {
             return $"No subject at {configuration.SubjectPath}";
@@ -172,7 +182,8 @@ internal sealed class EventTriggerEngine(
 
     private void Join(CompiledEventTrigger trigger, long joinedAfter)
     {
-        var error = FindSource(resolver, trigger, out var source, out var eventType);
+        var error = FindSource(resolver, trigger, out var source, out var eventType, routes.BeginRoute());
+        routes.EndRoute(trigger.SourceRoute);
         trigger.Source = source;
         if (source is null || eventType is null)
         {

@@ -3,6 +3,7 @@ using System.Collections.Immutable;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using HomeBlaze.Services;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Mcp;
 
@@ -498,7 +499,7 @@ public sealed class AgentMemory
             JsonSerializer.Serialize(writer, new AgentMemoryFile(FileVersion, snapshot.Entries), AgentJsonContext.Default.AgentMemoryFile);
         }
 
-        return AtomicFile.WriteAllTextAsync(filePath, Encoding.UTF8.GetString(buffer.WrittenSpan), cancellationToken);
+        return AtomicFile.WriteAllBytesAsync(filePath, buffer.WrittenMemory, cancellationToken);
     }
 }
 
