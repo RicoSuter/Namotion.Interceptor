@@ -1,5 +1,6 @@
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -516,5 +517,65 @@ public class ParentIndexTests
         // Assert
         Assert.Equal(Parent(garage, nameof(Garage.Cars), 0), Assert.Single(first.GetParents()));
         Assert.Equal(0, garage.TryGetRegisteredProperty(g => g.Cars)!.Children.Single(c => c.Subject == first).Index);
+    }
+
+    [Fact]
+    public void WhenHandlerGetsSeveralPlacesOfASubject_ThenItHasAParentEntryPerPlace()
+    {
+        // Arrange
+        var car = new Car();
+        var other = new Car();
+        var garage = new Garage(CreateContext()) { Cars = [car, other] };
+        IChildIndexHandler handler = new ParentTrackingHandler();
+
+        // Act
+        handler.HandleChildIndexChanges(
+            new PropertyReference(garage, nameof(Garage.Cars)),
+            [new SubjectChild(car, 0), new SubjectChild(car, 2), new SubjectChild(other, 1)]);
+
+        // Assert
+        Assert.Equal<SubjectParent>(
+            [Parent(garage, nameof(Garage.Cars), 0), Parent(garage, nameof(Garage.Cars), 2)],
+            car.GetParents());
+        Assert.Equal<SubjectParent>([Parent(garage, nameof(Garage.Cars), 1)], other.GetParents());
+    }
+
+    [Fact]
+    public void WhenHandlerGetsOnePlaceOfASubjectWithSeveral_ThenItKeepsOneParentEntry()
+    {
+        // Arrange
+        var car = new Car();
+        var garage = new Garage(CreateContext()) { Cars = [car] };
+        IChildIndexHandler handler = new ParentTrackingHandler();
+        var property = new PropertyReference(garage, nameof(Garage.Cars));
+        handler.HandleChildIndexChanges(property, [new SubjectChild(car, 0), new SubjectChild(car, 1)]);
+
+        // Act
+        handler.HandleChildIndexChanges(property, [new SubjectChild(car, 1)]);
+
+        // Assert
+        Assert.Equal<SubjectParent>([Parent(garage, nameof(Garage.Cars), 1)], car.GetParents());
+    }
+
+    [Fact]
+    public void WhenSubjectWithSeveralParentEntriesLeavesTheProperty_ThenAllItsEntriesForThePropertyAreRemoved()
+    {
+        // Arrange
+        var car = new Car();
+        var garage = new Garage(CreateContext())
+        {
+            Cars = [car],
+            CarsByName = new Dictionary<string, Car> { ["Motor"] = car }
+        };
+        IChildIndexHandler handler = new ParentTrackingHandler();
+        handler.HandleChildIndexChanges(
+            new PropertyReference(garage, nameof(Garage.Cars)),
+            [new SubjectChild(car, 0), new SubjectChild(car, 1)]);
+
+        // Act
+        garage.Cars = [];
+
+        // Assert
+        Assert.Equal<SubjectParent>([Parent(garage, nameof(Garage.CarsByName), "Motor")], car.GetParents());
     }
 }

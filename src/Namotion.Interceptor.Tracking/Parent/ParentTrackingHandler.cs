@@ -31,9 +31,19 @@ public class ParentTrackingHandler : ILifecycleHandler, IChildIndexHandler
 
     void IChildIndexHandler.HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
     {
-        foreach (var child in children)
+        // The places of a subject form one consecutive run.
+        var start = 0;
+        while (start < children.Length)
         {
-            child.Subject.UpdateParentIndex(property, child.Index);
+            var subject = children[start].Subject;
+            var end = start + 1;
+            while (end < children.Length && ReferenceEquals(children[end].Subject, subject))
+            {
+                end++;
+            }
+
+            subject.ReplaceParentIndices(property, children[start..end]);
+            start = end;
         }
     }
 }
