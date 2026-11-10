@@ -54,8 +54,7 @@
                         // While the page is edited a link would leave it, also by keyboard, so the links lead nowhere and take no focus.
                         var link = IsEditing ? null : SubjectTableRows.GetLink(PathResolver, row.Subject);
 
-                        @* A subject held at several places is a row for each, so the place is part of the key. *@
-                        <tr @key="row" data-testid="subject-table-row">
+                        <tr @key="row.Subject" data-testid="subject-table-row">
                             @if (columns.Length == 0)
                             {
                                 <td>
