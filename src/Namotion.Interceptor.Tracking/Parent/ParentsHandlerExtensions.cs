@@ -222,13 +222,17 @@ public static class ParentsHandlerExtensions
                 }
                 else
                 {
-                    var indices = new object?[places.Length];
-                    for (var i = 0; i < places.Length; i++)
+                    // Snapshots copy the indices, so a holder of the same length can be refilled.
+                    if (current is not Places holder || holder.Indices.Length != places.Length)
                     {
-                        indices[i] = places[i].Index;
+                        holder = new Places(new object?[places.Length]);
+                        current = holder;
                     }
 
-                    current = new Places(indices);
+                    for (var i = 0; i < places.Length; i++)
+                    {
+                        holder.Indices[i] = places[i].Index;
+                    }
                 }
 
                 _cache = null; // Invalidate cache
