@@ -498,7 +498,8 @@ public class MovedChildConsistencyTests
     /// <summary>
     /// Asserts that the registry children of the property are the subjects of its value, one for each position or key,
     /// in the order of a collection (a dictionary's children keep their attach order), that the tracked and the
-    /// registry parents of each carry the same indices, and that no former child keeps a parent entry.
+    /// registry parents of each carry the same indices with the entries of each property adjacent, and that no former
+    /// child keeps a parent entry.
     /// </summary>
     private static void AssertEveryCopyMatchesValue(
         IInterceptorSubject parent, string propertyName, IEnumerable<IInterceptorSubject> candidates)
@@ -529,15 +530,41 @@ public class MovedChildConsistencyTests
                 .Select(child => child.Index)
                 .ToArray();
 
-            Assert.Equal(expectedIndices, candidate.GetParents()
+            var trackedParents = candidate.GetParents();
+            Assert.Equal(expectedIndices, trackedParents
                 .Where(entry => entry.Property == property)
                 .Select(entry => entry.Index));
+            AssertEntriesOfEachPropertyAreAdjacent(
+                trackedParents.Select(entry => entry.Property).ToList(), trackedParents.CountProperties());
 
             var registeredParents = candidate.TryGetRegisteredSubject()?.Parents ?? [];
             Assert.Equal(expectedIndices, registeredParents
                 .Where(entry => entry.Property.Reference == property)
                 .Select(entry => entry.Index));
+            AssertEntriesOfEachPropertyAreAdjacent(
+                registeredParents.Select(entry => entry.Property).ToList(), registeredParents.CountProperties());
         }
+    }
+
+    /// <summary>
+    /// Asserts that the parent entries of each property follow one another, which <c>CountProperties()</c> relies on, and
+    /// that it counts the distinct properties.
+    /// </summary>
+    private static void AssertEntriesOfEachPropertyAreAdjacent<TProperty>(List<TProperty> properties, int countedProperties)
+    {
+        var distinctProperties = new List<TProperty>();
+        for (var i = 0; i < properties.Count; i++)
+        {
+            if (i > 0 && EqualityComparer<TProperty>.Default.Equals(properties[i], properties[i - 1]))
+            {
+                continue;
+            }
+
+            Assert.DoesNotContain(properties[i], distinctProperties);
+            distinctProperties.Add(properties[i]);
+        }
+
+        Assert.Equal(distinctProperties.Count, countedProperties);
     }
 
     private static List<(IInterceptorSubject Subject, object? Index)> GetPlaces(object? value)
