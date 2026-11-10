@@ -208,8 +208,8 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
 
                     if (property is not null)
                     {
-                        registeredSubject.RemoveParent(property);
-                        property.RemoveChild(change.Subject);
+                        var removed = registeredSubject.RemoveParent(property);
+                        property.RemoveChild(change.Subject, removed);
                     }
                 }
                 

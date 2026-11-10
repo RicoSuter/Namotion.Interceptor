@@ -36,7 +36,7 @@ public class RegisteredSubject
 
     /// <summary>
     /// Gets the properties which reference this subject.
-    /// One entry per property that holds the subject, with its first key or position (<c>null</c> for a subject reference).
+    /// One entry per key or position that holds the subject, grouped by property in the order of its value (<c>null</c> for a subject reference).
     /// Thread-safe; reads are lock-free once the snapshot is cached.
     /// </summary>
     public ImmutableArray<SubjectPropertyParent> Parents
@@ -163,23 +163,36 @@ public class RegisteredSubject
         }
     }
 
-    // Matched by property alone: a subject has one parent entry per property that holds it.
-    internal void RemoveParent(RegisteredSubjectProperty property)
+    // Removes every entry of the property, one per key or position that held the subject, and returns how many.
+    internal int RemoveParent(RegisteredSubjectProperty property)
     {
         lock (_lock)
         {
+            var removed = 0;
+            if (_additionalParents is not null)
+            {
+                for (var i = _additionalParents.Count - 1; i >= 0; i--)
+                {
+                    if (_additionalParents[i].Property == property)
+                    {
+                        _additionalParents.RemoveAt(i);
+                        removed++;
+                    }
+                }
+            }
+
             if (_firstParent.Property == property)
             {
                 PromoteFirstParentFromAdditional();
-                return;
+                return removed + 1;
             }
 
-            var position = IndexOfAdditionalParent(property);
-            if (position >= 0)
+            if (removed > 0)
             {
-                _additionalParents!.RemoveAt(position);
                 InvalidateParentsSnapshot();
             }
+
+            return removed;
         }
     }
 
@@ -201,6 +214,42 @@ public class RegisteredSubject
                 _additionalParents![position] = entry;
                 InvalidateParentsSnapshot();
             }
+        }
+    }
+
+    // Replaces the entries of the property with one per place, at the position of its first entry.
+    internal void ReplaceParentIndices(RegisteredSubjectProperty property, ReadOnlySpan<SubjectChild> places)
+    {
+        lock (_lock)
+        {
+            if (_firstParent.Property is null)
+                return;
+
+            // The inline first entry joins the list for the duration, so positions count from it.
+            var parents = _additionalParents ??= [];
+            parents.Insert(0, _firstParent);
+
+            var position = -1;
+            for (var i = parents.Count - 1; i >= 0; i--)
+            {
+                if (parents[i].Property == property)
+                {
+                    parents.RemoveAt(i);
+                    position = i;
+                }
+            }
+
+            if (position >= 0)
+            {
+                for (var i = 0; i < places.Length; i++)
+                {
+                    parents.Insert(position + i, new SubjectPropertyParent { Property = property, Index = places[i].Index });
+                }
+            }
+
+            _firstParent = parents[0];
+            parents.RemoveAt(0);
+            InvalidateParentsSnapshot();
         }
     }
 
