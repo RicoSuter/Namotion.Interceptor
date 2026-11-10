@@ -137,6 +137,114 @@ public class MovedChildConsistencyTests
         }
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void WhenCollectionIsWrittenWithRandomRepeatedCars_ThenEveryCopyMatchesTheValueAfterEachStep(int seed)
+    {
+        // Arrange
+        var context = CreateContext();
+        var cars = CreateHeldCars(context, 4);
+        var garage = new Garage(context);
+        var random = new Random(seed);
+
+        for (var step = 0; step < 2_000; step++)
+        {
+            // Act
+            garage.Cars = Enumerable.Range(0, random.Next(7)).Select(_ => cars[random.Next(cars.Length)]).ToList();
+
+            // Assert
+            AssertEveryCopyMatchesValue(garage, nameof(Garage.Cars), cars);
+        }
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void WhenDictionaryIsWrittenWithRandomRepeatedCars_ThenEveryCopyMatchesTheValueAfterEachStep(int seed)
+    {
+        // Arrange
+        var context = CreateContext();
+        var cars = CreateHeldCars(context, 3);
+        var garage = new Garage(context);
+        var random = new Random(seed);
+        string[] keys = ["K0", "K1", "K2", "K3", "K4"];
+
+        for (var step = 0; step < 2_000; step++)
+        {
+            // Act
+            garage.CarsByName = keys
+                .OrderBy(_ => random.Next())
+                .Take(random.Next(keys.Length + 1))
+                .ToDictionary(key => key, _ => cars[random.Next(cars.Length)]);
+
+            // Assert
+            AssertEveryCopyMatchesValue(garage, nameof(Garage.CarsByName), cars);
+        }
+    }
+
+    [Fact]
+    public void WhenKeyEqualsWritesAnotherPropertyWhileTheValueRepeatsACar_ThenEveryCopyMatchesBothValues()
+    {
+        // Arrange
+        var context = CreateContext();
+        var cars = CreateHeldCars(context, 2);
+        var oldKey = new HookedKey("A");
+        var holder = new BroadlyDeclaredHolder(context)
+        {
+            BroadCars = new Dictionary<HookedKey, Car> { [oldKey] = cars[0], [new HookedKey("B")] = cars[0] }
+        };
+
+        var nestedWriteRan = false;
+        oldKey.OnEquals = () =>
+        {
+            holder.PreciseCars = new Dictionary<string, Car> { ["X"] = cars[1], ["Y"] = cars[1], ["Z"] = cars[0] };
+            nestedWriteRan = true;
+        };
+
+        // Act: the old key is compared with the new key "A" while the places of the repeated car are matched.
+        holder.BroadCars = new Dictionary<HookedKey, Car>
+        {
+            [new HookedKey("A")] = cars[0],
+            [new HookedKey("C")] = cars[0],
+            [new HookedKey("D")] = cars[1]
+        };
+
+        // Assert
+        Assert.True(nestedWriteRan);
+        AssertEveryCopyMatchesValue(holder, nameof(BroadlyDeclaredHolder.BroadCars), cars);
+        AssertEveryCopyMatchesValue(holder, nameof(BroadlyDeclaredHolder.PreciseCars), cars);
+    }
+
+    [Fact]
+    public void WhenKeyEqualsThrowsWhileTheValueRepeatsACar_ThenTheNextWriteIsReconciled()
+    {
+        // Arrange
+        var context = CreateContext();
+        var cars = CreateHeldCars(context, 2);
+        var oldKey = new HookedKey("A");
+        var holder = new BroadlyDeclaredHolder(context)
+        {
+            BroadCars = new Dictionary<HookedKey, Car> { [oldKey] = cars[0], [new HookedKey("B")] = cars[0] }
+        };
+
+        oldKey.OnEquals = () => throw new InvalidOperationException();
+
+        // Act
+        Assert.Throws<InvalidOperationException>(() => holder.BroadCars = new Dictionary<HookedKey, Car>
+        {
+            [new HookedKey("A")] = cars[0],
+            [new HookedKey("C")] = cars[0]
+        });
+
+        holder.BroadCars = new Dictionary<string, Car> { ["C"] = cars[0], ["D"] = cars[1], ["E"] = cars[0] };
+
+        // Assert
+        AssertEveryCopyMatchesValue(holder, nameof(BroadlyDeclaredHolder.BroadCars), cars);
+    }
+
     [Fact]
     [Trait("Category", "Concurrency")]
     public void WhenEntryIsReKeyedWhileParentsAreRead_ThenReadersAlwaysSeeOneEntry()
@@ -320,5 +428,25 @@ public class MovedChildConsistencyTests
         }
 
         return children;
+    }
+
+    /// <summary>
+    /// A key equal to every key of the same name that runs a hook once, the first time its Equals is called.
+    /// </summary>
+    private sealed class HookedKey(string name)
+    {
+        public Action? OnEquals { get; set; }
+
+        public override bool Equals(object? obj)
+        {
+            var onEquals = OnEquals;
+            OnEquals = null;
+            onEquals?.Invoke();
+            return obj is HookedKey other && other.ToString() == name;
+        }
+
+        public override int GetHashCode() => name.GetHashCode(StringComparison.Ordinal);
+
+        public override string ToString() => name;
     }
 }
