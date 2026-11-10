@@ -431,7 +431,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             }
 
             // Report kept subjects whose key or position changed. A write between two single references
-            // keeps no subject, since writing the same one again returns early.
+            // keeps no subject, since writing the same one again returns early. The refresh uses
+            // newTouchedSubjects up, so nothing may read the set after it.
             if (lastProcessed is IEnumerable || newValue is IEnumerable)
             {
                 ChildIndexRefresher.RefreshMovedChildren(context.Property,

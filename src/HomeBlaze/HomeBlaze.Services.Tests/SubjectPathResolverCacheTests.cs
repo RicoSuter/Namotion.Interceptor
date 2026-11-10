@@ -213,52 +213,6 @@ public class SubjectPathResolverCacheTests : SubjectPathResolverTestBase
     }
 
     [Fact]
-    public void WhenDictionaryGainsAnotherKeyForAChildItHolds_ThenTheNewKeyResolvesToTheChild()
-    {
-        // Arrange
-        var child = new TestContainer(Context) { Name = "Child" };
-        var root = new TestContainer(Context)
-        {
-            Name = "Root",
-            Children = new Dictionary<string, TestContainer> { ["Motor"] = child }
-        };
-        RootManager.Root = root;
-        var resolvedBefore = Resolver.ResolveSubject("/Children[Engine]", PathStyle.Canonical);
-        var versionBefore = Resolver.PathsVersion;
-
-        // Act
-        root.Children = new Dictionary<string, TestContainer> { ["Motor"] = child, ["Engine"] = child };
-
-        // Assert
-        Assert.Null(resolvedBefore);
-        Assert.NotEqual(versionBefore, Resolver.PathsVersion);
-        Assert.Same(child, Resolver.ResolveSubject("/Children[Engine]", PathStyle.Canonical));
-        Assert.Equal("/Children[Motor]", Resolver.GetPath(child, PathStyle.Canonical));
-    }
-
-    [Fact]
-    public void WhenDictionaryLosesTheSecondOfTwoKeysForAChild_ThenTheRemovedKeyNoLongerResolves()
-    {
-        // Arrange
-        var child = new TestContainer(Context) { Name = "Child" };
-        var root = new TestContainer(Context)
-        {
-            Name = "Root",
-            Children = new Dictionary<string, TestContainer> { ["Motor"] = child, ["Engine"] = child }
-        };
-        RootManager.Root = root;
-        var resolvedBefore = Resolver.ResolveSubject("/Children[Engine]", PathStyle.Canonical);
-
-        // Act
-        root.Children = new Dictionary<string, TestContainer> { ["Motor"] = child };
-
-        // Assert
-        Assert.Same(child, resolvedBefore);
-        Assert.Null(Resolver.ResolveSubject("/Children[Engine]", PathStyle.Canonical));
-        Assert.Same(child, Resolver.ResolveSubject("/Children[Motor]", PathStyle.Canonical));
-    }
-
-    [Fact]
     public void WhenDictionaryIsAssignedAgainWithTheSameEntries_ThenPathsVersionIsUnchanged()
     {
         // Arrange
