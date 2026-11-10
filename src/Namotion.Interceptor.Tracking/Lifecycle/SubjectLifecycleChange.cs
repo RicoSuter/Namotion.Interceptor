@@ -13,7 +13,11 @@ public readonly struct SubjectLifecycleChange
     /// <summary>Gets the property which has been changed.</summary>
     public PropertyReference? Property { get; init; }
 
-    /// <summary>Gets the index defining the place of the subject in the property's dictionary or collection; on attach, its first one when the value holds it more than once.</summary>
+    /// <summary>
+    /// Gets the key or position of the subject in the property's dictionary or collection. On attach, its first one in
+    /// the value. On detach, one of its keys or positions in the old value, not necessarily the first: an ordinary write
+    /// detaches on its last.
+    /// </summary>
     /// <remarks>
     /// On detach, remove every stored index of the subject for the property: a subject held more than once has one
     /// per key or position and this is only one of them.
@@ -21,9 +25,9 @@ public readonly struct SubjectLifecycleChange
     public object? Index { get; init; }
 
     /// <summary>
-    /// Gets the later keys or positions of the subject in the property's value, in order, when an added property
-    /// reference finds it at more than one; otherwise empty. Together with <see cref="Index"/> they are every key or
-    /// position of the subject in the value.
+    /// Gets the keys or positions of the subject in the property's value after the first, which is <see cref="Index"/>,
+    /// in order. Set only on attach, and empty unless the value holds the subject more than once. Together with
+    /// <see cref="Index"/> they are every key or position of the subject in the value.
     /// </summary>
     public ImmutableArray<object?> AdditionalIndices
     {
