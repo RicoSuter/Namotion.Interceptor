@@ -22,23 +22,23 @@ internal sealed class PathPattern
     }
 
     /// <exception cref="AuthorizationException">The pattern is empty, contains a control or format character, starts with a path separator of another provider, is malformed, has an empty segment, has a segment with leading or trailing whitespace, or matches no member because it has no segment or its last segment has an index.</exception>
-    public static PathPattern Parse(string pattern, PathProviderBase pathProvider, string roleName)
+    public static PathPattern Parse(string pattern, PathProviderBase pathProvider, string? roleName)
     {
         if (pattern.Length == 0)
         {
-            throw new AuthorizationException($"A path pattern of role '{roleName}' is empty.");
+            throw new AuthorizationException($"A path pattern of {PolicyCompiler.DescribeOwner(roleName)} is empty.");
         }
 
         if (SelectorText.ContainsInvisibleCharacter(pattern))
         {
-            throw new AuthorizationException($"Path pattern '{pattern}' of role '{roleName}' contains an invisible (control or format) character.");
+            throw new AuthorizationException($"Path pattern '{pattern}' of {PolicyCompiler.DescribeOwner(roleName)} contains an invisible (control or format) character.");
         }
 
         ThrowIfStartsWithForeignSeparator(pattern, pathProvider.PathSeparator, roleName);
 
         if (!pathProvider.TryParsePath(pattern, out var parsed, out var error))
         {
-            throw new AuthorizationException($"Path pattern '{pattern}' of role '{roleName}' is malformed: {error}");
+            throw new AuthorizationException($"Path pattern '{pattern}' of {PolicyCompiler.DescribeOwner(roleName)} is malformed: {error}");
         }
 
         var separator = pathProvider.PathSeparator;
@@ -49,7 +49,7 @@ internal sealed class PathPattern
 
         if (HasEmptySegment(pattern, pathProvider))
         {
-            throw new AuthorizationException($"Path pattern '{pattern}' of role '{roleName}' has an empty segment; '{separator}' may only start a pattern and separate segments.");
+            throw new AuthorizationException($"Path pattern '{pattern}' of {PolicyCompiler.DescribeOwner(roleName)} has an empty segment; '{separator}' may only start a pattern and separate segments.");
         }
 
         var segments = ToSegments(parsed, pattern, roleName);
@@ -65,17 +65,17 @@ internal sealed class PathPattern
 
     // Under another separator a pattern copied from a slash-separated tool would read as one segment and match nothing.
     // Only the first character is checked, since an [InlinePaths] key may contain either character.
-    private static void ThrowIfStartsWithForeignSeparator(string pattern, char separator, string roleName)
+    private static void ThrowIfStartsWithForeignSeparator(string pattern, char separator, string? roleName)
     {
         var first = pattern[0];
         if (first is '/' or '\\' && first != separator)
         {
             throw new AuthorizationException(
-                $"Path pattern '{pattern}' of role '{roleName}' starts with '{first}', which is not the path provider's separator '{separator}'; write the pattern with '{separator}' or without a leading separator.");
+                $"Path pattern '{pattern}' of {PolicyCompiler.DescribeOwner(roleName)} starts with '{first}', which is not the path provider's separator '{separator}'; write the pattern with '{separator}' or without a leading separator.");
         }
     }
 
-    private static Segment[] ToSegments(List<(string segment, string? index)> parsed, string pattern, string roleName)
+    private static Segment[] ToSegments(List<(string segment, string? index)> parsed, string pattern, string? roleName)
     {
         var segments = new Segment[parsed.Count];
         for (var i = 0; i < parsed.Count; i++)
@@ -83,7 +83,7 @@ internal sealed class PathPattern
             var (name, index) = parsed[i];
             if (HasOuterWhitespace(name) || (index is not null && HasOuterWhitespace(index)))
             {
-                throw new AuthorizationException($"Path pattern '{pattern}' of role '{roleName}' has a segment with leading or trailing whitespace.");
+                throw new AuthorizationException($"Path pattern '{pattern}' of {PolicyCompiler.DescribeOwner(roleName)} has a segment with leading or trailing whitespace.");
             }
 
             segments[i] = new Segment(name, index, IsAnySegments: name == AnySegments && index is null);
@@ -94,9 +94,9 @@ internal sealed class PathPattern
 
     // A deny that silently matches nothing must not compile.
     [DoesNotReturn]
-    private static void ThrowMatchesNoMember(string pattern, string prefix, char separator, string roleName)
+    private static void ThrowMatchesNoMember(string pattern, string prefix, char separator, string? roleName)
         => throw new AuthorizationException(
-            $"Path pattern '{pattern}' of role '{roleName}' matches no member; use '{prefix}**' for the subject and everything below it, or '{prefix}*' for its members.");
+            $"Path pattern '{pattern}' of {PolicyCompiler.DescribeOwner(roleName)} matches no member; use '{prefix}**' for the subject and everything below it, or '{prefix}*' for its members.");
 
     // The registry's parser skips empty segments, so a doubled or trailing separator would otherwise compile as a
     // pattern other than the one written. Only called for a well-formed pattern, so every index is closed.

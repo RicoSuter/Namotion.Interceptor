@@ -1,6 +1,7 @@
 @using System.Globalization
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Gauge))]
 @implements ISubjectComponent
+@inherits PermissionsComponentBase
 @inject SubjectPathResolver PathResolver
 @inject ITimeZoneDisplay TimeZone
 
@@ -12,11 +13,11 @@
 {
     // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var path = gauge.Path;
-    var reading = ValueReader.Read(PathResolver, gauge, path, gauge.Map, TimeZone);
+    var reading = ValueReader.Read(PathResolver, gauge, path, gauge.Map, TimeZone, Permissions);
     var state = ValueRangeResolver.GetState(reading.Property, reading.Value, gauge.Minimum, gauge.Maximum);
     var size = gauge.Size;
 
-    var labelText = _label.Render(gauge.Label, PathResolver, gauge, reading.Binding, TimeZone, out var labelError);
+    var labelText = _label.Render(gauge.Label, PathResolver, gauge, reading.Binding, TimeZone, Permissions, out var labelError);
 
     if ((reading.MapError ?? state.Error ?? labelError) is { } error)
     {

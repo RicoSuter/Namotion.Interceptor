@@ -1,12 +1,14 @@
 @* A row of a value list. The list reads the values of all rows in one render, so a row whose parameters are equal does not render again. *@
 @inherits Namotion.Interceptor.Blazor.TrackedComponentBase
+@implements IDisposable
 @inject SubjectPathResolver PathResolver
 @inject ITimeZoneDisplay TimeZone
+@inject IUserPermissions Permissions
 
 @{
     var content = Row.Content;
     // A row with an empty path has no reading and binds nothing.
-    var label = _label.Render(Row.Label, PathResolver, Row, Reading is null ? default : Reading.Binding, TimeZone, out var labelError);
+    var label = _label.Render(Row.Label, PathResolver, Row, Reading is null ? default : Reading.Binding, TimeZone, Permissions, out var labelError);
     // A row shows one error: that of its map first, then that of its label.
     var error = Reading?.MapError ?? labelError;
 }
@@ -69,4 +71,13 @@
     /// <summary>Whether another row has an icon, so that this one leaves room for one.</summary>
     [Parameter]
     public bool AnyIcon { get; set; }
+
+    protected override void OnInitialized()
+    {
+        Permissions.Changed += OnPermissionsChanged;
+    }
+
+    private void OnPermissionsChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Permissions.Changed -= OnPermissionsChanged;
 }

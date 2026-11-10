@@ -1,6 +1,7 @@
 @using Namotion.Interceptor
 
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(GpioSubject))]
+@inherits PermissionsComponentBase
 @implements ISubjectComponent
 
 <MudPaper Class="pa-4">
@@ -15,7 +16,7 @@
         <MudStack Row="true" Spacing="4">
             <MudStack>
                 <MudText Typo="Typo.caption">Digital Pins</MudText>
-                <MudText Typo="Typo.h5">@(GpioSubject?.Pins.Count ?? 0)</MudText>
+                <MudText Typo="Typo.h5">@ShownPins.Count()</MudText>
             </MudStack>
 
             <MudStack>
@@ -29,13 +30,13 @@
             </MudStack>
         </MudStack>
 
-        @if (GpioSubject?.AnalogChannels.Count > 0)
+        @if (GpioSubject?.AnalogChannels.Values.Count(channel => Permissions.CanShow(channel)) is > 0 and var analogChannelCount)
         {
             <MudDivider />
             <MudStack Row="true" Spacing="4">
                 <MudStack>
                     <MudText Typo="Typo.caption">Analog Channels</MudText>
-                    <MudText Typo="Typo.h5">@GpioSubject.AnalogChannels.Count</MudText>
+                    <MudText Typo="Typo.h5">@analogChannelCount</MudText>
                 </MudStack>
             </MudStack>
         }
@@ -48,9 +49,13 @@
 
     private GpioSubject? GpioSubject => Subject as GpioSubject;
 
-    private int InputCount => GpioSubject?.Pins.Values
-        .Count(p => p.Mode is GpioPinMode.Input or GpioPinMode.InputPullUp or GpioPinMode.InputPullDown) ?? 0;
+    // A pin the roles hide is not counted.
+    private IEnumerable<GpioPin> ShownPins =>
+        GpioSubject?.Pins.Values.Where(pin => Permissions.CanShow(pin)) ?? [];
 
-    private int OutputCount => GpioSubject?.Pins.Values
-        .Count(p => p.Mode == GpioPinMode.Output) ?? 0;
+    private int InputCount => ShownPins
+        .Count(p => p.Mode is GpioPinMode.Input or GpioPinMode.InputPullUp or GpioPinMode.InputPullDown);
+
+    private int OutputCount => ShownPins
+        .Count(p => p.Mode == GpioPinMode.Output);
 }

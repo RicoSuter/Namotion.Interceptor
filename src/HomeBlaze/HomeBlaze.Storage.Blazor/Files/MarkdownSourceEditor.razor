@@ -8,6 +8,7 @@
 @using Microsoft.JSInterop
 @using MudBlazor
 @using Namotion.Interceptor
+@using Namotion.Interceptor.Registry.Abstractions
 
 @inject IJSRuntime JsRuntime
 @inject IDialogService DialogService
@@ -146,6 +147,13 @@ else
     /// <summary>The names that blocks outside of the text use, which a block that <see cref="CreateAsync"/> writes cannot take.</summary>
     [Parameter]
     public IReadOnlyCollection<string> ReservedNames { get; set; } = [];
+
+    /// <summary>
+    /// The member that holds the text, which the viewer must administer to create a block with <see cref="CreateAsync"/>;
+    /// null refuses.
+    /// </summary>
+    [Parameter]
+    public RegisteredSubjectProperty? AdministerMember { get; set; }
 
     /// <summary>
     /// Called with the text after every change of the text in the editor. It does not render the component around the
@@ -493,7 +501,8 @@ else
         // configured in it is gone once the dialog has closed.
         var result = await SubjectSetupDialog.ShowAsync(DialogService, new SubjectSetupOptions
         {
-            NameField = MarkdownBlockNames.CreateNameOptions(text, ReservedNames)
+            NameField = MarkdownBlockNames.CreateNameOptions(text, ReservedNames),
+            AdministerMember = AdministerMember
         });
 
         if (result?.Name is null)

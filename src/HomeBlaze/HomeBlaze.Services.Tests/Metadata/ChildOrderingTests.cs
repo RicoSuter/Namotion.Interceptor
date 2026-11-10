@@ -1,9 +1,12 @@
 using System.Collections.Immutable;
+using System.Text.Json;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage.Abstractions.Metadata;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 
 namespace HomeBlaze.Services.Tests.Metadata;
@@ -107,6 +110,44 @@ public class ChildOrderingTests
 
         // Assert
         Assert.Equal(["a.md", "b.md"], names);
+    }
+
+    [Fact]
+    public void WhenTheReaderIsListedEveryNameOfTheOrderInTheMetadata_ThenFilterOrderReturnsTheValueUnchanged()
+    {
+        // Arrange
+        var (member, metadata) = CreateFolderWithOrderMetadata();
+
+        // Act
+        var filtered = ChildOrdering.FilterOrder(member, metadata, 0, static (_, _) => new HashSet<string> { "a.md", "b.md" });
+
+        // Assert
+        Assert.Same(metadata, filtered);
+    }
+
+    [Fact]
+    public void WhenTheReaderIsNotListedANameOfTheOrderInTheMetadata_ThenFilterOrderRemovesIt()
+    {
+        // Arrange
+        var (member, metadata) = CreateFolderWithOrderMetadata();
+
+        // Act
+        var filtered = ChildOrdering.FilterOrder(member, metadata, 0, static (_, _) => new HashSet<string> { "a.md" });
+
+        // Assert
+        var order = Assert.IsType<ImmutableDictionary<string, JsonElement>>(filtered)[MetadataKeys.Order];
+        Assert.Equal(["a.md"], order.EnumerateArray().Select(static item => item.GetString()));
+    }
+
+    private static (RegisteredSubjectProperty Member, ImmutableDictionary<string, JsonElement> Metadata) CreateFolderWithOrderMetadata()
+    {
+        var folder = new OrderingTestFolder(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry())
+        {
+            Children = new Dictionary<string, IInterceptorSubject> { ["a.md"] = new OrderingTestFolder(), ["b.md"] = new OrderingTestFolder() }
+        };
+        TestMetadata.Set(folder, """{ "order": ["b.md", "a.md"] }""");
+        var member = folder.TryGetRegisteredSubject()!.TryGetProperty(KnownAttributes.Metadata)!;
+        return (member, (ImmutableDictionary<string, JsonElement>)member.GetValue()!);
     }
 }
 

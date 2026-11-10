@@ -99,15 +99,15 @@ public static class Extensions
 
     /// <summary>
     /// Maps <c>/health</c> (all checks) and <c>/alive</c> (checks tagged <c>live</c>) in every environment.
-    /// The endpoints report status only.
+    /// The endpoints report status only and need no sign-in.
     /// </summary>
     public static WebApplication MapDefaultEndpoints(this WebApplication app)
     {
-        app.MapHealthChecks(HealthEndpointPath);
+        app.MapHealthChecks(HealthEndpointPath).AllowAnonymous();
         app.MapHealthChecks(AlivenessEndpointPath, new HealthCheckOptions
         {
             Predicate = registration => registration.Tags.Contains("live")
-        });
+        }).AllowAnonymous();
 
         return app;
     }

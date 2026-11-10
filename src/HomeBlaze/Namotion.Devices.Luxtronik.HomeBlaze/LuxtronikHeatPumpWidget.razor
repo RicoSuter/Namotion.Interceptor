@@ -1,4 +1,5 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(LuxtronikHeatPump))]
+@inherits PermissionsComponentBase
 @implements ISubjectComponent
 
 <MudPaper Class="pa-4">
@@ -20,12 +21,20 @@
         @if (HeatPump is not null)
         {
             <MudStack Row="true" Spacing="4" Wrap="Wrap.Wrap">
-                @Value("State", GetDisplayName(HeatPump.OperatingStatus.OperatingState))
-                @Value("Outside", Format(HeatPump.Temperatures.Outside.Temperature, "F1", "°C"))
-                @Value("Flow", Format(HeatPump.Temperatures.Flow.Temperature, "F1", "°C"))
-                @Value("Hot water", Format(HeatPump.HotWater.Temperature.Temperature, "F1", "°C"))
-                @Value("Electrical", Format(HeatPump.Energy.ElectricalPower, "F0", "W"))
-                @Value("Thermal", Format(HeatPump.Energy.ThermalPower, "F0", "W"))
+                @{
+                    // A subject the roles hide renders as an unknown value.
+                    var operatingStatus = Shown(HeatPump.OperatingStatus);
+                    var outside = Shown(HeatPump.Temperatures.Outside);
+                    var flow = Shown(HeatPump.Temperatures.Flow);
+                    var hotWater = Shown(HeatPump.HotWater.Temperature);
+                    var energy = Shown(HeatPump.Energy);
+                }
+                @Value("State", GetDisplayName(operatingStatus?.OperatingState))
+                @Value("Outside", Format(outside?.Temperature, "F1", "°C"))
+                @Value("Flow", Format(flow?.Temperature, "F1", "°C"))
+                @Value("Hot water", Format(hotWater?.Temperature, "F1", "°C"))
+                @Value("Electrical", Format(energy?.ElectricalPower, "F0", "W"))
+                @Value("Thermal", Format(energy?.ThermalPower, "F0", "W"))
             </MudStack>
 
             @if (HeatPump.StatusMessage is { } statusMessage)
@@ -41,6 +50,10 @@
     public IInterceptorSubject? Subject { get; set; }
 
     private LuxtronikHeatPump? HeatPump => Subject as LuxtronikHeatPump;
+
+    private TSubject? Shown<TSubject>(TSubject subject)
+        where TSubject : class, IInterceptorSubject =>
+        Permissions.CanShow(subject) ? subject : null;
 
     private static string? Format(decimal? value, string format, string unit) =>
         value is null ? null : $"{value.Value.ToString(format)} {unit}";

@@ -1,0 +1,87 @@
+@* The account of the signed-in person: their names and roles, changing their display name and password, and signing out. *@
+@using HomeBlaze.Authorization
+
+@inject CurrentUser CurrentUser
+@inject AccountPasswords Passwords
+
+<MudDialog>
+    <DialogContent>
+        <div data-testid="account-dialog">
+            @if (_displayName is not null)
+            {
+                <MudText Typo="Typo.body2" Class="mb-3">Signed in as <strong data-testid="account-display-name">@_displayName</strong> (<span data-testid="account-name">@_userName</span>).</MudText>
+            }
+            else
+            {
+                <MudText Typo="Typo.body2" Class="mb-3">Signed in as <strong data-testid="account-name">@_userName</strong>.</MudText>
+            }
+            <MudText Typo="Typo.subtitle2">Roles</MudText>
+            @if (_roles.Count > 0)
+            {
+                <ul class="mb-3" data-testid="account-roles">
+                    @foreach (var role in _roles)
+                    {
+                        <li>@role</li>
+                    }
+                </ul>
+            }
+            else
+            {
+                <MudText Typo="Typo.body2" Class="mb-3" data-testid="account-no-roles">No roles yet. Ask an administrator.</MudText>
+            }
+            <MudText Typo="Typo.subtitle2" Class="mb-2">Display name</MudText>
+            <AccountForm Action="@AccountEndpoints.DisplayNamePath.TrimStart('/')" SubmitText="Save display name" TestId="account-display-name-form">
+                <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+                <label for="account-display-name-input">The name shown in place of your user name; leave it empty for none</label>
+                <input id="account-display-name-input" name="displayName" type="text" value="@_displayName"
+                       maxlength="@NameRules.MaximumDisplayNameLength" autocomplete="name" />
+            </AccountForm>
+            <MudText Typo="Typo.subtitle2" Class="mb-2 mt-3">Change your password</MudText>
+            @if (_hasPassword is { } hasPassword)
+            {
+                <PasswordFields UserName="@_userName" HasPassword="@hasPassword" ReturnUrl="@ReturnUrl" SubmitText="Change password"
+                                IdPrefix="account-password" TestId="account-password-form" />
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <SignOutForm TestId="account-sign-out" />
+        <MudButton Variant="Variant.Text" OnClick="Close" data-testid="account-close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private string? _userName;
+    private string? _displayName;
+    private bool? _hasPassword;
+    private IReadOnlyList<string> _roles = [];
+
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthenticationState { get; set; }
+
+    [CascadingParameter]
+    private IMudDialogInstance? MudDialog { get; set; }
+
+    /// <summary>The page to load once the password is changed, including the path base.</summary>
+    [Parameter]
+    public string? ReturnUrl { get; set; }
+
+    /// <summary>Shows the dialog and returns once it is shown.</summary>
+    public static Task<IDialogReference> ShowAsync(IDialogService dialogService, string? returnUrl)
+    {
+        ArgumentNullException.ThrowIfNull(dialogService);
+
+        var parameters = new DialogParameters<AccountDialog> { { dialog => dialog.ReturnUrl, returnUrl } };
+        return dialogService.ShowAsync<AccountDialog>("Account", parameters, AccountDialogOptions.Create(isClosable: true));
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _userName = AuthenticationState is null ? null : (await AuthenticationState).User.Identity?.Name;
+        _displayName = CurrentUser.DisplayName;
+        _roles = [.. CurrentUser.Roles.Order(StringComparer.Ordinal)];
+        _hasPassword = await Passwords.HasPasswordAsync(CurrentUser.UserId);
+    }
+
+    private void Close() => MudDialog?.Close();
+}

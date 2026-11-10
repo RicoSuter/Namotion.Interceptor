@@ -51,6 +51,8 @@ Storage.Abs.   Components.Abs.   Abstractions
              Namotion.Interceptor.*
 ```
 
+`HomeBlaze.Components.Abstractions` uses `HomeBlaze.Authorization.Abstractions` for `PermissionsComponentBase`, and `HomeBlaze.Authorization.Abstractions` uses `HomeBlaze.Abstractions`. `HomeBlaze.Authorization.Abstractions` never references `HomeBlaze.Components.Abstractions`.
+
 ## Project Overview
 
 | Project | SDK | Purpose |
@@ -58,6 +60,7 @@ Storage.Abs.   Components.Abs.   Abstractions
 | `HomeBlaze.Abstractions` | Microsoft.NET.Sdk | Core metadata interfaces (IIconProvider, ITitleProvider) |
 | `HomeBlaze.Storage.Abstractions` | Microsoft.NET.Sdk | Storage contracts and configuration attributes |
 | `HomeBlaze.Components.Abstractions` | Microsoft.NET.Sdk | UI component abstractions and attributes |
+| `HomeBlaze.Authorization.Abstractions` | Microsoft.NET.Sdk | What the viewer may see and do, and the operation gate |
 | `HomeBlaze.Services` | Microsoft.NET.Sdk | Backend domain services (no UI) |
 | `HomeBlaze.Host.Services` | Microsoft.NET.Sdk | UI-agnostic services (no MudBlazor) |
 | `HomeBlaze.Storage` | Microsoft.NET.Sdk | File storage domain logic (no UI) |
@@ -129,10 +132,27 @@ Storage.Abs.   Components.Abs.   Abstractions
 - `[SubjectComponent]` - Component registration attribute
 - `SubjectComponentType` - Component type enum (Page, Edit, Widget)
 - Navigation types (`NavigationLocation`, `AppBarAlignment`)
+- `AccessDeniedTexts` - Texts of a control the viewer may not use
+- `PermissionsComponentBase` - A component that injects the permissions of the viewer and renders again when they change
 
-**Dependencies**: `Namotion.Interceptor`
+**Dependencies**: `HomeBlaze.Authorization.Abstractions`, `Microsoft.AspNetCore.Components`, `Namotion.Interceptor`
 
 **Use when**: Building UI components for subjects.
+
+---
+
+### HomeBlaze.Authorization.Abstractions
+
+**Purpose**: What the person of a circuit may see and do.
+
+**Contents**:
+- `IUserPermissions` - Read, write, invoke, administer and history answers per member, scoped per circuit
+- `DenyAllPermissions`, `UnrestrictedPermissions` - The default without sign-in, and the answer for tools without a person
+- `UserPermissionsExtensions` - Answers by subject and method name, and runs an operation only when the viewer may invoke it
+
+**Dependencies**: `HomeBlaze.Abstractions`, `Namotion.Interceptor.Registry`
+
+**Use when**: Building UI components that write properties or run operations.
 
 ---
 
@@ -155,7 +175,7 @@ Storage.Abs.   Components.Abs.   Abstractions
 - **Method Properties**: `MethodPropertyInitializer` creates virtual properties for methods, enabling `[PropertyAttribute]` on operations (e.g., `IsEnabled`)
 - **Metadata**: Read and search the metadata of subjects and properties and order children, in the namespace `HomeBlaze.Services.Metadata`
 
-**Dependencies**: `HomeBlaze.Abstractions`, `HomeBlaze.Storage.Abstractions`, `HomeBlaze.Components.Abstractions`
+**Dependencies**: `HomeBlaze.Abstractions`, `HomeBlaze.Storage.Abstractions`, `HomeBlaze.Components.Abstractions`, `HomeBlaze.Authorization.Abstractions`
 
 **Use when**: Building headless applications or APIs.
 

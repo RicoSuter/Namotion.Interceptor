@@ -225,8 +225,7 @@ namespace HomeBlaze.History.Blazor
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public void Dispose() { }
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
-        public static System.Threading.Tasks.Task<MudBlazor.IDialogReference?> ShowAsync(MudBlazor.IDialogService dialogService, Namotion.Interceptor.Registry.Abstractions.ISubjectRegistry registry, HomeBlaze.Abstractions.ISubjectPathResolver pathResolver, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, string displayName, HomeBlaze.History.Blazor.PropertyHistoryDialogSettings? settings = null) { }
-        public static System.Threading.Tasks.Task<MudBlazor.IDialogReference> ShowAsync(MudBlazor.IDialogService dialogService, Namotion.Interceptor.Registry.Abstractions.ISubjectRegistry registry, string propertyPath, string displayName, System.Type propertyType, bool isCumulative, HomeBlaze.Abstractions.Attributes.StateUnit unit = 0, bool isDiscreteState = false, HomeBlaze.History.Blazor.PropertyHistoryDialogSettings? settings = null) { }
+        public static System.Threading.Tasks.Task<MudBlazor.IDialogReference?> ShowAsync(MudBlazor.IDialogService dialogService, Namotion.Interceptor.Registry.Abstractions.ISubjectRegistry registry, HomeBlaze.Abstractions.ISubjectPathResolver pathResolver, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, string displayName, HomeBlaze.History.Blazor.PropertyHistoryDialogSettings? settings = null) { }
     }
     public sealed class PropertyHistoryDialogSettings : System.IEquatable<HomeBlaze.History.Blazor.PropertyHistoryDialogSettings>
     {

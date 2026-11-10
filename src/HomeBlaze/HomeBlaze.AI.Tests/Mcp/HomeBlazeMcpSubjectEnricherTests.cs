@@ -60,11 +60,11 @@ public class HomeBlazeMcpSubjectEnricherTests
         var device = new TitledTestDevice(CreateContext()) { Name = "Pump" };
         var role = new AuthorizationRole
         {
-            Name = "NoTitle",
+            Name = "notitle",
             Includes = [BuiltInRoles.OperatorName],
             Deny = deniesTitle ? [new PermissionRule { Members = [nameof(TitledTestDevice.Title)], Actions = [PermissionAction.Read] }] : []
         };
-        var enricher = new HomeBlazeMcpSubjectEnricher([], CreateConfiguration(TestAccessPolicies.Create(role.Name, role)), isReadOnly: false);
+        var enricher = new HomeBlazeMcpSubjectEnricher([], CreateConfiguration(TestAccessPolicies.Create(role.Name, role)));
 
         // Act
         var enrichments = enricher.GetSubjectEnrichments(device.TryGetRegisteredSubject()!);
@@ -83,7 +83,7 @@ public class HomeBlazeMcpSubjectEnricherTests
 
         var typeProvider = new TestTypeProvider(
             new McpTypeInfo(typeof(TestThing).FullName!, "Test", IsInterface: false, Type: typeof(TestThing)));
-        var enricher = new HomeBlazeMcpSubjectEnricher([typeProvider], CreateConfiguration(), isReadOnly: false);
+        var enricher = new HomeBlazeMcpSubjectEnricher([typeProvider], CreateConfiguration());
 
         // Act
         var enrichments = enricher.GetSubjectEnrichments(registered);
@@ -101,7 +101,7 @@ public class HomeBlazeMcpSubjectEnricherTests
         var registered = thing.TryGetRegisteredSubject()!;
 
         // No type providers — nothing is "known"
-        var enricher = new HomeBlazeMcpSubjectEnricher([], CreateConfiguration(), isReadOnly: false);
+        var enricher = new HomeBlazeMcpSubjectEnricher([], CreateConfiguration());
 
         // Act
         var enrichments = enricher.GetSubjectEnrichments(registered);
@@ -117,7 +117,7 @@ public class HomeBlazeMcpSubjectEnricherTests
         var context = CreateContext();
         var thing = new TestThing(context) { Name = "My Thing", Temperature = 20m };
         var other = new TestThing(context) { Name = "Other", Temperature = 20m };
-        var enricher = new HomeBlazeMcpSubjectEnricher([], CreateConfiguration(), isReadOnly: false,
+        var enricher = new HomeBlazeMcpSubjectEnricher([], CreateConfiguration(),
             subject => ReferenceEquals(subject, thing) ? "/pages/House/Thing.md" : null);
 
         // Act
@@ -130,11 +130,11 @@ public class HomeBlazeMcpSubjectEnricherTests
     }
 
     [Fact]
-    public void WhenThereIsNoAccessPolicy_ThenTheAddressIsTheCanonicalPath()
+    public void WhenThePolicyAllowsEveryRead_ThenTheAddressIsTheCanonicalPath()
     {
         // Arrange
         var graph = CreateHolderGraph();
-        var enricher = CreatePageEnricher(graph, accessPolicy: null);
+        var enricher = CreatePageEnricher(graph, AllowAllMcpAccessPolicy.Instance);
 
         // Act
         var deviceEnrichments = enricher.GetSubjectEnrichments(graph.Device.TryGetRegisteredSubject()!);
@@ -201,7 +201,7 @@ public class HomeBlazeMcpSubjectEnricherTests
         var typeProvider = new TestTypeProvider(
             new McpTypeInfo(typeof(HomeBlaze.Abstractions.ITitleProvider).FullName!, "Title", IsInterface: true,
                 Type: typeof(HomeBlaze.Abstractions.ITitleProvider)));
-        var enricher = new HomeBlazeMcpSubjectEnricher([typeProvider], CreateConfiguration(), isReadOnly: false);
+        var enricher = new HomeBlazeMcpSubjectEnricher([typeProvider], CreateConfiguration());
 
         // Act
         var enrichments = enricher.GetSubjectEnrichments(registered);
@@ -224,7 +224,7 @@ public class HomeBlazeMcpSubjectEnricherTests
         var typeProvider = new TestTypeProvider(
             new McpTypeInfo("IUnrelatedInterface", "Unrelated", IsInterface: true,
                 Type: typeof(ITestSensorInterface)));
-        var enricher = new HomeBlazeMcpSubjectEnricher([typeProvider], CreateConfiguration(), isReadOnly: false);
+        var enricher = new HomeBlazeMcpSubjectEnricher([typeProvider], CreateConfiguration());
 
         // Act
         var enrichments = enricher.GetSubjectEnrichments(registered);
@@ -258,42 +258,6 @@ public class HomeBlazeMcpSubjectEnricherTests
         Assert.True(enrichments.ContainsKey("$methods"));
         var methods = (string[])enrichments["$methods"]!;
         Assert.Contains("Refresh", methods);
-    }
-
-    [Fact]
-    public void WhenReadOnly_ThenOperationMethodsAreExcluded()
-    {
-        // Arrange
-        var context = CreateContext();
-        var thing = new TestThing(context) { Name = "My Thing", Temperature = 20m };
-        var registered = thing.TryGetRegisteredSubject()!;
-
-        registered.AddProperty<MethodMetadata>("Refresh", _ => new MethodMetadata(_ => null)
-        {
-            Kind = MethodKind.Query,
-            Title = "Refresh",
-            PropertyName = "Refresh",
-            Parameters = []
-        });
-
-        registered.AddProperty<MethodMetadata>("Reset", _ => new MethodMetadata(_ => null)
-        {
-            Kind = MethodKind.Operation,
-            Title = "Reset",
-            PropertyName = "Reset",
-            Parameters = []
-        });
-
-        var enricher = CreateEnricher(isReadOnly: true);
-
-        // Act
-        var enrichments = enricher.GetSubjectEnrichments(registered);
-
-        // Assert — only Query methods should appear
-        Assert.True(enrichments.ContainsKey("$methods"));
-        var methods = (string[])enrichments["$methods"]!;
-        Assert.Contains("Refresh", methods);
-        Assert.DoesNotContain("Reset", methods);
     }
 
     [Fact]
@@ -381,23 +345,23 @@ public class HomeBlazeMcpSubjectEnricherTests
         return TestAccessPolicies.Create(role.Name, role);
     }
 
-    private static HomeBlazeMcpSubjectEnricher CreatePageEnricher(HolderGraph graph, IMcpAccessPolicy? accessPolicy)
+    private static HomeBlazeMcpSubjectEnricher CreatePageEnricher(HolderGraph graph, IMcpAccessPolicy accessPolicy)
     {
         var configuration = CreateConfiguration(accessPolicy);
         var getPageUrl = HomeBlazeMcpSubjectEnricher.CreatePageUrlGetter(
             _ => true, new SubjectPathResolver(() => graph.Root), configuration, () => graph.Root);
-        return new HomeBlazeMcpSubjectEnricher([], configuration, isReadOnly: false, getPageUrl);
+        return new HomeBlazeMcpSubjectEnricher([], configuration, getPageUrl);
     }
 
     private sealed record HolderGraph(TestHolder Root, TestHolder Folder, TestHolder Device);
 
-    private static HomeBlazeMcpSubjectEnricher CreateEnricher(bool isReadOnly = false)
+    private static HomeBlazeMcpSubjectEnricher CreateEnricher()
     {
-        return new HomeBlazeMcpSubjectEnricher([], CreateConfiguration(), isReadOnly);
+        return new HomeBlazeMcpSubjectEnricher([], CreateConfiguration());
     }
 
     private static McpServerConfiguration CreateConfiguration(IMcpAccessPolicy? accessPolicy = null) =>
-        new() { PathProvider = new StateAttributePathProvider(), AccessPolicy = accessPolicy };
+        new() { PathProvider = new StateAttributePathProvider(), AccessPolicy = accessPolicy ?? AllowAllMcpAccessPolicy.Instance };
 
     private class TestTypeProvider : IMcpTypeProvider
     {

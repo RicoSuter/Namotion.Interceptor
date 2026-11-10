@@ -1,8 +1,9 @@
 using System.Collections.Immutable;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Components.Abstractions.TimeZones;
-using Namotion.Interceptor.Expressions;
+using HomeBlaze.Authorization.Abstractions;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Expressions;
 using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Services.Display;
@@ -50,7 +51,7 @@ public static class ExpressionDisplay
     internal const string RawPipe = "raw";
 
     /// <summary>The pipe that applies a value map to the value, <c>map:name</c>.</summary>
-    internal const string MapPipe = "map";
+    public const string MapPipe = "map";
 
     /// <summary>
     /// Gets the text that shows a result: the text of a pipe as it is, otherwise the value formatted for display with the
@@ -91,46 +92,40 @@ public static class ExpressionDisplay
     /// <param name="resolver">The resolver of the name of a map.</param>
     /// <param name="scope">The subject the name of a map resolves from, such as the page or the widget.</param>
     /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
+    /// <param name="permissions">The permissions of the viewer, for whom a property of a case of the map that it may not read is missing.</param>
     public static ExpressionValue ApplyPipe(
         string name,
         ImmutableArray<string> arguments,
         ExpressionValue input,
         SubjectPathResolver resolver,
         IInterceptorSubject scope,
-        ITimeZoneDisplay? timeZone) =>
+        ITimeZoneDisplay? timeZone,
+        IUserPermissions permissions) =>
         name.Equals(MapPipe, StringComparison.OrdinalIgnoreCase)
-            ? ApplyMap(resolver, scope, arguments[0], input, timeZone)
+            ? ApplyMap(resolver, scope, arguments[0], input, timeZone, permissions)
             : ApplyFormat(name, input, timeZone);
 
     /// <summary>
     /// Applies a value map to a value: the text of the first case that matches, otherwise the text of the value. A name
-    /// that leads to no map, or to one none of whose members <see cref="PropertyReadAccess"/> allows on the current flow,
-    /// gives <c>Cannot resolve map: name</c>, and a map with a mistake gives its message.
+    /// that leads to no map, through a member <paramref name="permissions"/> do not allow to read, or to a map they do not
+    /// show or none of whose members they allow to read, gives <c>Cannot resolve map: name</c>, and a map with a mistake
+    /// gives its message.
     /// </summary>
     /// <param name="resolver">The resolver of the name of the map and of the paths of its cases.</param>
     /// <param name="scope">The subject the name resolves from, such as the page or the widget, like the <c>Map</c> of a widget.</param>
     /// <param name="mapName">The name or path of the map.</param>
     /// <param name="input">The value, bound as <see cref="ValueBinding.FromExpressionValue"/> binds it.</param>
     /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
+    /// <param name="permissions">The permissions of the viewer, for whom a property of a case that it may not read is missing.</param>
     internal static ExpressionValue ApplyMap(
         SubjectPathResolver resolver,
         IInterceptorSubject scope,
         string mapName,
         ExpressionValue input,
-        ITimeZoneDisplay? timeZone)
+        ITimeZoneDisplay? timeZone,
+        IUserPermissions permissions)
     {
-        IInterceptorSubject? map;
-        try
-        {
-            map = resolver.ResolveScopedSubject(mapName, PathStyle.Canonical, scope);
-        }
-        catch
-        {
-            // The name is written by the author of a page, and a malformed one must not take the page down.
-            map = null;
-        }
-
-        if (map is not IValueMap valueMap || !IsReadable(map))
+        if (ResolveReadableMap(resolver, scope, mapName, permissions) is not IValueMap valueMap)
         {
             return ExpressionValue.FromText($"Cannot resolve map: {mapName}");
         }
@@ -141,21 +136,53 @@ public static class ExpressionDisplay
         }
 
         var binding = ValueBinding.FromExpressionValue(input);
-        return ExpressionValue.FromText(valueMap.GetText(binding, resolver, timeZone) ?? ToText(input, timeZone));
+        return ExpressionValue.FromText(valueMap.GetText(binding, resolver, timeZone, permissions) ?? ToText(input, timeZone));
+    }
+
+    /// <summary>
+    /// Resolves the name or path of a value map for a viewer, as the pipe <c>map</c> and the <c>Map</c> of a widget do: the
+    /// subject that <paramref name="mapName"/> leads to from <paramref name="scope"/>, when the viewer may read every member
+    /// the path reads through, is shown the subject and may read one of its members; otherwise null, as for a name that
+    /// leads nowhere, also for a malformed name.
+    /// </summary>
+    /// <param name="resolver">The resolver of the name.</param>
+    /// <param name="scope">The subject the name resolves from, such as the page or the widget.</param>
+    /// <param name="mapName">The name or path of the map.</param>
+    /// <param name="permissions">The permissions of the viewer.</param>
+    public static IInterceptorSubject? ResolveReadableMap(
+        SubjectPathResolver resolver, IInterceptorSubject scope, string mapName, IUserPermissions permissions)
+    {
+        IInterceptorSubject? map;
+        try
+        {
+            map = resolver.ResolveScopedSubject(mapName, PathStyle.Canonical, scope, permissions);
+        }
+        catch
+        {
+            // The name is written by the author of a page, and a malformed one must not take the page down.
+            map = null;
+        }
+
+        return map is not null && IsReadable(map, permissions) ? map : null;
     }
 
     // A map that the caller may not reach reads as a missing one, so that neither its texts nor its existence are shown.
-    // It is reachable when a member of it may be read, as the check of the flow refuses a member below a hidden subject.
-    private static bool IsReadable(IInterceptorSubject map)
+    // It is reachable when it is shown and a member of it may be read: a member below a hidden subject may be readable.
+    private static bool IsReadable(IInterceptorSubject map, IUserPermissions permissions)
     {
         if (map.TryGetRegisteredSubject() is not { } registered)
         {
             return true;
         }
 
+        if (!permissions.CanShow(registered))
+        {
+            return false;
+        }
+
         foreach (var property in registered.Properties)
         {
-            if (!property.IsAttribute && PropertyReadAccess.CanRead(property))
+            if (!property.IsAttribute && permissions.CanRead(property))
             {
                 return true;
             }

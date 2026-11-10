@@ -1,5 +1,6 @@
 using System.Reactive.Concurrency;
 using System.Runtime.CompilerServices;
+using HomeBlaze.Authorization.Internal;
 using HomeBlaze.Authorization.Tests.Subjects;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Authorization;
@@ -43,13 +44,75 @@ public sealed class AuthorizationServiceTests : IDisposable
     }
 
     [Fact]
+    public void WhenEveryPrincipalsRolesCompileWithTheCandidateRoles_ThenValidationPasses()
+    {
+        // Arrange
+        var family = new AuthorizationRole { Name = "family", Includes = [BuiltInRoles.ReaderName] };
+
+        // Act
+        var error = _service.ValidateRoles([family], [family], [new("Agent", ["family"]), new("Empty", []), new("operator", [BuiltInRoles.OperatorName])]);
+
+        // Assert
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void WhenAPrincipalWouldNameARoleTheCandidateLacks_ThenValidationNamesThePrincipalAndTheRole()
+    {
+        // Arrange
+        var family = new AuthorizationRole { Name = "family", Includes = [BuiltInRoles.ReaderName] };
+        var gone = new AuthorizationRole { Name = "gone" };
+
+        // Act
+        var includeError = _service.ValidateRoles([family], [family with { Includes = ["missing"] }], [new("kitchen helper", ["family"])]);
+        var missingError = _service.ValidateRoles([gone], [], [new("alice", [BuiltInRoles.ReaderName, "gone"]), new("bob", ["gone"])]);
+
+        // Assert
+        Assert.Contains("missing", includeError);
+        Assert.Contains("kitchen helper", includeError);
+        Assert.Contains("gone", missingError);
+        Assert.Contains("alice, bob", missingError);
+    }
+
+    [Fact]
+    public void WhenAPrincipalsRolesFailAlready_ThenTheyDoNotBlockTheChange()
+    {
+        // Arrange
+        var gone = new AuthorizationRole { Name = "gone" };
+
+        // Act
+        var unrelatedError = _service.ValidateRoles([], [new AuthorizationRole { Name = "family" }], [new("Agent", ["gone"])]);
+        var repairError = _service.ValidateRoles([], [gone], [new("Agent", ["gone"])]);
+
+        // Assert
+        Assert.Null(unrelatedError);
+        Assert.Null(repairError);
+    }
+
+    [Fact]
+    public void WhenARoleIsRenamed_ThenThePrincipalsAreValidatedWithTheNewName()
+    {
+        // Arrange
+        var family = new AuthorizationRole { Name = "family" };
+        var household = new AuthorizationRole { Name = "household" };
+
+        // Act
+        var renameError = _service.ValidateRoles([family], [household], [new("Agent", ["family"])], "family", "household");
+        var plainError = _service.ValidateRoles([family], [household], [new("Agent", ["family"])]);
+
+        // Assert
+        Assert.Null(renameError);
+        Assert.NotNull(plainError);
+    }
+
+    [Fact]
     public void WhenACustomRoleAllowsAMember_ThenThePolicyAllowsIt()
     {
         // Arrange
-        AddAuthorization(("PlainReader", new Role { Allow = [ReadPlain()] }));
+        AddAuthorization(("plainreader", new Role { Allow = [ReadPlain()] }));
 
         // Act
-        var result = _service.GetPolicy(["PlainReader"]);
+        var result = _service.GetPolicy(["plainreader"]);
 
         // Assert
         Assert.Null(result.Error);
@@ -61,7 +124,7 @@ public sealed class AuthorizationServiceTests : IDisposable
     public void WhenACustomRoleIncludesABuiltInRole_ThenThePolicyAllowsBoth()
     {
         // Arrange
-        AddAuthorization(("PlainReader", new Role { Includes = [BuiltInRoles.ReaderName], Allow = [ReadPlain()] }));
+        AddAuthorization(("plainreader", new Role { Includes = [BuiltInRoles.ReaderName], Allow = [ReadPlain()] }));
 
         // Act
         var result = _service.GetPolicy(["plainreader"]);
@@ -76,11 +139,11 @@ public sealed class AuthorizationServiceTests : IDisposable
     public void WhenANameIsUnknown_ThenThePolicyDeniesAllAndTheErrorNamesIt()
     {
         // Act
-        var result = _service.GetPolicy([BuiltInRoles.ReaderName, "Missing"]);
+        var result = _service.GetPolicy([BuiltInRoles.ReaderName, "missing"]);
 
         // Assert
         Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
-        Assert.Contains("'Missing'", result.Error);
+        Assert.Contains("'missing'", result.Error);
     }
 
     [Fact]
@@ -114,16 +177,16 @@ public sealed class AuthorizationServiceTests : IDisposable
         // Arrange
         var bad = new Role { Allow = [new PermissionRule { Paths = ["Home"], Actions = [PermissionAction.Read] }] };
         var good = new Role { Allow = [ReadPlain()] };
-        AddAuthorization(("Bad", bad), ("Good", good));
+        AddAuthorization(("bad", bad), ("good", good));
 
         // Act
-        var badResult = _service.GetPolicy(["Good", "Bad"]);
-        var goodResult = _service.GetPolicy(["Good"]);
+        var badResult = _service.GetPolicy(["good", "bad"]);
+        var goodResult = _service.GetPolicy(["good"]);
 
         // Assert
         Assert.Same(AuthorizationPolicy.DenyAll, badResult.Policy);
-        Assert.Contains("'Bad'", badResult.Error);
-        await StatusAssert.ContainsAsync("'Bad'", () => bad.Status);
+        Assert.Contains("'bad'", badResult.Error);
+        await StatusAssert.ContainsAsync("'bad'", () => bad.Status);
         Assert.Null(goodResult.Error);
         Assert.True(goodResult.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
         await StatusAssert.EqualAsync(null, () => good.Status);
@@ -136,13 +199,13 @@ public sealed class AuthorizationServiceTests : IDisposable
     {
         // Arrange
         var role = new Role { Deny = [new PermissionRule { Paths = ["/Home/**", pattern], Actions = [PermissionAction.Read] }] };
-        AddAuthorization(("Custom", role));
+        AddAuthorization(("custom", role));
 
         // Act
-        var result = _service.GetPolicy(["Custom"]);
+        var result = _service.GetPolicy(["custom"]);
 
         // Assert
-        var expected = $"Path pattern '{pattern}' of role 'Custom' must start with '/'.";
+        var expected = $"Path pattern '{pattern}' of role 'custom' must start with '/'.";
         Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
         Assert.Equal(expected, result.Error);
         await StatusAssert.EqualAsync(expected, () => role.Status);
@@ -153,15 +216,15 @@ public sealed class AuthorizationServiceTests : IDisposable
     {
         // Arrange
         var role = new Role { Deny = [new PermissionRule { Paths = ["/"], Actions = [PermissionAction.Read] }] };
-        AddAuthorization(("Custom", role));
+        AddAuthorization(("custom", role));
 
         // Act
-        var result = _service.GetPolicy(["Custom"]);
+        var result = _service.GetPolicy(["custom"]);
 
         // Assert
         Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
         await StatusAssert.EqualAsync(
-            "Path pattern '/' of role 'Custom' matches no member; use '/**' for every member, or '/*' for the members of the root.",
+            "Path pattern '/' of role 'custom' matches no member; use '/**' for every member, or '/*' for the members of the root.",
             () => role.Status);
     }
 
@@ -170,15 +233,15 @@ public sealed class AuthorizationServiceTests : IDisposable
     {
         // Arrange
         var included = new Role { Allow = [new PermissionRule { Paths = ["Home/**"], Actions = [PermissionAction.Read] }] };
-        var including = new Role { Includes = ["Included"], Allow = [ReadPlain()] };
-        AddAuthorization(("Included", included), ("Including", including));
+        var including = new Role { Includes = ["included"], Allow = [ReadPlain()] };
+        AddAuthorization(("included", included), ("including", including));
 
         // Act
-        var result = _service.GetPolicy(["Including"]);
+        var result = _service.GetPolicy(["including"]);
 
         // Assert
         Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
-        Assert.Equal("Path pattern 'Home/**' of role 'Included' must start with '/'.", result.Error);
+        Assert.Equal("Path pattern 'Home/**' of role 'included' must start with '/'.", result.Error);
         await StatusAssert.EqualAsync(result.Error, () => including.Status);
     }
 
@@ -199,37 +262,45 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.Equal([BuiltInRoles.ReaderName, BuiltInRoles.OperatorName, BuiltInRoles.EverythingName], _service.GetRoleNames());
     }
 
-    [Fact]
-    public async Task WhenACustomRoleIsNamedSystem_ThenItIsNotUsedAndOtherRolesStillCompile()
+    [Theory]
+    [InlineData(PrincipalKind.NonHuman)]
+    [InlineData(PrincipalKind.Person)]
+    [InlineData(PrincipalKind.Anonymous)]
+    public async Task WhenACustomRoleIsNamedSystem_ThenItIsUsedAndTheSystemRulesStillDeny(PrincipalKind kind)
     {
         // Arrange
-        var system = new Role { Allow = [ReadPlain()] };
-        AddAuthorization(("system", system), ("Good", new Role { Allow = [ReadPlain()] }));
+        var system = new Role { Includes = [BuiltInRoles.EverythingName] };
+        AddAuthorization(("system", system));
 
         // Act
-        var systemResult = _service.GetPolicy(["system"]);
-        var goodResult = _service.GetPolicy(["Good"]);
+        var result = _service.GetPolicy(["system"], kind);
+        var secretRead = result.Policy.Explain(Member(nameof(TagTestSubject.Password)), PermissionAction.Read);
 
         // Assert
-        Assert.Same(AuthorizationPolicy.DenyAll, systemResult.Policy);
-        await StatusAssert.NotNullAsync(() => system.Status);
-        Assert.Null(goodResult.Error);
+        Assert.Null(result.Error);
+        Assert.True(result.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+        Assert.False(result.Policy.CanWrite(Member(nameof(TagTestSubject.Host))));
+        Assert.False(secretRead.IsAllowed);
+        Assert.True(secretRead.IsDeniedBySystem);
+        Assert.Null(secretRead.DeniedBy);
+        await StatusAssert.EqualAsync(null, () => system.Status);
     }
 
     [Theory]
-    [InlineData("Kitchen/Lights")]
-    [InlineData("Lights[0]")]
-    [InlineData("Lights]")]
-    public async Task WhenACustomRoleNameHasAPathCharacter_ThenItIsUnavailableWithAStatusAndOtherRolesStillCompile(string name)
+    [InlineData("kitchen/lights")]
+    [InlineData("lights[0]")]
+    [InlineData("Kitchen")]
+    [InlineData("kitchen\u200B")]
+    public async Task WhenACustomRoleNameBreaksTheNameRule_ThenItIsUnavailableWithAStatusAndOtherRolesStillCompile(string name)
     {
         // Arrange
         var invalid = new Role { Allow = [ReadPlain()] };
-        AddAuthorization((name, invalid), ("Good", new Role { Allow = [ReadPlain()] }));
-        var expectedStatus = $"The name '{name}' cannot contain '/', '[' or ']', because it is part of the role's path.";
+        AddAuthorization((name, invalid), ("good", new Role { Allow = [ReadPlain()] }));
+        var expectedStatus = NameRules.GetNameError(name, "role name");
 
         // Act
         var invalidResult = _service.GetPolicy([name]);
-        var goodResult = _service.GetPolicy(["Good"]);
+        var goodResult = _service.GetPolicy(["good"]);
 
         // Assert
         Assert.Same(AuthorizationPolicy.DenyAll, invalidResult.Policy);
@@ -241,46 +312,49 @@ public sealed class AuthorizationServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData("LightOperator", null)]
-    [InlineData("Light Operator.2", null)]
-    [InlineData(" ", "A role needs a name.")]
-    [InlineData("OPERATOR", "The name 'OPERATOR' is reserved for a built-in role.")]
-    [InlineData("System", "The name 'System' is reserved for the system rules.")]
-    [InlineData("a/b", "The name 'a/b' cannot contain '/', '[' or ']', because it is part of the role's path.")]
-    [InlineData("Light\u200BOperator", "The name 'Light\u200BOperator' cannot contain invisible characters, such as a zero-width space or a control character.")]
-    [InlineData("\uFEFFKitchen", "The name '\uFEFFKitchen' cannot contain invisible characters, such as a zero-width space or a control character.")]
-    [InlineData("Kit\tchen", "The name 'Kit\tchen' cannot contain invisible characters, such as a zero-width space or a control character.")]
-    [InlineData("Kitchen\U000E0041", "The name 'Kitchen\U000E0041' cannot contain invisible characters, such as a zero-width space or a control character.")] // a tag character, outside the BMP
-    [InlineData("Kit\u200Cchen", "The name 'Kit\u200Cchen' cannot contain invisible characters, such as a zero-width space or a control character.")]
-    [InlineData("Kit\u200Dchen", "The name 'Kit\u200Dchen' cannot contain invisible characters, such as a zero-width space or a control character.")]
-    [InlineData("Kitchen ", "The name 'Kitchen ' cannot start or end with whitespace.")]
-    [InlineData(" Kitchen", "The name ' Kitchen' cannot start or end with whitespace.")]
-    public void WhenARoleNameIsChecked_ThenOnlyBlankReservedPathOuterWhitespaceAndInvisibleCharacterNamesHaveAnError(string name, string? expectedError)
+    [InlineData("lightoperator")]
+    [InlineData("light-operator.2")]
+    [InlineData("system")]
+    public void WhenARoleNameFollowsTheNameRule_ThenItHasNoError(string name)
     {
         // Act
         var error = AuthorizationService.GetRoleNameError(name);
 
         // Assert
-        Assert.Equal(expectedError, error);
+        Assert.Null(error);
+    }
+
+    [Theory]
+    [InlineData(" ")]
+    [InlineData("kitchen ")]
+    [InlineData(" kitchen")]
+    [InlineData("Light operator.2")]
+    [InlineData("OPERATOR")]
+    [InlineData("System")]
+    [InlineData("a/b")]
+    [InlineData("light\u200Boperator")]
+    [InlineData("kit\tchen")]
+    [InlineData("kitchen\U000E0041")] // a tag character, outside the BMP
+    [InlineData("\u06A9\u062A\u0627\u0628\u200C\u062E\u0627\u0646\u0647")]
+    [InlineData("\U0001F9D1\u200D\U0001F373 kitchen")]
+    public void WhenARoleNameBreaksTheNameRule_ThenItsErrorNamesTheRule(string name)
+    {
+        // Act
+        var error = AuthorizationService.GetRoleNameError(name);
+
+        // Assert
+        Assert.Equal(NameRules.GetNameError(name, "role name"), error);
+        Assert.NotNull(error);
     }
 
     [Fact]
-    public async Task WhenACustomRoleNameHasAnInvisibleCharacter_ThenItIsUnavailableWithAStatus()
+    public void WhenARoleNameIsABuiltInName_ThenItIsReserved()
     {
-        // Arrange
-        const string name = "Kitchen\u200B";
-        var invalid = new Role { Allow = [ReadPlain()] };
-        AddAuthorization((name, invalid));
-        const string expectedStatus = $"The name '{name}' cannot contain invisible characters, such as a zero-width space or a control character.";
-
         // Act
-        var result = _service.GetPolicy([name]);
+        var error = AuthorizationService.GetRoleNameError(BuiltInRoles.OperatorName);
 
         // Assert
-        Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
-        Assert.Equal($"Role '{name}' is unavailable: {expectedStatus}", result.Error);
-        Assert.DoesNotContain(name, _service.GetRoleNames());
-        await StatusAssert.EqualAsync(expectedStatus, () => invalid.Status);
+        Assert.Equal("The name 'operator' is reserved for a built-in role.", error);
     }
 
     [Theory]
@@ -312,30 +386,11 @@ public sealed class AuthorizationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenTwoRolesHaveTheSameNameIgnoringCase_ThenNeitherIsUsedAndBothHaveAStatus()
-    {
-        // Arrange
-        var first = new Role { Allow = [ReadPlain()] };
-        var second = new Role { Allow = [ReadPlain()] };
-        AddAuthorization(("Twin", first), ("twin", second));
-
-        // Act
-        var result = _service.GetPolicy(["Twin"]);
-
-        // Assert
-        Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
-        Assert.Contains("'Twin'", result.Error);
-        await StatusAssert.NotNullAsync(() => first.Status);
-        await StatusAssert.NotNullAsync(() => second.Status);
-        Assert.Null(_service.GetPolicy([BuiltInRoles.ReaderName]).Error);
-    }
-
-    [Fact]
     public async Task WhenTwoAuthorizationsExist_ThenEachHasAStatusAndCustomRolesAreDeniedWhileBuiltInRolesWork()
     {
         // Arrange
         var role = new Role { Allow = [ReadPlain()] };
-        var first = new Authorization { Roles = new Dictionary<string, Role> { ["PlainReader"] = role } };
+        var first = new Authorization { Roles = new Dictionary<string, Role> { ["plainreader"] = role } };
         var second = new Authorization();
         _root.Children = new Dictionary<string, IInterceptorSubject>
         {
@@ -344,7 +399,7 @@ public sealed class AuthorizationServiceTests : IDisposable
         };
 
         // Act
-        var customResult = _service.GetPolicy(["PlainReader"]);
+        var customResult = _service.GetPolicy(["plainreader"]);
         var builtInResult = _service.GetPolicy([BuiltInRoles.OperatorName]);
 
         // Assert
@@ -356,7 +411,7 @@ public sealed class AuthorizationServiceTests : IDisposable
         await StatusAssert.EqualAsync(expected, () => first.Status);
         await StatusAssert.EqualAsync(expected, () => second.Status);
         await StatusAssert.EqualAsync(expected, () => role.Status);
-        Assert.DoesNotContain("PlainReader", _service.GetRoleNames());
+        Assert.DoesNotContain("plainreader", _service.GetRoleNames());
     }
 
     [Fact]
@@ -364,17 +419,17 @@ public sealed class AuthorizationServiceTests : IDisposable
     {
         // Arrange
         var role = new Role { Allow = [ReadPlain()] };
-        var first = new Authorization { Roles = new Dictionary<string, Role> { ["PlainReader"] = role } };
+        var first = new Authorization { Roles = new Dictionary<string, Role> { ["plainreader"] = role } };
         _root.Children = new Dictionary<string, IInterceptorSubject>
         {
             ["Authorization"] = first,
             ["Authorization2"] = new Authorization()
         };
-        Assert.NotNull(_service.GetPolicy(["PlainReader"]).Error);
+        Assert.NotNull(_service.GetPolicy(["plainreader"]).Error);
 
         // Act
         _root.Children = new Dictionary<string, IInterceptorSubject> { ["Authorization"] = first };
-        var result = _service.GetPolicy(["PlainReader"]);
+        var result = _service.GetPolicy(["plainreader"]);
 
         // Assert
         Assert.Null(result.Error);
@@ -387,12 +442,12 @@ public sealed class AuthorizationServiceTests : IDisposable
     {
         // Arrange
         var role = new Role { Allow = [ReadPlain()] };
-        AddAuthorization(("Custom", role));
-        var before = _service.GetPolicy(["Custom"]).Policy;
+        AddAuthorization(("custom", role));
+        var before = _service.GetPolicy(["custom"]).Policy;
 
         // Act
         role.Allow = [new PermissionRule { Tags = [MemberTags.State], Actions = [PermissionAction.Read] }];
-        var after = _service.GetPolicy(["Custom"]).Policy;
+        var after = _service.GetPolicy(["custom"]).Policy;
 
         // Assert
         Assert.NotSame(before, after);
@@ -425,25 +480,109 @@ public sealed class AuthorizationServiceTests : IDisposable
     {
         // Arrange
         var authorization = AddAuthorization();
-        Assert.NotNull(_service.GetPolicy(["Late"]).Error);
+        Assert.NotNull(_service.GetPolicy(["late"]).Error);
 
         // Act
-        authorization.Roles = new Dictionary<string, Role> { ["Late"] = new Role { Allow = [ReadPlain()] } };
-        var result = _service.GetPolicy(["Late"]);
+        authorization.Roles = new Dictionary<string, Role> { ["late"] = new Role { Allow = [ReadPlain()] } };
+        var result = _service.GetPolicy(["late"]);
 
         // Assert
         Assert.Null(result.Error);
     }
 
     [Fact]
-    public void WhenTheSameNamesAreAskedInAnotherCaseAndOrder_ThenTheCachedPolicyIsReturned()
+    public void WhenARoleIncludesEverything_ThenTheClosureContainsItAndTheHolderIsAFullAdministrator()
     {
         // Arrange
-        AddAuthorization(("Custom", new Role { Allow = [ReadPlain()] }));
+        AddAuthorization(("admins", new Role { Includes = [BuiltInRoles.EverythingName] }));
 
         // Act
-        var first = _service.GetPolicy(["Custom", BuiltInRoles.ReaderName]);
-        var second = _service.GetPolicy(["reader", "CUSTOM", "custom"]);
+        var closure = _service.GetRoleClosure(["admins"]);
+
+        // Assert
+        Assert.Contains(BuiltInRoles.EverythingName, closure);
+        Assert.Contains("admins", closure);
+        Assert.True(_service.IsFullAdministrator(["admins"]));
+        Assert.False(_service.IsFullAdministrator(["ADMINS"]));
+        Assert.False(_service.IsFullAdministrator([BuiltInRoles.OperatorName]));
+    }
+
+    [Fact]
+    public void WhenRolesWithEverythingDoNotCompile_ThenTheHolderIsNoFullAdministrator()
+    {
+        // Arrange
+        AddAuthorization();
+
+        // Act
+        var isFullAdministrator = _service.IsFullAdministrator([BuiltInRoles.EverythingName, "unknown"]);
+
+        // Assert
+        Assert.Contains(BuiltInRoles.EverythingName, _service.GetRoleClosure([BuiltInRoles.EverythingName, "unknown"]));
+        Assert.False(isFullAdministrator);
+        Assert.True(_service.IsFullAdministrator([BuiltInRoles.EverythingName]));
+    }
+
+    [Fact]
+    public void WhenARoleInTheClosureDeniesAdminister_ThenTheHolderIsNoFullAdministrator()
+    {
+        // Arrange
+        AddAuthorization(
+            ("noadmin", new Role { Deny = [new PermissionRule { Paths = ["/Devices/**"], Actions = [AuthorizationActions.Administer] }] }),
+            ("admins", new Role { Includes = [BuiltInRoles.EverythingName, "noadmin"] }),
+            ("nowrite", new Role { Deny = [new PermissionRule { Paths = ["/Devices/**"], Actions = [PermissionAction.Write] }] }));
+
+        // Act
+        var isDirectlyFullAdministrator = _service.IsFullAdministrator([BuiltInRoles.EverythingName, "noadmin"]);
+        var isIncludedFullAdministrator = _service.IsFullAdministrator(["admins"]);
+        var isWithOtherDenyFullAdministrator = _service.IsFullAdministrator([BuiltInRoles.EverythingName, "nowrite"]);
+
+        // Assert
+        Assert.False(isDirectlyFullAdministrator);
+        Assert.False(isIncludedFullAdministrator);
+        Assert.True(isWithOtherDenyFullAdministrator);
+    }
+
+    [Fact]
+    public void WhenTheClosureIsGivenToTheFullAdministratorCheck_ThenItDecidesAsWithoutIt()
+    {
+        // Arrange
+        AddAuthorization(("admins", new Role { Includes = [BuiltInRoles.EverythingName] }));
+        string[] broken = [BuiltInRoles.EverythingName, "unknown"];
+        string[] admins = ["admins"];
+
+        // Act
+        var isBrokenFullAdministrator = _service.IsFullAdministrator(broken, _service.GetRoleClosure(broken));
+        var isAdminsFullAdministrator = _service.IsFullAdministrator(admins, _service.GetRoleClosure(admins));
+
+        // Assert
+        Assert.False(isBrokenFullAdministrator);
+        Assert.True(isAdminsFullAdministrator);
+    }
+
+    [Fact]
+    public void WhenThePolicyOfTheSameRolesIsAskedForDifferentKinds_ThenTheyDiffer()
+    {
+        // Arrange
+        AddAuthorization(("admins", new Role { Includes = [BuiltInRoles.EverythingName] }));
+
+        // Act
+        var person = _service.GetPolicy(["admins"], PrincipalKind.Person).Policy;
+        var agent = _service.GetPolicy(["admins"], PrincipalKind.NonHuman).Policy;
+
+        // Assert
+        Assert.True(person.IsAllowed(Member("Configure"), AuthorizationActions.Administer));
+        Assert.False(agent.IsAllowed(Member("Configure"), AuthorizationActions.Administer));
+    }
+
+    [Fact]
+    public void WhenTheSameNamesAreAskedInAnotherOrder_ThenTheCachedPolicyIsReturned()
+    {
+        // Arrange
+        AddAuthorization(("custom", new Role { Allow = [ReadPlain()] }));
+
+        // Act
+        var first = _service.GetPolicy(["custom", BuiltInRoles.ReaderName]);
+        var second = _service.GetPolicy(["reader", "custom", "custom"]);
 
         // Assert
         Assert.Same(first.Policy, second.Policy);
@@ -455,11 +594,11 @@ public sealed class AuthorizationServiceTests : IDisposable
         // Arrange
         var role = new Role { Allow = [ReadPlain()] };
         var other = new Role { Allow = [ReadPlain()] };
-        AddAuthorization(("Custom", role), ("Other", other));
+        AddAuthorization(("custom", role), ("other", other));
         var firstAgent = new object();
         var secondAgent = new object();
-        _service.SetPrincipalRoles(firstAgent, ["Custom", "custom"]);
-        _service.SetPrincipalRoles(secondAgent, ["CUSTOM", BuiltInRoles.ReaderName]);
+        _service.SetPrincipalRoles(firstAgent, ["custom", "custom"]);
+        _service.SetPrincipalRoles(secondAgent, ["custom", "CUSTOM", BuiltInRoles.ReaderName]);
         await StatusAssert.EqualAsync(2, () => role.UsedByAgents);
 
         // Act
@@ -471,15 +610,57 @@ public sealed class AuthorizationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenAPrincipalNamesABuiltInRole_ThenItsEntryCountsItAndHasNoStatus()
+    {
+        // Arrange
+        var authorization = new Authorization();
+        _root.Children = new Dictionary<string, IInterceptorSubject> { ["Authorization"] = authorization };
+        var operatorRole = authorization.Roles[BuiltInRoles.OperatorName];
+
+        // Act
+        _service.SetPrincipalRoles(new object(), [BuiltInRoles.OperatorName]);
+        _ = _service.GetRoleNames();
+
+        // Assert
+        await StatusAssert.EqualAsync(1, () => operatorRole.UsedByAgents);
+        Assert.Null(operatorRole.Status);
+        Assert.Null(operatorRole.Warning);
+        Assert.Equal(0, authorization.Roles[BuiltInRoles.ReaderName].UsedByAgents);
+        Assert.Null(_service.GetPolicy([BuiltInRoles.OperatorName]).Error);
+        Assert.Equal(BuiltInRoles.All.Select(role => role.Name), _service.GetRoleNames());
+    }
+
+    [Fact]
+    public async Task WhenSeveralAuthorizationsExist_ThenTheirBuiltInEntriesHaveNoStatusAndCountTheAgents()
+    {
+        // Arrange
+        var first = new Authorization { Roles = new Dictionary<string, Role> { ["First"] = new() } };
+        var second = new Authorization();
+        _root.Children = new Dictionary<string, IInterceptorSubject> { ["Authorization"] = first, ["Authorization2"] = second };
+        first.ReplaceRoles([new AuthorizationRole { Name = "First" }]);
+
+        // Act
+        _service.SetPrincipalRoles(new object(), [BuiltInRoles.ReaderName]);
+        _ = _service.GetRoleNames();
+
+        // Assert
+        await StatusAssert.EqualAsync(AuthorizationSnapshot.SeveralAuthorizationsStatus, () => first.Roles["First"].Status);
+        await StatusAssert.EqualAsync(1, () => first.Roles[BuiltInRoles.ReaderName].UsedByAgents);
+        await StatusAssert.EqualAsync(1, () => second.Roles[BuiltInRoles.ReaderName].UsedByAgents);
+        Assert.Null(first.Roles[BuiltInRoles.ReaderName].Status);
+        Assert.Null(second.Roles[BuiltInRoles.ReaderName].Status);
+    }
+
+    [Fact]
     public async Task WhenAPrincipalNamesARoleBeforeItExists_ThenTheRoleCountsItOnceAdded()
     {
         // Arrange
         var authorization = AddAuthorization();
-        _service.SetPrincipalRoles(new object(), ["Late"]);
+        _service.SetPrincipalRoles(new object(), ["late"]);
         var role = new Role();
 
         // Act
-        authorization.Roles = new Dictionary<string, Role> { ["Late"] = role };
+        authorization.Roles = new Dictionary<string, Role> { ["late"] = role };
         _ = _service.GetRoleNames();
 
         // Assert
@@ -491,17 +672,17 @@ public sealed class AuthorizationServiceTests : IDisposable
     {
         // Arrange
         AddAuthorization(
-            ("Zeta", new Role()),
+            ("zeta", new Role()),
             ("alpha", new Role()),
-            ("Everything", new Role()),
-            ("Twin", new Role()),
-            ("TWIN", new Role()));
+            ("everything", new Role()),
+            ("twin", new Role()),
+            ("Twin", new Role()));
 
         // Act
         var names = _service.GetRoleNames();
 
         // Assert
-        Assert.Equal([BuiltInRoles.ReaderName, BuiltInRoles.OperatorName, BuiltInRoles.EverythingName, "alpha", "Zeta"], names);
+        Assert.Equal([BuiltInRoles.ReaderName, BuiltInRoles.OperatorName, BuiltInRoles.EverythingName, "alpha", "twin", "zeta"], names);
     }
 
     [Fact]
@@ -509,17 +690,17 @@ public sealed class AuthorizationServiceTests : IDisposable
     {
         // Arrange
         AddAuthorization(
-            ("Zeta", new Role()),
-            ("Everything", new Role()),
-            ("Twin", new Role()),
-            ("TWIN", new Role()));
+            ("zeta", new Role()),
+            ("everything", new Role()),
+            ("twin", new Role()),
+            ("Twin", new Role()));
 
         // Act
         var unavailable = _service.GetUnavailableRoles();
 
         // Assert
         Assert.Equal(["Twin"], unavailable.Keys);
-        Assert.Equal("The name 'Twin' is used by more than one role, ignoring case.", unavailable["twin"]);
+        Assert.Equal(NameRules.GetNameError("Twin", "role name"), unavailable["Twin"]);
     }
 
     [Fact]
@@ -547,7 +728,7 @@ public sealed class AuthorizationServiceTests : IDisposable
 
         // Assert
         Assert.Equal(["First", "Second"], unavailable.Keys.Order(StringComparer.Ordinal));
-        Assert.All(unavailable.Values, reason => Assert.Equal(AuthorizationService.SeveralAuthorizationsStatus, reason));
+        Assert.All(unavailable.Values, reason => Assert.Equal(AuthorizationSnapshot.SeveralAuthorizationsStatus, reason));
     }
 
     [Fact]
@@ -555,7 +736,7 @@ public sealed class AuthorizationServiceTests : IDisposable
     {
         // Arrange
         var role = new Role { Allow = [ReadPlain()] };
-        AddAuthorization(("Custom", role));
+        AddAuthorization(("custom", role));
         _ = _service.GetRoleNames();
         await StatusAssert.EqualAsync(null, () => role.Status);
 
@@ -563,7 +744,7 @@ public sealed class AuthorizationServiceTests : IDisposable
         role.Allow = [new PermissionRule { Paths = ["Home"], Actions = [PermissionAction.Read] }];
 
         // Assert
-        await StatusAssert.ContainsAsync("'Custom'", () => role.Status);
+        await StatusAssert.ContainsAsync("'custom'", () => role.Status);
     }
 
     [Fact]
@@ -571,8 +752,8 @@ public sealed class AuthorizationServiceTests : IDisposable
     {
         // Arrange
         var role = new Role { Allow = [ReadPlain()] };
-        AddAuthorization(("Custom", role));
-        var policyBefore = _service.GetPolicy(["Custom"]).Policy;
+        AddAuthorization(("custom", role));
+        var policyBefore = _service.GetPolicy(["custom"]).Policy;
         var raised = 0;
         _service.PoliciesChanged += () => Interlocked.Increment(ref raised);
 
@@ -582,149 +763,7 @@ public sealed class AuthorizationServiceTests : IDisposable
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => Volatile.Read(ref raised) > 0, message: "PoliciesChanged should be raised.");
         Assert.True(policyBefore.CanRead(Member(nameof(TagTestSubject.Plain))));
-        Assert.False(_service.GetPolicy(["Custom"]).Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
-    }
-
-    [Fact]
-    public void WhenAnUpdateIsOpen_ThenPoliciesAndRoleNamesStayAsBeforeItUntilItEnds()
-    {
-        // Arrange
-        var role = new Role { Allow = [ReadPlain()] };
-        var authorization = AddAuthorization(("Custom", role));
-        var before = _service.GetPolicy(["Custom"]).Policy;
-
-        // Act
-        var update = _service.BeginUpdate();
-        role.Includes = ["Added"];
-        role.Allow = [];
-        authorization.Roles = new Dictionary<string, Role> { ["Custom"] = role, ["Added"] = new Role() };
-        var during = _service.GetPolicy(["Custom"]);
-        var namesDuring = _service.GetRoleNames();
-        var previewDuring = _service.PreviewPolicy(new AuthorizationRole { Name = "Other", Includes = ["Added"] });
-        update.Dispose();
-        var after = _service.GetPolicy(["Custom"]);
-
-        // Assert
-        Assert.Same(before, during.Policy);
-        Assert.DoesNotContain("Added", namesDuring);
-        Assert.NotNull(previewDuring.Error);
-        Assert.Null(after.Error);
-        Assert.NotSame(before, after.Policy);
-        Assert.False(after.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
-        Assert.Contains("Added", _service.GetRoleNames());
-    }
-
-    [Fact]
-    public async Task WhenAStatusWriteThrowsWhileAnUpdateStarts_ThenTheUpdateStartsAndLaterChangesStillTakeEffect()
-    {
-        // Arrange: an observer that throws on a status write of this thread, as BeginUpdate writes them.
-        var role = new Role { Allow = [ReadPlain()] };
-        AddAuthorization(("Custom", role));
-        Assert.True(_service.GetPolicy(["Custom"]).Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
-        var testThread = Environment.CurrentManagedThreadId;
-        var isThrowing = true;
-        var throwCount = 0;
-        using var subscription = _context
-            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
-            .Subscribe(change =>
-            {
-                if (isThrowing && Environment.CurrentManagedThreadId == testThread && change.Property.Name == nameof(Role.Status))
-                {
-                    throwCount++;
-                    throw new InvalidOperationException("A faulty observer.");
-                }
-            });
-
-        // Act: repeated, as a background rebuild that writes the statuses first leaves nothing for BeginUpdate to write.
-        var exceptions = new List<Exception>();
-        for (var attempt = 0; attempt < 50 && throwCount == 0; attempt++)
-        {
-            role.Includes = attempt % 2 == 0 ? ["Missing"] : [];
-            if (Record.Exception(() => _service.BeginUpdate().Dispose()) is { } exception)
-            {
-                exceptions.Add(exception);
-            }
-        }
-
-        isThrowing = false;
-        role.Includes = [];
-        role.Allow = [];
-
-        // Assert
-        Assert.True(throwCount > 0, "No status write of BeginUpdate threw.");
-        Assert.Empty(exceptions);
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => !_service.GetPolicy(["Custom"]).Policy.CanRead(Member(nameof(TagTestSubject.Plain))),
-            message: "The removed allow rule still applies.");
-    }
-
-    [Fact]
-    public void WhenARoleChangedJustBeforeAnUpdate_ThenTheUpdateKeepsTheChange()
-    {
-        // Arrange
-        var role = new Role { Allow = [ReadPlain()] };
-        AddAuthorization(("Custom", role));
-        var readableDuringUpdate = 0;
-
-        // Act: repeated, as a background rebuild that runs between the change and the update would hide the failure.
-        for (var attempt = 0; attempt < 20; attempt++)
-        {
-            role.Allow = [ReadPlain()];
-            Assert.True(_service.GetPolicy(["Custom"]).Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
-
-            role.Allow = [];
-            using (_service.BeginUpdate())
-            {
-                if (_service.GetPolicy(["Custom"]).Policy.CanRead(Member(nameof(TagTestSubject.Plain))))
-                {
-                    readableDuringUpdate++;
-                }
-            }
-        }
-
-        // Assert
-        Assert.Equal(0, readableDuringUpdate);
-    }
-
-    [Fact]
-    public void WhenUpdatesAreNested_ThenTheChangeTakesEffectOnceTheLastEnds()
-    {
-        // Arrange
-        var role = new Role { Allow = [ReadPlain()] };
-        AddAuthorization(("Custom", role));
-        var before = _service.GetPolicy(["Custom"]).Policy;
-        var outer = _service.BeginUpdate();
-        var inner = _service.BeginUpdate();
-        role.Allow = [];
-
-        // Act
-        inner.Dispose();
-        inner.Dispose();
-        var afterInner = _service.GetPolicy(["Custom"]).Policy;
-        outer.Dispose();
-        var afterOuter = _service.GetPolicy(["Custom"]).Policy;
-
-        // Assert
-        Assert.Same(before, afterInner);
-        Assert.NotSame(before, afterOuter);
-        Assert.False(afterOuter.CanRead(Member(nameof(TagTestSubject.Plain))));
-    }
-
-    [Fact]
-    public async Task WhenAnUpdateEnds_ThenTheStatusesAreUpdatedWithoutAPolicyBeingAsked()
-    {
-        // Arrange
-        var role = new Role { Allow = [ReadPlain()] };
-        AddAuthorization(("Custom", role));
-        _ = _service.GetRoleNames();
-        var update = _service.BeginUpdate();
-        role.Allow = [new PermissionRule { Paths = ["Home"], Actions = [PermissionAction.Read] }];
-
-        // Act
-        update.Dispose();
-
-        // Assert
-        await StatusAssert.ContainsAsync("'Custom'", () => role.Status);
+        Assert.False(_service.GetPolicy(["custom"]).Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
     }
 
     [Fact]
@@ -736,10 +775,10 @@ public sealed class AuthorizationServiceTests : IDisposable
             Allow = [ReadPlain()],
             Deny = [new PermissionRule { Paths = ["/Kitchen"], Actions = [PermissionAction.Read] }]
         };
-        AddAuthorizationWithKitchen(("Custom", role));
+        AddAuthorizationWithKitchen(("custom", role));
 
         // Act
-        var result = _service.GetPolicy(["Custom"]);
+        var result = _service.GetPolicy(["custom"]);
 
         // Assert
         Assert.Null(result.Error);
@@ -760,10 +799,10 @@ public sealed class AuthorizationServiceTests : IDisposable
             Allow = [new PermissionRule { Paths = ["/Kitchen", "/Authorization"], Actions = [PermissionAction.Read] }],
             Deny = [new PermissionRule { Paths = ["/Kitchen"], Actions = [PermissionAction.Read] }]
         };
-        AddAuthorizationWithKitchen(("Custom", role));
+        AddAuthorizationWithKitchen(("custom", role));
 
         // Act
-        _ = _service.GetPolicy(["Custom"]);
+        _ = _service.GetPolicy(["custom"]);
 
         // Assert
         await StatusAssert.EqualAsync(
@@ -782,10 +821,10 @@ public sealed class AuthorizationServiceTests : IDisposable
     {
         // Arrange
         var role = new Role { Deny = [new PermissionRule { Paths = [pattern], Actions = [PermissionAction.Read] }] };
-        AddAuthorizationWithKitchen(("Custom", role));
+        AddAuthorizationWithKitchen(("custom", role));
 
         // Act
-        var result = _service.GetPolicy(["Custom"]);
+        var result = _service.GetPolicy(["custom"]);
 
         // Assert
         Assert.Null(result.Error);
@@ -800,12 +839,12 @@ public sealed class AuthorizationServiceTests : IDisposable
         var role = new Role { Deny = [new PermissionRule { Paths = ["/Kitchen*"], Actions = [PermissionAction.Read] }] };
         _root.Children = new Dictionary<string, IInterceptorSubject>
         {
-            ["Kitchen*"] = new TagTestSubject(),
-            ["Authorization"] = new Authorization { Roles = new Dictionary<string, Role> { ["Custom"] = role } }
+            ["kitchen*"] = new TagTestSubject(),
+            ["Authorization"] = new Authorization { Roles = new Dictionary<string, Role> { ["custom"] = role } }
         };
 
         // Act
-        var result = _service.GetPolicy(["Custom"]);
+        var result = _service.GetPolicy(["custom"]);
 
         // Assert
         Assert.Null(result.Error);
@@ -817,8 +856,8 @@ public sealed class AuthorizationServiceTests : IDisposable
     {
         // Arrange
         var role = new Role { Deny = [new PermissionRule { Paths = ["/Kitchen"], Actions = [PermissionAction.Read] }] };
-        AddAuthorizationWithKitchen(("Custom", role));
-        _ = _service.GetPolicy(["Custom"]);
+        AddAuthorizationWithKitchen(("custom", role));
+        _ = _service.GetPolicy(["custom"]);
         await StatusAssert.NotNullAsync(() => role.Warning);
 
         // Act
@@ -841,11 +880,11 @@ public sealed class AuthorizationServiceTests : IDisposable
         _root.Children = new Dictionary<string, IInterceptorSubject>
         {
             ["Kitchen"] = new ThrowingGetterSubject(),
-            ["Authorization"] = new Authorization { Roles = new Dictionary<string, Role> { ["Custom"] = role } }
+            ["Authorization"] = new Authorization { Roles = new Dictionary<string, Role> { ["custom"] = role } }
         };
 
         // Act
-        var result = _service.GetPolicy(["Custom"]);
+        var result = _service.GetPolicy(["custom"]);
 
         // Assert
         Assert.Null(result.Error);

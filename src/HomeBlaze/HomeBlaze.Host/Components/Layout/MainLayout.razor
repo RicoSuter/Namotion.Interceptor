@@ -1,11 +1,14 @@
 ﻿@using HomeBlaze.Host.Components.Clients
 @using HomeBlaze.Host.Components.TimeZones
+@using HomeBlaze.Components.Abstractions.Pages
+@using Microsoft.Extensions.Options
 
 @inherits LayoutComponentBase
 
 @inject RootManager RootManager
 @inject NavigationManager NavigationManager
 @inject BrowserPreferences Preferences
+@inject IOptions<HomeBlazeHostOptions> HostOptions
 
 @implements IDisposable
 
@@ -19,37 +22,57 @@
     <MudSnackbarProvider/>
 
     <CascadingValue Value="@_isDarkMode" Name="IsDarkMode">
-        <MudLayout>
-            <TimeZoneInitializer />
-            <ClientConnectionInitializer />
-            <MudAppBar Elevation="1">
-                <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
-                               OnClick="@DrawerToggleAsync" title="Toggle Navigation"/>
-                <AppBarItems Root="@RootManager.Root" IsDarkMode="@_isDarkMode" OnToggleDarkMode="@DarkModeToggle"/>
-            </MudAppBar>
-            <MudDrawer id="nav-drawer" @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2">
-                <NavMenu Root="@RootManager.Root"/>
-            </MudDrawer>
-            <MudMainContent Class="pt-16 px-4 pt-4">
-                @if (_isRootLoaded || IsErrorPage)
-                {
+        @if (IsFrameOnly)
+        {
+            @* Shown to a visitor who may not use the app yet, such as one who must sign in: nothing of the app, only its
+               frame and the body, which shows the dialog. *@
+            <MudLayout>
+                <MudAppBar Elevation="1">
+                    <MudText Typo="Typo.h6" data-testid="app-bar-brand">HomeBlaze</MudText>
+                </MudAppBar>
+                <MudMainContent Class="pt-16 px-4 pt-4">
                     @Body
-                }
-                else if (_rootLoadFailed)
-                {
-                    <MudAlert Severity="Severity.Error">
-                        The configuration could not be loaded. See the server log for details.
-                    </MudAlert>
-                }
-                else
-                {
-                    <div class="d-flex flex-column justify-center align-center" style="height: calc(100vh - 128px);">
-                        <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Large"/>
-                        <MudText Class="mt-4">Loading configuration...</MudText>
-                    </div>
-                }
-            </MudMainContent>
-        </MudLayout>
+                </MudMainContent>
+            </MudLayout>
+        }
+        else
+        {
+            <MudLayout>
+                <TimeZoneInitializer />
+                <ClientConnectionInitializer />
+                <MudAppBar Elevation="1">
+                    <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
+                                   OnClick="@DrawerToggleAsync" title="Toggle Navigation"/>
+                    <AppBarItems Root="@RootManager.Root" IsDarkMode="@_isDarkMode" OnToggleDarkMode="@DarkModeToggle"/>
+                </MudAppBar>
+                <MudDrawer id="nav-drawer" @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2">
+                    <NavMenu Root="@RootManager.Root"/>
+                </MudDrawer>
+                <MudMainContent Class="pt-16 px-4 pt-4">
+                    @foreach (var banner in HostOptions.Value.BannerComponents)
+                    {
+                        <DynamicComponent Type="@banner"/>
+                    }
+                    @if (_isRootLoaded || IsErrorPage)
+                    {
+                        @Body
+                    }
+                    else if (_rootLoadFailed)
+                    {
+                        <MudAlert Severity="Severity.Error">
+                            The configuration could not be loaded. See the server log for details.
+                        </MudAlert>
+                    }
+                    else
+                    {
+                        <div class="d-flex flex-column justify-center align-center" style="height: calc(100vh - 128px);">
+                            <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Large"/>
+                            <MudText Class="mt-4">Loading configuration...</MudText>
+                        </div>
+                    }
+                </MudMainContent>
+            </MudLayout>
+        }
     </CascadingValue>
 </div>
 
@@ -72,6 +95,10 @@
     private bool _isRootLoaded;
     private bool _rootLoadFailed;
 
+    /// <summary>Whether to render only the frame, see <see cref="LayoutFrame"/>.</summary>
+    [CascadingParameter(Name = LayoutFrame.CascadingValueName)]
+    private bool IsFrameOnly { get; set; }
+
     protected override void OnInitialized()
     {
         base.OnInitialized();
@@ -88,7 +115,7 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender || _isRootLoaded)
+        if (!firstRender || _isRootLoaded || IsFrameOnly)
         {
             return;
         }

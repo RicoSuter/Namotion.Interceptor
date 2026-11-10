@@ -17,24 +17,20 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
 {
     private readonly Lazy<(HashSet<Type> Concrete, HashSet<Type> Interfaces)> _typeCache;
     private readonly McpServerConfiguration _configuration;
-    private readonly bool _isReadOnly;
     private readonly Func<IInterceptorSubject, string?>? _getPageUrl;
 
     /// <param name="typeProviders">The providers of the types named in <c>$type</c> and <c>$interfaces</c>.</param>
     /// <param name="configuration">The configuration whose access policy decides which methods <c>$methods</c> lists and
-    /// whether <c>$title</c> and <c>$icon</c> are given, when they are registered members: only those it allows to read;
-    /// all without one.</param>
-    /// <param name="isReadOnly">Whether <c>$methods</c> leaves out operations.</param>
+    /// whether <c>$title</c> and <c>$icon</c> are given, when they are registered members: only those it allows to read.</param>
     /// <param name="getPageUrl">Gets the address of the page of a subject, such as <c>/pages/House/Haus.md</c>, or null
     /// for a subject without a page of its own; null for no addresses.</param>
     public HomeBlazeMcpSubjectEnricher(
         IEnumerable<IMcpTypeProvider> typeProviders,
         McpServerConfiguration configuration,
-        bool isReadOnly,
         Func<IInterceptorSubject, string?>? getPageUrl = null)
     {
+        ArgumentNullException.ThrowIfNull(configuration);
         _configuration = configuration;
-        _isReadOnly = isReadOnly;
         _getPageUrl = getPageUrl;
         _typeCache = new Lazy<(HashSet<Type>, HashSet<Type>)>(() =>
         {
@@ -63,9 +59,8 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
     }
 
     // The address names every property on the canonical path, which may differ from the path the tools build for the
-    // subject, such as for a subject with several parents. With an access policy, a subject therefore gets an address
-    // only when the canonical path resolves back to it as the tools resolve a path, so the address names nothing hidden
-    // from the tools.
+    // subject, such as for a subject with several parents. A subject therefore gets an address only when the canonical
+    // path resolves back to it as the tools resolve a path, so the address names nothing hidden from the tools.
     internal static Func<IInterceptorSubject, string?> CreatePageUrlGetter(
         Func<IInterceptorSubject, bool> hasPage,
         ISubjectPathResolver pathResolver,
@@ -82,11 +77,6 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
     private static bool IsReadableAtPath(
         McpServerConfiguration configuration, Func<IInterceptorSubject> rootSubjectProvider, IInterceptorSubject subject, string path)
     {
-        if (configuration.AccessPolicy is null)
-        {
-            return true;
-        }
-
         var root = rootSubjectProvider();
         if (ReferenceEquals(root, subject))
         {
@@ -125,8 +115,7 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
             metadata["$interfaces"] = interfaces;
         }
 
-        var methods = subject.GetAllMethods(ExclusionTarget.Agents)
-            .Where(method => (!_isReadOnly || method.Kind == MethodKind.Query) && IsReadable(subject, method))
+        var methods = McpMethodInvoker.GetReadableMethods(subject, _configuration)
             .Select(method => method.PropertyName)
             .ToArray();
 
@@ -150,10 +139,6 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
             metadata["$icon"] = iconProvider.IconName;
         }
     }
-
-    private bool IsReadable(RegisteredSubject subject, MethodMetadata method)
-        => _configuration.AccessPolicy is not { } accessPolicy ||
-            subject.TryGetProperty(method.PropertyName) is { } property && accessPolicy.IsAllowed(property, McpAccessActions.Read);
 
     // A title or icon that is a registered member, such as a derived title, is shown only when the policy allows to read it.
     private bool IsReadable(RegisteredSubject subject, string memberName)

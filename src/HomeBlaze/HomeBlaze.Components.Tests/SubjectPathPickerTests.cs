@@ -1,11 +1,14 @@
 using Bunit;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Components.Inputs;
+using HomeBlaze.Components.Tests.Access;
 using HomeBlaze.Components.Tests.Models;
 using HomeBlaze.Services;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
 using MudBlazor.Services;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 using Xunit;
 
 namespace HomeBlaze.Components.Tests;
@@ -15,6 +18,7 @@ public sealed class SubjectPathPickerTests : BunitContext, IAsyncLifetime
     private readonly ServiceProvider _serviceProvider = new ServiceCollection().BuildServiceProvider();
     private readonly RootManager _rootManager;
     private readonly IInterceptorSubjectContext _context;
+    private readonly TestUserPermissions _permissions = new();
 
     public SubjectPathPickerTests()
     {
@@ -34,6 +38,7 @@ public sealed class SubjectPathPickerTests : BunitContext, IAsyncLifetime
 
         Services.AddSingleton(_rootManager);
         Services.AddSingleton(pathResolver);
+        Services.AddSingleton<IUserPermissions>(_permissions);
     }
 
     public Task InitializeAsync() => Task.CompletedTask;
@@ -145,6 +150,75 @@ public sealed class SubjectPathPickerTests : BunitContext, IAsyncLifetime
 
         // Assert
         Assert.Contains("Preview: kitchen.local", component.Find(".mud-typography-caption").TextContent);
+    }
+
+    [Fact]
+    public void WhenTheViewerMayNotReadAMember_ThenThePickerDoesNotListIt()
+    {
+        // Arrange
+        var root = (PathTargetSubject)_rootManager.Root!;
+        _permissions.CannotRead.Add(root.TryGetRegisteredSubject()!.TryGetProperty(nameof(PathTargetSubject.Speed))!);
+
+        // Act
+        var component = RenderPicker(listsPropertiesWithoutState: true);
+
+        // Assert
+        var items = GetItemNames(component);
+        Assert.DoesNotContain("Speed", items);
+        Assert.Contains("IsOn", items);
+    }
+
+    [Fact]
+    public void WhenTheViewerMayNotReadTheMemberAPathNames_ThenItsValueIsNotPreviewed()
+    {
+        // Arrange
+        var root = (PathTargetSubject)_rootManager.Root!;
+        root.Name = "Kitchen pump";
+        _permissions.CannotRead.Add(root.TryGetRegisteredSubject()!.TryGetProperty(nameof(PathTargetSubject.Name))!);
+
+        // Act
+        var component = Render<SubjectPathPicker>(parameters => parameters.Add(picker => picker.Value, "/Name"));
+
+        // Assert
+        Assert.DoesNotContain("Kitchen pump", component.Markup);
+        Assert.DoesNotContain("Preview:", component.Markup);
+    }
+
+    [Fact]
+    public void WhenTheViewerMayNotSeeTheSubjectOfTheMemberAPathNames_ThenItsValueIsNotPreviewed()
+    {
+        // Arrange
+        var root = (PathTargetSubject)_rootManager.Root!;
+        root.Name = "Kitchen pump";
+        var shown = Render<SubjectPathPicker>(parameters => parameters.Add(picker => picker.Value, "/Name")).Markup;
+        _permissions.CannotShow.Add(root);
+
+        // Act
+        var component = Render<SubjectPathPicker>(parameters => parameters.Add(picker => picker.Value, "/Name"));
+
+        // Assert
+        Assert.DoesNotContain("Kitchen pump", component.Markup);
+        Assert.Contains("Preview: Kitchen pump", shown);
+    }
+
+    [Fact]
+    public void WhenTheViewerMayNotSeeASubject_ThenThePickerDoesNotListIt()
+    {
+        // Arrange
+        var device = new AccessTestDevice(_context)
+        {
+            Devices = [new AccessTestRow { Name = "Pump" }, new AccessTestRow { Name = "Fan" }]
+        };
+        _rootManager.Root = device;
+        _permissions.CannotShow.Add(device.Devices[0]);
+
+        // Act
+        var component = Render<SubjectPathPicker>(parameters => parameters.Add(picker => picker.Value, "/Devices[1]/Name"));
+
+        // Assert
+        var items = GetItemNames(component);
+        Assert.DoesNotContain("[0]", items);
+        Assert.Contains("[1]", items);
     }
 
     private SecretTargetSubject CreateSecretTarget() =>

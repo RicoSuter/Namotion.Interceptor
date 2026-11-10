@@ -1,3 +1,4 @@
+@using HomeBlaze.Authorization.Abstractions
 @using HomeBlaze.Components.Abstractions.Pages
 @using Microsoft.Extensions.Logging
 
@@ -10,7 +11,7 @@
         {
             @if (child.HasNavigationBarPages)
             {
-                <NavFolder @key="child.Path" Item="child" NavigationResolver="NavigationResolver" CurrentPath="@CurrentPath" />
+                <NavFolder @key="child.Path" Item="child" NavigationResolver="NavigationResolver" Permissions="Permissions" CurrentPath="@CurrentPath" />
             }
             else if (child.IsPage)
             {
@@ -31,6 +32,10 @@
     [Parameter, EditorRequired]
     public required NavigationItemResolver NavigationResolver { get; set; }
 
+    /// <summary>The permissions of the viewer, who sees only the children it may see.</summary>
+    [Parameter, EditorRequired]
+    public required IUserPermissions Permissions { get; set; }
+
     [Parameter]
     public string CurrentPath { get; set; } = string.Empty;
 
@@ -50,8 +55,8 @@
             }
         }
 
-        // Nothing observes the folder's children, so they are re-read on every parent render:
-        // NavMenu's refresh timer is what makes pages added or removed later show up here.
+        // Nothing observes the folder's children, so they are re-read on every parent render: NavMenu's refresh timer is
+        // what makes pages added or removed later show up here, and its render on a change of the permissions what hides them.
         if (_expanded)
         {
             RefreshChildren();
@@ -62,7 +67,7 @@
     {
         try
         {
-            _children = NavigationResolver.GetChildItems(Item.Subject).ToList();
+            _children = NavigationResolver.GetChildItems(Item.Subject, Permissions).ToList();
         }
         catch (Exception exception)
         {

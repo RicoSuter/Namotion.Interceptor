@@ -13,11 +13,10 @@ namespace Namotion.Interceptor.Mcp.Tests.Tools.Access;
 /// </summary>
 public class HiddenSubjectAccessTests
 {
-    private static McpServerConfiguration CreateConfiguration(IMcpAccessPolicy? policy, bool isReadOnly = false) => new()
+    private static McpServerConfiguration CreateConfiguration(IMcpAccessPolicy? policy) => new()
     {
         PathProvider = DefaultPathProvider.Instance,
-        AccessPolicy = policy,
-        IsReadOnly = isReadOnly
+        AccessPolicy = policy ?? AllowAllMcpAccessPolicy.Instance
     };
 
     [Fact]
@@ -334,8 +333,7 @@ public class HiddenSubjectAccessTests
     private static McpServerConfiguration CreateExcludingAndHidingConfiguration() => new()
     {
         PathProvider = new ExcludingPathProvider(nameof(TestHouse.Private)),
-        AccessPolicy = TestAccessPolicy.DenyRead(nameof(TestHouse.Public)),
-        IsReadOnly = false
+        AccessPolicy = TestAccessPolicy.DenyRead(nameof(TestHouse.Public))
     };
 
     // The text the answer without either restriction contains, so the case reaches the device, or for the where filter
@@ -475,18 +473,25 @@ public class HiddenSubjectAccessTests
     }
 
     [Fact]
-    public async Task WhenTheServerIsReadOnly_ThenTheReadOnlyErrorComesBeforeAHiddenPath()
+    public async Task WhenThePolicyDeniesEveryWrite_ThenSetPropertyOfAHiddenPathAnswersAsAMissingOne()
     {
         // Arrange
         var context = CreateContext();
         var room = new TestRoom(context) { Name = "Kitchen", Temperature = 21.5m };
-        var configuration = CreateConfiguration(TestAccessPolicy.DenyRead(nameof(TestRoom.Temperature)), isReadOnly: true);
+        var configuration = CreateConfiguration(new TestAccessPolicy((member, action) =>
+            action == McpAccessActions.Read && member.Name != nameof(TestRoom.Temperature)));
 
         // Act
-        var result = await McpToolCaller.CallAsync(room, configuration, "set_property", new { path = "Temperature", value = 25.0 });
+        var hidden = await McpToolCaller.CallAsync(room, configuration, "set_property", new { path = "Temperature", value = 25.0 });
+        var missing = await McpToolCaller.CallAsync(room, configuration, "set_property", new { path = "Humidity", value = 25.0 });
+        var readable = await McpToolCaller.CallAsync(room, configuration, "set_property", new { path = "Name", value = "Hall" });
 
         // Assert
-        Assert.Equal("Server is in read-only mode.", result.GetProperty("error").GetString());
+        Assert.Equal(
+            missing.GetProperty("error").GetString()!.Replace("Humidity", "Temperature"),
+            hidden.GetProperty("error").GetString());
+        Assert.Equal("Property is not writable: Name. The access policy does not allow it.", readable.GetProperty("error").GetString());
+        Assert.Equal(21.5m, room.Temperature);
     }
 
     [Fact]

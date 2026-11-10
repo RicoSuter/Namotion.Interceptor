@@ -34,6 +34,10 @@
     </ItemGroup>
 
     <ItemGroup>
+        <Compile Include="..\HomeBlaze.Components.Tests\Access\TestUserPermissions.cs" Link="Access\TestUserPermissions.cs" />
+    </ItemGroup>
+
+    <ItemGroup>
         <None Update="Agents\ClaudeCli\Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 

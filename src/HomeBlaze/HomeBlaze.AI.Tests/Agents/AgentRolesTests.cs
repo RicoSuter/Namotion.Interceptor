@@ -9,6 +9,7 @@ using HomeBlaze.AI.Mcp;
 using HomeBlaze.AI.Tests.Mcp;
 using HomeBlaze.Components;
 using HomeBlaze.Authorization;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Abstractions;
@@ -147,16 +148,52 @@ public sealed class AgentRolesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenAWatchedMemberIsDeniedByTheRolesOfTheAgent_ThenItsStateIsLeftOutOfTheWatchedState()
+    {
+        // Arrange
+        var graph = await CreateGraphAsync(
+            "# Notes",
+            new AuthorizationRole
+            {
+                Name = "no-humidity",
+                Includes = [BuiltInRoles.ReaderName],
+                Deny = [new PermissionRule { Members = [nameof(AgentTestRoot.Humidity)], Actions = [PermissionAction.Read] }]
+            });
+        var agent = new FakeAgent(graph.AgentServices)
+        {
+            Roles = ["no-humidity"],
+            WatchPaths = ["/Temperature", "/Humidity"],
+            MinRunInterval = TimeSpan.Zero
+        };
+        await AttachAndWaitForStartAsync(graph, agent);
+
+        // Act
+        agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => agent.RunCount > 0 && !agent.IsBusy);
+
+        // Assert
+        var stateLines = agent.Requests[^1].UserMessage.ReplaceLineEndings("\n").Split('\n')
+            .SkipWhile(line => line != "```jsonl").Skip(1).TakeWhile(line => line != "```")
+            .Select(line => JsonDocument.Parse(line).RootElement)
+            .ToList();
+        var temperature = Assert.Single(stateLines, line => line.GetProperty("path").GetString() == "/Temperature");
+        Assert.Equal(21.5m, temperature.GetProperty("property").GetProperty("value").GetDecimal());
+        var humidity = Assert.Single(stateLines, line => line.GetProperty("path").GetString() == "/Humidity");
+        Assert.False(humidity.TryGetProperty("property", out _));
+    }
+
+    [Fact]
     public async Task WhenTheRolesHideAPartOfAWatchedBranch_ThenTheBackgroundMessageLeavesItOut()
     {
         // Arrange
-        var graph = await CreateGraphAsync("# Notes", ("NoCellar", new Role
+        var graph = await CreateGraphAsync("# Notes", new AuthorizationRole
         {
+            Name = "nocellar",
             Includes = [BuiltInRoles.OperatorName],
             Deny = [new PermissionRule { Paths = ["/Devices/Cellar/**"], Actions = [PermissionAction.Read] }]
-        }));
+        });
         AddDevices(graph);
-        var agent = new FakeAgent(graph.AgentServices) { Roles = ["NoCellar"], WatchPaths = ["/Devices"], MinRunInterval = TimeSpan.Zero };
+        var agent = new FakeAgent(graph.AgentServices) { Roles = ["nocellar"], WatchPaths = ["/Devices"], MinRunInterval = TimeSpan.Zero };
         await AttachAndWaitForStartAsync(graph, agent);
 
         // Act
@@ -174,14 +211,15 @@ public sealed class AgentRolesTests : IAsyncLifetime
     public async Task WhenAWatchedChangeIsHiddenByTheRoles_ThenItStartsNoRunWhileAReadableOneDoes()
     {
         // Arrange
-        var graph = await CreateGraphAsync("# Notes", ("NoCellar", new Role
+        var graph = await CreateGraphAsync("# Notes", new AuthorizationRole
         {
+            Name = "nocellar",
             Includes = [BuiltInRoles.OperatorName],
             Deny = [new PermissionRule { Paths = ["/Devices/Cellar/**"], Actions = [PermissionAction.Read] }]
-        }));
+        });
         AddDevices(graph);
         var logger = new RecordingLogger();
-        var agent = new FakeAgent(graph.AgentServices, logger) { Roles = ["NoCellar"], WatchPaths = ["/Devices"], MinRunInterval = TimeSpan.Zero };
+        var agent = new FakeAgent(graph.AgentServices, logger) { Roles = ["nocellar"], WatchPaths = ["/Devices"], MinRunInterval = TimeSpan.Zero };
         await AttachAndWaitForStartAsync(graph, agent);
         var devices = (AgentTestRoot)graph.Root.Children["Devices"];
 
@@ -227,6 +265,39 @@ public sealed class AgentRolesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenAnAgentWithTheDefaultAllowedToolsHasARoleAllowingExecute_ThenItsToolSetHasNoStateChangingTool()
+    {
+        // Arrange
+        var graph = await CreateGraphAsync("# Notes");
+        string[]? turnToolNames = null;
+        var agent = new FakeAgent(graph.AgentServices)
+        {
+            Roles = [BuiltInRoles.OperatorName],
+            Handler = (request, _, _) =>
+            {
+                turnToolNames = request.Tools.Tools.Select(tool => tool.Name).ToArray();
+                return Task.FromResult(new AgentTurnResult("Done.", null, null));
+            }
+        };
+        await AttachAndWaitForStartAsync(graph, agent);
+        var offeredToolNames = graph.AgentServices.ToolSource
+            .CreateTools(McpAuthorization.GetAccessPolicy(graph.Services.GetRequiredService<AuthorizationService>(), [BuiltInRoles.OperatorName]))
+            .Select(tool => tool.Name)
+            .ToArray();
+
+        // Act
+        await agent.SendMessageAsync("Hello", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(AgentToolSet.DefaultAllowedTools, agent.AllowedTools);
+        Assert.Contains(HomeBlazeMcpToolProvider.InvokeOperationToolName, offeredToolNames);
+        Assert.Contains("set_property", offeredToolNames);
+        Assert.NotNull(turnToolNames);
+        Assert.Contains(HomeBlazeMcpToolProvider.InvokeQueryToolName, turnToolNames);
+        Assert.All(AgentToolSet.StateChangingTools, name => Assert.DoesNotContain(name, turnToolNames));
+    }
+
+    [Fact]
     public async Task WhenARoleIsUnknown_ThenTheAgentRunsItsTurnsWithDenyAllAndShowsTheError()
     {
         // Arrange
@@ -235,7 +306,7 @@ public sealed class AgentRolesTests : IAsyncLifetime
             services => new FakeAgent(services),
             agent =>
             {
-                agent.Roles = ["Missing"];
+                agent.Roles = ["missing"];
                 agent.AllowedTools = ["get_property"];
                 agent.Handler = async (request, _, cancellationToken) =>
                 {
@@ -252,13 +323,13 @@ public sealed class AgentRolesTests : IAsyncLifetime
 
         // Assert
         Assert.Equal(ServiceStatus.Error, statusAfterStart.Status);
-        Assert.Contains("'Missing'", statusAfterStart.StatusMessage);
+        Assert.Contains("'missing'", statusAfterStart.StatusMessage);
         Assert.Equal(AgentTimelineEntryKind.Assistant, test.Agent.Timeline.Entries[^1].Kind);
         Assert.Contains("Path not found", getPropertyResult);
         var policy = Assert.IsType<AuthorizationMcpAccessPolicy>(((TestAgentToolSource)test.Services.ToolSource).LastAccessPolicy);
         Assert.Same(AuthorizationPolicy.DenyAll, policy.Policy);
         Assert.Equal(ServiceStatus.Error, test.Agent.Status);
-        Assert.Contains("'Missing'", test.Agent.StatusMessage);
+        Assert.Contains("'missing'", test.Agent.StatusMessage);
     }
 
     [Fact]
@@ -280,7 +351,7 @@ public sealed class AgentRolesTests : IAsyncLifetime
         // Arrange
         await using var test = await AgentTestContext<FakeAgent>.StartAsync(
             services => new FakeAgent(services),
-            agent => agent.Roles = ["Missing"]);
+            agent => agent.Roles = ["missing"]);
 
         // Act
         test.Agent.Roles = [BuiltInRoles.ReaderName];
@@ -288,7 +359,7 @@ public sealed class AgentRolesTests : IAsyncLifetime
 
         // Assert
         Assert.Equal(ServiceStatus.Running, test.Agent.Status);
-        Assert.DoesNotContain("'Missing'", test.Agent.StatusMessage ?? string.Empty);
+        Assert.DoesNotContain("'missing'", test.Agent.StatusMessage ?? string.Empty);
     }
 
     [Fact]
@@ -296,20 +367,20 @@ public sealed class AgentRolesTests : IAsyncLifetime
     {
         // Arrange
         var graph = await CreateGraphAsync("# Notes");
-        var agent = new FakeAgent(graph.AgentServices) { Roles = ["Late"] };
+        var agent = new FakeAgent(graph.AgentServices) { Roles = ["late"] };
         await AttachAndWaitForStartAsync(graph, agent);
         var statusBefore = (agent.Status, agent.StatusMessage);
         var authorization = Assert.IsType<Authorization.Authorization>(graph.Root.Children["Authorization"]);
 
         // Act
-        authorization.Roles = new Dictionary<string, Role> { ["Late"] = new() { Includes = [BuiltInRoles.ReaderName] } };
+        authorization.ReplaceRoles([new AuthorizationRole { Name = "late", Includes = [BuiltInRoles.ReaderName] }]);
 
         // Assert
         Assert.Equal(ServiceStatus.Error, statusBefore.Status);
-        Assert.Contains("'Late'", statusBefore.StatusMessage);
+        Assert.Contains("'late'", statusBefore.StatusMessage);
         // Status and message are written one after the other, so both are waited for.
         await AsyncTestHelpers.WaitUntilAsync(
-            () => agent.Status == ServiceStatus.Running && !(agent.StatusMessage ?? string.Empty).Contains("'Late'"),
+            () => agent.Status == ServiceStatus.Running && !(agent.StatusMessage ?? string.Empty).Contains("'late'"),
             message: "The roles error should clear.");
         Assert.Empty(agent.Requests);
     }
@@ -318,19 +389,19 @@ public sealed class AgentRolesTests : IAsyncLifetime
     public async Task WhenARoleIsRemovedDuringATurn_ThenTheNextToolCallIsRefused()
     {
         // Arrange
-        var graph = await CreateGraphAsync("# Notes", ("Custom", new Role { Includes = [BuiltInRoles.ReaderName] }));
+        var graph = await CreateGraphAsync("# Notes", new AuthorizationRole { Name = "custom", Includes = [BuiltInRoles.ReaderName] });
         var authorization = Assert.IsType<Authorization.Authorization>(graph.Root.Children["Authorization"]);
         var results = new List<string>();
         var agent = new FakeAgent(graph.AgentServices)
         {
-            Roles = ["Custom"],
+            Roles = ["custom"],
             AllowedTools = ["get_property"],
             Handler = async (request, _, cancellationToken) =>
             {
                 var getProperty = request.Tools.Tools.First(tool => tool.Name == "get_property");
                 var input = JsonSerializer.SerializeToElement(new { path = "/Temperature" });
                 results.Add(JsonSerializer.Serialize(await getProperty.Handler(input, cancellationToken)));
-                authorization.Roles = new Dictionary<string, Role>();
+                authorization.ReplaceRoles([]);
                 results.Add(JsonSerializer.Serialize(await getProperty.Handler(input, cancellationToken)));
                 return new AgentTurnResult("Done.", null, null);
             }
@@ -350,26 +421,27 @@ public sealed class AgentRolesTests : IAsyncLifetime
     public async Task WhenARoleHidesAMethodDuringATurn_ThenTheNextListMethodsLeavesItOutAlsoWhenItsResultIsReadLater()
     {
         // Arrange
-        var graph = await CreateGraphAsync("# Notes", ("Custom", new Role { Includes = [BuiltInRoles.ReaderName] }));
+        var graph = await CreateGraphAsync("# Notes", new AuthorizationRole { Name = "custom", Includes = [BuiltInRoles.ReaderName] });
         var authorization = Assert.IsType<Authorization.Authorization>(graph.Root.Children["Authorization"]);
         var results = new List<string>();
         var agent = new FakeAgent(graph.AgentServices)
         {
-            Roles = ["Custom"],
+            Roles = ["custom"],
             AllowedTools = ["list_methods"],
             Handler = async (request, _, cancellationToken) =>
             {
                 var listMethods = request.Tools.Tools.First(tool => tool.Name == "list_methods");
                 var input = JsonSerializer.SerializeToElement(new { path = "/Storage" });
                 results.Add(JsonSerializer.Serialize(await listMethods.Handler(input, cancellationToken)));
-                authorization.Roles = new Dictionary<string, Role>
-                {
-                    ["Custom"] = new()
+                authorization.ReplaceRoles(
+                [
+                    new AuthorizationRole
                     {
+                        Name = "custom",
                         Includes = [BuiltInRoles.ReaderName],
                         Deny = [new PermissionRule { Members = [nameof(FluentStorageContainer.GetOrder)], Actions = [PermissionAction.Read] }]
                     }
-                };
+                ]);
 
                 // Serialized after the call returned, as a backend serializes a result.
                 var result = await listMethods.Handler(input, cancellationToken);
@@ -393,20 +465,20 @@ public sealed class AgentRolesTests : IAsyncLifetime
     public async Task WhenAUsedRoleIsRemovedFromTheAuthorization_ThenTheAgentShowsTheErrorWithoutATurn()
     {
         // Arrange
-        var graph = await CreateGraphAsync("# Notes", ("Custom", new Role { Includes = [BuiltInRoles.ReaderName] }));
-        var agent = new FakeAgent(graph.AgentServices) { Roles = ["Custom"] };
+        var graph = await CreateGraphAsync("# Notes", new AuthorizationRole { Name = "custom", Includes = [BuiltInRoles.ReaderName] });
+        var agent = new FakeAgent(graph.AgentServices) { Roles = ["custom"] };
         await AttachAndWaitForStartAsync(graph, agent);
         var statusBefore = agent.Status;
         var authorization = Assert.IsType<Authorization.Authorization>(graph.Root.Children["Authorization"]);
 
         // Act
-        authorization.Roles = new Dictionary<string, Role>();
+        authorization.ReplaceRoles([]);
 
         // Assert
         Assert.Equal(ServiceStatus.Running, statusBefore);
         // Status and message are written one after the other, so both are waited for.
         await AsyncTestHelpers.WaitUntilAsync(
-            () => agent.Status == ServiceStatus.Error && (agent.StatusMessage ?? string.Empty).Contains("'Custom'"),
+            () => agent.Status == ServiceStatus.Error && (agent.StatusMessage ?? string.Empty).Contains("'custom'"),
             message: "The roles error should be shown.");
     }
 
@@ -416,15 +488,16 @@ public sealed class AgentRolesTests : IAsyncLifetime
         // Arrange
         var graph = await CreateGraphAsync(
             "Temperature: [{{ /Temperature }}], humidity: [{{ /Humidity }}]",
-            ("PageReader", new Role
+            new AuthorizationRole
             {
+                Name = "page-reader",
                 Includes = [BuiltInRoles.ReaderName],
                 Deny = [new PermissionRule { Members = [nameof(AgentTestRoot.Humidity)], Actions = [PermissionAction.Read] }]
-            }));
+            });
         string? evaluated = null;
         var agent = new FakeAgent(graph.AgentServices)
         {
-            Roles = ["PageReader"],
+            Roles = ["page-reader"],
             AllowedTools = [HomeBlazeMcpToolProvider.InvokeQueryToolName],
             Handler = async (request, _, cancellationToken) =>
             {
@@ -442,7 +515,7 @@ public sealed class AgentRolesTests : IAsyncLifetime
 
         // Assert
         var page = Assert.IsType<MarkdownFile>(graph.Storage.Children["Notes.md"]);
-        Assert.Equal("Temperature: [21.5], humidity: [40]", page.ReadEvaluatedContent()?.Trim());
+        Assert.Equal("Temperature: [21.5], humidity: [40]", page.ReadEvaluatedContent(UnrestrictedPermissions.Instance)?.Trim());
         Assert.Equal("Temperature: [21.5], humidity: []", evaluated?.Trim());
     }
 
@@ -489,27 +562,8 @@ public sealed class AgentRolesTests : IAsyncLifetime
 
         // Assert
         var page = Assert.IsType<MarkdownFile>(graph.Storage.Children["Notes.md"]);
-        Assert.DoesNotContain("agent: []", page.ReadEvaluatedContent());
+        Assert.DoesNotContain("agent: []", page.ReadEvaluatedContent(UnrestrictedPermissions.Instance));
         Assert.Equal("Temperature: [21.5], agent: []", result.GetProperty("result").GetString()?.Trim());
-    }
-
-    [Fact]
-    public async Task WhenAnMcpClientReadsAnEvaluatedPageOnAFlowWithAReadCheck_ThenTheCheckOfTheFlowDoesNotApply()
-    {
-        // Arrange
-        var graph = await CreateGraphAsync("Temperature: [{{ /Temperature }}]");
-        var invokeQuery = CreateMcpServerTools(graph)[HomeBlazeMcpToolProvider.InvokeQueryToolName];
-
-        // Act
-        JsonElement result;
-        using (PropertyReadAccess.Enter(_ => false))
-        {
-            result = JsonSerializer.SerializeToElement(await invokeQuery.Handler(
-                JsonSerializer.SerializeToElement(new { path = "/Storage/Notes.md", method = "ReadEvaluatedContent" }), CancellationToken.None));
-        }
-
-        // Assert
-        Assert.Equal("Temperature: [21.5]", result.GetProperty("result").GetString()?.Trim());
     }
 
     [Fact]
@@ -520,7 +574,7 @@ public sealed class AgentRolesTests : IAsyncLifetime
         AddDevices(graph);
         var role = new AuthorizationRole
         {
-            Name = "NoChildren",
+            Name = "no-children",
             Includes = [BuiltInRoles.ReaderName],
             Deny = [new PermissionRule { Members = [nameof(TestThing.Child)], Actions = [PermissionAction.Read] }]
         };
@@ -545,7 +599,7 @@ public sealed class AgentRolesTests : IAsyncLifetime
         AddDevices(graph);
         var role = new AuthorizationRole
         {
-            Name = "KitchenOnly",
+            Name = "kitchen-only",
             Allow =
             [
                 new PermissionRule { Tags = [MemberTags.State], Actions = [PermissionAction.Read] },
@@ -587,7 +641,10 @@ public sealed class AgentRolesTests : IAsyncLifetime
                 async Task CallAsync(string name, object input) => results.Add(JsonSerializer.Serialize(
                     await tools[name].Handler(JsonSerializer.SerializeToElement(input), cancellationToken)));
 
-                await CallAsync(HomeBlazeMarkdownToolProvider.CreateMarkdownToolName, new { folder_path = "/Storage", name = "Roles.md", content = "# Roles\n\n" + block });
+                await CallAsync(HomeBlazeMcpToolProvider.InvokeOperationToolName, new
+                {
+                    path = "/Storage", method = "CreateMarkdownFile", parameters = new { name = "Roles.md", content = "# Roles\n\n" + block }
+                });
                 await CallAsync(HomeBlazeMarkdownToolProvider.WriteMarkdownToolName, new { path = "/Storage/Notes.md", content = "# Notes\n\n" + block });
                 await CallAsync(HomeBlazeMarkdownToolProvider.EditMarkdownToolName, new { path = "/Storage/Notes.md", old_text = "# Notes", new_text = "# Notes\n\n" + block });
                 await CallAsync(HomeBlazeMcpToolProvider.InvokeOperationToolName, new
@@ -605,10 +662,14 @@ public sealed class AgentRolesTests : IAsyncLifetime
         // Assert
         Assert.Equal([BuiltInRoles.OperatorName], agent.Roles);
         Assert.Equal(4, results.Count);
-        Assert.All(results, result => Assert.Contains("With the permission to edit page layout", result));
+
+        // Creating a page is administration, which agents never have; the other writes refuse the block.
+        Assert.Contains("CreateMarkdownFile", results[0]);
+        Assert.Contains("is not permitted", results[0]);
+        Assert.All(results.Skip(1), result => Assert.Contains("With the permission to edit page layout", result));
         var knownSubjects = ((IInterceptorSubject)graph.Root).Context.GetService<ISubjectRegistry>().KnownSubjects.Keys;
-        Assert.Single(knownSubjects.OfType<Authorization.Authorization>());
-        Assert.Empty(knownSubjects.OfType<Role>());
+        var authorization = Assert.Single(knownSubjects.OfType<Authorization.Authorization>());
+        Assert.True(knownSubjects.OfType<Role>().ToHashSet().SetEquals(authorization.Roles.Values), "Only the roles of the Authorization exist.");
         Assert.Equal("# Notes", await File.ReadAllTextAsync(Path.Combine(_directory.FullName, "Notes.md")));
         Assert.False(File.Exists(Path.Combine(_directory.FullName, "Roles.md")));
     }
@@ -628,7 +689,7 @@ public sealed class AgentRolesTests : IAsyncLifetime
             """);
         var role = new AuthorizationRole
         {
-            Name = "NoMap",
+            Name = "nomap",
             Includes = [BuiltInRoles.OperatorName],
             Deny = hidesMap ? [new PermissionRule { Paths = ["/Storage/Notes.md/busy/**"], Actions = [PermissionAction.Read] }] : []
         };
@@ -642,28 +703,13 @@ public sealed class AgentRolesTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task WhenAnOperationChangesAProperty_ThenItsChangeHandlersDoNotRunUnderTheReadCheckOfTheCaller()
+    public async Task WhenAnOperationTakesThePermissionsOfItsReader_ThenTheyDenyEverything()
     {
         // Arrange
         var graph = await CreateGraphAsync("# Notes");
-        var root = graph.Root.TryGetRegisteredSubject()!;
-        var humidity = root.TryGetProperty(nameof(AgentTestRoot.Humidity))!;
-        root.AddProperty<MethodMetadata>("Heat", _ => new MethodMetadata(_ =>
-        {
-            graph.Root.Temperature = 30;
-            return null;
-        })
-        {
-            Kind = MethodKind.Operation,
-            Title = "Heat",
-            PropertyName = "Heat"
-        });
-        bool? canReadInHandler = null;
-        using var subscription = ((IInterceptorSubject)graph.Root).Context
-            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
-            .Where(change => change.Property.Name == nameof(AgentTestRoot.Temperature))
-            .Subscribe(_ => canReadInHandler = PropertyReadAccess.CanRead(humidity));
-        var tools = CreateClientTools(graph, TestAccessPolicies.Create("NoHumidity", CreateNoHumidityRole()), isReadOnly: false);
+        IUserPermissions? permissions = null;
+        AddMethod(graph, "Heat", MethodKind.Operation, resolved => permissions = (IUserPermissions?)resolved[0]);
+        var tools = CreateClientTools(graph, TestAccessPolicies.Create(BuiltInRoles.OperatorName));
 
         // Act
         var result = JsonSerializer.Serialize(await tools[HomeBlazeMcpToolProvider.InvokeOperationToolName].Handler(
@@ -671,45 +717,75 @@ public sealed class AgentRolesTests : IAsyncLifetime
 
         // Assert
         Assert.Contains("\"success\":true", result);
-        Assert.Equal(30, graph.Root.Temperature);
-        Assert.True(canReadInHandler);
+        Assert.Same(DenyAllPermissions.Instance, permissions);
     }
 
     [Fact]
-    public async Task WhenAQueryRuns_ThenItRunsUnderTheReadCheckOfTheCaller()
+    public async Task WhenAQueryTakesThePermissionsOfItsReader_ThenTheyFollowThePolicyOfTheCaller()
     {
         // Arrange
         var graph = await CreateGraphAsync("# Notes");
         var root = graph.Root.TryGetRegisteredSubject()!;
         var humidity = root.TryGetProperty(nameof(AgentTestRoot.Humidity))!;
         var temperature = root.TryGetProperty(nameof(AgentTestRoot.Temperature))!;
-        bool? canReadHumidity = null;
-        bool? canReadTemperature = null;
-        root.AddProperty<MethodMetadata>("Check", _ => new MethodMetadata(_ =>
-        {
-            canReadHumidity = PropertyReadAccess.CanRead(humidity);
-            canReadTemperature = PropertyReadAccess.CanRead(temperature);
-            return null;
-        })
-        {
-            Kind = MethodKind.Query,
-            Title = "Check",
-            PropertyName = "Check"
-        });
-        var tools = CreateClientTools(graph, TestAccessPolicies.Create("NoHumidity", CreateNoHumidityRole()));
+        IUserPermissions? permissions = null;
+        AddMethod(graph, "Check", MethodKind.Query, resolved => permissions = (IUserPermissions?)resolved[0]);
+        var tools = CreateClientTools(graph, TestAccessPolicies.Create("no-humidity", CreateNoHumidityRole()));
+
+        // Act
+        var result = JsonSerializer.Serialize(await tools[HomeBlazeMcpToolProvider.InvokeQueryToolName].Handler(
+            JsonSerializer.SerializeToElement(new { path = "/", method = "Check" }), CancellationToken.None));
+
+        // Assert
+        Assert.Contains("\"success\":true", result);
+        Assert.NotNull(permissions);
+        Assert.False(permissions.CanRead(humidity));
+        Assert.True(permissions.CanRead(temperature));
+        Assert.True(permissions.CanShow(graph.Storage.TryGetRegisteredSubject()!));
+        Assert.False(permissions.CanAdminister(temperature));
+        Assert.False(permissions.HoldsAllRoles([BuiltInRoles.ReaderName]));
+    }
+
+    [Fact]
+    public async Task WhenAQueryTakesThePermissionsOfItsReader_ThenTheyNeitherWriteNorInvoke()
+    {
+        // Arrange
+        var graph = await CreateGraphAsync("# Notes");
+        var root = graph.Root.TryGetRegisteredSubject()!;
+        var temperature = root.TryGetProperty(nameof(AgentTestRoot.Temperature))!;
+        IUserPermissions? permissions = null;
+        AddMethod(graph, "Check", MethodKind.Query, resolved => permissions = (IUserPermissions?)resolved[0]);
+        AddMethod(graph, "Heat", MethodKind.Operation, _ => { });
+        var tools = CreateClientTools(graph, TestAccessPolicies.Create(BuiltInRoles.OperatorName));
 
         // Act
         await tools[HomeBlazeMcpToolProvider.InvokeQueryToolName].Handler(
             JsonSerializer.SerializeToElement(new { path = "/", method = "Check" }), CancellationToken.None);
 
         // Assert
-        Assert.False(canReadHumidity);
-        Assert.True(canReadTemperature);
+        Assert.NotNull(permissions);
+        Assert.True(permissions.CanRead(temperature));
+        Assert.False(permissions.CanWrite(temperature));
+        Assert.False(permissions.CanInvoke(root.TryGetProperty("Heat")!));
     }
+
+    // A method of the root that takes the permissions of its reader as a service.
+    private static void AddMethod(Graph graph, string name, MethodKind kind, Action<object?[]> invoked) =>
+        graph.Root.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>(name, _ => new MethodMetadata(resolved =>
+        {
+            invoked(resolved ?? []);
+            return null;
+        })
+        {
+            Kind = kind,
+            Title = name,
+            PropertyName = name,
+            Parameters = [new MethodParameter { Name = "permissions", Type = typeof(IUserPermissions), IsFromServices = true }]
+        });
 
     private static AuthorizationRole CreateNoHumidityRole() => new()
     {
-        Name = "NoHumidity",
+        Name = "no-humidity",
         Includes = [BuiltInRoles.OperatorName],
         Deny = [new PermissionRule { Members = [nameof(AgentTestRoot.Humidity)], Actions = [PermissionAction.Read] }]
     };
@@ -718,8 +794,8 @@ public sealed class AgentRolesTests : IAsyncLifetime
     public async Task WhenAnAgentNamesACustomRole_ThenItsUsedByAgentsFollowsTheRolesAndResetsWhenTheAgentIsRemoved()
     {
         // Arrange
-        var role = new Role { Includes = [BuiltInRoles.ReaderName] };
-        var graph = await CreateGraphAsync("# Notes", ("Custom", role));
+        var graph = await CreateGraphAsync("# Notes", new AuthorizationRole { Name = "custom", Includes = [BuiltInRoles.ReaderName] });
+        var role = Assert.IsType<Authorization.Authorization>(graph.Root.Children["Authorization"]).Roles["custom"];
         var agent = new FakeAgent(graph.AgentServices) { Roles = ["custom"] };
 
         // Act
@@ -727,7 +803,7 @@ public sealed class AgentRolesTests : IAsyncLifetime
         var countWhenStarted = role.UsedByAgents;
         agent.Roles = [BuiltInRoles.OperatorName];
         var countAfterChange = role.UsedByAgents;
-        agent.Roles = ["Custom", BuiltInRoles.ReaderName];
+        agent.Roles = ["custom", BuiltInRoles.ReaderName];
         var countAfterChangeBack = role.UsedByAgents;
         graph.Root.Children = graph.Root.Children
             .Where(child => child.Key != "Agent")
@@ -756,9 +832,9 @@ public sealed class AgentRolesTests : IAsyncLifetime
     }
 
     // The tools of a client with the policy over the graph.
-    private static Dictionary<string, McpToolInfo> CreateClientTools(Graph graph, IMcpAccessPolicy accessPolicy, bool isReadOnly = true)
+    private static Dictionary<string, McpToolInfo> CreateClientTools(Graph graph, IMcpAccessPolicy accessPolicy)
     {
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(graph.Services, () => graph.Root, isReadOnly, accessPolicy);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(graph.Services, () => graph.Root, accessPolicy);
         return new McpToolFactory(graph.Root, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }
 
@@ -778,7 +854,7 @@ public sealed class AgentRolesTests : IAsyncLifetime
     // The tools of the external MCP server over the graph.
     private static Dictionary<string, McpToolInfo> CreateMcpServerTools(Graph graph)
     {
-        var configuration = McpBuilderExtensions.CreateServerConfiguration(graph.Services, () => graph.Root, isReadOnly: true);
+        var configuration = McpBuilderExtensions.CreateServerConfiguration(graph.Services, () => graph.Root);
         return new McpToolFactory(graph.Root, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }
 
@@ -792,7 +868,7 @@ public sealed class AgentRolesTests : IAsyncLifetime
             message: "The agent should finish starting.");
     }
 
-    private async Task<Graph> CreateGraphAsync(string notes, params (string Name, Role Role)[] roles)
+    private async Task<Graph> CreateGraphAsync(string notes, params AuthorizationRole[] roles)
     {
         await File.WriteAllTextAsync(Path.Combine(_directory.FullName, "Notes.md"), notes);
 
@@ -817,6 +893,7 @@ public sealed class AgentRolesTests : IAsyncLifetime
         services.AddSingleton(pathResolver);
         services.AddSingleton<MarkdownContentParser>();
         services.AddHomeBlazeAuthorization(McpAuthorization.PathProvider);
+        services.AddSingleton<IMcpClientAccess>(new TestMcpClientAccess(BuiltInRoles.ReaderName));
         var serviceProvider = services.BuildServiceProvider();
         _disposables.Add(serviceProvider);
 
@@ -845,10 +922,8 @@ public sealed class AgentRolesTests : IAsyncLifetime
             return ValueTask.CompletedTask;
         }));
 
-        var authorization = new Authorization.Authorization
-        {
-            Roles = roles.ToDictionary(entry => entry.Name, entry => entry.Role)
-        };
+        var authorization = new Authorization.Authorization();
+        authorization.ReplaceRoles(roles);
         root = new AgentTestRoot(context)
         {
             Temperature = 21.5m,
@@ -890,9 +965,9 @@ public sealed class AgentRolesTests : IAsyncLifetime
     /// <summary>The HomeBlaze tools of agents over a fixed root.</summary>
     private sealed class FactoryToolSource(IServiceProvider serviceProvider, Func<IInterceptorSubject> root) : IAgentToolSource
     {
-        public IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly, IMcpAccessPolicy accessPolicy)
+        public IReadOnlyList<McpToolInfo> CreateTools(IMcpAccessPolicy accessPolicy)
         {
-            var configuration = HomeBlazeMcpConfigurationFactory.Create(serviceProvider, root, isReadOnly, accessPolicy);
+            var configuration = HomeBlazeMcpConfigurationFactory.Create(serviceProvider, root, accessPolicy);
             return new McpToolFactory(root, configuration).CreateTools();
         }
     }

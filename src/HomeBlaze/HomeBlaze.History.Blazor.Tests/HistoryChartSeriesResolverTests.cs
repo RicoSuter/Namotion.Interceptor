@@ -1,10 +1,12 @@
 using System.Numerics;
 using System.Reflection;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Components.Tests.Access;
 using HomeBlaze.History;
 using HomeBlaze.History.Abstractions;
 using HomeBlaze.History.Blazor;
 using HomeBlaze.Services;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
@@ -35,7 +37,7 @@ public class HistoryChartSeriesResolverTests
 
     private static IReadOnlyList<HistoryChartSeriesInfo> Resolve(SubjectPathResolver resolver, HistoryChart chart) =>
         HistoryChartSeriesResolver.Resolve(
-            resolver, chart.Series, chart.Series.Select(HistoryChartSeriesConfiguration.Read).ToArray(), chart.Aggregation);
+            resolver, chart.Series, chart.Series.Select(HistoryChartSeriesConfiguration.Read).ToArray(), chart.Aggregation, UnrestrictedPermissions.Instance);
 
     [Fact]
     public void WhenAChartIsCreated_ThenItHasTheDocumentedDefaults()
@@ -726,6 +728,30 @@ public class HistoryChartSeriesResolverTests
         // Assert
         Assert.Equal(engine.Paths, paths);
         Assert.Equal("/Child/Temperature", paths[1]);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenTheUserMayNotReadTheValueOrItsHistory_ThenTheSeriesIsMissing(bool refusesHistoryOnly)
+    {
+        // Arrange
+        var (resolver, root) = CreateGraph(
+            new HistoryChartSeries { Path = "/Temperature" },
+            new HistoryChartSeries { Path = "/IsOn" });
+        var temperature = root.TryGetRegisteredSubject()!.TryGetProperty(nameof(ChartTargetSubject.Temperature))!;
+        var permissions = new TestUserPermissions();
+        (refusesHistoryOnly ? permissions.CannotReadHistory : permissions.CannotRead).Add(temperature);
+
+        // Act
+        var series = HistoryChartSeriesResolver.Resolve(
+            resolver, root.Chart!.Series, root.Chart.Series.Select(HistoryChartSeriesConfiguration.Read).ToArray(), null, permissions);
+
+        // Assert
+        Assert.Equal(HistoryChartSeriesKind.Missing, series[0].Kind);
+        Assert.Null(series[0].Property);
+        Assert.Equal("/Temperature", series[0].Label);
+        Assert.Equal(HistoryChartSeriesKind.Band, series[1].Kind);
     }
 
     private static (SubjectPathResolver Resolver, ChartTargetSubject Root) CreateGraph(params HistoryChartSeries[] series)

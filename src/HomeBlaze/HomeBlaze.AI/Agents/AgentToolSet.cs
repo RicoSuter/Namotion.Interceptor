@@ -139,12 +139,6 @@ public sealed class AgentToolSet
     public static bool WritesPages(string toolName) => PageWritingTools.Contains(toolName);
 
     /// <summary>
-    /// Whether tools built for these allowed names must run in read-only mode, i.e. none of the <see cref="StateChangingTools"/> is allowed.
-    /// </summary>
-    public static bool IsReadOnly(IReadOnlyCollection<string> allowedTools) =>
-        !StateChangingTools.Any(allowedTools.Contains);
-
-    /// <summary>
     /// Creates the tool set of a turn.
     /// </summary>
     /// <param name="availableTools">All tools the configuration offers.</param>

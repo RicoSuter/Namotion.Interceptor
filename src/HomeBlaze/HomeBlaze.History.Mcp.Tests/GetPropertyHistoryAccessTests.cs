@@ -10,6 +10,7 @@ using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Xunit;
@@ -130,30 +131,59 @@ public class GetPropertyHistoryAccessTests
     }
 
     [Fact]
-    public async Task WhenTheConfigurationHasNoAccessPolicy_ThenAnUnresolvedPathIsQueried()
+    public async Task WhenTheConfigurationHasNoExplicitAccessPolicy_ThenHistoryIsRefusedWithoutAQuery()
     {
         // Arrange
         var graph = CreateGraph(accessPolicy: null);
 
         // Act
+        var json = await InvokeAsync(graph, "/Power");
+
+        // Assert
+        Assert.Equal(
+            "History is not available: /Power. The access policy does not allow it.",
+            json.GetProperty("series").GetProperty("/Power").GetProperty("error").GetString());
+        Assert.Empty(graph.Store.QueriedPaths);
+    }
+
+    [Fact]
+    public async Task WhenThePolicyAllowsAll_ThenAResolvedPathIsQueried()
+    {
+        // Arrange
+        var graph = CreateGraph(AllowAllMcpAccessPolicy.Instance);
+
+        // Act
+        var json = await InvokeAsync(graph, "/Child/Power");
+
+        // Assert
+        Assert.False(json.GetProperty("series").GetProperty("/Child/Power").TryGetProperty("error", out _));
+        Assert.Equal(["/Child/Power"], graph.Store.QueriedPaths);
+    }
+
+    [Fact]
+    public async Task WhenThePolicyAllowsAll_ThenAnUnresolvedPathIsNotFoundWithoutAQuery()
+    {
+        // Arrange
+        var graph = CreateGraph(AllowAllMcpAccessPolicy.Instance);
+
+        // Act
         var json = await InvokeAsync(graph, "/Missing/Value");
 
         // Assert
-        Assert.False(json.GetProperty("series").GetProperty("/Missing/Value").TryGetProperty("error", out _));
-        Assert.Equal(["/Missing/Value"], graph.Store.QueriedPaths);
+        Assert.Equal("Path not found: /Missing/Value", json.GetProperty("series").GetProperty("/Missing/Value").GetProperty("error").GetString());
+        Assert.Empty(graph.Store.QueriedPaths);
     }
 
+    // Without a policy, the configuration keeps its default.
     private static Graph CreateGraph(IMcpAccessPolicy? accessPolicy)
     {
         var context = CreateContext();
         var root = new HistoryToolTestSubject(context) { Name = "Room", Password = "s3cr3t" };
         root.Child = new HistoryToolTestSubject { Name = "Child" };
         var store = new TestHistoryStore(context);
-        var configuration = new McpServerConfiguration
-        {
-            PathProvider = new StateAttributePathProvider(),
-            AccessPolicy = accessPolicy
-        };
+        var configuration = accessPolicy is null
+            ? new McpServerConfiguration { PathProvider = new StateAttributePathProvider() }
+            : new McpServerConfiguration { PathProvider = new StateAttributePathProvider(), AccessPolicy = accessPolicy };
 
         var provider = new HistoryMcpToolProvider(() => root, configuration, NullLogger<HistoryMcpToolProvider>.Instance);
         return new Graph(provider.GetTools().Single(), store);
@@ -172,7 +202,7 @@ public class GetPropertyHistoryAccessTests
     {
         var policy = AuthorizationDefinition.Create(
             [.. BuiltInRoles.All, .. customRoles],
-            SystemRules.Rules,
+            SystemRules.For(PrincipalKind.NonHuman),
             AuthorizationActions.All,
             new StateAttributePathProvider(),
             new HomeBlazeMemberTagProvider()).Compile([roleName]);

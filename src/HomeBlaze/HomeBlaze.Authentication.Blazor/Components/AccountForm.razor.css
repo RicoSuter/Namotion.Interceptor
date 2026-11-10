@@ -1,0 +1,39 @@
+/* Plain inputs, so that what is typed stays in the browser and is never bound to the circuit, in the look of the outlined
+   inputs of the theme. */
+.account-form {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.account-form ::deep label {
+    font-size: 0.875rem;
+    color: var(--mud-palette-text-secondary);
+}
+
+.account-form ::deep input:not([type="checkbox"]):not([type="hidden"]) {
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    border: 1px solid var(--mud-palette-lines-inputs);
+    border-radius: var(--mud-default-borderradius);
+    background: transparent;
+    color: var(--mud-palette-text-primary);
+    font: inherit;
+}
+
+.account-form ::deep input:not([type="checkbox"]):not([type="hidden"]):focus {
+    outline: 2px solid var(--mud-palette-primary);
+    outline-offset: -1px;
+}
+
+.account-form ::deep .account-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    color: var(--mud-palette-text-primary);
+}
+
+.account-form-errors {
+    margin-bottom: 8px;
+}

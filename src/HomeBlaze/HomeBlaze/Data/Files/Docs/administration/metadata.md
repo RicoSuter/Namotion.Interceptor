@@ -225,7 +225,7 @@ Agents read metadata with the MCP tools. `browse` and `search` show the metadata
 | Method | On | Description |
 |--------|----|-------------|
 | `SetMetadata` | A storage, such as the root `/` | Merges `values`, a JSON object, into the metadata of the subject at `path`, or of its property `property`. A key with a value is set, replacing a nested value as a whole, a key with `null` is removed, and every other key stays |
-| `GetOrder` | A folder or a storage | Returns the names of the children in the order they are shown. Through the MCP tools, it leaves out the children they do not list, and so do the `order` in the metadata of the folder and its property `ChildOrder` as the tools and page expressions show them |
+| `GetOrder` | A folder or a storage | Returns the names of the children the caller may see in the order they are shown. Through the MCP tools, it leaves out the children they do not list, and so do the `order` in the metadata of the folder and its property `ChildOrder` as the tools and page expressions show them |
 | `SetOrder` | A folder or a storage | Puts the given `names` first, in that order, then the other children in the order they are shown. A name that is not a child, or that is given twice, is refused |
 | `SearchMetadata` | A storage | Returns the subjects and properties whose metadata matches every filter that is given, see below |
 
@@ -246,7 +246,7 @@ Agents read metadata with the MCP tools. `browse` and `search` show the metadata
 | `value` | A string that equals the whole value, or a string in an array, of `key` when it is given, else of any key, without regard to case. Numbers and booleans never match |
 | `path` | Subjects and properties at or below this path, relative to the storage |
 
-Each match has the `path` of its subject and, for a property, its `property`, as `SetMetadata` takes them, sorted by path and then property. The MCP tools return at most the first 100 matches and leave out what they do not list and metadata the roles do not allow to read, such as the metadata of an agent.
+Each match has the `path` of its subject and, for a property, its `property`, as `SetMetadata` takes them, sorted by path and then property. `SearchMetadata` returns at most the first 100 matches and leaves out metadata the caller may not read; through the MCP tools, also what they do not list, such as the metadata of an agent.
 
 To find text inside notes, agents use `search_markdown`, which searches the notes along with the pages and returns with each match in notes the path that `get_property` reads them with, see [Markdown Tools](../architecture/design/ai.md#markdown-tools).
 

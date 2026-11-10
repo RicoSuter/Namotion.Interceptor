@@ -1,7 +1,9 @@
 using System.Text.Json;
 using FluentStorage.Storage;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
+using HomeBlaze.Authorization;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Tests.Metadata;
 using Namotion.Interceptor;
@@ -15,7 +17,7 @@ public class StorageDeleteOperationTests : StorageTestBase
         => subject.TryGetRegisteredSubject()!.GetDeleteOperation(ExclusionTarget.None);
 
     [Fact]
-    public async Task WhenASubjectIsLoadedFromAFile_ThenItHasADeleteOperationThatRequiresConfirmation()
+    public async Task WhenASubjectIsLoadedFromAFile_ThenItHasADeleteOperationThatRequiresConfirmationAndAdministration()
     {
         // Arrange
         WriteFile("Motor.json", SerializeMotor("Motor"));
@@ -30,8 +32,29 @@ public class StorageDeleteOperationTests : StorageTestBase
         Assert.Equal("Delete", motorDelete.PropertyName);
         Assert.Equal(OperationPurpose.Delete, motorDelete.Purpose);
         Assert.True(motorDelete.RequiresConfirmation);
+        Assert.True(motorDelete.RequiresAdministration);
         Assert.DoesNotContain(motorDelete.Parameters, parameter => parameter.RequiresInput);
         Assert.NotNull(GetDeleteOperation(storage.Children["Page.md"]));
+    }
+
+    [Fact]
+    public async Task WhenTheDeleteOperationOfAFileAndAFolderIsTagged_ThenItIsTaggedAdministration()
+    {
+        // Arrange
+        WriteFile("House/Motor.json", SerializeMotor("Motor"));
+        var storage = await ConnectAsync();
+        var house = Assert.IsType<VirtualFolder>(storage.Children["House"]);
+        var tagProvider = new HomeBlazeMemberTagProvider();
+
+        // Act
+        var fileTags = tagProvider.GetTags(house.Children["Motor"].TryGetRegisteredSubject()!.TryGetProperty("Delete")!);
+        var folderTags = tagProvider.GetTags(house.TryGetRegisteredSubject()!.TryGetProperty("Delete")!);
+
+        // Assert
+        Assert.Contains(MemberTags.Administration, fileTags);
+        Assert.Contains(MemberTags.Operation, fileTags);
+        Assert.Contains(MemberTags.RequiresConfirmation, fileTags);
+        Assert.Contains(MemberTags.Administration, folderTags);
     }
 
     [Fact]

@@ -1,7 +1,10 @@
+@using System.Diagnostics.CodeAnalysis
 @using System.Globalization
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Metadata
 @using HomeBlaze.Services.Display
+@using HomeBlaze.Components.Operations
+@inject IEnumerable<MethodParameterEditorRegistration> EditorRegistrations
 
 <MudDialog>
     <DialogContent>
@@ -35,6 +38,12 @@
                                     <MudText Typo="Typo.caption" Color="Color.Error" Class="mt-2">@GetError(input.Parameter.Name)</MudText>
                                 }
                             </MudPaper>
+                            break;
+
+                        case InputKind.Editor:
+                            <div>
+                                <DynamicComponent Type="@input.EditorType" Parameters="@GetEditorParameters(input)" />
+                            </div>
                             break;
 
                         case InputKind.Json:
@@ -80,6 +89,9 @@
     private readonly Dictionary<string, string?> _inputValues = new();
     private readonly Dictionary<string, string?> _errors = new();
 
+    // The values the editors of the parameters that name one report, keyed by parameter name.
+    private readonly Dictionary<string, object?> _editorValues = new();
+
     private ParameterInput[] _inputs = [];
 
     private enum InputKind
@@ -87,7 +99,8 @@
         Unsupported,
         Simple,
         Members,
-        Json
+        Json,
+        Editor
     }
 
     private static readonly string[] BoolChoices = ["True", "False"];
@@ -96,11 +109,18 @@
     // "parameter.Member", so the two never collide. Choices, when set, are offered in a select.
     private sealed record InputField(string Key, string Label, Type Type, StateUnit? Unit, bool IsRequired, string[]? Choices);
 
-    private sealed record ParameterInput(MethodParameter Parameter, InputKind Kind, InputField[] Fields);
+    // EditorType is set for an input of the kind Editor only.
+    private sealed record ParameterInput(
+        MethodParameter Parameter,
+        InputKind Kind,
+        InputField[] Fields,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)]
+        [property: DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)]
+        Type? EditorType = null);
 
     protected override void OnInitialized()
     {
-        _inputs = Method?.Parameters.Where(parameter => parameter.RequiresInput).Select(CreateParameterInput).ToArray() ?? [];
+        _inputs = Method?.Parameters.Where(parameter => parameter.RequiresInput).Select(CreateInput).ToArray() ?? [];
         foreach (var input in _inputs.Where(input => input.Kind == InputKind.Simple && input.Parameter.Type == typeof(bool)))
         {
             _inputValues[input.Parameter.Name] = "false";
@@ -117,11 +137,18 @@
             return;
         }
 
-        foreach (var input in _inputs.Where(input => input.Kind == InputKind.Simple))
+        foreach (var input in _inputs.Where(input => input.Kind is InputKind.Simple or InputKind.Editor))
         {
             if (InitialValues.TryGetValue(input.Parameter.Name, out var value))
             {
-                _inputValues[input.Parameter.Name] = FormatInitialValue(value, input.Parameter.Unit);
+                if (input.Kind == InputKind.Editor)
+                {
+                    _editorValues[input.Parameter.Name] = value;
+                }
+                else
+                {
+                    _inputValues[input.Parameter.Name] = FormatInitialValue(value, input.Parameter.Unit);
+                }
             }
         }
     }
@@ -153,6 +180,32 @@
             _ => (false, 0m)
         };
         return isFraction;
+    }
+
+    // The last registration of a name wins, as the services list them in the order they were added.
+    private ParameterInput CreateInput(MethodParameter parameter) =>
+        parameter.Editor is { } editorName &&
+        EditorRegistrations.LastOrDefault(registration => string.Equals(registration.Name, editorName, StringComparison.Ordinal)) is { } editor
+            ? new ParameterInput(parameter, InputKind.Editor, [], editor.EditorType)
+            : CreateParameterInput(parameter);
+
+    private Dictionary<string, object?> GetEditorParameters(ParameterInput input)
+    {
+        var name = input.Parameter.Name;
+        return new Dictionary<string, object?>
+        {
+            [nameof(MethodParameterEditor.Parameter)] = input.Parameter,
+            [nameof(MethodParameterEditor.Label)] = GetLabel(name, !input.Parameter.IsNullable),
+            [nameof(MethodParameterEditor.Value)] = _editorValues.GetValueOrDefault(name),
+            [nameof(MethodParameterEditor.ValueChanged)] = EventCallback.Factory.Create<object?>(this, value => SetEditorValue(name, value)),
+            [nameof(MethodParameterEditor.ErrorText)] = GetError(name)
+        };
+    }
+
+    private void SetEditorValue(string name, object? value)
+    {
+        _editorValues[name] = value;
+        ValidateAll();
     }
 
     private static ParameterInput CreateParameterInput(MethodParameter parameter)
@@ -281,6 +334,13 @@
                         _errors[input.Parameter.Name] = jsonError;
                     }
                     break;
+
+                case InputKind.Editor:
+                    if (_editorValues.GetValueOrDefault(input.Parameter.Name) is null && !input.Parameter.IsNullable)
+                    {
+                        _errors[input.Parameter.Name] = "This field is required";
+                    }
+                    break;
             }
         }
     }
@@ -354,6 +414,10 @@
                     {
                         parameters[i] = jsonValue;
                     }
+                    break;
+
+                case InputKind.Editor:
+                    parameters[i] = _editorValues.GetValueOrDefault(input.Parameter.Name);
                     break;
             }
         }

@@ -42,32 +42,30 @@ public class AgentToolSetTests
     }
 
     [Theory]
-    [InlineData(new[] { "browse" }, true)]
-    [InlineData(new[] { "browse", "invoke_operation" }, false)]
-    [InlineData(new[] { "browse", "invoke_query" }, true)]
-    [InlineData(new[] { "set_property" }, false)]
-    [InlineData(new[] { "browse", "edit_markdown" }, false)]
-    [InlineData(new[] { "write_markdown" }, false)]
-    [InlineData(new[] { "create_markdown" }, false)]
-    public void WhenCheckingAllowedTools_ThenWriteToolsDisableReadOnly(string[] allowedTools, bool expected)
+    [InlineData("browse", false)]
+    [InlineData("invoke_query", false)]
+    [InlineData("invoke_operation", true)]
+    [InlineData("set_property", true)]
+    [InlineData("edit_markdown", true)]
+    [InlineData("write_markdown", true)]
+    public void WhenCheckingATool_ThenOnlyTheWriteToolsChangeState(string toolName, bool expected)
     {
         // Act
-        var isReadOnly = AgentToolSet.IsReadOnly(allowedTools);
+        var changesState = AgentToolSet.StateChangingTools.Contains(toolName);
 
         // Assert
-        Assert.Equal(expected, isReadOnly);
+        Assert.Equal(expected, changesState);
     }
 
     [Fact]
-    public void WhenUsingTheDefaultAllowedTools_ThenInvokeQueryIsAllowedAndTheToolsAreReadOnly()
+    public void WhenUsingTheDefaultAllowedTools_ThenInvokeQueryIsAllowedAndNoToolChangesState()
     {
         // Act
-        var isReadOnly = AgentToolSet.IsReadOnly(AgentToolSet.DefaultAllowedTools);
+        var stateChangingTools = AgentToolSet.DefaultAllowedTools.Intersect(AgentToolSet.StateChangingTools);
 
         // Assert
         Assert.Contains("invoke_query", AgentToolSet.DefaultAllowedTools);
-        Assert.DoesNotContain("invoke_operation", AgentToolSet.DefaultAllowedTools);
-        Assert.True(isReadOnly);
+        Assert.Empty(stateChangingTools);
     }
 
     [Fact]

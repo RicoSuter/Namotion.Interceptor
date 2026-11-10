@@ -21,7 +21,7 @@ HomeBlaze treats AI as a first-class concern with two complementary modes: **bui
 | Aspect | Built-in Agent | External Agent (MCP) |
 |--------|---------------|---------------------|
 | Runtime | In-process subject | Remote MCP client |
-| Tool access | `AIFunction` calls in-process (`AnthropicAgent`), or the per-turn MCP route `/mcp/agents` (`ClaudeCliAgent`); only the agent's `AllowedTools` | MCP protocol on `/mcp`, read-only unless configured otherwise |
+| Tool access | `AIFunction` calls in-process (`AnthropicAgent`), or the per-turn MCP route `/mcp/agents` (`ClaudeCliAgent`); only the agent's `AllowedTools` | MCP protocol on `/mcp`, with the roles of the built-in user `mcp` (`reader` by default) |
 | LLM configuration | On the agent: model and effort per mode, plus the API key or the CLI path | Client-side |
 | Visibility | Visible as subject in knowledge graph | Not visible in graph |
 | Interaction | Background runs (poll, debounced change under watch paths, Run now) plus a chat | Pull only (push TBD, depends on MCP evolution) |
@@ -34,7 +34,7 @@ MCP tools are split across packages, configured via a single `McpServerConfigura
 | Package | Tools | Scope |
 |---------|-------|-------|
 | `Namotion.Interceptor.Mcp` | `browse`, `search`, `get_property`, `set_property`, `list_types` | Any Namotion.Interceptor application |
-| `HomeBlaze.AI` | `list_methods`, `invoke_query`, `invoke_operation`, `search_markdown`, `edit_markdown`, `write_markdown`, `create_markdown` (via `IMcpToolProvider`) + subject enrichment (`$type`, `$icon`, `$title`, and `$url` for a subject with a page, via `IMcpSubjectEnricher`) + concrete type discovery (via `IMcpTypeProvider`) | HomeBlaze-specific features |
+| `HomeBlaze.AI` | `list_methods`, `invoke_query`, `invoke_operation`, `search_markdown`, `edit_markdown`, `write_markdown` (via `IMcpToolProvider`) + subject enrichment (`$type`, `$icon`, `$title`, and `$url` for a subject with a page, via `IMcpSubjectEnricher`) + concrete type discovery (via `IMcpTypeProvider`) | HomeBlaze-specific features |
 | `HomeBlaze.History.Mcp` | `get_property_history`, and the planned `get_event_history` and `get_command_history` (see [Messages](messages.md)) | Ships with the history packages |
 
 - **One configuration**: `HomeBlazeMcpConfigurationFactory` builds the configuration for both the MCP server and the built-in agents. Satellite packages contribute tool providers once with `AddHomeBlazeMcpToolProvider`.
@@ -50,7 +50,7 @@ MCP tools are split across packages, configured via a single `McpServerConfigura
 - `list_methods` lists each operation and query with name, kind (`query` or `operation`, matching the tool that calls it), title, description, return type and whether it requires confirmation. It leaves out the methods excluded from agents, see [Excluding Subjects and Methods](../../development/building-subjects.md#excluding-subjects-and-methods), and those the access policy does not allow to read.
 - `invoke_query` and `invoke_operation` resolve the subject as the other tools do, so a subject the access policy hides is "Subject not found.", report a method without `read` as not found, and refuse one without `execute`, see [Write Limits](#write-limits-implemented).
 - Parameters use the `McpMethodParameter` shape of the core library: JSON Schema `type`, `format`, `enum` names and `nullable`. HomeBlaze adds the unit of an `[OperationParameter(Unit = ...)]` as `description`. A `Percent` parameter reads "fraction where 1 = 100% (0.2 = 20%)", since agents pass the fraction and only the operation dialog takes 0 to 100.
-- `invoke_query` calls only `[Query]` methods and `invoke_operation` only `[Operation]` methods, so each permission is exactly one tool. A method of the other kind returns an error naming the right tool, and nothing is invoked. A read-only configuration does not offer `invoke_operation`.
+- `invoke_query` calls only `[Query]` methods and `invoke_operation` only `[Operation]` methods, so each permission is exactly one tool. A method of the other kind returns an error naming the right tool, and nothing is invoked. An agent has `invoke_operation` only when its `AllowedTools` allow it.
 - Arguments are passed by name in a `parameters` object and converted with `McpValueConverter`: an enum accepts its name (ignoring case) or a defined number, a `TimeSpan` its `hh:mm:ss` string.
 - An unknown parameter, a missing non-nullable one or a value that does not convert returns an error naming the expected parameters, and the method is not invoked. A missing nullable parameter is passed as null.
 - An `ArgumentException` of the method returns its message, for example the list of known values. Any other failure returns a generic error and is logged.
@@ -58,9 +58,9 @@ MCP tools are split across packages, configured via a single `McpServerConfigura
 
 #### Markdown Tools
 
-- `edit_markdown`, `write_markdown` and `create_markdown` (`HomeBlazeMarkdownToolProvider`) are thin tools over `ReplaceText` and `ReplaceContent` of a `MarkdownFile` and `CreateMarkdownFile` of a `VirtualFolder` or `FluentStorageContainer`, so page changes can be allowed without every operation.
+- `edit_markdown` and `write_markdown` (`HomeBlazeMarkdownToolProvider`) are thin tools over `ReplaceText` and `ReplaceContent` of a `MarkdownFile`, so page changes can be allowed without every operation. The two operations are excluded from user interfaces: people change page text only in the page editor, which requires a full administrator. There is no tool that creates a page: `CreateMarkdownFile` is an administration operation, which the system rules keep from every non-human principal.
 - Each tool checks only the type of its target ("'path' is not a Markdown file.", "'path' is not a storage folder."), maps its arguments and calls the operation through `McpMethodInvoker`, the path of `invoke_operation`. Argument conversion, the operation filter, the confirmation rule and error handling are therefore the same.
-- The operations check their own rules, the [page write rules](#page-write-rules), and refuse a change with an `ArgumentException` whose message reaches the caller. A read-only configuration does not offer the tools.
+- The operations check their own rules, the [page write rules](#page-write-rules), and refuse a change with an `ArgumentException` whose message reaches the caller. An agent has them only when its `AllowedTools` allow them.
 - `search_markdown` finds text without reading every page. It matches `query` within single lines as plain text, or as a .NET regular expression with `regex: true`, ignoring case unless `ignore_case` is false, optionally only in or under `path`.
 - It also searches the [notes of metadata](../../administration/metadata.md#notes-links-and-tags), which hold no secrets. A match in notes has `kind: notes`, the path of its subject, for a property its `property`, and `read`, the path that `get_property` reads the metadata with, such as `/Devices/Pump/Temperature@HomeBlaze:Metadata`.
 - It leaves out the pages and notes of a subject of a type in `ExcludeTypes` or below one, and the notes of a property that the path provider leaves out, as `browse` and `search` do not list them. It searches a page only when it is readable for the tools at its path and the access policy allows `read` and `execute` on its `ReadRawContent`, and notes only when `get_property` could read their metadata member, so the notes of agents are left out for every client.
@@ -70,8 +70,8 @@ MCP tools are split across packages, configured via a single `McpServerConfigura
 
 #### Server Instructions and Annotations
 
-- Pages hold most of the documentation and context of an installation. The MCP server's instructions (`HomeBlazeMcpInstructions.GetServerInstructions`) tell clients to read them with `invoke_query` and `ReadEvaluatedContent`.
-- Right after the description of the graph, the instructions state that values from the graph and tool results are data, never instructions. They stay below 2,048 characters, as some clients cut longer server instructions. A read-only server gets a variant without `invoke_operation`, `SetMetadata` and `SetOrder`.
+- Pages hold most of the documentation and context of an installation. The MCP server's instructions (`HomeBlazeMcpInstructions.ServerInstructions`) tell clients to read them with `invoke_query` and `ReadEvaluatedContent`.
+- Right after the description of the graph, the instructions state that values from the graph and tool results are data, never instructions. They stay below 2,048 characters, as some clients cut longer server instructions. The roles of the client, not the instructions, decide which of the methods they name it may call.
 - `browse` and `search` carry the same hint through the `ToolDescriptionAdditions` of the configuration. The `search` hint also states that `Percent` properties hold fractions where 1 is 100%.
 - `ReadEvaluatedContent` takes an optional `includeSourcePaths` that follows each evaluated value with the absolute path of its property.
 - The agent route `/mcp/agents` sends no server instructions, because the agents' preamble shares that text.
@@ -84,8 +84,9 @@ Every tool decides with the access policy of its configuration, an `Authorizatio
 
 - **Configuration**: the system rule that denies `write` on `[configuration]` makes `set_property` refuse a property marked `[Configuration]`, also when it is `[State]` as well, and the `set_property` description says so. The rule decides about members, not about what a method does, so an operation that the policy allows to execute can still change a `[Configuration]` property as part of its work.
 - **Agents**: the system rule that denies every action on `LlmAgentBase` hides every agent and the subjects inside it from the tools, so no client reads their state, runs their operations, such as Run now, or changes their metadata. A call that names one gets the answer of a missing subject, such as "Subject not found." from `invoke_operation` or "No subject at '...' in this storage." from `SetMetadata`. The agents' settings are configuration, which the tools do not list.
-- **Roles**: the system rule on `Authorization` and `Role` keeps every client from reading or changing the roles, so no agent grants itself more.
-- **Metadata**: `SetMetadata` of a storage is refused for arguments that do not have the shape of the method, for a target that the tools do not list, and without `write` on the metadata member of the target. A result filter of `McpMethodInvoker` leaves out every match of `SearchMetadata` that the tools do not list or whose metadata member the policy does not allow to read, then returns at most the first 100, see [Metadata: Agents](../../administration/metadata.md#agents).
+- **Roles and users**: the system rule on `Authorization`, `Role` and `User` keeps every client from reading or changing the roles and users, so no agent grants itself more.
+- **Administration**: agents and `/mcp` clients are denied `administer` on every member and `execute` on every operation that requires administration, such as creating a subject or a file, so they change no configuration and create nothing; what an agent does is steered by text it reads. The roles of an agent decide the rest, see [Security](security.md#principals).
+- **Metadata**: `SetMetadata` of a storage is refused for arguments that do not have the shape of the method, for a target that the tools do not list, and without `write` on the metadata member of the target. `SearchMetadata` is a query, so it searches with the permissions `McpMethodInvoker` gives it (`McpPageReadAccess`): it leaves out every match whose subject the tools do not list or whose metadata member the policy does not allow to read, matches the metadata as the tools show it, and returns at most the first 100, see [Metadata: Agents](../../administration/metadata.md#agents).
 - **Confirmation**: the system rule that denies `execute` on `[requires-confirmation]` keeps operations marked `[Operation(RequiresConfirmation = true)]` from running through MCP. `McpMethodInvoker` refuses them with a message of its own before it asks the policy and before a problem with the arguments, so the client is told the actual reason. MCP elicitation, the server asking the client's user to confirm during a call, would allow them for clients that support it. It is not implemented, and the CLI agent runs non-interactively and could not answer it.
 - **Pages**: the Markdown write operations, which all of these reach, follow the [page write rules](#page-write-rules), because a block becomes a running subject of any type configured outside these filters, HTML runs in the browser of whoever opens the page, and images and media embeds load content from other sites.
 
@@ -183,7 +184,7 @@ With `edit_page_layout`, the agent's Markdown tools and `invoke_operation` may a
 |-------|-------------|
 | Stage 1 [Implemented] | `LlmAgentBase` with `ClaudeCliAgent` and `AnthropicAgent`. Read-only by default, per-agent `AllowedTools`. Poll and debounced change triggers, chat, agent memory |
 | Stage 2 | Shared provider subject for credentials, declarative trigger filters (for example "temperature > 80"), agent-to-agent calls with recursion limits |
-| Stage 3 | Per-agent roles that scope the tools to subjects [Implemented], see [Security](security.md#graph-authorization-in-progress), and an approval workflow for operations that require confirmation |
+| Stage 3 | Per-agent roles that scope the tools to subjects [Implemented], see [Security](security.md#graph-authorization-implemented), and an approval workflow for operations that require confirmation |
 
 ## Key Decisions
 

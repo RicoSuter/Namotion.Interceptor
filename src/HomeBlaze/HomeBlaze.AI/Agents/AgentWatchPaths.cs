@@ -41,7 +41,7 @@ internal static class AgentWatchPaths
     }
 
     /// <summary>
-    /// Fetches the state at each of the normalized watch paths with the read-only tools of <paramref name="toolSource"/>
+    /// Fetches the state at each of the normalized watch paths with browse and get_property of <paramref name="toolSource"/>
     /// under <paramref name="accessPolicy"/>; a path whose state cannot be fetched gets an error state.
     /// </summary>
     /// <param name="normalizedWatchPaths">The watch paths, normalized with <see cref="Normalize"/>.</param>
@@ -59,7 +59,7 @@ internal static class AgentWatchPaths
             return [];
         }
 
-        var tools = toolSource.CreateTools(isReadOnly: true, accessPolicy);
+        var tools = toolSource.CreateTools(accessPolicy);
         var browse = tools.FirstOrDefault(tool => tool.Name == "browse");
         var getProperty = tools.FirstOrDefault(tool => tool.Name == "get_property");
         var states = new List<AgentWatchedState>(normalizedWatchPaths.Length);

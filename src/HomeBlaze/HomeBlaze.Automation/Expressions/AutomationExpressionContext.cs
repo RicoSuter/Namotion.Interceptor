@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Display;
 using Namotion.Interceptor.Expressions;
@@ -47,8 +48,9 @@ internal readonly struct AutomationExpressionContext(AutomationEvaluation evalua
         return value;
     }
 
+    // An evaluation has no viewer, so a map reads every property of its cases, as the paths of the expression do.
     public ExpressionValue ApplyPipe(string name, ImmutableArray<string> arguments, ExpressionValue input) =>
-        ExpressionDisplay.ApplyPipe(name, arguments, input, evaluation.Resolver, evaluation.Rule, timeZone: null);
+        ExpressionDisplay.ApplyPipe(name, arguments, input, evaluation.Resolver, evaluation.Rule, timeZone: null, UnrestrictedPermissions.Instance);
 
     public string ToText(ExpressionValue result) => ExpressionDisplay.ToText(result, timeZone: null);
 

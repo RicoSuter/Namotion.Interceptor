@@ -46,22 +46,45 @@ public class ExplainTests
         Assert.Same(reader, decision.AllowedBy);
         Assert.Same(agent, decision.DeniedBy);
         Assert.Same(secretRule, decision.DeniedByRule);
+        Assert.False(decision.IsDeniedBySystem);
     }
 
     [Fact]
-    public void WhenDeniedByTheSystem_ThenTheSystemRoleIsNamed()
+    public void WhenDeniedByTheSystem_ThenTheDecisionSaysSoAndNamesNoRole()
     {
         // Arrange
         var home = Create();
-        var policy = Compile([Role("Reader", allow: [Rule(Read)])], ["Reader"], systemDeny: [Rule(Read, tags: ["secret"])]);
+        var secretRule = Rule(Read, tags: ["secret"]);
+        var policy = Compile([Role("Reader", allow: [Rule(Read)])], ["Reader"], systemDeny: [secretRule]);
 
         // Act
         var decision = policy.Explain(Member(home.Wifi!, nameof(Wifi.Password)), PermissionAction.Read);
 
         // Assert
         Assert.False(decision.IsAllowed);
-        Assert.Equal(AuthorizationPolicy.SystemRoleName, decision.DeniedBy!.Name);
-        Assert.Equal(["secret"], decision.DeniedByRule!.Tags.AsEnumerable());
+        Assert.True(decision.IsDeniedBySystem);
+        Assert.Null(decision.DeniedBy);
+        Assert.Same(secretRule, decision.DeniedByRule);
+    }
+
+    [Fact]
+    public void WhenARoleNamedSystemDenies_ThenItIsNamedAndNotReportedAsTheSystem()
+    {
+        // Arrange
+        var home = Create();
+        var reader = Role("Reader", allow: [Rule(Read)]);
+        var secretRule = Rule(Read, tags: ["secret"]);
+        var system = Role("System", deny: [secretRule], includes: ["Reader"]);
+        var policy = Compile([reader, system], ["System"], systemDeny: [Rule(Read, tags: ["secret"])]);
+
+        // Act
+        var decision = policy.Explain(Member(home.Wifi!, nameof(Wifi.Password)), PermissionAction.Read);
+
+        // Assert
+        Assert.False(decision.IsAllowed);
+        Assert.False(decision.IsDeniedBySystem);
+        Assert.Same(system, decision.DeniedBy);
+        Assert.Same(secretRule, decision.DeniedByRule);
     }
 
     [Fact]

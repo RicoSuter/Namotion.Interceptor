@@ -7,9 +7,9 @@ using Namotion.Interceptor.Registry.Paths;
 namespace Namotion.Interceptor.Mcp.Tools;
 
 /// <summary>
-/// The path provider of a configuration with an access policy: it includes what the inner provider includes and the
-/// policy allows to read, and looks up a segment as the inner provider does, but treats a property the policy does not
-/// allow to read as absent. Separators and segments are the inner provider's.
+/// The path provider of a configuration with a <see cref="McpServerConfiguration.ReadPolicy"/>: it includes what the
+/// inner provider includes and the policy allows to read, and looks up a segment as the inner provider does, but treats
+/// a property the policy does not allow to read as absent. Separators and segments are the inner provider's.
 /// </summary>
 internal sealed class McpAccessPathProvider : PathProviderBase
 {

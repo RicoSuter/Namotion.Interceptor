@@ -5,7 +5,7 @@
 @using HomeBlaze.Components.Operations
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(DoorLock))]
 @implements ISubjectComponent
-@implements IDisposable
+@inherits PermissionsComponentBase
 @inject SubjectPathResolver PathResolver
 @inject ITimeZoneDisplay TimeZone
 @inject IDialogService DialogService
@@ -19,25 +19,26 @@
 {
     // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var path = widget.Path;
-    var valueMap = ValueReader.ResolveMap(PathResolver, widget, widget.Map, out var mapError);
+    var valueMap = ValueReader.ResolveMap(PathResolver, widget, widget.Map, Permissions, out var mapError);
     if (mapError is not null)
     {
         <WidgetArgumentError Message="@mapError" />
     }
     else
     {
-        var (target, appearance, operation) = Resolve(widget, path, valueMap);
+        var (target, appearance, operation, member) = Resolve(widget, path, valueMap);
+        var isDenied = member is not null && !Permissions.CanInvoke(member);
         var label = !string.IsNullOrEmpty(widget.Label)
             ? widget.Label
             : (target is null ? null : SubjectNames.TryGetTitle(target)) ?? path ?? string.Empty;
         var subtitle = widget.Subtitle ?? (target is null ? null : appearance.Subtitle);
-        var disabled = IsEditing || _isRunning || operation is null;
+        var disabled = IsEditing || _isRunning || operation is null || isDenied;
 
         @* The label is the accessible name, which hides the subtitle, so the description carries the state, also under a custom subtitle. *@
         <TileView TestId="door-lock-tile"
                   AccessibleName="@label"
                   AccessibleDescription="@(target is null ? null : disabled ? appearance.Subtitle : appearance.Description)"
-                  Tooltip="@operation?.Title"
+                  Tooltip="@(isDenied ? AccessDeniedTexts.Tooltip : operation?.Title)"
                   Label="@label"
                   Subtitle="@subtitle"
                   Outlined="@widget.Outlined"
@@ -64,25 +65,32 @@
 
     protected override void OnInitialized()
     {
+        base.OnInitialized();
         _clickCallback = EventCallback.Factory.Create<MouseEventArgs>(this, RunAsync);
     }
 
     // The lock at the path of the widget (null when there is none), what the tile shows for it with the map, and the
-    // operation a click invokes (null when there is none or it is not enabled), which the map does not change.
-    private (IInterceptorSubject? Target, DoorLockAppearance Appearance, MethodMetadata? Operation) Resolve(DoorLock widget, string? path, ValueMap? valueMap)
+    // operation a click invokes and its member (both null when there is none or it is not enabled), which the map does not change.
+    private (IInterceptorSubject? Target, DoorLockAppearance Appearance, MethodMetadata? Operation, RegisteredSubjectProperty? Member) Resolve(DoorLock widget, string? path, ValueMap? valueMap)
     {
         var target = string.IsNullOrEmpty(path)
             ? null
-            : ValueReader.ResolveSubject(PathResolver, widget, path) as IDoorLockState as IInterceptorSubject;
-        var appearance = DoorLockDisplay.Get((target as IDoorLockState)?.LockState, (target as IDoorSensor)?.DoorState, valueMap, target, PathResolver, TimeZone);
+            : ValueReader.ResolveSubject(PathResolver, widget, path, Permissions) as IDoorLockState as IInterceptorSubject;
+        // A state the viewer may not read is unknown, as a missing one is.
+        var lockState = CanRead(target, nameof(IDoorLockState.LockState)) ? (target as IDoorLockState)?.LockState : null;
+        var doorState = CanRead(target, nameof(IDoorSensor.DoorState)) ? (target as IDoorSensor)?.DoorState : null;
+        var appearance = DoorLockDisplay.Get(lockState, doorState, Permissions, valueMap, target, PathResolver, TimeZone);
         var property = target is not null && appearance.Operation is { } name ? target.TryGetRegisteredProperty(name) : null;
         var operation = property?.TryGetMethodMetadata() is { } method && property.IsMethodEnabled() ? method : null;
-        return (target, appearance, operation);
+        return (target, appearance, operation, operation is null ? null : property);
     }
+
+    private bool CanRead(IInterceptorSubject? target, string propertyName) =>
+        target?.TryGetRegisteredProperty(propertyName) is { } property && Permissions.CanRead(property);
 
     private async Task RunAsync()
     {
-        if (_isRunning || Subject is not DoorLock widget || Resolve(widget, widget.Path, null).Operation is not { } operation)
+        if (_isRunning || Subject is not DoorLock widget || Resolve(widget, widget.Path, null) is not { Operation: not null, Member: { } member })
         {
             return;
         }
@@ -90,7 +98,7 @@
         _isRunning = true;
         try
         {
-            await OperationInvoker.InvokeAsync(DialogService, ServiceProvider, operation, _lifetime.Token);
+            await OperationInvoker.InvokeAsync(DialogService, ServiceProvider, Permissions, member, _lifetime.Token);
         }
         finally
         {
@@ -98,9 +106,14 @@
         }
     }
 
-    public void Dispose()
+    protected override void Dispose(bool disposing)
     {
-        _lifetime.Cancel();
-        _lifetime.Dispose();
+        if (disposing)
+        {
+            _lifetime.Cancel();
+            _lifetime.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 }

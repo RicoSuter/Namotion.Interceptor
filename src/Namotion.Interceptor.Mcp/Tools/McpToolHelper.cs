@@ -301,22 +301,17 @@ internal static class McpToolHelper
     /// Whether set_property may write the property: <see cref="GetWriteError"/> returns null for it.
     /// </summary>
     internal static bool IsWritable(RegisteredSubjectProperty property, McpServerConfiguration configuration) =>
-        !configuration.IsReadOnly && property.HasPublicSetter && configuration.IsAllowed(property, McpAccessActions.Write);
+        property.HasPublicSetter && configuration.IsAllowed(property, McpAccessActions.Write);
 
     /// <summary>
-    /// The error set_property returns for the property, or null when it may be written: the server is read-only, the
-    /// property has no public setter, or the <see cref="McpServerConfiguration.AccessPolicy"/> does not allow writing it.
+    /// The error set_property returns for the property, or null when it may be written: the property has no public
+    /// setter, or the <see cref="McpServerConfiguration.AccessPolicy"/> does not allow writing it.
     /// </summary>
     /// <param name="property">The property.</param>
     /// <param name="path">The path of the property as the client gave it, for the message.</param>
     /// <param name="configuration">The configuration.</param>
     internal static string? GetWriteError(RegisteredSubjectProperty property, string path, McpServerConfiguration configuration)
     {
-        if (configuration.IsReadOnly)
-        {
-            return "Server is in read-only mode.";
-        }
-
         if (!property.HasPublicSetter)
         {
             return $"Property is not writable: {path}";

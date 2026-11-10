@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Components;
 using HomeBlaze.Services;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services.Display;
 using HomeBlaze.Storage.Files;
 using Microsoft.Extensions.DependencyInjection;
@@ -39,7 +40,7 @@ public class WidgetTextTests
     }
 
     private static string? Render(SubjectPathResolver resolver, MarkdownFile page, string? text, string? path, out string? error) =>
-        new WidgetText("Label", ExpressionUse.WidgetText).Render(text, resolver, page, path, null, out error);
+        new WidgetText("Label", ExpressionUse.WidgetText).Render(text, resolver, page, path, null, UnrestrictedPermissions.Instance, out error);
 
     [Theory]
     [InlineData("{{ value }}", "wallbox/ChargingPower", "7.4 kW")]
@@ -94,7 +95,7 @@ public class WidgetTextTests
         var title = new WidgetText("Title", ExpressionUse.WidgetTextWithoutPath);
 
         // Act
-        var rendered = title.Render("{{ subject/ChargingPower }}", resolver, page, default(ValueBinding), null, out var error);
+        var rendered = title.Render("{{ subject/ChargingPower }}", resolver, page, default(ValueBinding), null, UnrestrictedPermissions.Instance, out var error);
 
         // Assert
         Assert.Null(rendered);
@@ -139,11 +140,11 @@ public class WidgetTextTests
         // Arrange
         var (resolver, page) = await AddPageAsync();
         var label = new WidgetText("Label", ExpressionUse.WidgetText);
-        label.Render("Wallbox", resolver, page, "wallbox/IsCharging", null, out _);
+        label.Render("Wallbox", resolver, page, "wallbox/IsCharging", null, UnrestrictedPermissions.Instance, out _);
 
         // Act
         var before = GC.GetAllocatedBytesForCurrentThread();
-        label.Render("Wallbox", resolver, page, "wallbox/IsCharging", null, out _);
+        label.Render("Wallbox", resolver, page, "wallbox/IsCharging", null, UnrestrictedPermissions.Instance, out _);
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         // Assert
@@ -161,7 +162,7 @@ public class WidgetTextTests
         var scope = ReadPropertyRecorder.Start();
 
         // Act
-        label.Render("{{ subject/ChargingPower }} of {{ meter/Power }}", resolver, page, "wallbox/IsCharging", null, out _);
+        label.Render("{{ subject/ChargingPower }} of {{ meter/Power }}", resolver, page, "wallbox/IsCharging", null, UnrestrictedPermissions.Instance, out _);
         var recorded = scope.GetPropertiesAndDispose();
 
         // Assert: these records are what make the widget render again when one of the values changes
@@ -175,10 +176,10 @@ public class WidgetTextTests
         // Arrange
         var (resolver, page) = await AddPageAsync();
         var label = new WidgetText("Label", ExpressionUse.WidgetText);
-        label.Render("{{ value | raw }}", resolver, page, "wallbox/ChargingPower", null, out _);
+        label.Render("{{ value | raw }}", resolver, page, "wallbox/ChargingPower", null, UnrestrictedPermissions.Instance, out _);
 
         // Act
-        var rendered = label.Render("{{ value }}", resolver, page, "wallbox/ChargingPower", null, out var error);
+        var rendered = label.Render("{{ value }}", resolver, page, "wallbox/ChargingPower", null, UnrestrictedPermissions.Instance, out var error);
 
         // Assert
         Assert.Null(error);
@@ -193,9 +194,9 @@ public class WidgetTextTests
         var wallbox = ((IPathScope)page).TryGetNamedSubject("wallbox")!;
 
         // Act
-        var property = ValueReader.Read(resolver, page, "wallbox/ChargingPower", null, null);
-        var subject = ValueReader.Read(resolver, page, "wallbox", "charging", null);
-        var nowhere = ValueReader.Read(resolver, page, "nothing/Here", null, null);
+        var property = ValueReader.Read(resolver, page, "wallbox/ChargingPower", null, null, UnrestrictedPermissions.Instance);
+        var subject = ValueReader.Read(resolver, page, "wallbox", "charging", null, UnrestrictedPermissions.Instance);
+        var nowhere = ValueReader.Read(resolver, page, "nothing/Here", null, null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Same(wallbox, property.Binding.Subject);

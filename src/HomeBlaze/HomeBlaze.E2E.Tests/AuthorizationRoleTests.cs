@@ -1,11 +1,10 @@
-using System.Text.Json;
 using System.Text.Json.Nodes;
 using HomeBlaze.Abstractions;
 using HomeBlaze.AI.Agents.ClaudeCli;
+using HomeBlaze.Components.Abstractions.Access;
 using HomeBlaze.Authorization;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Services;
-using HomeBlaze.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 using Namotion.Interceptor;
@@ -17,9 +16,8 @@ using Xunit.Abstractions;
 namespace HomeBlaze.E2E.Tests;
 
 /// <summary>
-/// E2E tests for adding and renaming a custom role with the operations of the Authorization subject and its roles,
-/// deleting it with the Delete button of its pane, editing its rules in its dialog, picking a path into a rule, and giving
-/// the role to an agent.
+/// E2E tests for adding, renaming and deleting custom roles with the operations of the Authorization subject and its roles,
+/// editing a role in its dialog, picking a path into a rule, previewing a role and giving it to an agent.
 /// </summary>
 [Collection(nameof(PlaywrightCollection))]
 [Trait("Category", "Integration")]
@@ -27,8 +25,8 @@ public class AuthorizationRoleTests
 {
     private const int Timeout = 30000;
     private const string AgentPath = "Agents/TestAgent";
-    private const string RoleName = "StateReader";
-    private const string RenamedRoleName = "StateWatcher";
+    private const string RoleName = "state-reader";
+    private const string RenamedRoleName = "state-watcher";
     private const string TypeName = "IConfigurable";
     private const string FolderPath = "/Agents";
     private const string FolderPattern = "/Agents/**";
@@ -43,42 +41,27 @@ public class AuthorizationRoleTests
     }
 
     [Fact]
-    public async Task WhenARoleIsAddedEditedGivenToAnAgentRenamedAndDeletedInTheUi_ThenTheFileFollowsAndTheAgentReportsInvalidRoles()
+    public async Task WhenARoleIsAddedEditedGivenToAnAgentRenamedAndDeletedInTheUi_ThenTheRoleStoreHoldsItAndTheAgentFollowsTheRename()
     {
         // Arrange
         var registry = _fixture.ServerServices.GetRequiredService<IInterceptorSubjectContext>().GetService<ISubjectRegistry>();
-        var root = Assert.IsType<FluentStorageContainer>(_fixture.ServerServices.GetRequiredService<RootManager>().Root);
         var resolver = _fixture.ServerServices.GetRequiredService<SubjectPathResolver>();
+        var roleStore = _fixture.ServerServices.GetRequiredService<IRoleStore>();
         var agent = Assert.IsType<ClaudeCliAgent>(resolver.ResolveSubject("/" + AgentPath, PathStyle.Canonical));
         var authorizationFilePath = _fixture.GetPagePath("Authorization.json");
         var agentFilePath = _fixture.GetPagePath(Path.Combine("Agents", "TestAgent.json"));
         var originalAgentFile = await _fixture.ReadFileAsync(agentFilePath);
         var originalRoles = agent.Roles;
 
-        // Only one Authorization subject may exist, and the output copy outlives a run that was stopped before its cleanup.
-        Assert.Empty(registry.KnownSubjects.Keys.OfType<Authorization.Authorization>());
-        Assert.False(File.Exists(authorizationFilePath), "An Authorization.json of an earlier run is left in the test data.");
+        // The startup adds the single Authorization subject to the root storage, and the roles come from the database.
+        var authorization = Assert.Single(registry.KnownSubjects.Keys.OfType<Authorization.Authorization>());
+        Assert.True(File.Exists(authorizationFilePath));
+        Assert.Null(roleStore.GetConcurrencyStamp(RoleName));
+        Assert.Null(roleStore.GetConcurrencyStamp(RenamedRoleName));
 
         var isCompleted = false;
         try
         {
-            // Act: create the Authorization subject in the create dialog.
-            var page = await SubjectBrowserPage.OpenAsync(_fixture, string.Empty);
-            var paneCreateButton = page.Locator("#scrollContainer button:has-text('Create')").First;
-            await Assertions.Expect(paneCreateButton).ToBeVisibleAsync(new() { Timeout = Timeout });
-            await paneCreateButton.ClickAsync();
-            await SubjectSetupDialogTests.PickTypeAsync(page, "authorization");
-            await Assertions.Expect(page.GetByLabel("File name")).ToHaveValueAsync("Authorization");
-            await Assertions.Expect(SubjectSetupDialogTests.CreateButton(page)).ToBeEnabledAsync(new() { Timeout = Timeout });
-            await SubjectSetupDialogTests.CreateButton(page).ClickAsync();
-
-            // Assert
-            await Assertions.Expect(SubjectSetupDialogTests.Dialog(page)).Not.ToBeVisibleAsync(new() { Timeout = Timeout });
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => registry.KnownSubjects.Keys.OfType<Authorization.Authorization>().Any() && File.Exists(authorizationFilePath),
-                TimeSpan.FromSeconds(30),
-                message: "The created Authorization subject is not in the graph or not stored.");
-
             // Act: add the role with the operation of the Authorization subject, which has no edit dialog.
             var authorizationPane = await OpenPaneAsync("Authorization");
             await Assertions.Expect(Method(authorizationPane, "Add Role")).ToBeEnabledAsync(new() { Timeout = Timeout });
@@ -86,11 +69,10 @@ public class AuthorizationRoleTests
             await RunOperationAsync(authorizationPane, "Add Role", RoleName, "Adds a custom role without rules");
 
             // Assert
-            await WaitForAuthorizationFileAsync(
-                registry,
-                authorizationFilePath,
-                roles => roles[RoleName] is not null,
-                "The added role was not written to Authorization.json.");
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => authorization.Roles.ContainsKey(RoleName) && roleStore.GetConcurrencyStamp(RoleName) is not null,
+                TimeSpan.FromSeconds(30),
+                message: "The added role was not stored.");
 
             // Act: add an allow rule in the dialog of the role, which is titled after it and keeps its height.
             var roleDialog = await OpenEditDialogAsync($"Authorization/{RoleName}");
@@ -100,13 +82,8 @@ public class AuthorizationRoleTests
             await allowTab.ClickAsync();
             await Assertions.Expect(roleDialog.GetByTestId("role-edit-allow-empty")).ToBeVisibleAsync(new() { Timeout = Timeout });
             var editor = roleDialog.GetByTestId("role-edit");
-
-            // The dialog scales while it opens, and an editor that is measured meanwhile is smaller than the final one.
-            await roleDialog.Page.WaitForFunctionAsync(
-                "() => [...document.querySelectorAll('.mud-dialog')].every(dialog => dialog.getAnimations().every(animation => animation.playState === 'finished'))",
-                null,
-                new() { Timeout = Timeout });
-            var editorHeight = (await editor.BoundingBoxAsync())!.Height;
+            // The layout height, which the dialog's opening animation, a scale transform, leaves as it is.
+            var editorHeight = await GetLayoutHeightAsync(editor);
             await roleDialog.GetByTestId("role-edit-add-allow").ClickAsync();
 
             // A new rule has no action yet, which the tab marks as invalid until one is checked.
@@ -124,7 +101,7 @@ public class AuthorizationRoleTests
             await Assertions.Expect(roleDialog.GetByTestId("role-edit-tab-allow-error")).ToHaveCountAsync(0, new() { Timeout = Timeout });
 
             // A rule card leaves the height of the editor as it was; what does not fit scrolls inside the tab.
-            Assert.Equal(editorHeight, (await editor.BoundingBoxAsync())!.Height);
+            Assert.Equal(editorHeight, await GetLayoutHeightAsync(editor));
             Assert.True(await editor.EvaluateAsync<bool>("element => element.scrollHeight <= element.clientHeight"));
 
             // A path picked in the dialog goes into the field, to be edited there and added with its button.
@@ -143,18 +120,23 @@ public class AuthorizationRoleTests
             // Entered into a field with suggestions and saved at once, without Enter or leaving the field first. Filled
             // rather than typed key by key, which can lose keys when the focus moves or the field renders while typing.
             // The value check catches only a render that replaced the text in the browser before the save, not text the
-            // server never received; the failure below shows the file and the roles in memory for that.
+            // server never received; the failure below shows the roles in memory for that.
             var typesInput = rule.GetByTestId("rule-types").Locator("input");
             await typesInput.FillAsync(TypeName);
             await Assertions.Expect(typesInput).ToHaveValueAsync(TypeName);
             await SaveAsync(roleDialog);
 
             // Assert
-            await WaitForAuthorizationFileAsync(
-                registry,
-                authorizationFilePath,
-                roles => IsStateReadRule(roles[RoleName]?["allow"]?.AsArray().SingleOrDefault()),
-                "The allow rule was not written to Authorization.json.");
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => authorization.Roles.TryGetValue(RoleName, out var role) && IsStateReadRule(role.Allow.SingleOrDefault()),
+                () => $"The allow rule was not stored. The roles in memory: {DescribeRoles(authorization)}",
+                TimeSpan.FromSeconds(30));
+
+            // A full administrator is never refused, also not when the dialog persists the role it saved.
+            await Assertions.Expect(roleDialog.Page.GetByText(AccessDeniedTexts.Administer)).ToHaveCountAsync(0);
+
+            // Roles live in the database only, never in the file of the Authorization subject.
+            Assert.Null(JsonNode.Parse(await _fixture.ReadFileAsync(authorizationFilePath))!["roles"]);
 
             // Act: preview the role in a short window, where the whole tab scrolls and the header row of the matrix sticks
             // to its top.
@@ -197,62 +179,69 @@ public class AuthorizationRoleTests
                 TimeSpan.FromSeconds(30),
                 message: "The role was not given to the agent.");
 
-            var agentPage = await _fixture.CreatePageAsync();
-            await agentPage.GotoAsync($"{_fixture.ServerAddress}pages/{AgentPath}");
-            var settingsTab = agentPage.GetByRole(AriaRole.Tab, new() { Name = "Settings" });
-            await Assertions.Expect(settingsTab).ToBeVisibleAsync(new() { Timeout = Timeout });
-            await agentPage.WaitUntilInteractiveAsync(Timeout);
-            await settingsTab.ClickAsync();
-            var settingsRoles = agentPage.GetByTestId("agent-settings-roles");
-            await Assertions.Expect(settingsRoles).ToContainTextAsync(RoleName, new() { Timeout = Timeout });
-            await Assertions.Expect(agentPage.GetByTestId("agent-settings-roles-error")).ToHaveCountAsync(0);
+            await AssertAgentSettingsShowRoleAsync(RoleName);
 
-            var authorizationFile = JsonNode.Parse(await _fixture.ReadFileAsync(authorizationFilePath))!;
-            Assert.True(IsStateReadRule(authorizationFile["roles"]?[RoleName]?["allow"]?.AsArray().SingleOrDefault()));
-
-            // Act: rename the role the agent uses with the operation of the role, whose dialog warns about the names in use.
+            // Act: rename the role the agent uses with the operation of the role, whose dialog says that its users follow.
             var rolePane = await OpenPaneAsync($"Authorization/{RoleName}");
-            await RunOperationAsync(rolePane, "Rename", RenamedRoleName, "Agents and roles that already name the new name get its rules.");
+            await RunOperationAsync(rolePane, "Rename", RenamedRoleName, "The roles, users and agents that name it are given the new name as well.");
 
             // Assert
-            await WaitForAuthorizationFileAsync(
-                registry,
-                authorizationFilePath,
-                roles => roles[RoleName] is null && IsStateReadRule(roles[RenamedRoleName]?["allow"]?.AsArray().SingleOrDefault()),
-                "The renamed role was not written to Authorization.json.");
             await AsyncTestHelpers.WaitUntilAsync(
-                () => agent.StatusMessage?.StartsWith("Invalid roles: ", StringComparison.Ordinal) == true,
+                () => !authorization.Roles.ContainsKey(RoleName) &&
+                    authorization.Roles.TryGetValue(RenamedRoleName, out var role) && IsStateReadRule(role.Allow.SingleOrDefault()),
                 TimeSpan.FromSeconds(30),
-                message: "The agent does not report invalid roles.");
+                message: "The role was not renamed in the role store.");
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => agent.Roles.Contains(RenamedRoleName) && !agent.Roles.Contains(RoleName),
+                TimeSpan.FromSeconds(30),
+                message: "The agent was not given the new name of the role.");
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    try
+                    {
+                        return File.ReadAllText(agentFilePath).Contains(RenamedRoleName, StringComparison.Ordinal);
+                    }
+                    catch (IOException)
+                    {
+                        // The server writes the file in place, so a read can meet it held.
+                        return false;
+                    }
+                },
+                TimeSpan.FromSeconds(30),
+                message: "The new name of the role was not written to the file of the agent.");
+            // The roles were invalid for the agent between the rename of the role and of its roles; the configuration written
+            // with the new name is applied after the file is written, which clears the status.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => agent.StatusMessage?.StartsWith("Invalid roles: ", StringComparison.Ordinal) != true,
+                TimeSpan.FromSeconds(30),
+                message: "The agent still reports invalid roles after the rename.");
 
-            agentPage = await _fixture.CreatePageAsync();
-            await agentPage.GotoAsync($"{_fixture.ServerAddress}pages/{AgentPath}");
-            settingsTab = agentPage.GetByRole(AriaRole.Tab, new() { Name = "Settings" });
-            await Assertions.Expect(settingsTab).ToBeVisibleAsync(new() { Timeout = Timeout });
-            await agentPage.WaitUntilInteractiveAsync(Timeout);
-            await settingsTab.ClickAsync();
-            await Assertions.Expect(agentPage.GetByTestId("agent-settings-roles-error"))
-                .ToContainTextAsync($"Role '{RoleName}' is not defined.", new() { Timeout = Timeout });
+            await AssertAgentSettingsShowRoleAsync(RenamedRoleName);
 
-            // Act: delete the renamed role with the Delete button of its pane, which runs the role's delete operation.
+            // Act: delete the renamed role with the Delete button of its pane while the agent holds it.
             rolePane = await OpenPaneAsync($"Authorization/{RenamedRoleName}");
-            var deleteButton = rolePane.GetByTestId("delete-subject-button");
-            await Assertions.Expect(deleteButton).ToBeEnabledAsync(new() { Timeout = Timeout });
-            await Assertions.Expect(Method(rolePane, "Delete")).ToHaveCountAsync(0);
-            await deleteButton.ClickAsync();
-            var confirmation = rolePane.Page.GetByRole(AriaRole.Dialog);
-            await Assertions.Expect(confirmation).ToContainTextAsync($"Delete '{RenamedRoleName}'?", new() { Timeout = Timeout });
-            await Assertions.Expect(confirmation).ToContainTextAsync("Agents and roles that name it report it as unknown afterwards.");
-            await confirmation.GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true }).ClickAsync();
+            await DeleteWithButtonAsync(rolePane, RenamedRoleName);
+
+            // Assert: the role store refuses to delete a role in use.
+            var refusal = rolePane.Page.GetByRole(AriaRole.Dialog);
+            await Assertions.Expect(refusal).ToContainTextAsync("Delete Failed", new() { Timeout = Timeout });
+            await Assertions.Expect(refusal).ToContainTextAsync($"The role '{RenamedRoleName}' is used by users or agents; remove it from them first.");
+            await refusal.GetByRole(AriaRole.Button, new() { Name = "OK", Exact = true }).ClickAsync();
+            Assert.NotNull(roleStore.GetConcurrencyStamp(RenamedRoleName));
+
+            // Act: take the role from the agent and delete it again.
+            agent.Roles = originalRoles;
+            rolePane = await OpenPaneAsync($"Authorization/{RenamedRoleName}");
+            await DeleteWithButtonAsync(rolePane, RenamedRoleName);
 
             // Assert
             var panes = rolePane.Page.Locator("#scrollContainer [data-testid='subject-pane']");
             await Assertions.Expect(panes).ToHaveCountAsync(2, new() { Timeout = Timeout });
-            await WaitForAuthorizationFileAsync(
-                registry,
-                authorizationFilePath,
-                roles => roles.AsObject().Count == 0,
-                "The deleted role was not removed from Authorization.json.");
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => !authorization.Roles.ContainsKey(RenamedRoleName) && roleStore.GetConcurrencyStamp(RenamedRoleName) is null,
+                TimeSpan.FromSeconds(30),
+                message: "The deleted role was not removed from the role store.");
             isCompleted = true;
         }
         finally
@@ -262,14 +251,14 @@ public class AuthorizationRoleTests
                 agent.Roles = originalRoles;
                 await File.WriteAllTextAsync(agentFilePath, originalAgentFile);
 
-                foreach (var authorization in registry.KnownSubjects.Keys.OfType<Authorization.Authorization>().ToList())
+                // Refused while an agent names the role, so after the agent got its roles back.
+                foreach (var name in new[] { RoleName, RenamedRoleName })
                 {
-                    await root.DeleteSubjectAsync(authorization, CancellationToken.None);
-                }
-
-                if (File.Exists(authorizationFilePath))
-                {
-                    File.Delete(authorizationFilePath);
+                    if (roleStore.GetConcurrencyStamp(name) is { } stamp)
+                    {
+                        var result = await roleStore.DeleteRoleAsync(name, stamp, CancellationToken.None);
+                        Assert.True(result.Succeeded, result.Error);
+                    }
                 }
             }
             catch (Exception exception) when (!isCompleted)
@@ -280,12 +269,27 @@ public class AuthorizationRoleTests
         }
     }
 
-    private static bool IsStateReadRule(JsonNode? rule) =>
+    private async Task AssertAgentSettingsShowRoleAsync(string roleName)
+    {
+        var agentPage = await _fixture.CreatePageAsync();
+        await agentPage.GotoAsync($"{_fixture.ServerAddress}pages/{AgentPath}");
+        var settingsTab = agentPage.GetByRole(AriaRole.Tab, new() { Name = "Settings" });
+        await Assertions.Expect(settingsTab).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await agentPage.WaitUntilInteractiveAsync(Timeout);
+        await settingsTab.ClickAsync();
+        await Assertions.Expect(agentPage.GetByTestId("agent-settings-roles")).ToContainTextAsync(roleName, new() { Timeout = Timeout });
+        await Assertions.Expect(agentPage.GetByTestId("agent-settings-roles-error")).ToHaveCountAsync(0);
+    }
+
+    private static Task<double> GetLayoutHeightAsync(ILocator element) =>
+        element.EvaluateAsync<double>("element => element.offsetHeight");
+
+    private static bool IsStateReadRule(PermissionRule? rule) =>
         rule is not null &&
-        JsonNode.DeepEquals(rule["paths"], new JsonArray(FolderPattern)) &&
-        JsonNode.DeepEquals(rule["types"], new JsonArray(TypeName)) &&
-        JsonNode.DeepEquals(rule["tags"], new JsonArray(MemberTags.State)) &&
-        JsonNode.DeepEquals(rule["actions"], new JsonArray("read"));
+        rule.Paths.SequenceEqual(new[] { FolderPattern }) &&
+        rule.Types.SequenceEqual(new[] { TypeName }) &&
+        rule.Tags.SequenceEqual(new[] { MemberTags.State }) &&
+        rule.Actions.SequenceEqual(new[] { PermissionAction.Read });
 
     /// <summary>Opens the subject at the path in the subject browser and returns its pane, the last one.</summary>
     private async Task<ILocator> OpenPaneAsync(string path)
@@ -337,6 +341,23 @@ public class AuthorizationRoleTests
         await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = Timeout });
     }
 
+    /// <summary>
+    /// Clicks the Delete button of the pane, which runs the delete operation of its subject, checks that the operation is
+    /// not listed among the others and that the confirmation names the subject and carries the operation's description,
+    /// and confirms; a refusal opens its error dialog afterwards.
+    /// </summary>
+    private static async Task DeleteWithButtonAsync(ILocator pane, string name)
+    {
+        var deleteButton = pane.GetByTestId("delete-subject-button");
+        await Assertions.Expect(deleteButton).ToBeEnabledAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(Method(pane, "Delete")).ToHaveCountAsync(0);
+        await deleteButton.ClickAsync();
+        var confirmation = pane.Page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(confirmation).ToContainTextAsync($"Delete '{name}'?", new() { Timeout = Timeout });
+        await Assertions.Expect(confirmation).ToContainTextAsync("Refused while users or agents hold it");
+        await confirmation.GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true }).ClickAsync();
+    }
+
     private static async Task SaveAsync(ILocator dialog)
     {
         var saveButton = dialog.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true });
@@ -347,38 +368,12 @@ public class AuthorizationRoleTests
         await Assertions.Expect(dialog.Page.GetByText("Configuration saved.")).ToBeVisibleAsync(new() { Timeout = Timeout });
     }
 
-    private static string DescribeRoles(ISubjectRegistry registry) =>
-        string.Join("; ", registry.KnownSubjects.Keys
-            .OfType<Authorization.Authorization>()
-            .SelectMany(authorization => authorization.Roles ?? new Dictionary<string, Role>())
+    private static string DescribeRoles(Authorization.Authorization authorization) =>
+        string.Join("; ", authorization.Roles
             .Select(role => $"{role.Key}: allow {DescribeRules(role.Value.Allow)}, deny {DescribeRules(role.Value.Deny)}"));
 
-    private static string DescribeRules(IReadOnlyList<PermissionRule>? rules) =>
-        "[" + string.Join(", ", (rules ?? []).Select(rule =>
+    private static string DescribeRules(IReadOnlyList<PermissionRule> rules) =>
+        "[" + string.Join(", ", rules.Select(rule =>
             $"paths=[{string.Join(",", rule.Paths)}] types=[{string.Join(",", rule.Types)}] members=[{string.Join(",", rule.Members)}] " +
             $"tags=[{string.Join(",", rule.Tags)}] actions=[{string.Join(",", rule.Actions)}]")) + "]";
-
-    // The server writes the file in place, so a read can see it held or partly written; the poll tries again. A failure
-    // shows the file as last read and the roles in memory, so that it tells which part differs and whether the save
-    // assigned other rules or the write lost them.
-    private static async Task WaitForAuthorizationFileAsync(
-        ISubjectRegistry registry, string path, Func<JsonNode, bool> isExpected, string message)
-    {
-        var content = string.Empty;
-        await AsyncTestHelpers.WaitUntilAsync(
-            () =>
-            {
-                try
-                {
-                    content = File.ReadAllText(path);
-                    return JsonNode.Parse(content)?["roles"] is { } roles && isExpected(roles);
-                }
-                catch (Exception exception) when (exception is IOException or JsonException)
-                {
-                    return false;
-                }
-            },
-            () => $"{message} The file holds: {content} The roles in memory: {DescribeRoles(registry)}",
-            TimeSpan.FromSeconds(30));
-    }
 }

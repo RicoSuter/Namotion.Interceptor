@@ -1,5 +1,6 @@
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(SunSpecDevice))]
 @implements ISubjectEditComponent
+@inject IUserPermissions Permissions
 
 <MudForm>
     <MudTextField @bind-Value="_name"
@@ -64,7 +65,7 @@
         <MudDivider Class="my-4" />
         <MudText Typo="Typo.subtitle2" Class="mb-2">Current State</MudText>
         <MudText>Status: @Device.Status @Device.StatusMessage</MudText>
-        @foreach (var logicalDevice in Device.Units.OrderBy(pair => pair.Key).SelectMany(pair => pair.Value.Devices))
+        @foreach (var logicalDevice in Device.Units.OrderBy(pair => pair.Key).SelectMany(pair => pair.Value.Devices).Where(logicalDevice => Permissions.CanShow(logicalDevice)))
         {
             <MudText>Unit @logicalDevice.UnitId: @logicalDevice.Title</MudText>
             @if (logicalDevice.SoftwareVersion is not null)

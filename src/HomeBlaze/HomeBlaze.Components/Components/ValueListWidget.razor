@@ -3,6 +3,7 @@
 @inherits SelectionContainingWidgetBase
 @inject SubjectPathResolver PathResolver
 @inject ITimeZoneDisplay TimeZone
+@inject IUserPermissions Permissions
 
 @{
     // Read once per render and never kept in a field: its render records the read, so that it renders again when it changes.
@@ -15,7 +16,7 @@
     {
         var row = rows[index];
         var path = row.Path;
-        var reading = string.IsNullOrEmpty(path) ? null : ValueReader.Read(PathResolver, row, path, row.Map, TimeZone);
+        var reading = string.IsNullOrEmpty(path) ? null : ValueReader.Read(PathResolver, row, path, row.Map, TimeZone, Permissions);
         var icon = MudBlazorIconResolver.ResolveOrNull(reading?.Icon ?? row.Icon);
         items[index] = (path, reading, icon);
         anyIcon |= icon is not null;
@@ -47,4 +48,21 @@
 @code {
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
+
+    protected override void OnInitialized()
+    {
+        Permissions.Changed += OnPermissionsChanged;
+    }
+
+    private void OnPermissionsChanged() => _ = InvokeAsync(StateHasChanged);
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Permissions.Changed -= OnPermissionsChanged;
+        }
+
+        base.Dispose(disposing);
+    }
 }

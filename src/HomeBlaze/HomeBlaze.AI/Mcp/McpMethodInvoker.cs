@@ -2,6 +2,7 @@ using System.Text.Json;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Authorization;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -17,7 +18,7 @@ namespace HomeBlaze.AI.Mcp;
 /// Resolves the subject of an MCP tool and calls a query or operation method of it: checks the method kind, the
 /// confirmation it requires, the access policy and the operation filter, converts the arguments, invokes the
 /// method and turns the outcome into the tool result. invoke_query, invoke_operation and the Markdown tools share it, so it
-/// is where the read check of page expressions is set for the queries of every client, agents and external clients alike.
+/// is where a method gets the permissions of its reader, for the queries of every client, agents and external clients alike.
 /// </summary>
 internal sealed class McpMethodInvoker
 {
@@ -25,39 +26,32 @@ internal sealed class McpMethodInvoker
     private readonly McpServerConfiguration _configuration;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger _logger;
-    private readonly bool _isReadOnly;
     private readonly Func<RegisteredSubject, MethodMetadata, object?[], string?>? _operationFilter;
-    private readonly Func<RegisteredSubject, MethodMetadata, object?[], object?, object?>? _resultFilter;
-    private readonly McpPageReadAccess? _pageReadAccess;
+    private readonly McpPageReadAccess _pageReadAccess;
+    private readonly ReaderServiceProvider _operationServices;
 
     /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
     /// <param name="configuration">
     /// The configuration of the tools, whose access policy decides which subjects and methods are readable and which
     /// methods may be invoked.
     /// </param>
-    /// <param name="serviceProvider">Resolves the services that the methods take.</param>
+    /// <param name="serviceProvider">Resolves the services that the methods take, except <see cref="IUserPermissions"/>.</param>
     /// <param name="logger">Logs failed calls.</param>
-    /// <param name="isReadOnly">Whether operations are blocked.</param>
     /// <param name="operationFilter">Gets why a call of an operation with the given arguments is refused, or null when it is not.</param>
-    /// <param name="resultFilter">Gets the result that the caller is given in place of the result of a method called with
-    /// the given input arguments; null passes every result on.</param>
     public McpMethodInvoker(
         Func<IInterceptorSubject> rootSubjectProvider,
         McpServerConfiguration configuration,
         IServiceProvider serviceProvider,
         ILogger logger,
-        bool isReadOnly,
-        Func<RegisteredSubject, MethodMetadata, object?[], string?>? operationFilter,
-        Func<RegisteredSubject, MethodMetadata, object?[], object?, object?>? resultFilter = null)
+        Func<RegisteredSubject, MethodMetadata, object?[], string?>? operationFilter)
     {
         _rootSubjectProvider = rootSubjectProvider;
         _configuration = configuration;
         _serviceProvider = serviceProvider;
         _logger = logger;
-        _isReadOnly = isReadOnly;
         _operationFilter = operationFilter;
-        _resultFilter = resultFilter;
-        _pageReadAccess = McpPageReadAccess.TryCreate(configuration);
+        _pageReadAccess = McpPageReadAccess.Create(configuration);
+        _operationServices = new ReaderServiceProvider(serviceProvider, DenyAllPermissions.Instance);
     }
 
     /// <summary>
@@ -95,27 +89,14 @@ internal sealed class McpMethodInvoker
         return subject;
     }
 
-    // Only a query evaluates pages for the caller. An operation changes state, and the change handlers, renders and
-    // background work it starts must not inherit the caller's check. Entered without one as well, so that a check of the
-    // flow the tool is called on never carries over.
-    private async Task<object?> InvokeWithReadAccessAsync(MethodMetadata method, object?[]? arguments, CancellationToken cancellationToken)
-    {
-        var isQuery = method.Kind == MethodKind.Query;
-        var readCheck = isQuery ? _pageReadAccess?.CreateCheck(_rootSubjectProvider()) : null;
-        using (PropertyReadAccess.Enter(readCheck, isQuery && _configuration.ValueFilters.Count > 0 ? _configuration.ApplyValueFilters : null))
-        {
-            return await method.InvokeAsync(arguments, _serviceProvider, cancellationToken);
-        }
-    }
-
     /// <summary>
     /// Invokes the method and returns <c>{ success, result }</c>, or <c>{ error }</c> when the call is refused, an argument
     /// does not fit or the method fails. A method the access policy does not allow to read is not found; one it does not
-    /// allow to execute is refused. A query runs with the policy's read check and the value filters of the configuration
-    /// as <see cref="PropertyReadAccess"/>, so a page expression over a property that does not resolve through the
-    /// readable resolution of the tools, because it or a property on its path is not readable or a subject on its path is
-    /// hidden, renders empty, and one over a readable property renders the value the tools return. An operation runs
-    /// without either.
+    /// allow to execute is refused. A query that takes <see cref="IUserPermissions"/> gets the permissions of the policy,
+    /// so a page expression over a property that does not resolve through the readable resolution of the tools, because it
+    /// or a property on its path is not readable or a subject on its path is hidden, renders empty, and one over a
+    /// readable property renders the value the tools return, after the value filters of the configuration. An operation
+    /// gets <see cref="DenyAllPermissions"/>.
     /// </summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled during the call.</exception>
     /// <param name="subject">The subject that has the method.</param>
@@ -148,8 +129,13 @@ internal sealed class McpMethodInvoker
 
         try
         {
-            var result = await InvokeWithReadAccessAsync(method, arguments, cancellationToken);
-            result = MethodResultLimit.Apply(_resultFilter is null ? result : _resultFilter(subject, method, arguments ?? [], result));
+            // Only a query reads for the caller. An operation changes state, and what it reads is not shown to the caller.
+            var services = method.Kind == MethodKind.Query
+                ? new ReaderServiceProvider(_serviceProvider, _pageReadAccess.CreatePermissions(_rootSubjectProvider()))
+                : _operationServices;
+            var result = await method.InvokeAsync(arguments, services, cancellationToken);
+
+            result = MethodResultLimit.Apply(result);
             return result is not null ? new { success = true, result } : new { success = true };
         }
         catch (ArgumentException exception)
@@ -211,20 +197,20 @@ internal sealed class McpMethodInvoker
     /// Gets the methods of the subject that are offered to agents and that the access policy of the configuration allows
     /// to read, ordered by position.
     /// </summary>
-    public IEnumerable<MethodMetadata> GetReadableMethods(RegisteredSubject subject)
-    {
-        var methods = subject.GetAllMethods(ExclusionTarget.Agents);
-        return _configuration.AccessPolicy is not { } accessPolicy
-            ? methods
-            : methods.Where(method =>
-                subject.TryGetProperty(method.PropertyName) is { } property && accessPolicy.IsAllowed(property, McpAccessActions.Read));
-    }
+    public IEnumerable<MethodMetadata> GetReadableMethods(RegisteredSubject subject) => GetReadableMethods(subject, _configuration);
 
-    private string DescribeWrongKind(string methodName, MethodKind kind) => kind switch
+    /// <summary>
+    /// Gets the methods of the subject that are offered to agents and that the access policy of
+    /// <paramref name="configuration"/> allows to read, ordered by position.
+    /// </summary>
+    internal static IEnumerable<MethodMetadata> GetReadableMethods(RegisteredSubject subject, McpServerConfiguration configuration) =>
+        subject.GetAllMethods(ExclusionTarget.Agents).Where(method =>
+            subject.TryGetProperty(method.PropertyName) is { } property && configuration.IsAllowed(property, McpAccessActions.Read));
+
+    private static string DescribeWrongKind(string methodName, MethodKind kind) => kind switch
     {
         MethodKind.Query => $"'{methodName}' is a query; call it with {HomeBlazeMcpToolProvider.InvokeQueryToolName}.",
-        _ when _isReadOnly => $"'{methodName}' is an operation; it can only be called with {HomeBlazeMcpToolProvider.InvokeOperationToolName}, which is not available in read-only mode.",
-        _ => $"'{methodName}' is an operation; call it with {HomeBlazeMcpToolProvider.InvokeOperationToolName}."
+        _ => $"'{methodName}' is an operation; call it with {HomeBlazeMcpToolProvider.InvokeOperationToolName} when that tool is offered."
     };
 
     private static (object?[]? Arguments, string? Error) ReadArguments(JsonElement argumentsElement, MethodParameter[] inputParameters)
@@ -293,4 +279,11 @@ internal sealed class McpMethodInvoker
         inputParameters.Length == 0
             ? "The method takes no parameters."
             : $"Expected parameters: {string.Join(", ", inputParameters.Select(parameter => parameter.Name))}.";
+
+    // The services of the application, with the permissions of the reader in place of those of the application's scope.
+    private sealed class ReaderServiceProvider(IServiceProvider inner, IUserPermissions permissions) : IServiceProvider
+    {
+        public object? GetService(Type serviceType) =>
+            serviceType == typeof(IUserPermissions) ? permissions : inner.GetService(serviceType);
+    }
 }

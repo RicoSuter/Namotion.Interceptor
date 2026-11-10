@@ -30,7 +30,7 @@ public class SubjectAttributeAccessTests
     private static McpServerConfiguration CreateConfiguration(IMcpAccessPolicy? policy) => new()
     {
         PathProvider = DefaultPathProvider.Instance,
-        AccessPolicy = policy
+        AccessPolicy = policy ?? ReadOnlyMcpAccessPolicy.Instance
     };
 
     public static TheoryData<string, string, string[]> Calls()

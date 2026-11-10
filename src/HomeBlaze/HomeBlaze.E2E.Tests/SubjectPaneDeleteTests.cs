@@ -1,5 +1,8 @@
+using HomeBlaze.Authorization;
 using HomeBlaze.E2E.Tests.Infrastructure;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
+using Namotion.Interceptor.Authorization;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -22,9 +25,14 @@ public class SubjectPaneDeleteTests
     /// <summary>
     /// Opens the subject browser at a subject, given by its path, and returns the pane of that subject.
     /// </summary>
-    private async Task<(IPage Page, ILocator Pane)> OpenPaneAsync(string subjectPath)
+    private Task<(IPage Page, ILocator Pane)> OpenPaneAsync(string subjectPath) => OpenPaneAsync(subjectPath, SignedInAs.Admin);
+
+    /// <summary>
+    /// Opens the subject browser at a subject, given by its path, for <paramref name="user"/> and returns the pane of that subject.
+    /// </summary>
+    private async Task<(IPage Page, ILocator Pane)> OpenPaneAsync(string subjectPath, SignedInAs user)
     {
-        var page = await _fixture.CreatePageAsync();
+        var page = await _fixture.CreatePageAsync(user);
         await page.SetViewportSizeAsync(1280, 720);
         await page.GotoAsync($"{_fixture.ServerAddress}browser/{subjectPath}");
 
@@ -135,6 +143,81 @@ public class SubjectPaneDeleteTests
                 Directory.Delete(directoryPath, recursive: true);
                 await _fixture.ReconcileStorageAsync();
             }
+        }
+    }
+
+    [Fact]
+    public async Task WhenAnOperatorOpensAStoredSubjectAndARole_ThenNeitherPaneHasADeleteButton()
+    {
+        // Arrange
+        var userName = TestNames.Create("operator");
+        var roleName = TestNames.Create("deletable");
+        await _fixture.AddPersonAsync(userName, BuiltInRoles.OperatorName);
+        await SaveRoleAsync(roleName);
+        var motor = await _fixture.AddStoredMotorAsync();
+        try
+        {
+            // Act
+            var (page, filePane) = await OpenPaneAsync(motor.Name, SignedInAs.User(userName));
+
+            // Assert: the operations of the pane render, so a missing button is no pane that has not loaded yet.
+            await Assertions.Expect(filePane.GetByTestId("subject-pane-content").GetByRole(AriaRole.Button, new() { Name = "Restart Controller", Exact = true }))
+                .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(filePane.GetByTestId("delete-subject-button")).ToHaveCountAsync(0);
+
+            // Act
+            await page.GotoAsync($"{_fixture.ServerAddress}browser/Authorization/{roleName}");
+            await page.WaitUntilInteractiveAsync(PageLoadTimeout);
+            var rolePane = page.Locator("#scrollContainer [data-testid='subject-pane']").Last;
+
+            // Assert
+            await Assertions.Expect(rolePane.GetByRole(AriaRole.Heading, new() { Name = roleName })).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(rolePane.GetByTestId("subject-pane-content").GetByRole(AriaRole.Button, new() { Name = "Rename", Exact = true }))
+                .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(rolePane.GetByTestId("delete-subject-button")).ToHaveCountAsync(0);
+        }
+        finally
+        {
+            await motor.DisposeAsync();
+            await DeleteRoleAsync(roleName);
+            await _fixture.RemovePersonAsync(userName);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAFullAdministratorOpensARole_ThenItsPaneHasAnEnabledDeleteButton()
+    {
+        // Arrange
+        var roleName = TestNames.Create("deletable");
+        await SaveRoleAsync(roleName);
+        try
+        {
+            // Act
+            var (_, pane) = await OpenPaneAsync($"Authorization/{roleName}");
+
+            // Assert
+            await Assertions.Expect(pane.GetByTestId("delete-subject-button")).ToBeEnabledAsync(new() { Timeout = PageLoadTimeout });
+        }
+        finally
+        {
+            await DeleteRoleAsync(roleName);
+        }
+    }
+
+    private async Task SaveRoleAsync(string roleName)
+    {
+        var result = await _fixture.ServerServices.GetRequiredService<IRoleStore>()
+            .SaveRoleAsync(null, new AuthorizationRole { Name = roleName }, null, CancellationToken.None);
+        Assert.True(result.Succeeded, result.Error);
+    }
+
+    private async Task DeleteRoleAsync(string roleName)
+    {
+        var roleStore = _fixture.ServerServices.GetRequiredService<IRoleStore>();
+        if (roleStore.GetConcurrencyStamp(roleName) is { } stamp)
+        {
+            var result = await roleStore.DeleteRoleAsync(roleName, stamp, CancellationToken.None);
+            Assert.True(result.Succeeded, result.Error);
         }
     }
 }

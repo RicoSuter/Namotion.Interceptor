@@ -13,6 +13,35 @@ public class HomeBlazeMemberTagProviderTests
     private readonly HomeBlazeMemberTagProvider _provider = new();
 
     [Fact]
+    public void WhenAnOperationRequiresAdministration_ThenItIsTaggedAdministration()
+    {
+        // Arrange
+        var subject = new TagTestSubject(TestContext.Create()).TryGetRegisteredSubject()!;
+        var provider = new HomeBlazeMemberTagProvider();
+
+        // Act
+        var tags = provider.GetTags(subject.TryGetProperty("Configure")!);
+
+        // Assert
+        Assert.Contains(MemberTags.Operation, tags);
+        Assert.Contains(MemberTags.Administration, tags);
+    }
+
+    [Fact]
+    public void WhenAnOperationDoesNotRequireAdministration_ThenItIsNotTaggedAdministration()
+    {
+        // Arrange
+        var subject = new TagTestSubject(TestContext.Create()).TryGetRegisteredSubject()!;
+        var provider = new HomeBlazeMemberTagProvider();
+
+        // Act
+        var tags = provider.GetTags(subject.TryGetProperty("Start")!);
+
+        // Assert
+        Assert.DoesNotContain(MemberTags.Administration, tags);
+    }
+
+    [Fact]
     public void WhenAPropertyIsState_ThenItIsTaggedState()
     {
         // Arrange

@@ -3,6 +3,7 @@ using HomeBlaze.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Extensions;
 
@@ -14,7 +15,6 @@ namespace HomeBlaze.AI;
 /// </summary>
 /// <param name="Services">The services of the tools.</param>
 /// <param name="RootSubjectProvider">Resolves the root subject when a tool runs.</param>
-/// <param name="IsReadOnly">Whether the tools may not change anything.</param>
 /// <param name="Configuration">
 /// The configuration the provider is added to, whose access policy decides per member and action; resolve paths with
 /// its <c>TryGetReadableProperty</c> and <c>TryGetReadableSubject</c> and check actions with its <c>IsAllowed</c>.
@@ -22,7 +22,6 @@ namespace HomeBlaze.AI;
 public readonly record struct McpToolProviderContext(
     IServiceProvider Services,
     Func<IInterceptorSubject> RootSubjectProvider,
-    bool IsReadOnly,
     McpServerConfiguration Configuration);
 
 /// <summary>
@@ -32,10 +31,10 @@ public static class McpBuilderExtensions
 {
     /// <summary>
     /// Registers HomeBlaze-specific MCP tools including subject enrichment, type discovery,
-    /// and method invocation, and sets <see cref="HomeBlazeMcpInstructions.GetServerInstructions"/> for
-    /// <paramref name="isReadOnly"/> as the server instructions unless the host already set them. Configuration is resolved lazily from the service provider.
-    /// The tools decide access with the policy of the <see cref="BuiltInRoles.EverythingName"/> role from the
-    /// <see cref="AuthorizationService"/>, so the system rules apply.
+    /// and method invocation, and sets <see cref="HomeBlazeMcpInstructions.ServerInstructions"/> as the server instructions
+    /// unless the host already set them. Configuration is resolved lazily from the service provider, per request.
+    /// The tools decide access with the policy of the roles of the registered <see cref="IMcpClientAccess"/> from the
+    /// <see cref="AuthorizationService"/>, so the system rules of non-human principals apply; without one they allow nothing.
     /// </summary>
     /// <remarks>
     /// Tools of other packages are added with
@@ -43,26 +42,27 @@ public static class McpBuilderExtensions
     /// server and the built-in agents.
     /// </remarks>
     /// <param name="builder">The MCP server builder.</param>
-    /// <param name="isReadOnly">Whether operations are blocked and only queries are allowed.</param>
-    public static IMcpServerBuilder WithHomeBlazeMcpTools(
-        this IMcpServerBuilder builder,
-        bool isReadOnly = true)
+    public static IMcpServerBuilder WithHomeBlazeMcpTools(this IMcpServerBuilder builder)
     {
-        builder.Services.Configure<McpServerOptions>(options => options.ServerInstructions ??= HomeBlazeMcpInstructions.GetServerInstructions(isReadOnly));
+        builder.Services.Configure<McpServerOptions>(options => options.ServerInstructions ??= HomeBlazeMcpInstructions.ServerInstructions);
         builder.Services.AddHomeBlazeAuthorization(McpAuthorization.PathProvider);
         return builder.WithSubjectRegistryTools(
             HomeBlazeMcpConfigurationFactory.GetLoadedRoot,
             serviceProvider => CreateServerConfiguration(
-                serviceProvider, () => HomeBlazeMcpConfigurationFactory.GetLoadedRoot(serviceProvider), isReadOnly));
+                serviceProvider, () => HomeBlazeMcpConfigurationFactory.GetLoadedRoot(serviceProvider)));
     }
 
     /// <summary>
     /// Creates the configuration of the tools of the external MCP server, which decide access with the policy of the
-    /// <see cref="BuiltInRoles.EverythingName"/> role from the <see cref="AuthorizationService"/>.
+    /// roles of the registered <see cref="IMcpClientAccess"/>; <see cref="AuthorizationPolicy.DenyAll"/> when none is
+    /// registered.
     /// </summary>
-    internal static McpServerConfiguration CreateServerConfiguration(
-        IServiceProvider serviceProvider, Func<IInterceptorSubject> rootSubjectProvider, bool isReadOnly)
-        => HomeBlazeMcpConfigurationFactory.Create(
-            serviceProvider, rootSubjectProvider, isReadOnly, McpAuthorization.GetAccessPolicy(
-                serviceProvider.GetRequiredService<AuthorizationService>(), McpAuthorization.EverythingRoleNames));
+    internal static McpServerConfiguration CreateServerConfiguration(IServiceProvider serviceProvider, Func<IInterceptorSubject> rootSubjectProvider)
+    {
+        var access = serviceProvider.GetService<IMcpClientAccess>();
+        var accessPolicy = access is null
+            ? new AuthorizationMcpAccessPolicy(() => AuthorizationPolicy.DenyAll)
+            : McpAuthorization.GetAccessPolicy(serviceProvider.GetRequiredService<AuthorizationService>(), access.Roles);
+        return HomeBlazeMcpConfigurationFactory.Create(serviceProvider, rootSubjectProvider, accessPolicy);
+    }
 }

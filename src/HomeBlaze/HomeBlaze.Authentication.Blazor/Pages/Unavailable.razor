@@ -1,0 +1,20 @@
+@* The page every request gets while authentication is unavailable, rendered outside of routing as a whole document. *@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Authentication unavailable</title>
+</head>
+<body>
+    <h1>Authentication unavailable</h1>
+    <p>Nobody can sign in right now. @Reason</p>
+    <p>The server log says more.</p>
+</body>
+</html>
+
+@code {
+    /// <summary>Why authentication is unavailable, shown to visitors who are not signed in, so it holds no details of errors.</summary>
+    [Parameter, EditorRequired]
+    public string Reason { get; set; } = string.Empty;
+}

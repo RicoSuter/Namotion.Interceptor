@@ -1,8 +1,10 @@
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.Authorization;
+using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Namotion.Interceptor;
 
 namespace HomeBlaze.AI.Agents;
 
@@ -13,7 +15,8 @@ public static class AgentServiceCollectionExtensions
 {
     /// <summary>
     /// Adds the agent services, including a hosted service that serves the agent MCP route of CLI agents on a
-    /// loopback listener of its own, and the <see cref="AuthorizationService"/> that decides what the agents' tools may touch.
+    /// loopback listener of its own, the <see cref="AuthorizationService"/> that decides what the agents' tools may touch,
+    /// and an <see cref="IRoleNameReferences"/> for the roles the agents name.
     /// </summary>
     public static IServiceCollection AddHomeBlazeAgents(this IServiceCollection services)
     {
@@ -31,6 +34,9 @@ public static class AgentServiceCollectionExtensions
         services.AddHomeBlazeAuthorization(McpAuthorization.PathProvider);
         services.TryAddSingleton<IAgentEndpointAddress>(serviceProvider => serviceProvider.GetRequiredService<AgentMcpListener>());
         services.TryAddSingleton<AgentServices>();
+        services.AddSingleton<IRoleNameReferences>(serviceProvider => new AgentRoleNameReferences(
+            serviceProvider.GetRequiredService<IInterceptorSubjectContext>(),
+            serviceProvider.GetRequiredService<RootManager>()));
         return services;
     }
 }

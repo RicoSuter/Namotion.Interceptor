@@ -17,13 +17,16 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
     where TProgram : class
 {
     private readonly IReadOnlyCollection<Type> _testTypes;
+    private readonly string _authenticationDatabasePath;
 
     private int _startedHostCount;
 
     /// <param name="testTypes">Subject and component types of the tests that the server has to know.</param>
-    public WebTestingHostFactory(IReadOnlyCollection<Type> testTypes)
+    /// <param name="authenticationDatabasePath">The path of the authentication database, which the server creates and seeds when missing.</param>
+    public WebTestingHostFactory(IReadOnlyCollection<Type> testTypes, string authenticationDatabasePath)
     {
         _testTypes = testTypes;
+        _authenticationDatabasePath = authenticationDatabasePath;
         UseKestrel(0);
     }
 
@@ -58,6 +61,13 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
 
         // Point to test-specific plugin configuration
         builder.UseSetting("PluginConfigurationPath", Path.Combine(AppContext.BaseDirectory, "TestData", "Plugins.json"));
+
+        // Outside the test data, so that every server starts with a database of its own, seeded with the administrator.
+        builder.UseSetting("Authentication:Database", _authenticationDatabasePath);
+
+        // The browser contexts of the tests name a client address of their own in X-Forwarded-For, so that the rate limits
+        // per address of signing in and of starting the app count each context as the separate client it stands for.
+        builder.UseSetting("Authentication:ForwardedHeadersKnownProxies:0", "127.0.0.1");
 
         // The serializer of the configuration reads the types once, the first time it reads a configuration, which the
         // hosted service that loads the root does. So the types of the tests are added by a hosted service that starts

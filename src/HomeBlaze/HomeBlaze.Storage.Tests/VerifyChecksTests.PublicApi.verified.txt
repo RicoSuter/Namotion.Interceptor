@@ -113,12 +113,14 @@ namespace HomeBlaze.Storage.Files
         protected void RaisePropertyChanged(string propertyName) { }
         public System.Threading.Tasks.Task<System.IO.Stream> ReadAsync(System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.Query(Description=@"Returns the markdown content with {{ path }} expressions evaluated against the current object graph. With includeSourcePaths set to true, each value is followed by the absolute path of its property in parentheses, which get_property reads when the property is exposed as state", Icon="Preview", Title="Read Evaluated Content")]
-        public string? ReadEvaluatedContent(bool? includeSourcePaths = default) { }
+        public string? ReadEvaluatedContent([HomeBlaze.Abstractions.Attributes.FromServices] HomeBlaze.Authorization.Abstractions.IUserPermissions? permissions, bool? includeSourcePaths = default) { }
         [HomeBlaze.Abstractions.Attributes.Query(Description="Returns the markdown file source, including unevaluated {{ path }} expressions. S" +
             "ecret configuration values in blocks are shown as ***", Icon="Description", Title="Read Raw Content")]
         public string? ReadRawContent() { }
+        [HomeBlaze.Abstractions.Attributes.ExcludeFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget.UserInterface)]
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Replaces the whole markdown source of this file.", Icon="EditNote", Title="Replace Content")]
         public System.Threading.Tasks.Task ReplaceContentAsync(string content, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.ExcludeFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget.UserInterface)]
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Replaces one exact, unique passage of the markdown source.", Icon="FindReplace", Title="Replace Text")]
         public System.Threading.Tasks.Task ReplaceTextAsync(string oldText, string newText, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> ReplaceTextBlockAsync(HomeBlaze.Storage.Internal.HtmlSegment segment, string expectedText, string newText, System.Threading.CancellationToken cancellationToken) { }
@@ -169,10 +171,10 @@ namespace HomeBlaze.Storage
         public void ApplyStoredMetadata(Namotion.Interceptor.IInterceptorSubject subject, string? propertyName) { }
         public bool CanStoreMetadata(Namotion.Interceptor.IInterceptorSubject subject) { }
         public System.Threading.Tasks.Task ConnectAsync(System.Threading.CancellationToken cancellationToken) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Add", Position=1, Title="Create")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Add", Position=1, RequiresAdministration=true, Title="Create")]
         public System.Threading.Tasks.Task CreateAsync([HomeBlaze.Abstractions.Attributes.FromServices] HomeBlaze.Storage.Abstractions.ISubjectSetupService subjectSetupService, System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Creates a new markdown file with the given name (ending in .md) and content in th" +
-            "is folder.", Icon="NoteAdd", Position=2, Title="Create Markdown File")]
+            "is folder.", Icon="NoteAdd", Position=2, RequiresAdministration=true, Title="Create Markdown File")]
         public System.Threading.Tasks.Task CreateMarkdownFileAsync(string name, string content, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task DeleteBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task DeleteSubjectAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
@@ -181,16 +183,16 @@ namespace HomeBlaze.Storage
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Abstractions.BlobMetadata?> GetBlobMetadataAsync(string path, System.Threading.CancellationToken cancellationToken) { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         [HomeBlaze.Abstractions.Attributes.ExcludeFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget.UserInterface)]
-        [HomeBlaze.Abstractions.Attributes.Query(Description="Gets the names of the children of this folder or storage in the order in which th" +
-            "ey are shown in navigation and in the browser.", Position=4, Title="Get Order")]
-        public string[] GetOrder() { }
+        [HomeBlaze.Abstractions.Attributes.Query(Description="Gets the names of the children of this folder or storage that the caller may see," +
+            " in the order in which they are shown in navigation and in the browser.", Position=4, Title="Get Order")]
+        public string[] GetOrder([HomeBlaze.Abstractions.Attributes.FromServices] HomeBlaze.Authorization.Abstractions.IUserPermissions? permissions) { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         public System.Threading.Tasks.Task<System.IO.Stream> ReadBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.ExcludeFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget.UserInterface)]
-        [HomeBlaze.Abstractions.Attributes.Query(Description=@"Finds the subjects and properties in this storage whose metadata matches every filter that is given, and returns them by path and then property, at most the first 100 to MCP clients, each with path, the path of the subject relative to this storage, and property, the name of the property or omitted for the subject, as SetMetadata takes them. tag: a tag in tags; key: a key that is set, such as notes; value: equals the whole value of a string, or of a string in an array, of key when it is given, else of any key, and never a number or a boolean; path: the path of a subject relative to this storage that the results are at or below. Keys match exactly, and tags and values without regard to case. To find text inside notes, use search_markdown. Example: tag floor-2 finds everything tagged floor-2.", Position=6, Title="Search Metadata")]
-        public HomeBlaze.Services.Metadata.MetadataSearchMatch[] SearchMetadata(string? tag, string? key, string? value, string? path) { }
+        [HomeBlaze.Abstractions.Attributes.Query(Description=@"Finds the subjects and properties in this storage whose metadata matches every filter that is given, and returns them by path and then property, at most the first 100, each with path, the path of the subject relative to this storage, and property, the name of the property or omitted for the subject, as SetMetadata takes them. Only metadata the caller may read is searched, as the caller is shown it. tag: a tag in tags; key: a key that is set, such as notes; value: equals the whole value of a string, or of a string in an array, of key when it is given, else of any key, and never a number or a boolean; path: the path of a subject relative to this storage that the results are at or below. Keys match exactly, and tags and values without regard to case. To find text inside notes, use search_markdown. Example: tag floor-2 finds everything tagged floor-2.", Position=6, Title="Search Metadata")]
+        public HomeBlaze.Services.Metadata.MetadataSearchMatch[] SearchMetadata(string? tag, string? key, string? value, string? path, [HomeBlaze.Abstractions.Attributes.FromServices] HomeBlaze.Authorization.Abstractions.IUserPermissions? permissions) { }
         public System.Threading.Tasks.Task SetMetadataAsync(Namotion.Interceptor.IInterceptorSubject subject, string? propertyName, System.Text.Json.JsonElement values, System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.ExcludeFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget.UserInterface)]
         [HomeBlaze.Abstractions.Attributes.Operation(Description=@"Sets metadata of a subject in this storage or of one of its properties. path is the path of the subject below this storage as browse shows it, for example Devices/Shelly/Channels[0] (a leading / is ignored), and empty for the storage itself; property is the name of a property of that subject, or omitted for the subject. values is a JSON object that is merged into the metadata: a key with a value is set, replacing a nested value as a whole, a key with null is removed, and every other key stays; keys match exactly, case included. HomeBlaze reads title (of a folder), navTitle, icon (a MudBlazor icon name), location (NavBar or AppBar), alignment (Left, Right or Menu), notes (Markdown of up to 4 KB without HTML, pictures or blocks), links (an array of at most 20 objects with an optional title and either url, an http, https or mailto address, or path, the absolute path of a page, subject or property) and tags (an array of at most 20 strings of up to 64 characters, unique without regard to case); any other key, such as comment, is stored as given. Example: {""navTitle"": ""Hall light"", ""tags"": [""floor-2""], ""icon"": null}.", Position=3, Title="Set Metadata")]
@@ -239,19 +241,19 @@ namespace HomeBlaze.Storage
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         public System.Threading.Tasks.Task AddSubjectAsync(string path, Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Add", Position=1, Title="Create")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Add", Position=1, RequiresAdministration=true, Title="Create")]
         public System.Threading.Tasks.Task CreateAsync([HomeBlaze.Abstractions.Attributes.FromServices] HomeBlaze.Storage.Abstractions.ISubjectSetupService subjectSetupService, System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Creates a new markdown file with the given name (ending in .md) and content in th" +
-            "is folder.", Icon="NoteAdd", Position=2, Title="Create Markdown File")]
+            "is folder.", Icon="NoteAdd", Position=2, RequiresAdministration=true, Title="Create Markdown File")]
         public System.Threading.Tasks.Task CreateMarkdownFileAsync(string name, string content, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task DeleteBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task DeleteSubjectAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Abstractions.BlobMetadata?> GetBlobMetadataAsync(string path, System.Threading.CancellationToken cancellationToken) { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         [HomeBlaze.Abstractions.Attributes.ExcludeFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget.UserInterface)]
-        [HomeBlaze.Abstractions.Attributes.Query(Description="Gets the names of the children of this folder or storage in the order in which th" +
-            "ey are shown in navigation and in the browser.", Position=3, Title="Get Order")]
-        public string[] GetOrder() { }
+        [HomeBlaze.Abstractions.Attributes.Query(Description="Gets the names of the children of this folder or storage that the caller may see," +
+            " in the order in which they are shown in navigation and in the browser.", Position=3, Title="Get Order")]
+        public string[] GetOrder([HomeBlaze.Abstractions.Attributes.FromServices] HomeBlaze.Authorization.Abstractions.IUserPermissions? permissions) { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
@@ -302,7 +304,7 @@ namespace HomeBlaze.Storage.Internal
     {
         public MarkdownContentParser(HomeBlaze.Services.ConfigurableSubjectSerializer serializer, HomeBlaze.Services.SubjectPathResolver pathResolver, HomeBlaze.Services.TypeProvider typeProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Storage.Internal.MarkdownContentParser>? logger = null) { }
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownParseResult> ParseAsync(string? content, HomeBlaze.Storage.Files.MarkdownFile parent, System.Collections.Generic.IDictionary<string, Namotion.Interceptor.IInterceptorSubject> existingChildren, System.Threading.CancellationToken cancellationToken) { }
-        public string? RenderContent(string? content, HomeBlaze.Storage.Files.MarkdownFile parent, bool includeSourcePaths = false) { }
+        public string? RenderContent(string? content, HomeBlaze.Storage.Files.MarkdownFile parent, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, bool includeSourcePaths = false) { }
         public string ResolveLink(string link, HomeBlaze.Storage.Files.MarkdownFile page) { }
     }
     public class MarkdownFrontmatter
@@ -323,7 +325,7 @@ namespace HomeBlaze.Storage.Internal
     }
     public static class MarkdownMarkup
     {
-        public static System.Collections.Generic.List<HomeBlaze.Storage.Internal.MarkdownRenderSegment> GetRenderSegments(System.Collections.Generic.IEnumerable<Namotion.Interceptor.IInterceptorSubject> children, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone, bool groupsText = false) { }
+        public static System.Collections.Generic.List<HomeBlaze.Storage.Internal.MarkdownRenderSegment> GetRenderSegments(System.Collections.Generic.IEnumerable<Namotion.Interceptor.IInterceptorSubject> children, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, bool groupsText = false) { }
     }
     public readonly struct MarkdownRenderSegment : System.IEquatable<HomeBlaze.Storage.Internal.MarkdownRenderSegment>
     {
@@ -347,7 +349,7 @@ namespace HomeBlaze.Storage.Internal
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
-        public string GetText(HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
+        public string GetText(HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }

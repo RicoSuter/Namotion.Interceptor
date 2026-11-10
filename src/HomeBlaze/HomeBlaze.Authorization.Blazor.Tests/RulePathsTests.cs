@@ -6,7 +6,7 @@ namespace HomeBlaze.Authorization.Blazor.Tests;
 
 public sealed class RulePathsTests : IDisposable
 {
-    private readonly TestAuthorizationGraph _graph = TestAuthorizationGraph.Create("Kitchen");
+    private readonly TestAuthorizationGraph _graph = TestAuthorizationGraph.Create("kitchen");
 
     public void Dispose() => _graph.Dispose();
 
@@ -28,24 +28,6 @@ public sealed class RulePathsTests : IDisposable
         Assert.Equal(expectedPattern, pattern);
     }
 
-    [Theory]
-    [InlineData("/Devices/Child", true)] // a property holding a subject
-    [InlineData("/Devices/Child/Child", true)] // a property that can hold a subject but holds none
-    [InlineData("/Devices", false)] // an entry
-    [InlineData("/Devices/Temperature", false)] // a value
-    [InlineData("/Devices/Start", false)] // a method
-    [InlineData("/Devices/*/Child", false)] // an interior wildcard
-    [InlineData("/Devices/Child/**", false)] // a trailing wildcard
-    [InlineData("/Devices/Kitchn", false)] // nothing
-    public void WhenAPatternIsChecked_ThenOnlyOneWithoutWildcardsNamingAPropertyThatHoldsSubjectsNamesSuchAMember(string pattern, bool expected)
-    {
-        // Act
-        var namesMember = RulePaths.NamesMemberHoldingSubjects(pattern, _graph.Root, _graph.Service.PathProvider);
-
-        // Assert
-        Assert.Equal(expected, namesMember);
-    }
-
     [Fact]
     public void WhenTheMembersOfASubjectGetTheirPaths_ThenARuleWithEachPathMatchesThatMember()
     {
@@ -60,10 +42,10 @@ public sealed class RulePathsTests : IDisposable
         {
             var role = new AuthorizationRole
             {
-                Name = "Kitchen",
+                Name = "kitchen",
                 Allow = [new PermissionRule { Paths = [paths[index]!], Actions = [PermissionAction.Read] }]
             };
-            var policy = _graph.Service.PreviewPolicy(role).Policy;
+            var policy = _graph.Service.PreviewPolicy(role, PrincipalKind.NonHuman).Policy;
             var decision = policy.Explain(members[index], PermissionAction.Read);
             Assert.True(decision.AllowedByRule is not null, $"'{paths[index]}' does not match {members[index].Name}.");
         }

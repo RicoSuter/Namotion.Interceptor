@@ -8,3 +8,9 @@ h1[tabindex="-1"]:focus {
 pre.mermaid[data-mermaid-state="pending"] {
     visibility: hidden;
 }
+
+/* The base styles of MudBlazor remove the padding of lists, which leaves their markers outside the text; this places them
+   flush with the text around the list. A class of a component that styles its own list wins over this. */
+ul, ol {
+    padding-inline-start: 0.9em;
+}

@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Authorization.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
@@ -34,9 +35,9 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     // GetStructureVersion for the version.
     private readonly ConcurrentDictionary<IInterceptorSubject, (long Version, IReadOnlyList<string> Paths, RecordedRoute? Route)> _canonicalPathsCache = new(ReferenceEqualityComparer.Instance);
 
-    // (path, style) → Subject resolve cache (absolute paths only) and the route of the first caller with a recorder, see
-    // GetStructureVersion for the version.
-    private readonly ConcurrentDictionary<(string Path, PathStyle Style), (long Version, IInterceptorSubject? Subject, RecordedRoute? Route)> _resolveCache = new();
+    // (path, style) → Subject resolve cache (absolute paths only) with the members the path reads through and the route
+    // of the first caller with a recorder, see GetStructureVersion for the version.
+    private readonly ConcurrentDictionary<(string Path, PathStyle Style), (long Version, IInterceptorSubject? Subject, RegisteredSubjectProperty[] Members, RecordedRoute? Route)> _resolveCache = new();
 
     // In a context of its own, so that a change of the version tells only the components that read it and not the
     // observers of the graph's changes, such as connectors and the history.
@@ -71,7 +72,23 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     public IInterceptorSubject? ResolveSubject(
         string path,
         PathStyle style,
-        IInterceptorSubject? relativeTo = null) => ResolveSubjectCore(path, style, relativeTo, recorder: null);
+        IInterceptorSubject? relativeTo = null) => ResolveSubjectCore(path, style, relativeTo, permissions: null, recorder: null);
+
+    /// <summary>
+    /// Resolves a subject from a path for a viewer: as <see cref="ResolveSubject(string, PathStyle, IInterceptorSubject?)"/>,
+    /// but null unless the viewer may read every member the path reads through, such as a reference, a collection or the
+    /// member of a parent that <c>..</c> goes up through, and is shown the subject that <c>..</c> leads to.
+    /// </summary>
+    /// <param name="path">The path to resolve, see <see cref="ResolveSubject(string, PathStyle, IInterceptorSubject?)"/>.</param>
+    /// <param name="style">Path style (Canonical or Route).</param>
+    /// <param name="relativeTo">Base subject for relative paths.</param>
+    /// <param name="permissions">The permissions of the viewer, or null to check nothing.</param>
+    /// <returns>The resolved subject, or null if not found or not readable through the path.</returns>
+    public IInterceptorSubject? ResolveSubject(
+        string path,
+        PathStyle style,
+        IInterceptorSubject? relativeTo,
+        IUserPermissions? permissions) => ResolveSubjectCore(path, style, relativeTo, permissions, recorder: null);
 
     /// <summary>
     /// Resolves a subject from a path as <see cref="ResolveSubject(string, PathStyle, IInterceptorSubject?)"/> does and
@@ -82,12 +99,13 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         string path,
         PathStyle style,
         IInterceptorSubject? relativeTo,
-        ISubjectPathRecorder? recorder) => ResolveSubjectCore(path, style, relativeTo, recorder);
+        ISubjectPathRecorder? recorder) => ResolveSubjectCore(path, style, relativeTo, permissions: null, recorder);
 
     private IInterceptorSubject? ResolveSubjectCore(
         string path,
         PathStyle style,
         IInterceptorSubject? relativeTo,
+        IUserPermissions? permissions,
         ISubjectPathRecorder? recorder)
     {
         var root = _getRoot();
@@ -123,37 +141,45 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                 return null;
             }
 
-            // Looked up first, so that a hit allocates nothing: every render asks for the same paths again. An entry computed
-            // without a recorder has no route to replay.
+            // Looked up first, so that a hit allocates nothing: every render asks for the same paths again. The entry is
+            // computed for no viewer and keeps the members the path reads through, which are checked for the viewer. An
+            // entry computed without a recorder has no route to replay.
             var key = (path, style);
             var version = GetStructureVersion(root);
-            if (_resolveCache.TryGetValue(key, out var cached) && cached.Version == version && (recorder is null || cached.Route is not null))
+            if (!_resolveCache.TryGetValue(key, out var cached) || cached.Version != version || (recorder is not null && cached.Route is null))
             {
-                if (recorder is not null)
-                    cached.Route!.Replay(recorder);
+                var members = new List<RegisteredSubjectProperty>();
+                IInterceptorSubject? resolved;
+                RecordedRoute? route = null;
+                if (recorder is null)
+                {
+                    resolved = ResolveInternal(root, path[1..], style, permissions: null, members, recorder: null);
+                }
+                else
+                {
+                    var buffer = RouteBuffer.Take();
+                    resolved = ResolveInternal(root, path[1..], style, permissions: null, members, buffer);
+                    route = buffer.ToRoute(cached.Route);
+                    RouteBuffer.Return(buffer);
+                }
 
-                return cached.Subject;
+                cached = (version, resolved, members.ToArray(), route);
+                _resolveCache[key] = cached;
             }
 
-            IInterceptorSubject? resolved;
-            RecordedRoute? route = null;
-            if (recorder is null)
-            {
-                resolved = ResolveInternal(root, path[1..], style, null);
-            }
-            else
-            {
-                var buffer = RouteBuffer.Take();
-                resolved = ResolveInternal(root, path[1..], style, buffer);
-                route = buffer.ToRoute(cached.Route);
-                RouteBuffer.Return(buffer);
-            }
-
-            _resolveCache[key] = (version, resolved, route);
             if (recorder is not null)
-                route!.Replay(recorder);
+                cached.Route!.Replay(recorder);
 
-            return resolved;
+            if (permissions is not null)
+            {
+                foreach (var member in cached.Members)
+                {
+                    if (!permissions.CanRead(member))
+                        return null;
+                }
+            }
+
+            return cached.Subject;
         }
 
         // Explicit relative: ./...
@@ -166,7 +192,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                 return null;
             }
 
-            return ResolveInternal(baseSubject, path[2..], style, recorder);
+            return ResolveInternal(baseSubject, path[2..], style, permissions, members: null, recorder);
         }
 
         // Parent navigation: ../... or ".." alone
@@ -195,13 +221,20 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                 if (parents.Length != 1)
                     return null;
 
+                if (permissions is not null && !permissions.CanRead(parents[0].Property))
+                    return null;
+
                 current = parents[0].Property.Subject;
             }
+
+            // The members below are checked on the way down, which shows each subject they lead to only when this one is shown.
+            if (permissions is not null && !permissions.CanShow(current))
+                return null;
 
             if (string.IsNullOrEmpty(remaining))
                 return current;
 
-            return ResolveInternal(current, remaining, style, recorder);
+            return ResolveInternal(current, remaining, style, permissions, members: null, recorder);
         }
 
         // No prefix = relative implicit
@@ -213,7 +246,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                 return null;
             }
 
-            return ResolveInternal(baseSubject, path, style, recorder);
+            return ResolveInternal(baseSubject, path, style, permissions, members: null, recorder);
         }
     }
 
@@ -365,7 +398,14 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         return sb.ToString();
     }
 
-    private IInterceptorSubject? ResolveInternal(IInterceptorSubject baseSubject, string path, PathStyle style, ISubjectPathRecorder? recorder)
+    // Each member the path reads through is added to members and refused unless the viewer may read it.
+    private static IInterceptorSubject? ResolveInternal(
+        IInterceptorSubject baseSubject,
+        string path,
+        PathStyle style,
+        IUserPermissions? permissions,
+        List<RegisteredSubjectProperty>? members,
+        ISubjectPathRecorder? recorder)
     {
         if (string.IsNullOrEmpty(path))
             return baseSubject;
@@ -435,6 +475,9 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                         var childSubject = SubjectPathResolverExtensions.FindChildByIndex(childrenProperty, childrenValue, segment);
                         if (childSubject is not null)
                         {
+                            if (!ReadThrough(childrenProperty, permissions, members))
+                                return null;
+
                             current = childSubject;
                             continue;
                         }
@@ -449,6 +492,9 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             // attachment of that subject nor, for a plain property, a change of its value.
             if (!property.Reference.Metadata.IsIntercepted)
                 recorder?.MarkUnbounded();
+
+            if (!ReadThrough(property, permissions, members))
+                return null;
 
             var value = property.GetValue();
             if (value == null)
@@ -483,6 +529,12 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         }
 
         return current;
+    }
+
+    private static bool ReadThrough(RegisteredSubjectProperty member, IUserPermissions? permissions, List<RegisteredSubjectProperty>? members)
+    {
+        members?.Add(member);
+        return permissions?.CanRead(member) != false;
     }
 
     private IReadOnlyList<string> ComputeCanonicalPaths(IInterceptorSubject subject, ISubjectPathRecorder? recorder)

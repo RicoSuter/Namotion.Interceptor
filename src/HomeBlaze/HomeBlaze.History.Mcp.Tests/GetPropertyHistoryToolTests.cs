@@ -37,7 +37,7 @@ public class GetPropertyHistoryToolTests
         }
 
         var provider = new HistoryMcpToolProvider(
-            () => root, new McpServerConfiguration { PathProvider = new StateAttributePathProvider() }, NullLogger<HistoryMcpToolProvider>.Instance);
+            () => root, new McpServerConfiguration { PathProvider = new StateAttributePathProvider(), AccessPolicy = AllowAllMcpAccessPolicy.Instance }, NullLogger<HistoryMcpToolProvider>.Instance);
 
         var tool = provider.GetTools().First(candidate => candidate.Name == "get_property_history");
         var input = JsonSerializer.SerializeToElement(inputObject);
@@ -58,7 +58,7 @@ public class GetPropertyHistoryToolTests
     {
         // Act
         var json = await InvokeAsync(
-            new { paths = new[] { "/a/Value", "/b/Value" }, from = "2026-06-24T00:00:00Z", to = "2026-06-24T01:00:00Z", time_zone = "UTC" },
+            new { paths = new[] { "/Power", "/Energy" }, from = "2026-06-24T00:00:00Z", to = "2026-06-24T01:00:00Z", time_zone = "UTC" },
             ConfigureGappedStore);
 
         // Assert
@@ -82,11 +82,11 @@ public class GetPropertyHistoryToolTests
     {
         // Act
         var json = await InvokeAsync(
-            new { paths = new[] { "/a/Value" }, from = "2026-06-24T00:00:00Z", to = "2026-06-24T01:00:00Z", time_zone = "UTC" },
+            new { paths = new[] { "/Power" }, from = "2026-06-24T00:00:00Z", to = "2026-06-24T01:00:00Z", time_zone = "UTC" },
             ConfigureGappedStore);
 
         // Assert
-        var points = json.GetProperty("series").GetProperty("/a/Value").GetProperty("points").EnumerateArray().ToArray();
+        var points = json.GetProperty("series").GetProperty("/Power").GetProperty("points").EnumerateArray().ToArray();
         Assert.Equal(2, points.Length);
         Assert.Equal("2026-06-24T00:05:00Z", points[0][0].GetString());
         Assert.Equal(1.5, points[0][1].GetDouble());
@@ -99,7 +99,7 @@ public class GetPropertyHistoryToolTests
     {
         // Act
         var json = await InvokeAsync(
-            new { paths = new[] { "/a/Value", "/b/Value" }, from = "2026-06-24T00:00:00Z", to = "2026-06-24T01:00:00Z", time_zone = "UTC", coverage = "Ranges" },
+            new { paths = new[] { "/Power", "/Energy" }, from = "2026-06-24T00:00:00Z", to = "2026-06-24T01:00:00Z", time_zone = "UTC", coverage = "Ranges" },
             ConfigureGappedStore);
 
         // Assert
@@ -118,18 +118,18 @@ public class GetPropertyHistoryToolTests
     {
         // Act - a truncated result narrows what the merger vouches for, so that series' coverage differs.
         var json = await InvokeAsync(
-            new { paths = new[] { "/a/Value", "/b/Value" }, from = "2026-06-24T00:00:00Z", to = "2026-06-24T01:00:00Z", coverage = "ranges" },
+            new { paths = new[] { "/Power", "/Energy" }, from = "2026-06-24T00:00:00Z", to = "2026-06-24T01:00:00Z", coverage = "ranges" },
             store =>
             {
                 ConfigureGappedStore(store);
-                store.TruncatedPath = "/b/Value";
+                store.TruncatedPath = "/Energy";
             });
 
         // Assert
         var series = json.GetProperty("series");
-        Assert.False(series.GetProperty("/a/Value").TryGetProperty("ranges", out _));
-        Assert.True(series.GetProperty("/b/Value").GetProperty("truncated").GetBoolean());
-        Assert.NotEmpty(series.GetProperty("/b/Value").GetProperty("ranges").EnumerateArray());
+        Assert.False(series.GetProperty("/Power").TryGetProperty("ranges", out _));
+        Assert.True(series.GetProperty("/Energy").GetProperty("truncated").GetBoolean());
+        Assert.NotEmpty(series.GetProperty("/Energy").GetProperty("ranges").EnumerateArray());
     }
 
     [Fact]
@@ -137,17 +137,17 @@ public class GetPropertyHistoryToolTests
     {
         // Act
         var json = await InvokeAsync(
-            new { paths = new[] { "/a/Value", "/b/Value" }, from = "2026-06-24T00:00:00Z", to = "2026-06-24T01:00:00Z", time_zone = "UTC" },
+            new { paths = new[] { "/Power", "/Energy" }, from = "2026-06-24T00:00:00Z", to = "2026-06-24T01:00:00Z", time_zone = "UTC" },
             store =>
             {
                 ConfigureGappedStore(store);
-                store.TruncatedPath = "/b/Value";
+                store.TruncatedPath = "/Energy";
             });
 
         // Assert
         var series = json.GetProperty("series");
-        Assert.False(series.GetProperty("/a/Value").TryGetProperty("complete_from", out _));
-        var truncated = series.GetProperty("/b/Value");
+        Assert.False(series.GetProperty("/Power").TryGetProperty("complete_from", out _));
+        var truncated = series.GetProperty("/Energy");
         Assert.Equal("2026-06-24T00:05:00Z", truncated.GetProperty("complete_from").GetString());
         Assert.Equal(truncated.GetProperty("points")[0][0].GetString(), truncated.GetProperty("complete_from").GetString());
     }
@@ -307,7 +307,7 @@ public class GetPropertyHistoryToolTests
     public async Task WhenCoverageModeIsUnknown_ThenStructuredError()
     {
         // Act
-        var json = await InvokeAsync(new { paths = new[] { "/a/Value" }, from = "2026-06-24T00:00:00Z", coverage = "all" });
+        var json = await InvokeAsync(new { paths = new[] { "/Power" }, from = "2026-06-24T00:00:00Z", coverage = "all" });
 
         // Assert
         Assert.Equal("Parameter 'coverage' must be 'summary' or 'ranges'.", json.GetProperty("error").GetString());
@@ -318,7 +318,7 @@ public class GetPropertyHistoryToolTests
     {
         // Arrange
         var provider = new HistoryMcpToolProvider(
-            () => throw new InvalidOperationException("Not used."), new McpServerConfiguration { PathProvider = new StateAttributePathProvider() }, NullLogger<HistoryMcpToolProvider>.Instance);
+            () => throw new InvalidOperationException("Not used."), new McpServerConfiguration { PathProvider = new StateAttributePathProvider(), AccessPolicy = AllowAllMcpAccessPolicy.Instance }, NullLogger<HistoryMcpToolProvider>.Instance);
 
         // Act
         var tool = provider.GetTools().Single();
@@ -335,19 +335,19 @@ public class GetPropertyHistoryToolTests
         var json = await InvokeAsync(
             new
             {
-                paths = new[] { "/a/Text", "/b/Value" },
+                paths = new[] { "/Name", "/Energy" },
                 from = "2026-06-24T00:00:00Z",
                 to = "2026-06-24T01:00:00Z",
                 aggregation = "SampleAverage"
             },
-            store => store.UnsupportedPath = "/a/Text");
+            store => store.UnsupportedPath = "/Name");
 
         // Assert - the whole call used to fail, throwing away the paths that could be served.
         Assert.False(json.TryGetProperty("error", out _));
         var series = json.GetProperty("series");
-        Assert.True(series.GetProperty("/a/Text").TryGetProperty("error", out _));
-        Assert.False(series.GetProperty("/b/Value").TryGetProperty("error", out _));
-        Assert.True(series.GetProperty("/b/Value").TryGetProperty("points", out _));
+        Assert.True(series.GetProperty("/Name").TryGetProperty("error", out _));
+        Assert.False(series.GetProperty("/Energy").TryGetProperty("error", out _));
+        Assert.True(series.GetProperty("/Energy").TryGetProperty("points", out _));
     }
 
     [Fact]
@@ -356,7 +356,7 @@ public class GetPropertyHistoryToolTests
         // Act
         var json = await InvokeAsync(new
         {
-            paths = new[] { "/a/Value" },
+            paths = new[] { "/Power" },
             from = "2026-06-24T00:00:00Z",
             to = "2026-06-24T01:00:00Z",
             max_points = "many"
@@ -373,7 +373,7 @@ public class GetPropertyHistoryToolTests
         // unstructured and naming an internal parameter.
         var json = await InvokeAsync(new
         {
-            paths = new[] { "/a/Value" },
+            paths = new[] { "/Power" },
             from = "2026-06-24T00:00:00Z",
             to = "2026-06-24T01:00:00Z",
             max_points = 0
@@ -417,7 +417,7 @@ public class GetPropertyHistoryToolTests
         // Act: a swapped range, which is a routine mistake when composing timestamps.
         var json = await InvokeAsync(new
         {
-            paths = new[] { "/a/Value" },
+            paths = new[] { "/Power" },
             from = "2026-06-24T12:00:00Z",
             to = "2026-06-24T06:00:00Z"
         });
@@ -433,7 +433,7 @@ public class GetPropertyHistoryToolTests
         // ten times the point budget, with nothing telling the caller its bucket was dropped.
         var json = await InvokeAsync(new
         {
-            paths = new[] { "/a/Value" },
+            paths = new[] { "/Power" },
             from = "2026-06-24T00:00:00Z",
             bucket = 300
         });
@@ -448,7 +448,7 @@ public class GetPropertyHistoryToolTests
         // Act
         var json = await InvokeAsync(new
         {
-            paths = new[] { "/a/Value" },
+            paths = new[] { "/Power" },
             from = "2026-06-24T00:00:00Z",
             aggregation = 0
         });
@@ -463,7 +463,7 @@ public class GetPropertyHistoryToolTests
         // Act
         var json = await InvokeAsync(new
         {
-            paths = new[] { "/a/Value" },
+            paths = new[] { "/Power" },
             from = "2026-06-24T00:00:00Z",
             bucket = "99999999999d"
         });
@@ -478,7 +478,7 @@ public class GetPropertyHistoryToolTests
         // Act
         var json = await InvokeAsync(new
         {
-            paths = Enumerable.Range(0, 50).Select(index => $"/a/Value{index}").ToArray(),
+            paths = Enumerable.Range(0, 50).Select(index => $"/Power{index}").ToArray(),
             from = "2026-06-24T00:00:00Z"
         });
 
@@ -490,7 +490,7 @@ public class GetPropertyHistoryToolTests
     public async Task WhenFromMissing_ThenError()
     {
         // Act
-        var json = await InvokeAsync(new { paths = new[] { "/a/Value" } });
+        var json = await InvokeAsync(new { paths = new[] { "/Power" } });
 
         // Assert
         Assert.True(json.TryGetProperty("error", out _));
@@ -517,14 +517,14 @@ public class GetPropertyHistoryToolTests
         // Act - the non-string element is skipped and the valid string path drives a normal (empty) result.
         var json = await InvokeAsync(new
         {
-            paths = new object[] { "/a/Value", 123 },
+            paths = new object[] { "/Power", 123 },
             from = "2026-06-24T00:00:00Z",
             to = "2026-06-24T01:00:00Z"
         });
 
         // Assert
         Assert.False(json.TryGetProperty("error", out _));
-        Assert.True(json.GetProperty("series").TryGetProperty("/a/Value", out _));
+        Assert.True(json.GetProperty("series").TryGetProperty("/Power", out _));
     }
 
     [Fact]
@@ -533,7 +533,7 @@ public class GetPropertyHistoryToolTests
         // Act
         var json = await InvokeAsync(new
         {
-            paths = new[] { "/a/Value" },
+            paths = new[] { "/Power" },
             from = "2026-06-24T00:00:00Z",
             aggregation = "bogus"
         });
@@ -551,7 +551,7 @@ public class GetPropertyHistoryToolTests
         // Act
         var json = await InvokeAsync(new
         {
-            paths = new[] { "/a/Value" },
+            paths = new[] { "/Power" },
             from = "2026-06-24T00:00:00Z",
             bucket = "5x"
         });
@@ -566,7 +566,7 @@ public class GetPropertyHistoryToolTests
         // Arrange - default aggregation Last (AlwaysAvailable), no stores -> empty points, not an error.
         var json = await InvokeAsync(new
         {
-            paths = new[] { "/a/Value", "/b/Value" },
+            paths = new[] { "/Power", "/Energy" },
             from = "2026-06-24T00:00:00Z",
             to = "2026-06-24T01:00:00Z"
         });
@@ -574,10 +574,10 @@ public class GetPropertyHistoryToolTests
         // Assert
         Assert.False(json.TryGetProperty("error", out _));
         var series = json.GetProperty("series");
-        foreach (var path in new[] { "/a/Value", "/b/Value" })
+        foreach (var path in new[] { "/Power", "/Energy" })
         {
             Assert.True(series.TryGetProperty(path, out var entry));
-            Assert.True(entry.TryGetProperty("value_type", out _));     // present (null when unresolved)
+            Assert.True(entry.TryGetProperty("value_type", out _));
             Assert.Empty(entry.GetProperty("points").EnumerateArray());
             Assert.False(entry.TryGetProperty("truncated", out _));
             Assert.False(entry.TryGetProperty("ranges", out _));
@@ -595,7 +595,7 @@ public class GetPropertyHistoryToolTests
         // Arrange - "count" normalizes to Count (AlwaysAvailable); bucket "5m" parses; no stores -> empty, no error.
         var json = await InvokeAsync(new
         {
-            paths = new[] { "/a/Value" },
+            paths = new[] { "/Power" },
             from = "2026-06-24T00:00:00Z",
             to = "2026-06-24T01:00:00Z",
             bucket = "5m",
@@ -604,7 +604,7 @@ public class GetPropertyHistoryToolTests
 
         // Assert
         Assert.False(json.TryGetProperty("error", out _));
-        Assert.True(json.GetProperty("series").TryGetProperty("/a/Value", out _));
+        Assert.True(json.GetProperty("series").TryGetProperty("/Power", out _));
     }
 
     [Fact]
@@ -773,7 +773,7 @@ public class GetPropertyHistoryToolTests
         // Assert
         var series = json.GetProperty("series");
         Assert.Equal(
-            "Property not found; Delta needs the property to check that it is cumulative.",
+            "Path not found: /Missing",
             series.GetProperty("/Missing").GetProperty("error").GetString());
         Assert.False(series.GetProperty("/Energy").TryGetProperty("error", out _));
     }

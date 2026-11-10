@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
@@ -172,7 +173,7 @@ public class MarkdownPageScopeTests
             """);
 
         // Act
-        var evaluated = page.ReadEvaluatedContent();
+        var evaluated = page.ReadEvaluatedContent(UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Contains("Count: 7", evaluated);
@@ -195,7 +196,7 @@ public class MarkdownPageScopeTests
             """);
 
         // Act
-        var evaluated = page.ReadEvaluatedContent();
+        var evaluated = page.ReadEvaluatedContent(UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Contains("Count: 7\n", evaluated);
@@ -215,7 +216,7 @@ public class MarkdownPageScopeTests
             """);
 
         // Act
-        var evaluated = page.ReadEvaluatedContent();
+        var evaluated = page.ReadEvaluatedContent(UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Contains("Write `{{ leaf/Count }}` or only `{{` to show 7 here.", evaluated);
@@ -548,13 +549,13 @@ public class MarkdownPageScopeTests
         var expression = FindExpression(page.Children.Values, "/later.md/Title");
         var pathResolver = fixture.Services.GetRequiredService<SubjectPathResolver>();
         var pathsVersionBefore = pathResolver.PathsVersion;
-        Assert.Equal(string.Empty, expression.GetText(timeZone: null));
+        Assert.Equal(string.Empty, expression.GetText(timeZone: null, UnrestrictedPermissions.Instance));
 
         // Act
         await fixture.AddPageAsync("later.md", "---\ntitle: Later\n---\n\ntext");
 
         // Assert: a render reads the version of the paths and then the text, see RenderExpression.Value.
         Assert.NotEqual(pathsVersionBefore, pathResolver.PathsVersion);
-        Assert.Equal("Later", expression.GetText(timeZone: null));
+        Assert.Equal("Later", expression.GetText(timeZone: null, UnrestrictedPermissions.Instance));
     }
 }

@@ -1,0 +1,65 @@
+@* Enters the role names of an operation parameter named for AuthorizationParameterEditors.RoleNames: offers the roles the person may assign. The user store still checks the roles when the operation runs. *@
+@using HomeBlaze.Authorization.Abstractions
+@using HomeBlaze.Components.Operations
+@inherits MethodParameterEditor
+@implements IDisposable
+@inject AuthorizationService AuthorizationService
+@inject IUserPermissions Permissions
+
+<RoleSelector Selected="@_selected" SelectedChanged="@SelectAsync" Excluded="@GetNotAssignable()" Label="@Label"
+              HelperText="@GetHelperText()" Error="@(ErrorText is not null)" ErrorText="@ErrorText" TestId="parameter-role" />
+
+@code {
+    private IReadOnlyList<string> _selected = [];
+    private bool _isDisposed;
+
+    protected override void OnInitialized() => Permissions.Changed += OnPermissionsChanged;
+
+    // Without a value the parameter starts with no roles, which a user may hold, so the dialog can execute without a choice.
+    protected override async Task OnInitializedAsync()
+    {
+        if (Value is null)
+        {
+            await ValueChanged.InvokeAsync(Array.Empty<string>());
+        }
+    }
+
+    protected override void OnParametersSet()
+    {
+        _selected = Value as IReadOnlyList<string> ?? [];
+    }
+
+    public void Dispose()
+    {
+        _isDisposed = true;
+        Permissions.Changed -= OnPermissionsChanged;
+    }
+
+    // A person assigns only roles they hold, counting the roles they include; a full administrator holds every role.
+    private List<string> GetNotAssignable() =>
+        AuthorizationService.GetRoleNames().Where(role => !Permissions.HoldsAllRoles([role])).ToList();
+
+    private string? GetHelperText()
+    {
+        var missing = Permissions.GetRolesWithDenyRulesMissingFrom(_selected);
+        return missing.Count > 0
+            ? $"Unless the change only takes roles away, the roles must include your roles with deny rules: {string.Join(", ", missing)}."
+            : null;
+    }
+
+    private Task SelectAsync(IReadOnlyList<string> names)
+    {
+        _selected = names;
+        return ValueChanged.InvokeAsync(names.ToArray());
+    }
+
+    // Raised on any thread, also right after this component was disposed.
+    private void OnPermissionsChanged() =>
+        _ = InvokeAsync(() =>
+        {
+            if (!_isDisposed)
+            {
+                StateHasChanged();
+            }
+        });
+}

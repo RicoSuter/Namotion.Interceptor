@@ -17,9 +17,17 @@ public class OperationAttribute : SubjectMethodAttribute
     public bool RequiresConfirmation { get; set; }
 
     /// <summary>
+    /// If true, the operation changes what the application is or who may use it, such as creating subjects or managing
+    /// users. It is never run through <c>execute</c>: a person needs the <c>administer</c> action on it, and agents and
+    /// MCP clients cannot run it. A method that implements an interface operation or overrides a base class operation
+    /// that sets this keeps the requirement.
+    /// </summary>
+    public bool RequiresAdministration { get; set; }
+
+    /// <summary>
     /// What the operation is for; <see cref="OperationPurpose.None"/> by default. Independent of
-    /// <see cref="RequiresConfirmation"/>, which still decides whether agents may call the operation. Ignored on an
-    /// operation with a parameter that requires input.
+    /// <see cref="RequiresConfirmation"/>, which still decides whether agents may call the operation.
+    /// <see cref="OperationPurpose.Delete"/> is ignored on an operation with a parameter that requires input.
     /// </summary>
     public OperationPurpose Purpose { get; set; }
 }

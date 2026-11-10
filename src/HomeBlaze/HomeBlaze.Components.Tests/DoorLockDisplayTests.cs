@@ -2,6 +2,7 @@ using HomeBlaze.Abstractions.Devices.Locks;
 using HomeBlaze.Abstractions.Sensors;
 using HomeBlaze.Components.Controls;
 using HomeBlaze.Services;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services.Display;
 using MudBlazor;
 using Xunit;
@@ -43,7 +44,7 @@ public class DoorLockDisplayTests
         string doorIcon, string badgeIcon, Color fill, string subtitle, string description, string? operation)
     {
         // Act
-        var appearance = DoorLockDisplay.Get(lockState, doorState);
+        var appearance = DoorLockDisplay.Get(lockState, doorState, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(new DoorLockAppearance(doorIcon, badgeIcon, fill, ValueColor.Default, subtitle, description, operation), appearance);
@@ -74,7 +75,7 @@ public class DoorLockDisplayTests
         var map = CreateMap();
 
         // Act
-        var appearance = DoorLockDisplay.Get(lockState, doorState, map, subject: null, resolver: Resolver);
+        var appearance = DoorLockDisplay.Get(lockState, doorState, UnrestrictedPermissions.Instance, map, subject: null, resolver: Resolver);
 
         // Assert
         Assert.Equal(new DoorLockAppearance(doorIcon, badgeIcon, fill, ValueColor.Default, subtitle, description, operation), appearance);
@@ -90,7 +91,7 @@ public class DoorLockDisplayTests
         };
 
         // Act
-        var appearance = DoorLockDisplay.Get(DoorLockState.Locked, DoorState.Closed, map, subject: null, resolver: Resolver);
+        var appearance = DoorLockDisplay.Get(DoorLockState.Locked, DoorState.Closed, UnrestrictedPermissions.Instance, map, subject: null, resolver: Resolver);
 
         // Assert
         Assert.Equal(Color.Info, appearance.Fill.Theme);
@@ -107,10 +108,10 @@ public class DoorLockDisplayTests
         var map = CreateMap();
 
         // Act
-        var appearance = DoorLockDisplay.Get(lockState, doorState, map, subject: null, resolver: Resolver);
+        var appearance = DoorLockDisplay.Get(lockState, doorState, UnrestrictedPermissions.Instance, map, subject: null, resolver: Resolver);
 
         // Assert
-        Assert.Equal(DoorLockDisplay.Get(lockState, doorState), appearance);
+        Assert.Equal(DoorLockDisplay.Get(lockState, doorState, UnrestrictedPermissions.Instance), appearance);
     }
 
     [Fact]
@@ -126,7 +127,7 @@ public class DoorLockDisplayTests
         foreach (var state in states)
         {
             // Act
-            var appearance = DoorLockDisplay.Get(state, DoorState.Closed, map, subject: null, resolver: Resolver);
+            var appearance = DoorLockDisplay.Get(state, DoorState.Closed, UnrestrictedPermissions.Instance, map, subject: null, resolver: Resolver);
 
             // Assert
             Assert.Equal("mapped", appearance.Subtitle);

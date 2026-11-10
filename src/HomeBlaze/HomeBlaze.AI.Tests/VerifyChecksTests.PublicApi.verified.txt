@@ -160,7 +160,6 @@ namespace HomeBlaze.AI.Agents
         public static bool CanEditPageLayout(System.Collections.Generic.IReadOnlyCollection<string> allowedTools) { }
         public static HomeBlaze.AI.Agents.AgentToolSet Create(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Mcp.McpToolInfo> availableTools, System.Collections.Generic.IReadOnlyCollection<string> allowedTools, Namotion.Interceptor.Mcp.McpToolInfo memoryTool, int maxToolCalls, System.IProgress<HomeBlaze.AI.Agents.AgentTurnUpdate>? progress) { }
         public static bool HasMarkdownTool(System.Collections.Generic.IReadOnlyCollection<string> allowedTools) { }
-        public static bool IsReadOnly(System.Collections.Generic.IReadOnlyCollection<string> allowedTools) { }
         public static bool WritesPages(string toolName) { }
     }
     public static class AgentTriggers
@@ -222,14 +221,15 @@ namespace HomeBlaze.AI.Agents
     }
     public interface IAgentToolSource
     {
-        System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Mcp.McpToolInfo> CreateTools(bool isReadOnly, Namotion.Interceptor.Mcp.Abstractions.IMcpAccessPolicy accessPolicy);
+        System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Mcp.McpToolInfo> CreateTools(Namotion.Interceptor.Mcp.Abstractions.IMcpAccessPolicy accessPolicy);
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
-    public abstract class LlmAgentBase : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    public abstract class LlmAgentBase : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Authorization.IRoleScopedSubject, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public const string AnsweringStatusMessage = "Answering";
         public const string BackgroundRunStatusMessage = "Running";
         public const string CancelledText = "Cancelled before a reply.";
+        public const string NewConversationMemberName = "NewConversation";
         public const string NotRunningText = "The agent is not running.";
         public const string WaitingStatusMessage = "Waiting for the previous turn to finish";
         public static readonly System.TimeSpan MaximumTurnTimeout;
@@ -311,7 +311,7 @@ namespace HomeBlaze.AI.Agents
         protected System.Threading.Tasks.Task<T?> ReadSessionAsync<T>(System.Func<string, T?> parse, System.Threading.CancellationToken cancellationToken)
             where T :  class { }
         protected abstract System.Threading.Tasks.Task ResetSessionAsync(System.Threading.CancellationToken cancellationToken);
-        [HomeBlaze.Abstractions.Attributes.Operation(Icon="PlayArrow", Position=1, Title="Run Now")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="PlayArrow", Position=1, RequiresAdministration=true, Title="Run Now")]
         public void RunNow() { }
         public System.Threading.Tasks.Task SendMessageAsync(string text, System.Threading.CancellationToken cancellationToken) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
@@ -362,11 +362,6 @@ namespace HomeBlaze.AI.Agents.ClaudeCli
 }
 namespace HomeBlaze.AI.Mcp
 {
-    public sealed class AllowAllMcpAccessPolicy : Namotion.Interceptor.Mcp.Abstractions.IMcpAccessPolicy
-    {
-        public static HomeBlaze.AI.Mcp.AllowAllMcpAccessPolicy Instance { get; }
-        public bool IsAllowed(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, string action) { }
-    }
     public sealed class AuthorizationMcpAccessPolicy : Namotion.Interceptor.Mcp.Abstractions.IMcpAccessPolicy
     {
         public AuthorizationMcpAccessPolicy(System.Func<Namotion.Interceptor.Authorization.AuthorizationPolicy> getPolicy) { }
@@ -380,7 +375,6 @@ namespace HomeBlaze.AI.Mcp
     }
     public class HomeBlazeMarkdownToolProvider : Namotion.Interceptor.Mcp.Abstractions.IMcpToolProvider
     {
-        public const string CreateMarkdownToolName = "create_markdown";
         public const string EditMarkdownToolName = "edit_markdown";
         public const string WriteMarkdownToolName = "write_markdown";
         public static System.Collections.Generic.IReadOnlyList<string> ToolNames { get; }
@@ -412,13 +406,12 @@ namespace HomeBlaze.AI
 {
     public static class McpBuilderExtensions
     {
-        public static Microsoft.Extensions.DependencyInjection.IMcpServerBuilder WithHomeBlazeMcpTools(this Microsoft.Extensions.DependencyInjection.IMcpServerBuilder builder, bool isReadOnly = true) { }
+        public static Microsoft.Extensions.DependencyInjection.IMcpServerBuilder WithHomeBlazeMcpTools(this Microsoft.Extensions.DependencyInjection.IMcpServerBuilder builder) { }
     }
     public readonly struct McpToolProviderContext : System.IEquatable<HomeBlaze.AI.McpToolProviderContext>
     {
-        public McpToolProviderContext(System.IServiceProvider Services, System.Func<Namotion.Interceptor.IInterceptorSubject> RootSubjectProvider, bool IsReadOnly, Namotion.Interceptor.Mcp.McpServerConfiguration Configuration) { }
+        public McpToolProviderContext(System.IServiceProvider Services, System.Func<Namotion.Interceptor.IInterceptorSubject> RootSubjectProvider, Namotion.Interceptor.Mcp.McpServerConfiguration Configuration) { }
         public Namotion.Interceptor.Mcp.McpServerConfiguration Configuration { get; init; }
-        public bool IsReadOnly { get; init; }
         public System.Func<Namotion.Interceptor.IInterceptorSubject> RootSubjectProvider { get; init; }
         public System.IServiceProvider Services { get; init; }
     }

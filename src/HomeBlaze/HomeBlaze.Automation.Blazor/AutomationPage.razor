@@ -2,6 +2,7 @@
 @implements ISubjectComponent
 @implements IDisposable
 @using global::HomeBlaze.Components.Dialogs
+@using global::HomeBlaze.Authorization.Abstractions
 @using global::HomeBlaze.Services.Components
 @inject ITimeZoneDisplay TimeZone
 @inject IDialogService DialogService
@@ -9,6 +10,8 @@
 @inject SubjectComponentRegistry ComponentRegistry
 @inject SubjectPathResolver PathResolver
 @inject TimeProvider TimeProvider
+@inject IServiceProvider ServiceProvider
+@inject IUserPermissions Permissions
 
 @if (Subject is Automation automation)
 {
@@ -33,6 +36,7 @@
             }
             <MudSpacer />
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="@(() => ResetAsync(automation))"
+                       Disabled="@(!Permissions.CanInvoke(automation, nameof(Automation.ResetState)))"
                        data-testid="automation-reset">Reset state</MudButton>
             <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Edit" OnClick="@(() => EditAsync(automation))"
                        data-testid="automation-edit">Edit</MudButton>
@@ -97,7 +101,9 @@
                                     <td>@(rule.RunCount ?? 0)</td>
                                     <td>
                                         <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Science"
-                                                   OnClick="@(() => TestAsync(automation, key, rule))" data-testid="automation-test-now">Test now</MudButton>
+                                                   OnClick="@(() => TestAsync(automation, key, rule))"
+                                                   Disabled="@(!Permissions.CanInvoke(rule, nameof(AutomationRule.TestNow)))"
+                                                   data-testid="automation-test-now">Test now</MudButton>
                                     </td>
                                 </tr>
                             }
@@ -219,15 +225,17 @@
     {
         var status = automation.Status;
         var isRunningRules = automation.IsRunningRules;
-        AutomationRuleTestResult result;
-        try
+        // A getter or a text of a device value that the test reads can throw, which comes back as a failure.
+        var invocation = await Permissions.TryInvokeAsync(rule, nameof(AutomationRule.TestNow), null, ServiceProvider, _disposal.Token);
+        if (invocation.Outcome == PermittedOperationOutcome.Denied)
         {
-            result = rule.TestNow();
+            Snackbar.Add("You may not test this rule.", Severity.Warning);
+            return;
         }
-        catch (Exception exception)
+
+        if (invocation.Result is not AutomationRuleTestResult result)
         {
-            // A getter or a text of a device value that the test reads can throw, which must not end the circuit.
-            Snackbar.Add($"Test now failed: {exception.Message}", Severity.Error);
+            Snackbar.Add($"Test now failed: {invocation.Exception?.Message}", Severity.Error);
             return;
         }
 
@@ -259,11 +267,12 @@
             return;
         }
 
-        try
+        var invocation = await Permissions.TryInvokeAsync(automation, nameof(Automation.ResetState), null, ServiceProvider, _disposal.Token);
+        if (invocation.Outcome == PermittedOperationOutcome.Denied)
         {
-            automation.ResetState();
+            Snackbar.Add("You may not reset the state of this automation.", Severity.Warning);
         }
-        catch (InvalidOperationException exception)
+        else if (invocation.Exception is { } exception)
         {
             Snackbar.Add(exception.Message, Severity.Error);
         }

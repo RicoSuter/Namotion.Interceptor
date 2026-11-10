@@ -2,6 +2,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.TimeZones;
 using HomeBlaze.Services;
+using HomeBlaze.Authorization.Abstractions;
 using Namotion.Interceptor.Expressions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Pages;
@@ -34,21 +35,7 @@ public partial class RenderExpression : ITitleProvider
     // so it renders again when the target of an absolute path appears. Its change notification tells other observers when
     // the value changes, but not when a target appears. It is the value before the pipes format it.
     [Derived]
-    public object? Value
-    {
-        get
-        {
-            if (_expression is null)
-            {
-                return null;
-            }
-
-            // Without the read check: the derived value is computed again on the flow of whoever changes a property it
-            // reads, such as an agent whose check refuses it, and would then miss the value and its dependency for everyone.
-            var context = new MarkdownExpressionContext(_pathResolver, Parent, timeZone: null, checksReadAccess: false);
-            return _expression.EvaluateWithoutPipes(ref context).Value;
-        }
-    }
+    public object? Value => EvaluateShared();
 
     public RenderExpression(string text, MarkdownFile parent, SubjectPathResolver pathResolver)
     {
@@ -60,18 +47,33 @@ public partial class RenderExpression : ITitleProvider
     }
 
     /// <summary>
-    /// Gets the value as the page shows it. A missing value, also one of a property that <see cref="PropertyReadAccess"/>
-    /// refuses on the current flow, gives an empty text.
+    /// Gets the value as the page shows it to a viewer. A property that the viewer may not read is missing like one that
+    /// does not exist, also in the cases of a value map, so that a hidden value cannot be told from a wrong path. A missing
+    /// value gives an empty text.
     /// </summary>
     /// <param name="timeZone">The time zone of the viewer for dates, or null for the time zone of the server.</param>
-    public string GetText(ITimeZoneDisplay? timeZone)
+    /// <param name="permissions">The permissions of the viewer the text is shown to.</param>
+    public string GetText(ITimeZoneDisplay? timeZone, IUserPermissions permissions)
     {
         if (_expression is null)
         {
             return string.Empty;
         }
 
-        var context = new MarkdownExpressionContext(_pathResolver, Parent, timeZone);
+        var context = new MarkdownExpressionContext(_pathResolver, Parent, timeZone, permissions);
         return context.ToText(_expression.Evaluate(ref context));
+    }
+
+    // Evaluated without a check of any viewer, as the derived value and its dependencies are shared by every viewer. It is
+    // the value before the pipes, which no property read by a pipe, such as by the cases of a map, can change.
+    private object? EvaluateShared()
+    {
+        if (_expression is null)
+        {
+            return null;
+        }
+
+        var context = new MarkdownExpressionContext(_pathResolver, Parent, timeZone: null, UnrestrictedPermissions.Instance);
+        return _expression.EvaluateWithoutPipes(ref context).Value;
     }
 }

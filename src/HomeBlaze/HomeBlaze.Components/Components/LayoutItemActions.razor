@@ -5,11 +5,15 @@
                    Size="Size.Small"
                    title="@EditTitle"
                    OnClick="OnEdit" />
-    <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                   Size="Size.Small"
-                   Color="Color.Error"
-                   title="Delete"
-                   OnClick="OnDelete" />
+    @if (CanDelete)
+    {
+        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                       Size="Size.Small"
+                       Color="Color.Error"
+                       title="Delete"
+                       OnClick="OnDelete"
+                       data-testid="layout-item-delete-button" />
+    }
 </div>
 
 <style>
@@ -49,6 +53,12 @@
     /// </summary>
     [Parameter]
     public EventCallback<MouseEventArgs> OnEdit { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the button that deletes the item is shown: whether the viewer may delete it.
+    /// </summary>
+    [Parameter]
+    public bool CanDelete { get; set; }
 
     /// <summary>
     /// Raised when the button that deletes the item is clicked.

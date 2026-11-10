@@ -53,7 +53,7 @@
     [Parameter]
     public EventCallback<IReadOnlyList<string>> SelectedChanged { get; set; }
 
-    /// <summary>The role names not offered, compared ignoring case; a selected one stays selected.</summary>
+    /// <summary>The role names not offered; a selected one stays selected.</summary>
     [Parameter]
     public IReadOnlyCollection<string>? Excluded { get; set; }
 
@@ -73,20 +73,12 @@
     [Parameter]
     public string TestId { get; set; } = "role";
 
-    /// <summary>
-    /// Normalizes role names as the selector shows them: blank names dropped, a name of <paramref name="roleNames"/> in its
-    /// casing there, and each name once, ignoring case, at its first position.
-    /// </summary>
-    public static IReadOnlyList<string> Normalize(IEnumerable<string> names, IReadOnlyList<string> roleNames)
+    /// <summary>Normalizes role names as the selector shows them: blank names dropped, and each name once, at its first position.</summary>
+    public static IReadOnlyList<string> Normalize(IEnumerable<string> names)
     {
         ArgumentNullException.ThrowIfNull(names);
-        ArgumentNullException.ThrowIfNull(roleNames);
 
-        return names
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Select(name => roleNames.FirstOrDefault(roleName => string.Equals(roleName, name, StringComparison.OrdinalIgnoreCase)) ?? name)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        return names.Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.Ordinal).ToList();
     }
 
     // Read on each render of the parent as well, so that a parent re-rendered for changed roles shows them.
@@ -98,7 +90,7 @@
         // Normalized only when the parent passes another list, which is not the case for the selection it got from here.
         if (!ReferenceEquals(Selected, _normalizedSelected))
         {
-            _selected = Normalize(Selected, _roleNames);
+            _selected = Normalize(Selected);
             _normalizedSelected = Selected;
         }
     }
@@ -117,7 +109,7 @@
         return offered.Concat(_selected.Where(name => !IsKnownRole(name) || IsExcluded(name)));
     }
 
-    private bool IsExcluded(string name) => Excluded?.Contains(name, StringComparer.OrdinalIgnoreCase) == true;
+    private bool IsExcluded(string name) => Excluded?.Contains(name, StringComparer.Ordinal) == true;
 
     private bool IsKnownRole(string name) => _roleNames.Contains(name, StringComparer.Ordinal);
 

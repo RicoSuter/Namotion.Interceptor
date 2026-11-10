@@ -1,5 +1,10 @@
 ﻿@page "/Error"
 @using System.Diagnostics
+@* The exception handler shows it to visitors who are not signed in as well; it shows only the request id, and the layout
+   lists only the pages the roles of the visitor allow. Static, as it shows when the app may be failing; the gate of the app
+   lets a static page that allows anonymous access pass. *@
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
 
 <PageTitle>Error</PageTitle>
 

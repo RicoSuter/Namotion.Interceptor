@@ -1,6 +1,10 @@
+@using HomeBlaze.Authorization.Abstractions
+@using HomeBlaze.Components.Abstractions.Access
 @using HomeBlaze.Services.Clients
 
 @inject ClientConnectionService ClientConnections
+@inject IUserPermissions Permissions
+@inject IServiceProvider ServiceProvider
 
 <MudDialog data-testid="client-name-dialog">
     <DialogContent>
@@ -12,9 +16,12 @@
         }
     </DialogContent>
     <DialogActions>
+        @{
+            var canRename = ClientConnections.TryGetRenameMember(Connection) is { } member && Permissions.CanInvoke(member);
+        }
         <MudButton OnClick="Cancel">Cancel</MudButton>
-        <MudButton Color="Color.Primary" Disabled="@(string.IsNullOrWhiteSpace(_name) || _isSaving)" OnClick="SaveAsync"
-                   data-testid="client-name-save">Save</MudButton>
+        <MudButton Color="Color.Primary" Disabled="@(string.IsNullOrWhiteSpace(_name) || _isSaving || !canRename)" OnClick="SaveAsync"
+                   title="@(canRename ? null : AccessDeniedTexts.Tooltip)" data-testid="client-name-save">Save</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -32,18 +39,32 @@
 
     private void Cancel() => MudDialog?.Cancel();
 
+    // Runs the Rename operation of the client for the viewer, which requires administration.
     private async Task SaveAsync()
     {
+        if (ClientConnections.TryGetRenameMember(Connection) is not { } member)
+        {
+            _error = "This browser is not known to the installation yet.";
+            return;
+        }
+
         _isSaving = true;
         _error = null;
         try
         {
-            await ClientConnections.RenameAsync(Connection, _name ?? string.Empty, CancellationToken.None);
-            MudDialog?.Close();
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            _error = exception.Message;
+            var result = await Permissions.TryInvokeAsync(member, [_name ?? string.Empty], ServiceProvider, CancellationToken.None);
+            switch (result.Outcome)
+            {
+                case PermittedOperationOutcome.Completed:
+                    MudDialog?.Close();
+                    break;
+                case PermittedOperationOutcome.Denied:
+                    _error = AccessDeniedTexts.Invoke;
+                    break;
+                default:
+                    _error = result.Exception?.Message;
+                    break;
+            }
         }
         finally
         {

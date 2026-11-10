@@ -12,7 +12,7 @@ public class AgentMemoryEditorTests
     public async Task WhenAddingAnEntry_ThenItIsSavedAndTheEditorCloses()
     {
         // Arrange
-        var editor = new AgentMemoryEditor(() => _memory);
+        var editor = new AgentMemoryEditor(() => _memory, () => null);
         editor.StartAdd();
         editor.Key = "preferences/quiet-hours";
         editor.Value = "22:00 to 07:00";
@@ -31,7 +31,7 @@ public class AgentMemoryEditorTests
     public async Task WhenTheMemoryIsNotLoaded_ThenTheEditorIsUnavailableAndSavingFailsWithAClearMessage()
     {
         // Arrange
-        var editor = new AgentMemoryEditor(() => null);
+        var editor = new AgentMemoryEditor(() => null, () => null);
         editor.StartAdd();
         editor.Key = "preferences/quiet-hours";
         editor.Value = "22:00 to 07:00";
@@ -51,7 +51,7 @@ public class AgentMemoryEditorTests
     {
         // Arrange
         await _memory.UpdateAsync([AgentMemoryChange.Set("alerts/freezer", "notified")], CancellationToken.None);
-        var editor = new AgentMemoryEditor(() => _memory);
+        var editor = new AgentMemoryEditor(() => _memory, () => null);
         editor.StartEdit(_memory.GetSnapshot().Entries[0]);
         editor.Key = "alerts/kitchen-freezer";
 
@@ -66,7 +66,7 @@ public class AgentMemoryEditorTests
     public async Task WhenTheKeyIsInvalid_ThenTheErrorIsShownAndTheEditorStaysOpen()
     {
         // Arrange
-        var editor = new AgentMemoryEditor(() => _memory);
+        var editor = new AgentMemoryEditor(() => _memory, () => null);
         editor.StartAdd();
         editor.Key = "bad key";
         editor.Value = "x";
@@ -85,7 +85,7 @@ public class AgentMemoryEditorTests
     {
         // Arrange
         await _memory.UpdateAsync([AgentMemoryChange.Set("alerts/freezer", "notified")], CancellationToken.None);
-        var editor = new AgentMemoryEditor(() => _memory);
+        var editor = new AgentMemoryEditor(() => _memory, () => null);
         editor.StartEdit(_memory.GetSnapshot().Entries[0]);
         editor.Value = "edited by the operator";
 
@@ -105,7 +105,7 @@ public class AgentMemoryEditorTests
     {
         // Arrange
         await _memory.UpdateAsync([AgentMemoryChange.Set("alerts/freezer", "notified")], CancellationToken.None);
-        var editor = new AgentMemoryEditor(() => _memory);
+        var editor = new AgentMemoryEditor(() => _memory, () => null);
         editor.StartEdit(_memory.GetSnapshot().Entries[0]);
         editor.Value = "edited by the operator";
         await _memory.UpdateAsync([AgentMemoryChange.Remove("alerts/freezer")], CancellationToken.None);
@@ -125,7 +125,7 @@ public class AgentMemoryEditorTests
     public void WhenTheValueIsTooLong_ThenTheEditorFlagsItBeforeSaving()
     {
         // Arrange
-        var editor = new AgentMemoryEditor(() => _memory);
+        var editor = new AgentMemoryEditor(() => _memory, () => null);
         editor.StartAdd();
 
         // Act
@@ -140,7 +140,7 @@ public class AgentMemoryEditorTests
     {
         // Arrange
         await _memory.UpdateAsync([AgentMemoryChange.Set("alerts/freezer", "notified")], CancellationToken.None);
-        var editor = new AgentMemoryEditor(() => _memory);
+        var editor = new AgentMemoryEditor(() => _memory, () => null);
 
         // Act
         editor.StartAdd();
@@ -156,7 +156,7 @@ public class AgentMemoryEditorTests
         // Arrange
         await _memory.UpdateAsync(
             [AgentMemoryChange.Set("alerts", "root"), AgentMemoryChange.Set("alerts/freezer", "notified")], CancellationToken.None);
-        var editor = new AgentMemoryEditor(() => _memory);
+        var editor = new AgentMemoryEditor(() => _memory, () => null);
         var entry = _memory.GetSnapshot().Entries[0];
         editor.StartEdit(entry);
 

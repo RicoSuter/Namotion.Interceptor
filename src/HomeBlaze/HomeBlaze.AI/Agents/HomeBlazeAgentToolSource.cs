@@ -17,10 +17,10 @@ internal sealed class HomeBlazeAgentToolSource : IAgentToolSource
         _serviceProvider = serviceProvider;
     }
 
-    public IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly, IMcpAccessPolicy accessPolicy)
+    public IReadOnlyList<McpToolInfo> CreateTools(IMcpAccessPolicy accessPolicy)
     {
         var rootSubjectProvider = () => HomeBlazeMcpConfigurationFactory.GetLoadedRoot(_serviceProvider);
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(_serviceProvider, rootSubjectProvider, isReadOnly, accessPolicy);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(_serviceProvider, rootSubjectProvider, accessPolicy);
         return new McpToolFactory(rootSubjectProvider, configuration).CreateTools();
     }
 }

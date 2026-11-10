@@ -30,7 +30,7 @@ public class ReadInvariantAccessTests
     private static McpServerConfiguration CreateConfiguration(IMcpAccessPolicy? policy) => new()
     {
         PathProvider = new NameAndSubjectsPathProvider(),
-        AccessPolicy = policy
+        AccessPolicy = policy ?? ReadOnlyMcpAccessPolicy.Instance
     };
 
     public static TheoryData<string, string> Calls => new()

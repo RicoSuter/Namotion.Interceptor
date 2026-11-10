@@ -60,5 +60,18 @@ public abstract class SelectionContainingWidgetBase : ComponentBase, IDisposable
         }
     }
 
-    public void Dispose() => Unsubscribe();
+    public void Dispose()
+    {
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Releases what the widget subscribed to. A widget that overrides it calls the base.</summary>
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Unsubscribe();
+        }
+    }
 }

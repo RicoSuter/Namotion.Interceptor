@@ -23,7 +23,6 @@ public class AuthorizationBenchmark
 {
     private static readonly PermissionAction Execute = new("execute");
 
-    private Building _building;
     private AuthorizationPolicy _policy;
     private AuthorizationPolicy _readPathDenyPolicy;
     private RegisteredSubjectProperty _lampBrightness;
@@ -38,7 +37,7 @@ public class AuthorizationBenchmark
             .WithFullPropertyTracking()
             .WithRegistry();
 
-        _building = new Building(context);
+        var building = new Building(context);
         var floors = new Dictionary<string, Floor>();
         for (var floor = 0; floor < 50; floor++)
         {
@@ -51,7 +50,7 @@ public class AuthorizationBenchmark
             floors[$"Floor{floor}"] = new Floor { Lamps = lamps };
         }
 
-        _building.Floors = floors;
+        building.Floors = floors;
 
         var allow = new List<PermissionRule>
         {
@@ -75,11 +74,11 @@ public class AuthorizationBenchmark
         var readPathDenyRole = new AuthorizationRole { Name = "Operator", Allow = [.. allow], Deny = [.. deny] };
         _readPathDenyPolicy = AuthorizationDefinition.Create([readPathDenyRole], [], [PermissionAction.Read, PermissionAction.Write, Execute], DefaultPathProvider.Instance, new TagProvider()).Compile(["Operator"]);
 
-        _lampBrightness = Member(_building.Floors["Floor5"].Lamps["Lamp3"], nameof(Lamp.Brightness));
-        _restrictedLampBrightness = Member(_building.Floors["Floor45"].Lamps["Lamp3"], nameof(Lamp.Brightness));
+        _lampBrightness = Member(building.Floors["Floor5"].Lamps["Lamp3"], nameof(Lamp.Brightness));
+        _restrictedLampBrightness = Member(building.Floors["Floor45"].Lamps["Lamp3"], nameof(Lamp.Brightness));
 
-        var subjects = new List<RegisteredSubject> { _building.TryGetRegisteredSubject()! };
-        foreach (var floor in _building.Floors.Values)
+        var subjects = new List<RegisteredSubject> { building.TryGetRegisteredSubject()! };
+        foreach (var floor in building.Floors.Values)
         {
             subjects.Add(floor.TryGetRegisteredSubject()!);
             foreach (var lamp in floor.Lamps.Values)

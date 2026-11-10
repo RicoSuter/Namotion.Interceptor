@@ -1,0 +1,78 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace HomeBlaze.Authorization.Abstractions
+{
+    public sealed class DenyAllPermissions : HomeBlaze.Authorization.Abstractions.IUserPermissions
+    {
+        public static HomeBlaze.Authorization.Abstractions.DenyAllPermissions Instance { get; }
+        public event System.Action? Changed;
+        public bool CanActThrough(System.Collections.Generic.IReadOnlyCollection<string> roles) { }
+        public bool CanAdminister(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member) { }
+        public bool CanInvoke(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member) { }
+        public bool CanRead(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member) { }
+        public bool CanReadHistory(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member) { }
+        public bool CanShow(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
+        public bool CanWrite(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member) { }
+        public System.Collections.Generic.IReadOnlyList<string> GetRolesWithDenyRulesMissingFrom(System.Collections.Generic.IReadOnlyCollection<string> roles) { }
+        public bool HoldsAllRoles(System.Collections.Generic.IReadOnlyCollection<string> roles) { }
+    }
+    public interface IRequestUserPermissionsFactory
+    {
+        HomeBlaze.Authorization.Abstractions.IUserPermissions Create(System.Security.Claims.ClaimsPrincipal user);
+    }
+    public interface IUserPermissions
+    {
+        event System.Action? Changed;
+        bool CanActThrough(System.Collections.Generic.IReadOnlyCollection<string> roles);
+        bool CanAdminister(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member);
+        bool CanInvoke(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member);
+        bool CanRead(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member);
+        bool CanReadHistory(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member);
+        bool CanShow(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject);
+        bool CanWrite(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member);
+        System.Collections.Generic.IReadOnlyList<string> GetRolesWithDenyRulesMissingFrom(System.Collections.Generic.IReadOnlyCollection<string> roles);
+        object? GetValue(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member);
+        bool HoldsAllRoles(System.Collections.Generic.IReadOnlyCollection<string> roles);
+    }
+    public enum PermittedOperationOutcome
+    {
+        Completed = 0,
+        Denied = 1,
+        Failed = 2,
+    }
+    public readonly struct PermittedOperationResult : System.IEquatable<HomeBlaze.Authorization.Abstractions.PermittedOperationResult>
+    {
+        public PermittedOperationResult(HomeBlaze.Authorization.Abstractions.PermittedOperationOutcome Outcome, object? Result, System.Exception? Exception) { }
+        public System.Exception? Exception { get; init; }
+        public HomeBlaze.Authorization.Abstractions.PermittedOperationOutcome Outcome { get; init; }
+        public object? Result { get; init; }
+    }
+    public sealed class UnrestrictedPermissions : HomeBlaze.Authorization.Abstractions.IUserPermissions
+    {
+        public static HomeBlaze.Authorization.Abstractions.UnrestrictedPermissions Instance { get; }
+        public event System.Action? Changed;
+        public bool CanActThrough(System.Collections.Generic.IReadOnlyCollection<string> roles) { }
+        public bool CanAdminister(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member) { }
+        public bool CanInvoke(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member) { }
+        public bool CanRead(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member) { }
+        public bool CanReadHistory(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member) { }
+        public bool CanShow(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
+        public bool CanWrite(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member) { }
+        public System.Collections.Generic.IReadOnlyList<string> GetRolesWithDenyRulesMissingFrom(System.Collections.Generic.IReadOnlyCollection<string> roles) { }
+        public bool HoldsAllRoles(System.Collections.Generic.IReadOnlyCollection<string> roles) { }
+    }
+    public static class UserPermissionsExtensions
+    {
+        public static bool CanAdminister(this HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, Namotion.Interceptor.IInterceptorSubject subject, string propertyName) { }
+        public static bool CanAdministerConfiguration(this HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static bool CanAdministerHoldingMembers(this HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static bool CanDelete(this HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty deleteOperationMember) { }
+        public static bool CanInvoke(this HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, Namotion.Interceptor.IInterceptorSubject subject, string methodName) { }
+        public static bool CanReadShown(this HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member) { }
+        public static bool CanShow(this HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static bool TryGetInvocableMethod(this HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out HomeBlaze.Abstractions.Metadata.MethodMetadata? method) { }
+        public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetMethodMember(this Namotion.Interceptor.IInterceptorSubject subject, string methodName) { }
+        public static System.Threading.Tasks.Task<HomeBlaze.Authorization.Abstractions.PermittedOperationResult> TryInvokeAsync(this HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, object?[]? parameters, System.IServiceProvider? serviceProvider, System.Threading.CancellationToken cancellationToken) { }
+        public static System.Threading.Tasks.Task<HomeBlaze.Authorization.Abstractions.PermittedOperationResult> TryInvokeAsync(this HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, Namotion.Interceptor.IInterceptorSubject subject, string methodName, object?[]? parameters, System.IServiceProvider? serviceProvider, System.Threading.CancellationToken cancellationToken) { }
+    }
+}

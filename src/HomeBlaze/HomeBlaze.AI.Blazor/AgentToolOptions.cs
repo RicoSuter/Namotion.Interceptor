@@ -47,8 +47,7 @@ internal static class AgentToolOptions
         [HomeBlazeMcpToolProvider.InvokeOperationToolName] = "Runs operations on subjects, such as switching a device or sending a notification.",
         ["set_property"] = "Writes property values of subjects.",
         [HomeBlazeMarkdownToolProvider.EditMarkdownToolName] = "Replaces a passage of a Markdown page or document.",
-        [HomeBlazeMarkdownToolProvider.WriteMarkdownToolName] = "Replaces the whole text of a Markdown page or document.",
-        [HomeBlazeMarkdownToolProvider.CreateMarkdownToolName] = "Creates a Markdown page or document in a folder."
+        [HomeBlazeMarkdownToolProvider.WriteMarkdownToolName] = "Replaces the whole text of a Markdown page or document."
     };
 
     private const string PageLayoutSummary =
@@ -67,7 +66,7 @@ internal static class AgentToolOptions
         IReadOnlyList<McpToolInfo>? offeredTools;
         try
         {
-            offeredTools = toolSource.CreateTools(isReadOnly: false, AllowAllMcpAccessPolicy.Instance);
+            offeredTools = toolSource.CreateTools(AllowAllMcpAccessPolicy.Instance);
         }
         catch (Exception)
         {
@@ -143,5 +142,5 @@ internal static class AgentToolOptions
             ChangesPages: PageTools.Contains(name), ChangesPageLayout: isPageLayout);
     }
 
-    private static bool CanChangeState(string name) => !AgentToolSet.IsReadOnly([name]);
+    private static bool CanChangeState(string name) => AgentToolSet.StateChangingTools.Contains(name);
 }

@@ -1,5 +1,6 @@
 using System.Globalization;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Authorization.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -37,7 +38,37 @@ public static class SubjectPathResolverExtensions
         this SubjectPathResolver resolver,
         string path,
         PathStyle style,
-        IInterceptorSubject from)
+        IInterceptorSubject from) =>
+        resolver.ResolveDisplayablePropertyFrom(path, style, from, permissions: null);
+
+    /// <summary>
+    /// Resolves the property a canonical path ends at for showing its value to a viewer, relative to a subject itself and
+    /// not to the page that holds it: the displayable property that
+    /// <see cref="ResolveDisplayablePropertyFrom(SubjectPathResolver, string, PathStyle, IInterceptorSubject)"/> finds, when
+    /// the viewer may read every member the path reads through, see
+    /// <see cref="SubjectPathResolver.ResolveSubject(string, PathStyle, IInterceptorSubject?, IUserPermissions?)"/>, and is
+    /// shown its value, see <see cref="UserPermissionsExtensions.CanReadShown"/>; otherwise null.
+    /// </summary>
+    /// <param name="resolver">The path resolver.</param>
+    /// <param name="path">The canonical path of the property.</param>
+    /// <param name="from">The subject the path is relative to.</param>
+    /// <param name="permissions">The permissions of the viewer.</param>
+    public static RegisteredSubjectProperty? ResolveShownPropertyFrom(
+        this SubjectPathResolver resolver,
+        string path,
+        IInterceptorSubject from,
+        IUserPermissions permissions)
+    {
+        var property = resolver.ResolveDisplayablePropertyFrom(path, PathStyle.Canonical, from, permissions);
+        return property is not null && permissions.CanReadShown(property) ? property : null;
+    }
+
+    private static RegisteredSubjectProperty? ResolveDisplayablePropertyFrom(
+        this SubjectPathResolver resolver,
+        string path,
+        PathStyle style,
+        IInterceptorSubject from,
+        IUserPermissions? permissions)
     {
         var lastSlash = path.LastIndexOf('/');
         var name = lastSlash < 0 ? path : path[(lastSlash + 1)..];
@@ -46,7 +77,7 @@ public static class SubjectPathResolverExtensions
             return null;
         }
 
-        var owner = lastSlash < 0 ? from : resolver.ResolveSubject(lastSlash == 0 ? "/" : path[..lastSlash], style, from);
+        var owner = lastSlash < 0 ? from : resolver.ResolveSubject(lastSlash == 0 ? "/" : path[..lastSlash], style, from, permissions);
         return owner?.TryGetRegisteredProperty(name).AsDisplayable();
     }
 

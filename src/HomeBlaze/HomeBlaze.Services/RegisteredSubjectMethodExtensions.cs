@@ -1,6 +1,9 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
+using HomeBlaze.Authorization.Abstractions;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Services;
@@ -33,20 +36,54 @@ public static class RegisteredSubjectMethodExtensions
     /// <see cref="OperationPurpose.Delete"/>, the one with the lowest position when there are several (an arbitrary one of
     /// those with equal positions), or null when it has none.
     /// </summary>
-    public static MethodMetadata? GetDeleteOperation(this RegisteredSubject subject, ExclusionTarget target)
+    public static MethodMetadata? GetDeleteOperation(this RegisteredSubject subject, ExclusionTarget target) =>
+        GetOperation(subject, OperationPurpose.Delete, target);
+
+    /// <summary>
+    /// Gets the edit operation of the subject that is offered to the target: the operation whose purpose is
+    /// <see cref="OperationPurpose.Edit"/>, the one with the lowest position when there are several (an arbitrary one of
+    /// those with equal positions), or null when it has none.
+    /// </summary>
+    public static MethodMetadata? GetEditOperation(this RegisteredSubject subject, ExclusionTarget target) =>
+        GetOperation(subject, OperationPurpose.Edit, target);
+
+    /// <summary>
+    /// Gets whether the viewer may save the edit component of the subject through its edit operation, see
+    /// <see cref="GetEditOperation"/>: the subject offers one to user interfaces, it is enabled, see
+    /// <see cref="IsMethodEnabled"/>, and <see cref="IUserPermissions.CanInvoke"/> allows its member. False for a subject
+    /// without one and for a subject that is not registered.
+    /// </summary>
+    public static bool CanInvokeEditOperation(this IUserPermissions permissions, IInterceptorSubject subject) =>
+        subject.TryGetRegisteredSubject() is { } registered &&
+        registered.GetEditOperation(ExclusionTarget.UserInterface) is { } editOperation &&
+        registered.TryGetProperty(editOperation.PropertyName) is { } member &&
+        member.IsMethodEnabled() &&
+        permissions.CanInvoke(member);
+
+    /// <summary>
+    /// Gets whether the viewer may save the edit component of the subject through its edit operation instead of
+    /// administering its configuration: the subject has no configuration members, whose change needs
+    /// <see cref="UserPermissionsExtensions.CanAdministerConfiguration"/> whatever saves it, and
+    /// <see cref="CanInvokeEditOperation"/> allows its edit operation.
+    /// </summary>
+    public static bool CanSaveThroughEditOperation(this IUserPermissions permissions, IInterceptorSubject subject) =>
+        !subject.HasConfigurationProperties() && permissions.CanInvokeEditOperation(subject);
+
+    private static MethodMetadata? GetOperation(RegisteredSubject subject, OperationPurpose purpose, ExclusionTarget target)
     {
-        MethodMetadata? deleteOperation = null;
+        MethodMetadata? operation = null;
         foreach (var property in subject.Properties)
         {
-            if (property.TryGetMethodMetadata() is { Kind: MethodKind.Operation, Purpose: OperationPurpose.Delete } method &&
+            if (property.TryGetMethodMetadata() is { Kind: MethodKind.Operation } method &&
+                method.Purpose == purpose &&
                 !method.IsExcludedFrom(target) &&
-                (deleteOperation is null || method.Position < deleteOperation.Position))
+                (operation is null || method.Position < operation.Position))
             {
-                deleteOperation = method;
+                operation = method;
             }
         }
 
-        return deleteOperation;
+        return operation;
     }
 
     /// <summary>
@@ -56,6 +93,15 @@ public static class RegisteredSubjectMethodExtensions
     public static bool IsMethodEnabled(this RegisteredSubjectProperty methodProperty)
     {
         return methodProperty.TryGetAttribute(KnownAttributes.IsEnabled)?.GetValue() as bool? ?? true;
+    }
+
+    /// <summary>
+    /// Gets why the operation or query that the method property holds is not enabled: the value of its
+    /// <see cref="KnownAttributes.DisabledReason"/> attribute, null without one.
+    /// </summary>
+    public static string? GetMethodDisabledReason(this RegisteredSubjectProperty methodProperty)
+    {
+        return methodProperty.TryGetAttribute(KnownAttributes.DisabledReason)?.GetValue() as string;
     }
 
     /// <summary>

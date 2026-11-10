@@ -1,0 +1,48 @@
+@* Redeems the setup code of a new or reset user, who chooses their password with it, posted to the setup endpoint. *@
+
+<MudDialog ContentClass="pb-6">
+    <DialogContent>
+        <div data-testid="setup-dialog">
+            <UnencryptedHttpWarning />
+            <MudText Typo="Typo.body2" Class="mb-3">
+                Enter your user name and the setup code you were given, and choose a password with at least 10 characters.
+            </MudText>
+            <AccountForm Action="@AccountEndpoints.SetupPath.TrimStart('/')" SubmitText="Set password" TestId="setup-form">
+                <label for="setup-user-name">User name</label>
+                <input id="setup-user-name" name="userName" value="@UserName" autocomplete="username" required />
+                <label for="setup-code">Setup code</label>
+                <input id="setup-code" name="code" value="@Code" autocomplete="one-time-code" required />
+                <label for="setup-new">New password</label>
+                <input id="setup-new" name="newPassword" type="password" autocomplete="new-password" required />
+                <label for="setup-confirm">Repeat the new password</label>
+                <input id="setup-confirm" name="confirmPassword" type="password" autocomplete="new-password" required />
+            </AccountForm>
+        </div>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    /// <summary>The user name of the link that leads here, filled in.</summary>
+    [Parameter]
+    public string? UserName { get; set; }
+
+    /// <summary>The setup code of the link that leads here, filled in.</summary>
+    [Parameter]
+    public string? Code { get; set; }
+
+    /// <summary>
+    /// Shows the dialog with <paramref name="userName"/> and <paramref name="code"/> filled in, which can be closed when
+    /// <paramref name="isClosable"/>, as when the app shows behind it, and returns once it is shown.
+    /// </summary>
+    public static Task<IDialogReference> ShowAsync(IDialogService dialogService, string? userName, string? code, bool isClosable)
+    {
+        ArgumentNullException.ThrowIfNull(dialogService);
+
+        var parameters = new DialogParameters<SetupDialog>
+        {
+            { dialog => dialog.UserName, userName },
+            { dialog => dialog.Code, code }
+        };
+        return dialogService.ShowAsync<SetupDialog>("Set up your account", parameters, AccountDialogOptions.Create(isClosable));
+    }
+}

@@ -23,6 +23,18 @@ public class MethodParameter
     public StateUnit? Unit { get; init; }
 
     /// <summary>
+    /// The name of the editor that the user interface enters the value with, or null for the field of <see cref="Type"/>,
+    /// see <see cref="Attributes.OperationParameterAttribute.Editor"/>.
+    /// </summary>
+    public string? Editor { get; init; }
+
+    /// <summary>
+    /// The name of a property of the subject of the method whose value the user interface prefills the parameter with, or
+    /// null, see <see cref="Attributes.OperationParameterAttribute.InitialValueProperty"/>.
+    /// </summary>
+    public string? InitialValueProperty { get; init; }
+
+    /// <summary>
     /// Whether this parameter is resolved from the DI container via [FromServices].
     /// </summary>
     public bool IsFromServices { get; init; }

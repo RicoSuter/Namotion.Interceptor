@@ -1,5 +1,6 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(OperationButton))]
 @implements ISubjectComponent
+@inherits PermissionsComponentBase
 @inject SubjectPathResolver PathResolver
 
 @{
@@ -10,7 +11,7 @@
 {
     // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var path = button.Path;
-    <OperationButtonView Property="@ValueReader.ResolveProperty(PathResolver, button, path)"
+    <OperationButtonView Property="@ValueReader.ResolveProperty(PathResolver, button, path, Permissions)"
                          Path="@path"
                          Label="@button.Label"
                          Icon="@button.Icon"

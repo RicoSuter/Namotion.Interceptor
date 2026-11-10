@@ -1,11 +1,12 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Components;
 using HomeBlaze.Services;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Storage.Files;
 using Microsoft.Extensions.DependencyInjection;
+using MudBlazor;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Tracking.Recorder;
-using MudBlazor;
 using Xunit;
 
 namespace HomeBlaze.Storage.Tests.Pages;
@@ -98,7 +99,7 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var reading = ValueReader.Read(resolver, page, "meter/Power", null, null);
+        var reading = ValueReader.Read(resolver, page, "meter/Power", null, null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.False(reading.IsMissing);
@@ -115,7 +116,7 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null);
+        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal("an", reading.Text);
@@ -132,7 +133,7 @@ public class ValueReaderTests
         meter.IsOn = false;
 
         // Act
-        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null);
+        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal("No", reading.Text);
@@ -147,7 +148,7 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var reading = ValueReader.Read(resolver, page, "meter/Power", "onoff", null);
+        var reading = ValueReader.Read(resolver, page, "meter/Power", "onoff", null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal("1.23 kW", reading.Text);
@@ -167,7 +168,7 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var reading = ValueReader.Read(resolver, page, path, null, null);
+        var reading = ValueReader.Read(resolver, page, path, null, null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.True(reading.IsMissing);
@@ -184,7 +185,7 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var reading = ValueReader.Read(resolver, page, "meter/Power", map, null);
+        var reading = ValueReader.Read(resolver, page, "meter/Power", map, null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal($"Cannot resolve map: {map}", reading.MapError);
@@ -197,14 +198,14 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "css", null);
+        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "css", null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Null(reading.MapError);
         Assert.Equal(Color.Primary, reading.Color.Theme);
         Assert.Equal("#ffffff80", reading.Color.Css);
         Assert.StartsWith("--mud-palette-primary: #ffffff80; ", reading.Color.Style);
-        Assert.Same(reading.Color, ValueReader.Read(resolver, page, "meter/IsOn", "css", null).Color);
+        Assert.Same(reading.Color, ValueReader.Read(resolver, page, "meter/IsOn", "css", null, UnrestrictedPermissions.Instance).Color);
     }
 
     [Fact]
@@ -214,8 +215,8 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var valueMap = ValueReader.ResolveMap(resolver, page, "broken", out var error);
-        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "broken", null);
+        var valueMap = ValueReader.ResolveMap(resolver, page, "broken", UnrestrictedPermissions.Instance, out var error);
+        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "broken", null, UnrestrictedPermissions.Instance);
 
         // Assert: the error does not depend on whether the value matches the case with the wrong color.
         Assert.Null(valueMap);
@@ -231,13 +232,13 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "textcolor", null);
+        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "textcolor", null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Null(reading.MapError);
         Assert.Equal(Color.Info, reading.Color);
         Assert.Equal("#ffffff", reading.TextColor.Css);
-        Assert.Same(reading.TextColor, ValueReader.Read(resolver, page, "meter/IsOn", "textcolor", null).TextColor);
+        Assert.Same(reading.TextColor, ValueReader.Read(resolver, page, "meter/IsOn", "textcolor", null, UnrestrictedPermissions.Instance).TextColor);
     }
 
     [Fact]
@@ -247,7 +248,7 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null);
+        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Same(ValueColor.Default, reading.TextColor);
@@ -260,8 +261,8 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var valueMap = ValueReader.ResolveMap(resolver, page, "brokentext", out var error);
-        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "brokentext", null);
+        var valueMap = ValueReader.ResolveMap(resolver, page, "brokentext", UnrestrictedPermissions.Instance, out var error);
+        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "brokentext", null, UnrestrictedPermissions.Instance);
 
         // Assert: the case with the wrong text color is not the one that matches.
         Assert.Null(valueMap);
@@ -281,8 +282,8 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var asPath = ValueReader.Read(resolver, page, malformed, null, null);
-        var asMap = ValueReader.Read(resolver, page, "meter/Power", malformed, null);
+        var asPath = ValueReader.Read(resolver, page, malformed, null, null, UnrestrictedPermissions.Instance);
+        var asMap = ValueReader.Read(resolver, page, "meter/Power", malformed, null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.True(asPath.IsMissing);
@@ -297,7 +298,7 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var value = ValueReader.ReadValue(resolver, page, "meter/Power");
+        var value = ValueReader.ReadValue(resolver, page, "meter/Power", UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(1234.5m, value);
@@ -315,7 +316,7 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var value = ValueReader.ReadValue(resolver, page, path);
+        var value = ValueReader.ReadValue(resolver, page, path, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Null(value);
@@ -329,7 +330,7 @@ public class ValueReaderTests
         var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
 
         // Act
-        var reading = ValueReader.ReadProperty(resolver, meter, nameof(TestMeter.Power), null, null);
+        var reading = ValueReader.ReadProperty(resolver, meter, nameof(TestMeter.Power), null, null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.False(reading.IsMissing);
@@ -344,10 +345,10 @@ public class ValueReaderTests
         // Arrange
         var (resolver, page) = await AddPageAsync();
         var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
-        var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", out _);
+        var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", UnrestrictedPermissions.Instance, out _);
 
         // Act
-        var reading = ValueReader.ReadProperty(resolver, meter, nameof(TestMeter.IsOn), valueMap, null);
+        var reading = ValueReader.ReadProperty(resolver, meter, nameof(TestMeter.IsOn), valueMap, null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal("an", reading.Text);
@@ -367,7 +368,7 @@ public class ValueReaderTests
         var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
 
         // Act
-        var reading = ValueReader.ReadProperty(resolver, meter, propertyName, null, null);
+        var reading = ValueReader.ReadProperty(resolver, meter, propertyName, null, null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.True(reading.IsMissing);
@@ -382,7 +383,7 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var map = ValueReader.ResolveMap(resolver, page, "nomap", out var error);
+        var map = ValueReader.ResolveMap(resolver, page, "nomap", UnrestrictedPermissions.Instance, out var error);
 
         // Assert
         Assert.Null(map);
@@ -399,7 +400,7 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var reading = ValueReader.Read(resolver, page, path, "charging", null);
+        var reading = ValueReader.Read(resolver, page, path, "charging", null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Null(reading.MapError);
@@ -418,7 +419,7 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var reading = ValueReader.Read(resolver, page, path, "power", null);
+        var reading = ValueReader.Read(resolver, page, path, "power", null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(text, reading.Text);
@@ -435,7 +436,7 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var reading = ValueReader.Read(resolver, page, "meter/IsOn", map, null);
+        var reading = ValueReader.Read(resolver, page, "meter/IsOn", map, null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(expected, reading.MapError);
@@ -448,7 +449,7 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var reading = ValueReader.Read(resolver, page, "idle", "pagepath", null);
+        var reading = ValueReader.Read(resolver, page, "idle", "pagepath", null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Null(reading.MapError);
@@ -462,7 +463,7 @@ public class ValueReaderTests
         var (resolver, page) = await AddPageAsync();
 
         // Act
-        var reading = ValueReader.Read(resolver, page, "nothing/Here", "charging", null);
+        var reading = ValueReader.Read(resolver, page, "nothing/Here", "charging", null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.True(reading.IsMissing);
@@ -478,7 +479,7 @@ public class ValueReaderTests
         var scope = ReadPropertyRecorder.Start();
 
         // Act
-        ValueReader.Read(resolver, page, "idle", "charging", null);
+        ValueReader.Read(resolver, page, "idle", "charging", null, UnrestrictedPermissions.Instance);
         var recorded = scope.GetPropertiesAndDispose();
 
         // Assert: this record is what makes the widget render again when the charger starts charging
@@ -492,11 +493,11 @@ public class ValueReaderTests
         // Arrange
         var (resolver, page) = await AddPageAsync();
         var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
-        var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", out _);
+        var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", UnrestrictedPermissions.Instance, out _);
 
         // Act
-        var fromSubject = ValueReader.ReadProperty(resolver, meter, nameof(TestMeter.IsOn), valueMap, null);
-        var fromPath = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null);
+        var fromSubject = ValueReader.ReadProperty(resolver, meter, nameof(TestMeter.IsOn), valueMap, null, UnrestrictedPermissions.Instance);
+        var fromPath = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(fromPath, fromSubject);
@@ -508,13 +509,13 @@ public class ValueReaderTests
     {
         // Arrange
         var (resolver, page) = await AddPageAsync();
-        var property = ValueReader.ResolveProperty(resolver, page, "meter/IsOn");
-        var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", out _);
+        var property = ValueReader.ResolveProperty(resolver, page, "meter/IsOn", UnrestrictedPermissions.Instance);
+        var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", UnrestrictedPermissions.Instance, out _);
 
         // Act
-        var fromProperty = ValueReader.ReadResolved(resolver, property, valueMap, null);
-        var fromPath = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null);
-        var withoutProperty = ValueReader.ReadResolved(resolver, null, valueMap, null);
+        var fromProperty = ValueReader.ReadResolved(resolver, property, valueMap, null, UnrestrictedPermissions.Instance);
+        var fromPath = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null, UnrestrictedPermissions.Instance);
+        var withoutProperty = ValueReader.ReadResolved(resolver, null, valueMap, null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(fromPath, fromProperty);
@@ -542,13 +543,13 @@ public class ValueReaderTests
     {
         // Arrange
         var (resolver, page) = await AddPageAsync();
-        var reading = ValueReader.Read(resolver, page, "meter/Power", null, null);
-        var missing = ValueReader.Read(resolver, page, "meter/Missing", null, null);
+        var reading = ValueReader.Read(resolver, page, "meter/Power", null, null, UnrestrictedPermissions.Instance);
+        var missing = ValueReader.Read(resolver, page, "meter/Missing", null, null, UnrestrictedPermissions.Instance);
 
         // Act
         var given = ValueReader.GetLabel(reading.Property, "Leistung", "meter/Power");
         var fromProperty = ValueReader.GetLabel(reading.Property, null, "meter/Power");
-        var fromTitle = ValueReader.GetLabel(ValueReader.Read(resolver, page, "meter/Flow", null, null).Property, null, "meter/Flow");
+        var fromTitle = ValueReader.GetLabel(ValueReader.Read(resolver, page, "meter/Flow", null, null, UnrestrictedPermissions.Instance).Property, null, "meter/Flow");
         var fromPath = ValueReader.GetLabel(missing.Property, null, "meter/Missing");
         var withoutPath = ValueReader.GetLabel(null, null, null);
 
@@ -565,9 +566,9 @@ public class ValueReaderTests
     {
         // Arrange
         var (resolver, page) = await AddPageAsync();
-        var isOn = ValueReader.Read(resolver, page, "meter/IsOn", null, null);
-        var power = ValueReader.Read(resolver, page, "meter/Power", null, null);
-        var mapped = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null);
+        var isOn = ValueReader.Read(resolver, page, "meter/IsOn", null, null, UnrestrictedPermissions.Instance);
+        var power = ValueReader.Read(resolver, page, "meter/Power", null, null, UnrestrictedPermissions.Instance);
+        var mapped = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null, UnrestrictedPermissions.Instance);
 
         // Act & Assert
         Assert.Equal(Color.Primary, ValueReader.GetIndicatorColor(isOn, null));

@@ -2,9 +2,10 @@ using HomeBlaze.Abstractions.Devices.Locks;
 using HomeBlaze.Abstractions.Sensors;
 using HomeBlaze.Components.Abstractions.TimeZones;
 using HomeBlaze.Services;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services.Display;
-using Namotion.Interceptor;
 using MudBlazor;
+using Namotion.Interceptor;
 
 namespace HomeBlaze.Components.Controls;
 
@@ -23,11 +24,12 @@ internal static class DoorLockDisplay
     /// <summary>
     /// Gets the appearance of the tile. The case of the map for the name of the lock state, when there is one, gives
     /// the fill, its text color, the badge icon when it has one, and the text without the open door, which the door icon shows.
-    /// The cases see the name of the state as <c>value</c> and the lock as <c>subject</c>; without a resolver no case is tried. The time zone is that of the viewer for the dates in the text of a case, or null for that of the server.
+    /// The cases see the name of the state as <c>value</c> and the lock as <c>subject</c>; without a resolver no case is tried. The time zone is that of the viewer for the dates in the text of a case, or null for that of the server. A property the viewer may not read is missing in the cases.
     /// </summary>
     public static DoorLockAppearance Get(
         DoorLockState? lockState,
         DoorState? doorState,
+        IUserPermissions permissions,
         ValueMap? map = null,
         IInterceptorSubject? subject = null,
         SubjectPathResolver? resolver = null,
@@ -57,9 +59,9 @@ internal static class DoorLockDisplay
         if (name is not null && map is not null && resolver is not null)
         {
             var binding = new ValueBinding(null, name, subject);
-            if (map.FindCase(binding, resolver) is { } matched)
+            if (map.FindCase(binding, resolver, permissions) is { } matched)
             {
-                var text = matched.GetText(binding, resolver, timeZone) ?? subtitle;
+                var text = matched.GetText(binding, resolver, timeZone, permissions) ?? subtitle;
                 var clickText = operation == "Unlock" ? ", unlocks on click" : ", locks on click";
                 return new DoorLockAppearance(
                     doorIcon,

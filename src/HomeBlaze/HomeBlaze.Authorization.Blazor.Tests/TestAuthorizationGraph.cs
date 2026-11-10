@@ -2,6 +2,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
@@ -11,7 +12,8 @@ namespace HomeBlaze.Authorization.Blazor.Tests;
 
 /// <summary>
 /// A graph with an <see cref="Authorization"/> subject holding the given custom roles and a <see cref="TestDevice"/> at
-/// <c>/Devices</c> with another at <c>/Devices/Child</c>, the service over it and a resolver of its paths.
+/// <c>/Devices</c> with another at <c>/Devices/Child</c>, the service over it, a resolver of its paths and a fake role
+/// store over the roles.
 /// </summary>
 internal sealed class TestAuthorizationGraph : IDisposable
 {
@@ -32,10 +34,35 @@ internal sealed class TestAuthorizationGraph : IDisposable
 
     public Authorization Authorization => (Authorization)Root.Children["Authorization"];
 
+    /// <summary>A role store that records the changes and applies the successful ones to <see cref="Authorization"/>.</summary>
+    public FakeRoleStore RoleStore { get; private set; } = null!;
+
     /// <summary>Gets the custom role saved under <paramref name="name"/>.</summary>
     public Role GetRole(string name) => Authorization.Roles[name];
 
-    /// <param name="roleNames">The names of the custom roles; names differing only in case make both unusable.</param>
+    /// <summary>
+    /// Replaces the lists of the custom role named <paramref name="name"/> that are given, keeping the other roles, as
+    /// the role store does after a save; every role gets a new subject.
+    /// </summary>
+    /// <returns>The new subject of the role.</returns>
+    public Role SetRole(
+        string name,
+        IReadOnlyList<string>? includes = null,
+        IReadOnlyList<PermissionRule>? allow = null,
+        IReadOnlyList<PermissionRule>? deny = null)
+    {
+        var current = Authorization.Roles[name];
+        RoleStore.Apply(name, new AuthorizationRole
+        {
+            Name = name,
+            Includes = [.. includes ?? current.Includes],
+            Allow = [.. allow ?? current.Allow],
+            Deny = [.. deny ?? current.Deny]
+        });
+        return GetRole(name);
+    }
+
+    /// <param name="roleNames">The names of the custom roles; a name the role store would refuse makes the role unusable.</param>
     public static TestAuthorizationGraph Create(params string[] roleNames)
     {
         // The handlers register the markers that tags are read from, and methods as properties.
@@ -55,16 +82,15 @@ internal sealed class TestAuthorizationGraph : IDisposable
         {
             Children = new Dictionary<string, IInterceptorSubject>
             {
-                ["Authorization"] = new Authorization
-                {
-                    // Case-sensitive, so the tests can configure names that differ only in case.
-                    Roles = roleNames.ToDictionary(name => name, _ => new Role(), StringComparer.Ordinal)
-                },
+                ["Authorization"] = new Authorization(),
                 ["Devices"] = new TestDevice { Child = new TestDevice() }
             }
         };
 
-        return new TestAuthorizationGraph(root, service, pathResolver);
+        var graph = new TestAuthorizationGraph(root, service, pathResolver);
+        graph.RoleStore = new FakeRoleStore(graph.Authorization);
+        graph.Authorization.ReplaceRoles([.. roleNames.Select(name => new AuthorizationRole { Name = name })]);
+        return graph;
     }
 
     public void Dispose() => Service.Dispose();

@@ -1,4 +1,5 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(HueBridge))]
+@inherits PermissionsComponentBase
 @implements ISubjectComponent
 
 <MudPaper Class="pa-4">
@@ -20,7 +21,7 @@
         <MudStack Row="true" Spacing="4">
             <MudStack>
                 <MudText Typo="Typo.caption">Lights</MudText>
-                <MudText Typo="Typo.h5">@(BridgeSubject?.Lights?.Count ?? 0)</MudText>
+                <MudText Typo="Typo.h5">@CountShown(BridgeSubject?.Lights?.Values)</MudText>
             </MudStack>
 
             <MudStack>
@@ -30,12 +31,12 @@
 
             <MudStack>
                 <MudText Typo="Typo.caption">Rooms</MudText>
-                <MudText Typo="Typo.h5">@(BridgeSubject?.Rooms?.Count ?? 0)</MudText>
+                <MudText Typo="Typo.h5">@CountShown(BridgeSubject?.Rooms?.Values)</MudText>
             </MudStack>
 
             <MudStack>
                 <MudText Typo="Typo.caption">Zones</MudText>
-                <MudText Typo="Typo.h5">@(BridgeSubject?.Zones?.Count ?? 0)</MudText>
+                <MudText Typo="Typo.h5">@CountShown(BridgeSubject?.Zones?.Values)</MudText>
             </MudStack>
         </MudStack>
 
@@ -59,6 +60,10 @@
     private HueBridge? BridgeSubject => Subject as HueBridge;
 
     private int SensorCount =>
-        (BridgeSubject?.MotionSensors?.Count ?? 0) +
-        (BridgeSubject?.ButtonDevices?.Count ?? 0);
+        CountShown(BridgeSubject?.MotionSensors?.Values) +
+        CountShown(BridgeSubject?.ButtonDevices?.Values);
+
+    // A light, sensor or group the roles hide is not counted.
+    private int CountShown(IEnumerable<IInterceptorSubject>? subjects) =>
+        subjects?.Count(subject => Permissions.CanShow(subject)) ?? 0;
 }

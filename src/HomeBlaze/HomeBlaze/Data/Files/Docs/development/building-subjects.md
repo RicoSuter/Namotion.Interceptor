@@ -479,7 +479,7 @@ public partial class Motor
 | `Icon` | MudBlazor icon name | `"Speed"`, `"Stop"` |
 | `Position` | Sort position in operations list | `1`, `2`, `3` |
 | `RequiresConfirmation` | Show confirmation dialog before executing | `true` |
-| `Purpose` | What the operation is for. `OperationPurpose.Delete` makes it the subject's Delete button in the browser instead of an operation button | `OperationPurpose.Delete` |
+| `Purpose` | What the operation is for. `OperationPurpose.Delete` makes it the subject's Delete button in the browser and `OperationPurpose.Edit` its Edit button instead of an operation button | `OperationPurpose.Delete` |
 
 **Key points:**
 - Operations appear as buttons in the subject's property panel, grouped by [category](#categories)
@@ -491,6 +491,7 @@ public partial class Motor
 - Confirmation is inherited: an implementation of an interface operation or an override of a base class operation that requires confirmation requires it too, also with its own `[Operation]`, and a `[Query]` in its place becomes an operation that requires confirmation
 - Do not require confirmation for safety actions such as an emergency stop; agents must be able to call them
 - An operation with `Purpose = OperationPurpose.Delete` deletes or removes the subject. The subject browser shows it as the Delete button of the subject's pane, asks for confirmation before it runs it, whether or not it sets `RequiresConfirmation`, and leaves it out of the operation buttons. The confirmation asks "Delete '<name>'?", followed by the operation's `Description` when it has one, so the description should read as a sentence and can name a consequence of the delete. The button is disabled while the operation's `IsEnabled` attribute is false. Agents see it as an ordinary operation, so `RequiresConfirmation` still decides whether they may call it. It must take no parameter that requires input, otherwise the purpose is ignored. `Purpose` comes from the `[Operation]` attribute of the method itself and, unlike `RequiresConfirmation`, is not inherited: an override or implementation with its own `[Operation]` has only the purpose it sets itself. A subject stored in a file of a storage gets a `Delete` operation from the storage, which requires confirmation, unless it has a delete operation of its own, and so does a folder of a storage, which is enabled only while the folder is empty
+- An operation with `Purpose = OperationPurpose.Edit` saves what the subject's [Edit component](#edit-components) edits, which it takes as its parameters. The subject browser shows the Edit button to a person who may run it while its `IsEnabled` attribute is not false, the button opens the Edit component, and the component saves by running it through `TryInvokeAsync`, see [Permissions](#permissions). The Edit component writes only through the operation and never assigns a member itself. The operation must also persist the subject itself, such as through a store it takes from services: after a save through it, the edit panel does not persist the configuration that contains the subject. It is left out of the operation buttons. Use it for a subject without `[Configuration]` properties whose Edit component changes other members: a subject with `[Configuration]` properties needs `administer` on every one of them to be edited, whatever its Edit operation allows
 
 **Where a method is offered:**
 
@@ -513,6 +514,12 @@ public Task SetVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decima
 ```
 
 A `Percent` parameter is a fraction from 0 to 1, as described under units above: the dialog takes 0 to 100 and divides by 100, while agents pass the fraction. The description is shown to both, so it leaves the numeric range to the unit instead of stating "0 to 1".
+
+**Parameter editors:**
+
+`[OperationParameter(Editor = "...")]` names the editor the operation dialog enters the parameter with, in place of the field of its type, such as `AuthorizationParameterEditors.RoleNames`, the role picker of "Add User" and "Set Roles". An editor is a component derived from `MethodParameterEditor` and registered with `services.AddMethodParameterEditor<TEditor>(name)`; it reports the value of the parameter type through `ValueChanged`. Without an editor registered under the name, the dialog shows the field of the type. Agents never see the editor and pass the value as for its type.
+
+`[OperationParameter(InitialValueProperty = nameof(...))]` names a property of the same subject whose current value prefills the parameter when the operation is run from the user interface, such as the current roles of a user in "Set Roles" and their display name in "Set Display Name". The value is prefilled only when the person may read the property; a collection prefills an array parameter with its items. Agents are not affected.
 
 **Operations vs Configuration:**
 - Use `[Configuration]` for values that should persist and can be edited at any time
@@ -555,6 +562,7 @@ public partial class Server
 - When `IsEnabled` is `false`, the button is disabled in the UI
 - The attribute name is `IsEnabled`, without the `HomeBlaze:` prefix of the HomeBlaze metadata: it describes the operation itself, so an external source can provide it and a connector that exports attributes shows it under this name
 - The button renders again by itself when the derived property changes, because its render read it
+- A `[PropertyAttribute("Start", KnownAttributes.DisabledReason)]` string property, also `[Derived]`, says why: the disabled button shows it as its tooltip. Return null while the operation is enabled
 
 ## Categories
 
@@ -909,7 +917,11 @@ Storage contracts: `IStorageContainer`, `IStorageFile`, `IConfigurationWriter`, 
 
 ### HomeBlaze.Components.Abstractions
 
-UI component contracts: `ISubjectComponent`, `ISubjectEditComponent`, `[SubjectComponent]`, `SubjectComponentType`.
+UI component contracts: `ISubjectComponent`, `ISubjectEditComponent`, `[SubjectComponent]`, `SubjectComponentType`, `AccessDeniedTexts`, the texts of a control the user may not use, and `PermissionsComponentBase`, the base of a component that answers from the permissions of the user. It references `HomeBlaze.Authorization.Abstractions`, so a widget library gets `IUserPermissions` through it.
+
+### HomeBlaze.Authorization.Abstractions
+
+What the user may do: `IUserPermissions` and `UserPermissionsExtensions`, see [Permissions](#permissions).
 
 See [Project Structure](../architecture/project-structure.md) for the full dependency graph between these packages.
 
@@ -1096,12 +1108,23 @@ Use this for internal subjects that are part of a parent subject's implementatio
 
 Exclusion decides where a subject or a method is offered, and is no access control: an agent still reaches a subject of a type excluded from agents by its explicit path and calls its methods, and a path to a method excluded from the user interface that a person types into a widget, such as an operation button, still runs it. Code checks a subject with the extension `IsExcludedFrom(target)`, a type with `ExcludeFromAttribute.IsExcluded(type, target)`, and lists the methods for a target with `GetAllMethods(target)`.
 
-Use `UserInterface` on a method that gives an agent what a person does through other controls, as a folder does for the order that people change by dragging:
+Use `UserInterface` on a method that gives an agent what a person does through other controls, as a folder does for the order that people change by dragging. Like every query that shows other members, it takes the permissions of its caller and names only the children the caller is shown, see [Permissions](#permissions): none when they do not allow to read `Children`, else each child that `CanShow` allows:
 
 ```csharp
-[Query(Title = "Get Order", Description = "Gets the names of the children in the order in which they are shown.")]
+[Query(Title = "Get Order", Description = "Gets the names of the children that the caller may see, in the order in which they are shown.")]
 [ExcludeFrom(ExclusionTarget.UserInterface)]
-public string[] GetOrder() => ChildOrdering.GetShownNames(this);
+public string[] GetOrder([FromServices] IUserPermissions? permissions)
+{
+    if (permissions is null ||
+        this.TryGetRegisteredSubject()?.TryGetProperty(nameof(Children)) is not { } children ||
+        !permissions.CanRead(children))
+    {
+        return [];
+    }
+
+    var shown = Children;
+    return Array.FindAll(ChildOrdering.GetShownNames(this), name => shown.TryGetValue(name, out var child) && permissions.CanShow(child));
+}
 ```
 
 ### Page Layout Types
@@ -1250,6 +1273,39 @@ Three cases ask for a few lines:
 | The widget shows nothing on a viewed page | Render a `WidgetChip` while the page is edited inline, so that the widget has an area to click | `ValueMapWidget`, a `Responsive` whose content the screen hides |
 | Parts of the widget become blocks of their own once it is selected | Derive from `SelectionContainingWidgetBase` and render those parts only while `ContainsSelection` is true | The rows of a `ValueList`, the cases of a `ValueMap` |
 | The widget has controls that act, such as a button or a switch | Disable them while `IsEditing` is true. The host takes the pointer from the content of a widget while the page is edited, but the keyboard still reaches a control | `DoorLockWidget` |
+
+### Permissions
+
+The person who views a page may not be allowed to do everything a widget offers. `IUserPermissions` from the package `HomeBlaze.Authorization.Abstractions`, injected per circuit, answers what they may do with a registered member: `CanRead`, `CanWrite` and `CanInvoke`. `HoldsAllRoles` answers a rule that depends on roles rather than on members, such as who may chat with an agent: whether the user holds every one of the roles, counting the roles they include, and a full administrator does. It raises `Changed` when the answers may have changed, such as after a role change. Without sign-in configured, the user may do nothing and holds no role. A widget derives from `PermissionsComponentBase` from `HomeBlaze.Components.Abstractions`, which injects `Permissions` and renders the widget again on `Changed`; a widget that overrides `OnInitialized` or `Dispose(bool)` calls the base.
+
+A widget runs an operation of its subject through `TryInvokeAsync` of `UserPermissionsExtensions` from the same package, which checks `CanInvoke` right before the method starts, never by calling the method itself. Disable a control the user may not use with the tooltip `AccessDeniedTexts.Tooltip` from `HomeBlaze.Components.Abstractions`, and show a refusal titled `AccessDeniedTexts.Title` when the roles changed after the control rendered:
+
+```razor
+@inherits PermissionsComponentBase
+@inject IServiceProvider ServiceProvider
+@inject IDialogService DialogService
+
+@{
+    var canStop = MotorSubject is { } motor && Permissions.CanInvoke(motor, nameof(Motor.StopAsync));
+}
+<MudButton Disabled="@(!canStop)" title="@(canStop ? null : AccessDeniedTexts.Tooltip)" OnClick="StopAsync">Stop</MudButton>
+
+@code {
+    private async Task StopAsync()
+    {
+        var invocation = await Permissions.TryInvokeAsync(MotorSubject!, nameof(Motor.StopAsync), null, ServiceProvider, CancellationToken.None);
+        if (invocation.Outcome == PermittedOperationOutcome.Denied)
+        {
+            await DialogService.ShowMessageBoxAsync(new MessageBoxOptions
+                { Title = AccessDeniedTexts.Title, Message = AccessDeniedTexts.Invoke, YesText = "OK" });
+        }
+    }
+}
+```
+
+The parameters are those of the method that require input, in their order, so `SetSpeedAsync(int speed, CancellationToken cancellationToken)` takes `[speed]`. A widget that sets a property checks `CanWrite` for its registered member before it writes. What a method writes itself is not checked again.
+
+A query that shows values of other members to its caller, as `ReadEvaluatedContent` of a page does, takes `[FromServices] IUserPermissions` and leaves out what they do not allow to read. The caller passes its own: the circuit of a person, and for an agent or an MCP client the permissions of its access policy. Operations called through MCP get permissions that deny everything. Without a registered `IUserPermissions` the default registration denies everything, so treat a missing one as deny-all.
 
 A widget that shows nothing, with a chip while it is edited inline. `Selection` is only set while the page is edited inline, never in the Split preview:
 
@@ -1692,7 +1748,7 @@ The page author sees the sidebar with a width of 200 pixels at the left and the 
 
 ### Edit Components
 
-Edit components provide configuration forms:
+Edit components provide configuration forms. The Edit button and the save of an Edit component require that the person may administer every `[Configuration]` property of the subject, so a subject without any has no Edit button, unless the component saves through an [edit operation](#operations):
 
 ```razor
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Motor))]

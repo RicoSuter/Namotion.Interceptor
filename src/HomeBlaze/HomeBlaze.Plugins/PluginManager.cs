@@ -102,7 +102,7 @@ public partial class PluginManager : IConfigurable, ITitleProvider, IIconProvide
     // after a restart. Runtime hot-reload of plugins is not supported.
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    [Operation(Title = "Add Plugin", RequiresConfirmation = true)]
+    [Operation(Title = "Add Plugin", RequiresConfirmation = true, RequiresAdministration = true)]
     public void AddPlugin(string packageName, string version)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packageName);

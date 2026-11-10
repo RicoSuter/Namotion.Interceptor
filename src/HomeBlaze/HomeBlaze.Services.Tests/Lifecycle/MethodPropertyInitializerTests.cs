@@ -44,6 +44,23 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
+    public void WhenTheOperationAttributeRequiresAdministration_ThenTheMetadataRequiresAdministration()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new AdministrationTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Configure")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.NotNull(metadata);
+        Assert.True(metadata.RequiresAdministration);
+        Assert.Equal(MethodKind.Operation, metadata.Kind);
+    }
+
+    [Fact]
     public void WhenAMethodHasAQueryAttribute_ThenAMethodMetadataPropertyIsRegistered()
     {
         // Arrange
@@ -107,6 +124,26 @@ public class MethodPropertyInitializerTests
         // Assert
         Assert.Equal("Interface Unmute", metadata?.Title);
         Assert.Equal(ExclusionTarget.UserInterface, metadata?.ExcludedFrom);
+    }
+
+    [Fact]
+    public void WhenAParameterNamesAnEditorAndAnInitialValueProperty_ThenItsMetadataNamesThemAndHasNoUnit()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new AdministrationTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Assign")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.NotNull(metadata);
+        Assert.Equal("Test.Names", metadata.Parameters[0].Editor);
+        Assert.Equal("Names", metadata.Parameters[0].InitialValueProperty);
+        Assert.Null(metadata.Parameters[0].Unit);
+        Assert.Null(metadata.Parameters[1].Editor);
+        Assert.Null(metadata.Parameters[1].InitialValueProperty);
     }
 
     [Fact]
@@ -911,6 +948,20 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
+    public void WhenAnOperationWithTheEditPurposeTakesInput_ThenItKeepsItsPurpose()
+    {
+        // Arrange
+        var registered = new PurposeMethodSubject(CreateContext()).TryGetRegisteredSubject()!;
+
+        // Act
+        var save = registered.TryGetProperty("Save")?.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.NotNull(save);
+        Assert.Equal(OperationPurpose.Edit, save.Purpose);
+    }
+
+    [Fact]
     public void WhenASubjectAttachesBelowMethodProviders_ThenOnlyTheNearestOneAddsMethodsAfterTheOwnOnes()
     {
         // Arrange
@@ -1164,6 +1215,16 @@ public interface IMethodTestInterface
 }
 
 [InterceptorSubject]
+public partial class AdministrationTestSubject
+{
+    [Operation(RequiresAdministration = true)]
+    public Task ConfigureAsync() => Task.CompletedTask;
+
+    [Operation]
+    public Task AssignAsync([OperationParameter(Editor = "Test.Names", InitialValueProperty = "Names")] string[] names, int count) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
 public partial class MethodTestSubject : IMethodTestInterface
 {
     public bool StopCalled { get; set; }
@@ -1367,6 +1428,11 @@ public partial class PurposeMethodSubject
 
     [Operation(Purpose = OperationPurpose.Delete, RequiresConfirmation = true)]
     public void Uninstall()
+    {
+    }
+
+    [Operation(Purpose = OperationPurpose.Edit)]
+    public void Save(string label)
     {
     }
 }

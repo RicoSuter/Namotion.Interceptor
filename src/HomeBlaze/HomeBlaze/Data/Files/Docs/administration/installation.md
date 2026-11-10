@@ -26,7 +26,17 @@ Copy [docker-compose.yml](https://github.com/RicoSuter/Namotion.Interceptor/blob
 docker compose up -d
 ```
 
-HomeBlaze is then available at http://localhost:8080 and opens on its welcome page. To upgrade, run `docker compose pull` and `docker compose up -d`.
+HomeBlaze is then available at http://localhost:8080 and asks you to sign in, see [First start](#first-start). To upgrade, run `docker compose pull` and `docker compose up -d`, and read [Upgrading to sign-in](#upgrading-to-sign-in) when you come from a version without a login.
+
+### First start
+
+HomeBlaze requires signing in. On the first start it creates the user `admin` with an empty password:
+
+1. Open http://localhost:8080 and sign in as `admin` with an empty password.
+2. Set a password when HomeBlaze asks for it, at least 10 characters.
+3. Add the other people with the operation "Add User" of the `Authorization` subject, see [Authorization](authorization.md#people-and-users).
+
+The empty password is accepted from any address until a password is set, so set it right away and keep a new installation off a network you do not trust until you have. The welcome page opens after you sign in. If you lose the password or the authentication database, see [Recovery](authorization.md#recovery): `docker compose run --rm homeblaze --reset-admin`.
 
 ### Data folder
 
@@ -34,7 +44,7 @@ Everything HomeBlaze keeps lives in the folder mounted at `/data` (`./data` in t
 
 On the first start, when `Root.json` does not exist, HomeBlaze copies a starting set into the folder: a welcome page, a help page, this documentation, an empty plugin list, a SQLite history store that records to `History/Sqlite`, a `Host system` subject in `Servers/HostSystem.json` and an `Installation` subject in `Servers/Installation.json` (see [Version and Updates](updates.md)). Existing files are never overwritten, except for the documentation described below. The demo devices and sample plugins are only available when running from source.
 
-Back up HomeBlaze by copying this folder. Stop HomeBlaze first (`docker compose stop`) so the SQLite history is copied in a consistent state. The container runs as root, so on Linux the files in `./data` belong to root and editing them on the host needs `sudo`. A backup contains the secret keys in `DataProtection-Keys`, so store it as carefully as the installation itself; see [Configuration](configuration.md#data-folder) for how to revoke them.
+Back up HomeBlaze by copying this folder. Stop HomeBlaze first (`docker compose stop`) so the SQLite history and the authentication database are copied in a consistent state. The folder holds `authentication.db`, which stores the users, their password hashes and the roles, and `authentication.db.seeded` next to it. Restoring an old backup brings back the users and roles of that time, including users you removed since and their old passwords, and an empty password of `admin` that was not changed yet. If you set `Authentication:Database` to a file outside the folder, back that file up as well. The container runs as root, so on Linux the files in `./data` belong to root and editing them on the host needs `sudo`. A backup contains the secret keys in `DataProtection-Keys`, so store it as carefully as the installation itself; see [Configuration](configuration.md#data-folder) for how to revoke them.
 
 The documentation in `Files/Docs` belongs to the image. On every start, HomeBlaze deletes the folder and copies the documentation of the running image into it, so keep your own pages outside `Files/Docs`: anything added or changed there is lost on the next start. If that fails, for example because the disk is full, HomeBlaze logs a warning and starts anyway.
 
@@ -64,11 +74,23 @@ Keep `.env`: Seq creates the user `admin` with `SEQ_ADMIN_PASSWORD` on its first
 
 HomeBlaze sends its logs and traces to Seq through `ConnectionStrings__seq`. Without the `seq` profile the export fails silently and HomeBlaze keeps working; remove the setting if you never use Seq. See [Monitoring](monitoring.md).
 
-MCP clients connect to `http://<host>:8080/mcp` using the MCP Streamable HTTP transport. The compose file enables MCP read-only; set `McpServer__ReadOnly` to `"false"` to allow writes.
+MCP clients connect to `http://<host>:8080/mcp` using the MCP Streamable HTTP transport. The compose file enables MCP. The clients get the roles of the built-in user `mcp`, which is `reader` by default, so they can read but not write; to let them write, change its roles. Without a key, anyone who reaches `/mcp` gets these roles, so create a key for it first, see [Anonymous and MCP](authorization.md#anonymous-and-mcp).
 
 ### Security
 
-HomeBlaze has no login. Keep it on a trusted network or put it behind a reverse proxy that authenticates users and supports WebSockets. The container runs as root so it can write the data folder and access GPIO devices.
+HomeBlaze requires signing in, see [Authorization](authorization.md). Use HTTPS for anything beyond a trusted network, for example behind a reverse proxy that terminates TLS and supports WebSockets, and tell HomeBlaze which proxy to trust, see [Remote Access](authorization.md#remote-access). The external `/mcp` endpoint is separate from signing in and unauthenticated until a key is created for the user `mcp`. The container runs as root so it can write the data folder and access GPIO devices.
+
+### Upgrading to sign-in
+
+A version with sign-in changes what a running installation does on the first start:
+
+- **Signing in is required.** Every page needs a user. Wall tablets, kiosks and bookmarks that opened HomeBlaze without a login show the sign-in dialog after the upgrade: sign in once on the device with "Keep me signed in", or give the built-in user `anonymous` a role on a network you trust, see [the wall tablet recipe](authorization.md#wall-tablet). A visitor who is not signed in sees nothing until then.
+- **`admin` is created** with an empty password and the role `everything` on the first start. Set its password at once, see [First start](#first-start).
+- **The `ReadOnly` setting of `McpServer` is gone.** The roles of the built-in user `mcp` decide what `/mcp` clients may do, `reader` by default, which keeps them read-only. If you set it to false to allow writes, in `appsettings` or in your compose file, give `mcp` the role `operator` instead; the setting is ignored, so remove it.
+- **Back up the authentication database**, see [Data folder](#data-folder). It is part of the data folder by default.
+- **Downgrading** to a version from before sign-in removes sign-in entirely: every page and `/mcp` are open again to anyone who reaches the server, as they were before. Going back between versions with sign-in after a database migration is not supported and may fail. Restore the backup of the data folder taken before the upgrade, or run the newer version again.
+- **Configuration is administration.** People change configuration only as full administrators; an `operator` reads, writes state and runs operations. Agents create no Markdown files, and a person chats with an agent only when they hold its roles, see [Authorization](authorization.md#who-may-chat-with-an-agent).
+- **Forwarded headers** from a reverse proxy are applied only for the proxies you list in `Authentication:ForwardedHeadersKnownNetworks` or `Authentication:ForwardedHeadersKnownProxies`.
 
 ### Hardware and discovery
 
