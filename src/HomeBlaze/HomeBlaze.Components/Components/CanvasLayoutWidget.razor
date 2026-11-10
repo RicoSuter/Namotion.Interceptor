@@ -255,17 +255,7 @@ else
         // line changes.
         IInterceptorSubject moved = Nodes.FirstOrDefault(node => GetNodeId(node) == modifiedNode.Id) ?? (IInterceptorSubject)canvas;
 
-        _ = InvokeAsync(async () =>
-        {
-            try
-            {
-                await RootManager.WriteConfigurationOrWarnAsync(moved, Snackbar, CancellationToken.None);
-            }
-            catch (Exception exception)
-            {
-                Console.Error.WriteLine($"Failed to persist canvas layout: {exception.Message}");
-            }
-        });
+        _ = InvokeAsync(() => RootManager.WriteConfigurationOrWarnAsync(moved, Snackbar, CancellationToken.None));
     }
 
     // Only an edited canvas has these handlers. A viewed one has none, so that a click or a mouse down in a widget of a node

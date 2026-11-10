@@ -192,25 +192,53 @@ public class PlaywrightFixture : IAsyncLifetime
     }
 
     /// <summary>
-    /// Stores a new motor as a JSON file of the root storage, as the create dialog does.
+    /// Stores a new motor as a JSON file of the root storage, as the create dialog does, with the given name or a new one.
     /// </summary>
-    /// <returns>The name of the motor under the root, which is its path, the path of its file and the motor.</returns>
-    public async Task<(string Name, string FilePath, IInterceptorSubject Subject)> AddStoredMotorAsync()
+    public Task<StoredSubject<HomeBlaze.Samples.Motor>> AddStoredMotorAsync(string? name = null) =>
+        AddStoredSubjectAsync<HomeBlaze.Samples.Motor>(name ?? CreateMotorName(), configure: null);
+
+    /// <summary>A name for <see cref="AddStoredMotorAsync"/> that no other motor has.</summary>
+    public static string CreateMotorName() => $"Motor{Guid.NewGuid():N}";
+
+    /// <summary>
+    /// Stores a new automation, configured before it is stored, as a JSON file of the root storage, as the create dialog
+    /// does. The automation starts once it is in the graph.
+    /// </summary>
+    public Task<StoredSubject<HomeBlaze.Automation.Automation>> AddStoredAutomationAsync(Action<HomeBlaze.Automation.Automation> configure) =>
+        AddStoredSubjectAsync($"Automation{Guid.NewGuid():N}", configure);
+
+    private async Task<StoredSubject<T>> AddStoredSubjectAsync<T>(string name, Action<T>? configure)
+        where T : IInterceptorSubject
     {
-        var name = $"Motor{Guid.NewGuid():N}";
-        var motor = ServerServices.GetRequiredService<SubjectFactory>().CreateSubject<HomeBlaze.Samples.Motor>();
-        await GetRoot().AddSubjectAsync($"{name}.json", motor, CancellationToken.None);
-        return (name, GetPagePath($"{name}.json"), motor);
+        var subject = ServerServices.GetRequiredService<SubjectFactory>().CreateSubject<T>();
+        configure?.Invoke(subject);
+        await GetRoot().AddSubjectAsync($"{name}.json", subject, CancellationToken.None);
+        return new StoredSubject<T>(this, name, GetPagePath($"{name}.json"), subject);
     }
 
     /// <summary>
-    /// Deletes a subject of <see cref="AddStoredMotorAsync"/> with its file, unless it is gone already.
+    /// Deletes a subject of <see cref="AddStoredMotorAsync"/> or <see cref="AddStoredAutomationAsync"/> with its file, unless
+    /// it is gone already.
     /// </summary>
-    public async Task DeleteStoredSubjectAsync(string filePath, IInterceptorSubject subject)
+    internal async Task DeleteStoredSubjectAsync(string filePath, IInterceptorSubject subject)
     {
         if (File.Exists(filePath))
         {
             await GetRoot().DeleteSubjectAsync(subject, CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// Deletes a subject that a test created through the UI, found by its file name under the root without the extension,
+    /// with its file, unless it is gone already.
+    /// </summary>
+    public async Task DeleteStoredSubjectByNameAsync(string name)
+    {
+        var root = GetRoot();
+        var subject = root.Children.FirstOrDefault(pair => pair.Key == name || pair.Key == $"{name}.json").Value;
+        if (subject is not null)
+        {
+            await root.DeleteSubjectAsync(subject, CancellationToken.None);
         }
     }
 
@@ -364,6 +392,17 @@ public class PlaywrightFixture : IAsyncLifetime
     {
         return ServerServices.GetRequiredService<RootManager>().Root as FluentStorageContainer
             ?? throw new InvalidOperationException("The root of the test server is not a storage container");
+    }
+
+    /// <summary>
+    /// Opens the page of a subject, given by its path, in a new page and waits until the circuit renders it.
+    /// </summary>
+    public async Task<IPage> OpenSubjectPageAsync(string path)
+    {
+        var page = await CreatePageAsync();
+        await page.GotoAsync($"{ServerAddress}pages/{path}");
+        await page.WaitUntilInteractiveAsync();
+        return page;
     }
 
     /// <summary>

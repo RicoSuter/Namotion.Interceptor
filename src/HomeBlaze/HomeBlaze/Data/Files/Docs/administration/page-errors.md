@@ -85,11 +85,15 @@ An expression with a mistake does not take a block down. The page shows the mess
 | `The pipe 'raw' takes no arguments` | A pipe with an argument after a colon, like `{{ motor/Speed \| raw:2 }}` | Remove the colon and the argument |
 | `expected ')' at position 16` | A mistake in an expression: a parenthesis, a quote, an operator or a value is missing or in the wrong place. The position counts the characters of the expression from 0 | Correct the expression at that position, see [Conditions](pages.md#conditions) |
 | `use '==' for equality at position 12` | A single `=` in a comparison | Write `==` |
+| `put a space after '-' at position 2` | An operator directly before a value, like `{{ a -5 }}`, which reads as the number `-5` after `a` | Put a space after the operator, like `a - 5` |
+| `put a space before '-' at position 1` | An operator directly after a path, like `{{ a- b }}`, which makes it part of the path `a-` | Put a space before the operator, like `a - b` |
+| `invalid duration '5M' at position 11` | A duration with an unknown or upper-case unit, or with units that are not from the largest to the smallest | Write the units `d`, `h`, `m`, `s` and `ms` in lower case and in this order, like `1h30m` |
+| `duration out of range '10675200d' at position 11` | A duration longer than about 29,000 years. A number too large for a computer, like `1e999`, gives `number out of range` | Write a smaller value |
 | `The pipe 'map' takes the name of a value map, such as map:wallbox` | The pipe `map` without a name, or with more than one | Write `map:` and the name of the map |
 | `'value' is not available in the text of a page` | The text of a page uses `value` or `subject`, which are reserved for the values that widgets give their expressions | Write the path of the property |
 | `The pipe 'map' must be the first pipe` | The pipe `map` stands after another pipe, like `{{ motor/Status \| raw \| map:motorstate }}`. The map reads the value itself, which a pipe before it has already turned into text | Write `map` first, or remove the pipes before it |
 | `expression is longer than 1000 characters at position 1000` | An expression is longer than 1000 characters. In a text with expressions between double braces, the position counts inside the braces of that expression | Shorten the expression, see [Expression Limits](pages.md#expression-limits) |
-| `expression is nested too deeply at position 32` | An expression nests more than 32 levels of parentheses and `not`. In a text with expressions between double braces, the position counts inside the braces of that expression | Flatten the expression, see [Expression Limits](pages.md#expression-limits) |
+| `expression is nested too deeply at position 32` | An expression nests more than 32 levels of parentheses, `not` and negations with `-`. In a text with expressions between double braces, the position counts inside the braces of that expression | Flatten the expression, see [Expression Limits](pages.md#expression-limits) |
 
 A pipe `map` with a name that leads to no value map shows `Cannot resolve map: name` as the text of the expression, and a map with a mistake shows its message there, one of the map messages of [Value Widget Errors](#value-widget-errors).
 
