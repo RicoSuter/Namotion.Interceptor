@@ -1,7 +1,3 @@
-using HomeBlaze.Abstractions;
-using HomeBlaze.Abstractions.Attributes;
-using Namotion.Interceptor.Attributes;
-
 namespace HomeBlaze.Storage.Tests;
 
 public class FluentStorageContainerConfigurationIssueTests : StorageTestBase
@@ -41,53 +37,4 @@ public class FluentStorageContainerConfigurationIssueTests : StorageTestBase
         // Assert
         Assert.True(isWritten);
     }
-
-    [Fact]
-    public async Task WhenASubjectThatReceivesIssuesHasAKeyThatNamesNoSetting_ThenItGetsTheIssue()
-    {
-        // Arrange
-        WriteFile("Issues.json", $$"""{ "$type": "{{typeof(IssueReceivingSubject).FullName}}", "name": "a", "nmae": "b" }""");
-
-        // Act
-        var storage = await ConnectAsync();
-
-        // Assert
-        var subject = Assert.IsType<IssueReceivingSubject>(storage.Children["Issues"]);
-        Assert.Equal(["'nmae' is no setting of IssueReceivingSubject"], subject.Issues);
-    }
-
-    [Fact]
-    public async Task WhenASubjectThatReceivesIssuesIsReadInFull_ThenItGetsNoIssues()
-    {
-        // Arrange
-        WriteFile("Issues.json", $$"""{ "$type": "{{typeof(IssueReceivingSubject).FullName}}", "name": "a", "nmae": "b" }""");
-        var storage = await ConnectAsync();
-        var subject = Assert.IsType<IssueReceivingSubject>(storage.Children["Issues"]);
-        WriteFile("Issues.json", $$"""{ "$type": "{{typeof(IssueReceivingSubject).FullName}}", "name": "b" }""");
-
-        // Act
-        await storage.ReconcileAsync(Named("Issues.json"));
-
-        // Assert
-        Assert.Same(subject, storage.Children["Issues"]);
-        Assert.Empty(subject.Issues);
-    }
-}
-
-[InterceptorSubject]
-public partial class IssueReceivingSubject : IConfigurable, IConfigurationIssueReceiver
-{
-    public IssueReceivingSubject()
-    {
-        Name = string.Empty;
-    }
-
-    [Configuration]
-    public partial string Name { get; set; }
-
-    public string[] Issues { get; private set; } = [];
-
-    public void SetConfigurationIssues(string[] issues) => Issues = issues;
-
-    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

@@ -272,6 +272,24 @@ public class ConfigurableSubjectSerializerSkippedPropertyTests
         Assert.Equal(2, subject.Count);
         Assert.Equal("child", Assert.IsType<ChildSubject>(subject.Child).ChildConfig);
     }
+
+    [Theory]
+    [InlineData(ConfigurationNaming.JsonProperty, "count")]
+    [InlineData(ConfigurationNaming.CSharpProperty, "Count")]
+    public void WhenAPropertyIsSkipped_ThenItsDescriptionNamesItsKey(ConfigurationNaming naming, string key)
+    {
+        // Arrange
+        var serializer = CreateSerializer();
+        var json = $$"""{ "$type": "{{TypeName}}", "{{key}}": "three" }""";
+        var skipped = new List<SkippedConfigurationProperty>();
+        serializer.Deserialize(json, created: null, skipped.Add, naming);
+
+        // Act
+        var description = ConfigurableSubjectSerializer.DescribeSkippedProperties(skipped, naming);
+
+        // Assert
+        Assert.StartsWith($"the value of '{key}' could not be read: ", description);
+    }
 }
 
 [InterceptorSubject]

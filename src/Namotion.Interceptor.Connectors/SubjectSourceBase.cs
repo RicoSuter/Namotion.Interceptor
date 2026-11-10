@@ -44,6 +44,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
     internal WriteRetryQueue WriteRetryQueue { get; }
 
+    /// <summary>
+    /// The clock the connected processor measures its <see cref="ChangeQueueProcessor.TeardownFlushBound"/> on.
+    /// </summary>
+    internal TimeProvider TeardownTimeProvider { get; init; } = TimeProvider.System;
+
     protected SubjectSourceBase(
         IInterceptorSubjectContext context,
         ILogger logger,
@@ -297,7 +302,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                         completionHandler: async teardownToken =>
                         {
                             await WriteRetryQueue.FlushAsync(this, teardownToken).ConfigureAwait(false);
-                        });
+                        })
+                    {
+                        TeardownTimeProvider = TeardownTimeProvider
+                    };
 
                     // Declared after the processor so it is released first, which is what lets the
                     // retry loop's next attempt register its own: a second Register while one is

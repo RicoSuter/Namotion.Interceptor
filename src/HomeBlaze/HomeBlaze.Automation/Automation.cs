@@ -21,14 +21,13 @@ namespace HomeBlaze.Automation;
 [DisplayName("Automation")]
 [SubjectIcon("AutoMode")]
 [InterceptorSubject]
-public partial class Automation : BackgroundService, IConfigurable, IConfigurationIssueReceiver, IMonitoredService, ITitleProvider,
-    IIconProvider, IObservable<AutomationStateChangedEvent>, ILifecycleHandler
+public partial class Automation : BackgroundService, IConfigurable, IMonitoredService, ITitleProvider, IIconProvider,
+    IObservable<AutomationStateChangedEvent>, ILifecycleHandler
 {
     private readonly ILogger<Automation> _logger;
     private readonly Subject<AutomationStateChangedEvent> _stateChanged = new();
     private AutomationRuntime? _runtime;
     private int _configurationVersion;
-    private string[] _configurationIssues = [];
     private volatile bool _isDetached;
 
     /// <summary>Creates an automation with the services it takes, which dependency injection resolves.</summary>
@@ -128,14 +127,6 @@ public partial class Automation : BackgroundService, IConfigurable, IConfigurati
     internal AutomationChangeDispatcher ChangeDispatcher { get; }
 
     internal int ConfigurationVersion => Volatile.Read(ref _configurationVersion);
-
-    /// <summary>
-    /// The issues of the configuration file the automation was last read from, such as a value that could not be read or
-    /// a key that names no setting, which make its configuration invalid.
-    /// </summary>
-    internal string[] ConfigurationIssues => Volatile.Read(ref _configurationIssues);
-
-    void IConfigurationIssueReceiver.SetConfigurationIssues(string[] issues) => Volatile.Write(ref _configurationIssues, issues);
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {

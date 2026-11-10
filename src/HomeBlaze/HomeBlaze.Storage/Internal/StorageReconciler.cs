@@ -804,7 +804,7 @@ internal sealed class StorageReconciler
             {
                 var skipped = new List<SkippedConfigurationProperty>();
                 _serializer.UpdateConfiguration(entry.Subject, json, skipped.Add);
-                _subjectFactory.ReportIssues(entry.Subject, entry.Path, json, skipped);
+                _subjectFactory.LogSkippedProperties(entry.Path, skipped);
             }
 
             await configurable.ApplyConfigurationAsync(cancellationToken);
