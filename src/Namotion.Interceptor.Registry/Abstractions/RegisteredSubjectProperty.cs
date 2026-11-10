@@ -1,4 +1,5 @@
 ﻿using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -407,7 +408,8 @@ public class RegisteredSubjectProperty
     }
 
     // Removes the last count entries of the subject, which are all of them: the caller takes the count from the
-    // parent entries it removed.
+    // parent entries it removed. Both stores are written only by SubjectRegistry, in the same handler call under its
+    // _knownSubjects lock, so the subject has as many child entries here as parent entries for this property.
     internal void RemoveChild(IInterceptorSubject subject, int count)
     {
         lock (_children)
@@ -422,6 +424,8 @@ public class RegisteredSubjectProperty
                     removed++;
                 }
             }
+
+            Debug.Assert(removed == count, "The child entries of the subject must match its parent entries for the property.");
 
             if (removed > 0)
             {
