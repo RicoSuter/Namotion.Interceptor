@@ -290,7 +290,7 @@ internal class BrowseTool
                 var children = property.Children;
 
                 // A subject held at several keys or positions is listed once when expanded, so it counts once.
-                var counted = children.Length > 1
+                var counted = children.Length > 1 && property.HasRepeatedChildren
                     ? new HashSet<IInterceptorSubject>(children.Length, ReferenceEqualityComparer.Instance)
                     : null;
 

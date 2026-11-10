@@ -70,14 +70,15 @@ internal static class SubjectTableRows
         _ = property.GetValue();
 
         error = null;
-        rows = Filter(WithoutRepeats(property.Children), typeName);
+        rows = Filter(WithoutRepeats(property), typeName);
         return true;
     }
 
     // A subject held at several places is one row, at its first place, since the rows are keyed by subject.
-    private static ImmutableArray<SubjectPropertyChild> WithoutRepeats(ImmutableArray<SubjectPropertyChild> children)
+    private static ImmutableArray<SubjectPropertyChild> WithoutRepeats(RegisteredSubjectProperty property)
     {
-        if (children.Length < 2)
+        var children = property.Children;
+        if (children.Length < 2 || !property.HasRepeatedChildren)
         {
             return children;
         }
