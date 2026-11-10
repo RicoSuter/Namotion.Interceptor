@@ -592,7 +592,7 @@ var same = car.TryGetFirstParentOrSelf<Car>();  // The car itself, because it is
 
 Both searches go breadth first over all parents, so the nearest match wins, and neither throws when there is none. `TryGetFirstParent` never returns the subject itself.
 
-Every parent carries an `Index`, and a subject has one parent per property that holds it. The index follows the assigned value as described in [Child Index Changes](#child-index-changes).
+Every parent carries an `Index`, and a subject has one parent per key or position that holds it, grouped by property in the order of the value. The index follows the assigned value as described in [Child Index Changes](#child-index-changes).
 
 This enables scenarios like:
 - Finding the root object of a subject graph
