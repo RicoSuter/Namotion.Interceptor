@@ -243,6 +243,9 @@ internal class CustomNodeManager : CustomNodeManager2
         var childReferenceTypeId = _nodeFactory.GetChildReferenceTypeId(this, mapping);
         foreach (var child in children)
         {
+            if (IsPublishedUnder(propertyNode, child.Subject, childReferenceTypeId))
+                continue;
+
             var childBrowseName = new QualifiedName($"{propertyName}[{child.Index}]", NamespaceIndex);
             var childPath = $"{parentPath}{propertyName}[{child.Index}]";
 
@@ -271,6 +274,9 @@ internal class CustomNodeManager : CustomNodeManager2
 
                 continue;
             }
+
+            if (IsPublishedUnder(propertyNode, child.Subject, childReferenceTypeId))
+                continue;
 
             var childBrowseName = new QualifiedName(indexString, NamespaceIndex);
             var childPath = parentPath + propertyName + PathDelimiter + child.Index;
@@ -454,6 +460,18 @@ internal class CustomNodeManager : CustomNodeManager2
             var childName = childConfig.BrowseName ?? childProperty.BrowseName;
             CreateVariableNode(childName, childProperty, childConfig, variableNode.NodeId, path + PathDelimiter);
         }
+    }
+
+    /// <summary>
+    /// Whether the subject already has a node under the folder, because the property holds it at an earlier place.
+    /// </summary>
+    private bool IsPublishedUnder(FolderState folder, IInterceptorSubject subject, NodeId? referenceTypeId)
+    {
+        var registeredSubject = subject.TryGetRegisteredSubject();
+        return registeredSubject is not null &&
+            _subjects.TryGetValue(registeredSubject, out var node) &&
+            ((node is BaseInstanceState instance && ReferenceEquals(instance.Parent, folder)) ||
+             folder.ReferenceExists(referenceTypeId ?? ReferenceTypeIds.HasComponent, false, node.NodeId));
     }
 
     private void CreateChildObject(RegisteredSubjectProperty property, OpcUaPropertyMapping? mapping, QualifiedName browseName,

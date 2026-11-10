@@ -1,8 +1,10 @@
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.OpcUa.Attributes;
+using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Testing;
+using Opc.Ua;
 using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
@@ -71,11 +73,82 @@ public class OpcUaSubjectReuseTests
         Assert.Same(client.Root!.GroupA!.Shared, client.Root.GroupB!.Shared);
         Assert.Equal("shared", client.Root.GroupA.Shared!.Name);
     }
+
+    [Fact]
+    public async Task WhenPropertyHoldsSameSubjectAtSeveralPlaces_ThenServerPublishesItOnceAtItsFirstPlace()
+    {
+        // Arrange
+        var serverLog = new SharedLogBuffer();
+        using var port = await OpcUaTestPortPool.AcquireAsync();
+
+        SharedReuseItem? shared = null;
+        SharedReuseItem? sharedByKey = null;
+
+        await using var server = new OpcUaTestServer<SubjectReuseTestRoot>(new TestLogger(serverLog));
+
+        // Act
+        await server.StartAsync(
+            createRoot: context => new SubjectReuseTestRoot(context),
+            initializeDefaults: (context, root) =>
+            {
+                shared = new SharedReuseItem(context) { Name = "shared" };
+                root.Items = [shared, new SharedReuseItem(context) { Name = "other" }, shared];
+
+                sharedByKey = new SharedReuseItem(context) { Name = "shared" };
+                root.ItemsByKey = new Dictionary<string, SharedReuseItem>
+                {
+                    ["a"] = sharedByKey,
+                    ["b"] = new SharedReuseItem(context) { Name = "other" },
+                    ["c"] = sharedByKey
+                };
+            },
+            baseAddress: port.BaseAddress,
+            certificateStoreBasePath: port.CertificateStoreBasePath);
+
+        // Assert
+        var serverService = (OpcUaSubjectServer)server.Server!;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => serverService.TryGetVariableNode(new PropertyReference(shared!, nameof(SharedReuseItem.Name)), out _)
+                  && serverService.TryGetVariableNode(new PropertyReference(sharedByKey!, nameof(SharedReuseItem.Name)), out _),
+            message: "the repeated subjects' variable nodes should exist");
+
+        var systemContext = ((OpcUaStandardServer)serverService.CurrentServer!).CurrentInstance.DefaultSystemContext;
+        AssertPublishedOnceAtFirstPlace(serverService, systemContext, shared!, "Items[0]");
+        AssertPublishedOnceAtFirstPlace(serverService, systemContext, sharedByKey!, "a");
+
+        Assert.DoesNotContain(serverLog.ReadFrom(0), line => line.Contains("reused at 'SubjectReuseTestRoot."));
+    }
+
+    private static void AssertPublishedOnceAtFirstPlace(
+        OpcUaSubjectServer serverService, ISystemContext systemContext, SharedReuseItem subject, string expectedBrowseName)
+    {
+        Assert.True(serverService.TryGetVariableNode(new PropertyReference(subject, nameof(SharedReuseItem.Name)), out var nameNode));
+        var subjectNode = (BaseInstanceState)nameNode!.Parent!;
+        var folderNode = subjectNode.Parent!;
+
+        Assert.Equal(expectedBrowseName, subjectNode.BrowseName.Name);
+
+        // GetReferences returns the references that are not children, so a node is reached once
+        // when it is either one child or one reference of its folder.
+        var children = new List<BaseInstanceState>();
+        folderNode.GetChildren(systemContext, children);
+        var references = new List<IReference>();
+        folderNode.GetReferences(systemContext, references);
+
+        var childCount = children.Count(child => child.NodeId == subjectNode.NodeId);
+        var referenceCount = references.Count(reference => !reference.IsInverse && reference.TargetId == subjectNode.NodeId);
+        Assert.Equal(1, childCount + referenceCount);
+    }
 }
 
 [InterceptorSubject]
 public partial class SubjectReuseTestRoot
 {
+    public SubjectReuseTestRoot()
+    {
+        Items = [];
+    }
+
     [Path("opc", "Connected")]
     public partial bool Connected { get; set; }
 
@@ -86,6 +159,12 @@ public partial class SubjectReuseTestRoot
     [Path("opc", "GroupB")]
     [OpcUaReference("HasComponent")]
     public partial SubjectReuseGroup? GroupB { get; set; }
+
+    [Path("opc", "Items")]
+    public partial SharedReuseItem[] Items { get; set; }
+
+    [Path("opc", "ItemsByKey")]
+    public partial Dictionary<string, SharedReuseItem>? ItemsByKey { get; set; }
 }
 
 [InterceptorSubject]
