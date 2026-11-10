@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 /// <summary>
 /// Tells the <see cref="IChildIndexHandler"/> services of a context which children a structural
-/// write left under other keys or positions.
+/// write left under other keys or positions, and which children an attach placed at more than one.
 /// </summary>
 internal static class ChildIndexRefresher
 {

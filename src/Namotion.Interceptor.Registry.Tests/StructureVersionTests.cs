@@ -243,7 +243,7 @@ public class StructureVersionTests
     }
 
     [Fact]
-    public void WhenADictionaryHoldingASubjectTwiceIsRebuiltInAnotherOrderWithTheSameFirstKey_ThenStructureVersionIsUnchanged()
+    public void WhenADictionaryHoldingASubjectTwiceIsRebuiltInAnotherOrderThatKeepsTheKeysOfEachSubjectInOrder_ThenStructureVersionIsUnchanged()
     {
         // Arrange
         var (context, registry) = CreateContext();

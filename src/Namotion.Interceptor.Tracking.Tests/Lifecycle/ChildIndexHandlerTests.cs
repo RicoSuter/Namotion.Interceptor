@@ -255,7 +255,7 @@ public class ChildIndexHandlerTests
     }
 
     [Fact]
-    public void WhenDictionaryHoldingASubjectTwiceIsRebuiltInAnotherOrderWithTheSameFirstKey_ThenHandlerIsNotCalled()
+    public void WhenDictionaryHoldingASubjectTwiceIsRebuiltInAnotherOrderThatKeepsTheKeysOfEachSubjectInOrder_ThenHandlerIsNotCalled()
     {
         // Arrange
         var (context, handler) = CreateContext();

@@ -231,14 +231,13 @@ public class MovedChildConsistencyTests
         };
 
         oldKey.OnEquals = () => throw new InvalidOperationException();
-
-        // Act
         Assert.Throws<InvalidOperationException>(() => holder.BroadCars = new Dictionary<HookedKey, Car>
         {
             [new HookedKey("A")] = cars[0],
             [new HookedKey("C")] = cars[0]
         });
 
+        // Act
         holder.BroadCars = new Dictionary<string, Car> { ["C"] = cars[0], ["D"] = cars[1], ["E"] = cars[0] };
 
         // Assert
