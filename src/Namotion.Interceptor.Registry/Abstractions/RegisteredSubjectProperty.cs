@@ -21,7 +21,8 @@ public class RegisteredSubjectProperty
     private readonly List<SubjectPropertyChild> _children = [];
     private ImmutableArray<SubjectPropertyChild> _childrenCache;
 
-    // Entries beyond the first of each subject. While zero, no reported subject can have more than one entry.
+    // Entries beyond the first of each subject. While zero, no reported subject can have more than one entry. Written
+    // under the _children lock; HasRepeatedChildren reads it without.
     private int _repeatedChildCount;
 
     private readonly PropertyAttributeAttribute? _attributeMetadata;
@@ -245,6 +246,16 @@ public class RegisteredSubjectProperty
         }
     }
     
+    /// <summary>
+    /// Gets whether the property holds a subject at more than one key or position, so that <see cref="Children"/> has
+    /// more than one entry for it.
+    /// </summary>
+    /// <remarks>
+    /// A hint read separately from <see cref="Children"/>: after a concurrent write, a later read of
+    /// <see cref="Children"/> may disagree with it.
+    /// </remarks>
+    public bool HasRepeatedChildren => Volatile.Read(ref _repeatedChildCount) > 0;
+
     /// <summary>
     /// Adds an attribute to the property.
     /// </summary>

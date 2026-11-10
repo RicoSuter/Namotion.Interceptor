@@ -378,6 +378,67 @@ public class RepeatedChildTests
     }
 
     [Fact]
+    public void WhenNoChildIsRepeated_ThenPropertyHasNoRepeatedChildren()
+    {
+        // Arrange
+        var group = new LightGroup(CreateContext()) { Lights = [new Light(), new Light()] };
+
+        // Act
+        var property = group.TryGetRegisteredSubject()!.TryGetProperty(nameof(LightGroup.Lights))!;
+
+        // Assert
+        Assert.False(property.HasRepeatedChildren);
+    }
+
+    [Fact]
+    public void WhenAChildIsRepeated_ThenPropertyHasRepeatedChildren()
+    {
+        // Arrange
+        var light = new Light();
+        var group = new LightGroup(CreateContext()) { Lights = [light, new Light()] };
+        var property = group.TryGetRegisteredSubject()!.TryGetProperty(nameof(LightGroup.Lights))!;
+
+        // Act
+        group.Lights = [light, group.Lights[1], light];
+
+        // Assert
+        Assert.True(property.HasRepeatedChildren);
+    }
+
+    [Fact]
+    public void WhenTheRepeatGoes_ThenPropertyHasNoRepeatedChildrenAgain()
+    {
+        // Arrange
+        var light = new Light();
+        var other = new Light();
+        var group = new LightGroup(CreateContext()) { Lights = [light, other, light] };
+        var property = group.TryGetRegisteredSubject()!.TryGetProperty(nameof(LightGroup.Lights))!;
+        Assert.True(property.HasRepeatedChildren);
+
+        // Act
+        group.Lights = [other, light];
+
+        // Assert
+        Assert.False(property.HasRepeatedChildren);
+    }
+
+    [Fact]
+    public void WhenTheRepeatedChildLeaves_ThenPropertyHasNoRepeatedChildrenAgain()
+    {
+        // Arrange
+        var light = new Light();
+        var other = new Light();
+        var group = new LightGroup(CreateContext()) { Lights = [light, other, light] };
+        var property = group.TryGetRegisteredSubject()!.TryGetProperty(nameof(LightGroup.Lights))!;
+
+        // Act
+        group.Lights = [other];
+
+        // Assert
+        Assert.False(property.HasRepeatedChildren);
+    }
+
+    [Fact]
     public void WhenSubjectHasNoParent_ThenItCountsNoProperty()
     {
         // Arrange
