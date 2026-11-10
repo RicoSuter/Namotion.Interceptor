@@ -110,6 +110,11 @@ namespace HomeBlaze.Services
         public static string GetPluginConfigurationPath(Microsoft.Extensions.Configuration.IConfiguration configuration) { }
         public static string GetRootConfigurationPath(Microsoft.Extensions.Configuration.IConfiguration? configuration) { }
     }
+    public static class LocalClock
+    {
+        public static System.DateTimeOffset? GetOffsetChange(System.TimeZoneInfo timeZone, System.TimeSpan offset, System.DateTimeOffset now, System.DateTimeOffset limit) { }
+        public static System.TimeSpan GetTimeOfDay(System.DateTimeOffset instant, System.TimeZoneInfo timeZone) { }
+    }
     public sealed class ObjectParameterMember : System.IEquatable<HomeBlaze.Services.ObjectParameterMember>
     {
         public ObjectParameterMember(string Name, System.Type Type, bool IsRequired) { }

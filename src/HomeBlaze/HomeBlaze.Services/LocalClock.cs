@@ -1,13 +1,16 @@
-namespace HomeBlaze.Automation.Expressions;
+namespace HomeBlaze.Services;
 
-/// <summary>The local time of day that automation expressions read as <c>time</c>, and the instants its offset changes.</summary>
-internal static class LocalClock
+/// <summary>The local time of day of an instant in a time zone, and the instants at which the zone changes its offset.</summary>
+public static class LocalClock
 {
     /// <summary>
     /// Gets the local time of day of the instant, which never moves backwards within a day: in the hour that repeats when
     /// the clocks go back, it stays at the last time of day before they went back until the local time passes it again,
-    /// so that a time of day in that hour is passed once.
+    /// so that each time of day in that hour is passed once.
     /// </summary>
+    /// <param name="instant">The instant.</param>
+    /// <param name="timeZone">The time zone whose local time is read.</param>
+    /// <returns>The local time of day, from zero to less than a day.</returns>
     public static TimeSpan GetTimeOfDay(DateTimeOffset instant, TimeZoneInfo timeZone)
     {
         var offset = timeZone.GetUtcOffset(instant);
@@ -29,9 +32,15 @@ internal static class LocalClock
     }
 
     /// <summary>
-    /// Gets the first instant after <paramref name="now"/> with another offset than <paramref name="offset"/>, at the
-    /// latest at <paramref name="limit"/>; null without one. A time zone changes its offset at most once in between.
+    /// Gets the first instant after <paramref name="now"/>, to the tick, at which the time zone has another offset than
+    /// <paramref name="offset"/>, at the latest <paramref name="limit"/>.
     /// </summary>
+    /// <param name="timeZone">The time zone.</param>
+    /// <param name="offset">The offset of the time zone at <paramref name="now"/>.</param>
+    /// <param name="now">The instant to search from.</param>
+    /// <param name="limit">The last instant to search, after <paramref name="now"/>.</param>
+    /// <returns>The instant in UTC, or null when the time zone has <paramref name="offset"/> at <paramref name="limit"/>.</returns>
+    /// <remarks>The time zone must change its offset at most once between <paramref name="now"/> and <paramref name="limit"/>.</remarks>
     public static DateTimeOffset? GetOffsetChange(TimeZoneInfo timeZone, TimeSpan offset, DateTimeOffset now, DateTimeOffset limit)
     {
         if (timeZone.GetUtcOffset(limit) == offset)
