@@ -217,10 +217,8 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         }
     }
 
-    /// <summary>
-    /// Gets all paths to the subject, shortest first: one for each parent, and so one for each key or position of a
-    /// collection or dictionary that holds the subject. An ancestor contributes its first parent only.
-    /// </summary>
+    /// <inheritdoc />
+    /// <remarks>An ancestor contributes its first parent only.</remarks>
     public IReadOnlyList<string> GetPaths(
         IInterceptorSubject subject,
         PathStyle style) => GetPathsCore(subject, style, recorder: null);

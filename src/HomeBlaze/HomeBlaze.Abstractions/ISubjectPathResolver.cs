@@ -11,8 +11,8 @@ public interface ISubjectPathResolver
     string? GetPath(IInterceptorSubject subject, PathStyle style);
 
     /// <summary>
-    /// Gets all paths to the subject, shortest first: one for each parent, and so one for each key or position of a
-    /// collection or dictionary that holds the subject.
+    /// Gets all paths to the subject, shallowest first and otherwise in the order of the parents: one for each parent,
+    /// and so one for each key or position of a collection or dictionary that holds the subject.
     /// </summary>
     IReadOnlyList<string> GetPaths(IInterceptorSubject subject, PathStyle style);
 
