@@ -163,9 +163,9 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
         role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
         var component = RenderEditor(role);
         // The Add button renders again exactly when its field does.
-        var addButton = component.FindComponents<ChipListInput>()
-            .Single(input => input.Instance.TestId == "rule-types")
-            .FindComponent<MudButton>();
+        var field = component.FindComponents<ChipListInput>().Single(input => input.Instance.TestId == "rule-types");
+        var addButton = field.FindComponent<MudButton>();
+        var autocomplete = field.FindComponent<MudAutocomplete<string>>();
         var input = FindInput(component, "rule-types");
         var renders = addButton.RenderCount;
 
@@ -174,6 +174,9 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
         await input.InputAsync(new ChangeEventArgs { Value = "T" });
         await input.KeyUpAsync(new KeyboardEventArgs { Key = "T" });
         var rendersOfFirstKey = addButton.RenderCount - renders;
+        // The search the typed text starts after a delay renders the field on a timer thread with a new handler of input,
+        // which an input dispatched meanwhile would no longer find; opening the suggestions renders no Add button.
+        await component.WaitForAssertionAsync(() => Assert.True(autocomplete.Instance.Open), TimeSpan.FromSeconds(10));
         await input.FocusInAsync(new FocusEventArgs());
         await input.KeyDownAsync(new KeyboardEventArgs { Key = "e" });
         await input.InputAsync(new ChangeEventArgs { Value = "Te" });
