@@ -175,4 +175,19 @@ public class RepeatedChildTests
                 value.Select((light, index) => ((IInterceptorSubject)light, (object)index)).ToArray());
         }
     }
+
+    [Fact]
+    public void WhenParentHoldingAChildTwiceIsAttached_ThenTheChildHasAnEntryPerPosition()
+    {
+        // Arrange
+        var child = new Person();
+        var father = new Person { Children = [child, child] };
+        var root = new Person(CreateContext());
+
+        // Act
+        root.Father = father;
+
+        // Assert
+        AssertChildrenAndParents(father, nameof(Person.Children), (child, 0), (child, 1));
+    }
 }

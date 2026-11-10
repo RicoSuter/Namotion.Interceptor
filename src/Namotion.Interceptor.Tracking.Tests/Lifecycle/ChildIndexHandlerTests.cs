@@ -464,6 +464,39 @@ public class ChildIndexHandlerTests
         }
     }
 
+    [Fact]
+    public void WhenParentHoldingASubjectTwiceIsAttached_ThenHandlerGetsBothPositions()
+    {
+        // Arrange
+        var (context, handler) = CreateContext();
+        var car = new Car();
+        var garage = new Garage { Cars = [car, car] };
+        var holder = new BroadlyDeclaredHolder(context);
+
+        // Act
+        holder.BroadCars = garage;
+
+        // Assert
+        var call = Assert.Single(handler.Calls);
+        Assert.Equal(new PropertyReference(garage, nameof(Garage.Cars)), call.Property);
+        Assert.Equal([new SubjectChild(car, 0), new SubjectChild(car, 1)], call.Children);
+    }
+
+    [Fact]
+    public void WhenParentHoldingEachSubjectOnceIsAttached_ThenHandlerIsNotCalled()
+    {
+        // Arrange
+        var (context, handler) = CreateContext();
+        var garage = new Garage { Cars = [new Car(), new Car()] };
+        var holder = new BroadlyDeclaredHolder(context);
+
+        // Act
+        holder.BroadCars = garage;
+
+        // Assert
+        Assert.Empty(handler.Calls);
+    }
+
     private sealed class RecordingChildIndexHandler : IChildIndexHandler
     {
         public List<(PropertyReference Property, SubjectChild[] Children)> Calls { get; } = [];

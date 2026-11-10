@@ -81,14 +81,22 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             {
                 FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
 
+                // A property that holds a child more than once attaches it at its first place, and the attach of a later
+                // place finds the link already there.
+                var hasRepeatedChildren = false;
                 foreach (var child in collectedSubjects)
                 {
-                    AttachToProperty(child.subject, subject.Context, child.property, child.index);
+                    hasRepeatedChildren |= !AttachToProperty(child.subject, subject.Context, child.property, child.index);
                 }
 
                 if (!_attachedSubjects.ContainsKey(subject))
                 {
                     AttachToContext(subject, subject.Context);
+                }
+
+                if (hasRepeatedChildren)
+                {
+                    ChildIndexRefresher.RefreshRepeatedChildren(collectedSubjects);
                 }
             }
         }
@@ -152,17 +160,17 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     }
 
     /// <summary>
-    /// Attaches a subject via a property reference.
+    /// Attaches a subject via a property reference. Returns false when the property already held it.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AttachToProperty(IInterceptorSubject subject, IInterceptorSubjectContext context,
+    private bool AttachToProperty(IInterceptorSubject subject, IInterceptorSubjectContext context,
         PropertyReference property, object? index)
     {
         ref var set = ref CollectionsMarshal.GetValueRefOrAddDefault(_attachedSubjects, subject, out var existed);
         var isFirstAttach = !existed;
         if (!set.Add(property))
         {
-            return;
+            return false;
         }
 
         var count = subject.IncrementReferenceCount();
@@ -188,6 +196,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
             }
         }
+
+        return true;
     }
     
     private static void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
