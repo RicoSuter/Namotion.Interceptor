@@ -289,6 +289,47 @@ public class SubjectPathResolverGetPathTests : SubjectPathResolverTestBase
         Assert.Equal("/Children[Shortcut]", firstPath);
     }
 
+    [Theory]
+    [InlineData(PathStyle.Canonical, "/Items[0]", "/Items[2]")]
+    [InlineData(PathStyle.Route, "/Items/0", "/Items/2")]
+    public void WhenCollectionHoldsSubjectTwice_ThenGetPathsReturnsAPathPerPositionThatResolvesToTheSubject(
+        PathStyle style, string firstExpected, string secondExpected)
+    {
+        // Arrange
+        var shared = new TestContainer(Context) { Name = "Shared" };
+        var other = new TestContainer(Context) { Name = "Other" };
+        var root = new TestContainerWithItemList(Context) { Items = [shared, other, shared] };
+        RootManager.Root = root;
+
+        // Act
+        var path = Resolver.GetPath(shared, style);
+        var paths = Resolver.GetPaths(shared, style);
+
+        // Assert
+        Assert.Equal([firstExpected, secondExpected], paths);
+        Assert.Equal(firstExpected, path);
+        Assert.All(paths, candidate => Assert.Same(shared, Resolver.ResolveSubject(candidate, style)));
+    }
+
+    [Fact]
+    public void WhenCollectionHoldingSubjectTwiceIsReordered_ThenGetPathsFollowsTheNewPositions()
+    {
+        // Arrange
+        var shared = new TestContainer(Context) { Name = "Shared" };
+        var other = new TestContainer(Context) { Name = "Other" };
+        var root = new TestContainerWithItemList(Context) { Items = [shared, other, shared] };
+        RootManager.Root = root;
+        var pathsBefore = Resolver.GetPaths(shared, PathStyle.Canonical);
+
+        // Act
+        root.Items = [other, shared, shared];
+
+        // Assert
+        Assert.Equal(["/Items[0]", "/Items[2]"], pathsBefore);
+        Assert.Equal(["/Items[1]", "/Items[2]"], Resolver.GetPaths(shared, PathStyle.Canonical));
+        Assert.Equal("/Items[1]", Resolver.GetPath(shared, PathStyle.Canonical));
+    }
+
     #endregion
 
     #region CanonicalToRoute conversion
