@@ -353,13 +353,19 @@ public class ParsedExpressionEvaluationTests
         expression.EvaluateCondition(ref context);
 
         // Act
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var iteration = 0; iteration < 100; iteration++)
+        // The runtime holds its cache of enum names weakly, so a GC from a parallel test makes the next comparison of the
+        // enum with a text rebuild it once; only an allocation in every round comes from the evaluation itself.
+        var allocated = long.MaxValue;
+        for (var round = 0; round < 3 && allocated > 0; round++)
         {
-            expression.EvaluateCondition(ref context);
-        }
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            for (var iteration = 0; iteration < 100; iteration++)
+            {
+                expression.EvaluateCondition(ref context);
+            }
 
-        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        }
 
         // Assert
         Assert.Equal(0, allocated);

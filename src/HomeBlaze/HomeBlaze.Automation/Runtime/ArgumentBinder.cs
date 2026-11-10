@@ -137,13 +137,13 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
         return true;
     }
 
-    private static bool AcceptsNull(Type type) => PropertyNullability.AcceptsNull(type);
+    private static bool AcceptsNull(Type type) => MemberNullability.AcceptsNull(type);
 
     // A dynamic property has no PropertyInfo and so no annotation.
     private static bool AcceptsNull(RegisteredSubjectProperty property) =>
         property.Type.IsValueType || property.Reference.Metadata.PropertyInfo is not { } propertyInfo
             ? AcceptsNull(property.Type)
-            : PropertyNullability.AcceptsNull(propertyInfo);
+            : MemberNullability.AcceptsNull(propertyInfo);
 
     private bool TryParseConstant(string text, Type type, out object? value)
     {

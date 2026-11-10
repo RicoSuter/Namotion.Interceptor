@@ -73,6 +73,13 @@ namespace HomeBlaze.Services
         public static System.DateTimeOffset? GetOffsetChange(System.TimeZoneInfo timeZone, System.TimeSpan offset, System.DateTimeOffset start, System.DateTimeOffset limit) { }
         public static System.TimeSpan GetTimeOfDay(System.DateTimeOffset instant, System.TimeZoneInfo timeZone) { }
     }
+    public static class MemberNullability
+    {
+        public static bool AcceptsNull(System.Reflection.PropertyInfo property) { }
+        public static bool AcceptsNull(System.Type type) { }
+        public static System.Reflection.NullabilityState GetWriteState(System.Reflection.NullabilityInfoContext? context, System.Reflection.ParameterInfo parameter) { }
+        public static System.Reflection.NullabilityInfoContext? TryCreateContext() { }
+    }
     public sealed class ObjectParameterMember : System.IEquatable<HomeBlaze.Services.ObjectParameterMember>
     {
         public ObjectParameterMember(string Name, System.Type Type, bool IsRequired) { }
