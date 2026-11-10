@@ -5,7 +5,6 @@ using HomeBlaze.Storage.Files;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Storage.Internal;
@@ -53,8 +52,8 @@ internal sealed class FileSubjectFactory
 
     /// <summary>
     /// Creates the subject of a JSON file from its text: the configurable subject it describes,
-    /// or a <see cref="JsonFile"/> when the text is plain or invalid JSON. Reports the issues of the configuration of
-    /// the subject, see <see cref="ReportIssues"/>.
+    /// or a <see cref="JsonFile"/> when the text is plain or invalid JSON. Logs the values that cannot be read, see
+    /// <see cref="LogSkippedProperties"/>.
     /// </summary>
     public IInterceptorSubject CreateFromJson(IStorageContainer storage, string path, string json)
     {
@@ -63,9 +62,6 @@ internal sealed class FileSubjectFactory
         // part of the work item that creates the subject, and its calls into the storage would be refused.
         using var suppressedFlow = ExecutionContext.SuppressFlow();
 
-        // Until the subject has its issues, so that a hosted subject that reads them when it starts finds them.
-        using var startup = _serviceProvider.GetService<IInterceptorSubjectContext>()?.DeferHostedServiceStarts();
-
         try
         {
             var skipped = new List<SkippedConfigurationProperty>();
@@ -73,7 +69,7 @@ internal sealed class FileSubjectFactory
             // Every configurable type is a subject as well.
             if (_serializer.Deserialize(json, created: null, skipped.Add) is IInterceptorSubject subject)
             {
-                ReportIssues(subject, path, json, skipped);
+                LogSkippedProperties(path, skipped);
                 return subject;
             }
         }
@@ -91,17 +87,15 @@ internal sealed class FileSubjectFactory
     }
 
     /// <summary>
-    /// Gets the issues of a configuration that was read into the subject with the given skipped properties, hands them
-    /// to the subject, see <see cref="ConfigurableSubjectSerializer.ReportIssues"/>, and logs them.
+    /// Logs as a warning the properties that were skipped when the configuration of the file at the path was read.
     /// </summary>
-    public void ReportIssues(IInterceptorSubject subject, string path, string json, IEnumerable<SkippedConfigurationProperty> skipped)
+    public void LogSkippedProperties(string path, IReadOnlyCollection<SkippedConfigurationProperty> skipped)
     {
-        var issues = _serializer.ReportIssues(subject, json, skipped);
-        if (!issues.IsEmpty)
+        if (skipped.Count > 0)
         {
             _logger?.LogWarning(
                 "The configuration of {Path} has issues that saving it would lose; correct them in the file: {Issues}",
-                path, string.Join("; ", issues));
+                path, ConfigurableSubjectSerializer.DescribeSkippedProperties(skipped));
         }
     }
 

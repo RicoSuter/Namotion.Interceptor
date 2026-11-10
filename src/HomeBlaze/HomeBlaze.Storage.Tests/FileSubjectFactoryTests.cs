@@ -3,10 +3,8 @@ using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Moq;
-using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Storage.Tests;
 
@@ -39,35 +37,26 @@ public class FileSubjectFactoryTests
     }
 
     [Fact]
-    public async Task WhenAFileWithAValueThatCannotBeReadCreatesAHostedSubject_ThenItsWorkerStartsWithTheIssues()
+    public void WhenAValueOfTheFileCannotBeRead_ThenTheSubjectIsCreatedAndAWarningIsLogged()
     {
         // Arrange
+        var logger = new LevelRecordingLogger();
+        using var serviceProvider = new ServiceCollection().BuildServiceProvider();
         var typeProvider = new TypeProvider();
-        typeProvider.AddAssembly(typeof(IssueReceivingWorker).Assembly);
-        var services = new ServiceCollection();
-        var context = SubjectContextFactory.Create(services);
-        services.AddSingleton(typeProvider);
-        services.AddSingleton(context);
-        services.AddSingleton<ConfigurableSubjectSerializer>();
-        using var serviceProvider = services.BuildServiceProvider();
+        typeProvider.AddTypes([typeof(CallbackSubject)]);
         var factory = new FileSubjectFactory(
-            new SubjectTypeRegistry(typeProvider), serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>(), serviceProvider);
-        var host = context.GetServices<ILifecycleHandler>().OfType<IHostedService>().Single();
-        await host.StartAsync(CancellationToken.None);
-        var json = $$"""{ "$type": "{{typeof(IssueReceivingWorker).FullName}}", "count": "not a number" }""";
+            new SubjectTypeRegistry(typeProvider),
+            new ConfigurableSubjectSerializer(typeProvider, serviceProvider),
+            serviceProvider,
+            logger);
+        var json = $$"""{ "$type": "{{typeof(CallbackSubject).FullName}}", "name": [1] }""";
 
         // Act
-        var workers = new List<IssueReceivingWorker>();
-        for (var attempt = 0; attempt < 100; attempt++)
-        {
-            workers.Add(Assert.IsType<IssueReceivingWorker>(factory.CreateFromJson(Mock.Of<IStorageContainer>(), $"/Worker{attempt}.json", json)));
-        }
-
-        var issuesAtStart = await Task.WhenAll(workers.Select(worker => worker.IssuesAtStart)).WaitAsync(TimeSpan.FromSeconds(30));
-        await host.StopAsync(CancellationToken.None);
+        var subject = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Callback.json", json);
 
         // Assert
-        Assert.All(issuesAtStart, issues => Assert.Single(issues));
+        Assert.IsType<CallbackSubject>(subject);
+        Assert.Contains(LogLevel.Warning, logger.Levels);
     }
 
     private sealed class LevelRecordingLogger : ILogger

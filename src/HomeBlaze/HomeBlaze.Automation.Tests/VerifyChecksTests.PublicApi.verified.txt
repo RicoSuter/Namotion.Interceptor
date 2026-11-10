@@ -18,7 +18,7 @@ namespace HomeBlaze.Automation
     [System.ComponentModel.Category("Automation")]
     [System.ComponentModel.Description("Runs rules on property changes and events, optionally within named states.")]
     [System.ComponentModel.DisplayName("Automation")]
-    public class Automation : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IConfigurationIssueReceiver, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, System.ComponentModel.INotifyPropertyChanged, System.IObservable<HomeBlaze.Automation.AutomationStateChangedEvent>
+    public class Automation : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, System.ComponentModel.INotifyPropertyChanged, System.IObservable<HomeBlaze.Automation.AutomationStateChangedEvent>
     {
         public Automation(HomeBlaze.Services.SubjectPathResolver pathResolver, System.TimeProvider timeProvider, HomeBlaze.Automation.IAutomationAuthorizer authorizer, System.IServiceProvider serviceProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Automation.Automation> logger) { }
         [HomeBlaze.Abstractions.Attributes.State("Current State", IsDiscrete=true, Position=1)]

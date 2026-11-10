@@ -19,54 +19,32 @@ internal static class AutomationCompiler
         IReadOnlyList<string> ruleOrder,
         [NotNullWhen(true)] out CompiledAutomation? compiled,
         [NotNullWhen(false)] out string? error) =>
-        TryCompile(states, initialState, rules, ruleOrder, configurationIssues: [], out compiled, out error);
+        TryCompile(states, initialState, rules, ruleOrder, targets: null, out compiled, out error);
 
     /// <summary>
-    /// Compiles as the overload without <paramref name="configurationIssues"/> does; each issue of the configuration
-    /// file, see <see cref="Automation.ConfigurationIssues"/>, is an error before those of the states and the rules.
-    /// </summary>
-    public static bool TryCompile(
-        IReadOnlyList<string> states,
-        string? initialState,
-        IReadOnlyDictionary<string, AutomationRule> rules,
-        IReadOnlyList<string> ruleOrder,
-        IReadOnlyList<string> configurationIssues,
-        [NotNullWhen(true)] out CompiledAutomation? compiled,
-        [NotNullWhen(false)] out string? error)
-    {
-        var errors = new List<string>(configurationIssues);
-        error = TryCompile(errors, states, initialState, rules, ruleOrder, targets: null, out compiled) ? null : string.Join("; ", errors);
-        return compiled is not null;
-    }
-
-    /// <summary>
-    /// Compiles the configuration of the automation with the rules and roles read from it, the issues of its configuration
-    /// file first, checking the targets of actions that resolve against the roles.
+    /// Compiles the configuration of the automation with the rules and roles read from it, checking the targets of actions
+    /// that resolve against the roles.
     /// </summary>
     public static bool TryCompile(
         Automation automation,
         IReadOnlyList<string> roles,
         IReadOnlyDictionary<string, AutomationRule> rules,
         [NotNullWhen(true)] out CompiledAutomation? compiled,
-        [NotNullWhen(false)] out string? error)
-    {
-        var errors = new List<string>(automation.ConfigurationIssues);
-        var targets = ActionTargetCheck.Create(automation, roles);
-        error = TryCompile(errors, automation.States, automation.InitialState, rules, automation.RuleOrder, targets, out compiled) ? null : string.Join("; ", errors);
-        return compiled is not null;
-    }
+        [NotNullWhen(false)] out string? error) =>
+        TryCompile(
+            automation.States, automation.InitialState, rules, automation.RuleOrder, ActionTargetCheck.Create(automation, roles), out compiled, out error);
 
-    // Adds the errors of the states and the rules to those already in the list; targets also checks the targets of actions that resolve.
-    private static bool TryCompile(
-        List<string> errors,
+    /// <summary>Compiles the configuration; <paramref name="targets"/> also checks the targets of actions that resolve.</summary>
+    public static bool TryCompile(
         IReadOnlyList<string> states,
         string? initialState,
         IReadOnlyDictionary<string, AutomationRule> rules,
         IReadOnlyList<string> ruleOrder,
         ActionTargetCheck? targets,
-        [NotNullWhen(true)] out CompiledAutomation? compiled)
+        [NotNullWhen(true)] out CompiledAutomation? compiled,
+        [NotNullWhen(false)] out string? error)
     {
-        errors.AddRange(CheckStates(states, initialState));
+        var errors = CheckStates(states, initialState);
         var compiledRules = new List<CompiledRule>();
         foreach (var key in OrderKeys(rules.Keys, ruleOrder))
         {
@@ -83,10 +61,12 @@ internal static class AutomationCompiler
         if (errors.Count > 0)
         {
             compiled = null;
+            error = string.Join("; ", errors);
             return false;
         }
 
         compiled = new CompiledAutomation(compiledRules, [.. states], initialState);
+        error = null;
         return true;
     }
 
