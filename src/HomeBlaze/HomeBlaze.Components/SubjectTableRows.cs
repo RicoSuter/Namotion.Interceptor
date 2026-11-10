@@ -74,11 +74,12 @@ internal static class SubjectTableRows
         return true;
     }
 
-    // A subject held at several places is one row, at its first place, since the rows are keyed by subject.
+    // A subject held at several places is one row, at its first place, since the rows are keyed by subject. Checked on
+    // the snapshot itself: HasRepeatedChildren is read apart from it, and a repeat it misses would duplicate a row key.
     private static ImmutableArray<SubjectPropertyChild> WithoutRepeats(RegisteredSubjectProperty property)
     {
         var children = property.Children;
-        if (children.Length < 2 || !property.HasRepeatedChildren)
+        if (children.Length < 2)
         {
             return children;
         }

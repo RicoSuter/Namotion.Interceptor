@@ -63,7 +63,7 @@ _lastProcessedValues[(subject, "Collection")] = current collection reference
 _lastProcessedValues[(subject, "ObjectRef")]   = current child subject
 ```
 
-A handler that writes a later property while an earlier one attaches its children reconciles that property from no baseline, attaching its new children, and the attach then reads the written value and finds those children attached. Reading every property up front would attach the children of the value the handler replaced.
+A handler that writes a later property while an earlier one attaches its children reconciles that property from no baseline, attaching its new children, and the attach then reads the written value and finds those children attached. Reading every property up front would attach the children of the value the handler replaced. For a root, which joins `_attachedSubjects` only after its properties, that nested write first takes the path for a parent detached meanwhile, so its new children are attached, detached and attached again by the later read; the end state is the same.
 
 This establishes the initial baseline. Without seeding, the first `WriteProperty` would fall back to `null` (meaning "nothing was ever processed"), which triggers a full diff against the backing store. That is correct but slightly more work than diffing against a known baseline.
 
