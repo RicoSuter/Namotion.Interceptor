@@ -55,15 +55,16 @@ internal static class ChildIndexRefresher
     }
 
     /// <summary>
-    /// Reports every subject that the attach of a subject's properties attached at more than one key or position of a
-    /// property, with all of them, since its attach carries only the first.
+    /// Reports every subject that a property holds at more than one key or position, with all of them, since its attach
+    /// carries only the first.
     /// </summary>
-    /// <param name="children">The subjects the properties hold, as the lifecycle interceptor scanned them, grouped by property.</param>
+    /// <param name="property">The property of the attached subject.</param>
+    /// <param name="children">The subjects the property holds, as the lifecycle interceptor scanned them.</param>
     public static void RefreshRepeatedChildren(
+        PropertyReference property,
         List<(IInterceptorSubject subject, PropertyReference property, object? index)> children)
     {
-        var span = CollectionsMarshal.AsSpan(children);
-        var handlers = span[0].property.Subject.Context.GetServices<IChildIndexHandler>();
+        var handlers = property.Subject.Context.GetServices<IChildIndexHandler>();
         if (handlers.Length == 0)
         {
             return;
@@ -73,26 +74,8 @@ internal static class ChildIndexRefresher
         _reusableBuffers = null;
         try
         {
-            var start = 0;
-            while (start < span.Length)
-            {
-                var property = span[start].property;
-                var end = start + 1;
-                while (end < span.Length && span[end].property.Equals(property))
-                {
-                    end++;
-                }
-
-                if (end - start > 1)
-                {
-                    CollectSubjectsWithChangedPlaces([], span[start..end], buffers);
-                    ReportChangedChildren(property, buffers.Changes, handlers);
-                    buffers.Changes.Clear();
-                    buffers.Cursors.Clear();
-                }
-
-                start = end;
-            }
+            CollectSubjectsWithChangedPlaces([], CollectionsMarshal.AsSpan(children), buffers);
+            ReportChangedChildren(property, buffers.Changes, handlers);
         }
         finally
         {

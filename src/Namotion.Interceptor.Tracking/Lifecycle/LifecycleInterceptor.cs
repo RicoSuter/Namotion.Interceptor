@@ -96,13 +96,52 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
                 if (hasRepeatedChildren)
                 {
-                    ChildIndexRefresher.RefreshRepeatedChildren(collectedSubjects);
+                    RefreshRepeatedChildren(collectedSubjects);
                 }
             }
         }
         finally
         {
             ReturnList(collectedSubjects);
+        }
+    }
+
+    // Reports the places of each property that holds more than one subject, scanned again from its baseline: a child
+    // index handler may write another property of the subject in between, which leaves the attach scan stale.
+    private void RefreshRepeatedChildren(
+        List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects)
+    {
+        List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
+        try
+        {
+            var start = 0;
+            while (start < collectedSubjects.Count)
+            {
+                var property = collectedSubjects[start].property;
+                var end = start + 1;
+                while (end < collectedSubjects.Count && collectedSubjects[end].property.Equals(property))
+                {
+                    end++;
+                }
+
+                // No baseline: a handler detached the subject meanwhile.
+                if (end - start > 1 && _lastProcessedValues.TryGetValue(property, out var value))
+                {
+                    children ??= GetList();
+                    children.Clear();
+                    FindSubjectsInProperty(property, value, children, null);
+                    ChildIndexRefresher.RefreshRepeatedChildren(property, children);
+                }
+
+                start = end;
+            }
+        }
+        finally
+        {
+            if (children is not null)
+            {
+                ReturnList(children);
+            }
         }
     }
 

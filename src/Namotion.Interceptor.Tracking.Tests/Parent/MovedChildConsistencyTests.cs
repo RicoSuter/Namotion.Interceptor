@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Concurrent;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -219,6 +220,56 @@ public class MovedChildConsistencyTests
     }
 
     [Fact]
+    public void WhenHandlerRewritesAnotherPropertyWhileTheAttachReportsRepeatedCars_ThenEveryCopyMatchesBothValues()
+    {
+        // Arrange
+        var handler = new PropertyWritingChildIndexHandler(nameof(Garage.Cars));
+        var context = CreateContext().WithService(() => handler);
+        var cars = CreateHeldCars(context, 1);
+        var car = cars[0];
+        var garage = new Garage
+        {
+            Cars = [car, car],
+            CarsByName = new Dictionary<string, Car> { ["A"] = car, ["B"] = car }
+        };
+        handler.NestedWrite = () => garage.CarsByName = new Dictionary<string, Car> { ["New"] = car };
+
+        // Act: the attach reports the places of Cars first, and the handler then writes CarsByName.
+        new BroadlyDeclaredHolder(context).BroadCars = garage;
+
+        // Assert
+        Assert.Null(handler.NestedWrite);
+        AssertEveryCopyMatchesValue(garage, nameof(Garage.Cars), cars);
+        AssertEveryCopyMatchesValue(garage, nameof(Garage.CarsByName), cars);
+    }
+
+    [Fact]
+    public void WhenHandlerRewritesAnotherPropertyKeepingItsRepeatedCarWhileTheAttachReports_ThenEveryCopyMatchesBothValues()
+    {
+        // Arrange
+        var handler = new PropertyWritingChildIndexHandler(nameof(Garage.Cars));
+        var context = CreateContext().WithService(() => handler);
+        var cars = CreateHeldCars(context, 2);
+        var garage = new Garage
+        {
+            Cars = [cars[0], cars[0]],
+            CarsByName = new Dictionary<string, Car> { ["A"] = cars[0], ["B"] = cars[0] }
+        };
+        handler.NestedWrite = () => garage.CarsByName = new Dictionary<string, Car>
+        {
+            ["A"] = cars[0], ["B"] = cars[0], ["C"] = cars[1]
+        };
+
+        // Act: the nested write keeps both keys of the repeated car, so it reports nothing.
+        new BroadlyDeclaredHolder(context).BroadCars = garage;
+
+        // Assert
+        Assert.Null(handler.NestedWrite);
+        AssertEveryCopyMatchesValue(garage, nameof(Garage.Cars), cars);
+        AssertEveryCopyMatchesValue(garage, nameof(Garage.CarsByName), cars);
+    }
+
+    [Fact]
     public void WhenKeyEqualsThrowsWhileTheValueRepeatsACar_ThenTheNextWriteIsReconciled()
     {
         // Arrange
@@ -427,6 +478,24 @@ public class MovedChildConsistencyTests
         }
 
         return children;
+    }
+
+    /// <summary>
+    /// A child index handler that runs a write once, the first time it is called for the property of the given name.
+    /// </summary>
+    private sealed class PropertyWritingChildIndexHandler(string propertyName) : IChildIndexHandler
+    {
+        public Action? NestedWrite { get; set; }
+
+        public void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
+        {
+            if (property.Name != propertyName)
+                return;
+
+            var nestedWrite = NestedWrite;
+            NestedWrite = null;
+            nestedWrite?.Invoke();
+        }
     }
 
     /// <summary>
