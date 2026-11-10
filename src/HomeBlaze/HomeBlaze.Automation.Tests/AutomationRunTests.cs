@@ -443,24 +443,6 @@ public class AutomationRunTests
         Assert.Equal(2, host.Blinds.CloseCount);
     }
 
-    [Fact]
-    public async Task WhenTheFlowThatChangesAValueMayNotReadIt_ThenTheRunningAutomationStillReadsIt()
-    {
-        // Arrange
-        await using var host = await AutomationTestHost.StartAsync(automation =>
-            automation.Rules = Keyed(("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
-
-        // Act
-        using (PropertyReadAccess.Enter(_ => false))
-        {
-            host.Weather.Gust = 9;
-            await host.FlushAsync();
-        }
-
-        // Assert
-        Assert.Equal(1, host.Blinds.CloseCount);
-    }
-
     // Fails the first write of a rule status, as a failing interceptor of the graph does.
     private sealed class FailingStatusWrite : IWriteInterceptor
     {

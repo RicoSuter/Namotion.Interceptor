@@ -1,3 +1,4 @@
+using HomeBlaze.Authorization;
 using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Automation.Tests.Testing;
 using HomeBlaze.Services;
@@ -197,8 +198,8 @@ public sealed class AutomationValidatorTests : IDisposable
         var rules = new Dictionary<string, AutomationRule> { ["a"] = Rule() };
 
         // Act
-        var reader = AutomationValidator.Validate(host.Automation, ["Reader"], [], null, rules, []);
-        var operatorErrors = AutomationValidator.Validate(host.Automation, ["Operator"], [], null, rules, []);
+        var reader = AutomationValidator.Validate(host.Automation, [BuiltInRoles.ReaderName], [], null, rules, []);
+        var operatorErrors = AutomationValidator.Validate(host.Automation, [BuiltInRoles.OperatorName], [], null, rules, []);
 
         // Assert
         var error = Assert.Single(reader);
@@ -218,7 +219,7 @@ public sealed class AutomationValidatorTests : IDisposable
         var rules = new Dictionary<string, AutomationRule> { ["saved"] = Rule(actions: reset), ["new"] = Rule("New", actions: reset) };
 
         // Act
-        var errors = AutomationValidator.Validate(host.Automation, ["Reader"], [], null, rules, []);
+        var errors = AutomationValidator.Validate(host.Automation, [BuiltInRoles.ReaderName], [], null, rules, []);
 
         // Assert
         var error = Assert.Single(errors);

@@ -1,4 +1,6 @@
+@using global::HomeBlaze.Authorization.Abstractions
 @inject ITimeZoneDisplay TimeZone
+@inject IUserPermissions Permissions
 
 <MudStack Spacing="3" data-testid="automation-rule-editor">
     <div class="d-flex flex-wrap align-center gap-3">
@@ -125,7 +127,7 @@
     {
         if (_expressions is null || _expressions.AllowsEvent != Rule.AllowsEvent || !ReferenceEquals(_expressions.Automation, Automation))
         {
-            _expressions = new RuleExpressions(Automation, Rule.Key, Rule.AllowsEvent, TimeZone);
+            _expressions = new RuleExpressions(Automation, Rule.Key, Rule.AllowsEvent, TimeZone, Permissions);
         }
     }
 

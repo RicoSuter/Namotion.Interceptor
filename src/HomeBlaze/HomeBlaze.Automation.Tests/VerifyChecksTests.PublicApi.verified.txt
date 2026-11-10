@@ -89,8 +89,8 @@ namespace HomeBlaze.Automation
     }
     public static class AutomationPreview
     {
-        public static HomeBlaze.Components.Abstractions.Expressions.ExpressionPreview Evaluate(HomeBlaze.Automation.Automation automation, string? ruleKey, Namotion.Interceptor.Expressions.ParsedExpression expression, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone = null) { }
-        public static string Render(HomeBlaze.Automation.Automation automation, string? ruleKey, Namotion.Interceptor.Expressions.TextTemplate template) { }
+        public static HomeBlaze.Components.Abstractions.Expressions.ExpressionPreview Evaluate(HomeBlaze.Automation.Automation automation, string? ruleKey, Namotion.Interceptor.Expressions.ParsedExpression expression, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone = null) { }
+        public static string Render(HomeBlaze.Automation.Automation automation, string? ruleKey, Namotion.Interceptor.Expressions.TextTemplate template, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions) { }
         public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveTarget(HomeBlaze.Automation.Automation automation, string? ruleKey, string? path) { }
     }
     [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
@@ -133,7 +133,7 @@ namespace HomeBlaze.Automation
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
         [HomeBlaze.Abstractions.Attributes.Query(Description="Evaluates the triggers and Only if against the current values and shows the actio" +
             "ns with their arguments. Executes and records nothing.", Icon="Science", Position=1, Title="Test Now")]
-        public HomeBlaze.Automation.AutomationRuleTestResult TestNow() { }
+        public HomeBlaze.Automation.AutomationRuleTestResult TestNow([HomeBlaze.Abstractions.Attributes.FromServices] HomeBlaze.Authorization.Abstractions.IUserPermissions? permissions) { }
     }
     public enum AutomationRuleMode
     {

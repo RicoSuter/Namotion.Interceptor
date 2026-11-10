@@ -62,14 +62,14 @@ public sealed class AutomationMcpAccessTests : IDisposable
     public void Dispose() => _automation.Dispose();
 
     [Theory]
-    [InlineData("Everything", "/Storm/Roles")]
-    [InlineData("Everything", "/Storm/Name")]
-    [InlineData("Everything", "/Storm/Enabled")]
-    [InlineData("Everything", "/Storm/Rules")]
-    [InlineData("Everything", "/Storm/Rules/retract/Mode")]
-    [InlineData("Everything", "/Storm/Rules/retract/Actions")]
-    [InlineData("Operator", "/Storm/Roles")]
-    [InlineData("Operator", "/Storm/Rules/retract/Actions")]
+    [InlineData(BuiltInRoles.EverythingName, "/Storm/Roles")]
+    [InlineData(BuiltInRoles.EverythingName, "/Storm/Name")]
+    [InlineData(BuiltInRoles.EverythingName, "/Storm/Enabled")]
+    [InlineData(BuiltInRoles.EverythingName, "/Storm/Rules")]
+    [InlineData(BuiltInRoles.EverythingName, "/Storm/Rules/retract/Mode")]
+    [InlineData(BuiltInRoles.EverythingName, "/Storm/Rules/retract/Actions")]
+    [InlineData(BuiltInRoles.OperatorName, "/Storm/Roles")]
+    [InlineData(BuiltInRoles.OperatorName, "/Storm/Rules/retract/Actions")]
     public async Task WhenAnAgentOrAnMcpClientSetsAConfigurationPropertyOfAnAutomation_ThenTheWriteFailsAndTheAutomationIsUnchanged(string role, string path)
     {
         // Arrange
@@ -79,7 +79,7 @@ public sealed class AutomationMcpAccessTests : IDisposable
         var actionsBefore = rule.Actions;
 
         // Act
-        var result = await CallAsync(tools["set_property"], new { path, value = path.EndsWith("Mode") ? "Off" : (object)new[] { "Everything" } });
+        var result = await CallAsync(tools["set_property"], new { path, value = path.EndsWith("Mode") ? "Off" : (object)new[] { BuiltInRoles.EverythingName } });
 
         // Assert
         Assert.False(result.TryGetProperty("success", out _), result.ToString());
@@ -118,7 +118,7 @@ public sealed class AutomationMcpAccessTests : IDisposable
     private Dictionary<string, McpToolInfo> CreateTools(IMcpAccessPolicy accessPolicy)
     {
         var configuration = HomeBlazeMcpConfigurationFactory.Create(
-            HomeBlazeMcpConfigurationFactoryTests.CreateServices(), () => _root, isReadOnly: false, accessPolicy);
+            HomeBlazeMcpConfigurationFactoryTests.CreateServices(), () => _root, accessPolicy);
         return new McpToolFactory(_root, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }
 

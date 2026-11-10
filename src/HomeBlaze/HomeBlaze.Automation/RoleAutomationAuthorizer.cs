@@ -39,15 +39,15 @@ public sealed class RoleAutomationAuthorizer(AuthorizationService authorizationS
                 return null;
             }
 
-            var deniedBy = policy.Explain(member, action).DeniedBy?.Name;
-            if (deniedBy is null)
+            var decision = policy.Explain(member, action);
+            if (decision.IsDeniedBySystem)
             {
-                return $"no role of the automation allows {verb} it";
+                return $"the system rules deny {verb} it";
             }
 
-            return string.Equals(deniedBy, AuthorizationPolicy.SystemRoleName, StringComparison.OrdinalIgnoreCase)
-                ? $"the system rules deny {verb} it"
-                : $"the role '{deniedBy}' denies {verb} it";
+            return decision.DeniedBy?.Name is { } deniedBy
+                ? $"the role '{deniedBy}' denies {verb} it"
+                : $"no role of the automation allows {verb} it";
         }
     }
 }

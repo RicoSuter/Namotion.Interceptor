@@ -14,11 +14,11 @@ This page is the operator guide. The syntax of expressions is the one of [page e
 ## Quick start
 
 1. In the subject browser, create an **Automation** from the group Automation, for example in a folder `Automations`.
-2. Open its page and click **Edit**. In the **Rules** tab, add a rule, write its condition under **Runs when any of these happens**, and add an action under **Then, in this order**. Save is available once nothing is invalid or unfinished. On the **General** tab, select the roles that allow what the actions call and write, such as the built-in `Operator`; an automation without roles can only change its own state, see [Authorization](#authorization).
+2. Open its page and click **Edit**. In the **Rules** tab, add a rule, write its condition under **Runs when any of these happens**, and add an action under **Then, in this order**. Save is available once nothing is invalid or unfinished. On the **General** tab, select the roles that allow what the actions call and write, such as the built-in `operator`; an automation without roles can only change its own state, see [Authorization](#authorization).
 3. Keep the rule in **Dry run** and save. Each time the rule would run, the page lists the run with its actions and their values, and nothing is executed.
 4. Switch the rule to **On** once its runs look right.
 
-The demo data has `Demo/ConveyorGuard`, an automation in dry run over the demo conveyor with the role `Operator`:
+The demo data has `Demo/ConveyorGuard`, an automation in dry run over the demo conveyor with the role `operator`:
 
 - Both rules are Dry run, which never changes the state, so the automation stays in Normal and shows what it would do: it would slow the conveyor down and enter Hot when the temperature stays above 40 for 30 seconds, and would fire again only after it is below 38.
 - Its rule Back to normal is active only in Hot, so it stays inactive in dry run, and the page says next to the rule that would enter Hot that its dry runs do not change the state to Hot.
@@ -220,12 +220,12 @@ The arguments of an operation:
 
 ## Authorization
 
-An automation runs as its own principal with the roles in its `Roles`, which the **General** tab of the editor sets. They are the roles of [Authorization](authorization.md): the built-in `Reader`, `Operator` and `Everything` and the custom roles of `Authorization.json`, with the [system rules](authorization.md#system-rules) on top. A call needs `execute` on the operation, and a write needs `write` on the property. Only what a role allows runs: an automation without roles, which is the default, can change its own state and nothing else.
+An automation runs as its own principal with the roles in its `Roles`, which the **General** tab of the editor sets. They are the roles of [Authorization](authorization.md): the built-in `reader`, `operator` and `everything` and the custom roles of `Authorization.json`, with the [system rules](authorization.md#system-rules) on top. A call needs `execute` on the operation, and a write needs `write` on the property. Only what a role allows runs: an automation without roles, which is the default, can change its own state and nothing else.
 
-- **`Operator`** allows every operation and every write except what the system rules deny: configuration, secrets, operations that require confirmation, agents and the authorization with its roles. That includes **Reset State** of any automation, itself included.
+- **`operator`** allows every operation and every write except what the system rules deny: configuration, secrets, operations that require confirmation, agents and the authorization with its roles. That includes **Reset State** of any automation, itself included.
 - **A custom role** restricts an automation to what it is for. A deny is a block and not a convention: a storm automation whose role denies `Open` of the blinds never opens them, whatever rules are added to it later, see [Storm](#storm).
-- **Agents**: no role, `Everything` included, lets an automation call an operation of an agent, because the system rules deny every action on agents.
-- **When it is checked**: when the configuration is applied, and before each call and each write. The editor lists a denied action, such as `Rule 'Retract blinds': action 'call-1': /Living/Blinds/Open: the role 'StormBlinds' denies calling it`, and Save is blocked. The editor checks the actions of the rule it shows every second, and every action on each edit and on Save. A file with such an action is not applied, and the previous configuration keeps running, as for any invalid configuration, with only what both its roles and the roles of the rejected file allow, see [Roles of a rejected configuration](#roles-of-a-rejected-configuration). A denial when the action runs fails the action with the same reason.
+- **Agents**: no role, `everything` included, lets an automation call an operation of an agent, because the system rules deny every action on agents.
+- **When it is checked**: when the configuration is applied, and before each call and each write. The editor lists a denied action, such as `Rule 'Retract blinds': action 'call-1': /Living/Blinds/Open: the role 'storm-blinds' denies calling it`, and Save is blocked. The editor checks the actions of the rule it shows every second, and every action on each edit and on Save. A file with such an action is not applied, and the previous configuration keeps running, as for any invalid configuration, with only what both its roles and the roles of the rejected file allow, see [Roles of a rejected configuration](#roles-of-a-rejected-configuration). A denial when the action runs fails the action with the same reason.
 - **Not checkable yet**: a target that does not resolve, such as a device that is not loaded, is checked when the action runs. So are the relative targets of a rule that is not saved yet: the editor passes them, and after Save the automation may reject the configuration because the target is denied or does not resolve, in which case the previous configuration keeps running.
 - **Roles that cannot be used**, such as no roles, a misspelled name or a custom role while `Authorization.json` is not loaded yet, refuse every call and write with the reason, such as `/Living/Blinds/Close: the roles of the automation cannot be used: Role 'StormBlind' is not defined.`. They do not keep the configuration from being applied, so an automation that starts before the roles are loaded runs once they are. While a rule calls or writes anything, the page and the editor show `The actions that call operations or write properties are refused:` with the reason, and the editor blocks Save.
 - **The pickers** of **Call operation** and **Set property** let you select only targets that the roles selected in the dialog allow.
@@ -233,8 +233,8 @@ An automation runs as its own principal with the roles in its `Roles`, which the
 
 What the roles do not decide:
 
-- **Reading**: conditions, filters and texts read every value except secrets, as the [watch paths](authorization.md#watch-paths) of agents do, because the person who writes a rule chose its paths. **Test now** called by an agent through `invoke_query` shows only the values the agent may read; the editor shows every value. **Test now** only describes the actions and never runs them, and it describes them with the roles the automation has now. The run records of a rule hold its rendered arguments and are readable to whoever may read the rule.
-- **The person who edits**: people in the browser have no roles yet, so whoever can edit an automation can give it any role.
+- **Reading**: conditions, filters and texts read every value except secrets, as the [watch paths](authorization.md#watch-paths) of agents do, because the person who writes a rule chose its paths. **Test now** and the previews of the editor show only the values the caller may read: what the roles of an agent allow when it calls `invoke_query`, and what the roles of the person allow in the browser. **Test now** only describes the actions and never runs them, and it describes them with the roles the automation has now. The run records of a rule hold its rendered arguments and are readable to whoever may read the rule.
+- **The person who edits**: creating or changing an automation is configuration, which only a full administrator may change, see [Administration](authorization.md#administration), so nobody else can give an automation roles.
 - **What an operation does**: a role decides whether an operation runs, not what it changes as part of its work.
 
 **Agents and `/mcp` clients** can neither create nor change an automation, whatever their roles, so they never give an automation more than a person did: the system rules deny writing configuration, which covers `Roles`, the rules and every other setting, and the Markdown tools cannot add a block to a page or change one, other than layout blocks, so they can neither add an automation block nor change its roles. Agents have no tools that write files, and creating a subject in a folder opens a dialog for a person.
@@ -258,6 +258,7 @@ New rules start in Dry run. A rule in Dry run with a Change state action does no
 - **What it shows**: the result of each trigger, of Only if, and the actions with their arguments as they would run now.
 - **The verdict** says whether the rule would run with the current values, or why not. When Only if is false or unknown, it adds that a condition that becomes true meanwhile waits until Only if is true, or the status of the automation while it runs no rules, such as while it is stopped; it does not tell whether a condition fired already. An automation that shows an error while its worker runs, such as after a failed action, keeps running its rules, so the verdict is the one of a running automation with a note on the error. One whose worker ended with an error runs no rules, and the verdict says that it stopped after an error.
 - **Side effects**: none. It works in every mode and executes and records nothing.
+- **Permissions**: the button needs `execute` on the `TestNow` query of the rule, as **Reset state** needs it on its operation; it is disabled otherwise.
 - **Scope**: it tests the saved rule only; the editor shows the current value and result of every condition instead.
 - **Agents** get the same result through `invoke_query` on the `TestNow` query of the rule, such as `/Automations/Storm/Rules[k3f9]/TestNow`.
 
@@ -336,7 +337,7 @@ The state belongs to the path of the automation: moving it to another folder or 
 
 ## Examples
 
-The paths are illustrative. Each JSON example is the configuration file of the automation, which the editor shows in its tabs, and the shorter examples list the rules as the editor shows them. An automation whose rules call operations or write properties needs roles that allow them, such as `Operator`, see [Authorization](#authorization). A hold (`for`) is written as a duration of expressions, such as `20s`, `10m` or `1h30m`, and the form `00:10:00` is read as well.
+The paths are illustrative. Each JSON example is the configuration file of the automation, which the editor shows in its tabs, and the shorter examples list the rules as the editor shows them. An automation whose rules call operations or write properties needs roles that allow them, such as `operator`, see [Authorization](#authorization). A hold (`for`) is written as a duration of expressions, such as `20s`, `10m` or `1h30m`, and the form `00:10:00` is read as well.
 
 ### Washing machine finished
 
@@ -346,7 +347,7 @@ The memory "it was running" is a state, so a standby reading after a restart in 
 {
   "$type": "HomeBlaze.Automation.Automation",
   "name": "Washing machine",
-  "roles": [ "Operator" ],
+  "roles": [ "operator" ],
   "states": [ "Idle", "Running" ],
   "initialState": "Idle",
   "ruleOrder": [ "started", "finished" ],
@@ -385,13 +386,13 @@ The memory "it was running" is a state, so a standby reading after a restart in 
 
 ### Storm
 
-A gust held for 20 seconds or rain for a minute retracts the blinds, at most once every 30 minutes and not while they move. A gust or rain that is still there when the 30 minutes end or the blinds stop moving retracts them then, and a gust and rain together retract them once. The rearm condition keeps gusts around 8 m/s from firing again before the storm is over. The role `StormBlinds` lets the automation close the blinds and send the notification, and denies opening the blinds, so no rule of this automation can ever open them, also one added later.
+A gust held for 20 seconds or rain for a minute retracts the blinds, at most once every 30 minutes and not while they move. A gust or rain that is still there when the 30 minutes end or the blinds stop moving retracts them then, and a gust and rain together retract them once. The rearm condition keeps gusts around 8 m/s from firing again before the storm is over. The role `storm-blinds` lets the automation close the blinds and send the notification, and denies opening the blinds, so no rule of this automation can ever open them, also one added later.
 
 ```json
 {
   "$type": "HomeBlaze.Automation.Automation",
   "name": "Storm",
-  "roles": [ "StormBlinds" ],
+  "roles": [ "storm-blinds" ],
   "rules": {
     "retract": {
       "name": "Retract blinds",
@@ -415,21 +416,16 @@ A gust held for 20 seconds or rain for a minute retracts the blinds, at most onc
 }
 ```
 
-The role in `Authorization.json`, see [File Format](authorization.md#file-format):
+The role `storm-blinds`, added with "Add Role" on the `Authorization` subject and edited in its dialog, has these [role settings](authorization.md#role-settings):
 
 ```json
 {
-  "$type": "HomeBlaze.Authorization.Authorization",
-  "roles": {
-    "StormBlinds": {
-      "allow": [ { "paths": [ "/Living/Blinds/Close", "/Notifications/Family/SendNotification" ], "actions": [ "execute" ] } ],
-      "deny": [ { "paths": [ "/Living/Blinds/Open" ], "actions": [ "execute" ] } ]
-    }
-  }
+  "allow": [ { "paths": [ "/Living/Blinds/Close", "/Notifications/Family/SendNotification" ], "actions": [ "execute" ] } ],
+  "deny": [ { "paths": [ "/Living/Blinds/Open" ], "actions": [ "execute" ] } ]
 }
 ```
 
-The allow rule alone already leaves `Open` out; the deny keeps it out when the role later includes `Operator` or another broad role, because a deny always wins.
+The allow rule alone already leaves `Open` out; the deny keeps it out when the role later includes `operator` or another broad role, because a deny always wins.
 
 ### Hue button
 
@@ -439,7 +435,7 @@ Every short press of the button starts the music, also two in a row: a short pre
 {
   "$type": "HomeBlaze.Automation.Automation",
   "name": "Kitchen button",
-  "roles": [ "Operator" ],
+  "roles": [ "operator" ],
   "rules": {
     "play": {
       "name": "Play music",
@@ -468,7 +464,7 @@ The door state is part of the reminder's trigger and not of Only if, so after a 
 {
   "$type": "HomeBlaze.Automation.Automation",
   "name": "Front door",
-  "roles": [ "Operator" ],
+  "roles": [ "operator" ],
   "states": [ "Closed", "Open", "Informed" ],
   "initialState": "Closed",
   "ruleOrder": [ "opened", "remind", "shut" ],

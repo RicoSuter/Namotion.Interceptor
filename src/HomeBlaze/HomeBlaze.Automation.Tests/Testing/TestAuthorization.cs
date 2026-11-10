@@ -8,10 +8,10 @@ namespace HomeBlaze.Automation.Tests.Testing;
 internal static class TestAuthorization
 {
     /// <summary>The name of the role of <see cref="DenyOpen"/>.</summary>
-    public const string StormBlinds = "StormBlinds";
+    public const string StormBlinds = "storm-blinds";
 
     /// <summary>Creates the authorizer of automations over the roles of the graph, and adds the custom roles when given.</summary>
-    public static RoleAutomationAuthorizer Create(TestGraph graph, params (string Name, Role Role)[] roles)
+    public static RoleAutomationAuthorizer Create(TestGraph graph, params AuthorizationRole[] roles)
     {
         var service = CreateService(graph);
         if (roles.Length > 0)
@@ -26,22 +26,25 @@ internal static class TestAuthorization
     public static AuthorizationService CreateService(TestGraph graph) => new(graph.Context, new DefaultPathProvider('/'));
 
     /// <summary>Attaches an <c>Authorization</c> subject with the custom roles under <c>/Authorization</c>, replacing an earlier one.</summary>
-    public static void AddRoles(TestGraph graph, params (string Name, Role Role)[] roles) =>
-        graph.Add("Authorization", new global::HomeBlaze.Authorization.Authorization
-        {
-            Roles = roles.ToDictionary(role => role.Name, role => role.Role, StringComparer.OrdinalIgnoreCase)
-        });
-
-    /// <summary>A role that includes <c>Operator</c> and denies every member under the path of <c>/Blinds</c>.</summary>
-    public static Role DenyBlindsPath() => new()
+    public static void AddRoles(TestGraph graph, params AuthorizationRole[] roles)
     {
+        var authorization = new global::HomeBlaze.Authorization.Authorization();
+        authorization.ReplaceRoles(roles);
+        graph.Add("Authorization", authorization);
+    }
+
+    /// <summary>The role <see cref="StormBlinds"/>, which includes <c>operator</c> and denies every member under the path of <c>/Blinds</c>.</summary>
+    public static AuthorizationRole DenyBlindsPath() => new()
+    {
+        Name = StormBlinds,
         Includes = [BuiltInRoles.OperatorName],
         Deny = [new PermissionRule { Paths = ["/Blinds/**"], Actions = [AuthorizationActions.Execute, PermissionAction.Write] }]
     };
 
-    /// <summary>A role that includes <c>Operator</c> and denies calling <c>Open</c> of the test blinds.</summary>
-    public static Role DenyOpen() => new()
+    /// <summary>The role <see cref="StormBlinds"/>, which includes <c>operator</c> and denies calling <c>Open</c> of the test blinds.</summary>
+    public static AuthorizationRole DenyOpen() => new()
     {
+        Name = StormBlinds,
         Includes = [BuiltInRoles.OperatorName],
         Deny = [new PermissionRule { Types = [typeof(TestBlinds).FullName!], Members = ["Open"], Actions = [AuthorizationActions.Execute] }]
     };

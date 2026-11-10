@@ -508,10 +508,11 @@ A change of the agent's roles applies to its open pages at once: a person who ma
 
 ## Automations
 
-An automation names its roles in `Roles`, as an agent does, and has none by default, so it calls no operation and writes no property until a role allows it. It needs `execute` on each operation it calls and `write` on each property it writes; its conditions and texts read without its roles. The roles are checked when its configuration is applied and before each action, see [Authorization](automation.md#authorization) in the automation guide.
+An automation names its roles in `Roles`, as an agent does, and has none by default, so it calls no operation and writes no property until a role allows it. It needs `execute` on each operation it calls and `write` on each property it writes, with the system rules of agents and `/mcp` clients; its conditions and texts read without its roles. The roles are checked when its configuration is applied and before each action, see [Authorization](automation.md#authorization) in the automation guide.
 
 - **Edit form**: the field "Roles" on the tab General of its edit dialog, the same picker as for agents. Unlike an agent, an automation may have no roles; the dialog then lists every action that calls an operation or writes a property as refused.
 - **Usage**: `UsedByAgents` does not count automations, and the dialogs of Rename and Delete do not name them. An automation that names a renamed or deleted role refuses its calls and writes with "the roles of the automation cannot be used: Role '...' is not defined." until it is given the new name.
+- **People**: only a full administrator creates or changes an automation, as for any configuration, see [Administration](#administration).
 - **Agents and `/mcp` clients** can neither create nor change an automation, whatever their roles: the [system rules](#system-rules) deny writing its configuration, and the Markdown tools cannot add or change a block of a page other than a layout block. An agent therefore cannot give an automation roles it does not have itself.
 
 ---

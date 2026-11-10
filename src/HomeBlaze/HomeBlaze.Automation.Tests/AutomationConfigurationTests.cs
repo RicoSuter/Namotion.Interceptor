@@ -1,5 +1,7 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Authorization;
 using HomeBlaze.Automation.Tests.Testing;
+using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Testing;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
@@ -145,13 +147,13 @@ public class AutomationConfigurationTests
         await using var host = await AutomationTestHost.StartAsync(
             automation =>
             {
-                automation.Roles = ["Operator"];
+                automation.Roles = [BuiltInRoles.OperatorName];
                 automation.Rules = Keyed(("retract", Retract()));
             },
             authorizer: graph => TestAuthorization.Create(graph));
 
         // Act
-        host.Automation.Roles = ["Reader"];
+        host.Automation.Roles = [BuiltInRoles.ReaderName];
         await host.SaveAsync(Keyed(("retract", Retract())));
         var statusMessage = host.Automation.StatusMessage;
         host.Weather.Gust = 9;
@@ -172,13 +174,13 @@ public class AutomationConfigurationTests
         await using var host = await AutomationTestHost.StartAsync(
             automation =>
             {
-                automation.Roles = ["Ghost"];
+                automation.Roles = ["ghost"];
                 automation.Rules = Keyed(("retract", Retract()));
             },
             authorizer: graph => TestAuthorization.Create(graph));
 
         // Act
-        host.Automation.Roles = ["Operator"];
+        host.Automation.Roles = [BuiltInRoles.OperatorName];
         await host.SaveAsync(Keyed(("retract", Retract("/Weather/Gust >"))));
         host.Weather.Gust = 9;
         await host.FlushAsync();
@@ -187,7 +189,7 @@ public class AutomationConfigurationTests
         Assert.Equal(ServiceStatus.Error, host.Automation.Status);
         Assert.Equal(0, host.Blinds.CloseCount);
         Assert.Equal(
-            "action 'Close' failed: /Blinds/Close: the roles of the automation cannot be used: Role 'Ghost' is not defined.",
+            "action 'Close' failed: /Blinds/Close: the roles of the automation cannot be used: Role 'ghost' is not defined.",
             host.Rule("retract").LastRunMessage);
     }
 
@@ -198,11 +200,11 @@ public class AutomationConfigurationTests
         await using var host = await AutomationTestHost.StartAsync(
             automation =>
             {
-                automation.Roles = ["Operator"];
+                automation.Roles = [BuiltInRoles.OperatorName];
                 automation.Rules = Keyed(("retract", Retract()));
             },
             authorizer: graph => TestAuthorization.Create(graph));
-        host.Automation.Roles = ["Reader"];
+        host.Automation.Roles = [BuiltInRoles.ReaderName];
         await host.SaveAsync(Keyed(("retract", Retract())));
         host.Weather.Gust = 9;
         await host.FlushAsync();
@@ -211,7 +213,7 @@ public class AutomationConfigurationTests
         await host.FlushAsync();
 
         // Act
-        host.Automation.Roles = ["Operator"];
+        host.Automation.Roles = [BuiltInRoles.OperatorName];
         await host.SaveAsync(Keyed(("retract", Retract())));
         host.Weather.Gust = 9;
         await host.FlushAsync();
@@ -424,7 +426,7 @@ public class AutomationConfigurationTests
                 automation.Roles = [TestAuthorization.StormBlinds];
                 automation.Rules = Keyed(("retract", Retract()));
             },
-            authorizer: graph => TestAuthorization.Create(graph, (TestAuthorization.StormBlinds, TestAuthorization.DenyOpen())));
+            authorizer: graph => TestAuthorization.Create(graph, TestAuthorization.DenyOpen()));
 
         // Act
         await host.SaveAsync(Keyed(("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Open")))));
@@ -435,7 +437,7 @@ public class AutomationConfigurationTests
 
         // Assert
         Assert.Equal(ServiceStatus.Error, status);
-        Assert.EndsWith("Rule 'Retract': action 'Open': /Blinds/Open: the role 'StormBlinds' denies calling it", statusMessage);
+        Assert.EndsWith("Rule 'Retract': action 'Open': /Blinds/Open: the role 'storm-blinds' denies calling it", statusMessage);
         Assert.Equal(1, host.Blinds.CloseCount);
         Assert.Equal(0, host.Blinds.OpenCount);
     }
@@ -447,7 +449,7 @@ public class AutomationConfigurationTests
         await using var host = await AutomationTestHost.StartAsync(
             automation =>
             {
-                automation.Roles = ["Ghost"];
+                automation.Roles = ["ghost"];
                 automation.Rules = Keyed(("retract", Retract()));
             },
             authorizer: graph => TestAuthorization.Create(graph));
@@ -456,14 +458,14 @@ public class AutomationConfigurationTests
         host.Weather.Gust = 9;
         await host.FlushAsync();
         var refusal = host.Rule("retract").LastRunMessage;
-        TestAuthorization.AddRoles(host.Graph, ("Ghost", new global::HomeBlaze.Authorization.Role { Includes = [global::HomeBlaze.Authorization.BuiltInRoles.OperatorName] }));
+        TestAuthorization.AddRoles(host.Graph, new AuthorizationRole { Name = "ghost", Includes = [global::HomeBlaze.Authorization.BuiltInRoles.OperatorName] });
         host.Weather.Gust = 0;
         await host.FlushAsync();
         host.Weather.Gust = 9;
         await host.FlushAsync();
 
         // Assert
-        Assert.Equal("action 'Close' failed: /Blinds/Close: the roles of the automation cannot be used: Role 'Ghost' is not defined.", refusal);
+        Assert.Equal("action 'Close' failed: /Blinds/Close: the roles of the automation cannot be used: Role 'ghost' is not defined.", refusal);
         Assert.Equal(1, host.Blinds.CloseCount);
     }
 }

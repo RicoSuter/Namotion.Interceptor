@@ -1,5 +1,6 @@
 using HomeBlaze.Authorization;
 using HomeBlaze.Automation.Tests.Testing;
+using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -49,13 +50,13 @@ public class RoleAutomationAuthorizerTests
     public void WhenACustomRoleDeniesAnOperation_ThenTheDenialNamesTheRoleAndOtherOperationsStayAllowed()
     {
         // Arrange
-        var authorizer = TestAuthorization.Create(_graph, (TestAuthorization.StormBlinds, TestAuthorization.DenyOpen()));
+        var authorizer = TestAuthorization.Create(_graph, TestAuthorization.DenyOpen());
 
         // Act
         var permissions = authorizer.GetPermissions([TestAuthorization.StormBlinds]);
 
         // Assert
-        Assert.Equal("the role 'StormBlinds' denies calling it", permissions.GetOperationDenial(Member("Open")));
+        Assert.Equal("the role 'storm-blinds' denies calling it", permissions.GetOperationDenial(Member("Open")));
         Assert.Null(permissions.GetOperationDenial(Member("Close")));
         Assert.False(AutomationTargets.CanCall(Member("Open"), permissions));
         Assert.True(AutomationTargets.CanCall(Member("Close"), permissions));
@@ -76,7 +77,7 @@ public class RoleAutomationAuthorizerTests
 
     [Theory]
     [InlineData("", "the roles of the automation cannot be used: No roles are assigned.")]
-    [InlineData("Ghost", "the roles of the automation cannot be used: Role 'Ghost' is not defined.")]
+    [InlineData("ghost", "the roles of the automation cannot be used: Role 'ghost' is not defined.")]
     public void WhenTheRolesCannotBeUsed_ThenThePermissionsHaveTheReasonAndAllowNothing(string role, string expected)
     {
         // Arrange
@@ -100,7 +101,7 @@ public class RoleAutomationAuthorizerTests
         var before = authorizer.GetPermissions([TestAuthorization.StormBlinds]);
 
         // Act
-        TestAuthorization.AddRoles(_graph, (TestAuthorization.StormBlinds, TestAuthorization.DenyOpen()));
+        TestAuthorization.AddRoles(_graph, TestAuthorization.DenyOpen());
         var after = authorizer.GetPermissions([TestAuthorization.StormBlinds]);
 
         // Assert
@@ -113,25 +114,25 @@ public class RoleAutomationAuthorizerTests
     public void WhenACustomRoleDeniesAPathPattern_ThenCallsAndWritesUnderThePathAreDenied()
     {
         // Arrange
-        var authorizer = TestAuthorization.Create(_graph, (TestAuthorization.StormBlinds, TestAuthorization.DenyBlindsPath()));
+        var authorizer = TestAuthorization.Create(_graph, TestAuthorization.DenyBlindsPath());
 
         // Act
         var permissions = authorizer.GetPermissions([TestAuthorization.StormBlinds]);
 
         // Assert
-        Assert.Equal("the role 'StormBlinds' denies calling it", permissions.GetOperationDenial(Member("Close")));
-        Assert.Equal("the role 'StormBlinds' denies writing it", permissions.GetPropertyWriteDenial(Member("Position")));
+        Assert.Equal("the role 'storm-blinds' denies calling it", permissions.GetOperationDenial(Member("Close")));
+        Assert.Equal("the role 'storm-blinds' denies writing it", permissions.GetPropertyWriteDenial(Member("Position")));
     }
 
     [Fact]
     public void WhenTheRoleGainsADenyOrIsRemoved_ThenTheNextPermissionsRefuseWhatWasAllowed()
     {
         // Arrange
-        var authorizer = TestAuthorization.Create(_graph, (TestAuthorization.StormBlinds, new Role { Includes = [BuiltInRoles.OperatorName] }));
+        var authorizer = TestAuthorization.Create(_graph, new AuthorizationRole { Name = TestAuthorization.StormBlinds, Includes = [BuiltInRoles.OperatorName] });
         var allowed = authorizer.GetPermissions([TestAuthorization.StormBlinds]);
 
         // Act
-        TestAuthorization.AddRoles(_graph, (TestAuthorization.StormBlinds, TestAuthorization.DenyOpen()));
+        TestAuthorization.AddRoles(_graph, TestAuthorization.DenyOpen());
         var denied = authorizer.GetPermissions([TestAuthorization.StormBlinds]);
         TestAuthorization.AddRoles(_graph);
         var removed = authorizer.GetPermissions([TestAuthorization.StormBlinds]);

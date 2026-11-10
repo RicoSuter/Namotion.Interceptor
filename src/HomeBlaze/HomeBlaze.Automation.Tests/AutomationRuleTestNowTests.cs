@@ -1,5 +1,7 @@
 using HomeBlaze.Abstractions.Metadata;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Automation.Tests.Testing;
+using HomeBlaze.Components.Tests.Access;
 using HomeBlaze.Services;
 using Namotion.Interceptor.Registry;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
@@ -27,7 +29,7 @@ public class AutomationRuleTestNowTests
         var runsBefore = rule.RunCount;
 
         // Act
-        var result = rule.TestNow();
+        var result = rule.TestNow(UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Null(result.Error);
@@ -52,7 +54,7 @@ public class AutomationRuleTestNowTests
         await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(("retract", Retract(onlyIf: "/Weather/Rain > 0"))));
 
         // Act
-        var result = host.Rule("retract").TestNow();
+        var result = host.Rule("retract").TestNow(UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Null(result.Triggers[0].Result);
@@ -69,7 +71,7 @@ public class AutomationRuleTestNowTests
         host.Weather.Gust = 9;
 
         // Act
-        var result = host.Rule("retract").TestNow();
+        var result = host.Rule("retract").TestNow(UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.False(result.IsActive);
@@ -95,7 +97,7 @@ public class AutomationRuleTestNowTests
         await host.SaveAsync(Keyed(("retract", Retract())));
 
         // Act
-        var result = host.Rule("retract").TestNow();
+        var result = host.Rule("retract").TestNow(UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal("On: Inactive until Reset state", host.Rule("retract").Status);
@@ -111,7 +113,7 @@ public class AutomationRuleTestNowTests
             authorizer: _ => new ThrowingAuthorizer());
 
         // Act
-        var result = host.Rule("retract").TestNow();
+        var result = host.Rule("retract").TestNow(UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Null(result.Error);
@@ -127,7 +129,7 @@ public class AutomationRuleTestNowTests
         rule.Triggers = [When("/Weather/Gust >")];
 
         // Act
-        var result = rule.TestNow();
+        var result = rule.TestNow(UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.StartsWith("Rule 'Retract': trigger 1: ", result.Error);
@@ -157,17 +159,30 @@ public class AutomationRuleTestNowTests
         host.Weather.Gust = 12345;
         var rule = host.Rule("retract");
 
+        var permissions = new TestUserPermissions { CannotRead = [host.Weather.TryGetRegisteredProperty(nameof(TestSensor.Gust))!] };
+
         // Act
-        AutomationRuleTestResult result;
-        using (PropertyReadAccess.Enter(property => property.Name != nameof(TestSensor.Gust)))
-        {
-            result = rule.TestNow();
-        }
+        var result = rule.TestNow(permissions);
 
         // Assert
         Assert.Null(result.Triggers[0].Result);
         Assert.Equal(["/Weather/Gust"], result.Triggers[0].MissingPaths.ToArray());
         Assert.Equal("/Notifier/SendNotification(notification.Message: \"Gust \")", result.Actions[1]);
         Assert.DoesNotContain(result.Actions, action => action.Contains("12345", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task WhenTestNowGetsNoPermissions_ThenItTreatsEveryValueAsMissing()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(("retract", Retract())));
+        host.Weather.Gust = 12345;
+
+        // Act
+        var result = host.Rule("retract").TestNow(permissions: null);
+
+        // Assert
+        Assert.Null(result.Triggers[0].Result);
+        Assert.Equal(["/Weather/Gust"], result.Triggers[0].MissingPaths.ToArray());
     }
 }

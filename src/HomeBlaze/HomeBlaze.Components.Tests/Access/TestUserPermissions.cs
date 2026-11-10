@@ -8,7 +8,7 @@ namespace HomeBlaze.Components.Tests.Access;
 /// <summary>
 /// A viewer that may do everything except what the sets name. A member it may not read has no readable history either.
 /// A method that requires administration runs only when the viewer may administer its member.
-/// Linked into HomeBlaze.AI.Tests, HomeBlaze.Authorization.Blazor.Tests, HomeBlaze.History.Blazor.Tests,
+/// Linked into HomeBlaze.AI.Tests, HomeBlaze.Authorization.Blazor.Tests, HomeBlaze.Automation.Tests, HomeBlaze.History.Blazor.Tests,
 /// HomeBlaze.Host.Services.Tests, HomeBlaze.Host.Tests, HomeBlaze.Storage.Blazor.Tests and the widget tests of the device and service libraries.
 /// The sets may change during a test; <see cref="RaiseChanged"/> then tells the components.
 /// </summary>

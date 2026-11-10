@@ -12,7 +12,7 @@ public static class AutomationServiceCollectionExtensions
     /// Adds the services that automations take. An <see cref="IAutomationAuthorizer"/> registered before is kept; without
     /// one, <see cref="RoleAutomationAuthorizer"/> decides with the roles of each automation and needs the
     /// <see cref="AuthorizationService"/> that
-    /// <see cref="AuthorizationServiceCollectionExtensions.AddHomeBlazeAuthorization"/> registers.
+    /// <see cref="HomeBlaze.Authorization.AuthorizationServiceCollectionExtensions.AddHomeBlazeAuthorization"/> registers.
     /// </summary>
     public static IServiceCollection AddHomeBlazeAutomation(this IServiceCollection services)
     {

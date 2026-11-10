@@ -286,7 +286,7 @@ namespace HomeBlaze.Automation.Blazor.Editing
     }
     public sealed class RuleExpressions
     {
-        public RuleExpressions(HomeBlaze.Automation.Automation automation, string ruleKey, bool allowsEvent, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone = null) { }
+        public RuleExpressions(HomeBlaze.Automation.Automation automation, string ruleKey, bool allowsEvent, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone = null, HomeBlaze.Authorization.Abstractions.IUserPermissions? permissions = null) { }
     }
     public class RulesTab : Microsoft.AspNetCore.Components.ComponentBase
     {

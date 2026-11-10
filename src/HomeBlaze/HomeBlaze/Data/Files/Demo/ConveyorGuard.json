@@ -2,7 +2,7 @@
   "$type": "HomeBlaze.Automation.Automation",
   "name": "Conveyor guard",
   "enabled": true,
-  "roles": [ "Operator" ],
+  "roles": [ "operator" ],
   "states": [ "Normal", "Hot" ],
   "initialState": "Normal",
   "ruleOrder": [ "overheat", "cooled" ],
