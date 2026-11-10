@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
-using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -22,8 +21,6 @@ public class SubjectSourceBaseTests
     // budget only has to outlast scheduling, not describe how long the write should take. A tight one
     // fails whenever the whole solution runs in parallel and the thread pool is sized for a CI runner.
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan TeardownWaitTimeout =
-        ChangeQueueProcessor.TeardownFlushBound + TimeSpan.FromSeconds(5);
 
     [Fact]
     public async Task WhenStartingSourceAndPushingChanges_ThenUpdatesAreInCorrectOrder()
@@ -1420,12 +1417,14 @@ public class SubjectSourceBaseTests
         var releaseCurrentWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var currentWriteFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var failCurrentWrite = false;
+        var clock = new ManualTeardownClock();
         using var source = new TestSubjectSource(
             subject,
             context,
             NullLogger.Instance,
             bufferTime: TimeSpan.FromMilliseconds(8))
         {
+            TeardownTimeProvider = clock,
             WriteChangesOverride = async (changes, _) =>
             {
                 if (Volatile.Read(ref failCurrentWrite) &&
@@ -1471,7 +1470,9 @@ public class SubjectSourceBaseTests
         try
         {
             // Act
-            await source.StopAsync(CancellationToken.None).WaitAsync(TeardownWaitTimeout);
+            var stopping = source.StopAsync(CancellationToken.None);
+            await clock.AdvanceWhenArmedAsync(ChangeQueueProcessor.TeardownFlushBound);
+            await stopping.WaitAsync(TestTimeout);
         }
         finally
         {
@@ -1508,12 +1509,14 @@ public class SubjectSourceBaseTests
         var currentTransportStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var firstNameAttempt = 0;
         var sourceLifetimeToken = CancellationToken.None;
+        var clock = new ManualTeardownClock();
         using var source = new TestSubjectSource(
             subject,
             context,
             NullLogger.Instance,
             bufferTime: TimeSpan.FromMilliseconds(8))
         {
+            TeardownTimeProvider = clock,
             LoadInitialStateOverride = cancellationToken =>
             {
                 sourceLifetimeToken = cancellationToken;
@@ -1588,7 +1591,9 @@ public class SubjectSourceBaseTests
         try
         {
             // Act
-            await source.StopAsync(CancellationToken.None).WaitAsync(TeardownWaitTimeout);
+            var stopping = source.StopAsync(CancellationToken.None);
+            await clock.AdvanceWhenArmedAsync(ChangeQueueProcessor.TeardownFlushBound);
+            await stopping.WaitAsync(TestTimeout);
             retryOwnerRetiredAtStop = source.Diagnostics.OutboundRetries.TotalDropped == 2;
         }
         finally
@@ -1630,12 +1635,14 @@ public class SubjectSourceBaseTests
         var releaseDeadlineWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var deadlineWriteFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var sourceLifetimeToken = CancellationToken.None;
+        var clock = new ManualTeardownClock();
         using var source = new TestSubjectSource(
             subject,
             context,
             NullLogger.Instance,
             bufferTime: TimeSpan.FromMilliseconds(8))
         {
+            TeardownTimeProvider = clock,
             LoadInitialStateOverride = cancellationToken =>
             {
                 sourceLifetimeToken = cancellationToken;
@@ -1691,18 +1698,23 @@ public class SubjectSourceBaseTests
             EnqueueRetryChange(source, subject, nameof(Person.FirstName), null, "parked");
         }
 
-        var stopwatch = Stopwatch.StartNew();
         var stopping = Task.Run(() => source.StopAsync(CancellationToken.None));
         if (!processorDeadlineAlreadyConsumed)
         {
             await Task.WhenAny(stopping, deadlineWriteStarted.Task).WaitAsync(TestTimeout);
         }
 
+        bool stoppedBeforeTheBound;
         bool retryOwnerRetiredAtStop;
         try
         {
             // Act
-            await stopping.WaitAsync(TeardownWaitTimeout);
+            await clock.WaitForTimerAsync(ChangeQueueProcessor.TeardownFlushBound);
+            stoppedBeforeTheBound = stopping.IsCompleted;
+
+            // A single advance: a second teardown window would arm another timer and leave the stop waiting.
+            clock.Advance(ChangeQueueProcessor.TeardownFlushBound);
+            await stopping.WaitAsync(TestTimeout);
             retryOwnerRetiredAtStop = source.Diagnostics.OutboundRetries.TotalDropped ==
                 (processorDeadlineAlreadyConsumed ? 2 : 1);
         }
@@ -1719,9 +1731,8 @@ public class SubjectSourceBaseTests
         await source.WriteRetryQueue.FlushAsync(source, CancellationToken.None).AsTask().WaitAsync(TestTimeout);
 
         // Assert
+        Assert.False(stoppedBeforeTheBound);
         Assert.True(retryOwnerRetiredAtStop);
-        Assert.True(stopwatch.Elapsed < ChangeQueueProcessor.TeardownFlushBound + TimeSpan.FromSeconds(2),
-            $"Stopping took {stopwatch.Elapsed}, which indicates a second teardown window.");
         Assert.Equal(0, source.Diagnostics.OutboundChanges.TotalDropped);
         Assert.Equal(processorDeadlineAlreadyConsumed ? 2 : 1,
             source.Diagnostics.OutboundRetries.TotalDropped);
@@ -2028,6 +2039,11 @@ public class SubjectSourceBaseTests
         var stoppedNotificationEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseStoppedNotification = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var postStoppedTransportEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Declared before the source so they outlive it: when the test fails before its own release, disposing
+        // the source still runs into the blocked Stopped handler, and only the watchdog lets it out.
+        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var watchdogRegistration = watchdog.Token.Register(() => releaseStoppedNotification.TrySetResult());
         using var source = new TestSubjectSource(
             subject,
             context,
@@ -2060,8 +2076,6 @@ public class SubjectSourceBaseTests
             }
         };
 
-        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-        using var watchdogRegistration = watchdog.Token.Register(() => releaseStoppedNotification.TrySetResult());
         await source.StartAsync(CancellationToken.None);
         var probeValue = 0;
         await AsyncTestHelpers.WaitUntilAsync(() =>
@@ -2112,6 +2126,11 @@ public class SubjectSourceBaseTests
         var subject = new Person(context);
         var stoppedNotificationEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseStoppedNotification = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Declared before the source so they outlive it: when the test fails before its own release, disposing
+        // the source still runs into the blocked Stopped handler, and only the watchdog lets it out.
+        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var watchdogRegistration = watchdog.Token.Register(() => releaseStoppedNotification.TrySetResult());
         using var source = new TestSubjectSource(subject, context, NullLogger.Instance);
         source.StateChanged += (_, sourceEvent) =>
         {
@@ -2122,8 +2141,6 @@ public class SubjectSourceBaseTests
             }
         };
 
-        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-        using var watchdogRegistration = watchdog.Token.Register(() => releaseStoppedNotification.TrySetResult());
         var starting = Task.Run(() => source.StartAsync(CancellationToken.None));
         await stoppedNotificationEntered.Task.WaitAsync(TestTimeout);
         var droppedBeforeWrite = source.Diagnostics.OutboundRetries.TotalDropped;
