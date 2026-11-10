@@ -156,6 +156,91 @@ public class RepeatedChildTests
     }
 
     [Fact]
+    public void WhenListHoldingAChildTwiceSwapsTwoOtherChildren_ThenEveryEntryHasItsPosition()
+    {
+        // Arrange
+        var repeated = new Light();
+        var a = new Light();
+        var b = new Light();
+        var c = new Light();
+        var group = new LightGroup(CreateContext()) { Lights = [repeated, a, b, c, repeated] };
+
+        // Act
+        group.Lights = [repeated, b, a, c, repeated];
+
+        // Assert
+        AssertChildrenAndParents(group, nameof(LightGroup.Lights), (repeated, 0), (b, 1), (a, 2), (c, 3), (repeated, 4));
+    }
+
+    [Fact]
+    public void WhenListHoldingAChildTwiceSwapsTwoOtherChildrenAndLosesTheSecondPosition_ThenEveryEntryHasItsPosition()
+    {
+        // Arrange
+        var repeated = new Light();
+        var a = new Light();
+        var b = new Light();
+        var c = new Light();
+        var group = new LightGroup(CreateContext()) { Lights = [repeated, a, b, c, repeated] };
+
+        // Act
+        group.Lights = [repeated, b, a, c];
+
+        // Assert
+        AssertChildrenAndParents(group, nameof(LightGroup.Lights), (repeated, 0), (b, 1), (a, 2), (c, 3));
+    }
+
+    [Fact]
+    public void WhenListHoldingAChildTwiceLosesTheSecondPositionAtTheEnd_ThenTheChildKeepsItsFirstEntry()
+    {
+        // Arrange
+        var repeated = new Light();
+        var a = new Light();
+        var group = new LightGroup(CreateContext()) { Lights = [repeated, a, repeated] };
+
+        // Act
+        group.Lights = [repeated, a];
+
+        // Assert
+        AssertChildrenAndParents(group, nameof(LightGroup.Lights), (repeated, 0), (a, 1));
+    }
+
+    [Fact]
+    public void WhenListHoldingAChildTwiceSwapsTwoOtherChildrenAndGainsAThirdPosition_ThenEveryEntryHasItsPosition()
+    {
+        // Arrange
+        var repeated = new Light();
+        var a = new Light();
+        var b = new Light();
+        var c = new Light();
+        var group = new LightGroup(CreateContext()) { Lights = [repeated, a, b, c, repeated] };
+
+        // Act
+        group.Lights = [repeated, b, a, repeated, c, repeated];
+
+        // Assert
+        AssertChildrenAndParents(
+            group, nameof(LightGroup.Lights), (repeated, 0), (b, 1), (a, 2), (repeated, 3), (c, 4), (repeated, 5));
+    }
+
+    [Fact]
+    public void WhenDictionaryHoldingAChildTwiceReKeysAnotherChild_ThenEveryEntryHasItsKey()
+    {
+        // Arrange
+        var repeated = new Light();
+        var other = new Light();
+        var group = new LightGroup(CreateContext())
+        {
+            LightsByName = new Dictionary<string, Light> { ["x"] = repeated, ["a"] = other, ["y"] = repeated }
+        };
+
+        // Act
+        group.LightsByName = new Dictionary<string, Light> { ["x"] = repeated, ["b"] = other, ["y"] = repeated };
+
+        // Assert: the keys of a child form one run at the place of its first entry.
+        AssertChildrenAndParents(group, nameof(LightGroup.LightsByName), (repeated, "x"), (repeated, "y"), (other, "b"));
+    }
+
+    [Fact]
     public void WhenListIsWrittenRepeatedly_ThenChildrenAndParentsMatchTheValueAfterEachWrite()
     {
         // Arrange
