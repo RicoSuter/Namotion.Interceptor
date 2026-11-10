@@ -95,7 +95,7 @@ internal static class ChildIndexRefresher
         var span = CollectionsMarshal.AsSpan(changedChildren);
         for (var i = 0; i < handlers.Length; i++)
         {
-            handlers[i].HandleChildIndexChanges(property, span);
+            handlers[i].ReplaceChildIndices(property, span);
         }
     }
 

@@ -29,21 +29,11 @@ public class ParentTrackingHandler : ILifecycleHandler, IChildIndexHandler
         }
     }
 
-    void IChildIndexHandler.HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
+    void IChildIndexHandler.ReplaceChildIndices(PropertyReference property, ReadOnlySpan<SubjectChild> children)
     {
-        // The places of a subject form one consecutive run.
-        var start = 0;
-        while (start < children.Length)
+        foreach (var group in children.GroupBySubject())
         {
-            var subject = children[start].Subject;
-            var end = start + 1;
-            while (end < children.Length && ReferenceEquals(children[end].Subject, subject))
-            {
-                end++;
-            }
-
-            subject.ReplaceParentIndices(property, children[start..end]);
-            start = end;
+            group.Subject.ReplaceParentIndices(property, group.Children);
         }
     }
 }

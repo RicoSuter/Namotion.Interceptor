@@ -161,7 +161,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
     }
     public interface IChildIndexHandler
     {
-        void HandleChildIndexChanges(Namotion.Interceptor.PropertyReference property, System.ReadOnlySpan<Namotion.Interceptor.Tracking.Lifecycle.SubjectChild> children);
+        void ReplaceChildIndices(Namotion.Interceptor.PropertyReference property, System.ReadOnlySpan<Namotion.Interceptor.Tracking.Lifecycle.SubjectChild> children);
     }
     public interface ILifecycleHandler
     {
@@ -194,6 +194,21 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
         public SubjectChild(Namotion.Interceptor.IInterceptorSubject Subject, object? Index) { }
         public object? Index { get; init; }
         public Namotion.Interceptor.IInterceptorSubject Subject { get; init; }
+    }
+    public static class SubjectChildExtensions
+    {
+        public static Namotion.Interceptor.Tracking.Lifecycle.SubjectChildGroupEnumerator GroupBySubject(this System.ReadOnlySpan<Namotion.Interceptor.Tracking.Lifecycle.SubjectChild> children) { }
+    }
+    public readonly ref struct SubjectChildGroup
+    {
+        public System.ReadOnlySpan<Namotion.Interceptor.Tracking.Lifecycle.SubjectChild> Children { get; }
+        public Namotion.Interceptor.IInterceptorSubject Subject { get; }
+    }
+    public ref struct SubjectChildGroupEnumerator
+    {
+        public Namotion.Interceptor.Tracking.Lifecycle.SubjectChildGroup Current { get; }
+        public Namotion.Interceptor.Tracking.Lifecycle.SubjectChildGroupEnumerator GetEnumerator() { }
+        public bool MoveNext() { }
     }
     public readonly struct SubjectLifecycleChange
     {

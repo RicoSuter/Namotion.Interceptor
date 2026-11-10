@@ -470,12 +470,11 @@ public class RegisteredSubjectProperty
         }
     }
 
-    // The places of a subject form one consecutive run, so a repeat sits next to its predecessor.
     private static bool HasRepeatedSubject(ReadOnlySpan<SubjectChild> children)
     {
-        for (var i = 1; i < children.Length; i++)
+        foreach (var group in children.GroupBySubject())
         {
-            if (ReferenceEquals(children[i].Subject, children[i - 1].Subject))
+            if (group.Children.Length > 1)
                 return true;
         }
 
@@ -526,9 +525,11 @@ public class RegisteredSubjectProperty
     {
         // The first place of each reported subject, where its run starts.
         var starts = _reusableChildPositions ??= new Dictionary<IInterceptorSubject, int>(ReferenceEqualityComparer.Instance);
-        for (var i = 0; i < children.Length; i++)
+        var groupStart = 0;
+        foreach (var group in children.GroupBySubject())
         {
-            starts.TryAdd(children[i].Subject, i);
+            starts.TryAdd(group.Subject, groupStart);
+            groupStart += group.Children.Length;
         }
 
         // A run takes the place of its subject's first entry, which keeps dictionary children in attach order;

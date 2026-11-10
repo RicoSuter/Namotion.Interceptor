@@ -429,11 +429,12 @@ A structural write that keeps a subject in the property raises neither a detach 
 ```csharp
 public class MyChildIndexHandler : IChildIndexHandler
 {
-    public void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
+    public void ReplaceChildIndices(PropertyReference property, ReadOnlySpan<SubjectChild> children)
     {
-        foreach (var child in children)
+        foreach (var group in children.GroupBySubject())
         {
-            // child.Subject now sits at child.Index in the value of property
+            // Replace what is stored for group.Subject and property with the indices
+            // of group.Children, every key or position of group.Subject in the value
         }
     }
 }
@@ -443,7 +444,7 @@ These rules hold for every index the library keeps, in the registry (`Children`,
 
 - The index is `null` for a subject reference, the position for a collection and the key for a dictionary. A subject the value holds more than once has one entry per position or key, in the order of the value.
 - The handler is called once per written property, after the attach and detach callbacks of that write, with the subjects whose stored indices have to change. Those are each kept subject whose positions or keys changed in number, value or order, and each subject attached at more than one position or key, since its attach carries only the first. That includes a child of a subject attached later, such as a subtree assigned at once, when a property of that subject holds the child more than once. When no stored index has to change, the handler is not called. A subject attached at one position or key is not passed, since its attach carries its index. A dictionary assigned again in another order with the same keys passes nothing, unless it holds a subject under several keys and their order changes.
-- The span holds every position or key of each of these subjects in the new value, in order, as one consecutive run. A handler replaces the entries it stores for the subject and the property with the run, and keeps those of subjects that are not in the span.
+- The span holds every position or key of each of these subjects in the new value, in order, as one consecutive group. `GroupBySubject()` enumerates the groups without allocating. A handler replaces the entries it stores for the group's subject and the property with the group's children, and keeps those of subjects that are not in the span.
 - An index is compared with the one the old value had. The old value is read as it is now, so a collection or dictionary mutated in place and then assigned again hides the changes the two share, and the indices stay as they were before the mutation. A subject removed in place and then assigned again counts as still attached, so it is neither attached again nor passed to the handler, and keeps its old index.
 - Keys are compared with `Equals`, and only while an `IChildIndexHandler` is registered. Two keys that are equal but different instances count as unchanged, so a subject that is not in the span keeps the stored instances, and a subject in the span stores the instances of the new value. A dictionary whose comparer tells apart keys that `Equals` counts as equal, such as a comparer by reference, has them compared with `Equals` too, so subjects that swap such keys are not passed to the handler, while a subject that gains or loses such a key is. A key whose `Equals` throws makes the write throw after the value is stored, so the interceptors ordered before the lifecycle, which act once the value is stored, such as change notification and derived properties, miss that write, and indices can keep their old values until a later write changes them again, since that write is compared with the value that was stored.
 - The same requirements apply as to `ILifecycleHandler` (below). The handler must not write the property that was written, and the span is only valid during the call.

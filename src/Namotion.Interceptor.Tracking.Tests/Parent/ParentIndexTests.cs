@@ -547,7 +547,7 @@ public class ParentIndexTests
         IChildIndexHandler handler = new ParentTrackingHandler();
 
         // Act
-        handler.HandleChildIndexChanges(
+        handler.ReplaceChildIndices(
             new PropertyReference(garage, nameof(Garage.Cars)),
             [new SubjectChild(car, 0), new SubjectChild(car, 2), new SubjectChild(other, 1)]);
 
@@ -566,10 +566,10 @@ public class ParentIndexTests
         var garage = new Garage(CreateContext()) { Cars = [car] };
         IChildIndexHandler handler = new ParentTrackingHandler();
         var property = new PropertyReference(garage, nameof(Garage.Cars));
-        handler.HandleChildIndexChanges(property, [new SubjectChild(car, 0), new SubjectChild(car, 1)]);
+        handler.ReplaceChildIndices(property, [new SubjectChild(car, 0), new SubjectChild(car, 1)]);
 
         // Act
-        handler.HandleChildIndexChanges(property, [new SubjectChild(car, 1)]);
+        handler.ReplaceChildIndices(property, [new SubjectChild(car, 1)]);
 
         // Assert
         Assert.Equal<SubjectParent>([Parent(garage, nameof(Garage.Cars), 1)], car.GetParents());
@@ -586,7 +586,7 @@ public class ParentIndexTests
             CarsByName = new Dictionary<string, Car> { ["Motor"] = car }
         };
         IChildIndexHandler handler = new ParentTrackingHandler();
-        handler.HandleChildIndexChanges(
+        handler.ReplaceChildIndices(
             new PropertyReference(garage, nameof(Garage.Cars)),
             [new SubjectChild(car, 0), new SubjectChild(car, 1)]);
 

@@ -487,7 +487,7 @@ public class MovedChildConsistencyTests
     {
         public Action? NestedWrite { get; set; }
 
-        public void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
+        public void ReplaceChildIndices(PropertyReference property, ReadOnlySpan<SubjectChild> children)
         {
             if (property.Name != propertyName)
                 return;

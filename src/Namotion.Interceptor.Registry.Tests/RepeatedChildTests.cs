@@ -41,7 +41,7 @@ public class RepeatedChildTests
         var group = new LightGroup(context) { Lights = [light, other] };
 
         // Act
-        GetRegistryHandler(context).HandleChildIndexChanges(
+        GetRegistryHandler(context).ReplaceChildIndices(
             new PropertyReference(group, nameof(LightGroup.Lights)),
             [new SubjectChild(light, 0), new SubjectChild(light, 2)]);
 
@@ -62,7 +62,7 @@ public class RepeatedChildTests
         };
 
         // Act
-        GetRegistryHandler(context).HandleChildIndexChanges(
+        GetRegistryHandler(context).ReplaceChildIndices(
             new PropertyReference(group, nameof(LightGroup.LightsByName)),
             [new SubjectChild(light, "a"), new SubjectChild(light, "b")]);
 
@@ -80,10 +80,10 @@ public class RepeatedChildTests
         var group = new LightGroup(context) { Lights = [light, other] };
         var property = new PropertyReference(group, nameof(LightGroup.Lights));
         var handler = GetRegistryHandler(context);
-        handler.HandleChildIndexChanges(property, [new SubjectChild(light, 0), new SubjectChild(light, 2)]);
+        handler.ReplaceChildIndices(property, [new SubjectChild(light, 0), new SubjectChild(light, 2)]);
 
         // Act
-        handler.HandleChildIndexChanges(property, [new SubjectChild(light, 0)]);
+        handler.ReplaceChildIndices(property, [new SubjectChild(light, 0)]);
 
         // Assert
         AssertChildrenAndParents(group, nameof(LightGroup.Lights), (light, 0), (other, 1));
@@ -97,7 +97,7 @@ public class RepeatedChildTests
         var child = new Person();
         var other = new Person();
         var root = new Person(context) { Father = child, Children = [child, other] };
-        GetRegistryHandler(context).HandleChildIndexChanges(
+        GetRegistryHandler(context).ReplaceChildIndices(
             new PropertyReference(root, nameof(Person.Children)),
             [new SubjectChild(child, 0), new SubjectChild(child, 2)]);
 

@@ -286,7 +286,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     {
     }
 
-    void IChildIndexHandler.HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
+    void IChildIndexHandler.ReplaceChildIndices(PropertyReference property, ReadOnlySpan<SubjectChild> children)
     {
         lock (_knownSubjects)
         {

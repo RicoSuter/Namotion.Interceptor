@@ -456,7 +456,7 @@ public class ChildIndexHandlerTests
 
         public List<(PropertyReference Property, SubjectChild[] Before, SubjectChild[] After)> Calls { get; } = [];
 
-        public void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
+        public void ReplaceChildIndices(PropertyReference property, ReadOnlySpan<SubjectChild> children)
         {
             var before = children.ToArray();
             var nestedWrite = NestedWrite;
@@ -524,7 +524,7 @@ public class ChildIndexHandlerTests
     {
         public List<(PropertyReference Property, SubjectChild[] Children)> Calls { get; } = [];
 
-        public void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
+        public void ReplaceChildIndices(PropertyReference property, ReadOnlySpan<SubjectChild> children)
         {
             Calls.Add((property, children.ToArray()));
         }

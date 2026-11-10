@@ -223,7 +223,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     }
 
     // A move attaches and detaches nothing, so this is the only change it makes.
-    void IChildIndexHandler.HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
+    void IChildIndexHandler.ReplaceChildIndices(PropertyReference property, ReadOnlySpan<SubjectChild> children)
     {
         InvalidatePaths();
     }
