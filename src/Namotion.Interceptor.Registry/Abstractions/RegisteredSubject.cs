@@ -29,9 +29,14 @@ public class RegisteredSubject
     [JsonIgnore] public IInterceptorSubject Subject { get; }
 
     /// <summary>
-    /// Gets the current reference count (number of parent references).
+    /// Gets the current reference count: the number of properties that hold the subject.
     /// Returns 0 if subject is not attached or lifecycle tracking is not enabled.
     /// </summary>
+    /// <remarks>
+    /// <see cref="Parents"/> has an entry per key or position, so its length exceeds this count when a property holds
+    /// the subject at several places. Use <see cref="SubjectRegistryExtensions.CountProperties"/> to count the
+    /// properties of <see cref="Parents"/>.
+    /// </remarks>
     public int ReferenceCount => Subject.GetReferenceCount();
 
     /// <summary>
