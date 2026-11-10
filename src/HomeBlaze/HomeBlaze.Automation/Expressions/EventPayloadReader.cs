@@ -33,7 +33,7 @@ internal static class EventPayloadReader
     /// <summary>Reads the member path from the payload; an unknown member or a path into a value that is no subject is missing.</summary>
     public static ExpressionValue Read(IEvent payload, string memberPath, SubjectPathResolver resolver)
     {
-        var separator = memberPath.IndexOf(AutomationPaths.Separator);
+        var separator = memberPath.IndexOf(SubjectPathResolver.Separator);
         var name = separator < 0 ? memberPath : memberPath[..separator];
         if (!GetMembers(payload.GetType()).TryGetValue(name, out var member))
         {

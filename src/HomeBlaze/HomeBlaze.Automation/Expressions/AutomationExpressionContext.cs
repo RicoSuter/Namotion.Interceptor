@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using HomeBlaze.Services;
 using HomeBlaze.Services.Display;
 using Namotion.Interceptor.Expressions;
 
@@ -40,7 +41,7 @@ internal readonly struct AutomationExpressionContext(AutomationEvaluation evalua
 
         if (value.IsMissing)
         {
-            evaluation.AddMissingPath(memberPath is null ? variable : variable + AutomationPaths.Separator + memberPath);
+            evaluation.AddMissingPath(memberPath is null ? variable : variable + SubjectPathResolver.Separator + memberPath);
         }
 
         return value;

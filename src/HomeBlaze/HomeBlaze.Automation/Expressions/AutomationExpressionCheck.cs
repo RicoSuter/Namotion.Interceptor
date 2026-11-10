@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using HomeBlaze.Services;
 using Namotion.Interceptor.Expressions;
 
 namespace HomeBlaze.Automation.Expressions;
@@ -23,7 +24,7 @@ internal static class AutomationExpressionCheck
         [NotNullWhen(true)] out ParsedExpression? expression,
         [NotNullWhen(false)] out string? error)
     {
-        if (!ParsedExpression.TryParse(text ?? string.Empty, AutomationPaths.Separator, AutomationVariables.All, out expression, out error))
+        if (!ParsedExpression.TryParse(text ?? string.Empty, SubjectPathResolver.Separator, AutomationVariables.All, out expression, out error))
         {
             return false;
         }
@@ -48,7 +49,7 @@ internal static class AutomationExpressionCheck
         [NotNullWhen(true)] out TextTemplate? template,
         [NotNullWhen(false)] out string? error)
     {
-        if (!TextTemplate.TryParse(text ?? string.Empty, AutomationPaths.Separator, AutomationVariables.All, out template, out error))
+        if (!TextTemplate.TryParse(text ?? string.Empty, SubjectPathResolver.Separator, AutomationVariables.All, out template, out error))
         {
             return false;
         }

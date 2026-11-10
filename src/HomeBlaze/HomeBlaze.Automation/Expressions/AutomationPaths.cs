@@ -13,9 +13,6 @@ namespace HomeBlaze.Automation.Expressions;
 /// </summary>
 internal static class AutomationPaths
 {
-    /// <summary>The character between the segments of a path.</summary>
-    public const char Separator = '/';
-
     /// <summary>
     /// Resolves the property a path ends at, as <see cref="ResolveTarget"/> does, when an expression may read it: a secret
     /// or excluded property resolves to null.
@@ -28,7 +25,7 @@ internal static class AutomationPaths
     /// </summary>
     public static RegisteredSubjectProperty? ResolveTarget(SubjectPathResolver resolver, string path, IInterceptorSubject rule)
     {
-        var lastSeparator = path.LastIndexOf(Separator);
+        var lastSeparator = path.LastIndexOf(SubjectPathResolver.Separator);
         var name = lastSeparator < 0 ? path : path[(lastSeparator + 1)..];
         if (name.Length == 0)
         {
