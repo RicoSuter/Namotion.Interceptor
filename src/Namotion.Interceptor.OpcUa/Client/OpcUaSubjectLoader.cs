@@ -309,10 +309,17 @@ internal class OpcUaSubjectLoader
 
         var existingChildren = property.Children;
 
+        // A subject the property holds at several positions stays bound to the node of its first one.
+        var reusedSubjects = new HashSet<IInterceptorSubject>(System.Collections.Generic.ReferenceEqualityComparer.Instance);
+
         for (var i = 0; i < childCount; i++)
         {
             var (childNode, nodeId) = childNodes[i];
             var childSubject = i < existingChildren.Length ? existingChildren[i].Subject : null;
+            if (childSubject is not null && !reusedSubjects.Add(childSubject))
+            {
+                childSubject = null;
+            }
 
             if (childSubject is null)
             {
@@ -355,10 +362,17 @@ internal class OpcUaSubjectLoader
         var entries = new Dictionary<object, IInterceptorSubject>();
         var nodesByKey = new Dictionary<object, ReferenceDescription>();
 
+        // A subject the property holds under several keys stays bound to the node of the first one browsed.
+        var reusedSubjects = new HashSet<IInterceptorSubject>(System.Collections.Generic.ReferenceEqualityComparer.Instance);
+
         foreach (var (childNode, nodeId) in childNodes)
         {
             var key = childNode.BrowseName.Name; // Use BrowseName as dictionary key
             var childSubject = existingChildren.GetValueOrDefault(key);
+            if (childSubject is not null && !reusedSubjects.Add(childSubject))
+            {
+                childSubject = null;
+            }
 
             if (childSubject is null)
             {
