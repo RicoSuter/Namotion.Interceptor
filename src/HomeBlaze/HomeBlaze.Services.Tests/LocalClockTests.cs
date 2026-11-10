@@ -27,7 +27,7 @@ public class LocalClockTests
     [InlineData("2026-03-28T12:00:00Z", "2026-03-29T12:00:00Z", "2026-03-29T01:00:00Z")] // the clocks go forward
     [InlineData("2026-10-24T12:00:00Z", "2026-10-25T12:00:00Z", "2026-10-25T01:00:00Z")] // the clocks go back
     [InlineData("2026-10-24T12:00:00Z", "2026-10-25T00:59:59Z", null)]
-    public void WhenTheOffsetChangesBeforeTheLimit_ThenTheInstantOfTheChangeIsFound(string now, string limit, string? expected)
+    public void WhenSearchingUpToALimit_ThenTheInstantOfTheOffsetChangeOrNullIsFound(string now, string limit, string? expected)
     {
         // Arrange
         var offset = Zurich.GetUtcOffset(Parse(now));

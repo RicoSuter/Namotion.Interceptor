@@ -10,7 +10,8 @@ namespace HomeBlaze.Services.Messaging;
 /// Finds the events a subject publishes and subscribes to the events of one type. A subject publishes the events of each
 /// type <c>T</c> that implements <see cref="IEvent"/> and for which its type implements <see cref="IObservable{T}"/>.
 /// The event types of a subject type and the typed subscription of an event type are found once and cached weakly, so
-/// the cache keeps no type alive. All members are thread-safe.
+/// the cache keeps no type alive. The members can be called concurrently; Subscribe is as thread-safe as the Subscribe of
+/// the source.
 /// </summary>
 public static class SubjectEvents
 {
