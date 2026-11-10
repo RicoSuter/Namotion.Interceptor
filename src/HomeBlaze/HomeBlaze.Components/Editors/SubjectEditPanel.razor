@@ -222,7 +222,7 @@
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
+            Snackbar.AddConfigurationSaveError(ex.Message);
             return false;
         }
 
@@ -337,7 +337,7 @@
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
+            Snackbar.AddConfigurationSaveError(ex.Message);
         }
 
         return true;

@@ -223,12 +223,12 @@
 
     private static InputKind GetInputKind(MethodParameter parameter) =>
         ParameterConverter.IsSupported(parameter.Type) ? InputKind.Simple
-        : !parameter.IsNullable && ParameterConverter.IsSupportedObject(parameter.Type) ? InputKind.Members
+        : OperationInputLayout.IsEnteredPerMember(parameter) ? InputKind.Members
         : ParameterConverter.IsJsonObject(parameter.Type) ? InputKind.Json
         : InputKind.Unsupported;
 
     private static InputField CreateParameterField(MethodParameter parameter) =>
-        new(parameter.Name, GetLabel(parameter.Name, !parameter.IsNullable), parameter.Type, parameter.Unit, !parameter.IsNullable, GetEnumNames(parameter.Type));
+        new(parameter.Name, GetLabel(parameter.Name, !parameter.IsNullable), parameter.Type, parameter.Unit, !parameter.IsNullable, OperationInputLayout.GetEnumNames(parameter.Type));
 
     private static IEnumerable<InputField> CreateMemberFields(MethodParameter parameter) =>
         ParameterConverter.GetObjectMembers(parameter.Type).Select(member => CreateMemberField(parameter, member));
@@ -236,20 +236,14 @@
     // A bool member is a choice rather than a checkbox, so that leaving it empty keeps the type's default.
     private static InputField CreateMemberField(MethodParameter parameter, ObjectParameterMember member) =>
         new(GetMemberKey(parameter, member), GetLabel(member.Name, member.IsRequired), member.Type, null, member.IsRequired,
-            (Nullable.GetUnderlyingType(member.Type) ?? member.Type) == typeof(bool) ? BoolChoices : GetEnumNames(member.Type));
-
-    private static string[]? GetEnumNames(Type type)
-    {
-        var valueType = Nullable.GetUnderlyingType(type) ?? type;
-        return valueType.IsEnum ? Enum.GetNames(valueType) : null;
-    }
+            (Nullable.GetUnderlyingType(member.Type) ?? member.Type) == typeof(bool) ? BoolChoices : OperationInputLayout.GetEnumNames(member.Type));
 
     private static string GetMemberKey(MethodParameter parameter, ObjectParameterMember member) =>
-        $"{parameter.Name}.{member.Name}";
+        OperationInputLayout.GetMemberKey(parameter.Name, member.Name);
 
     private static string GetLabel(string name, bool isRequired)
     {
-        var label = name.Length > 0 ? char.ToUpperInvariant(name[0]) + name.Substring(1) : name;
+        var label = OperationInputLayout.GetLabel(name);
         return isRequired ? $"{label} *" : label;
     }
 

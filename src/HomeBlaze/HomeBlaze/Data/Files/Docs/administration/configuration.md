@@ -56,6 +56,7 @@ Data/
 ├── Root.json            root configuration
 ├── Files/               devices, dashboards, pages, Plugins.json, docs
 ├── Agents/              timeline, memory, chat session, run count and CLI working directory of AI agents
+├── AutomationState/     current state and last runs of automations, one checkpoint file each
 ├── DataProtection-Keys/ ASP.NET Core keys that keep antiforgery tokens valid across restarts
 ├── authentication.db    users, password hashes and roles (and authentication.db.seeded next to it)
 ├── History/Sqlite/      SQLite history
@@ -65,6 +66,8 @@ Data/
 When running from source, the data folder is `src/HomeBlaze/HomeBlaze/Data`. The container image uses `/data`; see [Installation](installation.md#data-folder).
 
 `DataProtection-Keys/` holds the secret keys that sign the browser's connection to the UI and any sign-in, so treat the folder and every backup of it like a password, or encrypt it with a certificate (see [HomeBlaze:DataProtection](#homeblazedataprotection)). To revoke the keys, for example after a backup leaked or in a copy of the data folder that runs as a second instance, stop HomeBlaze, delete the folder and start it again. Open browser tabs then need a reload, and everyone has to sign in again, because the session cookie is encrypted with these keys.
+
+`AutomationState/` holds one checkpoint file per automation with its current state and last runs, described in [Automations: The checkpoint](automation.md#the-checkpoint).
 
 ---
 

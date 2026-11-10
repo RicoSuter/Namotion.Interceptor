@@ -5,6 +5,7 @@ using HomeBlaze.AI.Mcp;
 using HomeBlaze.Authentication;
 using HomeBlaze.Authentication.Blazor;
 using HomeBlaze.Authentication.Blazor.Components;
+using HomeBlaze.Automation;
 using HomeBlaze.Components;
 using HomeBlaze.Components.Operations;
 using HomeBlaze.History.Blazor;
@@ -85,6 +86,7 @@ builder.Services.AddHomeBlazeMcpToolProvider(context => new HistoryMcpToolProvid
     context.Configuration,
     context.Services.GetRequiredService<ILoggerFactory>().CreateLogger<HistoryMcpToolProvider>()));
 builder.Services.AddHomeBlazeAgents();
+builder.Services.AddHomeBlazeAutomation();
 
 // The external MCP server at /mcp (default: off, enabled in Development). The built-in agents do not use it.
 var mcpEnabled = builder.Configuration.GetValue("McpServer:Enabled", false);
@@ -175,6 +177,8 @@ typeProvider
     .AddAssembly(typeof(SonosSystemWidget).Assembly)                                        // Namotion.Devices.Sonos.HomeBlaze
     .AddAssembly(typeof(FritzBox).Assembly)                                                 // Namotion.Devices.FritzBox
     .AddAssembly(typeof(FritzBoxWidget).Assembly)                                           // Namotion.Devices.FritzBox.HomeBlaze
+    .AddAssembly(typeof(HomeBlaze.Automation.Automation).Assembly)                          // HomeBlaze.Automation
+    .AddAssembly(typeof(HomeBlaze.Automation.Blazor.AutomationPage).Assembly)               // HomeBlaze.Automation.Blazor
     .AddAssembly(typeof(ClaudeCliAgent).Assembly)                                           // HomeBlaze.AI
     .AddAssembly(typeof(HomeBlaze.AI.Blazor.AgentPage).Assembly)                            // HomeBlaze.AI.Blazor
     .AddAssembly(typeof(HomeBlaze.Authorization.Role).Assembly)                             // HomeBlaze.Authorization

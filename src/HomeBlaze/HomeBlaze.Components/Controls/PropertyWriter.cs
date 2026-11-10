@@ -231,7 +231,7 @@ public sealed class PropertyWriter : IDisposable
             // ISnackbar is safe to call from any thread: its provider re-renders through InvokeAsync.
             if (errorMessage is not null)
             {
-                _snackbar.Add($"Error saving configuration: {errorMessage}", Severity.Error);
+                _snackbar.AddConfigurationSaveError(errorMessage);
             }
             else if (result != ConfigurationPersistResult.Written)
             {

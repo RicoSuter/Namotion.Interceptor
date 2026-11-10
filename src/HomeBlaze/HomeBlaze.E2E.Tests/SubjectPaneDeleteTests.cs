@@ -79,50 +79,37 @@ public class SubjectPaneDeleteTests
     public async Task WhenAStoredSubjectIsShown_ThenItHasADeleteButtonAndNoDeleteOperationButton()
     {
         // Arrange
-        var (name, filePath, motor) = await _fixture.AddStoredMotorAsync();
-        try
-        {
-            // Act
-            var (_, pane) = await OpenPaneAsync(name);
+        await using var motor = await _fixture.AddStoredMotorAsync();
 
-            // Assert
-            await Assertions.Expect(pane.GetByTestId("delete-subject-button")).ToBeEnabledAsync(new() { Timeout = PageLoadTimeout });
-            var content = pane.GetByTestId("subject-pane-content");
-            await Assertions.Expect(content.GetByRole(AriaRole.Button, new() { Name = "Restart Controller", Exact = true })).ToBeVisibleAsync();
-            await Assertions.Expect(content.GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true })).ToHaveCountAsync(0);
-        }
-        finally
-        {
-            await _fixture.DeleteStoredSubjectAsync(filePath, motor);
-        }
+        // Act
+        var (_, pane) = await OpenPaneAsync(motor.Name);
+
+        // Assert
+        await Assertions.Expect(pane.GetByTestId("delete-subject-button")).ToBeEnabledAsync(new() { Timeout = PageLoadTimeout });
+        var content = pane.GetByTestId("subject-pane-content");
+        await Assertions.Expect(content.GetByRole(AriaRole.Button, new() { Name = "Restart Controller", Exact = true })).ToBeVisibleAsync();
+        await Assertions.Expect(content.GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true })).ToHaveCountAsync(0);
     }
 
     [Fact]
     public async Task WhenTheDeleteOfAStoredSubjectIsConfirmed_ThenItsFileIsGoneAndItsPaneCloses()
     {
         // Arrange
-        var (name, filePath, motor) = await _fixture.AddStoredMotorAsync();
-        try
-        {
-            var (page, pane) = await OpenPaneAsync(name);
-            var deleteButton = pane.GetByTestId("delete-subject-button");
-            await Assertions.Expect(deleteButton).ToBeEnabledAsync(new() { Timeout = PageLoadTimeout });
+        await using var motor = await _fixture.AddStoredMotorAsync();
+        var (page, pane) = await OpenPaneAsync(motor.Name);
+        var deleteButton = pane.GetByTestId("delete-subject-button");
+        await Assertions.Expect(deleteButton).ToBeEnabledAsync(new() { Timeout = PageLoadTimeout });
 
-            // Act
-            await deleteButton.ClickAsync();
-            var dialog = page.GetByRole(AriaRole.Dialog);
-            await Assertions.Expect(dialog).ToContainTextAsync("Delete '", new() { Timeout = PageLoadTimeout });
-            await Assertions.Expect(dialog).ToContainTextAsync("Deletes the file of this subject from the storage.");
-            await dialog.GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true }).ClickAsync();
+        // Act
+        await deleteButton.ClickAsync();
+        var dialog = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(dialog).ToContainTextAsync("Delete '", new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(dialog).ToContainTextAsync("Deletes the file of this subject from the storage.");
+        await dialog.GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true }).ClickAsync();
 
-            // Assert
-            await Assertions.Expect(page.Locator("#scrollContainer [data-testid='subject-pane']")).ToHaveCountAsync(1, new() { Timeout = PageLoadTimeout });
-            Assert.False(File.Exists(filePath));
-        }
-        finally
-        {
-            await _fixture.DeleteStoredSubjectAsync(filePath, motor);
-        }
+        // Assert
+        await Assertions.Expect(page.Locator("#scrollContainer [data-testid='subject-pane']")).ToHaveCountAsync(1, new() { Timeout = PageLoadTimeout });
+        Assert.False(File.Exists(motor.FilePath));
     }
 
     [Fact]
@@ -167,11 +154,11 @@ public class SubjectPaneDeleteTests
         var roleName = TestNames.Create("deletable");
         await _fixture.AddPersonAsync(userName, BuiltInRoles.OperatorName);
         await SaveRoleAsync(roleName);
-        var (name, filePath, motor) = await _fixture.AddStoredMotorAsync();
+        var motor = await _fixture.AddStoredMotorAsync();
         try
         {
             // Act
-            var (page, filePane) = await OpenPaneAsync(name, SignedInAs.User(userName));
+            var (page, filePane) = await OpenPaneAsync(motor.Name, SignedInAs.User(userName));
 
             // Assert: the operations of the pane render, so a missing button is no pane that has not loaded yet.
             await Assertions.Expect(filePane.GetByTestId("subject-pane-content").GetByRole(AriaRole.Button, new() { Name = "Restart Controller", Exact = true }))
@@ -191,7 +178,7 @@ public class SubjectPaneDeleteTests
         }
         finally
         {
-            await _fixture.DeleteStoredSubjectAsync(filePath, motor);
+            await motor.DisposeAsync();
             await DeleteRoleAsync(roleName);
             await _fixture.RemovePersonAsync(userName);
         }

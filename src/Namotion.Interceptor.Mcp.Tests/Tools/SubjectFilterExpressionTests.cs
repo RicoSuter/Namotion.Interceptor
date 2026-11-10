@@ -230,6 +230,9 @@ public class SubjectFilterExpressionTests
     [InlineData("Name == \"abc", "where: unterminated string at position 8")]
     [InlineData("Temperature > 1 Name == x", "where: unexpected 'N' at position 16")]
     [InlineData("Temperature > 1.2.3", "where: invalid number '1.2.3' at position 14")]
+    [InlineData("Temperature*2 > 1", "where: put spaces around '*' in 'Temperature*2'")]
+    [InlineData("Temperature+Offset > 1", "where: put spaces around '+' in 'Temperature+Offset'")]
+    [InlineData("x > Device.Power/2", "where: put spaces around '/' in 'Device.Power/2'")]
     public void WhenExpressionIsInvalid_ThenReturnsErrorWithPosition(string where, string expectedError)
     {
         // Act
@@ -327,12 +330,17 @@ public class SubjectFilterExpressionTests
     [InlineData("Devices == null", false)]
     [InlineData("Devices[a].IsOn == true", true)]
     [InlineData("Devices[b].IsOn == true", false)]
+    [InlineData("Devices[a+b/c*d].IsOn == true", true)]
     public void WhenPathHasAnIndexOnAnIntermediateSegment_ThenItResolvesThroughTheEntry(string where, bool expected)
     {
         // Arrange
         var context = CreateContext();
         var group = new TestDeviceGroup(context);
-        group.Devices = new Dictionary<string, TestDevice> { ["a"] = new TestDevice(context) { DeviceName = "Light", IsOn = true } };
+        group.Devices = new Dictionary<string, TestDevice>
+        {
+            ["a"] = new TestDevice(context) { DeviceName = "Light", IsOn = true },
+            ["a+b/c*d"] = new TestDevice(context) { DeviceName = "Fan", IsOn = true }
+        };
 
         // Act
         var matches = Evaluate(where, group);
