@@ -184,9 +184,9 @@ public static class ParentsHandlerExtensions
     public static int CountProperties(this ImmutableArray<SubjectParent> parents)
     {
         var span = parents.AsSpan();
-        if (span.IsEmpty)
+        if (span.Length <= 1)
         {
-            return 0;
+            return span.Length;
         }
 
         var count = 1;
