@@ -235,7 +235,7 @@ public class MovedChildConsistencyTests
             var picked = cars.OrderBy(_ => random.Next()).Take(random.Next(cars.Length + 1)).ToList();
             if (random.Next(2) == 0)
             {
-                // A repeated item exercises the first-position rule.
+                // A repeated item exercises the entry per place.
                 garage.Cars = picked.Count > 0 ? [.. picked, picked[0]] : picked;
             }
             else
@@ -246,9 +246,9 @@ public class MovedChildConsistencyTests
     }
 
     /// <summary>
-    /// Asserts that the registry children of the property are the distinct subjects of its value, each with its first
-    /// position or key, in the order of a collection (a dictionary's children keep their attach order), that the
-    /// tracked and the registry parents of each carry the same index, and that no former child keeps a parent entry.
+    /// Asserts that the registry children of the property are the subjects of its value, one for each position or key,
+    /// in the order of a collection (a dictionary's children keep their attach order), that the tracked and the
+    /// registry parents of each carry the same indices, and that no former child keeps a parent entry.
     /// </summary>
     private static void AssertEveryCopyMatchesValue(
         IInterceptorSubject parent, string propertyName, IEnumerable<IInterceptorSubject> candidates)
@@ -256,19 +256,20 @@ public class MovedChildConsistencyTests
         var registeredProperty = parent.TryGetRegisteredSubject()?.TryGetProperty(propertyName);
         Assert.NotNull(registeredProperty);
         var property = new PropertyReference(parent, propertyName);
-        var expected = GetFirstOccurrences(registeredProperty.GetValue());
+        var expected = GetPlaces(registeredProperty.GetValue());
+        var expectedChildren = expected;
         var actual = registeredProperty.Children.Select(child => (child.Subject, child.Index)).ToList();
         if (registeredProperty.GetValue() is IDictionary)
         {
-            expected = expected.OrderBy(child => child.Index?.ToString(), StringComparer.Ordinal).ToList();
+            expectedChildren = expected.OrderBy(child => child.Index?.ToString(), StringComparer.Ordinal).ToList();
             actual = actual.OrderBy(child => child.Index?.ToString(), StringComparer.Ordinal).ToList();
         }
 
-        Assert.Equal(expected.Count, actual.Count);
-        for (var i = 0; i < expected.Count; i++)
+        Assert.Equal(expectedChildren.Count, actual.Count);
+        for (var i = 0; i < expectedChildren.Count; i++)
         {
-            Assert.Same(expected[i].Subject, actual[i].Subject);
-            Assert.Equal(expected[i].Index, actual[i].Index);
+            Assert.Same(expectedChildren[i].Subject, actual[i].Subject);
+            Assert.Equal(expectedChildren[i].Index, actual[i].Index);
         }
 
         foreach (var candidate in candidates)
@@ -289,10 +290,9 @@ public class MovedChildConsistencyTests
         }
     }
 
-    private static List<(IInterceptorSubject Subject, object? Index)> GetFirstOccurrences(object? value)
+    private static List<(IInterceptorSubject Subject, object? Index)> GetPlaces(object? value)
     {
         var children = new List<(IInterceptorSubject Subject, object? Index)>();
-        var seen = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
         switch (value)
         {
             case IInterceptorSubject subject:
@@ -302,7 +302,7 @@ public class MovedChildConsistencyTests
             case IDictionary dictionary:
                 foreach (DictionaryEntry entry in dictionary)
                 {
-                    if (entry.Value is IInterceptorSubject subject && seen.Add(subject))
+                    if (entry.Value is IInterceptorSubject subject)
                         children.Add((subject, entry.Key));
                 }
                 break;
@@ -311,7 +311,7 @@ public class MovedChildConsistencyTests
                 var position = 0;
                 foreach (var item in enumerable)
                 {
-                    if (item is IInterceptorSubject subject && seen.Add(subject))
+                    if (item is IInterceptorSubject subject)
                         children.Add((subject, position));
 
                     position++;

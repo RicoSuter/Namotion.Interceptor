@@ -1,11 +1,11 @@
-using System.Runtime.CompilerServices;
+using System.Collections.Immutable;
 using System.Runtime.InteropServices;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 /// <summary>
 /// Tells the <see cref="IChildIndexHandler"/> services of a context which children a structural
-/// write left under another key or position.
+/// write left under other keys or positions.
 /// </summary>
 internal static class ChildIndexRefresher
 {
@@ -16,10 +16,12 @@ internal static class ChildIndexRefresher
 
     private const int AllPlacesMatched = -1;
     private const int PlacesDiffer = -2;
+    private const int AttachedOnce = -3;
+    private const int NoNextPlace = -1;
 
     /// <summary>
-    /// Reports every subject both values hold whose keys or positions differ between them, with the first of them in
-    /// the new value.
+    /// Reports every subject both values hold whose keys or positions differ between them, and every subject the new
+    /// value holds more than once that the write attached, with all of its keys or positions in the new value.
     /// </summary>
     /// <param name="property">The written property.</param>
     /// <param name="oldChildren">The subjects the old value held, as the lifecycle interceptor scanned them.</param>
@@ -44,25 +46,86 @@ internal static class ChildIndexRefresher
         try
         {
             CollectMovedChildren(oldChildren, newChildren, oldSubjects, newSubjects, buffers);
-            if (buffers.Changes.Count == 0)
-            {
-                return;
-            }
+            Report(property, handlers, buffers);
+        }
+        finally
+        {
+            ReturnBuffers(buffers);
+        }
+    }
 
-            var span = CollectionsMarshal.AsSpan(buffers.Changes);
-            for (var i = 0; i < handlers.Length; i++)
+    /// <summary>
+    /// Reports every subject that the attach of a subject's properties attached at more than one key or position of a
+    /// property, with all of them, since its attach carries only the first.
+    /// </summary>
+    /// <param name="children">The subjects the properties hold, as the lifecycle interceptor scanned them, grouped by property.</param>
+    public static void RefreshRepeatedChildren(
+        List<(IInterceptorSubject subject, PropertyReference property, object? index)> children)
+    {
+        var span = CollectionsMarshal.AsSpan(children);
+        if (span.Length < 2)
+        {
+            return;
+        }
+
+        var handlers = span[0].property.Subject.Context.GetServices<IChildIndexHandler>();
+        if (handlers.Length == 0)
+        {
+            return;
+        }
+
+        var buffers = _reusableBuffers ?? new Buffers();
+        _reusableBuffers = null;
+        try
+        {
+            var start = 0;
+            while (start < span.Length)
             {
-                handlers[i].HandleChildIndexChanges(property, span);
+                var property = span[start].property;
+                var end = start + 1;
+                while (end < span.Length && span[end].property.Equals(property))
+                {
+                    end++;
+                }
+
+                if (end - start > 1)
+                {
+                    CollectSubjectsWithChangedPlaces([], span[start..end], buffers);
+                    Report(property, handlers, buffers);
+                    buffers.Changes.Clear();
+                    buffers.Cursors.Clear();
+                }
+
+                start = end;
             }
         }
         finally
         {
-            // Release references so subjects can be GC'd on idle threads
-            buffers.Changes.Clear();
-            buffers.OldIndices.Clear();
-            buffers.Cursors.Clear();
-            _reusableBuffers = buffers;
+            ReturnBuffers(buffers);
         }
+    }
+
+    private static void Report(PropertyReference property, ImmutableArray<IChildIndexHandler> handlers, Buffers buffers)
+    {
+        if (buffers.Changes.Count == 0)
+        {
+            return;
+        }
+
+        var span = CollectionsMarshal.AsSpan(buffers.Changes);
+        for (var i = 0; i < handlers.Length; i++)
+        {
+            handlers[i].HandleChildIndexChanges(property, span);
+        }
+    }
+
+    private static void ReturnBuffers(Buffers buffers)
+    {
+        // Release references so subjects can be GC'd on idle threads
+        buffers.Changes.Clear();
+        buffers.OldIndices.Clear();
+        buffers.Cursors.Clear();
+        _reusableBuffers = buffers;
     }
 
     private static void CollectMovedChildren(
@@ -75,8 +138,7 @@ internal static class ChildIndexRefresher
         var oldSpan = CollectionsMarshal.AsSpan(oldChildren);
         var newSpan = CollectionsMarshal.AsSpan(newChildren);
 
-        // A subject held more than once is known by its first key or position, which a comparison
-        // by place cannot tell from a later one, and its later ones can change while the first stays.
+        // A subject held more than once has several places, which a comparison of first places cannot follow.
         if (oldSubjects.Count != oldSpan.Length || newSubjects.Count != newSpan.Length)
         {
             CollectSubjectsWithChangedPlaces(oldSpan, newSpan, buffers);
@@ -107,14 +169,24 @@ internal static class ChildIndexRefresher
     }
 
     // Compares the keys or positions of each kept subject in order, the n-th in the new value with the n-th in the old
-    // one, and reports the subject with its first one when they differ.
+    // one, and reports each subject whose places differ, or which this write attached at more than one place, with all
+    // of its places in the new value as one run, at its first place.
     private static void CollectSubjectsWithChangedPlaces(
         ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> oldSpan,
         ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> newSpan,
         Buffers buffers)
     {
-        // Each subject of the old value has a cursor on its next place in oldSpan to compare, and nextPlaces links
-        // each place to the next one of the same subject.
+        var next = LinkOldPlaces(oldSpan, buffers);
+        var nextNew = MatchNewPlaces(oldSpan, newSpan, next, buffers);
+        AddChangedSubjects(newSpan, nextNew, buffers);
+    }
+
+    // Each subject of the old value gets a cursor on its next place in oldSpan to compare, and the returned span links
+    // each place to the next one of the same subject.
+    private static Span<int> LinkOldPlaces(
+        ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> oldSpan,
+        Buffers buffers)
+    {
         var cursors = buffers.Cursors;
         var nextPlaces = buffers.NextPlaces;
         CollectionsMarshal.SetCount(nextPlaces, oldSpan.Length);
@@ -122,30 +194,74 @@ internal static class ChildIndexRefresher
         for (var i = oldSpan.Length - 1; i >= 0; i--)
         {
             ref var cursor = ref CollectionsMarshal.GetValueRefOrAddDefault(cursors, oldSpan[i].subject, out var exists);
-            next[i] = exists ? cursor : AllPlacesMatched;
-            cursor = i;
+            next[i] = exists ? cursor.Next : AllPlacesMatched;
+            cursor.Next = i;
+            cursor.LastNewPlace = NoNextPlace;
         }
 
-        // A subject this write attached has no cursor, since its attach carries its index.
-        foreach (var (subject, _, index) in newSpan)
+        return next;
+    }
+
+    // Advances the cursor of each subject along its places in the new value, and links each of them to the next one of
+    // the same subject in the returned span, for the report.
+    private static Span<int> MatchNewPlaces(
+        ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> oldSpan,
+        ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> newSpan,
+        ReadOnlySpan<int> next,
+        Buffers buffers)
+    {
+        var cursors = buffers.Cursors;
+        var nextNewPlaces = buffers.NextNewPlaces;
+        CollectionsMarshal.SetCount(nextNewPlaces, newSpan.Length);
+        var nextNew = CollectionsMarshal.AsSpan(nextNewPlaces);
+        for (var i = 0; i < newSpan.Length; i++)
         {
-            ref var cursor = ref CollectionsMarshal.GetValueRefOrNullRef(cursors, subject);
-            if (!Unsafe.IsNullRef(ref cursor))
+            var (subject, _, index) = newSpan[i];
+            ref var cursor = ref CollectionsMarshal.GetValueRefOrAddDefault(cursors, subject, out var exists);
+            if (!exists)
             {
-                cursor = cursor >= 0 && Equals(oldSpan[cursor].index, index) ? next[cursor] : PlacesDiffer;
+                // Attached by this write: its attach carries the first place, so only a second one is reported.
+                cursor.Next = AttachedOnce;
             }
+            else
+            {
+                cursor.Next = cursor.Next >= 0 && Equals(oldSpan[cursor.Next].index, index) ? next[cursor.Next] : PlacesDiffer;
+                if (cursor.LastNewPlace != NoNextPlace)
+                {
+                    nextNew[cursor.LastNewPlace] = i;
+                }
+            }
+
+            nextNew[i] = NoNextPlace;
+            cursor.LastNewPlace = i;
         }
 
-        // Each subject whose places differed, or whose cursor is still on a place the new value lost, is reported once,
-        // at its first place.
-        foreach (var (subject, _, index) in newSpan)
+        return nextNew;
+    }
+
+    // Each subject whose places differed, or whose cursor is still on a place the new value lost, is reported at its
+    // first place with all of its places.
+    private static void AddChangedSubjects(
+        ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> newSpan,
+        ReadOnlySpan<int> nextNew,
+        Buffers buffers)
+    {
+        var cursors = buffers.Cursors;
+        for (var i = 0; i < newSpan.Length; i++)
         {
+            var subject = newSpan[i].subject;
             ref var cursor = ref CollectionsMarshal.GetValueRefOrNullRef(cursors, subject);
-            if (!Unsafe.IsNullRef(ref cursor) && cursor != AllPlacesMatched)
+            if (cursor.Next is AllPlacesMatched or AttachedOnce)
             {
-                buffers.Changes.Add(new SubjectChild(subject, index));
-                cursor = AllPlacesMatched;
+                continue;
             }
+
+            for (var place = i; place != NoNextPlace; place = nextNew[place])
+            {
+                buffers.Changes.Add(new SubjectChild(subject, newSpan[place].index));
+            }
+
+            cursor.Next = AllPlacesMatched;
         }
     }
 
@@ -170,14 +286,25 @@ internal static class ChildIndexRefresher
         }
     }
 
+    private struct PlaceCursor
+    {
+        // The next place in the old value to compare, or one of AllPlacesMatched, PlacesDiffer and AttachedOnce.
+        public int Next;
+
+        // The last place of the subject in the new value seen so far, or NoNextPlace.
+        public int LastNewPlace;
+    }
+
     private sealed class Buffers
     {
         public List<SubjectChild> Changes { get; } = [];
 
         public Dictionary<IInterceptorSubject, object?> OldIndices { get; } = new(ReferenceEqualityComparer.Instance);
 
-        public Dictionary<IInterceptorSubject, int> Cursors { get; } = new(ReferenceEqualityComparer.Instance);
+        public Dictionary<IInterceptorSubject, PlaceCursor> Cursors { get; } = new(ReferenceEqualityComparer.Instance);
 
         public List<int> NextPlaces { get; } = [];
+
+        public List<int> NextNewPlaces { get; } = [];
     }
 }

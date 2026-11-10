@@ -430,7 +430,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 return;
             }
 
-            // Report kept subjects whose key or position changed. A write between two single references
+            // Report subjects whose keys or positions changed. A write between two single references
             // keeps no subject, since writing the same one again returns early.
             if (lastProcessed is IEnumerable || newValue is IEnumerable)
             {

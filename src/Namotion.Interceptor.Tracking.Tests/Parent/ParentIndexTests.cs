@@ -151,7 +151,7 @@ public class ParentIndexTests
     }
 
     [Fact]
-    public void WhenSubjectMovesToSeveralKeys_ThenParentIndexIsTheFirstKey()
+    public void WhenSubjectMovesToSeveralKeys_ThenItHasAParentEntryPerKey()
     {
         // Arrange
         var car = new Car();
@@ -165,7 +165,7 @@ public class ParentIndexTests
         garage.CarsByName = new Dictionary<string, Car> { ["First"] = car, ["Second"] = car, ["Other"] = other };
 
         // Assert
-        Assert.Equal(Parent(garage, nameof(Garage.CarsByName), "First"), Assert.Single(car.GetParents()));
+        Assert.Equal<SubjectParent>([Parent(garage, nameof(Garage.CarsByName), "First"), Parent(garage, nameof(Garage.CarsByName), "Second")], car.GetParents());
     }
 
     [Fact]
@@ -187,7 +187,7 @@ public class ParentIndexTests
     }
 
     [Fact]
-    public void WhenSubjectUnderAnEqualKeyGainsAnotherKey_ThenParentIndexStoresTheNewKeyInstance()
+    public void WhenSubjectUnderAnEqualKeyGainsAnotherKey_ThenItsParentEntriesStoreTheNewKeyInstances()
     {
         // Arrange: the second write keeps the first key instance, since its key is equal.
         var car = new Car();
@@ -202,11 +202,14 @@ public class ParentIndexTests
         garage.CarsByName = new Dictionary<string, Car> { [newKey] = car, ["Other"] = car };
 
         // Assert
-        Assert.Same(newKey, Assert.Single(car.GetParents()).Index);
+        var parents = car.GetParents();
+        Assert.Equal(2, parents.Length);
+        Assert.Same(newKey, parents[0].Index);
+        Assert.Equal("Other", parents[1].Index);
     }
 
     [Fact]
-    public void WhenSubjectMovesToSeveralPositions_ThenParentIndexIsTheFirstPosition()
+    public void WhenSubjectMovesToSeveralPositions_ThenItHasAParentEntryPerPosition()
     {
         // Arrange
         var car = new Car();
@@ -217,11 +220,11 @@ public class ParentIndexTests
         garage.Cars = [car, other, car];
 
         // Assert
-        Assert.Equal(Parent(garage, nameof(Garage.Cars), 0), Assert.Single(car.GetParents()));
+        Assert.Equal<SubjectParent>([Parent(garage, nameof(Garage.Cars), 0), Parent(garage, nameof(Garage.Cars), 2)], car.GetParents());
     }
 
     [Fact]
-    public void WhenRetainedSubjectIsAlsoAppended_ThenParentIndexStaysTheFirstPosition()
+    public void WhenRetainedSubjectIsAlsoAppended_ThenItGainsAParentEntryForThePosition()
     {
         // Arrange
         var car = new Car();
@@ -232,7 +235,7 @@ public class ParentIndexTests
         garage.Cars = [car, other, car];
 
         // Assert
-        Assert.Equal(Parent(garage, nameof(Garage.Cars), 0), Assert.Single(car.GetParents()));
+        Assert.Equal<SubjectParent>([Parent(garage, nameof(Garage.Cars), 0), Parent(garage, nameof(Garage.Cars), 2)], car.GetParents());
     }
 
     [Fact]

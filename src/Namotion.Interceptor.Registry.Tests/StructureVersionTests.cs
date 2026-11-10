@@ -106,7 +106,7 @@ public class StructureVersionTests
     }
 
     [Fact]
-    public void WhenADictionaryGainsAnotherKeyForASubjectItHolds_ThenStructureVersionRisesAndChildrenKeepTheFirstKey()
+    public void WhenADictionaryGainsAnotherKeyForASubjectItHolds_ThenStructureVersionRisesAndChildrenHoldBothKeys()
     {
         // Arrange
         var (context, registry) = CreateContext();
@@ -119,11 +119,11 @@ public class StructureVersionTests
 
         // Assert
         AssertRisenToAnEvenValue(before, registry.StructureVersion);
-        AssertSingleChildAndParent(group, nameof(LightGroup.LightsByName), light, "a");
+        AssertChildrenAndParents(group, nameof(LightGroup.LightsByName), (light, "a"), (light, "b"));
     }
 
     [Fact]
-    public void WhenADictionaryLosesTheSecondOfTwoKeysForASubject_ThenStructureVersionRisesAndChildrenKeepTheFirstKey()
+    public void WhenADictionaryLosesTheSecondOfTwoKeysForASubject_ThenStructureVersionRisesAndChildrenHoldTheRemainingKey()
     {
         // Arrange
         var (context, registry) = CreateContext();
@@ -136,11 +136,11 @@ public class StructureVersionTests
 
         // Assert
         AssertRisenToAnEvenValue(before, registry.StructureVersion);
-        AssertSingleChildAndParent(group, nameof(LightGroup.LightsByName), light, "a");
+        AssertChildrenAndParents(group, nameof(LightGroup.LightsByName), (light, "a"));
     }
 
     [Fact]
-    public void WhenADictionaryReplacesTheSecondKeyOfASubject_ThenStructureVersionRisesAndChildrenKeepTheFirstKey()
+    public void WhenADictionaryReplacesTheSecondKeyOfASubject_ThenStructureVersionRisesAndChildrenHoldTheNewKey()
     {
         // Arrange
         var (context, registry) = CreateContext();
@@ -153,11 +153,11 @@ public class StructureVersionTests
 
         // Assert
         AssertRisenToAnEvenValue(before, registry.StructureVersion);
-        AssertSingleChildAndParent(group, nameof(LightGroup.LightsByName), light, "a");
+        AssertChildrenAndParents(group, nameof(LightGroup.LightsByName), (light, "a"), (light, "c"));
     }
 
     [Fact]
-    public void WhenAListGainsAnotherPositionForASubjectItHolds_ThenStructureVersionRisesAndChildrenKeepTheFirstPosition()
+    public void WhenAListGainsAnotherPositionForASubjectItHolds_ThenStructureVersionRisesAndChildrenHoldBothPositions()
     {
         // Arrange
         var (context, registry) = CreateContext();
@@ -170,11 +170,11 @@ public class StructureVersionTests
 
         // Assert
         AssertRisenToAnEvenValue(before, registry.StructureVersion);
-        AssertSingleChildAndParent(group, nameof(LightGroup.Lights), light, 0);
+        AssertChildrenAndParents(group, nameof(LightGroup.Lights), (light, 0), (light, 1));
     }
 
     [Fact]
-    public void WhenAListLosesTheSecondOfTwoPositionsOfASubject_ThenStructureVersionRisesAndChildrenKeepTheFirstPosition()
+    public void WhenAListLosesTheSecondOfTwoPositionsOfASubject_ThenStructureVersionRisesAndChildrenHoldTheRemainingPosition()
     {
         // Arrange
         var (context, registry) = CreateContext();
@@ -187,18 +187,17 @@ public class StructureVersionTests
 
         // Assert
         AssertRisenToAnEvenValue(before, registry.StructureVersion);
-        AssertSingleChildAndParent(group, nameof(LightGroup.Lights), light, 0);
+        AssertChildrenAndParents(group, nameof(LightGroup.Lights), (light, 0));
     }
 
     [Fact]
-    public void WhenAListHoldingSubjectsTwiceIsReorderedWithoutMovingTheirFirstPositions_ThenStructureVersionRisesAndChildrenAreUnchanged()
+    public void WhenAListHoldingSubjectsTwiceIsReorderedWithoutMovingTheirFirstPositions_ThenStructureVersionRisesAndChildrenFollowThePositions()
     {
         // Arrange
         var (context, registry) = CreateContext();
         var first = new Light();
         var second = new Light();
         var group = new LightGroup(context) { Lights = [first, second, second, first] };
-        var property = group.TryGetRegisteredSubject()!.TryGetProperty(nameof(LightGroup.Lights))!;
         var before = registry.StructureVersion;
 
         // Act
@@ -206,13 +205,11 @@ public class StructureVersionTests
 
         // Assert
         AssertRisenToAnEvenValue(before, registry.StructureVersion);
-        Assert.Equal<(IInterceptorSubject, object?)>(
-            [(first, 0), (second, 1)],
-            property.Children.Select(child => (child.Subject, child.Index)));
+        AssertChildrenAndParents(group, nameof(LightGroup.Lights), (first, 0), (second, 1), (first, 2), (second, 3));
     }
 
     [Fact]
-    public void WhenAnArrayGainsAnotherPositionForASubjectItHolds_ThenStructureVersionRisesAndChildrenKeepTheFirstPosition()
+    public void WhenAnArrayGainsAnotherPositionForASubjectItHolds_ThenStructureVersionRisesAndChildrenHoldBothPositions()
     {
         // Arrange
         var (context, registry) = CreateContext();
@@ -225,7 +222,7 @@ public class StructureVersionTests
 
         // Assert
         AssertRisenToAnEvenValue(before, registry.StructureVersion);
-        AssertSingleChildAndParent(root, nameof(Person.Children), child, 0);
+        AssertChildrenAndParents(root, nameof(Person.Children), (child, 0), (child, 1));
     }
 
     [Fact]
@@ -394,16 +391,18 @@ public class StructureVersionTests
         Assert.Equal(0, after % 2);
     }
 
-    private static void AssertSingleChildAndParent(IInterceptorSubject holder, string propertyName, IInterceptorSubject child, object index)
+    private static void AssertChildrenAndParents(
+        IInterceptorSubject holder, string propertyName, params (IInterceptorSubject Subject, object Index)[] expected)
     {
         var property = holder.TryGetRegisteredSubject()!.TryGetProperty(propertyName)!;
-        var registeredChild = Assert.Single(property.Children);
-        Assert.Same(child, registeredChild.Subject);
-        Assert.Equal(index, registeredChild.Index);
+        Assert.Equal(expected, property.Children.Select(child => (child.Subject, child.Index!)));
 
-        var parent = Assert.Single(child.TryGetRegisteredSubject()!.Parents);
-        Assert.Same(property, parent.Property);
-        Assert.Equal(index, parent.Index);
+        foreach (var subject in expected.Select(entry => entry.Subject).Distinct())
+        {
+            Assert.Equal(
+                expected.Where(entry => entry.Subject == subject).Select(entry => entry.Index),
+                subject.TryGetRegisteredSubject()!.Parents.Where(parent => parent.Property == property).Select(parent => parent.Index!));
+        }
     }
 
     private static (IInterceptorSubjectContext Context, ISubjectRegistry Registry) CreateContext()

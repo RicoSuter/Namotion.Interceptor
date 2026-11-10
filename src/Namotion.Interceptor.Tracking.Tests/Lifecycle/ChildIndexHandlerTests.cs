@@ -101,7 +101,7 @@ public class ChildIndexHandlerTests
     }
 
     [Fact]
-    public void WhenSubjectIsListedTwice_ThenHandlerGetsItOnceWithItsFirstPosition()
+    public void WhenSubjectIsListedTwice_ThenHandlerGetsAllItsPositionsAsOneRun()
     {
         // Arrange
         var (context, handler) = CreateContext();
@@ -114,11 +114,11 @@ public class ChildIndexHandlerTests
 
         // Assert
         var call = Assert.Single(handler.Calls);
-        Assert.Equal([new SubjectChild(shared, 0), new SubjectChild(other, 1)], call.Children);
+        Assert.Equal([new SubjectChild(shared, 0), new SubjectChild(shared, 2), new SubjectChild(other, 1)], call.Children);
     }
 
     [Fact]
-    public void WhenDictionaryGainsAnotherKeyForASubjectItHolds_ThenHandlerGetsItWithItsFirstKey()
+    public void WhenDictionaryGainsAnotherKeyForASubjectItHolds_ThenHandlerGetsBothKeys()
     {
         // Arrange
         var (context, handler) = CreateContext();
@@ -130,16 +130,17 @@ public class ChildIndexHandlerTests
 
         // Assert
         var call = Assert.Single(handler.Calls);
-        Assert.Equal([new SubjectChild(car, "First")], call.Children);
+        Assert.Equal([new SubjectChild(car, "First"), new SubjectChild(car, "Second")], call.Children);
     }
 
     [Fact]
-    public void WhenDictionaryLosesTheSecondOfTwoKeysForASubject_ThenHandlerGetsItWithItsFirstKey()
+    public void WhenDictionaryLosesTheSecondOfTwoKeysForASubject_ThenHandlerGetsTheRemainingKey()
     {
         // Arrange
         var (context, handler) = CreateContext();
         var car = new Car();
         var garage = new Garage(context) { CarsByName = new Dictionary<string, Car> { ["First"] = car, ["Second"] = car } };
+        handler.Calls.Clear();
 
         // Act
         garage.CarsByName = new Dictionary<string, Car> { ["First"] = car };
@@ -150,7 +151,7 @@ public class ChildIndexHandlerTests
     }
 
     [Fact]
-    public void WhenListGainsAnotherPositionForASubjectItHolds_ThenHandlerGetsItWithItsFirstPosition()
+    public void WhenListGainsAnotherPositionForASubjectItHolds_ThenHandlerGetsBothPositions()
     {
         // Arrange
         var (context, handler) = CreateContext();
@@ -163,16 +164,17 @@ public class ChildIndexHandlerTests
 
         // Assert
         var call = Assert.Single(handler.Calls);
-        Assert.Equal([new SubjectChild(car, 0)], call.Children);
+        Assert.Equal([new SubjectChild(car, 0), new SubjectChild(car, 2)], call.Children);
     }
 
     [Fact]
-    public void WhenListLosesTheSecondOfTwoPositionsOfASubject_ThenHandlerGetsItWithItsFirstPosition()
+    public void WhenListLosesTheSecondOfTwoPositionsOfASubject_ThenHandlerGetsTheRemainingPosition()
     {
         // Arrange
         var (context, handler) = CreateContext();
         var car = new Car();
         var garage = new Garage(context) { Cars = [car, car] };
+        handler.Calls.Clear();
 
         // Act
         garage.Cars = [car];
@@ -183,53 +185,56 @@ public class ChildIndexHandlerTests
     }
 
     [Fact]
-    public void WhenDictionaryReplacesTheSecondKeyOfASubject_ThenHandlerGetsItWithItsFirstKey()
+    public void WhenDictionaryReplacesTheSecondKeyOfASubject_ThenHandlerGetsBothKeys()
     {
         // Arrange
         var (context, handler) = CreateContext();
         var car = new Car();
         var garage = new Garage(context) { CarsByName = new Dictionary<string, Car> { ["First"] = car, ["Second"] = car } };
+        handler.Calls.Clear();
 
         // Act
         garage.CarsByName = new Dictionary<string, Car> { ["First"] = car, ["Third"] = car };
 
         // Assert
         var call = Assert.Single(handler.Calls);
-        Assert.Equal([new SubjectChild(car, "First")], call.Children);
+        Assert.Equal([new SubjectChild(car, "First"), new SubjectChild(car, "Third")], call.Children);
     }
 
     [Fact]
-    public void WhenListMovesTheSecondPositionOfASubject_ThenHandlerGetsItWithItsFirstPositionAndTheShiftedSubject()
+    public void WhenListMovesTheSecondPositionOfASubject_ThenHandlerGetsItsPositionsAndTheShiftedSubject()
     {
         // Arrange
         var (context, handler) = CreateContext();
         var car = new Car();
         var other = new Car();
         var garage = new Garage(context) { Cars = [car, car, other] };
+        handler.Calls.Clear();
 
         // Act
         garage.Cars = [car, other, car];
 
         // Assert
         var call = Assert.Single(handler.Calls);
-        Assert.Equal([new SubjectChild(car, 0), new SubjectChild(other, 1)], call.Children);
+        Assert.Equal([new SubjectChild(car, 0), new SubjectChild(car, 2), new SubjectChild(other, 1)], call.Children);
     }
 
     [Fact]
-    public void WhenListHoldingSubjectsTwiceIsReorderedWithoutMovingTheirFirstPositions_ThenHandlerGetsBoth()
+    public void WhenListHoldingSubjectsTwiceIsReorderedWithoutMovingTheirFirstPositions_ThenHandlerGetsBothWithAllTheirPositions()
     {
         // Arrange
         var (context, handler) = CreateContext();
         var first = new Car();
         var second = new Car();
         var garage = new Garage(context) { Cars = [first, second, second, first] };
+        handler.Calls.Clear();
 
         // Act
         garage.Cars = [first, second, first, second];
 
         // Assert
         var call = Assert.Single(handler.Calls);
-        Assert.Equal([new SubjectChild(first, 0), new SubjectChild(second, 1)], call.Children);
+        Assert.Equal([new SubjectChild(first, 0), new SubjectChild(first, 2), new SubjectChild(second, 1), new SubjectChild(second, 3)], call.Children);
     }
 
     [Fact]
@@ -240,6 +245,7 @@ public class ChildIndexHandlerTests
         var car = new Car();
         var other = new Car();
         var garage = new Garage(context) { Cars = [car, other, car] };
+        handler.Calls.Clear();
 
         // Act
         garage.Cars = [car, other, car];
@@ -259,6 +265,7 @@ public class ChildIndexHandlerTests
         {
             CarsByName = new Dictionary<string, Car> { ["A"] = car, ["B"] = car, ["C"] = other }
         };
+        handler.Calls.Clear();
 
         // Act
         garage.CarsByName = new Dictionary<string, Car> { ["A"] = car, ["C"] = other, ["B"] = car };
@@ -268,7 +275,7 @@ public class ChildIndexHandlerTests
     }
 
     [Fact]
-    public void WhenDictionaryReordersTheLaterKeysOfASubject_ThenHandlerGetsItWithItsFirstKey()
+    public void WhenDictionaryReordersTheLaterKeysOfASubject_ThenHandlerGetsItsKeysInTheNewOrder()
     {
         // Arrange
         var (context, handler) = CreateContext();
@@ -277,13 +284,14 @@ public class ChildIndexHandlerTests
         {
             CarsByName = new Dictionary<string, Car> { ["A"] = car, ["B"] = car, ["C"] = car }
         };
+        handler.Calls.Clear();
 
         // Act
         garage.CarsByName = new Dictionary<string, Car> { ["A"] = car, ["C"] = car, ["B"] = car };
 
         // Assert
         var call = Assert.Single(handler.Calls);
-        Assert.Equal([new SubjectChild(car, "A")], call.Children);
+        Assert.Equal([new SubjectChild(car, "A"), new SubjectChild(car, "C"), new SubjectChild(car, "B")], call.Children);
     }
 
     [Fact]
@@ -300,6 +308,7 @@ public class ChildIndexHandlerTests
                 [firstKey] = car, [new string('A', 1)] = car
             }
         };
+        handler.Calls.Clear();
 
         // Act
         garage.CarsByName = new Dictionary<string, Car>(ReferenceEqualityComparer.Instance) { [firstKey] = car };
@@ -354,7 +363,7 @@ public class ChildIndexHandlerTests
     }
 
     [Fact]
-    public void WhenSubjectUnderTwoKeysIsReordered_ThenHandlerGetsItWithItsNewFirstKey()
+    public void WhenSubjectUnderTwoKeysIsReordered_ThenHandlerGetsBothKeysInTheNewOrder()
     {
         // Arrange
         var (context, handler) = CreateContext();
@@ -363,13 +372,14 @@ public class ChildIndexHandlerTests
         {
             CarsByName = new Dictionary<string, Car> { ["P"] = car, ["Q"] = car }
         };
+        handler.Calls.Clear();
 
         // Act
         garage.CarsByName = new Dictionary<string, Car> { ["Q"] = car, ["P"] = car };
 
         // Assert
         var call = Assert.Single(handler.Calls);
-        Assert.Equal([new SubjectChild(car, "Q")], call.Children);
+        Assert.Equal([new SubjectChild(car, "Q"), new SubjectChild(car, "P")], call.Children);
     }
 
     [Fact]
@@ -396,6 +406,39 @@ public class ChildIndexHandlerTests
         holder.BroadCars = new Dictionary<string, Car> { ["B"] = car };
         Assert.Single(changes);
         Assert.Equal([new SubjectChild(car, "B")], handler.Calls[^1].Children);
+    }
+
+    [Fact]
+    public void WhenSubjectIsAttachedAtTwoPositions_ThenHandlerGetsBothPositions()
+    {
+        // Arrange
+        var (context, handler) = CreateContext();
+        var car = new Car();
+        var other = new Car();
+        var garage = new Garage(context) { Cars = [other] };
+
+        // Act
+        garage.Cars = [other, car, car];
+
+        // Assert
+        var call = Assert.Single(handler.Calls);
+        Assert.Equal([new SubjectChild(car, 1), new SubjectChild(car, 2)], call.Children);
+    }
+
+    [Fact]
+    public void WhenSubjectIsAttachedAtTwoKeys_ThenHandlerGetsBothKeys()
+    {
+        // Arrange
+        var (context, handler) = CreateContext();
+        var car = new Car();
+        var garage = new Garage(context);
+
+        // Act
+        garage.CarsByName = new Dictionary<string, Car> { ["A"] = car, ["B"] = car };
+
+        // Assert
+        var call = Assert.Single(handler.Calls);
+        Assert.Equal([new SubjectChild(car, "A"), new SubjectChild(car, "B")], call.Children);
     }
 
     private sealed class CastingKey

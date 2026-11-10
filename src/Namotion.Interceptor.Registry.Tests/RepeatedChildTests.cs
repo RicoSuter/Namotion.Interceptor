@@ -109,4 +109,70 @@ public class RepeatedChildTests
         var parent = Assert.Single(child.TryGetRegisteredSubject()!.Parents);
         Assert.Equal(nameof(Person.Father), parent.Property.Name);
     }
+
+    [Fact]
+    public void WhenListHoldsAChildAtTwoPositions_ThenItHasAnEntryPerPosition()
+    {
+        // Arrange
+        var light = new Light();
+        var other = new Light();
+
+        // Act
+        var group = new LightGroup(CreateContext()) { Lights = [light, other, light] };
+
+        // Assert
+        AssertChildrenAndParents(group, nameof(LightGroup.Lights), (light, 0), (other, 1), (light, 2));
+    }
+
+    [Fact]
+    public void WhenDictionaryHoldsAChildUnderTwoKeys_ThenItHasAnEntryPerKey()
+    {
+        // Arrange
+        var light = new Light();
+
+        // Act
+        var group = new LightGroup(CreateContext())
+        {
+            LightsByName = new Dictionary<string, Light> { ["a"] = light, ["b"] = light }
+        };
+
+        // Assert
+        AssertChildrenAndParents(group, nameof(LightGroup.LightsByName), (light, "a"), (light, "b"));
+    }
+
+    [Fact]
+    public void WhenListLosesOneOfTwoPositionsOfAChild_ThenTheOtherEntryStays()
+    {
+        // Arrange
+        var light = new Light();
+        var other = new Light();
+        var group = new LightGroup(CreateContext()) { Lights = [light, other, light] };
+
+        // Act
+        group.Lights = [other, light];
+
+        // Assert
+        AssertChildrenAndParents(group, nameof(LightGroup.Lights), (other, 0), (light, 1));
+    }
+
+    [Fact]
+    public void WhenListIsWrittenRepeatedly_ThenChildrenAndParentsMatchTheValueAfterEachWrite()
+    {
+        // Arrange
+        var a = new Light();
+        var b = new Light();
+        var group = new LightGroup(CreateContext());
+        List<Light>[] values = [[a, b, a], [b, a, a, b], [a], [], [b, b, b], [a, b], [b, a, b, a]];
+
+        foreach (var value in values)
+        {
+            // Act
+            group.Lights = value;
+
+            // Assert
+            AssertChildrenAndParents(
+                group, nameof(LightGroup.Lights),
+                value.Select((light, index) => ((IInterceptorSubject)light, (object)index)).ToArray());
+        }
+    }
 }
