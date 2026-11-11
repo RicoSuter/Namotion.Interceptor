@@ -38,6 +38,12 @@ public sealed class FakeHistoryStore : IHistoryStore
     /// <summary>When true, both query methods throw, simulating a misconfigured store.</summary>
     public bool ThrowOnQuery { get; set; }
 
+    /// <summary>
+    /// Runs after <see cref="GetSampleAtOrBeforeAsync"/> searched with the coverage it read and before it returns,
+    /// simulating a flush that publishes new coverage while the lookup runs.
+    /// </summary>
+    public Action? AfterSampleLookup { get; set; }
+
     public FakeHistoryStore AddSample(DateTimeOffset timestamp, double value)
     {
         _samples.Add(new HistoryPoint(timestamp, value, null));
@@ -101,7 +107,9 @@ public sealed class FakeHistoryStore : IHistoryStore
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        return new ValueTask<HistoryPoint?>(SampleAtOrBefore(asOf));
+        var sample = SampleAtOrBefore(asOf);
+        AfterSampleLookup?.Invoke();
+        return new ValueTask<HistoryPoint?>(sample);
     }
 
     public ValueTask<HistoryPoint?> GetLastNumericSampleBeforeAsync(
