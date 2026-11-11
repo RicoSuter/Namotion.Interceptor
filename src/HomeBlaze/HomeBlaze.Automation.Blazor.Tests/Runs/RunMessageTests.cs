@@ -134,12 +134,79 @@ public class RunMessageTests
     }
 
     [Fact]
-    public void WhenTheMessageWasShortenedInAValue_ThenTheValueKeepsTheEllipsis()
+    public void WhenAValueEndsWithAnEllipsisInAMessageThatWasNotShortened_ThenTheValueKeepsIt()
     {
         // Act
-        var actions = RunMessage.Parse("Ran /Display/Text = a long te...");
+        var actions = RunMessage.Parse("Ran /Display/Text = Loading...");
 
         // Assert
-        Assert.Equal([new RunMessageAction("Text", "/Display", "= a long te...")], actions);
+        Assert.Equal([new RunMessageAction("Text", "/Display", "= Loading...")], actions);
+    }
+
+    [Theory]
+    [InlineData("/Speaker/Say(text: \"see a/b = c and m")]
+    [InlineData("/Display/Text = a long te")]
+    public void WhenTheMessageWasShortened_ThenTheLastPartIsText(string shortenedPart)
+    {
+        // Arrange
+        const int maxMessageLength = 500;
+        var prefix = "Ran /Lamp/Toggle(); /Display/Text = " + new string('x', 400) + "; ";
+        var lastPart = shortenedPart + new string('m', maxMessageLength - 3 - prefix.Length - shortenedPart.Length) + "...";
+        var message = prefix + lastPart;
+
+        // Act
+        var actions = RunMessage.Parse(message);
+
+        // Assert
+        Assert.Equal(maxMessageLength, message.Length);
+        Assert.Equal(
+        [
+            new RunMessageAction("Toggle", "/Lamp", ""),
+            new RunMessageAction("Text", "/Display", "= " + new string('x', 400)),
+            new RunMessageAction(null, null, lastPart)
+        ], actions);
+    }
+
+    [Fact]
+    public void WhenTheTargetIsOnTheRootAndTheArgumentOrValueHoldsAPathLikeText_ThenTheSubjectIsTheRoot()
+    {
+        // Act
+        var actions = RunMessage.Parse("Ran /Mode = a/B = c; /Restart(reason: \"x/Y(z: 1)\")");
+
+        // Assert
+        Assert.Equal(
+        [
+            new RunMessageAction("Mode", "/", "= a/B = c"),
+            new RunMessageAction("Restart", "/", "reason: \"x/Y(z: 1)\"")
+        ], actions);
+    }
+
+    [Fact]
+    public void WhenAnArgumentOrValueHoldsANewLine_ThenTheActionKeepsItsSubject()
+    {
+        // Act
+        var actions = RunMessage.Parse("Ran /Speaker/Say(text: \"a\nb/C(d: e)\"); /Display/Text = a\nb/C = d; /Display/Note = x\n");
+
+        // Assert
+        Assert.Equal(
+        [
+            new RunMessageAction("Say", "/Speaker", "text: \"a\nb/C(d: e)\""),
+            new RunMessageAction("Text", "/Display", "= a\nb/C = d"),
+            new RunMessageAction("Note", "/Display", "= x\n")
+        ], actions);
+    }
+
+    [Fact]
+    public void WhenAnArgumentIsAMemberOfARecord_ThenTheActionIsTheOperation()
+    {
+        // Act
+        var actions = RunMessage.Parse("Ran /Lamp/SetColor(color.Red: 255); /Lamp/Set(color.Name: a/b = c)");
+
+        // Assert
+        Assert.Equal(
+        [
+            new RunMessageAction("SetColor", "/Lamp", "color.Red: 255"),
+            new RunMessageAction("Set", "/Lamp", "color.Name: a/b = c")
+        ], actions);
     }
 }

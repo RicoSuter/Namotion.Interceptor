@@ -14,6 +14,11 @@ internal static partial class RunMessage
 {
     private const string RanPrefix = "Ran ";
 
+    // The length of a message that the runtime shortened and ended with "...", RuleRunResult.MaxMessageLength in
+    // HomeBlaze.Automation, which this library cannot reference.
+    private const int ShortenedLength = 500;
+    private const string Ellipsis = "...";
+
     public static IReadOnlyList<RunMessageAction> Parse(string? message)
     {
         if (string.IsNullOrEmpty(message))
@@ -32,8 +37,21 @@ internal static partial class RunMessage
             return [];
         }
 
-        // Arguments and values can hold "; " themselves, which splits them here and shows those parts as text.
-        return descriptions.Split("; ").Select(ParseAction).ToArray();
+        // An argument or value can hold "; " itself; the parts it is split into here show as text or as actions of their own.
+        var parts = descriptions.Split("; ");
+        var actions = new RunMessageAction[parts.Length];
+        for (var index = 0; index < parts.Length; index++)
+        {
+            actions[index] = ParseAction(parts[index]);
+        }
+
+        // A shortened part can end anywhere, such as inside an argument that then reads as a property write.
+        if (message.Length >= ShortenedLength && message.EndsWith(Ellipsis, StringComparison.Ordinal))
+        {
+            actions[^1] = new RunMessageAction(null, null, parts[^1]);
+        }
+
+        return actions;
     }
 
     private static RunMessageAction ParseAction(string part)
@@ -58,14 +76,15 @@ internal static partial class RunMessage
 
     private static string GetSubjectPath(Match match) => match.Groups["path"] is { Success: true } path ? path.Value : "/";
 
-    [GeneratedRegex(@"^ChangeState\((?<state>.*)\)$")]
+    [GeneratedRegex(@"^ChangeState\((?<state>.*)\)\z", RegexOptions.Singleline)]
     private static partial Regex ChangeStatePattern();
 
-    // The path is the first one that the name and the arguments can follow, with keys in brackets kept whole, so that a
-    // key or an argument may hold slashes and parentheses; an absent path is the root.
-    [GeneratedRegex(@"^(?<path>/(?:[^\[]|\[[^\]]*\])*?)?/(?<name>[^/\s(\[\]]+)\((?<arguments>(?:\w+: .*)?)\)$")]
+    // The path is the shortest one that the name and the arguments can follow, the root first, with keys in brackets kept
+    // whole, so that a key or an argument may hold slashes and parentheses; an absent path is the root. An argument of a
+    // record member is named "parameter.Member".
+    [GeneratedRegex(@"^(?<path>/(?:[^\[]|\[[^\]]*\])*?)??/(?<name>[^/\s(\[\]]+)\((?<arguments>(?:[\w.]+: .*)?)\)\z", RegexOptions.Singleline)]
     private static partial Regex OperationPattern();
 
-    [GeneratedRegex(@"^(?<path>/(?:[^\[]|\[[^\]]*\])*?)?/(?<name>[^/\s=\[\]]+) = (?<value>.*)$")]
+    [GeneratedRegex(@"^(?<path>/(?:[^\[]|\[[^\]]*\])*?)??/(?<name>[^/\s=\[\]]+) = (?<value>.*)\z", RegexOptions.Singleline)]
     private static partial Regex WritePattern();
 }
