@@ -69,7 +69,10 @@ public class HistoryChartWidgetTests
         var page = await _fixture.CreatePageAsync();
         await page.SetViewportSizeAsync(width, 900);
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{pageName}");
-        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+        // The tabs and the charts are prerendered: a click before the circuit renders the page is lost, and its first render
+        // replaces the elements that a test measures.
+        await page.WaitUntilInteractiveAsync(Timeout);
         return page;
     }
 
@@ -674,7 +677,6 @@ public class HistoryChartWidgetTests
     {
         // Arrange
         var page = await OpenBarsPageAsync();
-        await page.WaitUntilInteractiveAsync(Timeout);
 
         // Act
         await page.GetByRole(AriaRole.Tab, new() { Name = "Bars tab" }).ClickAsync();

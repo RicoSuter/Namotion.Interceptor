@@ -107,6 +107,10 @@ public class UnsavedTextTests
         // Act: the dialog covers the links, so the app navigates as the back button of a phone would.
         await page.EvaluateAsync("url => Blazor.navigateTo(url)", "/browser");
         await page.GetByRole(AriaRole.Button, new() { Name = "Keep editing", Exact = true }).ClickAsync();
+
+        // As a user does, the app navigates again only once the question is gone, so that its Discard is not taken for
+        // the one of the next question. The text dialog stays open.
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Keep editing", Exact = true })).ToHaveCountAsync(0, new() { Timeout = Timeout });
         var editorTextAfterKeep = await page.EvaluateAsync<string>("() => blazorMonaco.editor.getEditor('markdown-text-editor', true).getValue()");
         await page.EvaluateAsync("url => Blazor.navigateTo(url)", "/browser");
         await page.GetByRole(AriaRole.Button, new() { Name = "Discard", Exact = true }).ClickAsync();
