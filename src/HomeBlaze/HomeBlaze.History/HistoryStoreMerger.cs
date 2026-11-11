@@ -48,9 +48,12 @@ public static class HistoryStoreMerger
 
     /// <summary>
     /// Gets the value held at <paramref name="asOf"/> from the store set: the newest sample at or before
-    /// it, taking the first hit in priority order. A raw query only returns the samples inside its window,
-    /// so a caller that renders a held value (the state timeline) needs this to know what the value was
-    /// entering the window. Returns null when no store has a sample it can vouch for.
+    /// it, taking the first hit in priority order. A store whose coverage holds the instant without a
+    /// sample vouches that the value did not change since the start of that coverage range, so the value
+    /// held just before that start is looked up the same way, also in the other stores. A raw query only
+    /// returns the samples inside its window, so a caller that renders a held value (the state timeline)
+    /// needs this to know what the value was entering the window. Returns null when the value is unknown:
+    /// no store has a sample at or before the instant inside the coverage that reaches it without a gap.
     /// </summary>
     public static Task<HistoryPoint?> GetValueAtAsync(
         this IEnumerable<IHistoryStore> stores, string propertyPath, DateTimeOffset asOf, CancellationToken cancellationToken) =>
@@ -300,22 +303,61 @@ public static class HistoryStoreMerger
         return newest;
     }
 
-    // The newest sample at or before asOf across the ordered stores, taking the first hit. Serves both
-    // the carry seed and the public held-value lookup: the two differed only in who ordered the stores.
+    // The value held at asOf across the ordered stores, as GetValueAtAsync describes it. Serves both the
+    // carry seed and the public held-value lookup.
     private static async Task<HistoryPoint?> ResolveHeldValueAsync(
         IReadOnlyList<IHistoryStore> ordered,
         string propertyPath,
         DateTimeOffset asOf,
         CancellationToken cancellationToken)
     {
-        foreach (var store in ordered)
+        var instant = asOf;
+        var hasHopped = false;
+        while (true)
         {
-            var sample = await store
-                .GetSampleAtOrBeforeAsync(propertyPath, asOf, cancellationToken)
-                .ConfigureAwait(false);
-            if (sample is not null)
+            DateTimeOffset? unchangedFrom = null;
+            foreach (var store in ordered)
             {
-                return sample;
+                // After a hop, a store that does not cover the instant cannot answer for it.
+                if (hasHopped && GetContainingRangeFrom(store, instant) is null)
+                {
+                    continue;
+                }
+
+                var sample = await store
+                    .GetSampleAtOrBeforeAsync(propertyPath, instant, cancellationToken)
+                    .ConfigureAwait(false);
+                if (sample is not null)
+                {
+                    return sample;
+                }
+
+                // Coverage is read after the lookup, so that a range that moved on meanwhile vouches only for
+                // its newer, shorter span.
+                if (GetContainingRangeFrom(store, instant) is { } from && (unchangedFrom is null || from < unchangedFrom))
+                {
+                    unchangedFrom = from;
+                }
+            }
+
+            // Every hop goes back to before a range start at or before the instant, so the loop ends.
+            if (unchangedFrom is not { } earliest || earliest == DateTimeOffset.MinValue)
+            {
+                return null;
+            }
+
+            instant = earliest.AddTicks(-1);
+            hasHopped = true;
+        }
+    }
+
+    private static DateTimeOffset? GetContainingRangeFrom(IHistoryStore store, DateTimeOffset instant)
+    {
+        foreach (var range in store.CoverageRanges)
+        {
+            if (range.From <= instant && range.To > instant)
+            {
+                return range.From;
             }
         }
 

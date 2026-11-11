@@ -262,6 +262,8 @@ Point budgets favor the newest data. Non-carry queries execute newest-first with
 
 For `Last` and `TimeWeightedAverage`, the merger resolves a value held at the start of each contiguous served region. It threads that value across adjacent segments. It does not carry across an uncovered interval. After each segment it asks for the last raw event rather than using an aggregate point as the next carry. The carry is threaded into the next segment only while the previous owner's coverage reaches the boundary; otherwise it is resolved again at the next segment's start. When the owner's coverage restarts inside a segment and no event follows the restart, the carry is cleared.
 
+A held value is resolved across stores. The lookup takes the newest sample at or before the instant, the first hit in priority order. A store whose coverage holds the instant without a sample vouches that the value did not change since that coverage range started, so the lookup continues just before the earliest such start, in the stores that cover that instant, until one has a sample or none covers it. The value is therefore found across coverage that adjoins or overlaps, such as the in-memory store at the live edge and the persistent store up to its last flush, but never across a gap. The state timeline's value at its window start, the `Last` and `TimeWeightedAverage` carries and the outcome of a run on the page of an automation all use this lookup.
+
 For `Delta`, the merger passes each segment the counter reading it starts from as `CarrySeed`. The first segment gets the newest numeric reading any store holds before it, which is not necessarily the first hit in priority order, because the stores cover different times. Each later segment gets the last reading the previous segment consumed: the previous owner's newest reading inside the previous segment, or the previous segment's own seed when the owner recorded none there. A reading another store holds inside the previous segment was never consumed, since a segment aggregates only its owner's covered samples, so seeding from it would lose the increase up to it. When there is no such reading, the seed falls back to the newest one across stores. The seed survives uncovered intervals between segments, like the reading inside a store.
 
 Query errors propagate. A failed store must not look like an empty store.
@@ -352,7 +354,7 @@ The band distinguishes three states, which is the distinction a line chart canno
 
 Filling the start of a window needs the value held entering it, which a raw query does not return, so the merger exposes `GetValueAtAsync`. Without it a property whose last change predates the window renders as unknown rather than as its actual state.
 
-A held value never crosses a coverage gap. The look-back stays inside the coverage range of the window start, and a value recorded before a gap ends at the gap, so the band shows "No data" from the gap until the next sample. A value that holds since startup or since a restart therefore shows as "No data" until it next changes, because nothing records it when recording starts (see the known limitations below). Recording a starting sample is planned separately.
+A held value never crosses a coverage gap. The look-back follows coverage that adjoins or overlaps across stores (see [Cross-store merge](#cross-store-merge)), and a value recorded before a gap ends at the gap, so the band shows "No data" from the gap until the next sample. A value that holds since startup or since a restart therefore shows as "No data" until it next changes, because nothing records it when recording starts (see the known limitations below). Recording a starting sample is planned separately.
 
 `get_property_history` takes:
 
@@ -403,7 +405,7 @@ Queries should send the relevant range predicate to PostgreSQL rather than loadi
 - Move detection cannot discover moves that occurred while HomeBlaze was stopped.
 - Per-property time resolution is bounded by the change queue's coalescing interval.
 - When the requested bucket size exceeds `InMemory.MaxAge`, no store covers the whole newest bucket, so it is served partially, usually by the persistent store, whose coverage covers the bucket start but ends at its last flush. It omits the samples outside that store's coverage, so its `Count` and `Sum` are lower bounds. Raise `MaxAgeSeconds` for a complete live edge.
-- For a value that has not changed within `InMemory.MaxAge`, `Last` and `TimeWeightedAverage` can be briefly null at the live edge: right after a bucket boundary, until the persistent store flushes past it. The held value is not looked up across stores.
+- A held value is unknown at the live edge when the coverage of the stores does not meet there, such as when the persistent store's flush interval exceeds `InMemory.MaxAge`: a value that has not changed since then is null until the persistent store flushes past it.
 - No sample is recorded when recording starts or resumes, so a value set at startup or held across a restart is unknown until it next changes, and the state timeline shows it as "No data". Recording a starting sample is planned separately.
 - Subject-bearing state, full graph snapshots, `Rate`, `StateDuration`, interpolation, compression, and continuous aggregates are future work.
 
