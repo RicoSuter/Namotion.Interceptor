@@ -161,11 +161,9 @@ The library has specialized support for:
 - **Naming**: `When<Condition>_Then<ExpectedBehavior>` (e.g., `WhenDepthIsZero_ThenReturnsNoChildren`)
 - **Structure**: Explicit `// Arrange`, `// Act`, `// Assert` comments separating each phase (use `// Act & Assert` for exception tests)
 - **No hardcoded waits**: Use `AsyncTestHelpers.WaitUntilAsync(() => condition)` or event-based synchronization (`ManualResetEventSlim`, `CountdownEvent`) instead of `Task.Delay`/`Thread.Sleep`. Hardcoded delays are either too long (slow CI) or too short (flaky CI).
-- **Timeouts bound the code, not the scheduler**: CI runners have few cores and test assemblies run in parallel, so work queued to the thread pool, a timer or a render can start seconds late. A positive wait on such work uses `TestTimeouts.Default` (30 seconds) or the same default of `AsyncTestHelpers.WaitUntilAsync`. A short bound belongs only to a negative check that cannot pass vacuously.
-- **Blocking race participants on dedicated threads**: A participant that parks on a gate, lock or barrier runs through `DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync`, never `Task.Run` or `ThreadPool.QueueUserWorkItem`.
-- **Nothing a late thread uses is disposed early**: A gate that another thread may still wait on after the test fails is a `TaskCompletionSource`, or is disposed only after joining that thread. An `ObjectDisposedException` on a background thread crashes the whole test host.
-- **Deadlines on a manual clock**: Assert a time bound through a `TimeProvider` the test advances, not with a `Stopwatch` and slack, which a stalled runner exceeds while the code is correct.
-- **E2E tests act on a ready page**: Before a key press or click, wait for the observable state that means the page handles it, for example `Expect(...).ToBeFocusedAsync()` on the element a MudBlazor dialog focuses itself after it renders.
+- **Timing on small CI runners**: A positive wait on background work uses `TestTimeouts.Default` (the default of `AsyncTestHelpers.WaitUntilAsync`), and only a check that something does not happen gets a short bound. A race participant that blocks runs through `DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync`, and a deadline is asserted on a `TimeProvider` the test advances, not with a `Stopwatch`.
+- **Nothing a late thread uses is disposed early**: Prefer a `TaskCompletionSource` as a gate; an `ObjectDisposedException` on a background thread crashes the test host.
+- **E2E tests act on a ready page**: Wait for the observable state that means the page handles a key or click, such as `ToBeFocusedAsync()` on the element a dialog focuses itself.
 
 ## Public API Tracking
 
