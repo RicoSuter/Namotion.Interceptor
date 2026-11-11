@@ -140,10 +140,13 @@ public sealed class FritzBoxWlanWidgetAccessTests : BunitContext, IAsyncLifetime
         // Arrange
         var wasOn = Guest.IsOn!.Value;
         var rendered = Render<FritzBoxWlanWidget>(parameters => parameters.Add(widget => widget.Subject, Guest));
+        // The toggle of the switch as rendered before the change: a later render, such as one for an update the router
+        // reports, disables the switch, which then ignores a change of its input.
+        var toggle = rendered.FindComponent<MudSwitch<bool>>().Instance.ValueChanged;
         _permissions.CannotInvoke.Add(Guest.TryGetMethodMember(SwitchMethod)!);
 
         // Act
-        await FindSwitch(rendered).ChangeAsync(new() { Value = !wasOn });
+        await rendered.InvokeAsync(() => toggle.InvokeAsync(!wasOn));
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => _shownMessages.Count > 0, message: "The refusal should be shown.");
