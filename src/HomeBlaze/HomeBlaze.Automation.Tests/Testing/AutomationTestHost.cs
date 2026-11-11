@@ -64,20 +64,27 @@ internal sealed class AutomationTestHost : IAsyncDisposable
     /// <summary>
     /// Starts the host with the automation <c>/Storm</c>, which <paramref name="configure"/> configures. With
     /// <paramref name="makesEveryRouteUnbounded"/> the change dispatcher treats every graph route as unbounded from before
-    /// the first automation registers, which is the dispatch without graph routes.
+    /// the first automation registers, which is the dispatch without graph routes. Without
+    /// <paramref name="keepsCheckpoints"/> the context has no data directory, so no automation writes a checkpoint, which
+    /// every state change otherwise flushes to the disk before it is entered.
     /// </summary>
     public static async Task<AutomationTestHost> StartAsync(
         Action<Automation> configure,
         DateTimeOffset? start = null,
         TimeZoneInfo? timeZone = null,
         IAutomationAuthorizer? authorizer = null,
-        bool makesEveryRouteUnbounded = false)
+        bool makesEveryRouteUnbounded = false,
+        bool keepsCheckpoints = true)
     {
         var time = new FakeTimeProvider(start ?? Start);
         time.SetLocalTimeZone(timeZone ?? TimeZoneInfo.Utc);
         var graph = new TestGraph();
         var dataDirectory = Directory.CreateTempSubdirectory("automation-test").FullName;
-        graph.Context.AddService<IDataDirectoryProvider>(new TestDataDirectory(dataDirectory));
+        if (keepsCheckpoints)
+        {
+            graph.Context.AddService<IDataDirectoryProvider>(new TestDataDirectory(dataDirectory));
+        }
+
         var host = new AutomationTestHost(graph, time, dataDirectory, authorizer ?? new AllowAllAutomationAuthorizer());
         host.ChangeDispatcher.MakesEveryRouteUnbounded = makesEveryRouteUnbounded;
         graph.Add("Weather", host.Weather);
