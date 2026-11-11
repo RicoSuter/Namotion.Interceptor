@@ -19,11 +19,8 @@ namespace HomeBlaze.E2E.Tests;
 [Trait("Category", "Integration")]
 public class PeopleAuthorizationTests
 {
-    private const int Timeout = 30000;
     private const string ControlsPage = "Controls.md";
     private const string MotorName = "ctlmotor";
-
-    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(30);
 
     private readonly PlaywrightFixture _fixture;
 
@@ -43,16 +40,16 @@ public class PeopleAuthorizationTests
             ResetMotor();
             var page = await OpenDemoPageAsync(SignedInAs.User(userName), ControlsPage);
             var powerSwitch = GetSwitch(page, "Power");
-            await Assertions.Expect(powerSwitch).ToBeCheckedAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(powerSwitch).ToBeCheckedAsync();
 
             // Act
             await powerSwitch.ClickAsync();
 
             // Assert
-            await AsyncTestHelpers.WaitUntilAsync(() => !GetMotor().IsPowered, WaitTimeout, message: "The switch did not power the motor off");
-            await Assertions.Expect(powerSwitch).Not.ToBeCheckedAsync(new() { Timeout = Timeout });
+            await AsyncTestHelpers.WaitUntilAsync(() => !GetMotor().IsPowered, message: "The switch did not power the motor off");
+            await Assertions.Expect(powerSwitch).Not.ToBeCheckedAsync();
             await Assertions.Expect(page.GetByTestId("page-head")).ToBeAttachedAsync();
-            await Assertions.Expect(page.GetByTestId("edit-mode-menu")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.GetByTestId("edit-mode-menu")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         }
         finally
         {
@@ -76,11 +73,11 @@ public class PeopleAuthorizationTests
 
             // Assert: configuration is changed only through administration, which an operator may not do.
             var outlineSwitch = GetSwitch(page, "Card outline");
-            await Assertions.Expect(outlineSwitch).ToBeDisabledAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(outlineSwitch).ToBeDisabledAsync();
             await Assertions.Expect(page.GetByTestId("switch").Filter(new() { Has = outlineSwitch }))
                 .ToHaveAttributeAsync("title", AccessDeniedTexts.Tooltip);
             var speedSlider = page.GetByRole(AriaRole.Slider, new() { Name = "Target speed", Exact = true });
-            await Assertions.Expect(speedSlider).ToBeDisabledAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(speedSlider).ToBeDisabledAsync();
             await Assertions.Expect(page.GetByTestId("slider").Filter(new() { Has = speedSlider }))
                 .ToHaveAttributeAsync("title", AccessDeniedTexts.Tooltip);
 
@@ -109,7 +106,7 @@ public class PeopleAuthorizationTests
         await page.SelectEditModeAsync("Source");
 
         // Assert
-        await Assertions.Expect(page.GetByTestId("editor-bar")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("editor-bar")).ToBeVisibleAsync();
     }
 
     [Fact]
@@ -127,8 +124,8 @@ public class PeopleAuthorizationTests
 
             // Assert
             var powerSwitch = GetSwitch(page, "Power");
-            await Assertions.Expect(powerSwitch).ToBeCheckedAsync(new() { Timeout = Timeout });
-            await Assertions.Expect(powerSwitch).ToBeDisabledAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(powerSwitch).ToBeCheckedAsync();
+            await Assertions.Expect(powerSwitch).ToBeDisabledAsync();
             Assert.True(GetMotor().IsPowered);
         }
         finally
@@ -159,14 +156,14 @@ public class PeopleAuthorizationTests
             await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{ControlsPage}");
 
             // Assert
-            await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Controls Demo" })).ToBeVisibleAsync(new() { Timeout = Timeout });
-            await Assertions.Expect(page.GetByTestId("user-menu-sign-in")).ToBeVisibleAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Controls Demo" })).ToBeVisibleAsync();
+            await Assertions.Expect(page.GetByTestId("user-menu-sign-in")).ToBeVisibleAsync();
 
             // Act
             await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Cards.md");
 
             // Assert
-            await Assertions.Expect(page.GetByText("Subject not found at path: Demo/Cards.md")).ToBeVisibleAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(page.GetByText("Subject not found at path: Demo/Cards.md")).ToBeVisibleAsync();
             Assert.Contains("/pages/Demo/Cards.md", page.Url, StringComparison.Ordinal);
         }
         finally
@@ -201,7 +198,7 @@ public class PeopleAuthorizationTests
             await dialog.Locator("input").First.FillAsync(addedName);
             await dialog.Locator(".mud-select").First.ClickAsync();
             var options = pane.Page.Locator(".mud-popover-open .mud-list-item");
-            await Assertions.Expect(options.First).ToBeVisibleAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(options.First).ToBeVisibleAsync();
 
             // Assert: only the roles the manager holds are offered.
             var offered = (await options.AllInnerTextsAsync()).Select(text => text.Trim()).ToList();
@@ -212,13 +209,13 @@ public class PeopleAuthorizationTests
 
             // Act: add the user with a role the manager holds.
             await options.Filter(new() { HasTextString = BuiltInRoles.ReaderName }).First.ClickAsync();
-            await Assertions.Expect(dialog.GetByTestId($"parameter-role-{BuiltInRoles.ReaderName}")).ToBeVisibleAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(dialog.GetByTestId($"parameter-role-{BuiltInRoles.ReaderName}")).ToBeVisibleAsync();
             await pane.Page.Keyboard.PressAsync("Escape");
-            await Assertions.Expect(options).ToHaveCountAsync(0, new() { Timeout = Timeout });
+            await Assertions.Expect(options).ToHaveCountAsync(0);
             await SubjectBrowserPage.ExecuteAsync(dialog);
 
             // Assert
-            await Assertions.Expect(dialog.Page.GetByTestId("one-time-secret-value")).Not.ToBeEmptyAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(dialog.Page.GetByTestId("one-time-secret-value")).Not.ToBeEmptyAsync();
             Assert.Equal(new[] { BuiltInRoles.ReaderName }, userStore.GetRoles(userStore.GetUserId(addedName)!));
 
             var managerAdministration = new UserAdministration(userStore, () => userStore.GetUserId(managerName));
@@ -257,9 +254,9 @@ public class PeopleAuthorizationTests
 
             // Assert: the hidden value renders like a path that leads nowhere, next to one the viewer reads.
             var hiddenRow = GetValueRow(page, "Soll");
-            await Assertions.Expect(hiddenRow.GetByTestId("value-missing")).ToHaveTextAsync("–", new() { Timeout = Timeout });
-            await Assertions.Expect(hiddenRow.GetByTestId("value-text")).ToHaveCountAsync(0);
-            await Assertions.Expect(GetValueRow(page, "Ist").GetByTestId("value-text")).ToBeVisibleAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(hiddenRow.GetByTestId("value-missing")).ToHaveTextAsync("–");
+            await Assertions.Expect(hiddenRow.GetByTestId("value-text")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+            await Assertions.Expect(GetValueRow(page, "Ist").GetByTestId("value-text")).ToBeVisibleAsync();
         }
         finally
         {
@@ -280,7 +277,7 @@ public class PeopleAuthorizationTests
             var page = await _fixture.CreatePageAsync(SignedInAs.User(userName));
 
             // Assert
-            await Assertions.Expect(page.GetByTestId("no-roles")).ToHaveTextAsync("No roles yet. Ask an administrator.", new() { Timeout = Timeout });
+            await Assertions.Expect(page.GetByTestId("no-roles")).ToHaveTextAsync("No roles yet. Ask an administrator.");
             Assert.Equal("/", new Uri(page.Url).AbsolutePath);
         }
         finally
@@ -306,7 +303,7 @@ public class PeopleAuthorizationTests
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{pageName}");
 
         // The controls are prerendered, and a click before the circuit is connected is lost.
-        await page.WaitUntilInteractiveAsync(Timeout);
+        await page.WaitUntilInteractiveAsync();
         return page;
     }
 
@@ -314,11 +311,11 @@ public class PeopleAuthorizationTests
     {
         var page = await _fixture.CreatePageAsync(user);
         await page.GotoAsync($"{_fixture.ServerAddress}browser/Authorization");
-        await page.WaitForFunctionAsync(SubjectBrowserPage.IsInteractive, null, new() { Timeout = Timeout });
+        await page.WaitForFunctionAsync(SubjectBrowserPage.IsInteractive, null, new() { Timeout = AssertionTimeouts.Default });
 
         // A path that does not resolve ends at an earlier pane, whose operations belong to another subject.
         var panes = page.Locator("#scrollContainer [data-testid='subject-pane']");
-        await Assertions.Expect(panes).ToHaveCountAsync(2, new() { Timeout = Timeout });
+        await Assertions.Expect(panes).ToHaveCountAsync(2);
         return panes.Last;
     }
 

@@ -14,7 +14,6 @@ namespace HomeBlaze.E2E.Tests;
 [Trait("Category", "Integration")]
 public class SignInTests
 {
-    private const int Timeout = 30000;
     private const string NewPassword = "e2e-new-password";
     private const string InvalidSignIn = "The user name or password is wrong, or the account is locked. Try again later.";
 
@@ -39,12 +38,12 @@ public class SignInTests
             await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Controls.md");
 
             // Assert
-            await Assertions.Expect(page.Locator("#sign-in-user-name")).ToBeVisibleAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(page.Locator("#sign-in-user-name")).ToBeVisibleAsync();
             await Assertions.Expect(page.GetByTestId("app-bar-brand")).ToHaveTextAsync("HomeBlaze");
-            await Assertions.Expect(page.Locator("#nav-drawer")).ToHaveCountAsync(0);
-            await Assertions.Expect(page.GetByTestId("user-menu-sign-in")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.Locator("#nav-drawer")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+            await Assertions.Expect(page.GetByTestId("user-menu-sign-in")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
             await Assertions.Expect(page.GetByTestId("unencrypted-http-warning")).ToBeVisibleAsync();
-            await Assertions.Expect(page.Locator(".mud-dialog .mud-button-close")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.Locator(".mud-dialog .mud-button-close")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
             Assert.Equal("/pages/Demo/Controls.md", new Uri(page.Url).AbsolutePath);
 
             // Act
@@ -75,10 +74,10 @@ public class SignInTests
             await PlaywrightFixture.FillSignInDialogAsync(page, userName, "a wrong password");
 
             // Assert
-            await Assertions.Expect(page.GetByTestId("account-form-errors")).ToHaveTextAsync(InvalidSignIn, new() { Timeout = Timeout });
+            await Assertions.Expect(page.GetByTestId("account-form-errors")).ToHaveTextAsync(InvalidSignIn);
             await Assertions.Expect(page.Locator("#sign-in-password")).ToHaveValueAsync(string.Empty);
             await Assertions.Expect(page.Locator("#sign-in-user-name")).ToHaveValueAsync(userName);
-            await Assertions.Expect(page.GetByTestId("user-menu")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.GetByTestId("user-menu")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         }
         finally
         {
@@ -97,9 +96,9 @@ public class SignInTests
         {
             var page = await _fixture.CreatePageAsync();
             await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Controls.md");
-            await page.WaitUntilInteractiveAsync(Timeout);
+            await page.WaitUntilInteractiveAsync();
             await Assertions.Expect(page.Locator("#nav-drawer")).ToHaveCountAsync(1);
-            await Assertions.Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
             // Act
             await PlaywrightFixture.FillSignInDialogAsync(page, userName, PlaywrightFixture.Password);
@@ -127,10 +126,11 @@ public class SignInTests
 
             // Assert
             var dialog = page.GetByTestId("set-password-dialog");
-            await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = Timeout });
-            await Assertions.Expect(page.Locator("#set-password-current")).ToHaveCountAsync(0);
-            await Assertions.Expect(page.Locator(".mud-dialog .mud-button-close")).ToHaveCountAsync(0);
-            await Assertions.Expect(page.Locator("#nav-drawer")).ToHaveCountAsync(0);
+            await Assertions.Expect(dialog).ToBeVisibleAsync();
+            await Assertions.Expect(page.Locator("#set-password-current")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+            await Assertions.Expect(page.Locator(".mud-dialog .mud-button-close")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+            await Assertions.Expect(page.Locator("#nav-drawer")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+            await page.GetByRole(AriaRole.Dialog).WaitForDialogFocusAsync();
             await page.Locator("#set-password-new").FocusAsync();
             await page.Keyboard.PressAsync("Escape");
             await Assertions.Expect(dialog).ToBeVisibleAsync();
@@ -159,14 +159,14 @@ public class SignInTests
         {
             var page = await _fixture.CreatePageAsync(SignedInAs.User(managerName));
             await page.GotoAsync($"{_fixture.ServerAddress}browser/Authorization");
-            await page.WaitForFunctionAsync(SubjectBrowserPage.IsInteractive, null, new() { Timeout = Timeout });
-            await Assertions.Expect(page.Locator("#scrollContainer [data-testid='subject-pane']")).ToHaveCountAsync(2, new() { Timeout = Timeout });
+            await page.WaitForFunctionAsync(SubjectBrowserPage.IsInteractive, null, new() { Timeout = AssertionTimeouts.Default });
+            await Assertions.Expect(page.Locator("#scrollContainer [data-testid='subject-pane']")).ToHaveCountAsync(2);
             var dialog = await SubjectBrowserPage.OpenOperationDialogAsync(page.Locator("#scrollContainer [data-testid='subject-pane']").Last, "Add User");
             await dialog.Locator("input").First.FillAsync(addedName);
-            await Assertions.Expect(dialog.Locator("textarea")).ToHaveCountAsync(0);
+            await Assertions.Expect(dialog.Locator("textarea")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
             await SubjectBrowserPage.ExecuteAsync(dialog);
             var secret = page.GetByTestId("one-time-secret-value");
-            await Assertions.Expect(secret).Not.ToBeEmptyAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(secret).Not.ToBeEmptyAsync();
             var setupCode = (await secret.InnerTextAsync()).Trim();
             await Assertions.Expect(page.GetByTestId("one-time-secret-link")).ToHaveTextAsync($"{_fixture.ServerAddress}account/setup");
 
@@ -206,26 +206,26 @@ public class SignInTests
         try
         {
             var page = await _fixture.CreatePageAsync(SignedInAs.User(userName));
-            await page.WaitUntilInteractiveAsync(Timeout);
+            await page.WaitUntilInteractiveAsync();
             await page.GetByTestId("user-menu").ClickAsync();
             await page.GetByTestId("user-menu-account").ClickAsync();
             var dialog = page.GetByTestId("account-dialog");
-            await Assertions.Expect(dialog.GetByTestId("account-name")).ToHaveTextAsync(userName, new() { Timeout = Timeout });
+            await Assertions.Expect(dialog.GetByTestId("account-name")).ToHaveTextAsync(userName);
             await Assertions.Expect(dialog.GetByTestId("account-roles")).ToHaveTextAsync(BuiltInRoles.ReaderName);
-            await Assertions.Expect(page.GetByTestId("unencrypted-http-warning")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.GetByTestId("unencrypted-http-warning")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
             // Act
             await page.Locator("#account-password-current").FillAsync(PlaywrightFixture.Password);
             await SetPasswordAsync(page, "account-password");
 
             // Assert
-            await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = Timeout });
+            await Assertions.Expect(dialog).ToHaveCountAsync(0);
             await AssertSignedInAsync(page, userName);
 
             var oldPasswordPage = await _fixture.CreatePageAsync();
             await oldPasswordPage.GotoAsync(_fixture.ServerAddress);
             await PlaywrightFixture.FillSignInDialogAsync(oldPasswordPage, userName, PlaywrightFixture.Password);
-            await Assertions.Expect(oldPasswordPage.GetByTestId("account-form-errors")).ToHaveTextAsync(InvalidSignIn, new() { Timeout = Timeout });
+            await Assertions.Expect(oldPasswordPage.GetByTestId("account-form-errors")).ToHaveTextAsync(InvalidSignIn);
 
             var newPasswordPage = await _fixture.CreatePageAsync();
             await _fixture.SignInAsync(newPasswordPage, userName, NewPassword);
@@ -247,7 +247,7 @@ public class SignInTests
         {
             var page = await _fixture.CreatePageAsync(SignedInAs.User(userName));
             await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Controls.md");
-            await page.WaitUntilInteractiveAsync(Timeout);
+            await page.WaitUntilInteractiveAsync();
 
             // Act: the form in the menu posts the antiforgery token of the prerendered page.
             await page.GetByTestId("user-menu").ClickAsync();
@@ -255,10 +255,10 @@ public class SignInTests
 
             // Assert
             await _fixture.WaitForUrlAsync(page, url => new Uri(url).AbsolutePath == "/");
-            await Assertions.Expect(page.Locator("#sign-in-user-name")).ToBeVisibleAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(page.Locator("#sign-in-user-name")).ToBeVisibleAsync();
             await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Controls.md");
-            await Assertions.Expect(page.Locator("#sign-in-user-name")).ToBeVisibleAsync(new() { Timeout = Timeout });
-            await Assertions.Expect(page.GetByTestId("user-menu")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.Locator("#sign-in-user-name")).ToBeVisibleAsync();
+            await Assertions.Expect(page.GetByTestId("user-menu")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         }
         finally
         {
@@ -283,11 +283,11 @@ public class SignInTests
     // Loaded anew and interactive, with the person named in the user menu and no account dialog left.
     private static async Task AssertSignedInAsync(IPage page, string userName)
     {
-        await Assertions.Expect(page.GetByTestId("user-menu")).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await page.WaitUntilInteractiveAsync(Timeout);
-        await Assertions.Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByTestId("user-menu")).ToBeVisibleAsync();
+        await page.WaitUntilInteractiveAsync();
+        await Assertions.Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         await page.GetByTestId("user-menu").ClickAsync();
-        await Assertions.Expect(page.GetByTestId("user-menu-name")).ToHaveTextAsync(userName, new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("user-menu-name")).ToHaveTextAsync(userName);
         await page.Keyboard.PressAsync("Escape");
     }
 }

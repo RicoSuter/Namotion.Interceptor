@@ -52,7 +52,7 @@ public class MarkdownQueryTests
             .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
 
         // Assert
-        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Replace Text" })).ToHaveCountAsync(0);
-        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Replace Content" })).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Replace Text" })).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Replace Content" })).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 }
