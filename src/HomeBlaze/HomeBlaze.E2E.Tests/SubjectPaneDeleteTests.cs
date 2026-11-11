@@ -50,7 +50,7 @@ public class SubjectPaneDeleteTests
         // Assert
         await Assertions.Expect(pane.GetByRole(AriaRole.Heading)).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
         await Assertions.Expect(pane.GetByTestId("reorder-children-button")).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
-        await Assertions.Expect(pane.GetByTestId("delete-subject-button")).ToHaveCountAsync(0);
+        await Assertions.Expect(pane.GetByTestId("delete-subject-button")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -62,7 +62,7 @@ public class SubjectPaneDeleteTests
         // Assert
         await Assertions.Expect(pane.GetByRole(AriaRole.Heading)).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
         await Assertions.Expect(pane.GetByTestId("edit-metadata-button")).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
-        await Assertions.Expect(pane.GetByTestId("delete-subject-button")).ToHaveCountAsync(0);
+        await Assertions.Expect(pane.GetByTestId("delete-subject-button")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -88,7 +88,7 @@ public class SubjectPaneDeleteTests
         await Assertions.Expect(pane.GetByTestId("delete-subject-button")).ToBeEnabledAsync(new() { Timeout = PageLoadTimeout });
         var content = pane.GetByTestId("subject-pane-content");
         await Assertions.Expect(content.GetByRole(AriaRole.Button, new() { Name = "Restart Controller", Exact = true })).ToBeVisibleAsync();
-        await Assertions.Expect(content.GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true })).ToHaveCountAsync(0);
+        await Assertions.Expect(content.GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true })).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]

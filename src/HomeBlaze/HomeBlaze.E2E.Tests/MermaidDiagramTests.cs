@@ -62,7 +62,7 @@ public class MermaidDiagramTests
         await Assertions.Expect(diagram).ToHaveAttributeAsync("data-mermaid-state", "error", new() { Timeout = Timeout });
         await Assertions.Expect(diagram).ToBeVisibleAsync();
         await Assertions.Expect(diagram).ToHaveTextAsync("this is not a diagram");
-        await Assertions.Expect(diagram.Locator("svg")).ToHaveCountAsync(0);
+        await Assertions.Expect(diagram.Locator("svg")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -81,9 +81,9 @@ public class MermaidDiagramTests
         await Assertions.Expect(diagram).ToHaveAttributeAsync("data-mermaid-state", "done", new() { Timeout = Timeout });
 
         // Assert
-        await Assertions.Expect(diagram.Locator("img")).ToHaveCountAsync(0);
-        await Assertions.Expect(diagram.Locator("a")).ToHaveCountAsync(0);
-        await Assertions.Expect(diagram.Locator("foreignObject")).ToHaveCountAsync(0);
+        await Assertions.Expect(diagram.Locator("img")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(diagram.Locator("a")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(diagram.Locator("foreignObject")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         var hasEventHandler = await diagram.EvaluateAsync<bool>(
             "element => [...element.querySelectorAll('*')].some(child => [...child.attributes].some(attribute => attribute.name.startsWith('on')))");
         Assert.False(hasEventHandler);

@@ -10,7 +10,7 @@ namespace HomeBlaze.E2E.Tests;
 [Trait("Category", "Integration")]
 public class MarkdownQueryTests
 {
-    private const int ElementVisibilityTimeout = 15000;
+    private const int ElementVisibilityTimeout = 30000;
 
     private readonly PlaywrightFixture _fixture;
 

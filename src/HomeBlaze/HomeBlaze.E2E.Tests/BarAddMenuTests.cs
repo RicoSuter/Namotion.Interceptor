@@ -132,7 +132,7 @@ public class BarAddMenuTests
         // Arrange
         var page = await _fixture.OpenDemoPageInInlineModeAsync(ScratchPageName, CardAndTabsContent);
         var actionBar = await page.GetByTestId("tab-panel").GetByText("First tab text.", new() { Exact = true }).SelectWidgetAsync();
-        await Assertions.Expect(actionBar.GetByTestId("add-menu")).ToHaveCountAsync(0);
+        await Assertions.Expect(actionBar.GetByTestId("add-menu")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
         // Act
         await actionBar.GetByRole(AriaRole.Button, new() { Name = "Add Tab", Exact = true }).ClickAsync();
@@ -234,7 +234,7 @@ public class BarAddMenuTests
         await plus.ClickAsync();
         await GetOpenMenuItem(page, "Add text...").ClickAsync();
         await page.ExpectTextEditorValueAsync(string.Empty);
-        await Assertions.Expect(page.GetByTestId("subject-edit-dialog-type")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByTestId("subject-edit-dialog-type")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(1);
     }
 

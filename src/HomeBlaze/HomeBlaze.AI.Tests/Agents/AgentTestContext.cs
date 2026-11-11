@@ -154,6 +154,7 @@ internal sealed class AgentTestContext<TAgent> : IAsyncDisposable
     where TAgent : LlmAgentBase
 {
     private readonly string _agentName;
+    private readonly List<TaskCompletionSource> _gates = [];
 
     private AgentTestContext(string dataDirectory, AgentTestRoot root, TAgent agent, AgentServices services, string agentName)
     {
@@ -211,6 +212,13 @@ internal sealed class AgentTestContext<TAgent> : IAsyncDisposable
     /// <summary>The path of the agent's data file with the given suffix, such as <see cref="AgentStorage.SessionSuffix"/>.</summary>
     public string GetDataFilePath(string suffix) => Path.Combine(DataDirectory, "Agents", AgentStorage.GetName("/" + _agentName) + suffix);
 
+    /// <summary>Opens the given gates when the context is disposed, before it stops the agent.</summary>
+    /// <remarks>
+    /// Register every gate that a turn, an upkeep or a start waits on without observing cancellation, so that a test
+    /// which fails while one is closed still stops the agent and reports its own failure.
+    /// </remarks>
+    public void ReleaseOnDispose(params TaskCompletionSource[] gates) => _gates.AddRange(gates);
+
     public Task StopAgentAsync() => ((IHostedService)Agent).StopAsync(CancellationToken.None);
 
     /// <summary>Stops the agent if it runs, starts it again and waits until it finished starting.</summary>
@@ -228,6 +236,16 @@ internal sealed class AgentTestContext<TAgent> : IAsyncDisposable
         await AsyncTestHelpers.WaitUntilAsync(() => Agent.RunCount > runCount && !Agent.IsBusy);
     }
 
+    /// <summary>Waits until the running turn has ended with <paramref name="status"/>.</summary>
+    /// <remarks>
+    /// The status and its message are two writes, so a wait on the status alone can resume before the message is
+    /// written; the turn ends after both.
+    /// </remarks>
+    public Task WaitUntilTurnEndedAsync(ServiceStatus status) =>
+        AsyncTestHelpers.WaitUntilAsync(
+            () => Agent.Status == status && !Agent.IsBusy,
+            () => $"The turn should end with status {status}, but the status is {Agent.Status} ({Agent.StatusMessage}) and the agent is {(Agent.IsBusy ? "busy" : "not busy")}.");
+
     /// <summary>Writes the timeline entries and the status of the agent to the test output.</summary>
     public void WriteTimeline(ITestOutputHelper output)
     {
@@ -241,8 +259,42 @@ internal sealed class AgentTestContext<TAgent> : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await StopAgentAsync();
+        foreach (var gate in _gates)
+        {
+            gate.TrySetResult();
+        }
+
+        try
+        {
+            // Bounded so that a stop that hangs fails the test instead of the test run.
+            await StopAgentAsync().WaitAsync(TestTimeouts.Default);
+        }
+        catch (TimeoutException exception)
+        {
+            TryDeleteDataDirectory();
+            throw new TimeoutException(
+                "The agent did not stop. A turn may wait on a gate of the test that is not passed to ReleaseOnDispose.", exception);
+        }
+        catch
+        {
+            TryDeleteDataDirectory();
+            throw;
+        }
+
         Directory.Delete(DataDirectory, recursive: true);
+    }
+
+    // After a failed stop the agent may still hold its files open, which must not replace the failure of the stop.
+    private void TryDeleteDataDirectory()
+    {
+        try
+        {
+            Directory.Delete(DataDirectory, recursive: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Left in the temporary directory of the operating system.
+        }
     }
 
     private async Task StartAgentAsync()
