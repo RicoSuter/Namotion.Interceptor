@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -836,7 +837,8 @@ public class DerivedPropertyConcurrencyTests
             //          → getter writes Companion (subject-typed) → lock(_attachedSubjects)
             //        Thread 2 sets holder.Person = null → lock(_attachedSubjects)
             //          → detach SideEffectPerson → DetachSubjectProperty(Greeting) → lock(data_Greeting)
-            var writeNameTask = Task.Run(() =>
+            // Dedicated threads, so the deadlock timeout below measures the race rather than the wait for a starved pool.
+            var writeNameTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
             {
                 barrier.SignalAndWait();
                 for (var j = 0; j < 20; j++)
@@ -853,7 +855,7 @@ public class DerivedPropertyConcurrencyTests
                 }
             });
 
-            var detachTask = Task.Run(() =>
+            var detachTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
             {
                 barrier.SignalAndWait();
                 for (var j = 0; j < 20; j++)

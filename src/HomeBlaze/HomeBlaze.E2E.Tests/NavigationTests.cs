@@ -167,7 +167,7 @@ public class NavigationTests
             await Assertions.Expect(navigation.GetByRole(AriaRole.Link, new() { Name = "Grid Demo" }))
                 .ToBeVisibleAsync();
             await Assertions.Expect(navigation.GetByRole(AriaRole.Link, new() { Name = "InsertedInner" }))
-                .ToHaveCountAsync(0);
+                .ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         }
         finally
         {
@@ -204,8 +204,8 @@ public class NavigationTests
             await Assertions.Expect(navigation.GetByRole(AriaRole.Button, new() { Name = "Demo" }))
                 .ToBeVisibleAsync(new() { Timeout = 30000 });
             await Assertions.Expect(navigation.GetByRole(AriaRole.Button, new() { Name = folderName }))
-                .ToHaveCountAsync(0);
-            await Assertions.Expect(navigation.GetByText(pageTitle)).ToHaveCountAsync(0);
+                .ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+            await Assertions.Expect(navigation.GetByText(pageTitle)).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         }
         finally
         {

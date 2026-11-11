@@ -68,8 +68,10 @@ public class LayoutWidgetSaveTests
 
         await _fixture.WithUnstoredLayoutAsync(layout, async page =>
         {
-            // Act
-            await DragNodeAsync(page, 80, 40);
+            await page.Locator(".canvas-layout-container.editing").WaitForCanvasNodesAsync(1);
+
+            // Act: the buttons of the node are at its bottom right and the one of the widget in it at its top right.
+            await page.Locator(".canvas-node.editing").DragNodeAsync(80, 40, fromLeftEdge: true);
 
             // Assert
             await Assertions.Expect(page.GetByText("Configuration applied but not saved")).ToBeVisibleAsync(new() { Timeout = 30000 });
@@ -99,22 +101,5 @@ public class LayoutWidgetSaveTests
         await deleteButton.ClickAsync();
 
         await page.Locator(".mud-dialog").GetByRole(AriaRole.Button, new() { Name = "Delete" }).ClickAsync();
-    }
-
-    private static async Task DragNodeAsync(IPage page, float deltaX, float deltaY)
-    {
-        var node = page.Locator(".canvas-node.editing");
-        await Assertions.Expect(node).ToBeVisibleAsync(new() { Timeout = 30000 });
-
-        // The buttons of the node are at its bottom right and the one of the widget in it at its top right, so it
-        // is grabbed at its lower left.
-        var box = (await node.BoundingBoxAsync())!;
-        var startX = box.X + box.Width / 4;
-        var startY = box.Y + box.Height * 3 / 4;
-
-        await page.Mouse.MoveAsync(startX, startY);
-        await page.Mouse.DownAsync();
-        await page.Mouse.MoveAsync(startX + deltaX, startY + deltaY, new() { Steps = 8 });
-        await page.Mouse.UpAsync();
     }
 }
