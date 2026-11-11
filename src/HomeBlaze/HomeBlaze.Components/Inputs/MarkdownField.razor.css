@@ -4,6 +4,11 @@
     overflow: hidden;
 }
 
+/* The text area draws no outline, so the box shows the focus. */
+.markdown-field-box:focus-within {
+    border-color: var(--mud-palette-primary);
+}
+
 /* Each column draws the line above and before it, moved by -1px so that the box clips the lines of the first row and the
    first column. Side by side the columns get a line between them, wrapped one above the other. */
 .markdown-field-column {
@@ -19,6 +24,11 @@
 .markdown-field-header {
     padding: 6px 12px;
     border-bottom: 1px solid var(--mud-palette-lines-default);
+}
+
+/* A header without a hint keeps the height of a line, so that both columns start at the same height. */
+.markdown-field-header:empty::before {
+    content: "\00a0";
 }
 
 /* 16px, because a phone zooms into a field with a smaller font when it takes the focus. */

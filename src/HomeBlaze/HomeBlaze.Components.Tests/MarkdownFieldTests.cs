@@ -13,23 +13,38 @@ public class MarkdownFieldTests
     [Fact]
     public async Task WhenTheHostSetsATestId_ThenTheTextAreaHasIt()
     {
-        // Arrange
-        await using var services = new ServiceCollection().AddLogging().AddMudServices().BuildServiceProvider();
-        await using var renderer = new HtmlRenderer(services, NullLoggerFactory.Instance);
-        var parameters = ParameterView.FromDictionary(new Dictionary<string, object?>
+        // Act
+        var html = await RenderAsync(new Dictionary<string, object?>
         {
             [nameof(MarkdownField.Value)] = "Some **bold** text",
-            [nameof(MarkdownField.ToHtml)] = (Func<string, string?>)(_ => "<p>Some <strong>bold</strong> text</p>"),
+            [nameof(MarkdownField.ToHtml)] = (Func<string, string?>)(text => text),
             ["data-testid"] = "notes-input"
         });
-
-        // Act
-        var html = await renderer.Dispatcher.InvokeAsync(async () =>
-            (await renderer.RenderComponentAsync<MarkdownField>(parameters)).ToHtmlString());
 
         // Assert
         Assert.Contains("<textarea class=\"markdown-field-source\"", html);
         Assert.Matches("<textarea [^>]*data-testid=\"notes-input\"[^>]*>Some \\*\\*bold\\*\\* text</textarea>", html);
-        Assert.Contains("<p>Some <strong>bold</strong> text</p>", html);
+    }
+
+    [Fact]
+    public async Task WhenTheTextIsRendered_ThenThePreviewShowsTheHtmlOfToHtml()
+    {
+        // Act
+        var html = await RenderAsync(new Dictionary<string, object?>
+        {
+            [nameof(MarkdownField.Value)] = "Some **bold** text",
+            [nameof(MarkdownField.ToHtml)] = (Func<string, string?>)(_ => "<p>Some <strong>bold</strong> text</p>")
+        });
+
+        // Assert
+        Assert.Matches("data-testid=\"markdown-field-preview\"[^>]*><p>Some <strong>bold</strong> text</p>", html);
+    }
+
+    private static async Task<string> RenderAsync(Dictionary<string, object?> parameters)
+    {
+        await using var services = new ServiceCollection().AddLogging().AddMudServices().BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(services, NullLoggerFactory.Instance);
+        return await renderer.Dispatcher.InvokeAsync(async () =>
+            (await renderer.RenderComponentAsync<MarkdownField>(ParameterView.FromDictionary(parameters))).ToHtmlString());
     }
 }

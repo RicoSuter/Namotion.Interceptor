@@ -7,7 +7,7 @@
         <MudSpacer />
         @if (MaxSize is { } maxSize)
         {
-            <MudText Typo="Typo.caption" Class="@(_model.IsTooLarge ? "mud-error-text" : "mud-text-secondary")" Style="font-variant-numeric: tabular-nums;"
+            <MudText Typo="Typo.caption" Color="@(_model.IsTooLarge ? Color.Error : Color.Default)" Class="@(_model.IsTooLarge ? null : "mud-text-secondary")" Style="font-variant-numeric: tabular-nums;"
                      data-testid="markdown-field-size">@_model.Size.ToString("N0") / @maxSize.ToString("N0") bytes</MudText>
         }
     </div>
@@ -59,9 +59,11 @@
     [Parameter] public string? Hint { get; set; }
 
     /// <summary>Renders the text to HTML that is safe to insert into the page, or returns null when it cannot.</summary>
+    /// <remarks>Returns the same HTML for the same text: the field renders a text again only when it or a parameter changed.</remarks>
     [Parameter, EditorRequired] public Func<string, string?> ToHtml { get; set; } = null!;
 
     /// <summary>Gets why the text is refused, or null when it is accepted.</summary>
+    /// <remarks>Returns the same error for the same text: the field checks a text again only when it or a parameter changed.</remarks>
     [Parameter] public Func<string, string?> GetError { get; set; } = static _ => null;
 
     /// <summary>The largest text in bytes of UTF-8, or null for no limit.</summary>
