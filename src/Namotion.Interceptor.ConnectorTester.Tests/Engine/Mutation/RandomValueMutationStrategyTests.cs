@@ -93,7 +93,7 @@ public class RandomValueMutationStrategyTests
 
         // Act
         var run = strategy.RunAsync(cts.Token);
-        await AsyncTestHelpers.WaitUntilAsync(() => counters.SourceWriteFailedCommitCount >= 1, timeout: TimeSpan.FromSeconds(10));
+        await AsyncTestHelpers.WaitUntilAsync(() => counters.SourceWriteFailedCommitCount >= 1);
         await cts.CancelAsync();
         await run;
 
@@ -115,7 +115,7 @@ public class RandomValueMutationStrategyTests
 
         // Act
         var run = strategy.RunAsync(cts.Token);
-        await AsyncTestHelpers.WaitUntilAsync(() => counters.UnexpectedFailedCommitCount >= 1, timeout: TimeSpan.FromSeconds(10));
+        await AsyncTestHelpers.WaitUntilAsync(() => counters.UnexpectedFailedCommitCount >= 1);
         await cts.CancelAsync();
         await run;
 
