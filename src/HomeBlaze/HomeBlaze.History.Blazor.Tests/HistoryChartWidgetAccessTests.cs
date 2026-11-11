@@ -20,9 +20,6 @@ public sealed partial class HistoryChartWidgetAccessTests : BunitContext, IAsync
     private const string TemperaturePath = "/" + nameof(ChartAccessRoot.Temperature);
     private const string PressurePath = "/" + nameof(ChartAccessRoot.Pressure);
 
-    // The default of one second is too short for the queries of the chart while other tests load the machine.
-    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(30);
-
     private readonly TestUserPermissions _permissions = new();
     private readonly ChartAccessRoot _root;
 
@@ -89,7 +86,7 @@ public sealed partial class HistoryChartWidgetAccessTests : BunitContext, IAsync
         var store = new ChartStoreSubject(history);
         _root.Store = store;
         var chart = RenderChart(TemperaturePath, PressurePath);
-        chart.WaitForAssertion(() => Assert.Null(chart.Find("[data-testid=history-chart-view]").GetAttribute("aria-busy")), WaitTimeout);
+        chart.WaitForAssertion(() => Assert.Null(chart.Find("[data-testid=history-chart-view]").GetAttribute("aria-busy")));
 
         // Act
         store.Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -105,7 +102,7 @@ public sealed partial class HistoryChartWidgetAccessTests : BunitContext, IAsync
                 Assert.Equal("true", chart.Find("[data-testid=history-chart-view]").GetAttribute("aria-busy"));
                 Assert.DoesNotContain("Water temperature", chart.Markup);
                 Assert.Contains("Pressure", chart.Markup);
-            }, WaitTimeout);
+            });
         }
         finally
         {
@@ -136,7 +133,7 @@ public sealed partial class HistoryChartWidgetAccessTests : BunitContext, IAsync
         {
             Assert.Empty(chart.FindAll("[data-testid=history-chart-view]"));
             Assert.NotEmpty(chart.FindAll("[data-testid=history-chart-legend]"));
-        }, WaitTimeout);
+        });
         return chart.Markup;
     }
 

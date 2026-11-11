@@ -252,8 +252,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
 
         // Assert
         await component.WaitForAssertionAsync(
-            () => Assert.Equal([Denied, Allowed, null, Denied, Denied], GetCellStates(component, "Temperature")),
-            TimeSpan.FromSeconds(30));
+            () => Assert.Equal([Denied, Allowed, null, Denied, Denied], GetCellStates(component, "Temperature")));
     }
 
     [Fact]

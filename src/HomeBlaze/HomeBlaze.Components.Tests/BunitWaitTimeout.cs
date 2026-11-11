@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Bunit;
+using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.Components.Tests;
 
@@ -11,5 +12,5 @@ internal static class BunitWaitTimeout
 {
     // The default of one second fails a wait for a render that a busy runner schedules late, although nothing is wrong.
     [ModuleInitializer]
-    public static void Initialize() => BunitContext.DefaultWaitTimeout = TimeSpan.FromSeconds(30);
+    public static void Initialize() => BunitContext.DefaultWaitTimeout = TestTimeouts.Default;
 }
