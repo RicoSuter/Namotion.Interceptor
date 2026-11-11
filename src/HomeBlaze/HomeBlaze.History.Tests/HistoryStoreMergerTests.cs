@@ -564,11 +564,12 @@ public class HistoryStoreMergerTests
     }
 
     [Fact]
-    public async Task WhenASegmentEndsUncoveredNextToTheNextSegment_ThenTheCarryIsResolvedAgain()
+    public async Task WhenASegmentEndsUncoveredNextToTheNextSegment_ThenTheCarryIsResolvedAgainAcrossTheAdjoiningCoverage()
     {
         // Arrange: 7 is held when the query starts at 10. In bucket [20,30) only the high store covers
-        // the start, so under Last it owns [10,30) although its coverage ends at 25. The value held at
-        // 30 is unknown to it, so the next segment must not inherit 7.
+        // the start, so under Last it owns [10,30) although its coverage ends at 25. The carry for the
+        // next segment is resolved again at 30: the low store covers [25,30] without a change, and the
+        // high store holds 7 just before 25.
         var high = new FakeHistoryStore
         {
             Priority = 100,
@@ -582,7 +583,10 @@ public class HistoryStoreMergerTests
         await new[] { high, low }.QueryHistoryAsync(query, CancellationToken.None);
 
         // Assert
-        Assert.Null(Assert.Single(low.ReceivedQueries).CarrySeed);
+        var carrySeed = Assert.Single(low.ReceivedQueries).CarrySeed;
+        Assert.NotNull(carrySeed);
+        Assert.Equal(7d, carrySeed.Number);
+        Assert.Equal(At(5), carrySeed.Timestamp);
     }
 
     [Fact]
@@ -1126,5 +1130,230 @@ public class HistoryStoreMergerTests
         Assert.NotNull(held);
         Assert.Equal(2d, held.Number);
         Assert.Equal(At(20), held.Timestamp);
+    }
+
+    [Fact]
+    public async Task WhenTheHigherPriorityStoreCoversTheInstantWithoutASample_ThenTheValueHeldBeforeItsCoverageIsFoundInTheOtherStore()
+    {
+        // Arrange: the live store covers [50,60) without a change, and the persistent store, which covers up
+        // to 52, holds 7 since 10.
+        var persistent = new FakeHistoryStore
+        {
+            Priority = 50,
+            CurrentCoverage = new HistoryCoverage(At(0), At(52))
+        }.AddSample(At(10), 7);
+        var live = new FakeHistoryStore { Priority = 100, CurrentCoverage = new HistoryCoverage(At(50), At(60)) };
+
+        // Act
+        var held = await new[] { persistent, live }.GetValueAtAsync("temp", At(55), CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(held);
+        Assert.Equal(7d, held.Number);
+        Assert.Equal(At(10), held.Timestamp);
+    }
+
+    [Fact]
+    public async Task WhenTheCoverageStartsExactlyAtTheInstant_ThenTheValueHeldBeforeItIsFoundInTheAdjoiningStore()
+    {
+        // Arrange
+        var persistent = new FakeHistoryStore
+        {
+            Priority = 50,
+            CurrentCoverage = new HistoryCoverage(At(0), At(30))
+        }.AddSample(At(10), 7);
+        var live = new FakeHistoryStore { Priority = 100, CurrentCoverage = new HistoryCoverage(At(30), At(60)) };
+
+        // Act
+        var held = await new[] { persistent, live }.GetValueAtAsync("temp", At(30), CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(held);
+        Assert.Equal(7d, held.Number);
+    }
+
+    [Fact]
+    public async Task WhenNoStoreCoversTheTimeBeforeTheCoveringRange_ThenTheHeldValueIsUnknown()
+    {
+        // Arrange: the persistent store's coverage ends at 40 and the live store's starts at 45, so the value
+        // may have changed in the gap.
+        var persistent = new FakeHistoryStore
+        {
+            Priority = 50,
+            CurrentCoverage = new HistoryCoverage(At(0), At(40))
+        }.AddSample(At(10), 7);
+        var live = new FakeHistoryStore { Priority = 100, CurrentCoverage = new HistoryCoverage(At(45), At(60)) };
+
+        // Act
+        var held = await new[] { persistent, live }.GetValueAtAsync("temp", At(55), CancellationToken.None);
+
+        // Assert
+        Assert.Null(held);
+    }
+
+    [Fact]
+    public async Task WhenAStoreRestartedItsCoverageWithoutASample_ThenTheValueBeforeTheRestartIsUnknown()
+    {
+        // Arrange
+        var store = new FakeHistoryStore
+        {
+            Priority = 50,
+            CoverageRanges = [new HistoryCoverage(At(0), At(20)), new HistoryCoverage(At(30), At(60))]
+        }.AddSample(At(10), 7);
+
+        // Act
+        var held = await new[] { store }.GetValueAtAsync("temp", At(40), CancellationToken.None);
+
+        // Assert
+        Assert.Null(held);
+    }
+
+    [Fact]
+    public async Task WhenThreeStoresCoverOverlappingRangesWithTheSampleInTheOldest_ThenTheLookupHopsAcrossAllOfThem()
+    {
+        // Arrange
+        var oldest = new FakeHistoryStore
+        {
+            Priority = 25,
+            CurrentCoverage = new HistoryCoverage(At(0), At(25))
+        }.AddSample(At(5), 3);
+        var middle = new FakeHistoryStore { Priority = 50, CurrentCoverage = new HistoryCoverage(At(20), At(45)) };
+        var newest = new FakeHistoryStore { Priority = 100, CurrentCoverage = new HistoryCoverage(At(40), At(60)) };
+
+        // Act - the timeout fails the test instead of hanging the suite if the lookup stops moving back.
+        var held = await Task.Run(() => new[] { oldest, middle, newest }.GetValueAtAsync("temp", At(55), CancellationToken.None))
+            .WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Assert
+        Assert.NotNull(held);
+        Assert.Equal(3d, held.Number);
+        Assert.Equal(At(5), held.Timestamp);
+    }
+
+    [Fact]
+    public async Task WhenStoresStartTheirCoverageAtTheSameInstantWithoutASample_ThenTheLookupEndsAsUnknown()
+    {
+        // Arrange
+        var first = new FakeHistoryStore { Priority = 50, CurrentCoverage = new HistoryCoverage(At(30), At(60)) };
+        var second = new FakeHistoryStore { Priority = 100, CurrentCoverage = new HistoryCoverage(At(30), At(60)) };
+
+        // Act - the timeout fails the test instead of hanging the suite if the lookup stops moving back.
+        var held = await Task.Run(() => new[] { first, second }.GetValueAtAsync("temp", At(45), CancellationToken.None))
+            .WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Assert
+        Assert.Null(held);
+    }
+
+    [Fact]
+    public async Task WhenTheCoverageStartsAtTheEarliestInstantWithoutASample_ThenTheLookupEndsAsUnknown()
+    {
+        // Arrange
+        var store = new FakeHistoryStore { Priority = 50, CurrentCoverage = new HistoryCoverage(DateTimeOffset.MinValue, At(60)) };
+
+        // Act - the timeout fails the test instead of hanging the suite if the lookup stops moving back.
+        var held = await Task.Run(() => new[] { store }.GetValueAtAsync("temp", At(45), CancellationToken.None))
+            .WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Assert
+        Assert.Null(held);
+    }
+
+    [Fact]
+    public async Task WhenTheCoveringStoreHoldsAnExplicitNull_ThenTheNullIsTheHeldValue()
+    {
+        // Arrange
+        var persistent = new FakeHistoryStore
+        {
+            Priority = 50,
+            CurrentCoverage = new HistoryCoverage(At(0), At(60))
+        }.AddSample(At(10), 7);
+        var live = new FakeHistoryStore
+        {
+            Priority = 100,
+            CurrentCoverage = new HistoryCoverage(At(50), At(60))
+        }.AddNullSample(At(52));
+
+        // Act
+        var held = await new[] { persistent, live }.GetValueAtAsync("temp", At(55), CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(held);
+        Assert.Null(held.Number);
+        Assert.Equal(At(52), held.Timestamp);
+    }
+
+    [Fact]
+    public async Task WhenAStoreCoverageGrowsToIncludeTheInstantDuringItsLookup_ThenItDoesNotVouchForTheInstant()
+    {
+        // Arrange: the persistent store's lookup searches with [20,50), which does not hold 55, and a flush publishes
+        // [20,60) meanwhile. Vouching with that coverage would skip its 2 at 45 and take the archive's older 1.
+        var archive = new FakeHistoryStore
+        {
+            Priority = 25,
+            CurrentCoverage = new HistoryCoverage(At(0), At(20))
+        }.AddSample(At(5), 1);
+        var persistent = new FakeHistoryStore
+        {
+            Priority = 50,
+            CurrentCoverage = new HistoryCoverage(At(20), At(50))
+        }.AddSample(At(45), 2);
+        persistent.AfterSampleLookup = () => persistent.CurrentCoverage = new HistoryCoverage(At(20), At(60));
+        var live = new FakeHistoryStore { Priority = 100, CurrentCoverage = new HistoryCoverage(At(48), At(60)) };
+
+        // Act
+        var held = await new[] { archive, persistent, live }.GetValueAtAsync("temp", At(55), CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(held);
+        Assert.Equal(2d, held.Number);
+        Assert.Equal(At(45), held.Timestamp);
+    }
+
+    [Fact]
+    public async Task WhenTheOnlyOtherStoreCoverageGrowsToIncludeTheInstantDuringItsLookup_ThenItsValueIsStillFound()
+    {
+        // Arrange: without the archive, vouching with the grown coverage would hop to before 20 and end as unknown.
+        var persistent = new FakeHistoryStore
+        {
+            Priority = 50,
+            CurrentCoverage = new HistoryCoverage(At(20), At(50))
+        }.AddSample(At(45), 2);
+        persistent.AfterSampleLookup = () => persistent.CurrentCoverage = new HistoryCoverage(At(20), At(60));
+        var live = new FakeHistoryStore { Priority = 100, CurrentCoverage = new HistoryCoverage(At(48), At(60)) };
+
+        // Act
+        var held = await new[] { persistent, live }.GetValueAtAsync("temp", At(55), CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(held);
+        Assert.Equal(2d, held.Number);
+        Assert.Equal(At(45), held.Timestamp);
+    }
+
+    [Fact]
+    public async Task WhenTwoStoresCoverTheInstantAfterAHopWithSamples_ThenTheHigherPriorityStoreAnswers()
+    {
+        // Arrange: both stores cover the instant just before 50, where the live store's coverage starts, and the
+        // lower-priority store holds the newer sample.
+        var high = new FakeHistoryStore
+        {
+            Priority = 50,
+            CurrentCoverage = new HistoryCoverage(At(0), At(52))
+        }.AddSample(At(30), 3);
+        var low = new FakeHistoryStore
+        {
+            Priority = 25,
+            CurrentCoverage = new HistoryCoverage(At(0), At(52))
+        }.AddSample(At(40), 4);
+        var live = new FakeHistoryStore { Priority = 100, CurrentCoverage = new HistoryCoverage(At(50), At(60)) };
+
+        // Act
+        var held = await new[] { low, high, live }.GetValueAtAsync("temp", At(55), CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(held);
+        Assert.Equal(3d, held.Number);
+        Assert.Equal(At(30), held.Timestamp);
     }
 }
