@@ -71,13 +71,13 @@ public class RandomValueMutationStrategyTests
 
         // Act
         var run = strategy.RunAsync(cts.Token);
-        await AsyncTestHelpers.WaitUntilAsync(() => counters.ValueMutationCount >= 1);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => counters.ValueMutationCount >= 1, message: "The unpaused strategy should mutate a value.");
         await cts.CancelAsync();
         try { await run; }
         catch (OperationCanceledException) { }
-
-        // Assert
-        Assert.True(counters.ValueMutationCount >= 1);
     }
 
     [Fact]
