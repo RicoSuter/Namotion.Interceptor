@@ -16,16 +16,18 @@ internal static class AdditionalIndexCollector
     private const int NoNextPlace = -1;
 
     /// <summary>
-    /// Rents an array with an entry per child: at the first place of each subject held more than once its later keys or
-    /// positions, in order; default at every other place. Give it back with <see cref="Return"/>.
+    /// Rents an array with an entry per child: at the first place of each subject held more than once and not kept its
+    /// later keys or positions, in order; default at every other place. Give it back with <see cref="Return"/>.
     /// </summary>
     /// <param name="children">The subjects one property value holds, as the lifecycle interceptor scanned them.</param>
+    /// <param name="kept">The subjects the property held before, which are not attached, or null.</param>
     /// <returns>The rented array, which may be longer than <paramref name="children"/>.</returns>
     public static ImmutableArray<object?>[] Rent(
-        ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> children)
+        ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> children,
+        HashSet<IInterceptorSubject>? kept)
     {
         var additionalIndices = ArrayPool<ImmutableArray<object?>>.Shared.Rent(children.Length);
-        Collect(children, additionalIndices.AsSpan(0, children.Length));
+        Collect(children, kept, additionalIndices.AsSpan(0, children.Length));
         return additionalIndices;
     }
 
@@ -39,7 +41,7 @@ internal static class AdditionalIndexCollector
 
     private static void Collect(
         ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> children,
-        Span<ImmutableArray<object?>> additionalIndices)
+        HashSet<IInterceptorSubject>? kept, Span<ImmutableArray<object?>> additionalIndices)
     {
         additionalIndices.Clear();
 
@@ -57,7 +59,7 @@ internal static class AdditionalIndexCollector
 
             foreach (var first in firstPlaces.Values)
             {
-                if (nextPlaces[first] != NoNextPlace)
+                if (nextPlaces[first] != NoNextPlace && (kept is null || !kept.Contains(children[first].subject)))
                 {
                     additionalIndices[first] = GetLaterIndices(children, nextPlaces, first);
                 }

@@ -200,4 +200,47 @@ public class AdditionalIndicesTests
             Changes.Add(change);
         }
     }
+
+    [Fact]
+    public void WhenACopyOfAValueRepeatingACarIsAssigned_ThenTheWriteAllocatesAsMuchAsForTwoCars()
+    {
+        // Arrange
+        var car = new Car();
+        var other = new Car();
+
+        // Act: the car is kept, so no attach is raised and its later position is not collected.
+        var allocatedForRepeatedCar = MeasureCopyWrites(car, car);
+        var allocatedForTwoCars = MeasureCopyWrites(car, other);
+
+        // Assert
+        Assert.Equal(allocatedForTwoCars, allocatedForRepeatedCar);
+    }
+
+    private static long MeasureCopyWrites(Car first, Car second)
+    {
+        const int writes = 100;
+        const int rounds = 3;
+        var garage = new Garage(InterceptorSubjectContext.Create().WithLifecycle()) { Cars = [first, second] };
+        var copies = Enumerable.Range(0, writes * (rounds + 1)).Select(_ => new[] { first, second }).ToArray();
+        for (var i = 0; i < writes; i++)
+        {
+            garage.Cars = copies[i];
+        }
+
+        // A GC from a parallel test can make the runtime allocate once in whichever round it falls into, so the
+        // smallest round counts.
+        var allocated = long.MaxValue;
+        for (var round = 1; round <= rounds; round++)
+        {
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            for (var i = round * writes; i < (round + 1) * writes; i++)
+            {
+                garage.Cars = copies[i];
+            }
+
+            allocated = Math.Min(allocated, GC.GetAllocatedBytesForCurrentThread() - before);
+        }
+
+        return allocated;
+    }
 }

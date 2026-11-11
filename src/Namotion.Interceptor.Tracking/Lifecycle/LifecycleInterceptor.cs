@@ -209,7 +209,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         HashSet<IInterceptorSubject>? kept)
     {
         // Rented per call: the handlers of an attach can start a nested write on this thread.
-        var additionalIndices = AdditionalIndexCollector.Rent(CollectionsMarshal.AsSpan(children));
+        var additionalIndices = AdditionalIndexCollector.Rent(CollectionsMarshal.AsSpan(children), kept);
         try
         {
             for (var i = 0; i < children.Count; i++)
