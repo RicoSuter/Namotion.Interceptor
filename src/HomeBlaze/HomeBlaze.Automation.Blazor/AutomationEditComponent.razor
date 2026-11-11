@@ -62,7 +62,10 @@
 
     [Parameter] public bool IsCreating { get; set; }
 
-    /// <summary>The key of a rule to show on the Rules tab when the editor opens, or null for the General tab.</summary>
+    /// <summary>
+    /// The key of a rule to show on the Rules tab when the editor opens, or null for the General tab. A key that names no
+    /// rule is ignored, and the editor opens on the General tab.
+    /// </summary>
     [Parameter] public string? InitialRuleKey { get; set; }
 
     public event Action<bool>? IsValidChanged;

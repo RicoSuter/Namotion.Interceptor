@@ -39,8 +39,8 @@
 @code {
     private const string IsCreatingParameterName = "IsCreating";
 
-    // SubjectComponent builds the parameters of the hosted component again whenever it is given another instance, so
-    // the merged dictionary is kept until EditorParameters or IsCreating change.
+    // Shared, as SubjectComponent builds the parameters of the hosted component again whenever it is given another
+    // instance; see _mergedParameters for the merged ones.
     private static readonly Dictionary<string, object?> CreatingParameters = new() { [IsCreatingParameterName] = true };
     private static readonly Dictionary<string, object?> EditingParameters = new() { [IsCreatingParameterName] = false };
 
@@ -77,6 +77,8 @@
     private ConfigurationPropertiesEditor? _propertiesEditor;
     private bool? _reportedIsValid;
     private Func<Task> _refreshIsValid = () => Task.CompletedTask;
+    // SubjectComponent builds the parameters of the hosted component again whenever it is given another instance, so
+    // the merged dictionary is kept until EditorParameters or IsCreating change.
     private IReadOnlyDictionary<string, object?>? _mergedEditorParameters;
     private bool _mergedIsCreating;
     private Dictionary<string, object?>? _mergedParameters;
