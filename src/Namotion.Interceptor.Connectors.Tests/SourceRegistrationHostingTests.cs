@@ -37,7 +37,7 @@ public class SourceRegistrationHostingTests
 
         var root = new Person(context);
         var monitor = context.GetSourceMonitor();
-        using var gate = new GatedStartHostedService();
+        var gate = new GatedStartHostedService();
 
         // Attached before the host starts, so its start is queued and drains asynchronously while
         // the host's own startup runs to completion.
@@ -150,7 +150,7 @@ public class SourceRegistrationHostingTests
         await host.StartAsync();
         Assert.True(monitor.IsRegistrationComplete);
 
-        using var gate = new GatedStartHostedService();
+        var gate = new GatedStartHostedService();
 
         // Act - the hold is taken synchronously, before the returned task is handed back.
         var attach = root.AttachHostedServiceAsync(gate, CancellationToken.None);
@@ -183,7 +183,7 @@ public class SourceRegistrationHostingTests
 
         var root = new Person(context);
         var monitor = context.GetSourceMonitor();
-        using var child = new GatedStartHostedService();
+        var child = new GatedStartHostedService();
 
         // The parent attaches the child from inside its own StartAsync, so the child's hold must be
         // taken before the parent's is released.
@@ -235,19 +235,16 @@ public class SourceRegistrationHostingTests
     }
 }
 
-/// <summary>A hosted service whose StartAsync blocks until the test releases it.</summary>
-internal sealed class GatedStartHostedService : IHostedService, IDisposable
+/// <summary>A hosted service whose StartAsync completes only once the test releases it.</summary>
+internal sealed class GatedStartHostedService : IHostedService
 {
-    private readonly ManualResetEventSlim _release = new(false);
+    private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public void ReleaseStart() => _release.Set();
+    public void ReleaseStart() => _release.TrySetResult();
 
-    public Task StartAsync(CancellationToken cancellationToken) =>
-        Task.Run(() => _release.Wait(TestTimeouts.Default, cancellationToken), cancellationToken);
+    public Task StartAsync(CancellationToken cancellationToken) => _release.Task.WaitAsync(cancellationToken);
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-
-    public void Dispose() => _release.Dispose();
 }
 
 /// <summary>A hosted service that attaches another one from inside its own StartAsync.</summary>
