@@ -54,6 +54,19 @@ public partial class TestFolder : ITitleProvider
     }
 }
 
+[InterceptorSubject]
+public partial class TestHolder : ITitleProvider
+{
+    public string? Title => Name;
+
+    [State]
+    public partial string Name { get; set; }
+
+    public partial TestHolder? Open { get; set; }
+
+    public partial TestHolder? Secret { get; set; }
+}
+
 public interface ITestSensorInterface
 {
     decimal Temperature { get; }
@@ -73,3 +86,13 @@ public partial class AgentExcludedDevice : IConfigurable
 [InterceptorSubject]
 [ExcludeFrom(ExclusionTarget.UserInterface)]
 public partial class UserInterfaceExcludedThing;
+
+[InterceptorSubject]
+public partial class TestUnitThing
+{
+    [State]
+    public partial decimal Temperature { get; set; }
+
+    [PropertyAttribute(nameof(Temperature), "Unit")]
+    public partial string? Temperature_Unit { get; set; }
+}

@@ -85,7 +85,8 @@ public abstract partial class LlmAgentBase
             await WriteRunStatisticsAsync();
             var progress = CreateProgress();
             var allowedTools = AllowedTools;
-            tools = CreateToolSet(allowedTools, progress);
+            var accessPolicy = GetTurnAccessPolicy(Roles);
+            tools = CreateToolSet(allowedTools, accessPolicy, progress);
             var message = AgentPromptBuilder.BuildChatMessage(text, Timeline.GetFindingsSinceLastReply());
             var result = await RunTurnAsync(AgentTurnKind.Chat, message, allowedTools, tools, progress, turnToken);
             ClearStreamingText();

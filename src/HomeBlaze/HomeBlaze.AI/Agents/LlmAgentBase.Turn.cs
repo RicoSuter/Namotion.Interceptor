@@ -3,6 +3,7 @@ using HomeBlaze.AI.Mcp;
 using HomeBlaze.Storage;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Mcp;
+using Namotion.Interceptor.Mcp.Abstractions;
 
 namespace HomeBlaze.AI.Agents;
 
@@ -73,22 +74,42 @@ public abstract partial class LlmAgentBase
         };
     }
 
-    private AgentToolSet CreateToolSet(string[] allowedTools, IProgress<AgentTurnUpdate> progress)
+    /// <summary>
+    /// Gets the access policy of a turn from <paramref name="roles"/> and records why the roles cannot be used, which the
+    /// end of the turn reports in the status; the turn then runs with a policy that denies everything. Each tool call of
+    /// the turn fetches the policy of the agent's current roles again, cached per compiled snapshot, and decides with it
+    /// for the whole call, so that a role removed or changed while the turn runs applies from the next call.
+    /// </summary>
+    private AuthorizationMcpAccessPolicy GetTurnAccessPolicy(List<string> roles)
+    {
+        var (computation, result) = GetRolesPolicy(roles);
+        var rolesError = GetRolesError(result);
+        lock (_stateLock)
+        {
+            StoreRolesErrorIfNewer(computation, rolesError);
+        }
+
+        return new AuthorizationMcpAccessPolicy(() => _services.AuthorizationService.GetPolicy(Roles).Policy);
+    }
+
+    private AgentToolSet CreateToolSet(string[] allowedTools, AuthorizationMcpAccessPolicy accessPolicy, IProgress<AgentTurnUpdate> progress)
     {
         var canEditPageLayout = AgentToolSet.CanEditPageLayout(allowedTools);
-        var available = _services.ToolSource.CreateTools(AgentToolSet.IsReadOnly(allowedTools))
-            .Select(tool => WithPageLayoutPermission(tool, grantsPageLayout: canEditPageLayout && AgentToolSet.WritesPages(tool.Name)))
+        var available = _services.ToolSource.CreateTools(AgentToolSet.IsReadOnly(allowedTools), accessPolicy)
+            .Select(tool => WithCallScope(tool, canEditPageLayout && AgentToolSet.WritesPages(tool.Name), accessPolicy))
             .ToList();
         return AgentToolSet.Create(available, allowedTools, Memory.CreateUpdateTool(), MaxToolCallsPerTurn, progress);
     }
 
     // A backend may call tools on a flow that does not descend from RunTurnAsync, such as an HTTP request of
-    // the MCP route, so each call sets the permission to edit page layout, granted or not, on its own flow only.
-    private static McpToolInfo WithPageLayoutPermission(McpToolInfo tool, bool grantsPageLayout) => new(tool)
+    // the MCP route, so each call sets the permission to edit page layout, granted or not, and the policy of the call on
+    // its own flow only. The read check of page expressions is set by the method invoker of the tools, for every client.
+    private static McpToolInfo WithCallScope(McpToolInfo tool, bool grantsPageLayout, AuthorizationMcpAccessPolicy accessPolicy) => new(tool)
     {
         Handler = async (input, cancellationToken) =>
         {
             using (MarkdownPageLayoutPermission.Enter(grantsPageLayout))
+            using (accessPolicy.BeginCall())
             {
                 return await tool.Handler(input, cancellationToken);
             }

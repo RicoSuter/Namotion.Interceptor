@@ -22,6 +22,14 @@ public class McpServerConfiguration
     public IList<IMcpSubjectEnricher> SubjectEnrichers { get; init; } = [];
 
     /// <summary>
+    /// Filters applied in order to the value of every property and attribute that the built-in tools get_property,
+    /// browse, search and set_property return and that a where filter of search compares. Results of other tools, such
+    /// as those of <see cref="ToolProviders"/>, are not filtered; such a tool applies the filters to a member value with
+    /// <see cref="McpServerConfigurationExtensions.ApplyValueFilters"/>.
+    /// </summary>
+    public IList<IMcpValueFilter> ValueFilters { get; init; } = [];
+
+    /// <summary>
     /// Type discovery for the list_types tool.
     /// </summary>
     public IList<IMcpTypeProvider> TypeProviders { get; init; } = [];

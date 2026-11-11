@@ -43,7 +43,9 @@ public partial class RenderExpression : ITitleProvider
                 return null;
             }
 
-            var context = new MarkdownExpressionContext(_pathResolver, Parent, timeZone: null);
+            // Without the read check: the derived value is computed again on the flow of whoever changes a property it
+            // reads, such as an agent whose check refuses it, and would then miss the value and its dependency for everyone.
+            var context = new MarkdownExpressionContext(_pathResolver, Parent, timeZone: null, checksReadAccess: false);
             return _expression.EvaluateWithoutPipes(ref context).Value;
         }
     }
@@ -58,7 +60,8 @@ public partial class RenderExpression : ITitleProvider
     }
 
     /// <summary>
-    /// Gets the value as the page shows it. A missing value gives an empty text.
+    /// Gets the value as the page shows it. A missing value, also one of a property that <see cref="PropertyReadAccess"/>
+    /// refuses on the current flow, gives an empty text.
     /// </summary>
     /// <param name="timeZone">The time zone of the viewer for dates, or null for the time zone of the server.</param>
     public string GetText(ITimeZoneDisplay? timeZone)

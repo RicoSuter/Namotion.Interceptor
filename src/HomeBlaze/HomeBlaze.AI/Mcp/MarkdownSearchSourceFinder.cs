@@ -1,14 +1,15 @@
 using HomeBlaze.Abstractions;
-using HomeBlaze.AI.Agents;
+using HomeBlaze.Authorization;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage.Abstractions.Metadata;
 using HomeBlaze.Storage.Files;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Mcp;
+using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.AI.Mcp;
 
@@ -17,67 +18,87 @@ namespace HomeBlaze.AI.Mcp;
 /// </summary>
 internal sealed class MarkdownSearchSourceFinder
 {
-    private readonly PathProviderBase _pathProvider;
-    private readonly string _pathPrefix;
-    private readonly Type[] _excludeTypes;
-    private readonly bool _forAgents;
+    private readonly McpServerConfiguration _configuration;
 
-    /// <param name="pathProvider">Builds the paths of the pages, as the other tools resolve them.</param>
-    /// <param name="pathPrefix">The prefix of every path.</param>
-    /// <param name="excludeTypes">The types whose subjects, and the subjects below them, are left out.</param>
-    /// <param name="forAgents">Whether the notes of an agent and of a subject that an agent holds through any parent are left out.</param>
-    public MarkdownSearchSourceFinder(PathProviderBase pathProvider, string pathPrefix, Type[] excludeTypes, bool forAgents)
+    /// <param name="configuration">
+    /// The configuration of the tools: its path provider and path prefix build the paths of the pages, its access policy
+    /// decides which pages and notes are found, and the subjects of its excluded types, and the subjects below them, are
+    /// left out.
+    /// </param>
+    public MarkdownSearchSourceFinder(McpServerConfiguration configuration)
     {
-        _pathProvider = pathProvider;
-        _pathPrefix = pathPrefix;
-        _excludeTypes = excludeTypes;
-        _forAgents = forAgents;
+        _configuration = configuration;
     }
 
     /// <summary>
     /// Gets the Markdown files and the notes of metadata in or under <paramref name="pathPrefix"/>, all when it is null,
     /// in order of path, then property and then a page before notes, so that results and truncation are stable; without those of a subject of an
-    /// excluded type or below one, which browse and search do not show, and for agents without the notes of agents.
+    /// excluded type or below one, which browse and search do not list. With an access policy, a page is found only when
+    /// it is readable for the tools at its path and the policy allows to read and execute its ReadRawContent, and notes only when
+    /// get_property can read them at the path of their metadata.
     /// </summary>
     public List<MarkdownSearchSource> Find(ISubjectRegistry registry, IInterceptorSubject rootSubject, string? pathPrefix)
     {
         var sources = new List<MarkdownSearchSource>();
+        if (rootSubject.TryGetRegisteredSubject() is not { } root)
+        {
+            return sources;
+        }
+
+        var accessRoot = _configuration.AccessPolicy is null ? null : root;
+
         foreach (var (_, registered) in registry.KnownSubjects)
         {
             var file = registered.Subject as MarkdownFile;
-
-            // Agents neither change nor find the metadata of agents, see AgentMetadataAccess; the parents are walked only
-            // for notes, as most subjects have none.
             var notes = TryGetNotes(registered);
-            if (notes is not null && _forAgents && registered.Subject.TryGetFirstParentOrSelf<LlmAgentBase>() is not null)
-            {
-                notes = null;
-            }
 
             // Most subjects are neither, and the path and the exclusion walk up the parents.
             if ((file is null && notes is null) ||
-                TryGetPath(registered, rootSubject) is not { } path ||
+                TryGetPath(registered, root) is not { } path ||
                 !IsInOrUnder(path, pathPrefix))
             {
                 continue;
             }
 
-            if (file is not null)
-            {
-                sources.Add(new MarkdownSearchSource(path, null, file.Title, file, null));
-            }
-
-            if (notes is not null)
-            {
-                foreach (var (propertyName, title, text) in notes)
-                {
-                    sources.Add(new MarkdownSearchSource(path, propertyName, title, null, text));
-                }
-            }
+            AddReadableSources(sources, accessRoot, registered, path, file, notes);
         }
 
         sources.Sort(CompareSources);
         return sources;
+    }
+
+    // The access root is null without an access policy, which lets every page and note through.
+    private void AddReadableSources(
+        List<MarkdownSearchSource> sources, RegisteredSubject? accessRoot, RegisteredSubject subject, string path,
+        MarkdownFile? file, List<(string? PropertyName, string? Title, string Notes)>? notes)
+    {
+        if (file is not null && (accessRoot is null || IsPageReadable(accessRoot, subject, path)))
+        {
+            sources.Add(new MarkdownSearchSource(path, null, file.Title, file, null));
+        }
+
+        if (notes is null)
+        {
+            return;
+        }
+
+        foreach (var (propertyName, title, text) in notes)
+        {
+            if (accessRoot is null || AgentMetadataAccess.IsMetadataReadable(_configuration, accessRoot, subject, path, propertyName))
+            {
+                sources.Add(new MarkdownSearchSource(path, propertyName, title, null, text));
+            }
+        }
+    }
+
+    // As invoke_query would call ReadRawContent: the page is readable at its path, and its method readable and executable.
+    private bool IsPageReadable(RegisteredSubject root, RegisteredSubject page, string path)
+    {
+        var readable = path == _configuration.PathPrefix ? root : _configuration.TryGetReadableSubject(root, path);
+        return ReferenceEquals(readable, page) &&
+            page.TryGetProperty(nameof(MarkdownFile.ReadRawContent)) is { } method &&
+            _configuration.IsAllowed(method, McpAccessActions.Read) &&
+            _configuration.IsAllowed(method, AuthorizationActions.Execute.Name);
     }
 
     // Sort is not stable, so a page comes before the notes of its own subject by a rule of its own.
@@ -104,7 +125,7 @@ internal sealed class MarkdownSearchSourceFinder
             {
                 (notes ??= []).Add((null, (subject.Subject as ITitleProvider)?.Title, text));
             }
-            else if (subject.TryGetProperty(propertyName) is { } property && _pathProvider.IsPropertyIncluded(property))
+            else if (subject.TryGetProperty(propertyName) is { } property && _configuration.PathProvider.IsPropertyIncluded(property))
             {
                 (notes ??= []).Add((propertyName, property.GetDisplayName(), text));
             }
@@ -113,31 +134,18 @@ internal sealed class MarkdownSearchSourceFinder
         return notes;
     }
 
-    // The path as browse and search show it, after the path prefix: through the first parent, in parent order, from
-    // which a path can be built; null for a subject of an excluded type or below one. The tools build it with the
-    // path provider restricted to what the access policy allows to read, which here is every property.
-    private string? TryGetPath(RegisteredSubject subject, IInterceptorSubject rootSubject)
+    // The path as search lists it, null for a subject search does not list and also for one below a subject of an
+    // excluded type, which search lists but browse does not list in the tree.
+    private string? TryGetPath(RegisteredSubject subject, RegisteredSubject root)
     {
-        if (ReferenceEquals(subject.Subject, rootSubject))
+        if (ReferenceEquals(subject.Subject, root.Subject))
         {
-            return _pathPrefix;
+            return _configuration.PathPrefix;
         }
 
-        var parents = subject.Parents;
-        if (parents.Length == 0 || AgentMetadataAccess.IsOfExcludedType(subject, rootSubject, _excludeTypes))
-        {
-            return null;
-        }
-
-        foreach (var parent in parents)
-        {
-            if (parent.Property.TryGetPath(_pathProvider, rootSubject, parent.Index) is { } path)
-            {
-                return _pathPrefix + path;
-            }
-        }
-
-        return null;
+        return subject.Parents.Length == 0 || AgentMetadataAccess.IsOfExcludedType(subject, root.Subject, _configuration.ExcludeTypes)
+            ? null
+            : _configuration.TryGetSubjectPath(root, subject);
     }
 
     // Whole segments only, so /Docs does not match /DocsArchive/Page.md; every path is under no prefix.

@@ -17,6 +17,15 @@ public static class McpServerConfigurationExtensions
         => configuration.AccessPolicy?.IsAllowed(member, action) ?? true;
 
     /// <summary>
+    /// Gets <paramref name="value"/>, a value of <paramref name="member"/>, after the
+    /// <see cref="McpServerConfiguration.ValueFilters"/>, applied in order: the value the built-in tools return for the
+    /// member. A tool of the application calls it for a member value it returns or compares, so that it shows what the
+    /// built-in tools show. Call it only for a member the client may read.
+    /// </summary>
+    public static object? ApplyValueFilters(this McpServerConfiguration configuration, RegisteredSubjectProperty member, object? value)
+        => McpToolHelper.ApplyValueFilters(member, value, configuration.ValueFilters);
+
+    /// <summary>
     /// Resolves a property path from <paramref name="root"/> as get_property does: null when the path does not resolve
     /// or the <see cref="McpServerConfiguration.AccessPolicy"/> hides something on it, see "Access Policy" in the MCP
     /// documentation. <paramref name="root"/> is the tool root: it is readable, and the path is checked from it.

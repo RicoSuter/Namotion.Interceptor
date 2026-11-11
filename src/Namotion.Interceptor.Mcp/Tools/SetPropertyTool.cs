@@ -78,7 +78,7 @@ internal class SetPropertyTool
             return Task.FromResult<object?>(new { error = $"Invalid value for {path}: {exception.Message}" });
         }
 
-        var previousValue = property.GetValue();
+        var previousValue = McpToolHelper.GetValue(property, _configuration);
         property.SetValue(newValue);
 
         return Task.FromResult<object?>(new { success = true, previousValue });
