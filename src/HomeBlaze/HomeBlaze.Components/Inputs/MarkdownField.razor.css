@@ -56,3 +56,9 @@
     overflow-wrap: anywhere;
     padding: 12px 16px;
 }
+
+/* The theme resets the padding of lists, which would put their markers outside the preview. */
+.markdown-field-preview ::deep ul,
+.markdown-field-preview ::deep ol {
+    padding-left: 1.5em;
+}
