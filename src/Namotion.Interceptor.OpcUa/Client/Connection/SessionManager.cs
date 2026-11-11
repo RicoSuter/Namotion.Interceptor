@@ -214,6 +214,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
         var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
 
+        // One policy cycle is one reconnect attempt in the diagnostics: when its budget is exhausted the
+        // managed session reports Disconnected and starts the next cycle by itself.
         var reconnectPolicy = new ReconnectPolicy
         {
             Strategy = BackoffStrategy.Constant,
@@ -285,7 +287,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         {
             switch (e.NewState)
             {
-                case ConnectionState.Reconnecting or ConnectionState.Failover or ConnectionState.Disconnected:
+                case ConnectionState.Reconnecting or ConnectionState.Failover:
                     if (Interlocked.Exchange(ref _reconnectInProgress, 1) == 0)
                     {
                         _source.NotifyConnectionLost();
@@ -297,15 +299,30 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                     }
                     break;
 
+                case ConnectionState.Disconnected:
+                    // The reconnect policy's budget is exhausted. The managed session starts a new
+                    // cycle by itself, which is counted as the next attempt.
+                    if (Interlocked.Exchange(ref _reconnectInProgress, 0) == 1)
+                    {
+                        _source.ReconnectionMetrics.RecordFailure();
+                        if (e.Error is not null)
+                        {
+                            _source.ReportBackgroundError(new ServiceResultException(e.Error));
+                        }
+                    }
+
+                    _source.NotifySessionNotHealthy();
+                    break;
+
                 case ConnectionState.Connected:
                     if (Interlocked.Exchange(ref _reconnectInProgress, 0) == 1)
                     {
                         _source.ReconnectionMetrics.RecordSuccess();
-
-                        // Notifications can be lost during an outage even when the server session and
-                        // its subscriptions survived, so every recovery ends with a full read.
-                        Interlocked.Exchange(ref _needsFullStateSync, 1);
                     }
+
+                    // Notifications can be lost during an outage even when the server session and
+                    // its subscriptions survived, so every recovery ends with a full read.
+                    Interlocked.Exchange(ref _needsFullStateSync, 1);
 
                     if (IsConnected)
                     {

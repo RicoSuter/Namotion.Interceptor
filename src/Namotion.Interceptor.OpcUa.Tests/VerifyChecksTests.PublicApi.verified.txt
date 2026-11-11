@@ -108,7 +108,6 @@ namespace Namotion.Interceptor.OpcUa.Client
         public System.TimeSpan PollingDisposalTimeout { get; set; }
         public System.TimeSpan PollingInterval { get; set; }
         public System.TimeSpan ReadAfterWriteBuffer { get; set; }
-        public System.TimeSpan ReconnectHandlerTimeout { get; set; }
         public System.TimeSpan ReconnectInterval { get; set; }
         public Opc.Ua.ITelemetryContext ResolvedTelemetryContext { get; }
         public System.TimeSpan? RetryTime { get; set; }

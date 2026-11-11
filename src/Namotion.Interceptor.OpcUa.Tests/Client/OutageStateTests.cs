@@ -76,7 +76,6 @@ public class OutageStateTests
             // wide margin makes it overwhelmingly unlikely for that path to race ahead of OnKeepAlive and
             // win, which would leave the SDK auto-reconnect window this test exists to cover unexercised.
             ReconnectInterval = TimeSpan.FromSeconds(1),
-            ReconnectHandlerTimeout = TimeSpan.FromSeconds(5),
             MaxReconnectDuration = TimeSpan.FromSeconds(20),
             SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(10),
 

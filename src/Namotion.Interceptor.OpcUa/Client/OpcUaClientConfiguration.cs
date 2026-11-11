@@ -61,10 +61,10 @@ public class OpcUaClientConfiguration
     public TimeSpan SubscriptionHealthCheckInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// Gets or sets the maximum time to wait for SDK reconnection before forcing a manual reconnection.
-    /// If the SDK's reconnect handler hasn't succeeded within this duration, stall detection triggers
-    /// a full session reset and manual reconnection attempt.
-    /// Default is 30 seconds. Use lower values (e.g., 15s) for faster recovery in tests.
+    /// Gets or sets the time budget of one reconnection cycle. When the managed session has not
+    /// recovered the connection within this duration, the cycle is reported as a failed reconnect
+    /// attempt and the next cycle starts. Reconnection continues until the source stops.
+    /// Default is 30 seconds.
     /// </summary>
     public TimeSpan MaxReconnectDuration { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -291,13 +291,7 @@ public class OpcUaClientConfiguration
     public TimeSpan OperationTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// Gets or sets the maximum time the reconnect handler will attempt to reconnect before giving up.
-    /// Default is 60 seconds.
-    /// </summary>
-    public TimeSpan ReconnectHandlerTimeout { get; set; } = TimeSpan.FromSeconds(60);
-
-    /// <summary>
-    /// Gets or sets the interval between reconnection attempts when connection is lost.
+    /// Gets or sets the delay between the managed session's reconnection attempts when connection is lost.
     /// Default is 5 seconds.
     /// </summary>
     public TimeSpan ReconnectInterval { get; set; } = TimeSpan.FromSeconds(5);
@@ -494,13 +488,6 @@ public class OpcUaClientConfiguration
             throw new ArgumentException(
                 $"SessionTimeout must be at least 1000ms, got: {SessionTimeout}",
                 nameof(SessionTimeout));
-        }
-
-        if (ReconnectHandlerTimeout < TimeSpan.FromSeconds(1))
-        {
-            throw new ArgumentException(
-                $"ReconnectHandlerTimeout must be at least 1000ms, got: {ReconnectHandlerTimeout}",
-                nameof(ReconnectHandlerTimeout));
         }
 
         if (ReconnectInterval < TimeSpan.FromSeconds(0.1))
