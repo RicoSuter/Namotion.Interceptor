@@ -307,10 +307,16 @@ public class SonosEventListenerTests
         LoopbackPorts.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
 
         // Act
+        var before = TimeProvider.System.GetTimestamp();
         var subscription = await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => { }, CancellationToken.None);
+        var after = TimeProvider.System.GetTimestamp();
 
-        // Assert
-        Assert.InRange(TimeUntil(subscription.RenewAt), TimeSpan.FromSeconds(25), TimeSpan.FromSeconds(31));
+        // Assert: bracketed by the call rather than measured from the assertion, so a stalled runner cannot fail it.
+        var renewalDelay = TimeSpan.FromSeconds(30);
+        Assert.InRange(
+            subscription.RenewAt,
+            TimeProvider.System.AddToTimestamp(before, renewalDelay),
+            TimeProvider.System.AddToTimestamp(after, renewalDelay));
     }
 
     [Fact]
