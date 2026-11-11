@@ -42,9 +42,9 @@ public class AutomationFeedbackTests
 
         // Act
         host.Graph.Add("Replacer", replacer);
-        await host.FlushAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        await host.FlushAsync().WaitAsync(TestTimeouts.Default);
         var replacementsAfterTheStop = replacer.Replacements;
-        await host.FlushAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        await host.FlushAsync().WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.Equal(ServiceStatus.Error, host.Automation.Status);
@@ -77,7 +77,7 @@ public class AutomationFeedbackTests
 
         replacer.Replace();
         host.Blinds.Release();
-        await host.FlushAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        await host.FlushAsync().WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.Equal(1, host.Blinds.CloseCount);

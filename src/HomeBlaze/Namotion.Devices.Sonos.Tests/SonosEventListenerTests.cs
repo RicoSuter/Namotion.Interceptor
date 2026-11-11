@@ -13,7 +13,7 @@ namespace Namotion.Devices.Sonos.Tests;
 
 public class SonosEventListenerTests
 {
-    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan WaitTimeout = TestTimeouts.Default;
     private static readonly TimeSpan NegativeCheckDuration = TimeSpan.FromMilliseconds(300);
 
     private static SonosEventListener CreateListener(HttpClient httpClient, ILogger? logger = null, Action? firstEventReceived = null) =>
