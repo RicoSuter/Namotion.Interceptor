@@ -73,7 +73,14 @@ internal sealed class AttachOperation
             }
         }
 
-        return afterLock is null ? null : () => RunAfterLock(afterLock);
+        return afterLock is null ? null : CreateAfterLockAction(afterLock);
+    }
+
+    // In its own method, so that the closure is only allocated when there is something to run: a lambda in
+    // RunCallbacks would allocate it on every call.
+    private static Action CreateAfterLockAction(List<(Action<PropertyReference> Action, PropertyReference Property)> actions)
+    {
+        return () => RunAfterLock(actions);
     }
 
     private static void RunAfterLock(List<(Action<PropertyReference> Action, PropertyReference Property)> actions)
