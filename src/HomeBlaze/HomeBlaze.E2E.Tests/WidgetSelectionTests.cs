@@ -161,7 +161,7 @@ public class WidgetSelectionTests
         // Assert
         await Assertions.Expect(wrapper).ToHaveClassAsync(new Regex(@"\bselected\b"));
         await Assertions.Expect(actionBar.GetByTestId("select-parent-button")).ToBeVisibleAsync();
-        await Assertions.Expect(actionBar.GetByTestId("edit-subject-button")).ToHaveCountAsync(0);
+        await Assertions.Expect(actionBar.GetByTestId("edit-subject-button")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
         // Act
         await actionBar.GetByTestId("select-parent-button").ClickAsync();
@@ -187,8 +187,8 @@ public class WidgetSelectionTests
         await Assertions.Expect(wrapper).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
         var actionBar = page.GetWidgetActionBar();
         await Assertions.Expect(actionBar.GetByTestId("delete-block-button")).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(actionBar.GetByTestId("edit-subject-button")).ToHaveCountAsync(0);
-        await Assertions.Expect(actionBar.GetByTestId("select-parent-button")).ToHaveCountAsync(0);
+        await Assertions.Expect(actionBar.GetByTestId("edit-subject-button")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(actionBar.GetByTestId("select-parent-button")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -219,7 +219,7 @@ public class WidgetSelectionTests
 
         // Assert
         await Assertions.Expect(innerSubject).ToHaveAttributeAsync("aria-current", "true", new() { Timeout = Timeout });
-        await Assertions.Expect(widgetBlock).Not.ToHaveAttributeAsync("aria-current", "true");
+        await Assertions.Expect(widgetBlock).Not.ToHaveAttributeAsync("aria-current", "true", new() { Timeout = AssertionTimeouts.Absence });
 
         // Act
         await actionBar.GetByTestId("select-parent-button").ClickAsync();

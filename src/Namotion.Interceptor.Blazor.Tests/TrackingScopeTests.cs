@@ -232,6 +232,6 @@ public class TrackingScopeTests
 
     internal static Task WaitAsync(Func<bool> condition)
     {
-        return AsyncTestHelpers.WaitUntilAsync(condition, TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(5));
+        return AsyncTestHelpers.WaitUntilAsync(condition, pollInterval: TimeSpan.FromMilliseconds(5));
     }
 }

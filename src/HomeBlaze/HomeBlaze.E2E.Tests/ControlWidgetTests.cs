@@ -233,7 +233,7 @@ public class ControlWidgetTests
             await AsyncTestHelpers.WaitUntilAsync(() => !GetMotor().IsPowered, WaitTimeout, message: "PowerOff was not invoked");
             await Assertions.Expect(offSwitch).Not.ToBeCheckedAsync(new() { Timeout = Timeout });
             await Assertions.Expect(offSwitch).ToBeDisabledAsync(new() { Timeout = Timeout });
-            await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         }
         finally
         {
@@ -357,7 +357,7 @@ public class ControlWidgetTests
         var slider = page.GetByTestId("slider").Filter(new() { HasText = "Wrong slider" });
         await Assertions.Expect(slider.GetByTestId("slider-value")).ToHaveTextAsync("–", new() { Timeout = Timeout });
         await Assertions.Expect(GetSlider(page, "Wrong slider")).ToBeDisabledAsync();
-        await Assertions.Expect(page.GetByTestId("widget-argument-error")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByTestId("widget-argument-error")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -427,7 +427,7 @@ public class ControlWidgetTests
 
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(() => GetMotor().IsPowered, WaitTimeout, message: "PowerOn was not invoked");
-            await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0);
+            await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
             await Assertions.Expect(powerOn).ToBeDisabledAsync(new() { Timeout = Timeout });
         }
         finally
@@ -549,7 +549,7 @@ public class ControlWidgetTests
         {
             var item = GetPickerItem(picker, name);
             await Assertions.Expect(item).ToBeVisibleAsync(new() { Timeout = Timeout });
-            await Assertions.Expect(item).Not.ToHaveClassAsync(NotSelectable);
+            await Assertions.Expect(item).Not.ToHaveClassAsync(NotSelectable, new() { Timeout = AssertionTimeouts.Absence });
         }
 
         foreach (var name in notSelectable)
@@ -562,7 +562,7 @@ public class ControlWidgetTests
         // The tree is shown by now, and an operation is listed only where it can be selected.
         foreach (var name in notListed)
         {
-            await Assertions.Expect(GetPickerItem(picker, name)).ToHaveCountAsync(0);
+            await Assertions.Expect(GetPickerItem(picker, name)).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         }
     }
 }

@@ -135,8 +135,8 @@ public class MetadataDisplayTests
         var (page, pane) = await OpenPaneAsync("Demo/Motor");
         var paneSummary = pane.GetByTestId("metadata-summary");
         await Assertions.Expect(paneSummary.GetByTestId("metadata-tag")).ToHaveTextAsync(MotorTag, new() { Timeout = PageLoadTimeout });
-        await Assertions.Expect(paneSummary.GetByTestId("metadata-notes")).ToHaveCountAsync(0);
-        await Assertions.Expect(paneSummary.GetByTestId("metadata-link")).ToHaveCountAsync(0);
+        await Assertions.Expect(paneSummary.GetByTestId("metadata-notes")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(paneSummary.GetByTestId("metadata-link")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
         // Act
         var summary = await OpenSubjectMetadataSummaryAsync(page, pane);
@@ -160,7 +160,7 @@ public class MetadataDisplayTests
         await Assertions.Expect(links.Nth(3)).ToHaveAttributeAsync("href", "/browser/Demo/Motor?property=Temperature");
         foreach (var index in new[] { 1, 2, 3 })
         {
-            await Assertions.Expect(links.Nth(index)).Not.ToHaveAttributeAsync("target", "_blank");
+            await Assertions.Expect(links.Nth(index)).Not.ToHaveAttributeAsync("target", "_blank", new() { Timeout = AssertionTimeouts.Absence });
         }
 
         // A path that leads to nothing and an address that may not be opened are broken links without an address.
@@ -182,7 +182,7 @@ public class MetadataDisplayTests
         // Assert
         var notes = summary.GetByTestId("metadata-notes");
         await Assertions.Expect(notes).ToHaveTextAsync("Raw <b>bold</b> text", new() { Timeout = PageLoadTimeout });
-        await Assertions.Expect(notes.Locator("b")).ToHaveCountAsync(0);
+        await Assertions.Expect(notes.Locator("b")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     });
 
     [Fact]
@@ -219,7 +219,7 @@ public class MetadataDisplayTests
         await Assertions.Expect(highlighted).ToHaveCountAsync(1, new() { Timeout = PageLoadTimeout });
         await Assertions.Expect(highlighted.GetByTestId("subject-pane-value-name")).ToHaveTextAsync("Fraction");
         await Assertions.Expect(highlighted.GetByTestId("subject-pane-value-metadata")).ToHaveCountAsync(1);
-        await Assertions.Expect(pane.GetByTestId("subject-pane-empty-values")).Not.ToContainTextAsync("Fraction");
+        await Assertions.Expect(pane.GetByTestId("subject-pane-empty-values")).Not.ToContainTextAsync("Fraction", new() { Timeout = AssertionTimeouts.Absence });
     });
 
     [Fact]
@@ -235,7 +235,7 @@ public class MetadataDisplayTests
         var items = page.GetByTestId("metadata-tag-filter-item");
         await Assertions.Expect(items).ToHaveCountAsync(2, new() { Timeout = PageLoadTimeout });
         await Assertions.Expect(items.Nth(0)).ToContainTextAsync("/Demo/Motor");
-        await Assertions.Expect(items.Nth(0)).Not.ToContainTextAsync("/Demo/Motor/Temperature");
+        await Assertions.Expect(items.Nth(0)).Not.ToContainTextAsync("/Demo/Motor/Temperature", new() { Timeout = AssertionTimeouts.Absence });
         await Assertions.Expect(items.Nth(1)).ToContainTextAsync("/Demo/Motor/Temperature");
     });
 
@@ -329,7 +329,7 @@ public class MetadataDisplayTests
         // Arrange
         var (page, pane) = await OpenPaneAsync("Demo/MetadataValues");
         await Assertions.Expect(pane.GetByTestId("subject-pane-empty-values")).ToContainTextAsync("Fraction", new() { Timeout = PageLoadTimeout });
-        await Assertions.Expect(pane.GetByTestId("metadata-summary")).ToHaveCountAsync(0);
+        await Assertions.Expect(pane.GetByTestId("metadata-summary")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         var storage = (FluentStorageContainer)_fixture.ServerServices.GetRequiredService<RootManager>().Root!;
 
         // Act - the method that agents call.
@@ -369,7 +369,7 @@ public class MetadataDisplayTests
             // Assert
             await Assertions.Expect(page.Locator(".mud-snackbar").GetByText("The metadata cannot be edited while the storage is not connected."))
                 .ToHaveCountAsync(1, new() { Timeout = PageLoadTimeout });
-            await Assertions.Expect(page.GetByTestId("metadata-edit-dialog")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.GetByTestId("metadata-edit-dialog")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         }
         finally
         {
@@ -399,7 +399,7 @@ public class MetadataDisplayTests
             await icon.ClickAsync();
             var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-summary-dialog") });
             await Assertions.Expect(dialog.GetByTestId("metadata-notes")).ToHaveTextAsync("Written by hand", new() { Timeout = PageLoadTimeout });
-            await Assertions.Expect(dialog.GetByTestId("metadata-summary-edit")).ToHaveCountAsync(0);
+            await Assertions.Expect(dialog.GetByTestId("metadata-summary-edit")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         }
         finally
         {

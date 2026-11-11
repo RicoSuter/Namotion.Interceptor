@@ -67,7 +67,7 @@ public class TileWidgetTests
 
         // Assert
         await Assertions.Expect(page.GetByTestId("switch-tile").First).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -155,7 +155,7 @@ public class TileWidgetTests
         // Assert
         var error = page.GetByTestId("widget-argument-error").Filter(new() { HasText = "unresolvedtilemap" });
         await Assertions.Expect(error).ToHaveTextAsync("Cannot resolve map: unresolvedtilemap", new() { Timeout = Timeout });
-        await Assertions.Expect(GetSwitchTile(page, "Unresolved map")).ToHaveCountAsync(0);
+        await Assertions.Expect(GetSwitchTile(page, "Unresolved map")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -204,7 +204,7 @@ public class TileWidgetTests
         await Assertions.Expect(tile).ToBeCheckedAsync(new() { Timeout = Timeout });
 
         // Assert
-        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveCountAsync(0);
+        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -294,7 +294,7 @@ public class TileWidgetTests
         // Assert
         await Assertions.Expect(tile).ToBeDisabledAsync(new() { Timeout = Timeout });
         await Assertions.Expect(tile.GetByTestId("tile-label")).ToHaveTextAsync("\u2013");
-        await Assertions.Expect(tile).Not.ToHaveAttributeAsync("aria-label", "");
+        await Assertions.Expect(tile).Not.ToHaveAttributeAsync("aria-label", "", new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -357,7 +357,7 @@ public class TileWidgetTests
         // Act & Assert: PowerOn is not enabled while the motor is powered.
         await Assertions.Expect(tile).ToBeDisabledAsync(new() { Timeout = Timeout });
         await Assertions.Expect(tile.GetByTestId("tile-icon")).ToBeVisibleAsync();
-        await Assertions.Expect(tile.GetByTestId("tile-label")).ToHaveCountAsync(0);
+        await Assertions.Expect(tile.GetByTestId("tile-label")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
         GetMotor().IsPowered = false;
         await Assertions.Expect(tile).ToBeEnabledAsync(new() { Timeout = Timeout });

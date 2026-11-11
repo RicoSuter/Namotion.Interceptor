@@ -6,6 +6,7 @@ using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Client.Polling;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Testing;
 using Opc.Ua;
 using Opc.Ua.Client;
 using static Namotion.Interceptor.OpcUa.Tests.Client.ClientSourceTestFactory;
@@ -161,11 +162,11 @@ public class SubscriptionManagerDiagnosticsTests
         await using var manager = CreateManager(source, propertyWriter, configuration, reportedErrors);
         var clientHandle = TrackNameProperty(manager, source);
 
-        var callback = Task.Run(() => manager.OnFastDataChange(
+        var callback = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => manager.OnFastDataChange(
             new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions()),
             CreateNotification(clientHandle, "value"),
             []));
-        await converter.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await converter.Entered.Task.WaitAsync(TestTimeouts.Default);
 
         // Act
         await manager.DisposeAsync();
@@ -289,7 +290,7 @@ public class SubscriptionManagerDiagnosticsTests
         var applyChanges = manager.ApplyChangesAndFilterFailedMonitoredItemsAsync(
             subscription,
             CancellationToken.None);
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await entered.Task.WaitAsync(TestTimeouts.Default);
 
         // Act
         await manager.DisposeAsync();
@@ -390,7 +391,7 @@ public class SubscriptionManagerDiagnosticsTests
             [],
             [],
             CancellationToken.None);
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await entered.Task.WaitAsync(TestTimeouts.Default);
 
         // Act
         await manager.DisposeAsync();
@@ -496,7 +497,7 @@ public class SubscriptionManagerDiagnosticsTests
         public override object? ConvertToPropertyValue(object? nodeValue, RegisteredSubjectProperty property)
         {
             Entered.TrySetResult();
-            if (!_release.Wait(TimeSpan.FromSeconds(5)))
+            if (!_release.Wait(TestTimeouts.Default))
             {
                 throw new TimeoutException("The test did not release the gated converter.");
             }
