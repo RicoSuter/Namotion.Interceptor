@@ -54,9 +54,6 @@ public class ValueTileWidgetTests
     private static Task<string> GetBackgroundAsync(ILocator tile) =>
         tile.EvaluateAsync<string>("element => getComputedStyle(element).backgroundColor");
 
-    private static Task<double[]> GetCenterAsync(ILocator element) =>
-        element.EvaluateAsync<double[]>("element => { const box = element.getBoundingClientRect(); return [box.x + box.width / 2, box.y + box.height / 2]; }");
-
     [Fact]
     public async Task WhenPageRenders_ThenItShowsNoBlockErrors()
     {
@@ -81,12 +78,13 @@ public class ValueTileWidgetTests
 
         // Assert
         await Assertions.Expect(tile.GetByTestId("tile-icon")).ToBeVisibleAsync();
-        var valueBox = await PageGeometry.GetBoxAsync(tile.GetByTestId("tile-label"));
-        var labelBox = await PageGeometry.GetBoxAsync(tile.GetByTestId("tile-subtitle"));
+        var boxes = await PageGeometry.GetBoxesAsync(
+            tile.GetByTestId("tile-label"),
+            tile.GetByTestId("tile-subtitle"),
+            tile,
+            tile.Locator("xpath=ancestor::div[contains(@class,'grid-cell')][1]"));
+        var (valueBox, labelBox, tileBox, cellBox) = (boxes[0], boxes[1], boxes[2], boxes[3]);
         Assert.True(valueBox.Top < labelBox.Top);
-
-        var tileBox = await PageGeometry.GetBoxAsync(tile);
-        var cellBox = await PageGeometry.GetBoxAsync(tile.Locator("xpath=ancestor::div[contains(@class,'grid-cell')][1]"));
         Assert.InRange(cellBox.Width - tileBox.Width, 0, 2.5);
         Assert.InRange(cellBox.Height - tileBox.Height, 0, 2.5);
     }
@@ -190,12 +188,13 @@ public class ValueTileWidgetTests
 
         // Assert: the ring and the label together are centered, so the middle of the ring is half the label and the gap of 8
         // pixels higher.
-        var node = gauge.Locator("xpath=ancestor::div[contains(@class,'canvas-node')][1]");
-        var nodeCenter = await GetCenterAsync(node);
-        var ringCenter = await GetCenterAsync(gauge.GetByTestId("gauge-meter"));
-        var labelBox = await PageGeometry.GetBoxAsync(gauge.GetByTestId("value-label"));
-        Assert.InRange(ringCenter[0] - nodeCenter[0], -1.5, 1.5);
-        Assert.InRange(nodeCenter[1] - ringCenter[1] - (labelBox.Height + 8) / 2, -1.5, 1.5);
+        var boxes = await PageGeometry.GetBoxesAsync(
+            gauge.Locator("xpath=ancestor::div[contains(@class,'canvas-node')][1]"),
+            gauge.GetByTestId("gauge-meter"),
+            gauge.GetByTestId("value-label"));
+        var (nodeBox, ringBox, labelBox) = (boxes[0], boxes[1], boxes[2]);
+        Assert.InRange(ringBox.Left + ringBox.Width / 2 - (nodeBox.Left + nodeBox.Width / 2), -1.5, 1.5);
+        Assert.InRange(nodeBox.Top + nodeBox.Height / 2 - (ringBox.Top + ringBox.Height / 2) - (labelBox.Height + 8) / 2, -1.5, 1.5);
     }
 
     [Fact]
@@ -208,9 +207,9 @@ public class ValueTileWidgetTests
         await Assertions.Expect(small).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Assert
-        var smallBox = await PageGeometry.GetBoxAsync(small);
-        var largeBox = await PageGeometry.GetBoxAsync(large);
-        var itemBox = await PageGeometry.GetBoxAsync(small.Locator("xpath=ancestor::div[contains(@class,'flow-layout-item')][1]"));
+        var boxes = await PageGeometry.GetBoxesAsync(
+            small, large, small.Locator("xpath=ancestor::div[contains(@class,'flow-layout-item')][1]"));
+        var (smallBox, largeBox, itemBox) = (boxes[0], boxes[1], boxes[2]);
         Assert.InRange(smallBox.Top - largeBox.Top, -0.5, 0.5);
         Assert.InRange(smallBox.Left - itemBox.Left, -0.5, 0.5);
         Assert.True(smallBox.Height < largeBox.Height);
@@ -226,9 +225,9 @@ public class ValueTileWidgetTests
 
         // Assert
         await Assertions.Expect(tile.GetByTestId("tile-icon")).ToBeHiddenAsync(new() { Timeout = Timeout });
-        var tileBox = await PageGeometry.GetBoxAsync(tile);
-        var labelBox = await PageGeometry.GetBoxAsync(tile.GetByTestId("tile-subtitle"));
-        Assert.True(labelBox.Top + labelBox.Height <= tileBox.Top + tileBox.Height);
+        var boxes = await PageGeometry.GetBoxesAsync(tile, tile.GetByTestId("tile-subtitle"));
+        var (tileBox, labelBox) = (boxes[0], boxes[1]);
+        Assert.True(labelBox.Bottom <= tileBox.Bottom);
     }
 
     [Fact]
@@ -282,13 +281,15 @@ public class ValueTileWidgetTests
         await Assertions.Expect(gauge).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Assert
-        var cellBox = await PageGeometry.GetBoxAsync(gauge.Locator("xpath=ancestor::div[contains(@class,'grid-cell')][1]"));
-        var ringBox = await PageGeometry.GetBoxAsync(gauge.GetByTestId("gauge-meter"));
-        var labelBox = await PageGeometry.GetBoxAsync(gauge.GetByTestId("value-label"));
+        var boxes = await PageGeometry.GetBoxesAsync(
+            gauge.Locator("xpath=ancestor::div[contains(@class,'grid-cell')][1]"),
+            gauge.GetByTestId("gauge-meter"),
+            gauge.GetByTestId("value-label"));
+        var (cellBox, ringBox, labelBox) = (boxes[0], boxes[1], boxes[2]);
         Assert.True(ringBox.Height < 112);
         Assert.Equal(ringBox.Width, ringBox.Height, 1);
         Assert.True(ringBox.Top >= cellBox.Top);
-        Assert.True(labelBox.Top + labelBox.Height <= cellBox.Top + cellBox.Height);
+        Assert.True(labelBox.Bottom <= cellBox.Bottom);
     }
 
     [Theory]
