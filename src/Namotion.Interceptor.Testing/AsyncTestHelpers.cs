@@ -63,6 +63,13 @@ public static class AsyncTestHelpers
             await Task.Delay(actualPollInterval).ConfigureAwait(false);
         }
 
+        // A stalled runner can resume the loop only after the deadline, when the condition may hold already.
+        Thread.MemoryBarrier();
+        if (condition())
+        {
+            return;
+        }
+
         var messageText = message();
         var errorMessage = string.IsNullOrEmpty(messageText)
             ? $"Condition was not met within {actualTimeout.TotalSeconds:F1} seconds."
