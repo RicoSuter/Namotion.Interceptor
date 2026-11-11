@@ -14,6 +14,11 @@ namespace Namotion.Interceptor.Connectors.Tests;
 
 public class SourceWaitTests
 {
+    // Only has to outlast scheduling: a completing wait resumes its caller through a thread pool
+    // dispatch, so a tight bound fails whenever the whole solution runs in parallel on a CI runner with
+    // a small thread pool.
+    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+
     private static IInterceptorSubjectContext CreateContext() =>
         InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
@@ -189,7 +194,7 @@ public class SourceWaitTests
 
         // Act
         source.ReportSynchronized();
-        await wait.WaitAsync(TimeSpan.FromSeconds(5));
+        await wait.WaitAsync(TestTimeout);
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => GetPendingWaitCount(monitor) == 0);
@@ -309,7 +314,7 @@ public class SourceWaitTests
         // Assert
         Assert.False(wait.IsCompleted);
         monitor.CompleteSourceRegistration();
-        await wait.WaitAsync(TimeSpan.FromSeconds(5));
+        await wait.WaitAsync(TestTimeout);
     }
 
     [Fact]
@@ -329,7 +334,7 @@ public class SourceWaitTests
         source.ReportSynchronized();
 
         // Assert
-        await wait.WaitAsync(TimeSpan.FromSeconds(5));
+        await wait.WaitAsync(TestTimeout);
     }
 
     [Fact]
@@ -351,7 +356,7 @@ public class SourceWaitTests
         healthy.ReportSynchronized();
 
         // Act
-        await left.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        await left.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeout);
 
         // Assert
         Assert.Equal(SourceState.Synchronizing, broken.State);
@@ -373,7 +378,7 @@ public class SourceWaitTests
         var wait = root.WaitForSynchronizationAsync(CancellationToken.None);
 
         // Assert
-        await wait.WaitAsync(TimeSpan.FromSeconds(5));
+        await wait.WaitAsync(TestTimeout);
     }
 
     [Fact]
@@ -395,7 +400,7 @@ public class SourceWaitTests
         await Task.Yield();
         Assert.False(wait.IsCompleted);
         monitor.CompleteSourceRegistration();
-        await wait.WaitAsync(TimeSpan.FromSeconds(5));
+        await wait.WaitAsync(TestTimeout);
     }
 
     [Fact]
@@ -440,7 +445,7 @@ public class SourceWaitTests
         healthySource.ReportSynchronized();
 
         // Assert
-        await healthyWait.WaitAsync(TimeSpan.FromSeconds(5));
+        await healthyWait.WaitAsync(TestTimeout);
     }
 
     [Fact]
@@ -470,7 +475,7 @@ public class SourceWaitTests
         second.ReportSynchronized();
 
         // Assert
-        await wait.WaitAsync(TimeSpan.FromSeconds(5));
+        await wait.WaitAsync(TestTimeout);
     }
 
     [Fact]
@@ -514,7 +519,7 @@ public class SourceWaitTests
         monitor.CompleteSourceRegistration();
         first.ReportSynchronized();
         var wait = root.WaitForSynchronizationAsync(CancellationToken.None);
-        await wait.WaitAsync(TimeSpan.FromSeconds(5));
+        await wait.WaitAsync(TestTimeout);
 
         // Act
         var second = new TestStateSource(root);
@@ -524,7 +529,7 @@ public class SourceWaitTests
         // Assert
         Assert.False(secondWait.IsCompleted);
         second.ReportSynchronized();
-        await secondWait.WaitAsync(TimeSpan.FromSeconds(5));
+        await secondWait.WaitAsync(TestTimeout);
     }
 
     [Fact]
@@ -542,7 +547,7 @@ public class SourceWaitTests
         source.ReportStopped();
 
         // Assert
-        await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeout);
     }
 
     [Fact]
@@ -608,7 +613,7 @@ public class SourceWaitTests
         // This is the test that catches handler-ordering defects. If the monitor ran before
         // ParentTrackingHandler it would re-evaluate against moving's stale parent set, still find
         // blocking in scope, and never look again - the wait would hang.
-        await wait.WaitAsync(TimeSpan.FromSeconds(5));
+        await wait.WaitAsync(TestTimeout);
     }
 
     [Fact]
@@ -676,7 +681,7 @@ public class SourceWaitTests
         // Assert
         Assert.False(wait.IsCompleted);
         hold.Dispose();
-        await wait.WaitAsync(TimeSpan.FromSeconds(5));
+        await wait.WaitAsync(TestTimeout);
     }
 
     [Fact]
@@ -703,7 +708,7 @@ public class SourceWaitTests
         started.ReportSynchronized();
 
         // Assert - completes despite neverStarted being in scope and never synchronizing.
-        await wait.WaitAsync(TimeSpan.FromSeconds(5));
+        await wait.WaitAsync(TestTimeout);
         Assert.DoesNotContain(neverStarted, monitor.Sources);
         Assert.Equal(SourceState.Synchronizing, neverStarted.State);
     }
@@ -739,18 +744,26 @@ public class SourceWaitTests
         monitor.CompleteSourceRegistration();
 
         const int iterations = 20_000;
-        using var barrier = new Barrier(2);
+        var barrier = new Barrier(2);
+        var stop = new CancellationTokenSource();
 
         var transitionThread = new Thread(() =>
         {
-            for (var i = 0; i < iterations; i++)
+            try
             {
-                if (!barrier.SignalAndWait(TimeSpan.FromSeconds(30)))
+                for (var i = 0; i < iterations; i++)
                 {
-                    return;
-                }
+                    if (!barrier.SignalAndWait(TestTimeout, stop.Token))
+                    {
+                        return;
+                    }
 
-                source.ReportSynchronized();
+                    source.ReportSynchronized();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // The test loop failed and released this participant.
             }
         })
         {
@@ -758,24 +771,36 @@ public class SourceWaitTests
         };
         transitionThread.Start();
 
-        // Act & Assert
-        for (var i = 0; i < iterations; i++)
+        try
         {
-            Assert.True(barrier.SignalAndWait(TimeSpan.FromSeconds(30)));
+            // Act & Assert
+            for (var i = 0; i < iterations; i++)
+            {
+                Assert.True(barrier.SignalAndWait(TestTimeout));
 
-            var wait = root.WaitForSynchronizationAsync(CancellationToken.None);
+                var wait = root.WaitForSynchronizationAsync(CancellationToken.None);
 
-            // A bounded timeout so a regression fails this test instead of wedging the run.
-            await wait.WaitAsync(TimeSpan.FromSeconds(5));
+                // A bounded timeout so a regression fails this test instead of wedging the run.
+                await wait.WaitAsync(TestTimeout);
 
-            // Reset for the next iteration. TransitionTo allows Synchronized -> Synchronizing, and
-            // wait's removal from the monitor's pending-wait list happens before the awaited task
-            // above completes (see PendingWait.AwaitAsync), so the monitor has no leftover wait
-            // state carried into the next iteration.
-            source.ReportSynchronizing();
+                // Reset for the next iteration. TransitionTo allows Synchronized -> Synchronizing, and
+                // wait's removal from the monitor's pending-wait list happens before the awaited task
+                // above completes (see PendingWait.AwaitAsync), so the monitor has no leftover wait
+                // state carried into the next iteration.
+                source.ReportSynchronizing();
+            }
         }
-
-        transitionThread.Join(TimeSpan.FromSeconds(30));
+        finally
+        {
+            // Disposed only once the participant has exited: one still parked in SignalAndWait would
+            // throw ObjectDisposedException on its own thread, which takes down the whole test host.
+            stop.Cancel();
+            if (transitionThread.Join(TestTimeout))
+            {
+                barrier.Dispose();
+                stop.Dispose();
+            }
+        }
     }
 
     [Fact]
