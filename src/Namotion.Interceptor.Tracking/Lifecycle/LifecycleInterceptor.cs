@@ -88,14 +88,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 var isRoot = !_attachedSubjects.ContainsKey(subject) && _attachingRoots.Add(subject);
                 try
                 {
-                    AttachProperties(subject, children, isRoot);
+                    AttachProperties(subject, children);
                 }
                 finally
                 {
-                    if (isRoot)
-                    {
-                        _attachingRoots.Remove(subject);
-                    }
+                    // False when a handler detached the root during its attach.
+                    isRoot = isRoot && _attachingRoots.Remove(subject);
                 }
 
                 if (isRoot)
@@ -114,7 +112,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     // reconciles it, so a property with a baseline is skipped: its children are attached, and a write still pending
     // on another thread reconciles from that baseline.
     private void AttachProperties(IInterceptorSubject subject,
-        List<(IInterceptorSubject subject, PropertyReference property, object? index)> children, bool isRoot)
+        List<(IInterceptorSubject subject, PropertyReference property, object? index)> children)
     {
         foreach (var property in subject.Properties)
         {
@@ -138,7 +136,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
             // A handler detached the subject during this attach. Its detach removed the baselines seeded so far
             // and the children attached before it; detach the ones attached after it and seed nothing more.
-            if (!isRoot && !_attachedSubjects.ContainsKey(subject))
+            if (!_attachedSubjects.ContainsKey(subject) && !_attachingRoots.Contains(subject))
             {
                 DetachChildren(subject.Context, children);
                 break;
@@ -343,6 +341,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     {
         if (!_attachedSubjects.Remove(subject))
         {
+            // A root detached during its own attach raised no attach, so it raises no detach either.
+            if (_attachingRoots.Remove(subject))
+            {
+                RemoveBaselines(subject);
+            }
+
             return;
         }
         
@@ -418,6 +422,17 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             }
 
             ReturnList(children);
+        }
+    }
+
+    private void RemoveBaselines(IInterceptorSubject subject)
+    {
+        foreach (var entry in subject.Properties)
+        {
+            if (entry.Value is { IsIntercepted: true } && entry.Value.Type.CanContainSubjects())
+            {
+                _lastProcessedValues.Remove(new PropertyReference(subject, entry.Key));
+            }
         }
     }
 

@@ -504,12 +504,6 @@ public class MovedChildConsistencyTests
         }
     }
 
-    /// <summary>
-    /// Asserts that the registry children of the property are the subjects of its value, one for each position or key,
-    /// in the order of a collection (a dictionary's children keep their attach order), that the tracked and the
-    /// registry parents of each carry the same indices with the entries of each property adjacent, and that no former
-    /// child keeps a parent entry.
-    /// </summary>
     [Fact]
     public async Task WhenAnotherThreadWritesAPropertyAHandlerWroteDuringTheAttach_ThenThePendingWriteIsReconciled()
     {
@@ -579,6 +573,56 @@ public class MovedChildConsistencyTests
         Assert.Equal(2, cars[2].GetReferenceCount());
     }
 
+    [Fact]
+    public void WhenHandlerAttachesTheRootAgainDuringItsAttach_ThenEveryCopyMatchesBothValues()
+    {
+        // Arrange
+        var handler = new PropertyWritingLifecycleHandler(nameof(Garage.Cars));
+        var context = CreateContext().WithService(() => handler);
+        var cars = CreateHeldCars(context, 2);
+        var garage = new Garage { Cars = [cars[0]], CarsByName = new Dictionary<string, Car> { ["A"] = cars[1] } };
+        var second = InterceptorSubjectContext.Create();
+        second.AddFallbackContext(context);
+        handler.NestedWrite = () => ((IInterceptorSubject)garage).Context.AddFallbackContext(second);
+
+        // Act: the second context reaches the same lifecycle interceptor, which attaches the garage again meanwhile.
+        ((IInterceptorSubject)garage).Context.AddFallbackContext(context);
+
+        // Assert
+        Assert.Null(handler.NestedWrite);
+        AssertEveryCopyMatchesValue(garage, nameof(Garage.Cars), cars);
+        AssertEveryCopyMatchesValue(garage, nameof(Garage.CarsByName), cars);
+        Assert.All(cars, car => Assert.Equal(2, car.GetReferenceCount()));
+    }
+
+    [Fact]
+    public void WhenHandlerDetachesTheRootDuringItsAttach_ThenAttachingItAgainAttachesEveryChild()
+    {
+        // Arrange
+        var handler = new PropertyWritingLifecycleHandler(nameof(Garage.Cars));
+        var context = CreateContext().WithService(() => handler);
+        var cars = CreateHeldCars(context, 2);
+        var garage = new Garage { Cars = [cars[0]], CarsByName = new Dictionary<string, Car> { ["A"] = cars[1] } };
+        handler.NestedWrite = () => ((IInterceptorSubject)garage).Context.RemoveFallbackContext(context);
+        ((IInterceptorSubject)garage).Context.AddFallbackContext(context);
+        var countsAfterDetach = cars.Select(car => car.GetReferenceCount()).ToArray();
+
+        // Act
+        ((IInterceptorSubject)garage).Context.AddFallbackContext(context);
+
+        // Assert
+        Assert.Equal([1, 1], countsAfterDetach);
+        AssertEveryCopyMatchesValue(garage, nameof(Garage.Cars), cars);
+        AssertEveryCopyMatchesValue(garage, nameof(Garage.CarsByName), cars);
+        Assert.All(cars, car => Assert.Equal(2, car.GetReferenceCount()));
+    }
+
+    /// <summary>
+    /// Asserts that the registry children of the property are the subjects of its value, one for each position or key,
+    /// in the order of a collection (a dictionary's children keep their attach order), that the tracked and the
+    /// registry parents of each carry the same indices with the entries of each property adjacent, and that no former
+    /// child keeps a parent entry.
+    /// </summary>
     private static void AssertEveryCopyMatchesValue(
         IInterceptorSubject parent, string propertyName, IEnumerable<IInterceptorSubject> candidates)
     {

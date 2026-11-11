@@ -16,11 +16,11 @@ internal static class AdditionalIndexCollector
     private const int NoNextPlace = -1;
 
     /// <summary>
-    /// Rents an array with an entry per child: at the first place of each subject held more than once and not kept its
+    /// Rents an array with an entry per child: at the first place of each subject held more than once and not kept, its
     /// later keys or positions, in order; default at every other place. Give it back with <see cref="Return"/>.
     /// </summary>
     /// <param name="children">The subjects one property value holds, as the lifecycle interceptor scanned them.</param>
-    /// <param name="kept">The subjects the property held before, which are not attached, or null.</param>
+    /// <param name="kept">The subjects the property held before, which the write does not attach, or null.</param>
     /// <returns>The rented array, which may be longer than <paramref name="children"/>.</returns>
     public static ImmutableArray<object?>[] Rent(
         ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> children,
