@@ -52,7 +52,7 @@ public class LayoutItemActionsTests
         await Assertions.Expect(GetNodes(page)).ToHaveCountAsync(2, new() { Timeout = Timeout });
         await Assertions.Expect(page.Locator(".subject-component-wrapper.selectable").First).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(page.Locator(".layout-item-actions")).ToHaveCountAsync(4);
-        await Assertions.Expect(page.Locator(".layout-item-actions:visible")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".layout-item-actions:visible")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -72,7 +72,7 @@ public class LayoutItemActionsTests
         await Assertions.Expect(GetCells(page).Nth(0).GetByTitle("Edit Cell")).ToBeVisibleAsync();
         await Assertions.Expect(emptyCell.GetByTitle("Edit Cell")).ToBeVisibleAsync();
         await Assertions.Expect(emptyCell.GetByTitle("Delete", new() { Exact = true })).ToBeVisibleAsync();
-        await Assertions.Expect(GetNodes(page).Locator(".layout-item-actions:visible")).ToHaveCountAsync(0);
+        await Assertions.Expect(GetNodes(page).Locator(".layout-item-actions:visible")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -88,7 +88,7 @@ public class LayoutItemActionsTests
         // Assert
         await Assertions.Expect(page.Locator(".subject-component-wrapper.selected")).ToContainTextAsync("Grid Card");
         await Assertions.Expect(GetCells(page).Locator(".layout-item-actions:visible")).ToHaveCountAsync(2);
-        await Assertions.Expect(GetNodes(page).Locator(".layout-item-actions:visible")).ToHaveCountAsync(0);
+        await Assertions.Expect(GetNodes(page).Locator(".layout-item-actions:visible")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -152,7 +152,7 @@ public class LayoutItemActionsTests
         // Assert
         await Assertions.Expect(page.Locator(".subject-component-wrapper.selected")).ToContainTextAsync("Node Card");
         await Assertions.Expect(GetNodes(page).Locator(".layout-item-actions:visible")).ToHaveCountAsync(2);
-        await Assertions.Expect(GetCells(page).Locator(".layout-item-actions:visible")).ToHaveCountAsync(0);
+        await Assertions.Expect(GetCells(page).Locator(".layout-item-actions:visible")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -171,7 +171,7 @@ public class LayoutItemActionsTests
         await Assertions.Expect(page.Locator(".subject-component-wrapper.selected > .canvas-layout-container")).ToHaveCountAsync(1);
         await Assertions.Expect(textNode.GetByTitle("Edit Node")).ToBeVisibleAsync();
         await Assertions.Expect(GetNodes(page).Locator(".layout-item-actions:visible")).ToHaveCountAsync(2);
-        await Assertions.Expect(page.GetByTestId("create-subject-dialog")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByTestId("create-subject-dialog")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     private static ILocator GetCells(IPage page) => page.Locator(".grid-cell.editing");

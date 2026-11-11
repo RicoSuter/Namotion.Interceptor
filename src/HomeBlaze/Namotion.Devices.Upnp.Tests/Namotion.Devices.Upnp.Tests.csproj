@@ -18,6 +18,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />
     <ProjectReference Include="..\Namotion.Devices.Upnp\Namotion.Devices.Upnp.csproj" />
   </ItemGroup>
 

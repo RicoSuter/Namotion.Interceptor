@@ -290,7 +290,7 @@ public class AnthropicAgentTests
 
         // Act
         test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Unavailable);
+        await test.WaitUntilTurnEndedAsync(ServiceStatus.Unavailable);
 
         // Assert
         Assert.Contains("API key", test.Agent.StatusMessage);
@@ -472,21 +472,22 @@ public class AnthropicAgentTests
         // Arrange
         await using var test = await StartAsync(agent => agent.HistoryTokenBudget = 1000);
         await test.Agent.SendMessageAsync("first", CancellationToken.None);
-        using var summarizing = new ManualResetEventSlim();
-        using var release = new ManualResetEventSlim();
+        var summarizing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        test.ReleaseOnDispose(release);
         test.Agent.Client.Respond = (_, _) => [new ChatResponseUpdate(ChatRole.Assistant, "Hello again"), Usage(5000)];
         test.Agent.Client.Summarize = () =>
         {
-            summarizing.Set();
-            release.Wait();
+            summarizing.TrySetResult();
+            release.Task.Wait();
             return "summary";
         };
         await test.Agent.SendMessageAsync("second", CancellationToken.None);
-        Assert.True(summarizing.Wait(TimeSpan.FromSeconds(30)));
+        await summarizing.Task.WaitAsync(TestTimeouts.Default);
 
         // Act
         var stop = test.StopAgentAsync();
-        release.Set();
+        release.SetResult();
         await stop;
 
         // Assert

@@ -818,13 +818,17 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         // B begins on the SAME context; it must not acquire the exclusive lock until A's deferred commit
         // completes and releases it.
         var bBegan = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var commitB = Task.Run(async () =>
+        async Task CommitBAsync()
         {
             using var transactionB = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
             bBegan.TrySetResult(true);
             person.LastName = "Doe";
             await transactionB.CommitAsync(CancellationToken.None);
-        });
+        }
+
+        // Called directly rather than queued, so B has asked for the lock by the time it returns: a B that
+        // was still waiting for a pool thread would pass the check below without proving anything.
+        var commitB = CommitBAsync();
 
         // While A is still parked, B must remain blocked on the lock. A non-occurrence can only be observed
         // within a window; this cannot false-fail because A cannot complete (and free the lock) until the

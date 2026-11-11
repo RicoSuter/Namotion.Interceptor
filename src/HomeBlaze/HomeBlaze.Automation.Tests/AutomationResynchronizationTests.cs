@@ -63,20 +63,24 @@ public class AutomationResynchronizationTests
         Assert.Equal(1L, host.Rule("gust").RunCount);
     }
 
+    // The gate blocks only after a state change for each input of the chain, all within a bounded wait, so the automation
+    // keeps no checkpoint: on a slow disk the durable write that precedes each state change adds up beyond the bound.
     [Fact]
     public async Task WhenAnExternalChangeIsQueuedAsAFeedbackChainIsStopped_ThenItsRuleStillRuns()
     {
         // Arrange
         var gate = new TestGate { BlockOnCall = RunsOfEachRuleInAChain };
-        await using var host = await AutomationTestHost.StartAsync(automation =>
-        {
-            automation.States = ["Left", "Right"];
-            automation.InitialState = "Left";
-            automation.Rules = Keyed(
-                ("right", Create("Right", AutomationRuleMode.On, [When("/Weather/Power > 0")], [Invoke("/Gate/Step"), Enter("Right")], inState: "Left")),
-                ("left", Create("Left", AutomationRuleMode.On, [When("/Weather/Power > 0")], [Enter("Left")], inState: "Right")),
-                ("door", On("Door", When("/Weather/Gust > 8"), Invoke("/Blinds/Close"))));
-        });
+        await using var host = await AutomationTestHost.StartAsync(
+            automation =>
+            {
+                automation.States = ["Left", "Right"];
+                automation.InitialState = "Left";
+                automation.Rules = Keyed(
+                    ("right", Create("Right", AutomationRuleMode.On, [When("/Weather/Power > 0")], [Invoke("/Gate/Step"), Enter("Right")], inState: "Left")),
+                    ("left", Create("Left", AutomationRuleMode.On, [When("/Weather/Power > 0")], [Enter("Left")], inState: "Right")),
+                    ("door", On("Door", When("/Weather/Gust > 8"), Invoke("/Blinds/Close"))));
+            },
+            keepsCheckpoints: false);
         host.Graph.Add("Gate", gate);
         await host.FlushAsync();
         host.Weather.Power = 1;
