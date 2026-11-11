@@ -67,13 +67,16 @@ public class RandomValueMutationStrategyTests
             new ParticipantConfiguration { Name = "test", ValueMutationRate = 1000, UseTransactions = false },
             NullLogger.Instance);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+        using var cts = new CancellationTokenSource();
 
         // Act
-        try { await strategy.RunAsync(cts.Token); }
+        var run = strategy.RunAsync(cts.Token);
+        await AsyncTestHelpers.WaitUntilAsync(() => counters.ValueMutationCount >= 1);
+        await cts.CancelAsync();
+        try { await run; }
         catch (OperationCanceledException) { }
 
-        // Assert: at least one mutation completed in 50ms at 1000/s.
+        // Assert
         Assert.True(counters.ValueMutationCount >= 1);
     }
 

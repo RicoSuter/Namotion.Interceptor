@@ -54,12 +54,18 @@ public class BatchValueMutationStrategyTests
         // Arrange: install a custom GetTimestampFunction that records every call. If propagation is
         // broken, parallel workers fall through to GetTimestampFunction and record DateTimeOffset.UtcNow
         // (multiple distinct values). If propagation works, GetTimestampFunction is never called inside
-        // the parallel block.
+        // the parallel block. The function is process-global, so only calls from this test's flow, which
+        // the parallel workers inherit, are counted: writes of tests running in parallel call it too.
         var fallbackCallCount = 0;
+        var isThisTestsFlow = new AsyncLocal<bool> { Value = true };
         var originalGetter = SubjectChangeContext.GetTimestampFunction;
         SubjectChangeContext.GetTimestampFunction = () =>
         {
-            Interlocked.Increment(ref fallbackCallCount);
+            if (isThisTestsFlow.Value)
+            {
+                Interlocked.Increment(ref fallbackCallCount);
+            }
+
             return DateTimeOffset.UtcNow;
         };
 
@@ -83,10 +89,13 @@ public class BatchValueMutationStrategyTests
                 participantIndex: 0,
                 NullLogger.Instance);
 
-            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(1500));
+            using var cts = new CancellationTokenSource();
 
             // Act
-            try { await strategy.RunAsync(cts.Token); }
+            var run = strategy.RunAsync(cts.Token);
+            await AsyncTestHelpers.WaitUntilAsync(() => counters.ValueMutationCount >= 100);
+            await cts.CancelAsync();
+            try { await run; }
             catch (OperationCanceledException) { }
 
             // Assert: GetTimestampFunction must NOT be called from inside the parallel mutations,
