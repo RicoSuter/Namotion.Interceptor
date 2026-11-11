@@ -72,12 +72,7 @@ public class SubscriptionTransactionOrderingTests
                 new MonitoredItemNotification
                 {
                     ClientHandle = monitoredItem.ClientHandle,
-                    Value = new DataValue
-                    {
-                        Value = incomingValue,
-                        SourceTimestamp = incomingTimestamp.UtcDateTime,
-                        StatusCode = StatusCodes.Good
-                    }
+                    Value = new DataValue(incomingValue, StatusCodes.Good, incomingTimestamp.UtcDateTime)
                 }
             ],
             DiagnosticInfos = []

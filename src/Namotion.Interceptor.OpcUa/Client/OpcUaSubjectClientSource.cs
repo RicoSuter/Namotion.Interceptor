@@ -275,7 +275,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         for (var offset = 0; offset < itemCount; offset += batchSize)
         {
             var take = Math.Min(batchSize, itemCount - offset);
-            var readValues = new ReadValueIdCollection(take);
+            var readValues = new List<ReadValueId>(take);
 
             for (var i = 0; i < take; i++)
             {
@@ -290,7 +290,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                 requestHeader: null,
                 maxAge: 0,
                 timestampsToReturn: TimestampsToReturn.Source,
-                readValues,
+                readValues.ToArrayOf(),
                 cancellationToken).ConfigureAwait(false);
 
             var resultCount = Math.Min(readResponse.Results.Count, readValues.Count);
@@ -309,8 +309,9 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         {
             foreach (var (property, dataValue) in result)
             {
-                var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
-                property.SetValueFromSource(this, dataValue.SourceTimestamp, null, value);
+                var value = _configuration.ValueConverter.ConvertToPropertyValue(
+                    dataValue.WrappedValue.ToClrValue(), property);
+                property.SetValueFromSource(this, dataValue.SourceTimestamp.ToDateTimeOffset(), null, value);
             }
 
             _logger.LogInformation("Updated {Count} properties with OPC UA node values.", itemCount);
@@ -630,7 +631,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             for (var i = 0; i < rootPath.Length; i++)
             {
                 var references = await BrowseNodeAsync(session, currentNodeId, cancellationToken).ConfigureAwait(false);
-                var match = references.FirstOrDefault(reference => reference.BrowseName.Name == rootPath[i]);
+                var match = references.Find(reference => reference.BrowseName.Name == rootPath[i]);
                 if (match is null)
                 {
                     return null;
@@ -759,7 +760,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         }
     }
 
-    private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
+    private async Task<ArrayOf<ReferenceDescription>> BrowseNodeAsync(
         Session session,
         NodeId nodeId,
         CancellationToken cancellationToken)

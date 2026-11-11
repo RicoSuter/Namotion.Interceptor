@@ -15,6 +15,7 @@ internal class OpcUaStandardServer : StandardServer
     private int _activeSessionCount;
 
     public OpcUaStandardServer(IInterceptorSubject subject, OpcUaSubjectServer source, OpcUaServerConfiguration configuration, ILogger logger)
+        : base(configuration.ResolvedTelemetryContext)
     {
         _logger = logger;
         _nodeManagerFactory = new CustomNodeManagerFactory(subject, source, configuration, logger);
@@ -30,11 +31,11 @@ internal class OpcUaStandardServer : StandardServer
     /// The SDK's StopAsync disposes the listeners itself (close, dispose, then clear),
     /// so no manual disposal is needed here. See OPCFoundation/UA-.NETStandard#3561.
     /// </remarks>
-    public void CloseTransportListeners()
+    public async Task CloseTransportListenersAsync()
     {
         foreach (var listener in TransportListeners)
         {
-            try { listener.Close(); } catch (Exception ex) { _logger.LogDebug(ex, "Error closing transport listener."); }
+            try { await listener.CloseAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error closing transport listener."); }
         }
     }
 

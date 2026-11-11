@@ -13,6 +13,10 @@ using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Client.Connection;
 
+// The classic Subscription API (FastDataChangeCallback, DefaultSubscription) is obsolete in SDK 2.0 in favor of the
+// managed subscription model (ISubscriptionManager); it still works and is kept until the client moves to that model.
+#pragma warning disable CS0618
+
 /// <summary>
 /// How a monitored item that failed to (re-)create should be handled, aligned with
 /// <see cref="OpcUaStatusCodeClassifier.IsTransientError"/>.
@@ -192,7 +196,7 @@ internal class SubscriptionManager : IAsyncDisposable
         }
     }
 
-    internal void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringTable)
+    internal void OnFastDataChange(Subscription subscription, DataChangeNotification notification, ArrayOf<string> stringTable)
     {
         if (_shuttingDown)
         {
@@ -217,8 +221,9 @@ internal class SubscriptionManager : IAsyncDisposable
                 {
                     changes.Add(new NotificationUpdate(
                         monitoredItem,
-                        _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, monitoredItem.Property),
-                        item.Value.SourceTimestamp));
+                        _configuration.ValueConverter.ConvertToPropertyValue(
+                            item.Value.WrappedValue.ToClrValue(), monitoredItem.Property),
+                        item.Value.SourceTimestamp.ToDateTimeOffset()));
                 }
             }
         }

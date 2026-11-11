@@ -12,18 +12,18 @@ namespace Namotion.Interceptor.OpcUa.Tests.Client;
 public class OpcUaStatusCodeClassifierTests
 {
     [Theory]
-    [InlineData(StatusCodes.BadNodeIdUnknown)]
-    [InlineData(StatusCodes.BadNodeIdInvalid)]
-    [InlineData(StatusCodes.BadAttributeIdInvalid)]
-    [InlineData(StatusCodes.BadIndexRangeInvalid)]
-    [InlineData(StatusCodes.BadTypeMismatch)]
-    [InlineData(StatusCodes.BadSecurityModeInsufficient)]
-    [InlineData(StatusCodes.BadNotWritable)]
-    [InlineData(StatusCodes.BadWriteNotSupported)]
-    public void WhenStatusIsPermanentBadCode_ThenIsTransientErrorReturnsFalse(uint statusCode)
+    [InlineData(nameof(StatusCodes.BadNodeIdUnknown))]
+    [InlineData(nameof(StatusCodes.BadNodeIdInvalid))]
+    [InlineData(nameof(StatusCodes.BadAttributeIdInvalid))]
+    [InlineData(nameof(StatusCodes.BadIndexRangeInvalid))]
+    [InlineData(nameof(StatusCodes.BadTypeMismatch))]
+    [InlineData(nameof(StatusCodes.BadSecurityModeInsufficient))]
+    [InlineData(nameof(StatusCodes.BadNotWritable))]
+    [InlineData(nameof(StatusCodes.BadWriteNotSupported))]
+    public void WhenStatusIsPermanentBadCode_ThenIsTransientErrorReturnsFalse(string statusCodeName)
     {
         // Arrange
-        var status = new StatusCode(statusCode);
+        var status = StatusCodeNames.Resolve(statusCodeName);
 
         // Act
         var isTransient = OpcUaStatusCodeClassifier.IsTransientError(status);
@@ -33,24 +33,24 @@ public class OpcUaStatusCodeClassifierTests
     }
 
     [Theory]
-    [InlineData(StatusCodes.BadTimeout)]
-    [InlineData(StatusCodes.BadCommunicationError)]
-    [InlineData(StatusCodes.BadServerNotConnected)]
-    [InlineData(StatusCodes.BadServerHalted)]
-    [InlineData(StatusCodes.BadShutdown)]
-    [InlineData(StatusCodes.BadResourceUnavailable)]
-    [InlineData(StatusCodes.BadOutOfMemory)]
-    [InlineData(StatusCodes.BadOutOfService)]
-    [InlineData(StatusCodes.BadTooManyOperations)]
-    [InlineData(StatusCodes.BadSessionIdInvalid)]
-    [InlineData(StatusCodes.BadSecureChannelClosed)]
-    [InlineData(StatusCodes.BadDeviceFailure)]
-    [InlineData(StatusCodes.BadSensorFailure)]
-    [InlineData(StatusCodes.BadTooManyMonitoredItems)]
-    public void WhenStatusIsTransientBadCode_ThenIsTransientErrorReturnsTrue(uint statusCode)
+    [InlineData(nameof(StatusCodes.BadTimeout))]
+    [InlineData(nameof(StatusCodes.BadCommunicationError))]
+    [InlineData(nameof(StatusCodes.BadServerNotConnected))]
+    [InlineData(nameof(StatusCodes.BadServerHalted))]
+    [InlineData(nameof(StatusCodes.BadShutdown))]
+    [InlineData(nameof(StatusCodes.BadResourceUnavailable))]
+    [InlineData(nameof(StatusCodes.BadOutOfMemory))]
+    [InlineData(nameof(StatusCodes.BadOutOfService))]
+    [InlineData(nameof(StatusCodes.BadTooManyOperations))]
+    [InlineData(nameof(StatusCodes.BadSessionIdInvalid))]
+    [InlineData(nameof(StatusCodes.BadSecureChannelClosed))]
+    [InlineData(nameof(StatusCodes.BadDeviceFailure))]
+    [InlineData(nameof(StatusCodes.BadSensorFailure))]
+    [InlineData(nameof(StatusCodes.BadTooManyMonitoredItems))]
+    public void WhenStatusIsTransientBadCode_ThenIsTransientErrorReturnsTrue(string statusCodeName)
     {
         // Arrange
-        var status = new StatusCode(statusCode);
+        var status = StatusCodeNames.Resolve(statusCodeName);
 
         // Act
         var isTransient = OpcUaStatusCodeClassifier.IsTransientError(status);
@@ -63,13 +63,13 @@ public class OpcUaStatusCodeClassifierTests
     // Role permissions and the AccessLevel attribute are mutable server-side, so these can start
     // succeeding mid-session. Classifying them permanent would drop the monitored item and forfeit
     // both in-session recovery routes, leaving the property dark until the next reconnect.
-    [InlineData(StatusCodes.BadUserAccessDenied)]
-    [InlineData(StatusCodes.BadNotReadable)]
-    [InlineData(StatusCodes.BadNotImplemented)]
-    public void WhenStatusIsAccessScoped_ThenIsTransientErrorReturnsTrue(uint statusCode)
+    [InlineData(nameof(StatusCodes.BadUserAccessDenied))]
+    [InlineData(nameof(StatusCodes.BadNotReadable))]
+    [InlineData(nameof(StatusCodes.BadNotImplemented))]
+    public void WhenStatusIsAccessScoped_ThenIsTransientErrorReturnsTrue(string statusCodeName)
     {
         // Arrange
-        var status = new StatusCode(statusCode);
+        var status = StatusCodeNames.Resolve(statusCodeName);
 
         // Act
         var isTransient = OpcUaStatusCodeClassifier.IsTransientError(status);
@@ -82,7 +82,7 @@ public class OpcUaStatusCodeClassifierTests
     public void WhenStatusIsGood_ThenIsTransientErrorReturnsFalse()
     {
         // Arrange
-        var status = new StatusCode(StatusCodes.Good);
+        var status = StatusCodes.Good;
 
         // Act & Assert
         Assert.False(OpcUaStatusCodeClassifier.IsTransientError(status));
@@ -93,7 +93,7 @@ public class OpcUaStatusCodeClassifierTests
     {
         // Arrange: Uncertain carries a real value with reduced confidence; it is neither
         // a transient failure (no retry will improve it) nor a permanent design-time error.
-        var status = new StatusCode(StatusCodes.Uncertain);
+        var status = StatusCodes.Uncertain;
 
         // Act & Assert
         Assert.False(OpcUaStatusCodeClassifier.IsTransientError(status));

@@ -361,7 +361,7 @@ public class OpcUaClientConfiguration
     /// Override this method to customize application configuration, security settings, or certificate handling.
     /// </summary>
     /// <returns>A configured <see cref="ApplicationInstance"/> ready for connecting to OPC UA servers.</returns>
-    public virtual async Task<ApplicationInstance> CreateApplicationInstanceAsync()
+    public virtual Task<ApplicationInstance> CreateApplicationInstanceAsync()
     {
         var application = new ApplicationInstance(ResolvedTelemetryContext)
         {
@@ -372,7 +372,7 @@ public class OpcUaClientConfiguration
         var host = System.Net.Dns.GetHostName();
         var applicationUri = $"urn:{host}:Namotion.Interceptor:{ApplicationName}";
 
-        var config = new ApplicationConfiguration
+        var config = new ApplicationConfiguration(ResolvedTelemetryContext)
         {
             ApplicationName = ApplicationName,
             ApplicationType = ApplicationType.Client,
@@ -417,14 +417,13 @@ public class OpcUaClientConfiguration
             {
                 OutputFilePath = "Logs/UaClient.log",
                 TraceMasks = 0
-            },
-            CertificateValidator = new CertificateValidator(ResolvedTelemetryContext)
+            }
         };
 
-        await config.CertificateValidator.UpdateAsync(config).ConfigureAwait(false);
+        config.CertificateManager = CertificateManagerFactory.Create(config.SecurityConfiguration, ResolvedTelemetryContext);
 
         application.ApplicationConfiguration = config;
-        return application;
+        return Task.FromResult(application);
     }
 
     /// <summary>

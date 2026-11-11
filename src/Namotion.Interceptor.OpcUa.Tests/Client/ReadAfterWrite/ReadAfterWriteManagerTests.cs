@@ -48,12 +48,12 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
                 It.IsAny<RequestHeader>(),
                 It.IsAny<double>(),
                 It.IsAny<TimestampsToReturn>(),
-                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ReadResponse
             {
                 ResponseHeader = new ResponseHeader(),
-                Results = new DataValueCollection(results),
+                Results = results.ToArrayOf(),
                 DiagnosticInfos = []
             });
 
@@ -61,12 +61,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
     }
 
     private static DataValue CreateDataValue(object? value, StatusCode statusCode, DateTime sourceTimestamp) =>
-        new()
-        {
-            Value = value,
-            StatusCode = statusCode,
-            SourceTimestamp = sourceTimestamp
-        };
+        new(VariantHelper.CastFromWithReflectionFallback(value), statusCode, sourceTimestamp);
 
     private static void RegisterAndSchedule(
         ReadAfterWriteManager manager,
@@ -628,10 +623,10 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
                 It.IsAny<RequestHeader>(),
                 It.IsAny<double>(),
                 It.IsAny<TimestampsToReturn>(),
-                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
                 It.IsAny<CancellationToken>()))
-            .Returns((RequestHeader _, double _, TimestampsToReturn _, ReadValueIdCollection _, CancellationToken cancellationToken) =>
-                FailAfterCancellationAsync(cancellationToken));
+            .Returns((RequestHeader _, double _, TimestampsToReturn _, ArrayOf<ReadValueId> _, CancellationToken cancellationToken) =>
+                new ValueTask<ReadResponse>(FailAfterCancellationAsync(cancellationToken)));
 
         var configuration = ClientSourceTestFactory.CreateConfiguration();
         configuration.ReadAfterWriteBuffer = TimeSpan.FromMinutes(1);
@@ -681,7 +676,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
                 It.IsAny<RequestHeader>(),
                 It.IsAny<double>(),
                 It.IsAny<TimestampsToReturn>(),
-                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(error);
 

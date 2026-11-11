@@ -69,7 +69,7 @@ public class SelfEchoReproTests
             finally
             {
                 OpcUaSubjectServer.IsWritingOwnNodeValues = false;
-                OpcUaSubjectServer.SelfWrittenNodeValue = null;
+                OpcUaSubjectServer.SelfWrittenNodeValue = default;
             }
         }
 

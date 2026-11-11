@@ -250,18 +250,20 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         OpcUaClientConfiguration configuration,
         CancellationToken cancellationToken)
     {
-        var endpointConfiguration = EndpointConfiguration.Create(application.ApplicationConfiguration);
+        var applicationConfiguration = application.ApplicationConfiguration
+            ?? throw new InvalidOperationException("The OPC UA application instance has no application configuration.");
+        var endpointConfiguration = EndpointConfiguration.Create(applicationConfiguration);
         var serverUri = new Uri(configuration.ServerUrl);
 
-        EndpointDescriptionCollection endpoints;
+        ArrayOf<EndpointDescription> endpoints;
         try
         {
             using var discoveryClient = await DiscoveryClient.CreateAsync(
-                application.ApplicationConfiguration,
+                applicationConfiguration,
                 serverUri,
                 endpointConfiguration, ct: cancellationToken).ConfigureAwait(false);
 
-            endpoints = await discoveryClient.GetEndpointsAsync(null, cancellationToken).ConfigureAwait(false);
+            endpoints = await discoveryClient.GetEndpointsAsync(default, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -273,26 +275,28 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         }
 
         var endpointDescription = CoreClientUtils.SelectEndpoint(
-            application.ApplicationConfiguration,
+            applicationConfiguration,
             serverUri,
             endpoints,
             useSecurity: configuration.UseSecurity,
-            configuration.ResolvedTelemetryContext);
+            configuration.ResolvedTelemetryContext)
+            ?? throw new InvalidOperationException(
+                $"No suitable OPC UA endpoint found at '{configuration.ServerUrl}' (UseSecurity: {configuration.UseSecurity}).");
 
         var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
         var oldSession = Volatile.Read(ref _session);
 
         var sessionFactory = configuration.ActualSessionFactory;
         var sessionResult = await sessionFactory.CreateAsync(
-            application.ApplicationConfiguration,
+            applicationConfiguration,
             endpoint,
             updateBeforeConnect: false,
-            sessionName: application.ApplicationName,
+            sessionName: application.ApplicationName ?? configuration.ApplicationName,
             sessionTimeout: (uint)configuration.SessionTimeout.TotalMilliseconds,
             identity: configuration.CreateUserIdentity != null
                 ? await configuration.CreateUserIdentity(cancellationToken).ConfigureAwait(false)
                 : new UserIdentity(),
-            preferredLocales: null,
+            preferredLocales: default,
             cancellationToken).ConfigureAwait(false);
 
         var newSession = sessionResult as Session

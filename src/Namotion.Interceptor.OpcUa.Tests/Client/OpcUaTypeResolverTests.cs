@@ -28,8 +28,8 @@ public class OpcUaTypeResolverTests
         };
 
         var mockSession = CreateMockSession();
-        var childCollection = new ReferenceDescriptionCollection
-        {
+        ArrayOf<ReferenceDescription> childCollection =
+        [
             new ReferenceDescription
             {
                 BrowseName = new QualifiedName("Item[0]"),
@@ -42,14 +42,14 @@ public class OpcUaTypeResolverTests
                 NodeId = new ExpandedNodeId(new NodeId(1002, 2)),
                 NodeClass = NodeClass.Object
             }
-        };
+        ];
 
         mockSession
             .Setup(s => s.BrowseAsync(
                 It.IsAny<RequestHeader>(),
                 It.IsAny<ViewDescription>(),
                 It.IsAny<uint>(),
-                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<ArrayOf<BrowseDescription>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BrowseResponse
             {
@@ -79,8 +79,8 @@ public class OpcUaTypeResolverTests
         };
 
         var mockSession = CreateMockSession();
-        var childCollection = new ReferenceDescriptionCollection
-        {
+        ArrayOf<ReferenceDescription> childCollection =
+        [
             new ReferenceDescription
             {
                 BrowseName = new QualifiedName("Temperature"),
@@ -93,14 +93,14 @@ public class OpcUaTypeResolverTests
                 NodeId = new ExpandedNodeId(new NodeId(2002, 2)),
                 NodeClass = NodeClass.Variable
             }
-        };
+        ];
 
         mockSession
             .Setup(s => s.BrowseAsync(
                 It.IsAny<RequestHeader>(),
                 It.IsAny<ViewDescription>(),
                 It.IsAny<uint>(),
-                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<ArrayOf<BrowseDescription>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BrowseResponse
             {
@@ -135,13 +135,13 @@ public class OpcUaTypeResolverTests
                 It.IsAny<RequestHeader>(),
                 It.IsAny<ViewDescription>(),
                 It.IsAny<uint>(),
-                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<ArrayOf<BrowseDescription>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BrowseResponse
             {
                 Results =
                 [
-                    new BrowseResult { References = new ReferenceDescriptionCollection() }
+                    new BrowseResult { References = [] }
                 ],
                 DiagnosticInfos = []
             });
@@ -165,22 +165,22 @@ public class OpcUaTypeResolverTests
         };
 
         var mockSession = CreateMockSession();
-        var childCollection = new ReferenceDescriptionCollection
-        {
+        ArrayOf<ReferenceDescription> childCollection =
+        [
             new ReferenceDescription
             {
                 BrowseName = new QualifiedName("Device[SensorA]"),
                 NodeId = new ExpandedNodeId(new NodeId(4001, 2)),
                 NodeClass = NodeClass.Object
             }
-        };
+        ];
 
         mockSession
             .Setup(s => s.BrowseAsync(
                 It.IsAny<RequestHeader>(),
                 It.IsAny<ViewDescription>(),
                 It.IsAny<uint>(),
-                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<ArrayOf<BrowseDescription>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BrowseResponse
             {
@@ -219,15 +219,15 @@ public class OpcUaTypeResolverTests
                 It.IsAny<RequestHeader>(),
                 It.IsAny<double>(),
                 It.IsAny<TimestampsToReturn>(),
-                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ReadResponse
             {
                 ResponseHeader = new ResponseHeader(),
                 Results =
                 [
-                    new DataValue { Value = customDataTypeId, StatusCode = StatusCodes.Good },
-                    new DataValue { Value = -1, StatusCode = StatusCodes.Good }
+                    new DataValue(customDataTypeId, StatusCodes.Good),
+                    new DataValue(-1, StatusCodes.Good)
                 ],
                 DiagnosticInfos = []
             });

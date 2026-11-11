@@ -326,6 +326,8 @@ namespace Namotion.Interceptor.OpcUa
         public System.Diagnostics.ActivitySource ActivitySource { get; }
         public Microsoft.Extensions.Logging.ILoggerFactory LoggerFactory { get; }
         public System.Diagnostics.Metrics.Meter CreateMeter() { }
+        public System.Diagnostics.Metrics.Meter CreateMeter(System.Reflection.Assembly assembly) { }
+        public System.Diagnostics.ActivitySource GetActivitySource(System.Reflection.Assembly assembly) { }
     }
     public static class OpcUaConstants
     {
