@@ -10,18 +10,30 @@ public static class RuleStatusTexts
     /// <summary>The whole status of a rule in the mode <see cref="AutomationRuleMode.Off"/>.</summary>
     public const string Off = "Off";
 
-    /// <summary>Every trigger waits for its condition to become true.</summary>
+    /// <summary>
+    /// The rule has no trigger, or at least one of its triggers can fire: an event trigger, or a property trigger that is
+    /// armed or waits for a first value of its condition.
+    /// </summary>
     public const string Armed = "Armed";
 
-    /// <summary>A trigger was rearmed while its condition is true and fires once it became false and true again.</summary>
+    /// <summary>
+    /// No trigger can fire now, and at least one was rearmed while its condition is still true; that one fires once its
+    /// condition has become false and then true again.
+    /// </summary>
     public const string ArmedWaitingUntilFalse = "Armed, waiting until false";
 
-    /// <summary>Every condition was true when the rule became active, and each trigger waits for it to become false.</summary>
+    /// <summary>Every trigger found its condition true when the rule became active and waits for it to become false.</summary>
     public const string AlreadyTrueWaitingUntilFalse = "Already true, waiting until false";
 
-    /// <summary>Every condition was true when the rule became active, and the triggers wait to rearm.</summary>
+    /// <summary>
+    /// Every trigger waits to rearm or for its condition to become false, and each found its condition true when the
+    /// rule became active, so none has fired since.
+    /// </summary>
     public const string AlreadyTrueWaitingToRearm = "Already true, waiting to rearm";
 
-    /// <summary>The triggers fired and wait to rearm.</summary>
+    /// <summary>
+    /// Every trigger waits to rearm or for its condition to become false, and at least one of them fired since the rule
+    /// became active.
+    /// </summary>
     public const string TriggeredWaitingToRearm = "Triggered, waiting to rearm";
 }
