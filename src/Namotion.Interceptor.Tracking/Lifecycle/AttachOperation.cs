@@ -1,9 +1,7 @@
-using System.Runtime.ExceptionServices;
-
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 /// <summary>
-/// Tracks one attach or detach operation of a <see cref="LifecycleInterceptor"/>, including the operations nested in
+/// Tracks the running attach or detach operation of a <see cref="LifecycleInterceptor"/>, including the operations nested in
 /// it, and runs the callbacks registered during it once it is done. <see cref="Enter"/> takes that interceptor's lock;
 /// everything else is called under it.
 /// </summary>
@@ -60,20 +58,10 @@ internal sealed class AttachOperation
 
         private static void RunAfterLocks(List<(Action<PropertyReference> Action, PropertyReference Property)> actions)
         {
-            ExceptionDispatchInfo? firstException = null;
             foreach (var (action, property) in actions)
             {
-                try
-                {
-                    action(property);
-                }
-                catch (Exception exception)
-                {
-                    firstException ??= ExceptionDispatchInfo.Capture(exception);
-                }
+                action(property);
             }
-
-            firstException?.Throw();
         }
     }
 
@@ -85,7 +73,7 @@ internal sealed class AttachOperation
     /// <summary>
     /// Calls <paramref name="callback"/> for <paramref name="property"/> once the outermost operation is done, still
     /// under the lock, if a subject is attached after this call in the same operation. The action the callback returns
-    /// is called for the property once the thread holds no lifecycle lock. The callback must not throw.
+    /// is called for the property once the thread holds no lifecycle lock. Neither of the two may throw.
     /// </summary>
     public void RunAtEndIfSubjectsAttachedLater(Func<PropertyReference, Action<PropertyReference>?> callback, in PropertyReference property)
     {

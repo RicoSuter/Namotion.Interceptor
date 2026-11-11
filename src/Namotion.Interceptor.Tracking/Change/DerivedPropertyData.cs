@@ -53,7 +53,8 @@ internal sealed class DerivedPropertyData
 
     /// <summary>
     /// Set under lock(this) when a state change occurs while IsRecalculating is true:
-    /// concurrent RecalculateDerivedProperty (bails), DetachProperty, or AttachProperty.
+    /// concurrent RecalculateDerivedProperty (bails), DetachProperty, AttachProperty, or the evaluation at
+    /// the end of an attach operation.
     /// Checked by RecalculateDerivedProperty before committing — if set, the evaluation
     /// result is discarded and the getter is re-evaluated with a fresh state.
     /// </summary>

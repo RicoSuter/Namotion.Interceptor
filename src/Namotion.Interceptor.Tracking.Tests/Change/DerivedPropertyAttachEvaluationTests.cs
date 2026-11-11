@@ -57,9 +57,7 @@ public class DerivedPropertyAttachEvaluationTests
         var observerWritesGraph = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         machine.Worker.Evaluator = worker =>
         {
-            // Changes between the two evaluations: the configuration has no parent before it is attached.
-            var configuration = worker.TryGetFirstParent<EvaluatorMachine>()!.Configuration;
-            var result = configuration.TryGetFirstParent<EvaluatorMachine>() is not null ? 1 : 0;
+            var result = EvaluatorWorker.ReadConfigurationOnceAttached(worker);
             if (++worker.EvaluationCount == 2)
             {
                 secondEvaluationReached.SetResult();
@@ -124,8 +122,62 @@ public class DerivedPropertyAttachEvaluationTests
         root.Machine = machine;
 
         // Assert
+        Assert.NotSame(worker, machine.Worker);
         var usedByProperties = new PropertyReference(root, nameof(EvaluatorRoot.Anchor)).GetUsedByProperties().Items.ToArray();
         Assert.DoesNotContain(usedByProperties, property => ReferenceEquals(property.Subject, worker));
+    }
+
+    [Fact]
+    public async Task WhenGetterWaitsForLockOfThreadWritingItsDependency_ThenBothComplete()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var getterLock = new object();
+        var firstEvaluationDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var writerHoldsLock = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondEvaluationReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        machine.Worker.Evaluator = worker =>
+        {
+            var evaluation = ++worker.EvaluationCount;
+            if (evaluation == 2)
+            {
+                writerHoldsLock.Task.Wait(TestTimeouts.Default);
+                secondEvaluationReached.SetResult();
+            }
+
+            int result;
+            lock (getterLock)
+            {
+                result = root.Anchor + worker.TryGetFirstParent<EvaluatorMachine>()!.Configuration.Value;
+            }
+
+            if (evaluation == 1)
+            {
+                firstEvaluationDone.SetResult();
+            }
+
+            return result;
+        };
+
+        // Act: the writer holds the lock the second evaluation waits for, and writes a dependency recorded by the first.
+        var write = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+        {
+            firstEvaluationDone.Task.Wait(TestTimeouts.Default);
+            lock (getterLock)
+            {
+                writerHoldsLock.SetResult();
+                secondEvaluationReached.Task.Wait(TestTimeouts.Default);
+                root.Anchor = 5;
+            }
+        });
+        var attach = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Machine = machine; });
+        await Task.WhenAll(write, attach).WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.Equal(5, machine.Worker.Result);
+        Assert.Equal(5, new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)).TryGetDerivedPropertyData()?.LastKnownValue);
     }
 
     [Fact]
@@ -136,12 +188,7 @@ public class DerivedPropertyAttachEvaluationTests
         var outgoingRoot = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
         var incomingRoot = new EvaluatorRoot { Machine = machine };
-        machine.Worker.Evaluator = worker =>
-        {
-            // Changes between the two evaluations: the configuration has no parent before it is attached.
-            var configuration = worker.TryGetFirstParent<EvaluatorMachine>()!.Configuration;
-            return configuration.TryGetFirstParent<EvaluatorMachine>() is not null ? 1 : 0;
-        };
+        machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
 
         var interceptor = context.GetService<LifecycleInterceptor>();
         interceptor.SubjectDetaching += change =>
@@ -181,12 +228,7 @@ public class DerivedPropertyAttachEvaluationTests
         ((IInterceptorSubject)root).Context.AddFallbackContext(firstContext);
         ((IInterceptorSubject)root).Context.AddFallbackContext(secondContext);
         var machine = new EvaluatorMachine();
-        machine.Worker.Evaluator = worker =>
-        {
-            // Changes between the two evaluations: the configuration has no parent before it is attached.
-            var configuration = worker.TryGetFirstParent<EvaluatorMachine>()!.Configuration;
-            return configuration.TryGetFirstParent<EvaluatorMachine>() is not null ? 1 : 0;
-        };
+        machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
 
         LifecycleInterceptor[] interceptors = [firstContext.GetService<LifecycleInterceptor>(), secondContext.GetService<LifecycleInterceptor>()];
         var lifecycleLocksWereFree = new List<bool>();
@@ -208,6 +250,45 @@ public class DerivedPropertyAttachEvaluationTests
 
         // Act
         root.Machine = machine;
+
+        // Assert
+        Assert.NotEmpty(lifecycleLocksWereFree);
+        Assert.All(lifecycleLocksWereFree, Assert.True);
+    }
+
+    [Fact]
+    public void WhenGraphIsAttachedToTwoContextsAtOnce_ThenChangedDerivedValueIsPublishedOutsideBothLifecycleLocks()
+    {
+        // Arrange: outside a write, the attach of one interceptor is nested in the attach of the other.
+        var firstContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var secondContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var bothContexts = InterceptorSubjectContext.Create();
+        bothContexts.AddFallbackContext(firstContext);
+        bothContexts.AddFallbackContext(secondContext);
+        var machine = new EvaluatorMachine();
+        var root = new EvaluatorRoot { Machine = machine };
+        machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
+
+        LifecycleInterceptor[] interceptors = [firstContext.GetService<LifecycleInterceptor>(), secondContext.GetService<LifecycleInterceptor>()];
+        var lifecycleLocksWereFree = new List<bool>();
+        using var subscription = firstContext.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (ReferenceEquals(change.Property.Subject, machine.Worker) && change.Property.Name == nameof(EvaluatorWorker.Result))
+            {
+                // Another thread gets both lifecycle locks only if this thread holds neither.
+                var otherThread = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+                {
+                    foreach (var interceptor in interceptors)
+                    {
+                        interceptor.TryRunWhileAttached(root, () => { });
+                    }
+                });
+                lifecycleLocksWereFree.Add(otherThread.Wait(TestTimeouts.Default));
+            }
+        });
+
+        // Act
+        ((IInterceptorSubject)root).Context.AddFallbackContext(bothContexts);
 
         // Assert
         Assert.NotEmpty(lifecycleLocksWereFree);

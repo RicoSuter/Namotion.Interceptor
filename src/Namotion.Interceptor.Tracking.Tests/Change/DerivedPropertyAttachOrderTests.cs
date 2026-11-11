@@ -17,6 +17,7 @@ public class DerivedPropertyAttachOrderTests
         var root = new SiblingReadingRoot(context);
         var machine = new SiblingReadingMachine();
         root.Machine = machine;
+        AssertEvaluatedAgain(machine.Device);
         var changes = SubscribeToChanges(context);
 
         // Act
@@ -34,6 +35,7 @@ public class DerivedPropertyAttachOrderTests
         var machine = new SiblingReadingMachine();
         var root = new SiblingReadingRoot { Machine = machine };
         ((IInterceptorSubject)root).Context.AddFallbackContext(context);
+        AssertEvaluatedAgain(machine.Device);
         var changes = SubscribeToChanges(context);
 
         // Act
@@ -52,6 +54,8 @@ public class DerivedPropertyAttachOrderTests
         var first = new SiblingReadingMachine();
         var second = new SiblingReadingMachine();
         root.Machines = [first, second];
+        AssertEvaluatedAgain(first.Device);
+        AssertEvaluatedAgain(second.Device);
         var changes = SubscribeToChanges(context);
 
         // Act
@@ -145,12 +149,7 @@ public class DerivedPropertyAttachOrderTests
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
-        machine.Worker.Evaluator = worker =>
-        {
-            // Changes between the two evaluations: the configuration has no parent before it is attached.
-            var configuration = worker.TryGetFirstParent<EvaluatorMachine>()!.Configuration;
-            return configuration.TryGetFirstParent<EvaluatorMachine>() is not null ? 1 : 0;
-        };
+        machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
         var changes = SubscribeToChanges(context);
 
         // Act
@@ -165,18 +164,118 @@ public class DerivedPropertyAttachOrderTests
     }
 
     [Fact]
-    public void WhenDerivedPropertyReturnsNewArrayWithTheSameItems_ThenAttachPublishesNoChangeOfIt()
+    public void WhenDerivedPropertyBuildsItsValueAnew_ThenAttachPublishesNoChangeOfAnUnchangedValue()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new SiblingReadingRoot(context);
+        var machine = new SiblingReadingMachine();
         var changes = SubscribeToChanges(context);
 
         // Act: the first machine is evaluated again, because the second one is attached after it.
-        root.Machines = [new SiblingReadingMachine(), new SiblingReadingMachine()];
+        root.Machines = [machine, new SiblingReadingMachine()];
+
+        // Assert: the list gained no dependency, and the array gained one but has the same items.
+        AssertEvaluatedAgain(machine.Device);
+        Assert.DoesNotContain(changes, change => change.Property.Name == nameof(SiblingReadingMachine.InstalledStateList));
+        Assert.DoesNotContain(changes, change => change.Property.Name == nameof(SiblingReadingDevice.InstalledStates));
+    }
+
+    [Fact]
+    public void WhenChangedValueCannotBeCompared_ThenItIsPublished()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new SiblingReadingRoot(context);
+        var machine = new SiblingReadingMachine();
+        context.WithService(() => new CallbackLifecycleHandler(change =>
+        {
+            if (change is { IsContextAttach: true, Subject: SiblingReadingConfiguration configuration })
+            {
+                configuration.Installed = true;
+            }
+        }));
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        root.Machine = machine;
 
         // Assert
-        Assert.DoesNotContain(changes, change => change.Property.Name == nameof(SiblingReadingMachine.InstalledStates));
+        var change = Assert.Single(changes, c => c.Property.Name == nameof(SiblingReadingDevice.InstalledGrid));
+        Assert.False(change.GetOldValue<bool[,]>()[0, 0]);
+        Assert.True(change.GetNewValue<bool[,]>()[0, 0]);
+    }
+
+    [Fact]
+    public void WhenStructuralWriteFails_ThenChangedDerivedValueIsPublishedAndTheExceptionOfTheWriteWins()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new SiblingReadingRoot(context);
+        var machine = new SiblingReadingMachine();
+        var failingMachine = new SiblingReadingMachine();
+        context.WithService(() => new CallbackLifecycleHandler(change =>
+        {
+            if (change is { IsContextAttach: true, Subject: SiblingReadingConfiguration configuration })
+            {
+                configuration.Installed = true;
+            }
+
+            if (change.IsContextAttach && change.Subject == failingMachine)
+            {
+                throw new NotSupportedException();
+            }
+        }));
+        var changes = SubscribeToChanges(context);
+        using var throwingSubscription = context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Subject == machine.Device && change.Property.Name == nameof(SiblingReadingDevice.IsInstalled))
+            {
+                throw new InvalidOperationException();
+            }
+        });
+
+        // Act
+        var exception = Record.Exception(() => root.Machines = [machine, failingMachine]);
+
+        // Assert
+        Assert.IsType<NotSupportedException>(exception);
+        AssertSingleChange(changes, machine.Device, nameof(SiblingReadingDevice.IsInstalled), true);
+    }
+
+    [Fact]
+    public void WhenContextAttachFails_ThenItsExceptionWinsOverAnObserverThatThrows()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var machine = new SiblingReadingMachine();
+        var failingMachine = new SiblingReadingMachine();
+        var root = new SiblingReadingRoot { Machines = [machine, failingMachine] };
+        context.WithService(() => new CallbackLifecycleHandler(change =>
+        {
+            if (change is { IsContextAttach: true, Subject: SiblingReadingConfiguration configuration })
+            {
+                configuration.Installed = true;
+            }
+
+            if (change.IsContextAttach && change.Subject == failingMachine)
+            {
+                throw new NotSupportedException();
+            }
+        }));
+        using var throwingSubscription = context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Name == nameof(SiblingReadingDevice.IsInstalled))
+            {
+                throw new InvalidOperationException();
+            }
+        });
+
+        // Act
+        var exception = Record.Exception(() => ((IInterceptorSubject)root).Context.AddFallbackContext(context));
+
+        // Assert
+        Assert.IsType<NotSupportedException>(exception);
     }
 
     [Fact]
@@ -266,6 +365,12 @@ public class DerivedPropertyAttachOrderTests
         var changes = new List<SubjectPropertyChange>();
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
         return changes;
+    }
+
+    // The tests of a sibling attached later mean nothing if the device is attached last: it is then evaluated once.
+    private static void AssertEvaluatedAgain(SiblingReadingDevice device)
+    {
+        Assert.True(device.EvaluationCount >= 2, $"The device was evaluated {device.EvaluationCount} time(s).");
     }
 
     private static void AssertSingleChange<T>(List<SubjectPropertyChange> changes, IInterceptorSubject subject, string propertyName, T newValue)

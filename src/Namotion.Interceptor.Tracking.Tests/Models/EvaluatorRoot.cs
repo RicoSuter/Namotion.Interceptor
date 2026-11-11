@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -13,7 +14,7 @@ public partial class EvaluatorRoot
 }
 
 /// <summary>
-/// Declares the worker ahead of the configuration, so that the worker attaches first.
+/// The tests rely on the worker attaching before the configuration.
 /// </summary>
 [InterceptorSubject]
 public partial class EvaluatorMachine
@@ -47,4 +48,14 @@ public partial class EvaluatorWorker
 
     [Derived]
     public int Result => Evaluator?.Invoke(this) ?? 0;
+
+    /// <summary>
+    /// An evaluator whose value changes, and that gains a dependency, once the configuration is attached: before that
+    /// the configuration has no parent, and its value is read without being tracked.
+    /// </summary>
+    public static int ReadConfigurationOnceAttached(EvaluatorWorker worker)
+    {
+        var configuration = worker.TryGetFirstParent<EvaluatorMachine>()!.Configuration;
+        return (configuration.TryGetFirstParent<EvaluatorMachine>() is not null ? 1 : 0) + configuration.Value;
+    }
 }

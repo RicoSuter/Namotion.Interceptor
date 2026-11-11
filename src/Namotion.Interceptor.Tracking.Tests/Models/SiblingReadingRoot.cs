@@ -17,7 +17,8 @@ public partial class SiblingReadingRoot
 }
 
 /// <summary>
-/// Declares the device ahead of the configuration it reads, so that the device attaches first.
+/// The tests rely on the device attaching before the configuration it reads, which they check through the number of
+/// evaluations of the device.
 /// </summary>
 [InterceptorSubject]
 public partial class SiblingReadingMachine
@@ -33,10 +34,10 @@ public partial class SiblingReadingMachine
     public partial SiblingReadingConfiguration Configuration { get; set; }
 
     /// <summary>
-    /// A new array on every evaluation.
+    /// A new list on every evaluation, of a subject that is attached before this property.
     /// </summary>
     [Derived]
-    public bool[] InstalledStates => [Configuration.Installed];
+    public List<bool> InstalledStateList => [Configuration.Installed];
 }
 
 [InterceptorSubject]
@@ -68,7 +69,24 @@ public partial class SiblingReadingDevice
         get
         {
             EvaluationCount++;
-            return this.TryGetFirstParent<SiblingReadingMachine>()?.Configuration.Installed ?? false;
+            return ReadInstalled();
         }
+    }
+
+    /// <summary>
+    /// A new array on every evaluation, of a subject that is attached after this property.
+    /// </summary>
+    [Derived]
+    public bool[] InstalledStates => [ReadInstalled()];
+
+    /// <summary>
+    /// An array of rank two, whose structural comparison throws.
+    /// </summary>
+    [Derived]
+    public bool[,] InstalledGrid => new[,] { { ReadInstalled() } };
+
+    private bool ReadInstalled()
+    {
+        return this.TryGetFirstParent<SiblingReadingMachine>()?.Configuration.Installed ?? false;
     }
 }

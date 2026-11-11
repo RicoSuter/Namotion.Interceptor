@@ -52,6 +52,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// <returns>True when the subject was attached and the callback ran.</returns>
     public bool TryRunWhileAttached(IInterceptorSubject subject, Action whenAttached)
     {
+        // A plain lock, since the callback must not mutate the graph. Whatever attaches or detaches takes the lock
+        // through _attachOperation.Enter, which is what keeps a publication from running under it.
         lock (_attachedSubjects)
         {
             if (!_attachedSubjects.ContainsKey(subject))
