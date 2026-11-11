@@ -137,9 +137,10 @@ jobs:
           path: 'TestResults/**/*.trx'
           if-no-files-found: warn
 
-      # A test that hangs for 5 minutes is dumped and named in the log, and the dump says where it waits.
+      # A test that hangs for 5 minutes is dumped and named in the log, and the dump says where it waits. A job that hits its
+      # time limit while dumping counts as canceled, not failed.
       - name: Upload hang dumps
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v7
         with:
           name: hang-dumps-${{ matrix.os }}
@@ -248,7 +249,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload HomeBlaze integration hang dumps
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v7
         with:
           name: hang-dumps-homeblaze-integration-${{ strategy.job-index }}
