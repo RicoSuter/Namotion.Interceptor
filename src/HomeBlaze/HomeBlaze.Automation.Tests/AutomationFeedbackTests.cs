@@ -38,7 +38,9 @@ public class AutomationFeedbackTests
     {
         // Arrange
         var replacer = new TestReplacer { Sensor = new TestSensor { Gust = 1 } };
-        await using var host = await AutomationTestHost.StartAsync(automation => ConfigureReplacingRules(automation, shape));
+        // A shape that changes state writes a durable checkpoint for each input of the chain, which adds up beyond the
+        // bounded flush on a slow disk; persistence is not what the test is about.
+        await using var host = await AutomationTestHost.StartAsync(automation => ConfigureReplacingRules(automation, shape), keepsCheckpoints: false);
 
         // Act
         host.Graph.Add("Replacer", replacer);
