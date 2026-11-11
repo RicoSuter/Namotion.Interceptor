@@ -9,6 +9,7 @@ using Moq;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Hosting;
+using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.Services.Tests.Serialization;
 
@@ -48,11 +49,11 @@ public class ConfigurableSubjectStartupTests
         {
             // Act
             await rootManager.StartAsync(CancellationToken.None);
-            await rootManager.RootLoaded.WaitAsync(TimeSpan.FromSeconds(10));
+            await rootManager.RootLoaded.WaitAsync(TestTimeouts.Default);
 
             // Assert
-            Assert.True(await published.Task.WaitAsync(TimeSpan.FromSeconds(10)));
-            Assert.Equal("configured", await probe.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.True(await published.Task.WaitAsync(TestTimeouts.Default));
+            Assert.Equal("configured", await probe.Started.Task.WaitAsync(TestTimeouts.Default));
         }
         finally
         {
@@ -83,10 +84,10 @@ public class ConfigurableSubjectStartupTests
         try
         {
             // Act
-            await probe.Populating.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await probe.Populating.Task.WaitAsync(TestTimeouts.Default);
             probe.Release.Set();
-            var subject = (IInterceptorSubject)(await deserialize.WaitAsync(TimeSpan.FromSeconds(10)))!;
-            var observed = await probe.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var subject = (IInterceptorSubject)(await deserialize.WaitAsync(TestTimeouts.Default))!;
+            var observed = await probe.Started.Task.WaitAsync(TestTimeouts.Default);
 
             // Assert
             Assert.Equal("configured", observed);
@@ -95,7 +96,7 @@ public class ConfigurableSubjectStartupTests
         finally
         {
             probe.Release.Set();
-            await deserialize.WaitAsync(TimeSpan.FromSeconds(10));
+            await deserialize.WaitAsync(TestTimeouts.Default);
             await handler.StopAsync(CancellationToken.None);
         }
     }
@@ -126,7 +127,7 @@ public class ConfigurableSubjectStartupTests
 
             // Assert - the scope defers the start, it does not decide whether the subject is fit to
             // run, so unwinding through its disposal releases the start like any other exit.
-            Assert.Equal(string.Empty, await probe.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Equal(string.Empty, await probe.Started.Task.WaitAsync(TestTimeouts.Default));
         }
         finally
         {
@@ -162,7 +163,7 @@ public class ConfigurableSubjectStartupTests
 
             // Assert: the starts run in the order of their subjects, so a start of the first subject would come first.
             Assert.Equal(string.Empty, defaults!.Value.GetProperty("configuration").GetString());
-            Assert.Equal("configured", await probe.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Equal("configured", await probe.Started.Task.WaitAsync(TestTimeouts.Default));
         }
         finally
         {
@@ -201,7 +202,7 @@ public partial class ConfigurableStartupSubject : IHostedService, IConfigurable
         set
         {
             _probe.Populating.TrySetResult();
-            if (!_probe.Release.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException();
+            if (!_probe.Release.Wait(TestTimeouts.Default)) throw new TimeoutException();
             _probe.BeforeAssignment?.Invoke();
             if (_probe.FailPopulation) throw new InvalidOperationException("Invalid configuration");
             _configuration = value;

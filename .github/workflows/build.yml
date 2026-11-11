@@ -125,6 +125,8 @@ jobs:
             --filter "Category!=Integration" `
             --logger trx `
             --results-directory ./TestResults `
+            --blame-hang-timeout 5m `
+            --blame-hang-dump-type mini `
             @coverageArguments
 
       - name: Upload test results
@@ -134,6 +136,19 @@ jobs:
           name: test-results-${{ matrix.os }}
           path: 'TestResults/**/*.trx'
           if-no-files-found: warn
+
+      # A test that hangs for 5 minutes is dumped and named in the log, and the dump says where it waits. A job that hits its
+      # time limit while dumping counts as canceled, not failed.
+      - name: Upload hang dumps
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hang-dumps-${{ matrix.os }}
+          path: |
+            TestResults/**/*.dmp
+            TestResults/**/Sequence_*.xml
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload raw coverage file
         if: runner.os == 'Linux'
@@ -221,6 +236,8 @@ jobs:
             --no-build `
             --filter "${{ steps.shard.outputs.filter }}" `
             --results-directory ./TestResults `
+            --blame-hang-timeout 5m `
+            --blame-hang-dump-type mini `
             --collect:"XPlat Code Coverage" `
             -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
 
@@ -230,6 +247,17 @@ jobs:
           name: cobertura-coverage-homeblaze-integration-${{ strategy.job-index }}
           path: '**/TestResults/**/coverage.cobertura.xml'
           if-no-files-found: warn
+
+      - name: Upload HomeBlaze integration hang dumps
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hang-dumps-homeblaze-integration-${{ strategy.job-index }}
+          path: |
+            TestResults/**/*.dmp
+            TestResults/**/Sequence_*.xml
+          if-no-files-found: ignore
+          retention-days: 7
 
   test-automation-integration:
     timeout-minutes: 40

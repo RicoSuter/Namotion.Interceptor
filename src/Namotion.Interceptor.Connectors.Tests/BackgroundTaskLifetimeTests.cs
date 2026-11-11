@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor.Testing;
 
 namespace Namotion.Interceptor.Connectors.Tests;
 
@@ -115,7 +116,7 @@ public class BackgroundTaskLifetimeTests
 
         // Act
         await parentCts.CancelAsync();
-        await monitorExited.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await monitorExited.Task.WaitAsync(TestTimeouts.Default);
 
         // Assert — monitor exited due to parent cancellation
         await lifetime.DisposeAsync();
