@@ -14,9 +14,12 @@ internal static class AutomationColors
         _ => Color.Default
     };
 
-    /// <summary>Green for a rule that is armed, such as <c>Armed</c> or <c>Armed, waiting until false</c>, otherwise the default.</summary>
+    /// <summary>
+    /// Green for the status text of a rule that is armed, <see cref="RuleStatusTexts.Armed"/> or
+    /// <see cref="RuleStatusTexts.ArmedWaitingUntilFalse"/>, also with why its last request did not run, otherwise the default.
+    /// </summary>
     public static Color GetRuleStatusColor(string? statusText) =>
-        statusText is not null && statusText.StartsWith("Armed", StringComparison.Ordinal) ? Color.Success : Color.Default;
+        statusText is not null && statusText.StartsWith(RuleStatusTexts.Armed, StringComparison.Ordinal) ? Color.Success : Color.Default;
 
     public static Color GetOutcomeColor(AutomationRunOutcome outcome) => outcome switch
     {

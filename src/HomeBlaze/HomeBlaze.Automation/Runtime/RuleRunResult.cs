@@ -7,9 +7,6 @@ namespace HomeBlaze.Automation.Runtime;
 /// </summary>
 internal sealed record RuleRunResult(AutomationRunOutcome? Outcome, string Message, bool ChangedState, string? Error)
 {
-    /// <summary>The longest <see cref="Message"/>, which keeps it within what history stores for a text.</summary>
-    public const int MaxMessageLength = 500;
-
     /// <summary>The states that the run entered and left again, in order, such as <c>On</c> for a run from <c>Off</c> to <c>On</c> and back.</summary>
     public IReadOnlyList<string> PassedStates { get; init; } = [];
 
@@ -26,5 +23,5 @@ internal sealed record RuleRunResult(AutomationRunOutcome? Outcome, string Messa
     public static RuleRunResult Canceled(string message) => new(AutomationRunOutcome.Canceled, Shorten(message), false, null);
 
     public static string Shorten(string text) =>
-        text.Length <= MaxMessageLength ? text : string.Concat(text.AsSpan(0, MaxMessageLength - 3), "...");
+        text.Length <= AutomationRule.MaxRunMessageLength ? text : string.Concat(text.AsSpan(0, AutomationRule.MaxRunMessageLength - 3), "...");
 }

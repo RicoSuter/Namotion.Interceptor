@@ -14,9 +14,7 @@ internal static partial class RunMessage
 {
     private const string RanPrefix = "Ran ";
 
-    // The length of a message that the runtime shortened and ended with "...", RuleRunResult.MaxMessageLength in
-    // HomeBlaze.Automation, which this library cannot reference.
-    private const int ShortenedLength = 500;
+    // The end of a message that the runtime cut to AutomationRule.MaxRunMessageLength.
     private const string Ellipsis = "...";
 
     public static IReadOnlyList<RunMessageAction> Parse(string? message)
@@ -46,7 +44,7 @@ internal static partial class RunMessage
         }
 
         // A shortened part can end anywhere, such as inside an argument that then reads as a property write.
-        if (message.Length >= ShortenedLength && message.EndsWith(Ellipsis, StringComparison.Ordinal))
+        if (message.Length >= AutomationRule.MaxRunMessageLength && message.EndsWith(Ellipsis, StringComparison.Ordinal))
         {
             actions[^1] = new RunMessageAction(null, null, parts[^1]);
         }
