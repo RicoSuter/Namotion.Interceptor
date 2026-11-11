@@ -76,71 +76,51 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     public void AttachSubjectToContext(IInterceptorSubject subject)
     {
         var collectedSubjects = GetList();
-        Action? afterLock = null;
         try
         {
-            lock (_attachedSubjects)
+            using (_attachOperation.Enter(_attachedSubjects))
             {
-                _attachOperation.Begin();
-                try
+                FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
+
+                foreach (var child in collectedSubjects)
                 {
-                    FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
-
-                    foreach (var child in collectedSubjects)
-                    {
-                        AttachToProperty(child.subject, subject.Context, child.property, child.index);
-                    }
-
-                    if (!_attachedSubjects.ContainsKey(subject))
-                    {
-                        AttachToContext(subject, subject.Context);
-                    }
+                    AttachToProperty(child.subject, subject.Context, child.property, child.index);
                 }
-                finally
+
+                if (!_attachedSubjects.ContainsKey(subject))
                 {
-                    afterLock = _attachOperation.End();
+                    AttachToContext(subject, subject.Context);
                 }
             }
         }
         finally
         {
             ReturnList(collectedSubjects);
-            afterLock?.Invoke();
         }
     }
 
     public void DetachSubjectFromContext(IInterceptorSubject subject)
     {
         var collectedSubjects = GetList();
-        Action? afterLock = null;
         try
         {
-            lock (_attachedSubjects)
+            // An operation, because a handler may attach subjects while this detaches: what those attaches leave to
+            // run after the lock then waits until this lock is released as well.
+            using (_attachOperation.Enter(_attachedSubjects))
             {
-                // A handler may attach subjects while this detaches: as one operation, so that what those attaches
-                // leave to run after the lock waits until this lock is released as well.
-                _attachOperation.Begin();
-                try
-                {
-                    FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Use);
+                FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Use);
 
-                    foreach (var child in collectedSubjects)
-                    {
-                        DetachFromProperty(child.subject, subject.Context, child.property, child.index);
-                    }
-
-                    DetachFromContext(subject, subject.Context);
-                }
-                finally
+                foreach (var child in collectedSubjects)
                 {
-                    afterLock = _attachOperation.End();
+                    DetachFromProperty(child.subject, subject.Context, child.property, child.index);
                 }
+
+                DetachFromContext(subject, subject.Context);
             }
         }
         finally
         {
             ReturnList(collectedSubjects);
-            afterLock?.Invoke();
         }
     }
 
@@ -383,28 +363,14 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             return;
         }
 
-        Action? afterLock = null;
-        try
-        {
-            ReconcileUnderLock(ref context, metadata.GetValue, ref afterLock);
-        }
-        finally
-        {
-            afterLock?.Invoke();
-        }
-    }
-
-    // afterLock receives what is left to run after the lock is released, also when this throws.
-    private void ReconcileUnderLock<TProperty>(
-        ref PropertyWriteContext<TProperty> context, Func<IInterceptorSubject, object?>? getValue, ref Action? afterLock)
-    {
-        lock (_attachedSubjects)
+        using (_attachOperation.Enter(_attachedSubjects))
         {
             var lastProcessed = _lastProcessedValues.GetValueOrDefault(context.Property);
 
             // Read the actual backing store value to handle concurrent writes correctly.
             // context.NewValue may differ from the backing store if another thread
             // overwrote the property between our next() call and lock acquisition.
+            var getValue = metadata.GetValue;
             var newValue = getValue is not null
                 ? getValue(context.Property.Subject)
                 : context.NewValue;
@@ -419,15 +385,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 return;
             }
 
-            _attachOperation.Begin();
-            try
-            {
-                ReconcilePropertySubjects(ref context, lastProcessed, newValue);
-            }
-            finally
-            {
-                afterLock = _attachOperation.End();
-            }
+            ReconcilePropertySubjects(ref context, lastProcessed, newValue);
         }
     }
 

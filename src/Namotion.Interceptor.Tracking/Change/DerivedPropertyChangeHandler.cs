@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -33,6 +34,15 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     [ThreadStatic]
     private static DerivedPropertyRecorder? _recorder;
 
+    // Writes on this thread that can attach subjects and have not returned yet, and the derived properties whose
+    // evaluation at the end of an attach found a changed value while such a write was running. The outermost of
+    // those writes recalculates them once it has been announced.
+    [ThreadStatic]
+    private static int _attachingWriteDepth;
+
+    [ThreadStatic]
+    private static List<PropertyReference>? _changedAfterAttach;
+
     internal static bool IsRecordingDerivedProperty
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -56,25 +66,23 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
         // A detach may remove the fetched data before it is locked: attach the current data instead.
         bool isAttached;
-        bool mayHaveMissedSubjects;
+        bool evaluationFailed;
         do
         {
-            isAttached = TryAttach(change.Property.GetDerivedPropertyData(), change.Property, out mayHaveMissedSubjects);
+            isAttached = TryAttach(change.Property.GetDerivedPropertyData(), change.Property, out evaluationFailed);
         }
         while (!isAttached);
 
         // The getter records only reads of attached subjects, so it misses a dependency on a subject attached later in
         // the same operation, such as a sibling of an ancestor.
-        if (mayHaveMissedSubjects)
-        {
-            change.AttachOperation?.RunAtEndIfSubjectsAttachedLater(ReevaluateAfterAttach, change.Property);
-        }
+        change.AttachOperation?.RunAtEndIfSubjectsAttachedLater(
+            evaluationFailed ? EvaluateAfterFailedAttach : ReevaluateAfterAttach, change.Property);
     }
 
     /// <summary>
-    /// Evaluates an attached derived property again to record dependencies on subjects attached after it. Returns the
-    /// recalculation to run after the lifecycle lock is released if the value changed through a read that was not
-    /// tracked when it was attached.
+    /// Evaluates an attached derived property again to record dependencies on subjects attached after it, if it
+    /// depends on a property that can hold subjects by now. Returns the recalculation to run once the thread holds no
+    /// lifecycle lock if the value changed through a read that was not tracked before.
     /// </summary>
     private static Action<PropertyReference>? ReevaluateAfterAttach(PropertyReference property)
     {
@@ -86,15 +94,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
         lock (data)
         {
-            if (!data.IsAttached || !ReferenceEquals(property.TryGetDerivedPropertyData(), data))
+            if (!TryBeginEvaluationAfterAttach(data, property) || !DependsOnPropertyThatCanHoldSubjects(data))
             {
-                return null;
-            }
-
-            if (data.IsRecalculating)
-            {
-                // The recalculation in flight evaluates again, records the dependencies and publishes.
-                data.RecalculationNeeded = true;
                 return null;
             }
 
@@ -102,7 +103,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             {
                 // LastKnownValue stays as it is, so that the recalculation publishes the change from it.
                 var value = EvaluateAndStabilize(data, property, callerHoldsLock: true);
-                return data.IsAttached && !Equals(value, data.LastKnownValue) ? RecalculateAfterAttach : null;
+                return data.IsAttached && !AreSameValue(value, data.LastKnownValue) ? RecalculateAfterAttach : null;
             }
             catch (Exception)
             {
@@ -112,19 +113,81 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
     }
 
-    // Publishes, so it must not run under the lifecycle lock: an observer on another thread may hold the dispatch lock
-    // while it waits for the lifecycle lock.
-    private static void RecalculateAfterAttach(PropertyReference property)
+    /// <summary>
+    /// Evaluates an attached derived property whose evaluation at attach threw. This is its first value, so nothing is
+    /// published, as for an evaluation at attach.
+    /// </summary>
+    private static Action<PropertyReference>? EvaluateAfterFailedAttach(PropertyReference property)
     {
-        property.RecalculateDerivedProperty();
+        var data = property.TryGetDerivedPropertyData();
+        if (data is null)
+        {
+            return null;
+        }
+
+        lock (data)
+        {
+            if (TryBeginEvaluationAfterAttach(data, property))
+            {
+                try
+                {
+                    data.LastKnownValue = EvaluateAndStabilize(data, property, callerHoldsLock: true);
+                    property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
+                }
+                catch (Exception)
+                {
+                    // Getter threw again. The value will be computed on the next dependency write.
+                }
+            }
+
+            return null;
+        }
     }
 
-    // mayHaveMissedSubjects: whether the evaluation could have missed a subject without a context, through a tracked
-    // property that can hold subjects or because it threw. A subject reached through a field or a service is not
-    // considered, see docs/tracking.md, Reaching Other Subjects.
-    private static bool TryAttach(DerivedPropertyData data, in PropertyReference property, out bool mayHaveMissedSubjects)
+    // Requires lock(data). False when the property is detached, or when a recalculation in flight evaluates it instead.
+    private static bool TryBeginEvaluationAfterAttach(DerivedPropertyData data, in PropertyReference property)
     {
-        mayHaveMissedSubjects = true;
+        if (!data.IsAttached || !Volatile.Read(ref data.IsDerived) || !ReferenceEquals(property.TryGetDerivedPropertyData(), data))
+        {
+            return false;
+        }
+
+        if (data.IsRecalculating)
+        {
+            // The recalculation in flight evaluates again, records the dependencies and publishes.
+            data.RecalculationNeeded = true;
+            return false;
+        }
+
+        return true;
+    }
+
+    // An array a getter builds anew on every call is the same value while its items are.
+    private static bool AreSameValue(object? value, object? lastKnownValue)
+    {
+        return Equals(value, lastKnownValue) ||
+            (value is System.Collections.IStructuralEquatable structural &&
+             structural.Equals(lastKnownValue, EqualityComparer<object>.Default));
+    }
+
+    // Publishes, so it runs only once the thread holds no lifecycle lock: an observer on another thread may hold the
+    // dispatch lock while it waits for a lifecycle lock. Within a write that can attach subjects it waits further, for
+    // that write to be announced, so that a subject is never announced after the derived properties in it.
+    private static void RecalculateAfterAttach(PropertyReference property)
+    {
+        if (_attachingWriteDepth > 0)
+        {
+            (_changedAfterAttach ??= []).Add(property);
+        }
+        else
+        {
+            property.RecalculateDerivedProperty();
+        }
+    }
+
+    private static bool TryAttach(DerivedPropertyData data, in PropertyReference property, out bool evaluationFailed)
+    {
+        evaluationFailed = false;
         lock (data)
         {
             if (!ReferenceEquals(property.TryGetDerivedPropertyData(), data))
@@ -144,17 +207,19 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             {
                 data.LastKnownValue = EvaluateAndStabilize(data, property, callerHoldsLock: true);
                 property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
-                mayHaveMissedSubjects = DependsOnPropertyThatCanHoldSubjects(data);
             }
             catch (Exception)
             {
                 // Getter threw. The value will be computed on the next dependency write.
+                evaluationFailed = true;
             }
 
             return true;
         }
     }
 
+    // A getter reaches another subject through tracked properties only by reading a property that can hold subjects.
+    // A subject reached through a field or a service is not considered, see docs/tracking.md, Reaching Other Subjects.
     private static bool DependsOnPropertyThatCanHoldSubjects(DerivedPropertyData data)
     {
         foreach (ref readonly var dependency in data.RequiredPropertiesSpan)
@@ -241,6 +306,71 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+    {
+        // Constant per TProperty, so a write of a value pays nothing for the bookkeeping below.
+        if (!RuntimeHelpers.IsReferenceOrContainsReferences<TProperty>() || typeof(TProperty) == typeof(string))
+        {
+            WriteAndRecalculateDependents(ref context, next);
+            return;
+        }
+
+        _attachingWriteDepth++;
+        try
+        {
+            WriteAndRecalculateDependents(ref context, next);
+        }
+        catch
+        {
+            // The write failed, but the subjects it attached before stay attached. Its exception wins.
+            if (--_attachingWriteDepth == 0)
+            {
+                RecalculateChangedAfterAttach(context.WriteTimestampRaw, throwOnFailure: false);
+            }
+
+            throw;
+        }
+
+        if (--_attachingWriteDepth == 0)
+        {
+            RecalculateChangedAfterAttach(context.WriteTimestampRaw, throwOnFailure: true);
+        }
+    }
+
+    private static void RecalculateChangedAfterAttach(long rawTimestamp, bool throwOnFailure)
+    {
+        var properties = _changedAfterAttach;
+        if (properties is null)
+        {
+            return;
+        }
+
+        // Taken over first, because an observer may start a write that collects and recalculates its own.
+        _changedAfterAttach = null;
+
+        var storageTimestamp = rawTimestamp > 0 ? rawTimestamp : 0L;
+        ExceptionDispatchInfo? firstException = null;
+        foreach (var changedProperty in properties)
+        {
+            var property = changedProperty;
+            try
+            {
+                RecalculateDerivedProperty(ref property, storageTimestamp, rawTimestamp);
+            }
+            catch (Exception exception)
+            {
+                // An observer threw: the other properties are still recalculated.
+                firstException ??= ExceptionDispatchInfo.Capture(exception);
+            }
+        }
+
+        if (throwOnFailure)
+        {
+            firstException?.Throw();
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void WriteAndRecalculateDependents<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         next(ref context);
 

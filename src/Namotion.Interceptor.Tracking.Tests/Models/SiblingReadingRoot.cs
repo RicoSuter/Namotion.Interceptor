@@ -31,6 +31,12 @@ public partial class SiblingReadingMachine
     public partial SiblingReadingDevice Device { get; set; }
 
     public partial SiblingReadingConfiguration Configuration { get; set; }
+
+    /// <summary>
+    /// A new array on every evaluation.
+    /// </summary>
+    [Derived]
+    public bool[] InstalledStates => [Configuration.Installed];
 }
 
 [InterceptorSubject]
