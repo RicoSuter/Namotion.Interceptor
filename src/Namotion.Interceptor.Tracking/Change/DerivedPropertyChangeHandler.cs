@@ -54,6 +54,13 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             return;
         }
 
+        // The getter records only reads of attached subjects, so evaluating it while its subtree is still attaching
+        // would miss a dependency on a subject attached later in the same operation, such as a sibling of an ancestor.
+        if (change.Deferral?.TryDefer(this, change.Property) == true)
+        {
+            return;
+        }
+
         // A detach may remove the fetched data before it is locked: attach the current data instead.
         bool isAttached;
         do

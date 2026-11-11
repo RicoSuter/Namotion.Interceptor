@@ -24,7 +24,7 @@ Derived properties can also be added at runtime via `RegisteredSubject.AddDerive
 
 ## Interceptor Ordering
 
-`DerivedPropertyChangeHandler` is annotated with `[RunsBefore(typeof(LifecycleInterceptor))]`. This ensures `AttachProperty` runs before lifecycle handlers, so derived property dependencies are recorded and the initial value is cached before other handlers see the property.
+`DerivedPropertyChangeHandler` is annotated with `[RunsBefore(typeof(LifecycleInterceptor))]`. This ensures `AttachProperty` runs before lifecycle handlers, so derived property dependencies are recorded and the initial value is cached before other handlers see the property, except for subjects entering the graph, whose evaluation is postponed (see [Attach](#1-attach-initialization)).
 
 It also carries `[RunsBefore(typeof(PropertyChangeInterceptor))]`, which places the cascade recalculation after that interceptor has dispatched, so a triggering write is announced before the derived recalculations it causes. This only changes the resolved order under aggregated contexts, where instances of both types would otherwise interleave.
 
@@ -125,6 +125,8 @@ AttachProperty(FullName)
 ```
 
 The retry only matters for an attach that runs outside the lifecycle lock, such as one for a property added at runtime, or under another context's lifecycle lock; attach and detach under one lifecycle lock never overlap.
+
+When `LifecycleInterceptor` attaches subjects that enter the graph, through a structural write or through a context attach, this evaluation is postponed until every subject entering the graph in that operation is attached. The getter records only reads of attached subjects, and the descent attaches a subject's subtree before its later siblings, so a derived property that reads a sibling of an ancestor (`Parent.Configuration.Installed` read from `Parent.Device`) would otherwise record a dependency on `Parent.Configuration` but not on `Installed`, and miss every later change of it. `DerivedPropertyChangeHandler.AttachProperty` hands the property to the interceptor's `PropertyAttachDeferral` and returns; the interceptor calls it again once the outermost operation is done, still under its lock and in attach order. Other property lifecycle handlers are unaffected: they still see every property when it attaches. `DerivedPropertyAttachOrderTests` covers it.
 
 `EvaluateAndStabilize` handles the dependency recording, generation check, and stabilization loop internally (see Section 4 for details). If the getter throws during initial evaluation (typically during concurrent state transitions), the exception is caught and `LastKnownValue` remains null. The next dependency write triggers recalculation which retries with consistent state.
 

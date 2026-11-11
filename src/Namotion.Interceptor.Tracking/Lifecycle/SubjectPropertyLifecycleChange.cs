@@ -6,4 +6,8 @@ public record struct SubjectPropertyLifecycleChange(
     IInterceptorSubject Subject,
     PropertyReference Property)
 {
+    /// <summary>
+    /// Set while a <see cref="LifecycleInterceptor"/> attaches the properties of subjects entering the graph.
+    /// </summary>
+    internal PropertyAttachDeferral? Deferral { get; init; }
 }

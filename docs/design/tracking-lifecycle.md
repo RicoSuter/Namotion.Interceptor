@@ -219,7 +219,7 @@ public void HandleLifecycleChange(SubjectLifecycleChange change)
 
 (`GetParents()` needs `WithParents()` on the context. Without it the same walk goes over `RegisteredSubject.Parents`, the registry's own parent edges.)
 
-Were the registry behind the descent, `child` would see only part of that chain and `TryGetRegisteredSubject()` would return null for the rest, so a walk would compute a wrong answer rather than fail. Derived getters are exposed to this too, because `DerivedPropertyChangeHandler` evaluates them while the property attaches.
+Were the registry behind the descent, `child` would see only part of that chain and `TryGetRegisteredSubject()` would return null for the rest, so a walk would compute a wrong answer rather than fail. Derived getters are not exposed to this: `DerivedPropertyChangeHandler` postpones their first evaluation until the outermost attach has attached every subject entering the graph, so that a getter reading a sibling of an ancestor records that sibling as a dependency (see [Attach](tracking-derived-properties.md#1-attach-initialization)).
 
 A handler that records something other handlers read during attach therefore has to say so with `[RunsBefore(typeof(ContextInheritanceHandler))]`. Registration order alone is not enough, because an unrelated handler's ordering constraint can move it. `[RunsAfter(typeof(SubjectRegistry))]` is not a substitute: it constrains the handler only against the registry, leaving its position relative to the descent dependent on where it was registered.
 
