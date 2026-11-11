@@ -22,4 +22,20 @@ public class DerivedPropertyAttachEvaluationTests
         // Assert
         Assert.Equal(1, device.EvaluationCount);
     }
+
+    [Fact]
+    public void WhenSubtreeIsAttached_ThenOnlyDerivedPropertyReadingThroughSubjectPropertiesIsEvaluatedAgain()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new SiblingReadingRoot(context);
+        var machine = new SiblingReadingMachine();
+
+        // Act
+        root.Machines = [machine, new SiblingReadingMachine()];
+
+        // Assert
+        Assert.Equal(2, machine.Device.EvaluationCount);
+        Assert.Equal(1, machine.Configuration.EvaluationCount);
+    }
 }

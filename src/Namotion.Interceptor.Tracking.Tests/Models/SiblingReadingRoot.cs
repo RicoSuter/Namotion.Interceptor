@@ -37,6 +37,18 @@ public partial class SiblingReadingMachine
 public partial class SiblingReadingConfiguration
 {
     public partial bool Installed { get; set; }
+
+    public int EvaluationCount { get; private set; }
+
+    [Derived]
+    public string State
+    {
+        get
+        {
+            EvaluationCount++;
+            return Installed ? "Installed" : "NotInstalled";
+        }
+    }
 }
 
 [InterceptorSubject]

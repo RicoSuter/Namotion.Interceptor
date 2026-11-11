@@ -56,15 +56,19 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
         // A detach may remove the fetched data before it is locked: attach the current data instead.
         bool isAttached;
+        bool mayHaveMissedSubjects;
         do
         {
-            isAttached = TryAttach(change.Property.GetDerivedPropertyData(), change.Property);
+            isAttached = TryAttach(change.Property.GetDerivedPropertyData(), change.Property, out mayHaveMissedSubjects);
         }
         while (!isAttached);
 
         // The getter records only reads of attached subjects, so it misses a dependency on a subject attached later in
         // the same operation, such as a sibling of an ancestor.
-        change.AttachOperation?.RunAtEndIfSubjectsAttachedLater(ReevaluateAfterAttach, change.Property);
+        if (mayHaveMissedSubjects)
+        {
+            change.AttachOperation?.RunAtEndIfSubjectsAttachedLater(ReevaluateAfterAttach, change.Property);
+        }
     }
 
     /// <summary>
@@ -111,8 +115,12 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         property.RecalculateDerivedProperty();
     }
 
-    private static bool TryAttach(DerivedPropertyData data, in PropertyReference property)
+    // mayHaveMissedSubjects: whether the evaluation could have missed a subject without a context, through a tracked
+    // property that can hold subjects or because it threw. A subject reached through a field or a service is not
+    // considered, see docs/tracking.md, Reaching Other Subjects.
+    private static bool TryAttach(DerivedPropertyData data, in PropertyReference property, out bool mayHaveMissedSubjects)
     {
+        mayHaveMissedSubjects = true;
         lock (data)
         {
             if (!ReferenceEquals(property.TryGetDerivedPropertyData(), data))
@@ -132,6 +140,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             {
                 data.LastKnownValue = EvaluateAndStabilize(data, property, callerHoldsLock: true);
                 property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
+                mayHaveMissedSubjects = DependsOnPropertyThatCanHoldSubjects(data);
             }
             catch (Exception)
             {
@@ -140,6 +149,19 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
             return true;
         }
+    }
+
+    private static bool DependsOnPropertyThatCanHoldSubjects(DerivedPropertyData data)
+    {
+        foreach (ref readonly var dependency in data.RequiredPropertiesSpan)
+        {
+            if (dependency.Metadata.Type.CanContainSubjects())
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <inheritdoc />
