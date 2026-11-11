@@ -72,46 +72,50 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     }
 
     /// <summary>
-    /// Evaluates an attached derived property again to record dependencies on subjects attached after it, and
-    /// recalculates it if the value changed through a read that was not tracked when it was attached.
+    /// Evaluates an attached derived property again to record dependencies on subjects attached after it. Returns the
+    /// recalculation to run after the lifecycle lock is released if the value changed through a read that was not
+    /// tracked when it was attached.
     /// </summary>
-    private static void ReevaluateAfterAttach(PropertyReference property)
+    private static Action<PropertyReference>? ReevaluateAfterAttach(PropertyReference property)
     {
         var data = property.TryGetDerivedPropertyData();
         if (data is null)
         {
-            return;
+            return null;
         }
 
         lock (data)
         {
             if (!data.IsAttached || !ReferenceEquals(property.TryGetDerivedPropertyData(), data))
             {
-                return;
+                return null;
             }
 
             if (data.IsRecalculating)
             {
                 // The recalculation in flight evaluates again, records the dependencies and publishes.
                 data.RecalculationNeeded = true;
-                return;
+                return null;
             }
 
             try
             {
-                // LastKnownValue stays as it is, so that the recalculation below publishes the change from it.
-                if (Equals(EvaluateAndStabilize(data, property, callerHoldsLock: true), data.LastKnownValue))
-                {
-                    return;
-                }
+                // LastKnownValue stays as it is, so that the recalculation publishes the change from it.
+                var value = EvaluateAndStabilize(data, property, callerHoldsLock: true);
+                return data.IsAttached && !Equals(value, data.LastKnownValue) ? RecalculateAfterAttach : null;
             }
             catch (Exception)
             {
                 // Getter threw. The value will be computed on the next dependency write.
-                return;
+                return null;
             }
         }
+    }
 
+    // Publishes, so it must not run under the lifecycle lock: an observer on another thread may hold the dispatch lock
+    // while it waits for the lifecycle lock.
+    private static void RecalculateAfterAttach(PropertyReference property)
+    {
         property.RecalculateDerivedProperty();
     }
 
@@ -582,6 +586,14 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         if (callerHoldsLock)
         {
+            // The getter detached its own property, which dropped its dependencies: recording them again would keep
+            // the detached property in their used-by properties.
+            if (!data.IsAttached)
+            {
+                _recorder!.ClearLastRecording();
+                return DependencyUpdate.Abandoned;
+            }
+
             return data.UpdateDependencies(property, recordedDependencies, _recorder!)
                 ? DependencyUpdate.Changed
                 : DependencyUpdate.Unchanged;

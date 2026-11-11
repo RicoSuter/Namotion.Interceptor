@@ -4,11 +4,12 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 /// <summary>
 /// Tracks one attach operation of a <see cref="LifecycleInterceptor"/>, including the attaches nested in it, and runs
-/// the callbacks registered during it once it is done. Accessed only under that interceptor's lock.
+/// the callbacks registered during it once it is done. Accessed only under that interceptor's lock, except for the
+/// action <see cref="End"/> returns.
 /// </summary>
 internal sealed class AttachOperation
 {
-    private readonly List<(Action<PropertyReference> Callback, PropertyReference Property, int AttachedSubjectCount)> _callbacks = [];
+    private readonly List<(Func<PropertyReference, Action<PropertyReference>?> Callback, PropertyReference Property, int AttachedSubjectCount)> _callbacks = [];
     private int _depth;
     private int _attachedSubjectCount;
 
@@ -23,10 +24,12 @@ internal sealed class AttachOperation
     }
 
     /// <summary>
-    /// Calls <paramref name="callback"/> for <paramref name="property"/> once the outermost operation is done, if a
-    /// subject is attached after this call in the same operation. Does nothing outside an operation.
+    /// Calls <paramref name="callback"/> for <paramref name="property"/> once the outermost operation is done, still
+    /// under the lock, if a subject is attached after this call in the same operation. The action the callback returns
+    /// is called for the property after the lock is released. The callback must not throw. Does nothing outside an
+    /// operation.
     /// </summary>
-    public void RunAtEndIfSubjectsAttachedLater(Action<PropertyReference> callback, in PropertyReference property)
+    public void RunAtEndIfSubjectsAttachedLater(Func<PropertyReference, Action<PropertyReference>?> callback, in PropertyReference property)
     {
         if (_depth > 0)
         {
@@ -36,16 +39,14 @@ internal sealed class AttachOperation
 
     /// <summary>
     /// Ends an operation. Ending the outermost one runs the callbacks, also when the operation failed, since the subjects
-    /// it attached before failing stay attached. Every callback runs; the first exception one throws is rethrown after.
+    /// it attached before failing stay attached.
     /// </summary>
-    public void End()
+    /// <returns>What the callbacks left to run after the lock is released, or null.</returns>
+    public Action? End()
     {
         try
         {
-            if (_depth == 1)
-            {
-                RunCallbacks();
-            }
+            return _depth == 1 ? RunCallbacks() : null;
         }
         finally
         {
@@ -57,22 +58,32 @@ internal sealed class AttachOperation
         }
     }
 
-    private void RunCallbacks()
+    private Action? RunCallbacks()
     {
-        ExceptionDispatchInfo? firstException = null;
+        List<(Action<PropertyReference> Action, PropertyReference Property)>? afterLock = null;
 
         // Indexed, because a callback may attach further subjects, which appends callbacks.
         for (var i = 0; i < _callbacks.Count; i++)
         {
             var (callback, property, attachedSubjectCount) = _callbacks[i];
-            if (attachedSubjectCount == _attachedSubjectCount)
+            if (attachedSubjectCount != _attachedSubjectCount && callback(property) is { } action)
             {
-                continue;
+                afterLock ??= [];
+                afterLock.Add((action, property));
             }
+        }
 
+        return afterLock is null ? null : () => RunAfterLock(afterLock);
+    }
+
+    private static void RunAfterLock(List<(Action<PropertyReference> Action, PropertyReference Property)> actions)
+    {
+        ExceptionDispatchInfo? firstException = null;
+        foreach (var (action, property) in actions)
+        {
             try
             {
-                callback(property);
+                action(property);
             }
             catch (Exception exception)
             {

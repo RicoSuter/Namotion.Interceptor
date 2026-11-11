@@ -76,6 +76,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     public void AttachSubjectToContext(IInterceptorSubject subject)
     {
         var collectedSubjects = GetList();
+        Action? afterLock = null;
         try
         {
             lock (_attachedSubjects)
@@ -97,13 +98,14 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 }
                 finally
                 {
-                    _attachOperation.End();
+                    afterLock = _attachOperation.End();
                 }
             }
         }
         finally
         {
             ReturnList(collectedSubjects);
+            afterLock?.Invoke();
         }
     }
 
@@ -369,6 +371,21 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             return;
         }
 
+        Action? afterLock = null;
+        try
+        {
+            ReconcileUnderLock(ref context, metadata.GetValue, ref afterLock);
+        }
+        finally
+        {
+            afterLock?.Invoke();
+        }
+    }
+
+    // afterLock receives what is left to run after the lock is released, also when this throws.
+    private void ReconcileUnderLock<TProperty>(
+        ref PropertyWriteContext<TProperty> context, Func<IInterceptorSubject, object?>? getValue, ref Action? afterLock)
+    {
         lock (_attachedSubjects)
         {
             var lastProcessed = _lastProcessedValues.GetValueOrDefault(context.Property);
@@ -376,7 +393,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             // Read the actual backing store value to handle concurrent writes correctly.
             // context.NewValue may differ from the backing store if another thread
             // overwrote the property between our next() call and lock acquisition.
-            var getValue = metadata.GetValue;
             var newValue = getValue is not null
                 ? getValue(context.Property.Subject)
                 : context.NewValue;
@@ -398,7 +414,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             }
             finally
             {
-                _attachOperation.End();
+                afterLock = _attachOperation.End();
             }
         }
     }
