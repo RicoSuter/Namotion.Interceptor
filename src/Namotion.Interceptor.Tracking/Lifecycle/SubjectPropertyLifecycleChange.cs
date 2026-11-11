@@ -7,7 +7,8 @@ public record struct SubjectPropertyLifecycleChange(
     PropertyReference Property)
 {
     /// <summary>
-    /// Set while a <see cref="LifecycleInterceptor"/> attaches the properties of subjects entering the graph.
+    /// Set while a <see cref="LifecycleInterceptor"/> attaches the properties of subjects entering the graph. Valid only
+    /// during the handler call it is passed to, which holds that interceptor's lock.
     /// </summary>
     internal AttachOperation? AttachOperation { get; init; }
 

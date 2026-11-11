@@ -64,12 +64,12 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
         // The getter records only reads of attached subjects, so it misses a dependency on a subject attached later in
         // the same operation, such as a sibling of an ancestor.
-        change.AttachOperation?.TryRunWhenLaterSubjectsAttached(ReevaluateAfterAttach, change.Property);
+        change.AttachOperation?.RunAtEndIfSubjectsAttachedLater(ReevaluateAfterAttach, change.Property);
     }
 
     /// <summary>
-    /// Evaluates an attached derived property again to record dependencies on subjects attached after it, without
-    /// publishing a change: the value can differ only through reads that were not tracked when it was attached.
+    /// Evaluates an attached derived property again to record dependencies on subjects attached after it, and
+    /// recalculates it if the value changed through a read that was not tracked when it was attached.
     /// </summary>
     private static void ReevaluateAfterAttach(PropertyReference property)
     {
@@ -88,20 +88,27 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
             if (data.IsRecalculating)
             {
-                // The recalculation in flight evaluates again and records the dependencies.
+                // The recalculation in flight evaluates again, records the dependencies and publishes.
                 data.RecalculationNeeded = true;
                 return;
             }
 
             try
             {
-                data.LastKnownValue = EvaluateAndStabilize(data, property, callerHoldsLock: true);
+                // LastKnownValue stays as it is, so that the recalculation below publishes the change from it.
+                if (Equals(EvaluateAndStabilize(data, property, callerHoldsLock: true), data.LastKnownValue))
+                {
+                    return;
+                }
             }
             catch (Exception)
             {
                 // Getter threw. The value will be computed on the next dependency write.
+                return;
             }
         }
+
+        property.RecalculateDerivedProperty();
     }
 
     private static bool TryAttach(DerivedPropertyData data, in PropertyReference property)

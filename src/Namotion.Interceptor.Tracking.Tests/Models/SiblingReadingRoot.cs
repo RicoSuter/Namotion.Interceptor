@@ -42,6 +42,15 @@ public partial class SiblingReadingConfiguration
 [InterceptorSubject]
 public partial class SiblingReadingDevice
 {
+    public int EvaluationCount { get; private set; }
+
     [Derived]
-    public bool IsInstalled => this.TryGetFirstParent<SiblingReadingMachine>()?.Configuration.Installed ?? false;
+    public bool IsInstalled
+    {
+        get
+        {
+            EvaluationCount++;
+            return this.TryGetFirstParent<SiblingReadingMachine>()?.Configuration.Installed ?? false;
+        }
+    }
 }

@@ -62,15 +62,44 @@ public class DerivedPropertyAttachOrderTests
     }
 
     [Fact]
-    public void WhenSubtreeIsDetachedAndAttachedAgain_ThenDerivedPropertyFollowsSibling()
+    public void WhenLaterSiblingIsWrittenDuringTheAttach_ThenDerivedPropertyPublishesTheChange()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new SiblingReadingRoot(context);
         var machine = new SiblingReadingMachine();
+        context.WithService(() => new CallbackLifecycleHandler(change =>
+        {
+            if (change is { IsContextAttach: true, Subject: SiblingReadingConfiguration configuration })
+            {
+                configuration.Installed = true;
+            }
+        }));
+        var changes = SubscribeToChanges(context);
+
+        // Act
         root.Machine = machine;
-        root.Machine = null;
-        root.Machine = machine;
+
+        // Assert
+        AssertSingleChange(changes, machine.Device, nameof(SiblingReadingDevice.IsInstalled), true);
+    }
+
+    [Fact]
+    public void WhenLifecycleHandlerThrowsDuringTheAttach_ThenDerivedPropertyAttachedBeforeFollowsLaterSibling()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new SiblingReadingRoot(context);
+        var machine = new SiblingReadingMachine();
+        var throwingMachine = new SiblingReadingMachine();
+        context.WithService(() => new CallbackLifecycleHandler(change =>
+        {
+            if (change.IsContextAttach && change.Subject == throwingMachine)
+            {
+                throw new InvalidOperationException();
+            }
+        }));
+        Assert.Throws<InvalidOperationException>(() => root.Machines = [machine, throwingMachine]);
         var changes = SubscribeToChanges(context);
 
         // Act
@@ -78,53 +107,6 @@ public class DerivedPropertyAttachOrderTests
 
         // Assert
         AssertSingleChange(changes, machine.Device, nameof(SiblingReadingDevice.IsInstalled), true);
-    }
-
-    [Fact]
-    public void WhenSourceChangesLaterInTheSameAttach_ThenDerivedPropertyAttachedBeforePublishesTheChange()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
-        var root = new Person(context);
-        var first = new Person { FirstName = "A" };
-        context.WithService(() => new CallbackLifecycleHandler(change =>
-        {
-            if (change is { IsContextAttach: true, Subject: Person { FirstName: "Writer" } })
-            {
-                first.FirstName = "B";
-            }
-        }));
-        var changes = SubscribeToChanges(context);
-
-        // Act
-        root.Children = [first, new Person { FirstName = "Writer" }];
-
-        // Assert
-        AssertSingleChange(changes, first, nameof(Person.FullName), "B");
-    }
-
-    [Fact]
-    public void WhenLifecycleHandlerThrowsDuringAttach_ThenDerivedPropertiesAttachedBeforeFollowTheirSources()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
-        var root = new Person(context);
-        var first = new Person { FirstName = "A" };
-        context.WithService(() => new CallbackLifecycleHandler(change =>
-        {
-            if (change is { IsContextAttach: true, Subject: Person { FirstName: "Throw" } })
-            {
-                throw new InvalidOperationException();
-            }
-        }));
-        Assert.Throws<InvalidOperationException>(() => root.Children = [first, new Person { FirstName = "Throw" }]);
-        var changes = SubscribeToChanges(context);
-
-        // Act
-        first.FirstName = "B";
-
-        // Assert
-        AssertSingleChange(changes, first, nameof(Person.FullName), "B");
     }
 
     private sealed class CallbackLifecycleHandler(Action<SubjectLifecycleChange> callback) : ILifecycleHandler
