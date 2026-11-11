@@ -224,7 +224,7 @@ public class AuthenticationPipelineTests
         // Past the stamp interval, so that the stamp check of the held request renews its cookie with the old stamp.
         time.Advance(TimeSpan.FromMinutes(6));
         var held = browser.GetAsync(AuthenticationTestHost.HoldPath);
-        await host.Hold.Entered.WaitAsync(TimeSpan.FromSeconds(30));
+        await host.Hold.Entered.WaitAsync(TestTimeouts.Default);
         var changed = await AccountTestForms.SetPasswordAsync(browser, "another correct horse", currentPassword: AccountTestForms.Password);
         Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(changed));
 

@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace HomeBlaze.Authentication.Blazor.Tests;
@@ -20,15 +21,15 @@ public class RevalidationTests
         // Arrange
         await using var host = await AuthenticationTestHost.StartAsync();
         await using var circuit = await SignedInCircuit.StartAsync(host, UserName);
-        using var changed = new ManualResetEventSlim();
-        circuit.Provider.AuthenticationStateChanged += _ => changed.Set();
+        var changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        circuit.Provider.AuthenticationStateChanged += _ => changed.TrySetResult();
 
         // Act
         var removed = await host.AdministrationAsAdmin.RemoveAsync(UserName, CancellationToken.None);
 
         // Assert
         Assert.True(removed.Succeeded, removed.Error);
-        Assert.True(changed.Wait(TimeSpan.FromSeconds(5)));
+        await changed.Task.WaitAsync(TestTimeouts.Default);
         Assert.False((await circuit.Provider.GetAuthenticationStateAsync()).User.Identity?.IsAuthenticated);
     }
 
@@ -38,15 +39,15 @@ public class RevalidationTests
         // Arrange
         await using var host = await AuthenticationTestHost.StartAsync();
         await using var circuit = await SignedInCircuit.StartAsync(host, UserName);
-        using var changed = new ManualResetEventSlim();
-        circuit.Provider.AuthenticationStateChanged += _ => changed.Set();
+        var changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        circuit.Provider.AuthenticationStateChanged += _ => changed.TrySetResult();
 
         // Act
         var result = await host.AdministrationAsAdmin.ResetPasswordAsync(UserName, CancellationToken.None);
 
         // Assert
         Assert.True(result.Succeeded, result.Error);
-        Assert.True(changed.Wait(TimeSpan.FromSeconds(5)));
+        await changed.Task.WaitAsync(TestTimeouts.Default);
         Assert.False((await circuit.Provider.GetAuthenticationStateAsync()).User.Identity?.IsAuthenticated);
     }
 
@@ -77,8 +78,8 @@ public class RevalidationTests
         var permissions = circuit.Services.GetRequiredService<IUserPermissions>();
         var roles = host.AuthorizationSubjects.Single().TryGetRegisteredSubject()!.TryGetProperty("Roles")!;
         Assert.False(permissions.CanAdminister(roles));
-        using var changed = new ManualResetEventSlim();
-        permissions.Changed += changed.Set;
+        var changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        permissions.Changed += () => changed.TrySetResult();
 
         // Act
         var result = await host.AdministrationAsAdmin.SetRolesAsync(UserName, [BuiltInRoles.EverythingName], CancellationToken.None);
@@ -86,7 +87,7 @@ public class RevalidationTests
 
         // Assert
         Assert.True(result.Succeeded, result.Error);
-        Assert.True(changed.Wait(TimeSpan.FromSeconds(5)));
+        await changed.Task.WaitAsync(TestTimeouts.Default);
         Assert.Same(circuit.Principal, (await circuit.Provider.GetAuthenticationStateAsync()).User);
         Assert.True(permissions.CanAdminister(roles));
     }

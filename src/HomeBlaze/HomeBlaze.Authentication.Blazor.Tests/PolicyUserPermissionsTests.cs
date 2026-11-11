@@ -111,8 +111,8 @@ public class PolicyUserPermissionsTests
     {
         // Arrange
         await using var graph = await PermissionsTestGraph.CreateAsync(roles: [BuiltInRoles.ReaderName]);
-        using var changed = new ManualResetEventSlim();
-        graph.Permissions.Changed += changed.Set;
+        var changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        graph.Permissions.Changed += () => changed.TrySetResult();
         var before = graph.Permissions.HoldsAllRoles([BuiltInRoles.OperatorName]);
 
         // Act
@@ -120,7 +120,7 @@ public class PolicyUserPermissionsTests
 
         // Assert
         Assert.False(before);
-        Assert.True(changed.Wait(TimeSpan.FromSeconds(5)));
+        await changed.Task.WaitAsync(TestTimeouts.Default);
         Assert.True(graph.Permissions.HoldsAllRoles([BuiltInRoles.OperatorName]));
     }
 
@@ -282,14 +282,14 @@ public class PolicyUserPermissionsTests
         // Arrange
         await using var graph = await PermissionsTestGraph.CreateAsync(roles: [BuiltInRoles.OperatorName], anonymousRoles: [BuiltInRoles.ReaderName]);
         var temperature = graph.Device.TryGetRegisteredSubject()!.TryGetProperty("Temperature")!;
-        using var changed = new ManualResetEventSlim();
-        graph.Permissions.Changed += changed.Set;
+        var changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        graph.Permissions.Changed += () => changed.TrySetResult();
 
         // Act
         await graph.RemoveTestUserAsync();
 
         // Assert
-        Assert.True(changed.Wait(TimeSpan.FromSeconds(5)));
+        await changed.Task.WaitAsync(TestTimeouts.Default);
         Assert.False(graph.Permissions.CanRead(temperature));
         Assert.False(graph.Permissions.CanShow(graph.Device.TryGetRegisteredSubject()!));
     }
@@ -300,14 +300,14 @@ public class PolicyUserPermissionsTests
         // Arrange
         await using var graph = await PermissionsTestGraph.CreateAsync(roles: [BuiltInRoles.ReaderName]);
         var temperature = graph.Device.TryGetRegisteredSubject()!.TryGetProperty("Temperature")!;
-        using var changed = new ManualResetEventSlim();
-        graph.Permissions.Changed += changed.Set;
+        var changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        graph.Permissions.Changed += () => changed.TrySetResult();
 
         // Act
         await graph.SetRolesAsync([BuiltInRoles.OperatorName]);
 
         // Assert
-        Assert.True(changed.Wait(TimeSpan.FromSeconds(5)));
+        await changed.Task.WaitAsync(TestTimeouts.Default);
         Assert.True(graph.Permissions.CanWrite(temperature));
     }
 
@@ -317,14 +317,14 @@ public class PolicyUserPermissionsTests
         // Arrange
         await using var graph = await PermissionsTestGraph.CreateAsync(roles: [BuiltInRoles.OperatorName]);
         var temperature = graph.Device.TryGetRegisteredSubject()!.TryGetProperty("Temperature")!;
-        using var changed = new ManualResetEventSlim();
-        graph.Permissions.Changed += changed.Set;
+        var changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        graph.Permissions.Changed += () => changed.TrySetResult();
 
         // Act
         graph.SignOut();
 
         // Assert
-        Assert.True(changed.Wait(TimeSpan.FromSeconds(5)));
+        await changed.Task.WaitAsync(TestTimeouts.Default);
         Assert.False(graph.Permissions.CanRead(temperature));
     }
 
@@ -366,15 +366,15 @@ public class PolicyUserPermissionsTests
         // Arrange
         await using var graph = await PermissionsTestGraph.CreateAsync(roles: [BuiltInRoles.ReaderName]);
         var temperature = graph.Device.TryGetRegisteredSubject()!.TryGetProperty("Temperature")!;
-        using var changed = new ManualResetEventSlim();
+        var changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         graph.Permissions.Changed += () => throw new InvalidOperationException("A component failed.");
-        graph.Permissions.Changed += changed.Set;
+        graph.Permissions.Changed += () => changed.TrySetResult();
 
         // Act
         await graph.SetRolesAsync([BuiltInRoles.OperatorName]);
 
         // Assert
-        Assert.True(changed.Wait(TimeSpan.FromSeconds(5)));
+        await changed.Task.WaitAsync(TestTimeouts.Default);
         Assert.True(graph.Permissions.CanWrite(temperature));
     }
 
@@ -386,14 +386,14 @@ public class PolicyUserPermissionsTests
         var temperature = graph.Device.TryGetRegisteredSubject()!.TryGetProperty("Temperature")!;
         graph.CurrentUser.Changed += () => throw new InvalidOperationException("A subscriber failed.");
         using var permissions = new PolicyUserPermissions(graph.AuthorizationService, graph.CurrentUser, NullLogger<PolicyUserPermissions>.Instance);
-        using var changed = new ManualResetEventSlim();
-        permissions.Changed += changed.Set;
+        var changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        permissions.Changed += () => changed.TrySetResult();
 
         // Act
         await graph.SetRolesAsync([BuiltInRoles.OperatorName]);
 
         // Assert
-        Assert.True(changed.Wait(TimeSpan.FromSeconds(5)));
+        await changed.Task.WaitAsync(TestTimeouts.Default);
         Assert.True(permissions.CanWrite(temperature));
     }
 
@@ -427,12 +427,12 @@ public class PolicyUserPermissionsTests
         await using var scope = host.Services.CreateAsyncScope();
         var authenticationState = await SignInAsync(scope.ServiceProvider, "boss");
         var administration = scope.ServiceProvider.GetRequiredService<IUserAdministration>();
-        using var signedOut = new ManualResetEventSlim();
-        ((AuthenticationStateProvider)authenticationState).AuthenticationStateChanged += _ => signedOut.Set();
+        var signedOut = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        ((AuthenticationStateProvider)authenticationState).AuthenticationStateChanged += _ => signedOut.TrySetResult();
 
         // Act
         var reset = await host.AdministrationAsAdmin.ResetPasswordAsync("boss", CancellationToken.None);
-        Assert.True(signedOut.Wait(TimeSpan.FromSeconds(5)));
+        await signedOut.Task.WaitAsync(TestTimeouts.Default);
         var result = await administration.AddUserAsync("kid", null, [BuiltInRoles.ReaderName], CancellationToken.None);
 
         // Assert
