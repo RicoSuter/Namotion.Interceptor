@@ -80,7 +80,7 @@ public class OpcUaClientDiagnosticsTests
 
         PollingDiagnostics polling;
         ReadAfterWriteDiagnostics readAfterWrite;
-        var session = (Session)RuntimeHelpers.GetUninitializedObject(typeof(Session));
+        var session = (ManagedSession)RuntimeHelpers.GetUninitializedObject(typeof(ManagedSession));
 
         try
         {
@@ -150,7 +150,7 @@ public class OpcUaClientDiagnosticsTests
             message: "The polling manager should start with the session manager");
         SetSessionManager(source, sessionManager);
 
-        var session = (Session)RuntimeHelpers.GetUninitializedObject(typeof(Session));
+        var session = (ManagedSession)RuntimeHelpers.GetUninitializedObject(typeof(ManagedSession));
         SetCurrentSession(sessionManager, session);
         try
         {
@@ -368,7 +368,7 @@ public class OpcUaClientDiagnosticsTests
             .GetField("_sessionManager", BindingFlags.Instance | BindingFlags.NonPublic)!
             .SetValue(source, sessionManager);
 
-    private static void SetCurrentSession(SessionManager sessionManager, Session? session) =>
+    private static void SetCurrentSession(SessionManager sessionManager, ManagedSession? session) =>
         typeof(SessionManager)
             .GetField("_session", BindingFlags.Instance | BindingFlags.NonPublic)!
             .SetValue(sessionManager, session);

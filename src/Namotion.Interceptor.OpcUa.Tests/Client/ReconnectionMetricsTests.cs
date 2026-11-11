@@ -130,11 +130,10 @@ public class ReconnectionMetricsTests
         await using var source = CreateClientSource(configuration: configuration);
         await using var sessionManager = CreateSessionManager(source, configuration);
         MarkSdkReconnectPending(sessionManager, source.ReconnectionMetrics);
-        var reconnectHandler = GetReconnectHandler(sessionManager);
         await sessionManager.DisposeAsync();
 
         // Act
-        InvokeReconnectComplete(sessionManager, reconnectHandler);
+        InvokeReconnectComplete(sessionManager);
 
         // Assert
         Assert.Equal(1, source.ReconnectionMetrics.TotalAttempts);
@@ -172,19 +171,20 @@ public class ReconnectionMetricsTests
 
     private static void MarkSdkReconnectPending(SessionManager sessionManager, ReconnectionMetrics metrics)
     {
-        // Mirrors the two accounting writes OnKeepAlive makes after the SDK accepts a reconnect,
-        // without involving a network connection or timer.
+        // Mirrors the two accounting writes OnConnectionStateChanged makes when the managed session
+        // leaves Connected, without involving a network connection.
         metrics.RecordAttemptStart();
-        GetField("_pendingSdkReconnection").SetValue(sessionManager, 1);
+        GetField("_reconnectInProgress").SetValue(sessionManager, 1);
     }
 
-    private static SessionReconnectHandler GetReconnectHandler(SessionManager sessionManager) =>
-        Assert.IsType<SessionReconnectHandler>(GetField("_reconnectHandler").GetValue(sessionManager));
-
-    private static void InvokeReconnectComplete(SessionManager sessionManager, SessionReconnectHandler reconnectHandler) =>
+    private static void InvokeReconnectComplete(SessionManager sessionManager) =>
         typeof(SessionManager)
-            .GetMethod("OnReconnectComplete", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(sessionManager, [reconnectHandler, EventArgs.Empty]);
+            .GetMethod("OnConnectionStateChanged", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(sessionManager, [null, new ConnectionStateChangedEventArgs
+            {
+                PreviousState = ConnectionState.Reconnecting,
+                NewState = ConnectionState.Connected
+            }]);
 
     private static FieldInfo GetField(string name) =>
         typeof(SessionManager).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!;
