@@ -240,7 +240,7 @@ public class CanvasLayoutTests
         // Assert: the editor is the round trip after which the preview shows the canvas of the split mode.
         await Assertions.Expect(page.Locator(".monaco-editor").First).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(page.Locator(".page-split-preview .canvas-layout-container")).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(page.Locator(".page-split-preview .canvas-layout-container.editing")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".page-split-preview .canvas-layout-container.editing")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -361,7 +361,7 @@ public class CanvasLayoutTests
         await WaitForServerAsync(page, "Inline");
 
         // Assert
-        await Assertions.Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -400,7 +400,7 @@ public class CanvasLayoutTests
         await page.Mouse.UpAsync();
         await WaitForNodeToMoveAsync(page, boxBefore);
         await WaitForServerAsync(page, "Inline");
-        await Assertions.Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
         // Act
         await page.Mouse.ClickAsync((float)x, (float)y);

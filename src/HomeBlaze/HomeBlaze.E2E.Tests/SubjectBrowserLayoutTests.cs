@@ -389,7 +389,7 @@ public class SubjectBrowserLayoutTests
 
         // The status has a value and therefore a row, which shows that a row is found by its name.
         await Assertions.Expect(ValueRow(pane, "Status")).ToHaveCountAsync(1);
-        await Assertions.Expect(ValueRow(pane, "StatusMessage")).ToHaveCountAsync(0);
+        await Assertions.Expect(ValueRow(pane, "StatusMessage")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -497,11 +497,11 @@ public class SubjectBrowserLayoutTests
                 await Assertions.Expect(link).ToHaveAttributeAsync("href", address);
                 await Assertions.Expect(link).ToHaveAttributeAsync("target", "_blank");
                 await Assertions.Expect(link).ToHaveAttributeAsync("rel", "noopener noreferrer");
-                await Assertions.Expect(copy).ToHaveCountAsync(0);
+                await Assertions.Expect(copy).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
             }
             else
             {
-                await Assertions.Expect(link).ToHaveCountAsync(0);
+                await Assertions.Expect(link).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
                 await Assertions.Expect(copy).ToHaveCountAsync(1);
             }
         }

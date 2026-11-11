@@ -247,7 +247,7 @@ public class ClaudeCliAgentTests
 
         // Act
         test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Unavailable);
+        await test.WaitUntilTurnEndedAsync(ServiceStatus.Unavailable);
 
         // Assert
         Assert.Contains("log in", test.Agent.StatusMessage);
@@ -285,7 +285,7 @@ public class ClaudeCliAgentTests
 
         // Act
         test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Error);
+        await test.WaitUntilTurnEndedAsync(ServiceStatus.Error);
 
         // Assert
         Assert.Contains("listener is not running", test.Agent.StatusMessage);
@@ -301,7 +301,7 @@ public class ClaudeCliAgentTests
 
         // Act
         test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Error);
+        await test.WaitUntilTurnEndedAsync(ServiceStatus.Error);
 
         // Assert
         Assert.Contains("did not finish", test.Agent.StatusMessage);
@@ -390,7 +390,7 @@ public class ClaudeCliAgentTests
 
         // Act
         test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Error);
+        await test.WaitUntilTurnEndedAsync(ServiceStatus.Error);
 
         // Assert
         Assert.Equal("35", ValueAfter(Assert.Single(cli.Invocations), "--max-turns"));
@@ -411,7 +411,7 @@ public class ClaudeCliAgentTests
 
         // Act
         test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Unavailable);
+        await test.WaitUntilTurnEndedAsync(ServiceStatus.Unavailable);
 
         // Assert
         Assert.Equal("The Claude weekly Opus usage limit is reached until 2026-10-14 18:00 UTC.", test.Agent.StatusMessage);
@@ -426,7 +426,7 @@ public class ClaudeCliAgentTests
 
         // Act
         test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Unavailable);
+        await test.WaitUntilTurnEndedAsync(ServiceStatus.Unavailable);
 
         // Assert
         Assert.Contains("not using the Claude subscription login", test.Agent.StatusMessage);

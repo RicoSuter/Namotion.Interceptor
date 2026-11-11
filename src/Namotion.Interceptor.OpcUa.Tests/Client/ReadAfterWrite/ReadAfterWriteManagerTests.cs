@@ -5,6 +5,7 @@ using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -478,7 +479,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
 
         // Act
         manager.OnPropertyWritten(nodeId);
-        await reported.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await reported.Task.WaitAsync(TestTimeouts.Default);
         await logger.WaitUntilOuterGuardLogsAsync();
 
         // Assert
@@ -540,7 +541,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         manager.OnPropertyWritten(pendingNodeId);
 
         logger.BlockNextLog();
-        var registrationTask = Task.Run(() => manager.RegisterProperty(
+        var registrationTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => manager.RegisterProperty(
             new NodeId("Blocked", 2),
             CreateTestProperty(_testSubject),
             requestedSamplingInterval: 0,
@@ -550,7 +551,8 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         try
         {
             // Act
-            var pendingCount = await Task.Run(() => manager.PendingReadCount).WaitAsync(TimeSpan.FromSeconds(1));
+            var pendingCount = await DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => manager.PendingReadCount)
+                .WaitAsync(TestTimeouts.Default);
 
             // Assert
             Assert.Equal(1, pendingCount);
@@ -645,7 +647,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         RegisterAndSchedule(manager, new NodeId("FirstName", 2), CreateTestProperty(_testSubject));
 
         var processing = manager.ProcessDueReadsAsync(DateTime.MaxValue);
-        await readStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await readStarted.Task.WaitAsync(TestTimeouts.Default);
 
         // Act
         await manager.DisposeAsync();
@@ -758,7 +760,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
 
         internal void BlockNextLog() => Volatile.Write(ref _blockNextLog, 1);
 
-        internal Task WaitUntilBlockedAsync() => _blocked.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        internal Task WaitUntilBlockedAsync() => _blocked.Task.WaitAsync(TestTimeouts.Default);
 
         internal void Release() => _release.Set();
     }
@@ -819,6 +821,6 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         }
 
         internal Task WaitUntilOuterGuardLogsAsync() =>
-            _outerGuardLogged.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            _outerGuardLogged.Task.WaitAsync(TestTimeouts.Default);
     }
 }

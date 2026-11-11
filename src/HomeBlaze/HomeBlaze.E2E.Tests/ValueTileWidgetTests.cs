@@ -62,7 +62,7 @@ public class ValueTileWidgetTests
 
         // Assert
         await Assertions.Expect(page.GetByTestId("value-tile").First).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -134,7 +134,7 @@ public class ValueTileWidgetTests
 
         // Assert
         await Assertions.Expect(tile.GetByTestId("tile-label")).ToHaveTextAsync("–", new() { Timeout = Timeout });
-        await Assertions.Expect(tile.GetByRole(AriaRole.Button)).ToHaveCountAsync(0);
+        await Assertions.Expect(tile.GetByRole(AriaRole.Button)).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -146,7 +146,7 @@ public class ValueTileWidgetTests
 
         // Assert
         await Assertions.Expect(tile.GetByTestId("tile-detail")).ToHaveTextAsync("Of ValueMotor", new() { Timeout = Timeout });
-        await Assertions.Expect(GetValueTile(page, "Target").GetByTestId("tile-detail")).ToHaveCountAsync(0);
+        await Assertions.Expect(GetValueTile(page, "Target").GetByTestId("tile-detail")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -239,7 +239,7 @@ public class ValueTileWidgetTests
 
         // Assert
         await Assertions.Expect(tile.GetByTestId("tile-icon")).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(tile.GetByTestId("tile-label")).ToHaveCountAsync(0);
+        await Assertions.Expect(tile.GetByTestId("tile-label")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]

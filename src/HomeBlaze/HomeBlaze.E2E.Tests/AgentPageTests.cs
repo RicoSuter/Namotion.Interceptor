@@ -327,7 +327,7 @@ public class AgentPageTests
             var card = page.GetByTestId("agent-background-run").Last;
             var plainResult = result.Replace("**", string.Empty);
             await Assertions.Expect(card).ToContainTextAsync(plainResult, new() { Timeout = PageLoadTimeout });
-            await Assertions.Expect(card).Not.ToContainTextAsync(preamble);
+            await Assertions.Expect(card).Not.ToContainTextAsync(preamble, new() { Timeout = AssertionTimeouts.Absence });
             await card.GetByTestId("agent-show-full-answer").ClickAsync();
             await Assertions.Expect(card).ToContainTextAsync(preamble);
 
@@ -379,14 +379,14 @@ public class AgentPageTests
         await Assertions.Expect(webSearch).ToContainTextAsync("Searches the web.", new() { Timeout = PageLoadTimeout });
         await Assertions.Expect(webSearch.GetByTestId("agent-edit-tool-web-warning")).ToHaveTextAsync("Loads untrusted web content");
         await Assertions.Expect(dialog.GetByTestId("agent-edit-tool-web_fetch")).ToContainTextAsync("Loads a web page.");
-        await Assertions.Expect(dialog.GetByTestId("agent-edit-tool-browse").GetByTestId("agent-edit-tool-web-warning")).ToHaveCountAsync(0);
+        await Assertions.Expect(dialog.GetByTestId("agent-edit-tool-browse").GetByTestId("agent-edit-tool-web-warning")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
         var editMarkdown = dialog.GetByTestId("agent-edit-tool-edit_markdown");
         await Assertions.Expect(editMarkdown).ToContainTextAsync("Replaces a passage of a Markdown page or document.", new() { Timeout = PageLoadTimeout });
         await Assertions.Expect(editMarkdown.GetByTestId("agent-edit-tool-pages-warning")).ToHaveTextAsync("Changes pages and documents");
         await Assertions.Expect(dialog.GetByTestId("agent-edit-tool-write_markdown").GetByTestId("agent-edit-tool-pages-warning")).ToHaveCountAsync(1);
         await Assertions.Expect(dialog.GetByTestId("agent-edit-tool-create_markdown").GetByTestId("agent-edit-tool-pages-warning")).ToHaveCountAsync(1);
-        await Assertions.Expect(dialog.GetByTestId("agent-edit-tool-invoke_operation").GetByTestId("agent-edit-tool-pages-warning")).ToHaveCountAsync(0);
+        await Assertions.Expect(dialog.GetByTestId("agent-edit-tool-invoke_operation").GetByTestId("agent-edit-tool-pages-warning")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         await Assertions.Expect(dialog.GetByTestId("agent-edit-tool-invoke_operation")).ToContainTextAsync("Can change devices and send notifications");
     }
 
@@ -423,7 +423,7 @@ public class AgentPageTests
 
             await page.ReloadAsync();
             var timelineLocator = page.GetByTestId("agent-timeline");
-            await Assertions.Expect(timelineLocator).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+            await WaitForTheChatScriptAsync(page);
             var timeline = await timelineLocator.ElementHandleAsync();
             await timelineLocator.HoverAsync();
             await page.Mouse.WheelAsync(0, -600);
@@ -521,7 +521,7 @@ public class AgentPageTests
 
             await page.ReloadAsync();
             var timelineLocator = page.GetByTestId("agent-timeline");
-            await Assertions.Expect(timelineLocator).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+            await WaitForTheChatScriptAsync(page);
             var timeline = await timelineLocator.ElementHandleAsync();
             var input = page.GetByTestId("agent-chat-input").Locator("textarea");
 
@@ -561,6 +561,14 @@ public class AgentPageTests
 
         var scrolls = await timeline.EvaluateAsync<int>("timeline => { timeline.removeEventListener('scroll', window.__typingListener); return window.__typingScrolls; }");
         Assert.Equal(0, scrolls);
+    }
+
+    // The chat script shows the timeline first, and on a later round trip makes Enter send and keeps the height of the
+    // input while it sizes itself to its text, after which the input shows its keyboard hint.
+    private static async Task WaitForTheChatScriptAsync(IPage page)
+    {
+        await Assertions.Expect(page.GetByTestId("agent-timeline")).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(page.GetByTestId("agent-chat-input")).ToContainTextAsync("Enter sends", new() { Timeout = PageLoadTimeout });
     }
 
     // Resolves once the scroll position has not changed for ten animation frames in a row, and fails when it keeps

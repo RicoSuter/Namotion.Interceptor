@@ -38,7 +38,6 @@ public class MutationEngineTests
         // Act
         await engine.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => engine.ValueMutationCount > 0,
-            timeout: TimeSpan.FromSeconds(5),
             pollInterval: TimeSpan.FromMilliseconds(20));
         await engine.StopAsync(CancellationToken.None);
 
