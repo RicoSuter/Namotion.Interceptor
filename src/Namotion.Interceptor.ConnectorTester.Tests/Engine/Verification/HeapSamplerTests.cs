@@ -61,8 +61,9 @@ public class HeapSamplerTests
 
     // Objects that other tests of the assembly leave behind can die between two samples, and their release offsets the
     // growth by the pinned arrays. An attempt counts only when the heap returns to its baseline once the arrays are
-    // released, which a sampler that misses the pinned arrays passes as well. The tolerance of a quarter of the pinned
-    // arrays keeps the growth that a correct sampler reports above the asserted half.
+    // released, which a sampler that misses the pinned arrays passes as well. A release between the first two samples
+    // also lowers the third, so the tolerance of a quarter of the pinned arrays keeps the growth that a correct sampler
+    // reports above the asserted half.
     private static PinnedArraysMeasurement MeasurePinnedArraysWhileTheRestOfTheHeapStaysUnchanged(HeapSampler sampler)
     {
         const int maximumAttempts = 5;

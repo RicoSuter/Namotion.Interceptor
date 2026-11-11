@@ -529,18 +529,13 @@ public class RecalculateDerivedPropertyTests
         Task<string?>? queuedWork = null;
         subject.ProbeEvaluator = value =>
         {
-            // Captures the execution context like any queued work item, but runs on a dedicated thread, so
-            // a starved thread pool cannot delay it past the wait below. Its completion also resumes that
-            // wait inline instead of through the pool.
-            queuedWork = Task.Factory.StartNew(
-                () =>
-                {
-                    evaluationCompleted.Task.GetAwaiter().GetResult();
-                    return value.Plain;
-                },
-                CancellationToken.None,
-                TaskCreationOptions.LongRunning,
-                TaskScheduler.Default);
+            // Starting a thread captures the execution context like queuing a work item does, and a starved
+            // thread pool cannot delay a dedicated thread past the wait below.
+            queuedWork = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+            {
+                evaluationCompleted.Task.GetAwaiter().GetResult();
+                return value.Plain;
+            });
             return value.Plain;
         };
 

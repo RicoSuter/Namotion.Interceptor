@@ -179,7 +179,9 @@ public class PropertyChangeInterceptorTests
         var person = new Person(context);
         using var existing = context.CreatePropertyChangeQueueSubscription();
 
-        var writer = StartBlockingWrite(() => person.FirstName = "John");
+        // The write parks in the interceptor chain, so it must not wait for a pool thread.
+        var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(
+            () => { person.FirstName = "John"; });
         Assert.True(blocker.EnteredInnerChain.Wait(TimeSpan.FromSeconds(10)));
 
         // Act: subscribe while the write is in flight, then release the commit.
@@ -209,7 +211,9 @@ public class PropertyChangeInterceptorTests
         using var existing = observable
             .Subscribe(change => first = change);
 
-        var writer = StartBlockingWrite(() => person.FirstName = "John");
+        // The write parks in the interceptor chain, so it must not wait for a pool thread.
+        var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(
+            () => { person.FirstName = "John"; });
         Assert.True(blocker.EnteredInnerChain.Wait(TimeSpan.FromSeconds(10)));
 
         // Act: a second observer joins the same observable mid-write. Its subscription must reach
@@ -439,11 +443,4 @@ public class PropertyChangeInterceptorTests
         Assert.True(interceptor.IsIdle);
         Assert.False(subscription.TryDequeue(out _, CancellationToken.None));
     }
-
-    // The write parks in the interceptor chain, so it runs on its own thread rather than waiting for a pool
-    // thread. Observing its completion must not need a pool thread either: unlike a task that resumes its
-    // continuations on the pool, this one completes a timed wait inline on the writer thread, so a starved
-    // pool cannot hold the completion back until that wait's timer fires.
-    private static Task StartBlockingWrite(Action write) =>
-        Task.Factory.StartNew(write, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 }

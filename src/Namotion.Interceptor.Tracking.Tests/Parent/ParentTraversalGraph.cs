@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Tracking.Tests.Parent;
@@ -67,11 +68,7 @@ internal static class ParentTraversalGraph
     public static Task<ITraversalMarker?> FindMarkerWithinTimeoutAsync(IInterceptorSubject subject)
     {
         // A dedicated thread, so the timeout measures the search rather than the wait for a starved pool.
-        return Task.Factory.StartNew(
-                () => subject.TryGetFirstParent<ITraversalMarker>(),
-                CancellationToken.None,
-                TaskCreationOptions.LongRunning,
-                TaskScheduler.Default)
+        return DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => subject.TryGetFirstParent<ITraversalMarker>())
             .WaitAsync(SearchTimeout);
     }
 }
