@@ -9,7 +9,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 {
     private readonly Dictionary<IInterceptorSubject, PropertyReferenceSet> _attachedSubjects = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<PropertyReference, object?> _lastProcessedValues = new(PropertyReference.Comparer);
-    private readonly PropertyAttachDeferral _propertyAttachDeferral = new();
+    private readonly AttachOperation _attachOperation = new();
 
     [ThreadStatic]
     private static Stack<List<(IInterceptorSubject subject, PropertyReference property, object? index)>>? _listPool;
@@ -80,7 +80,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             lock (_attachedSubjects)
             {
-                _propertyAttachDeferral.Begin();
+                _attachOperation.Begin();
                 try
                 {
                     FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
@@ -94,12 +94,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     {
                         AttachToContext(subject, subject.Context);
                     }
-
-                    _propertyAttachDeferral.RunIfOutermost(_attachedSubjects);
                 }
                 finally
                 {
-                    _propertyAttachDeferral.End();
+                    _attachOperation.End();
                 }
             }
         }
@@ -144,6 +142,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             return;
         }
 
+        _attachOperation.OnSubjectAttached();
+
         var count = subject.GetReferenceCount();
         var change = new SubjectLifecycleChange
         {
@@ -158,7 +158,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         SubjectAttached?.Invoke(change);
         foreach (var propertyName in properties)
         {
-            subject.AttachSubjectProperty(new PropertyReference(subject, propertyName), _propertyAttachDeferral);
+            subject.AttachSubjectProperty(new PropertyReference(subject, propertyName), _attachOperation);
         }
     }
 
@@ -174,6 +174,11 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         if (!set.Add(property))
         {
             return;
+        }
+
+        if (isFirstAttach)
+        {
+            _attachOperation.OnSubjectAttached();
         }
 
         var count = subject.IncrementReferenceCount();
@@ -196,7 +201,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
             foreach (var propertyName in properties)
             {
-                subject.AttachSubjectProperty(new PropertyReference(subject, propertyName), _propertyAttachDeferral);
+                subject.AttachSubjectProperty(new PropertyReference(subject, propertyName), _attachOperation);
             }
         }
     }
@@ -386,15 +391,14 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 return;
             }
 
-            _propertyAttachDeferral.Begin();
+            _attachOperation.Begin();
             try
             {
                 ReconcilePropertySubjects(ref context, lastProcessed, newValue);
-                _propertyAttachDeferral.RunIfOutermost(_attachedSubjects);
             }
             finally
             {
-                _propertyAttachDeferral.End();
+                _attachOperation.End();
             }
         }
     }

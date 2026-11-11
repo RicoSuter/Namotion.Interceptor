@@ -275,6 +275,8 @@ public double LastTemperature => _sensor.Temperature;   // does not, if the sens
 
 A field holding an ancestor, such as an owner passed to the constructor, is fine: detaching the ancestor also detaches the derived property, and attaching it again recalculates it.
 
+A getter may also reach a subject that is attached in the same operation as its own subject, such as a sibling of an ancestor reached through `TryGetFirstParent`: the derived property is evaluated again once the operation has attached every subject, and follows that subject from then on.
+
 ### Manual Recalculation
 
 When a derived property's getter depends on data outside the interceptor system (external APIs, services, static state, etc.), automatic dependency tracking cannot detect changes. Use `RecalculateDerivedProperty()` to manually trigger recalculation:

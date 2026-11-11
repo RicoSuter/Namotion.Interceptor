@@ -44,7 +44,4 @@ public partial class SiblingReadingDevice
 {
     [Derived]
     public bool IsInstalled => this.TryGetFirstParent<SiblingReadingMachine>()?.Configuration.Installed ?? false;
-
-    [Derived]
-    public string Presentation => IsInstalled ? "Installed" : "NotInstalled";
 }

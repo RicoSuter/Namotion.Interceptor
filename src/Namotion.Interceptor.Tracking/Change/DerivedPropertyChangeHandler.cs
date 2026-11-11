@@ -54,13 +54,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             return;
         }
 
-        // The getter records only reads of attached subjects, so evaluating it while its subtree is still attaching
-        // would miss a dependency on a subject attached later in the same operation, such as a sibling of an ancestor.
-        if (change.Deferral?.TryDefer(this, change.Property) == true)
-        {
-            return;
-        }
-
         // A detach may remove the fetched data before it is locked: attach the current data instead.
         bool isAttached;
         do
@@ -68,6 +61,47 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             isAttached = TryAttach(change.Property.GetDerivedPropertyData(), change.Property);
         }
         while (!isAttached);
+
+        // The getter records only reads of attached subjects, so it misses a dependency on a subject attached later in
+        // the same operation, such as a sibling of an ancestor.
+        change.AttachOperation?.TryRunWhenLaterSubjectsAttached(ReevaluateAfterAttach, change.Property);
+    }
+
+    /// <summary>
+    /// Evaluates an attached derived property again to record dependencies on subjects attached after it, without
+    /// publishing a change: the value can differ only through reads that were not tracked when it was attached.
+    /// </summary>
+    private static void ReevaluateAfterAttach(PropertyReference property)
+    {
+        var data = property.TryGetDerivedPropertyData();
+        if (data is null)
+        {
+            return;
+        }
+
+        lock (data)
+        {
+            if (!data.IsAttached || !ReferenceEquals(property.TryGetDerivedPropertyData(), data))
+            {
+                return;
+            }
+
+            if (data.IsRecalculating)
+            {
+                // The recalculation in flight evaluates again and records the dependencies.
+                data.RecalculationNeeded = true;
+                return;
+            }
+
+            try
+            {
+                data.LastKnownValue = EvaluateAndStabilize(data, property, callerHoldsLock: true);
+            }
+            catch (Exception)
+            {
+                // Getter threw. The value will be computed on the next dependency write.
+            }
+        }
     }
 
     private static bool TryAttach(DerivedPropertyData data, in PropertyReference property)

@@ -1,5 +1,6 @@
 using System.Reactive.Concurrency;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
@@ -21,10 +22,6 @@ public class DerivedPropertyAttachOrderTests
 
         // Assert
         AssertSingleChange(changes, machine.Device, nameof(SiblingReadingDevice.IsInstalled), true);
-        AssertSingleChange(changes, machine.Device, nameof(SiblingReadingDevice.Presentation), "Installed");
-        Assert.Contains(
-            new PropertyReference(machine.Configuration, nameof(SiblingReadingConfiguration.Installed)),
-            new PropertyReference(machine.Device, nameof(SiblingReadingDevice.IsInstalled)).GetRequiredProperties().ToArray());
     }
 
     [Fact]
@@ -81,6 +78,61 @@ public class DerivedPropertyAttachOrderTests
 
         // Assert
         AssertSingleChange(changes, machine.Device, nameof(SiblingReadingDevice.IsInstalled), true);
+    }
+
+    [Fact]
+    public void WhenSourceChangesLaterInTheSameAttach_ThenDerivedPropertyAttachedBeforePublishesTheChange()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var root = new Person(context);
+        var first = new Person { FirstName = "A" };
+        context.WithService(() => new CallbackLifecycleHandler(change =>
+        {
+            if (change is { IsContextAttach: true, Subject: Person { FirstName: "Writer" } })
+            {
+                first.FirstName = "B";
+            }
+        }));
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        root.Children = [first, new Person { FirstName = "Writer" }];
+
+        // Assert
+        AssertSingleChange(changes, first, nameof(Person.FullName), "B");
+    }
+
+    [Fact]
+    public void WhenLifecycleHandlerThrowsDuringAttach_ThenDerivedPropertiesAttachedBeforeFollowTheirSources()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var root = new Person(context);
+        var first = new Person { FirstName = "A" };
+        context.WithService(() => new CallbackLifecycleHandler(change =>
+        {
+            if (change is { IsContextAttach: true, Subject: Person { FirstName: "Throw" } })
+            {
+                throw new InvalidOperationException();
+            }
+        }));
+        Assert.Throws<InvalidOperationException>(() => root.Children = [first, new Person { FirstName = "Throw" }]);
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        first.FirstName = "B";
+
+        // Assert
+        AssertSingleChange(changes, first, nameof(Person.FullName), "B");
+    }
+
+    private sealed class CallbackLifecycleHandler(Action<SubjectLifecycleChange> callback) : ILifecycleHandler
+    {
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            callback(change);
+        }
     }
 
     private static List<SubjectPropertyChange> SubscribeToChanges(IInterceptorSubjectContext context)

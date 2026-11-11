@@ -211,6 +211,8 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
         public SubjectPropertyLifecycleChange(Namotion.Interceptor.IInterceptorSubject Subject, Namotion.Interceptor.PropertyReference Property) { }
         public Namotion.Interceptor.PropertyReference Property { get; set; }
         public Namotion.Interceptor.IInterceptorSubject Subject { get; set; }
+        public bool Equals(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange other) { }
+        public override int GetHashCode() { }
     }
 }
 namespace Namotion.Interceptor.Tracking.Parent
