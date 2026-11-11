@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using MudBlazor;
 using Namotion.Interceptor.Authorization;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace HomeBlaze.Authorization.Blazor.Tests;
@@ -176,7 +177,7 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
         var rendersOfFirstKey = addButton.RenderCount - renders;
         // The search the typed text starts after a delay renders the field on a timer thread with a new handler of input,
         // which an input dispatched meanwhile would no longer find; opening the suggestions renders no Add button.
-        await component.WaitForAssertionAsync(() => Assert.True(autocomplete.Instance.Open), TimeSpan.FromSeconds(30));
+        await component.WaitForAssertionAsync(() => Assert.True(autocomplete.Instance.Open), TestTimeouts.Default);
         await input.FocusInAsync(new FocusEventArgs());
         await input.KeyDownAsync(new KeyboardEventArgs { Key = "e" });
         await input.InputAsync(new ChangeEventArgs { Value = "Te" });
@@ -287,7 +288,7 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
             .Single(input => input.Instance.TestId == "rule-types")
             .FindComponent<MudAutocomplete<string>>();
         await FindInput(component, "rule-types").InputAsync(new ChangeEventArgs { Value = text });
-        await component.WaitForAssertionAsync(() => Assert.True(autocomplete.Instance.Open), TimeSpan.FromSeconds(30));
+        await component.WaitForAssertionAsync(() => Assert.True(autocomplete.Instance.Open), TestTimeouts.Default);
         return autocomplete;
     }
 

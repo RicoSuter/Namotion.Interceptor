@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Components.Web;
 using MudBlazor;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Authorization;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using System.Reactive.Concurrency;
 using Xunit;
@@ -112,7 +113,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         // Assert
         await component.WaitForAssertionAsync(
             () => Assert.Empty(component.FindAll("[data-testid='role-edit-tab-roles-error']")),
-            TimeSpan.FromSeconds(30));
+            TestTimeouts.Default);
         Assert.DoesNotContain("mud-chip-color-error", component.Find("[data-testid='role-edit-include-Pantry']").ClassName);
     }
 
@@ -345,7 +346,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         // Assert
         await component.WaitForAssertionAsync(
             () => Assert.Contains("Ghost", component.Find("[data-testid='role-edit-status']").TextContent),
-            TimeSpan.FromSeconds(30));
+            TestTimeouts.Default);
     }
 
     [Fact]
@@ -420,7 +421,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         // Assert
         await component.WaitForAssertionAsync(
             () => Assert.Equal("Used by 1 agent", component.Find("[data-testid='role-edit-used-by']").TextContent.Trim()),
-            TimeSpan.FromSeconds(30));
+            TestTimeouts.Default);
     }
 
     [Fact]

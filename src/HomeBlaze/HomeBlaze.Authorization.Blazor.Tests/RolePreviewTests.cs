@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using MudBlazor;
 using MudBlazor.Services;
 using Namotion.Interceptor.Authorization;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Registry;
 using Xunit;
 
@@ -242,7 +243,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
         // Assert
         await component.WaitForAssertionAsync(
             () => Assert.Equal([Denied, Allowed, null, Denied], GetCellStates(component, "Temperature")),
-            TimeSpan.FromSeconds(30));
+            TestTimeouts.Default);
     }
 
     [Fact]
