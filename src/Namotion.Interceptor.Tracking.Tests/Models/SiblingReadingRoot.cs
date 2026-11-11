@@ -79,12 +79,6 @@ public partial class SiblingReadingDevice
     [Derived]
     public bool[] InstalledStates => [ReadInstalled()];
 
-    /// <summary>
-    /// An array of rank two, whose structural comparison throws.
-    /// </summary>
-    [Derived]
-    public bool[,] InstalledGrid => new[,] { { ReadInstalled() } };
-
     private bool ReadInstalled()
     {
         return this.TryGetFirstParent<SiblingReadingMachine>()?.Configuration.Installed ?? false;

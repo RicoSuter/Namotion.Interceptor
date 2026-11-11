@@ -143,6 +143,60 @@ public class DerivedPropertyAttachOrderTests
     }
 
     [Fact]
+    public void WhenFailedFirstEvaluationIsRecalculatedDuringTheAttach_ThenValueChangedAfterItIsPublished()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = worker => root.Anchor == 0
+            ? throw new InvalidOperationException()
+            : 100 + worker.TryGetFirstParent<EvaluatorMachine>()!.Configuration.Value;
+        context.WithService(() => new BeforeContextInheritanceLifecycleHandler(change =>
+        {
+            // The worker is attached, the configuration has no context yet, so its write is not tracked.
+            if (change.IsContextAttach && change.Subject == machine.Configuration)
+            {
+                root.Anchor = 1;
+                new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)).RecalculateDerivedProperty();
+                machine.Configuration.Value = 5;
+            }
+        }));
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        root.Machine = machine;
+
+        // Assert
+        var values = changes
+            .Where(change => change.Property == new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)))
+            .Select(change => change.GetNewValue<int>());
+        Assert.Equal([100, 105], values);
+    }
+
+    [Fact]
+    public void WhenValueChangesWithoutNewDependency_ThenAttachPublishesTheChange()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = worker =>
+        {
+            // Reads the same tracked property in both evaluations: the parent of the configuration is not tracked.
+            var configuration = worker.TryGetFirstParent<EvaluatorMachine>()!.Configuration;
+            return configuration.TryGetFirstParent<EvaluatorMachine>() is not null ? 1 : 0;
+        };
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        root.Machine = machine;
+
+        // Assert
+        AssertSingleChange(changes, machine.Worker, nameof(EvaluatorWorker.Result), 1);
+    }
+
+    [Fact]
     public void WhenSubtreeIsAssigned_ThenItIsAnnouncedBeforeItsChangedDerivedValue()
     {
         // Arrange
@@ -179,31 +233,6 @@ public class DerivedPropertyAttachOrderTests
         AssertEvaluatedAgain(machine.Device);
         Assert.DoesNotContain(changes, change => change.Property.Name == nameof(SiblingReadingMachine.InstalledStateList));
         Assert.DoesNotContain(changes, change => change.Property.Name == nameof(SiblingReadingDevice.InstalledStates));
-    }
-
-    [Fact]
-    public void WhenChangedValueCannotBeCompared_ThenItIsPublished()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
-        var root = new SiblingReadingRoot(context);
-        var machine = new SiblingReadingMachine();
-        context.WithService(() => new CallbackLifecycleHandler(change =>
-        {
-            if (change is { IsContextAttach: true, Subject: SiblingReadingConfiguration configuration })
-            {
-                configuration.Installed = true;
-            }
-        }));
-        var changes = SubscribeToChanges(context);
-
-        // Act
-        root.Machine = machine;
-
-        // Assert
-        var change = Assert.Single(changes, c => c.Property.Name == nameof(SiblingReadingDevice.InstalledGrid));
-        Assert.False(change.GetOldValue<bool[,]>()[0, 0]);
-        Assert.True(change.GetNewValue<bool[,]>()[0, 0]);
     }
 
     [Fact]

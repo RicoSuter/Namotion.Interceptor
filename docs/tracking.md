@@ -275,7 +275,7 @@ public double LastTemperature => _sensor.Temperature;   // does not, if the sens
 
 A field holding an ancestor, such as an owner passed to the constructor, is fine: detaching the ancestor also detaches the derived property, and attaching it again recalculates it.
 
-A getter may also read, through tracked properties, a subject that is attached by the same operation but after its own subject, such as a sibling of an ancestor reached through `TryGetFirstParent()` and a partial property of that ancestor. The derived property is evaluated again once the operation has attached every subject, publishes a change if the value changed in between, and follows that subject from then on. The attach of a derived property added at runtime does not evaluate it again.
+A getter may also read, through tracked properties, a subject that is attached by the same operation but after its own subject, such as a sibling of an ancestor reached through `TryGetFirstParent()` and a partial property of that ancestor. The derived property is evaluated again once the operation has attached every subject and follows that subject from then on. If the value changed in between, a change is published; a new instance of a collection or another object counts as changed only if the property also reads other properties than before, and a one-dimensional array only if its items differ. The attach of a derived property added at runtime does not evaluate it again.
 
 ### Manual Recalculation
 

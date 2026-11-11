@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
@@ -65,46 +66,27 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             return;
         }
 
-        // A detach may remove the fetched data before it is locked: attach the current data instead.
-        bool isAttached;
-        bool evaluationFailed;
-        do
+        while (!TryAttach(change.Property.GetDerivedPropertyData(), change.Property))
         {
-            isAttached = TryAttach(change.Property.GetDerivedPropertyData(), change.Property, out evaluationFailed);
+            // A detach removed the fetched data before it was locked: attach the current data instead.
         }
-        while (!isAttached);
 
         // The getter records only reads of attached subjects, so it misses a dependency on a subject attached later in
         // the same operation, such as a sibling of an ancestor.
-        change.AttachOperation?.RunAtEndIfSubjectsAttachedLater(
-            evaluationFailed ? EvaluateAfterFailedAttach : ReevaluateAfterAttach, change.Property);
+        change.AttachOperation?.RunAtEndIfSubjectsAttachedLater(EvaluateAfterAttach, change.Property);
     }
 
     /// <summary>
-    /// Evaluates an attached derived property again to record dependencies on subjects attached after it, if it
-    /// depends on a property that can hold subjects by now. Returns the recalculation to run once the thread holds no
-    /// lifecycle lock if that found a dependency it did not have and a different value.
+    /// Evaluates an attached derived property again to record dependencies on subjects attached after it, if it has no
+    /// dependencies or depends on a property that can hold subjects by now. Returns the recalculation to run once the
+    /// thread holds no lifecycle lock if the value changed from the one of an earlier evaluation.
     /// </summary>
-    private static Action<PropertyReference>? ReevaluateAfterAttach(PropertyReference property)
-    {
-        return EvaluateAfterAttach(property, isFirstValue: false);
-    }
-
-    /// <summary>
-    /// Evaluates an attached derived property whose evaluation at attach threw. This is its first value, so nothing is
-    /// published, as for an evaluation at attach.
-    /// </summary>
-    private static Action<PropertyReference>? EvaluateAfterFailedAttach(PropertyReference property)
-    {
-        return EvaluateAfterAttach(property, isFirstValue: true);
-    }
-
-    // Evaluated like a recalculation, not like the evaluation at attach: the property has dependencies by now, so a
-    // write on another thread may ask for lock(data) while the getter runs, and the getter may wait for that thread.
-    private static Action<PropertyReference>? EvaluateAfterAttach(PropertyReference property, bool isFirstValue)
+    // Evaluated like a recalculation, not like the evaluation at attach: the property may have dependencies by now, so
+    // a write on another thread may ask for lock(data) while the getter runs, and the getter may wait for that thread.
+    private static Action<PropertyReference>? EvaluateAfterAttach(PropertyReference property)
     {
         var data = property.TryGetDerivedPropertyData();
-        if (data is null || !TryBeginEvaluationAfterAttach(data, property, isFirstValue, out var lastKnownValue))
+        if (data is null || !TryBeginEvaluationAfterAttach(data, property, out var lastKnownValue))
         {
             return null;
         }
@@ -137,18 +119,22 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 return null;
             }
 
-            if (isFirstValue)
+            if (lastKnownValue is null && !CanBeNull(property.Metadata.Type))
             {
+                // No evaluation has succeeded so far, so this is the first value, which is not a change, as at attach.
                 data.LastKnownValue = value;
                 property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
                 return null;
             }
 
-            // LastKnownValue stays as it is, so that the recalculation publishes the change from it. Without a new
-            // dependency the first evaluation missed nothing, and a getter that builds its value anew, such as a list,
-            // would look changed on every attach.
-            return dependenciesChanged && !AreSameValue(value, lastKnownValue) ? RecalculateAfterAttach : null;
+            // LastKnownValue stays as it is, so that the recalculation publishes the change from it.
+            return IsChangedValue(value, lastKnownValue, dependenciesChanged) ? RecalculateAfterAttach : null;
         }
+    }
+
+    private static bool CanBeNull(Type type)
+    {
+        return !type.IsValueType || Nullable.GetUnderlyingType(type) is not null;
     }
 
     /// <summary>
@@ -156,7 +142,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// evaluate, or when a recalculation in flight evaluates the property instead.
     /// </summary>
     private static bool TryBeginEvaluationAfterAttach(
-        DerivedPropertyData data, in PropertyReference property, bool isFirstValue, out object? lastKnownValue)
+        DerivedPropertyData data, in PropertyReference property, out object? lastKnownValue)
     {
         lastKnownValue = null;
         lock (data)
@@ -173,31 +159,39 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 return false;
             }
 
-            if (!isFirstValue && !DependsOnPropertyThatCanHoldSubjects(data))
+            // Without dependencies the evaluation at attach read no attached subject, or it threw.
+            if (!data.RequiredPropertiesSpan.IsEmpty && !DependsOnPropertyThatCanHoldSubjects(data))
             {
                 return false;
             }
 
             data.IsRecalculating = true;
+            data.RecalculationNeeded = false;
             lastKnownValue = data.LastKnownValue;
             return true;
         }
     }
 
-    // An array a getter builds anew on every call is the same value while its items are.
-    private static bool AreSameValue(object? value, object? lastKnownValue)
+    // Two instances of a reference type other than a string may be one value that the getter builds anew on every
+    // call, such as a list, and would look changed on every attach. They are a change only if the dependencies changed
+    // as well, and two one-dimensional arrays only if their items differ too.
+    private static bool IsChangedValue(object? value, object? lastKnownValue, bool dependenciesChanged)
     {
-        try
+        if (Equals(value, lastKnownValue))
         {
-            return Equals(value, lastKnownValue) ||
-                (value is System.Collections.IStructuralEquatable structural &&
-                 structural.Equals(lastKnownValue, EqualityComparer<object>.Default));
-        }
-        catch (Exception)
-        {
-            // A comparison that fails, as the structural one does for arrays of different rank, tells nothing.
             return false;
         }
+
+        return value is null or ValueType or string ||
+            lastKnownValue is null or ValueType or string ||
+            (dependenciesChanged && !HaveSameItems(value, lastKnownValue));
+    }
+
+    private static bool HaveSameItems(object value, object lastKnownValue)
+    {
+        return value.GetType().IsSZArray &&
+            lastKnownValue.GetType().IsSZArray &&
+            StructuralComparisons.StructuralEqualityComparer.Equals(value, lastKnownValue);
     }
 
     // Publishes, so it runs only once the thread holds no lifecycle lock: an observer on another thread may hold the
@@ -225,9 +219,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
     }
 
-    private static bool TryAttach(DerivedPropertyData data, in PropertyReference property, out bool evaluationFailed)
+    private static bool TryAttach(DerivedPropertyData data, in PropertyReference property)
     {
-        evaluationFailed = false;
         lock (data)
         {
             if (!ReferenceEquals(property.TryGetDerivedPropertyData(), data))
@@ -251,7 +244,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             catch (Exception)
             {
                 // Getter threw. The value will be computed on the next dependency write.
-                evaluationFailed = true;
             }
 
             return true;
@@ -676,7 +668,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// loop if concurrent writes changed the dependency set.
     /// When <paramref name="callerHoldsLock"/> is true (the evaluation at attach), the caller already holds
     /// lock(data) and lock(_attachedSubjects), so UpdateDependencies runs directly.
-    /// When false (RecalculateDerivedProperty), the lock is acquired only briefly for
+    /// When false (RecalculateDerivedProperty and the evaluation at the end of an attach), the lock is acquired only briefly for
     /// UpdateDependencies, preventing deadlock between lock(data) and lock(_attachedSubjects)
     /// when getters have side effects that write to subject-typed properties.
     /// </summary>
