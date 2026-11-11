@@ -390,7 +390,7 @@ public class AutomationRunTests
         await host.StopAsync();
 
         // Assert
-        await AsyncTestHelpers.WaitUntilAsync(() => flush.IsCompleted, timeout: TimeSpan.FromSeconds(5));
+        await AsyncTestHelpers.WaitUntilAsync(() => flush.IsCompleted);
         Assert.True(flush.IsCompletedSuccessfully);
     }
 
@@ -408,7 +408,7 @@ public class AutomationRunTests
         host.Blinds.Release();
 
         // Assert
-        await AsyncTestHelpers.WaitUntilAsync(() => flushes.IsCompleted, timeout: TimeSpan.FromSeconds(5));
+        await AsyncTestHelpers.WaitUntilAsync(() => flushes.IsCompleted);
         Assert.True(flushes.IsCompletedSuccessfully);
     }
 

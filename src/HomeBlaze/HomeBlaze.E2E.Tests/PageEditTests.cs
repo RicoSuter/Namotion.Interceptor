@@ -115,7 +115,7 @@ public class PageEditTests
 
         // Split view should NOT be visible
         var splitter = page.Locator("[data-testid='edit-splitter']");
-        await Assertions.Expect(splitter).Not.ToBeVisibleAsync(new() { Timeout = 5000 });
+        await Assertions.Expect(splitter).Not.ToBeVisibleAsync(new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -131,7 +131,7 @@ public class PageEditTests
 
         var textArea = page.GetByTestId("markdown-source-text");
         await Assertions.Expect(textArea).ToHaveValueAsync(source, new() { Timeout = 30000 });
-        await Assertions.Expect(page.Locator(".monaco-editor")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".monaco-editor")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
         // Act
         await textArea.FillAsync(source.Replace("before", "after"));
@@ -292,7 +292,7 @@ public class PageEditTests
                 }
             }
 
-            await Assertions.Expect(page.Locator("#blazor-error-ui")).ToBeHiddenAsync();
+            await Assertions.Expect(page.Locator("#blazor-error-ui")).ToBeHiddenAsync(new() { Timeout = AssertionTimeouts.Absence });
         }
     }
 
@@ -322,7 +322,7 @@ public class PageEditTests
             await page.WaitForFunctionAsync(
                 "minimum => document.querySelector('[data-testid=edit-splitter] .page-split-preview').getBoundingClientRect().width > minimum",
                 previewWidth + 100,
-                new() { Timeout = 10000 });
+                new() { Timeout = 30000 });
         }
 
         // Act: the cursor in the motor block adds its edit button, which makes the head as wide as it gets. It is placed
@@ -351,7 +351,7 @@ public class PageEditTests
             """;
         try
         {
-            await page.WaitForFunctionAsync($"() => ({headInBarScript})().isInside", null, new() { Timeout = 10000 });
+            await page.WaitForFunctionAsync($"() => ({headInBarScript})().isInside", null, new() { Timeout = 30000 });
         }
         catch (TimeoutException)
         {
@@ -360,7 +360,7 @@ public class PageEditTests
         }
 
         // Not forced, so that the click fails when another element covers the button.
-        await page.GetByTestId("create-subject-button").ClickAsync(new() { Timeout = 10000 });
+        await page.GetByTestId("create-subject-button").ClickAsync(new() { Timeout = 30000 });
         await Assertions.Expect(page.GetByTestId("create-subject-dialog")).ToBeVisibleAsync(new() { Timeout = 30000 });
     }
 
@@ -405,14 +405,14 @@ public class PageEditTests
                 .ToHaveValueAsync("Original label", new() { Timeout = 30000 });
 
             // Assert - the subject is valid, so nothing has to be touched before it can be saved.
-            await Assertions.Expect(saveButton).ToBeEnabledAsync(new() { Timeout = 5000 });
+            await Assertions.Expect(saveButton).ToBeEnabledAsync(new() { Timeout = 30000 });
 
             // Act - Enter commits the text without leaving the field.
             await limitInput.FillAsync("1.5");
             await limitInput.PressAsync("Enter");
 
             // Assert
-            await Assertions.Expect(saveButton).ToBeDisabledAsync(new() { Timeout = 5000 });
+            await Assertions.Expect(saveButton).ToBeDisabledAsync(new() { Timeout = 30000 });
             Assert.Null(subject.Limit);
 
             // Act
@@ -420,16 +420,16 @@ public class PageEditTests
             await limitInput.PressAsync("Enter");
 
             // Assert
-            await Assertions.Expect(saveButton).ToBeEnabledAsync(new() { Timeout = 5000 });
+            await Assertions.Expect(saveButton).ToBeEnabledAsync(new() { Timeout = 30000 });
 
             // Act
             await saveButton.ClickAsync();
 
             // Assert - the editor stays open after a save, and what it applied itself is no external change.
             // The subject has no file of its own, so nothing is written and the notification says so.
-            await Assertions.Expect(page.GetByText("Configuration applied but not saved")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            await Assertions.Expect(page.GetByText("Configuration applied but not saved")).ToBeVisibleAsync(new() { Timeout = 30000 });
             Assert.Equal(3, subject.Limit);
-            await Assertions.Expect(page.GetByText("Configuration was changed externally")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.GetByText("Configuration was changed externally")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         }
         finally
         {

@@ -66,7 +66,7 @@ public class ContextConcurrencyTests
             var both = Task.WhenAll(writer, mutator);
             try
             {
-                await both.WaitAsync(TimeSpan.FromSeconds(15));
+                await both.WaitAsync(TestTimeouts.Default);
             }
             catch (TimeoutException exception)
             {
@@ -157,7 +157,7 @@ public class ContextConcurrencyTests
             // and a poll interval would dominate the whole test.
             try
             {
-                await Task.WhenAll(adders).WaitAsync(TimeSpan.FromSeconds(15));
+                await Task.WhenAll(adders).WaitAsync(TestTimeouts.Default);
             }
             catch (TimeoutException exception)
             {

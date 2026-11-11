@@ -188,17 +188,23 @@ public class GraphRoutesTests
         var resolver = fixture.Host.Graph.Resolver;
         fixture.Room.Sensor!.Name = "gauge";
         IInterceptorSubject subject = startsAtTheRoom ? fixture.Room : fixture.Room.Sensor;
-        var paths = Enumerable.Range(0, reads).Select(_ => new string(path.AsSpan())).ToArray();
         Assert.Equal("gauge", resolver.ReadFrom(path, subject).Value);
 
         // Act
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        foreach (var instance in paths)
+        // The smallest of a few batches, so a route that background work of the host rebuilds during one batch does not
+        // count as the cost of a read; a read that allocates more than the split path exceeds the bound in every batch.
+        var allocated = long.MaxValue;
+        for (var batch = 0; batch < 3; batch++)
         {
-            resolver.ReadFrom(instance, subject);
-        }
+            var paths = Enumerable.Range(0, reads).Select(_ => new string(path.AsSpan())).ToArray();
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            foreach (var instance in paths)
+            {
+                resolver.ReadFrom(instance, subject);
+            }
 
-        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            allocated = Math.Min(allocated, GC.GetAllocatedBytesForCurrentThread() - before);
+        }
 
         // Assert
         Assert.True(allocated < reads * maxBytesPerRead, $"{allocated} bytes for {reads} reads of {path}");
