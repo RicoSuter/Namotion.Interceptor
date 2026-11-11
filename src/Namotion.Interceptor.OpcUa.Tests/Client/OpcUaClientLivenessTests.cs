@@ -304,7 +304,6 @@ public class OpcUaClientLivenessTests
         RetryTime = retryTime ?? TimeSpan.FromSeconds(10),
 
         ReconnectInterval = TimeSpan.FromSeconds(1),
-        ReconnectHandlerTimeout = TimeSpan.FromSeconds(5),
         MaxReconnectDuration = TimeSpan.FromSeconds(20),
 
         SessionTimeout = TimeSpan.FromSeconds(30),

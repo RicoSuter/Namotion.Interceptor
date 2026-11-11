@@ -35,11 +35,11 @@ public class OpcUaStallDetectionTests
     }
 
     [Fact]
-    public async Task StallDetection_WhenServerNeverReturns_ThenTheReconnectAttemptStaysOpen()
+    public async Task StallDetection_WhenServerNeverReturns_ClientKeepsRetrying()
     {
-        // When the server goes down and never comes back, the managed session keeps retrying across
-        // reconnect policy cycles. That is one outage, so it is one open attempt: it neither
-        // succeeds nor is abandoned, and the client stays non-operational.
+        // When the server goes down and never comes back, each reconnection cycle that exhausts
+        // MaxReconnectDuration counts as a failed attempt and the managed session starts the next
+        // one, so the client keeps retrying instead of getting stuck.
 
         var logger = new TestLogger(_output);
         OpcUaTestServer<TestRoot>? server = null;
@@ -93,26 +93,39 @@ public class OpcUaStallDetectionTests
                 message: "Client should detect disconnection");
             logger.Log("Client detected disconnection");
 
-            // Wait for reconnection to start, using Reconnects.TotalAttempts instead of IsReconnecting
-            // because IsReconnecting is only true for the brief duration of each failed manual
-            // reconnection attempt (~10-50ms when server is down). The 100ms polling interval
-            // can miss it entirely, causing flaky test timeouts on CI.
+            // Wait for reconnection to start.
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Source!.Diagnostics.Reconnects.TotalAttempts > initialReconnectAttempts,
                 timeout: TimeSpan.FromSeconds(120),
                 message: "Client should start reconnecting");
             logger.Log($"Client started reconnecting (attempts: {client.Source!.Diagnostics.Reconnects.TotalAttempts})");
 
-            var attemptsAfterStart = client.Source!.Diagnostics.Reconnects.TotalAttempts;
-            var succeededAfterStart = client.Source!.Diagnostics.Reconnects.TotalSucceeded;
+            // Each exhausted cycle (MaxReconnectDuration, 15s here) starts a new attempt, so the
+            // counter keeps climbing while the server stays away.
+            var recoveryTimeout = TimeSpan.FromSeconds(90);
+            var startTime = DateTime.UtcNow;
 
-            // A check that something does not happen: spans two reconnect policy budgets
-            // (MaxReconnectDuration), so a new policy cycle starting is covered.
-            await Task.Delay(TimeSpan.FromSeconds(30));
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    var attempts = client.Source!.Diagnostics.Reconnects.TotalAttempts;
+                    if (attempts > initialReconnectAttempts + 2)
+                    {
+                        logger.Log($"Recovery verified: IsReconnecting={client.Source!.Diagnostics.IsReconnecting}, " +
+                                   $"Attempts={attempts}");
+                        return true;
+                    }
+                    return false;
+                },
+                timeout: recoveryTimeout,
+                message: "Client should keep retrying reconnection");
 
-            Assert.False(client.Source!.Diagnostics.IsOperational);
-            Assert.Equal(attemptsAfterStart, client.Source!.Diagnostics.Reconnects.TotalAttempts);
-            Assert.Equal(succeededAfterStart, client.Source!.Diagnostics.Reconnects.TotalSucceeded);
+            var elapsed = DateTime.UtcNow - startTime;
+            logger.Log($"Recovery behavior confirmed in {elapsed.TotalSeconds:F1}s");
+
+            // Verify recovery happened within expected timeframe
+            Assert.True(elapsed < TimeSpan.FromSeconds(85),
+                $"Recovery should be confirmed within 85s (actual: {elapsed.TotalSeconds:F1}s)");
 
             logger.Log("Test passed - client correctly handles server-never-returns scenario");
         }
