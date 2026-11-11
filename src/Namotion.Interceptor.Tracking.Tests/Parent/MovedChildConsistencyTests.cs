@@ -1,6 +1,9 @@
 using System.Collections;
 using System.Collections.Concurrent;
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -507,6 +510,75 @@ public class MovedChildConsistencyTests
     /// registry parents of each carry the same indices with the entries of each property adjacent, and that no former
     /// child keeps a parent entry.
     /// </summary>
+    [Fact]
+    public async Task WhenAnotherThreadWritesAPropertyAHandlerWroteDuringTheAttach_ThenThePendingWriteIsReconciled()
+    {
+        // Arrange
+        var handler = new PropertyWritingLifecycleHandler(nameof(Garage.Cars));
+        var storedSignal = new StoredValueSignalInterceptor();
+        var context = CreateContext().WithService(() => handler).WithService(() => storedSignal);
+        var cars = CreateHeldCars(context, 3);
+        var garage = new Garage { Cars = [cars[0]] };
+        var final = new Dictionary<string, Car> { ["Final"] = cars[2] };
+        storedSignal.AwaitedValue = final;
+        Task? writer = null;
+        handler.NestedWrite = () =>
+        {
+            garage.CarsByName = new Dictionary<string, Car> { ["Nested"] = cars[1] };
+
+            // The other write stores its value now and reconciles once the attach releases the lock.
+            writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => garage.CarsByName = final);
+            Assert.True(storedSignal.Stored.Task.Wait(TestTimeouts.Default));
+        };
+
+        // Act: the attach of the car to Cars comes first, and the handler then writes CarsByName.
+        new BroadlyDeclaredHolder(context).BroadCars = garage;
+        Assert.NotNull(writer);
+        await writer;
+
+        // Assert
+        Assert.Same(final, garage.CarsByName);
+        AssertEveryCopyMatchesValue(garage, nameof(Garage.CarsByName), cars);
+    }
+
+    [Fact]
+    public void WhenHandlerRepeatsACarInAnEarlierPropertyWhileARootAttaches_ThenEveryCopyMatchesTheValue()
+    {
+        // Arrange
+        var handler = new PropertyWritingLifecycleHandler(nameof(Garage.CarsByName));
+        var context = CreateContext().WithService(() => handler);
+        var cars = CreateHeldCars(context, 2);
+        var garage = new Garage { Cars = [cars[0]], CarsByName = new Dictionary<string, Car> { ["A"] = cars[1] } };
+        handler.NestedWrite = () => garage.Cars = [cars[0], cars[0]];
+
+        // Act: the garage is a root, so the attach visits Cars before the handler writes it.
+        ((IInterceptorSubject)garage).Context.AddFallbackContext(context);
+
+        // Assert
+        Assert.Null(handler.NestedWrite);
+        AssertEveryCopyMatchesValue(garage, nameof(Garage.Cars), cars);
+        AssertEveryCopyMatchesValue(garage, nameof(Garage.CarsByName), cars);
+    }
+
+    [Fact]
+    public void WhenHandlerReplacesTheCarOfAnEarlierPropertyWhileARootAttaches_ThenTheNewCarIsAttached()
+    {
+        // Arrange
+        var handler = new PropertyWritingLifecycleHandler(nameof(Garage.CarsByName));
+        var context = CreateContext().WithService(() => handler);
+        var cars = CreateHeldCars(context, 3);
+        var garage = new Garage { Cars = [cars[0]], CarsByName = new Dictionary<string, Car> { ["A"] = cars[1] } };
+        handler.NestedWrite = () => garage.Cars = [cars[2]];
+
+        // Act
+        ((IInterceptorSubject)garage).Context.AddFallbackContext(context);
+
+        // Assert
+        Assert.Null(handler.NestedWrite);
+        AssertEveryCopyMatchesValue(garage, nameof(Garage.Cars), cars);
+        Assert.Equal(2, cars[2].GetReferenceCount());
+    }
+
     private static void AssertEveryCopyMatchesValue(
         IInterceptorSubject parent, string propertyName, IEnumerable<IInterceptorSubject> candidates)
     {
@@ -620,6 +692,27 @@ public class MovedChildConsistencyTests
             var nestedWrite = NestedWrite;
             NestedWrite = null;
             nestedWrite?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// A write interceptor inside the lifecycle interceptor that signals once the awaited value is stored, before the
+    /// lifecycle interceptor takes its lock to reconcile it.
+    /// </summary>
+    [RunsAfter(typeof(LifecycleInterceptor))]
+    private sealed class StoredValueSignalInterceptor : IWriteInterceptor
+    {
+        public object? AwaitedValue { get; set; }
+
+        public TaskCompletionSource Stored { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+            if (AwaitedValue is not null && ReferenceEquals(context.NewValue, AwaitedValue))
+            {
+                Stored.TrySetResult();
+            }
         }
     }
 

@@ -11,6 +11,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     private readonly Dictionary<IInterceptorSubject, PropertyReferenceSet> _attachedSubjects = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<PropertyReference, object?> _lastProcessedValues = new(PropertyReference.Comparer);
 
+    // Roots whose children are being attached, which a write reconciles as attached subjects.
+    private readonly HashSet<IInterceptorSubject> _attachingRoots = new(ReferenceEqualityComparer.Instance);
+
     [ThreadStatic]
     private static Stack<List<(IInterceptorSubject subject, PropertyReference property, object? index)>>? _listPool;
 
@@ -80,35 +83,19 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             lock (_attachedSubjects)
             {
-                // A subject attached through a property is already tracked; a root is tracked once its children are.
-                var isRoot = !_attachedSubjects.ContainsKey(subject);
-
-                // Each property is read and seeded when its turn comes, so that a handler that writes a later property
-                // during an attach reconciles it before it is read here, which then finds its children attached.
-                foreach (var property in subject.Properties)
+                // A subject attached through a property is already tracked; a root is tracked once its children are, and
+                // is in _attachingRoots meanwhile.
+                var isRoot = !_attachedSubjects.ContainsKey(subject) && _attachingRoots.Add(subject);
+                try
                 {
-                    var metadata = property.Value;
-                    if (!metadata.IsIntercepted || !metadata.Type.CanContainSubjects())
+                    AttachProperties(subject, children, isRoot);
+                }
+                finally
+                {
+                    if (isRoot)
                     {
-                        continue;
+                        _attachingRoots.Remove(subject);
                     }
-
-                    var propertyReference = new PropertyReference(subject, property.Key);
-                    var value = metadata.GetValue?.Invoke(subject);
-                    _lastProcessedValues[propertyReference] = value;
-
-                    FindSubjectsInProperty(propertyReference, value, children, null);
-                    AttachChildren(subject.Context, children, null, children.Count > 1 && HasRepeatedSubject(children));
-
-                    // A handler detached the subject during this attach. Its detach removed the baselines seeded so far
-                    // and the children attached before it; detach the ones attached after it and seed nothing more.
-                    if (!isRoot && !_attachedSubjects.ContainsKey(subject))
-                    {
-                        DetachChildren(subject.Context, children);
-                        break;
-                    }
-
-                    children.Clear();
                 }
 
                 if (isRoot)
@@ -120,6 +107,44 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         finally
         {
             ReturnList(children);
+        }
+    }
+
+    // Each property is read and seeded when its turn comes. A handler that writes a property during the attach
+    // reconciles it, so a property with a baseline is skipped: its children are attached, and a write still pending
+    // on another thread reconciles from that baseline.
+    private void AttachProperties(IInterceptorSubject subject,
+        List<(IInterceptorSubject subject, PropertyReference property, object? index)> children, bool isRoot)
+    {
+        foreach (var property in subject.Properties)
+        {
+            var metadata = property.Value;
+            if (!metadata.IsIntercepted || !metadata.Type.CanContainSubjects())
+            {
+                continue;
+            }
+
+            var propertyReference = new PropertyReference(subject, property.Key);
+            if (_lastProcessedValues.ContainsKey(propertyReference))
+            {
+                continue;
+            }
+
+            var value = metadata.GetValue?.Invoke(subject);
+            _lastProcessedValues[propertyReference] = value;
+
+            FindSubjectsInProperty(propertyReference, value, children, null);
+            AttachChildren(subject.Context, children, null, children.Count > 1 && HasRepeatedSubject(children));
+
+            // A handler detached the subject during this attach. Its detach removed the baselines seeded so far
+            // and the children attached before it; detach the ones attached after it and seed nothing more.
+            if (!isRoot && !_attachedSubjects.ContainsKey(subject))
+            {
+                DetachChildren(subject.Context, children);
+                break;
+            }
+
+            children.Clear();
         }
     }
 
@@ -521,7 +546,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
             // Parent was concurrently detached between next() and lock acquisition.
             // Undo: remove dangling _lastProcessedValues and detach orphaned children.
-            if (!_attachedSubjects.ContainsKey(context.Property.Subject))
+            if (!_attachedSubjects.ContainsKey(context.Property.Subject) && !_attachingRoots.Contains(context.Property.Subject))
             {
                 _lastProcessedValues.Remove(context.Property);
                 DetachOrphanedSubjects(ref context, newCollectedSubjects, oldTouchedSubjects);
