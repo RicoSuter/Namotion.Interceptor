@@ -1073,6 +1073,7 @@ public class AutomationEditorTests
         await page.GetByTestId("automation-edit").ClickAsync();
         var dialog = page.GetByRole(AriaRole.Dialog);
         await Assertions.Expect(dialog.GetByTestId("automation-editor")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await dialog.WaitForDialogFocusAsync();
         if (tab is not null)
         {
             await dialog.GetByRole(AriaRole.Tab, new() { Name = tab }).ClickAsync();

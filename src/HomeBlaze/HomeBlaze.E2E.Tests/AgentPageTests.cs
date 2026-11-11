@@ -423,7 +423,7 @@ public class AgentPageTests
 
             await page.ReloadAsync();
             var timelineLocator = page.GetByTestId("agent-timeline");
-            await Assertions.Expect(timelineLocator).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+            await WaitForTheChatScriptAsync(page);
             var timeline = await timelineLocator.ElementHandleAsync();
             await timelineLocator.HoverAsync();
             await page.Mouse.WheelAsync(0, -600);
@@ -521,7 +521,7 @@ public class AgentPageTests
 
             await page.ReloadAsync();
             var timelineLocator = page.GetByTestId("agent-timeline");
-            await Assertions.Expect(timelineLocator).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+            await WaitForTheChatScriptAsync(page);
             var timeline = await timelineLocator.ElementHandleAsync();
             var input = page.GetByTestId("agent-chat-input").Locator("textarea");
 
@@ -561,6 +561,14 @@ public class AgentPageTests
 
         var scrolls = await timeline.EvaluateAsync<int>("timeline => { timeline.removeEventListener('scroll', window.__typingListener); return window.__typingScrolls; }");
         Assert.Equal(0, scrolls);
+    }
+
+    // The chat script shows the timeline first, and on a later round trip makes Enter send and keeps the height of the
+    // input while it sizes itself to its text, after which the input shows its keyboard hint.
+    private static async Task WaitForTheChatScriptAsync(IPage page)
+    {
+        await Assertions.Expect(page.GetByTestId("agent-timeline")).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(page.GetByTestId("agent-chat-input")).ToContainTextAsync("Enter sends", new() { Timeout = PageLoadTimeout });
     }
 
     // Resolves once the scroll position has not changed for ten animation frames in a row, and fails when it keeps
