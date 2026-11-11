@@ -187,11 +187,12 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             (dependenciesChanged && !HaveSameItems(value, lastKnownValue));
     }
 
+    // Items are compared with Equals: a structural comparison of the items throws for an array of another rank.
     private static bool HaveSameItems(object value, object lastKnownValue)
     {
         return value.GetType().IsSZArray &&
             lastKnownValue.GetType().IsSZArray &&
-            StructuralComparisons.StructuralEqualityComparer.Equals(value, lastKnownValue);
+            ((IStructuralEquatable)value).Equals(lastKnownValue, EqualityComparer<object>.Default);
     }
 
     // Publishes, so it runs only once the thread holds no lifecycle lock: an observer on another thread may hold the

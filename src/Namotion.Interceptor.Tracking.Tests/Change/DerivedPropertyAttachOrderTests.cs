@@ -1,4 +1,5 @@
 using System.Reactive.Concurrency;
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -233,6 +234,63 @@ public class DerivedPropertyAttachOrderTests
         AssertEvaluatedAgain(machine.Device);
         Assert.DoesNotContain(changes, change => change.Property.Name == nameof(SiblingReadingMachine.InstalledStateList));
         Assert.DoesNotContain(changes, change => change.Property.Name == nameof(SiblingReadingDevice.InstalledStates));
+    }
+
+    [Fact]
+    public void WhenArrayHoldsAnArrayOfAnotherRank_ThenAttachCompletesAndDerivedPropertyFollowsTheSibling()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new SiblingReadingRoot(context);
+        var machine = new SiblingReadingMachine();
+        root.Machine = machine;
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        machine.Configuration.Installed = true;
+
+        // Assert
+        var change = Assert.Single(changes, c => c.Property.Name == nameof(SiblingReadingDevice.InstalledGrids));
+        Assert.True(((bool[,])change.GetNewValue<object[]>()[0])[0, 0]);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenSubtreeWithChangedDerivedValueIsDetached_ThenItIsNotKeptAlive(bool attachToContext)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+
+        // Act
+        var subtree = AttachAndDetachSubtree(context, root, attachToContext);
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        // Assert
+        Assert.False(subtree.IsAlive);
+        GC.KeepAlive(root);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference AttachAndDetachSubtree(IInterceptorSubjectContext context, EvaluatorRoot root, bool attachToContext)
+    {
+        // The worker is evaluated again when the attach ends, and its changed value is published after it.
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
+        if (attachToContext)
+        {
+            var otherRoot = new EvaluatorRoot { Machine = machine };
+            ((IInterceptorSubject)otherRoot).Context.AddFallbackContext(context);
+            ((IInterceptorSubject)otherRoot).Context.RemoveFallbackContext(context);
+            return new WeakReference(otherRoot);
+        }
+
+        root.Machine = machine;
+        root.Machine = null;
+        return new WeakReference(machine);
     }
 
     [Fact]

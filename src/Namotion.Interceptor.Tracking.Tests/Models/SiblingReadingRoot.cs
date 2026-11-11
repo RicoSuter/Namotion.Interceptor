@@ -79,6 +79,12 @@ public partial class SiblingReadingDevice
     [Derived]
     public bool[] InstalledStates => [ReadInstalled()];
 
+    /// <summary>
+    /// A new array on every evaluation, whose item is an array of rank two.
+    /// </summary>
+    [Derived]
+    public object[] InstalledGrids => [new[,] { { ReadInstalled() } }];
+
     private bool ReadInstalled()
     {
         return this.TryGetFirstParent<SiblingReadingMachine>()?.Configuration.Installed ?? false;
