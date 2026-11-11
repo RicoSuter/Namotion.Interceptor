@@ -482,6 +482,8 @@ public class MetadataDisplayTests
 
         // MudDialog puts its test id on its content, which does not hold the actions.
         var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
+        await Assertions.Expect(dialog.GetByTestId("metadata-notes-kept"))
+            .ToHaveTextAsync("These notes break the rules and are kept as they are unless you change them.", new() { Timeout = PageLoadTimeout });
         await dialog.GetByTestId("metadata-icon").FillAsync("Settings");
 
         // Act

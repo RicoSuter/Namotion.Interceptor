@@ -74,6 +74,12 @@
                        GetError="NotesFormat.GetError"
                        MaxSize="NotesFormat.MaxSize"
                        data-testid="metadata-notes-input" />
+        @if (_areLoadedNotesInvalid && _notes == _loadedNotes)
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1" data-testid="metadata-notes-kept">
+                These notes break the rules and are kept as they are unless you change them.
+            </MudText>
+        }
         <MudText Typo="Typo.subtitle2" Class="mt-4">Links</MudText>
         @foreach (var link in _links)
         {
@@ -135,6 +141,7 @@
     private AppBarAlignment? _alignment;
     private string? _notes;
     private string? _loadedNotes;
+    private bool _areLoadedNotesInvalid;
     private MarkdownField? _notesField;
     private readonly List<LinkInput> _links = [];
     private readonly List<string> _tags = [];
@@ -155,6 +162,7 @@
             : Owner.TryGetRegisteredSubject()?.TryGetProperty(PropertyName)?.GetMetadata();
 
         _notes = _loadedNotes = metadata.GetString(MetadataKeys.Notes);
+        _areLoadedNotesInvalid = _loadedNotes is not null && NotesFormat.GetError(_loadedNotes) is not null;
         foreach (var link in metadata.GetLinks())
         {
             _links.Add(new LinkInput { Title = link.Title, Address = link.Url ?? link.Path });
