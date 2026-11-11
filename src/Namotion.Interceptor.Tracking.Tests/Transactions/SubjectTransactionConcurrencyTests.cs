@@ -634,7 +634,10 @@ public class SubjectTransactionConcurrencyTests
         };
 
         // Act
-        await Task.WhenAll(Task.Run(() => person.FirstName = "Ann"), Task.Run(() => person.FirstName = "Ann"));
+        // Both writes park on the barrier, so neither may wait for a pool thread to start the other.
+        await Task.WhenAll(
+            DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => person.FirstName = "Ann"),
+            DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => person.FirstName = "Ann"));
         handler.RejectCapture = null;
         await transaction.CommitAsync(CancellationToken.None);
 
