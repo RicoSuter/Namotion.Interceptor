@@ -14,11 +14,6 @@ namespace Namotion.Interceptor.Connectors.Tests;
 /// </summary>
 public class SourceWaitResultTests
 {
-    // Only has to outlast scheduling: a completing wait resumes its caller through a thread pool
-    // dispatch, so a tight bound fails whenever the whole solution runs in parallel on a CI runner with
-    // a small thread pool.
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
-
     private static IInterceptorSubjectContext CreateContext() =>
         InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
@@ -42,7 +37,7 @@ public class SourceWaitResultTests
         // Act
         first.ReportSynchronized();
         second.ReportSynchronized();
-        var result = await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeout);
+        var result = await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.Equal(SourceSynchronizationResult.Synchronized, result);
@@ -58,7 +53,7 @@ public class SourceWaitResultTests
         monitor.CompleteSourceRegistration();
 
         // Act
-        var result = await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeout);
+        var result = await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeouts.Default);
 
         // Assert - vacuous, and the reason Synchronized is not proof that a source exists.
         Assert.Equal(SourceSynchronizationResult.Synchronized, result);
@@ -78,7 +73,7 @@ public class SourceWaitResultTests
         // Act - the initial load completed, so the values it delivered are real but no longer live.
         source.ReportSynchronized();
         source.ReportStopped();
-        var result = await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeout);
+        var result = await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.Equal(SourceSynchronizationResult.Stale, result);
@@ -101,7 +96,7 @@ public class SourceWaitResultTests
         live.ReportSynchronized();
         dropped.ReportSynchronized();
         dropped.ReportStopped();
-        var result = await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeout);
+        var result = await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.Equal(SourceSynchronizationResult.Stale, result);
@@ -123,7 +118,7 @@ public class SourceWaitResultTests
         // Act
         live.ReportSynchronized();
         neverDelivered.ReportStopped();
-        var result = await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeout);
+        var result = await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.Equal(SourceSynchronizationResult.Incomplete, result);
@@ -160,7 +155,7 @@ public class SourceWaitResultTests
         dropped.ReportSynchronized();
         dropped.ReportStopped();
         neverDelivered.ReportStopped();
-        var result = await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeout);
+        var result = await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.Equal(SourceSynchronizationResult.Incomplete, result);
@@ -209,7 +204,7 @@ public class SourceWaitResultTests
         source.ReportStopped();
 
         // Assert
-        Assert.Equal(SourceSynchronizationResult.Incomplete, await wait.WaitAsync(TestTimeout));
+        Assert.Equal(SourceSynchronizationResult.Incomplete, await wait.WaitAsync(TestTimeouts.Default));
     }
 
     [Fact]
@@ -232,7 +227,7 @@ public class SourceWaitResultTests
         source.Dispose();
 
         // Assert
-        Assert.Equal(SourceSynchronizationResult.Incomplete, await wait.WaitAsync(TestTimeout));
+        Assert.Equal(SourceSynchronizationResult.Incomplete, await wait.WaitAsync(TestTimeouts.Default));
     }
 
     [Fact]
@@ -249,11 +244,11 @@ public class SourceWaitResultTests
 
         Assert.Equal(
             SourceSynchronizationResult.Incomplete,
-            await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeout));
+            await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeouts.Default));
 
         // Act - unregistering removes it from every scope, so the branch has nothing left to report on.
         monitor.Unregister(source);
-        var result = await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeout);
+        var result = await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeouts.Default);
 
         // Assert - a failure that is cleaned up stops being visible, so Synchronized is not proof
         // the branch was ever loaded.
@@ -273,7 +268,7 @@ public class SourceWaitResultTests
         monitor.CompleteSourceRegistration();
 
         // Act
-        var result = await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeout);
+        var result = await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.Equal(SourceSynchronizationResult.Synchronized, result);
@@ -293,7 +288,7 @@ public class SourceWaitResultTests
 
         // Act - Stopped is terminal and the source stays registered, so waiting again cannot
         // improve the answer.
-        var first = await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeout);
+        var first = await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeouts.Default);
         var second = root.WaitForSynchronizationAsync(CancellationToken.None);
 
         // Assert
@@ -371,7 +366,7 @@ public class SourceWaitResultTests
         }
 
         // Assert
-        Assert.Equal(SourceSynchronizationResult.Incomplete, await wait.WaitAsync(TestTimeout));
+        Assert.Equal(SourceSynchronizationResult.Incomplete, await wait.WaitAsync(TestTimeouts.Default));
     }
 
     [Theory]
@@ -413,7 +408,7 @@ public class SourceWaitResultTests
         slow.ReportSynchronized();
 
         // Assert
-        Assert.Equal(SourceSynchronizationResult.Synchronized, await wait.WaitAsync(TestTimeout));
+        Assert.Equal(SourceSynchronizationResult.Synchronized, await wait.WaitAsync(TestTimeouts.Default));
     }
 
     [Fact]
@@ -484,7 +479,7 @@ public class SourceWaitResultTests
         Assert.Contains(source, monitor.Sources);
         Assert.Equal(
             SourceSynchronizationResult.Incomplete,
-            await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeout));
+            await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeouts.Default));
 
         Assert.False(poisonWait.IsCompleted);
     }
