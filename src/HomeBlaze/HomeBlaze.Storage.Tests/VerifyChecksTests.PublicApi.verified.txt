@@ -360,6 +360,14 @@ namespace HomeBlaze.Storage.Metadata
         public static string? ToHtml(string notes) { }
         public static string ToText(string notes) { }
     }
+    public sealed class MetadataNotesFormat : HomeBlaze.Storage.Abstractions.Metadata.IMetadataNotesFormat
+    {
+        public MetadataNotesFormat() { }
+        public int MaxSize { get; }
+        public string? GetError(string notes) { }
+        public string? ToHtml(string notes) { }
+        public string ToText(string notes) { }
+    }
     public static class MetadataStoreExtensions
     {
         public static System.Threading.Tasks.Task SetOrderAsync(this Namotion.Interceptor.IInterceptorSubject folder, System.Collections.Generic.IReadOnlyList<string> names, System.Threading.CancellationToken cancellationToken) { }
