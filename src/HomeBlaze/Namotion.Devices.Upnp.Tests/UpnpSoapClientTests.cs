@@ -3,6 +3,7 @@ using System.Text;
 using System.Xml;
 using System.Xml.Linq;
 using Namotion.Devices.Upnp.Tests.Testing;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace Namotion.Devices.Upnp.Tests;
@@ -320,7 +321,7 @@ public class UpnpSoapClientTests
         // Act: Task.Run so that a reader stuck in a synchronous loop still lets the timeout fail the test.
         var exception = await Assert.ThrowsAsync<UpnpFaultException>(
                 () => Task.Run(() => client.InvokeAsync(AvTransport, "Next", [("InstanceID", "0")], CancellationToken.None)))
-            .WaitAsync(TimeSpan.FromSeconds(30));
+            .WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.Equal(401, exception.ErrorCode);
