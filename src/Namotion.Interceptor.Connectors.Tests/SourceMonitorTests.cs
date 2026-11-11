@@ -11,6 +11,10 @@ namespace Namotion.Interceptor.Connectors.Tests;
 
 public class SourceMonitorTests
 {
+    // Only has to outlast scheduling: a tight bound fails whenever the whole solution runs in parallel
+    // on a CI runner with a small thread pool.
+    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+
     private static IInterceptorSubjectContext CreateContext() =>
         InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
@@ -326,13 +330,17 @@ public class SourceMonitorTests
         // directly rather than by catching a timeout as the pass path: under load that catch fires
         // for both the fixed and the broken code, silently turning the whole race harness into a
         // no-op that still reports green.
-        var settledFirst = await Task.WhenAny(subscribeTask, Task.Delay(TimeSpan.FromMilliseconds(200)));
-        Assert.NotSame(subscribeTask, settledFirst);
+        Assert.False(subscribeTask.Wait(TimeSpan.FromMilliseconds(200)),
+            "The racing Subscribe should still be blocked on the lock the paused action holds.");
 
         releaseStateRead.Set();
 
-        using var subscription = await subscribeTask.WaitAsync(TimeSpan.FromSeconds(10));
-        await actTask.WaitAsync(TimeSpan.FromSeconds(10));
+        // Blocking waits, not awaited WaitAsync: the participant thread releases a Task.Wait itself,
+        // whereas WaitAsync completes only once a pool thread runs its continuation, which a starved
+        // pool can delay past any timeout while the participants have long finished.
+        Assert.True(subscribeTask.Wait(TestTimeout), "The racing Subscribe should have completed.");
+        Assert.True(actTask.Wait(TestTimeout), "The racing action should have completed.");
+        using var subscription = await subscribeTask;
 
         var wasInSnapshot = subscription.Sources.Contains(source);
 
