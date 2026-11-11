@@ -1084,8 +1084,7 @@ public class InlineTextEditingTests
         await SelectTextAsync(page, "First paragraph");
         await page.GetWidgetActionBar().GetByTestId("delete-block-button").FocusAsync();
         await page.Keyboard.PressAsync("Enter");
-        var confirm = page.GetByRole(AriaRole.Dialog).GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true });
-        await confirm.FocusAsync();
+        await ExpectTheFocusOnTheDeleteButtonOfTheDialogAsync(page);
 
         // Act
         await page.Keyboard.PressAsync("Enter");
@@ -1105,8 +1104,7 @@ public class InlineTextEditingTests
         await SelectTextAsync(page, "Card body text");
         await page.GetWidgetActionBar().GetByTestId("delete-block-button").FocusAsync();
         await page.Keyboard.PressAsync("Enter");
-        var confirm = page.GetByRole(AriaRole.Dialog).GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true });
-        await confirm.FocusAsync();
+        await ExpectTheFocusOnTheDeleteButtonOfTheDialogAsync(page);
 
         // Act
         await page.Keyboard.PressAsync("Enter");
@@ -1250,6 +1248,12 @@ public class InlineTextEditingTests
         await Assertions.Expect(page.GetByTestId("subject-edit-dialog-type")).ToHaveCountAsync(0);
         await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(1);
     }
+
+    // The dialog moves the focus once it has rendered, through its own element to its Delete button last, so a focus set
+    // on the button before then would move away again, and an Enter pressed in between would not delete.
+    private static Task ExpectTheFocusOnTheDeleteButtonOfTheDialogAsync(IPage page) =>
+        Assertions.Expect(page.GetByRole(AriaRole.Dialog).GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true }))
+            .ToBeFocusedAsync(new() { Timeout = Timeout });
 
     private static ILocator GetCardWrapper(IPage page, string title) =>
         page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='card'])")
