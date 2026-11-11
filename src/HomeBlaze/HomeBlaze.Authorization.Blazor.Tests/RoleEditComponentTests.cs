@@ -107,8 +107,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
 
         // Assert
         await component.WaitForAssertionAsync(
-            () => Assert.Empty(component.FindAll("[data-testid='role-edit-tab-roles-error']")),
-            TimeSpan.FromSeconds(30));
+            () => Assert.Empty(component.FindAll("[data-testid='role-edit-tab-roles-error']")));
         Assert.DoesNotContain("mud-chip-color-error", component.Find("[data-testid='role-edit-include-pantry']").ClassName);
     }
 
@@ -306,8 +305,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
 
         // Assert
         await component.WaitForAssertionAsync(
-            () => Assert.Contains("ghost", component.Find("[data-testid='role-edit-status']").TextContent),
-            TimeSpan.FromSeconds(30));
+            () => Assert.Contains("ghost", component.Find("[data-testid='role-edit-status']").TextContent));
     }
 
     [Fact]
@@ -379,8 +377,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
 
         // Assert
         await component.WaitForAssertionAsync(
-            () => Assert.Equal("Used by 1 agent", component.Find("[data-testid='role-edit-used-by']").TextContent.Trim()),
-            TimeSpan.FromSeconds(30));
+            () => Assert.Equal("Used by 1 agent", component.Find("[data-testid='role-edit-used-by']").TextContent.Trim()));
     }
 
     [Fact]
@@ -397,8 +394,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
 
         // Assert
         await component.WaitForAssertionAsync(
-            () => Assert.Equal("Used by 1 agent", component.Find("[data-testid='role-edit-used-by']").TextContent.Trim()),
-            TimeSpan.FromSeconds(30));
+            () => Assert.Equal("Used by 1 agent", component.Find("[data-testid='role-edit-used-by']").TextContent.Trim()));
     }
 
     [Fact]
@@ -417,8 +413,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
 
         // Assert
         await component.WaitForAssertionAsync(
-            () => Assert.Equal("Used by 1 agent", component.Find("[data-testid='role-edit-used-by']").TextContent.Trim()),
-            TimeSpan.FromSeconds(30));
+            () => Assert.Equal("Used by 1 agent", component.Find("[data-testid='role-edit-used-by']").TextContent.Trim()));
     }
 
     [Fact]

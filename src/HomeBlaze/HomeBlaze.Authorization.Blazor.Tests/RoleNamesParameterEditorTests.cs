@@ -125,7 +125,7 @@ public sealed class RoleNamesParameterEditorTests : BunitContext, IAsyncLifetime
         });
 
         // Assert
-        await dialogProvider.WaitForAssertionAsync(() => Assert.Single(dialogProvider.FindComponents<RoleNamesParameterEditor>()), TimeSpan.FromSeconds(30));
+        await dialogProvider.WaitForAssertionAsync(() => Assert.Single(dialogProvider.FindComponents<RoleNamesParameterEditor>()));
         var picker = dialogProvider.FindComponent<RoleNamesParameterEditor>();
         Assert.Equal(["kitchen", BuiltInRoles.ReaderName], picker.FindAll("[data-testid^='parameter-role-']").Select(chip => chip.TextContent.Trim()));
     }

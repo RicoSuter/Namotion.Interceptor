@@ -16,6 +16,7 @@ using MudBlazor.Services;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace HomeBlaze.Components.Tests.Access;
@@ -396,7 +397,7 @@ public sealed class AdministrationGateTests : BunitContext, IAsyncLifetime
         provider.Find("[data-testid='create-button']").Click();
 
         // Assert
-        var result = await dialog.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await dialog.WaitAsync(TestTimeouts.Default);
         Assert.IsType<AdministeredDevice>(result?.Subject);
     }
 
@@ -509,7 +510,7 @@ public sealed class AdministrationGateTests : BunitContext, IAsyncLifetime
         provider.Find("[data-testid='create-button']").Click();
 
         // Assert
-        var result = await dialog.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await dialog.WaitAsync(TestTimeouts.Default);
         Assert.IsType<AdministeredDevice>(attached);
         Assert.Same(attached, result?.Subject);
     }

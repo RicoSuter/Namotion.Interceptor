@@ -2,6 +2,7 @@ using HomeBlaze.Authorization;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace HomeBlaze.Authentication.Blazor.Tests;
@@ -35,15 +36,15 @@ public class ShownSubjectsTests
         await using var graph = await PermissionsTestGraph.CreateAsync(roles: [BuiltInRoles.ReaderName], customRoles: [NoDeviceRole]);
         var device = graph.Device.TryGetRegisteredSubject()!;
         var shownBefore = graph.Permissions.CanShow(device);
-        using var changed = new ManualResetEventSlim();
-        graph.Permissions.Changed += changed.Set;
+        var changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        graph.Permissions.Changed += () => changed.TrySetResult();
 
         // Act
         await graph.SetRolesAsync([NoDeviceRole.Name]);
 
         // Assert
         Assert.True(shownBefore);
-        Assert.True(changed.Wait(TimeSpan.FromSeconds(30)));
+        await changed.Task.WaitAsync(TestTimeouts.Default);
         Assert.False(graph.Permissions.CanShow(device));
     }
 

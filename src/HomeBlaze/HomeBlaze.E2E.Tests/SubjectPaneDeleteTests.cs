@@ -163,7 +163,7 @@ public class SubjectPaneDeleteTests
             // Assert: the operations of the pane render, so a missing button is no pane that has not loaded yet.
             await Assertions.Expect(filePane.GetByTestId("subject-pane-content").GetByRole(AriaRole.Button, new() { Name = "Restart Controller", Exact = true }))
                 .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
-            await Assertions.Expect(filePane.GetByTestId("delete-subject-button")).ToHaveCountAsync(0);
+            await Assertions.Expect(filePane.GetByTestId("delete-subject-button")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
             // Act
             await page.GotoAsync($"{_fixture.ServerAddress}browser/Authorization/{roleName}");
@@ -174,7 +174,7 @@ public class SubjectPaneDeleteTests
             await Assertions.Expect(rolePane.GetByRole(AriaRole.Heading, new() { Name = roleName })).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
             await Assertions.Expect(rolePane.GetByTestId("subject-pane-content").GetByRole(AriaRole.Button, new() { Name = "Rename", Exact = true }))
                 .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
-            await Assertions.Expect(rolePane.GetByTestId("delete-subject-button")).ToHaveCountAsync(0);
+            await Assertions.Expect(rolePane.GetByTestId("delete-subject-button")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         }
         finally
         {

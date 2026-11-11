@@ -27,7 +27,6 @@ public class PlaywrightFixture : IAsyncLifetime
     /// <summary>The password of the administrator, once the fixture claimed it, and of every person of <see cref="AddPersonAsync"/>.</summary>
     public const string Password = "e2e-test-password";
 
-    private const float SignInTimeout = 30000;
 
     private readonly string _authenticationDirectory = Path.Combine(Path.GetTempPath(), "HomeBlaze.E2E", Guid.NewGuid().ToString("N"));
 
@@ -221,7 +220,7 @@ public class PlaywrightFixture : IAsyncLifetime
         await page.GotoAsync($"{ServerAddress}{path}");
         await FillSignInDialogAsync(page, userName, password);
         await Assertions.Expect(page.GetByTestId("user-menu").Or(page.GetByTestId("set-password-dialog")))
-            .ToBeVisibleAsync(new() { Timeout = SignInTimeout });
+            .ToBeVisibleAsync();
     }
 
     /// <summary>
@@ -232,13 +231,14 @@ public class PlaywrightFixture : IAsyncLifetime
     {
         var userNameInput = page.Locator("#sign-in-user-name");
         var menuSignIn = page.GetByTestId("user-menu-sign-in");
-        await Assertions.Expect(userNameInput.Or(menuSignIn)).ToBeVisibleAsync(new() { Timeout = SignInTimeout });
+        await Assertions.Expect(userNameInput.Or(menuSignIn)).ToBeVisibleAsync();
         if (!await userNameInput.IsVisibleAsync())
         {
-            await page.WaitUntilInteractiveAsync(SignInTimeout);
+            await page.WaitUntilInteractiveAsync();
             await menuSignIn.ClickAsync();
         }
 
+        await page.GetByRole(AriaRole.Dialog).WaitForDialogFocusAsync();
         await userNameInput.FillAsync(userName);
         await page.Locator("#sign-in-password").FillAsync(password);
         // Enabled once the script of the form is attached, which posts it to the endpoint that sets the cookie.

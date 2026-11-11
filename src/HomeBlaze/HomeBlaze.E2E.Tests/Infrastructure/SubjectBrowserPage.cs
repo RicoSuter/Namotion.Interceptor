@@ -42,6 +42,7 @@ public static class SubjectBrowserPage
 
         var dialog = pane.Page.GetByRole(AriaRole.Dialog);
         await Assertions.Expect(dialog).ToContainTextAsync(title, new() { Timeout = PageLoadTimeout });
+        await dialog.WaitForDialogFocusAsync();
         return dialog;
     }
 
