@@ -98,7 +98,7 @@ public class PollingManagerTests
         var configuration = CreateConfiguration();
         configuration.PollingInterval = TimeSpan.FromMilliseconds(1);
         configuration.PollingCircuitBreakerThreshold = 1;
-        configuration.PollingDisposalTimeout = TimeSpan.FromSeconds(1);
+        configuration.PollingDisposalTimeout = TestTimeouts.Default;
 
         var property = new RegisteredSubject((TestRoot)source.RootSubject)
             .TryGetProperty(nameof(TestRoot.Name))!;
@@ -123,7 +123,7 @@ public class PollingManagerTests
 
         // Act
         manager.Start();
-        await readStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await readStarted.Task.WaitAsync(TestTimeouts.Default);
         await AsyncTestHelpers.WaitUntilAsync(
             () => Stopwatch.GetElapsedTime(Volatile.Read(ref readStartedTimestamp)) > configuration.PollingInterval,
             pollInterval: TimeSpan.FromMilliseconds(1));
@@ -183,7 +183,7 @@ public class PollingManagerTests
 
         var configuration = CreateConfiguration();
         configuration.PollingInterval = TimeSpan.FromMilliseconds(100);
-        configuration.PollingDisposalTimeout = TimeSpan.FromSeconds(1);
+        configuration.PollingDisposalTimeout = TestTimeouts.Default;
 
         var property = new RegisteredSubject((TestRoot)source.RootSubject)
             .TryGetProperty(nameof(TestRoot.Name))!;
@@ -208,7 +208,7 @@ public class PollingManagerTests
 
         // Act
         manager.Start();
-        await reported.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await reported.Task.WaitAsync(TestTimeouts.Default);
         await manager.DisposeAsync();
 
         // Assert

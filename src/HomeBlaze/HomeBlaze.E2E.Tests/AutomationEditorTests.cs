@@ -666,7 +666,7 @@ public class AutomationEditorTests
         });
         var (_, dialog) = await OpenEditorAsync(washer.Name, tab: RulesTab);
         await Assertions.Expect(dialog.GetByTestId("automation-event-trigger")).ToHaveCountAsync(1, new() { Timeout = Timeout });
-        await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToHaveCountAsync(0);
+        await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
         // Act
         await dialog.GetByTestId("automation-event-trigger").GetByRole(AriaRole.Button, new() { Name = "Remove trigger" }).ClickAsync();
@@ -724,7 +724,7 @@ public class AutomationEditorTests
 
         // Assert
         await Assertions.Expect(dialog.GetByTestId("automation-state-node-Running")).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(dialog.GetByTestId("automation-renamed-state-warning")).ToHaveCountAsync(0);
+        await Assertions.Expect(dialog.GetByTestId("automation-renamed-state-warning")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         await Assertions.Expect(editor).ToHaveAttributeAsync("data-dirty", "false");
         await dialog.GetByRole(AriaRole.Tab, new() { Name = "General" }).ClickAsync();
         await dialog.GetByLabel("Name", new() { Exact = true }).FillAsync("Washing machine");
@@ -781,7 +781,7 @@ public class AutomationEditorTests
         await cooldown.PressSequentiallyAsync("30");
 
         // Assert
-        await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToHaveCountAsync(0);
+        await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         await cooldown.FillAsync("0s");
         await Assertions.Expect(dialog.GetByTestId("automation-only-if")).ToContainTextAsync("Use a duration above 0", new() { Timeout = Timeout });
         await Assertions.Expect(cooldown).ToHaveValueAsync("0s");
@@ -1009,6 +1009,23 @@ public class AutomationEditorTests
         // Arrange
         await using var washer = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
         var (page, dialog) = await OpenEditorAsync(washer.Name, tab: StatesTab);
+        var state = dialog.GetByTestId("automation-state-node-Running");
+
+        // The diagram attaches its Space guard in the browser after its first render, so a key pressed right after the tab
+        // opens can come before it. A synthetic Space on the state shows when the guard is there. It is stopped above the
+        // diagram, before Blazor handles it on the document, so that it does not select the state itself.
+        await page.WaitForFunctionAsync("""
+            () => {
+                const state = document.querySelector('[data-testid="automation-state-node-Running"]');
+                const outside = state?.closest('[data-testid="automation-state-diagram"]')?.parentElement;
+                if (!outside) { return false; }
+                const stop = event => event.stopPropagation();
+                const probe = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+                outside.addEventListener('keydown', stop);
+                try { state.dispatchEvent(probe); } finally { outside.removeEventListener('keydown', stop); }
+                return probe.defaultPrevented;
+            }
+            """, null, new() { Timeout = Timeout });
         await page.EvaluateAsync("""
             () => {
                 window.__spacePrevented = [];
@@ -1017,7 +1034,7 @@ public class AutomationEditorTests
             """);
 
         // Act
-        await dialog.GetByTestId("automation-state-node-Running").FocusAsync();
+        await state.FocusAsync();
         await page.Keyboard.PressAsync("Space");
 
         // Assert
@@ -1056,6 +1073,7 @@ public class AutomationEditorTests
         await page.GetByTestId("automation-edit").ClickAsync();
         var dialog = page.GetByRole(AriaRole.Dialog);
         await Assertions.Expect(dialog.GetByTestId("automation-editor")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await dialog.WaitForDialogFocusAsync();
         if (tab is not null)
         {
             await dialog.GetByRole(AriaRole.Tab, new() { Name = tab }).ClickAsync();
@@ -1143,7 +1161,7 @@ public class AutomationEditorTests
     /// <summary>Asserts that the condition field shows its one row in simple mode with an editable value.</summary>
     private static async Task AssertSimpleRowAsync(ILocator field, string testId)
     {
-        await Assertions.Expect(field.GetByTestId($"{testId}-text")).ToHaveCountAsync(0);
+        await Assertions.Expect(field.GetByTestId($"{testId}-text")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         await Assertions.Expect(field.GetByTestId($"{testId}-row")).ToHaveCountAsync(1);
         await Assertions.Expect(field.GetByTestId($"{testId}-row").GetByLabel("Value", new() { Exact = true })).ToBeEditableAsync();
     }
