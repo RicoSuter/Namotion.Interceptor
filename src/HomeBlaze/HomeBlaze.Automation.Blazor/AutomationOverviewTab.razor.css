@@ -1,0 +1,3 @@
+.automation-rule-row:hover td {
+    background: var(--mud-palette-action-default-hover);
+}

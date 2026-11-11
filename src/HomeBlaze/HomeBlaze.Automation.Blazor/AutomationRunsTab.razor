@@ -1,0 +1,119 @@
+@using global::HomeBlaze.Services.Display
+@using global::HomeBlaze.Services.Metadata
+@inject ITimeZoneDisplay TimeZone
+@inject TimeProvider TimeProvider
+@inject SubjectPathResolver PathResolver
+@inject MetadataLinkResolver LinkResolver
+
+@if (RecentRuns is not { } recentRuns)
+{
+    <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="automation-runs-loading">Loading runs...</MudText>
+}
+else
+{
+    var ruleNames = Automation.GetRulesInOrder().Select(pair => pair.Value.Name ?? pair.Key).Distinct(StringComparer.Ordinal).ToArray();
+    // A rule that was renamed or deleted has no chip anymore, so the selection falls back to all rules.
+    var selectedRuleName = _selectedRuleName is { } name && ruleNames.Contains(name, StringComparer.Ordinal) ? name : null;
+    <div class="d-flex flex-column gap-2">
+        @if (ruleNames.Length > 1)
+        {
+            <MudChipSet T="string" SelectionMode="SelectionMode.SingleSelection" SelectedValue="@(selectedRuleName ?? AllRules)"
+                        SelectedValueChanged="OnSelectedValueChanged" Size="Size.Small" Variant="Variant.Outlined" SelectedColor="Color.Primary"
+                        data-testid="automation-run-filter">
+                <MudChip T="string" Value="@AllRules" Text="All rules" />
+                @foreach (var ruleName in ruleNames)
+                {
+                    <MudChip T="string" @key="ruleName" Value="@ruleName" Text="@ruleName" />
+                }
+            </MudChipSet>
+        }
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">@recentRuns.Caption</MudText>
+        @if (recentRuns.Error is { } runsError)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true">@runsError</MudAlert>
+        }
+        else if (recentRuns.Runs.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="automation-no-runs">No runs yet.</MudText>
+        }
+        else
+        {
+            var runs = RunFilter.Apply(recentRuns.Runs, selectedRuleName);
+            @* Read in every render, which resolves the subjects of the actions, so that a subject that is attached, detached
+               or renamed renders the runs again. *@
+            _ = PathResolver.PathsVersion;
+            <div style="overflow-x: auto;">
+                <MudSimpleTable Dense="true" Hover="true">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Rule</th>
+                            <th>Outcome</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var run in runs)
+                        {
+                            <tr data-testid="automation-run">
+                                <td style="white-space: nowrap;">@(run.At is { } at ? AutomationTime.FormatWithSeconds(TimeZone, at, TimeProvider.GetUtcNow()) : "Last run")</td>
+                                <td style="font-weight: 500; min-width: 120px;">@run.RuleName</td>
+                                <td>
+                                    @if (run.Outcome is { } outcome)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="@AutomationColors.GetOutcomeColor(outcome)" Class="ma-0">@AutomationSummary.FormatOutcome(outcome)</MudChip>
+                                    }
+                                </td>
+                                @* The minimum width keeps the actions readable on a phone, where the table scrolls sideways instead. *@
+                                <td style="min-width: 240px; overflow-wrap: anywhere;">
+                                    @foreach (var action in RunMessage.Parse(run.Message))
+                                    {
+                                        <div class="d-flex flex-wrap align-baseline" style="column-gap: 6px;" data-testid="automation-run-action">
+                                            @if (action.Name is { } actionName)
+                                            {
+                                                <span style="font-weight: 500; overflow-wrap: normal;">@actionName</span>
+                                            }
+                                            @if (action.SubjectPath is { } subjectPath)
+                                            {
+                                                @RenderSubject(subjectPath)
+                                            }
+                                            <span class="@(action.Name is null ? null : "mud-text-secondary")" style="@(action.Name is null ? null : "font-family: monospace; font-size: 0.75rem;")">@action.Detail</span>
+                                        </div>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private const string AllRules = "";
+
+    private string? _selectedRuleName;
+
+    [Parameter, EditorRequired] public Automation Automation { get; set; } = null!;
+
+    /// <summary>The runs to list, or null while they load.</summary>
+    [Parameter] public RecentRunsResult? RecentRuns { get; set; }
+
+    private void OnSelectedValueChanged(string? value) =>
+        _selectedRuleName = string.IsNullOrEmpty(value) ? null : value;
+
+    // A subject that does not resolve, or has no address to open, shows the last segment of its path as text.
+    private RenderFragment RenderSubject(string subjectPath)
+    {
+        var subject = PathResolver.ResolveSubject(subjectPath, PathStyle.Canonical);
+        var link = subject is not null ? LinkResolver.Resolve(subject, propertyName: null) : null;
+        var title = subject?.GetTitle() ?? GetLastSegment(subjectPath);
+        return link is { IsBroken: false }
+            ? @<MudLink Href="@link.Href" title="@subjectPath" Typo="Typo.body2">@title</MudLink>
+            : @<span title="@subjectPath">@title</span>;
+    }
+
+    private static string GetLastSegment(string path) =>
+        path.Length <= 1 ? path : path[(path.LastIndexOf('/') + 1)..];
+}

@@ -72,7 +72,7 @@ internal static class RecentRuns
 /// The runs <see cref="RecentRuns"/> loaded, newest first, whether they come from history, why history could not be read,
 /// and whether history lags behind the live run counts.
 /// </summary>
-internal sealed record RecentRunsResult(bool HasHistory, IReadOnlyList<RunEntry> Runs, string? Error, bool IsBehind)
+public sealed record RecentRunsResult(bool HasHistory, IReadOnlyList<RunEntry> Runs, string? Error, bool IsBehind)
 {
     public string Caption => HasHistory
         ? "From history: the runs of the last seven days. Runs within about 250 ms can show as one, and a crash can drop runs."

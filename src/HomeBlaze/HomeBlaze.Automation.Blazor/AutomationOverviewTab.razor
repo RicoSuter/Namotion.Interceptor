@@ -1,0 +1,183 @@
+@using global::HomeBlaze.Components.Metadata
+@using global::HomeBlaze.Services.Metadata
+@inject ITimeZoneDisplay TimeZone
+@inject TimeProvider TimeProvider
+@inject IDialogService DialogService
+
+<div class="d-flex flex-column gap-6">
+    @* The diagram keeps its width and the notes take the rest, at least 320 px, else they wrap below it. *@
+    <div class="d-flex flex-wrap align-start" style="gap: 24px 40px;">
+        @if (Automation.States.Length > 0)
+        {
+            <section style="flex: 0 1 auto; min-width: 0; max-width: 100%;">
+                <MudText Typo="Typo.h6">State</MudText>
+                <div class="mt-2" style="overflow-x: auto;">
+                    <StateDiagram Layout="@Layout" CurrentState="@Automation.CurrentState" CurrentDetail="@CurrentDetail" />
+                </div>
+            </section>
+        }
+
+        <section style="flex: 1 1 320px; min-width: 0;" data-testid="automation-notes">
+            @{
+                var metadata = Automation.GetMetadata();
+                var store = MetadataEditing.FindStore(Automation);
+            }
+            <div class="d-flex align-center gap-1">
+                <MudText Typo="Typo.h6">Notes</MudText>
+                @if (store is not null)
+                {
+                    <MudTooltip Text="Edit notes, links and tags">
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" aria-label="Edit notes, links and tags"
+                                       Disabled="@(!MetadataEditing.IsConnected(store))" OnClick="@NotesEditRequested" data-testid="automation-notes-edit" />
+                    </MudTooltip>
+                }
+            </div>
+            @if (metadata.HasNotesLinksOrTags())
+            {
+                <MetadataSummary Metadata="@metadata" OnTagClick="OpenTagFilterAsync" Class="mt-1" />
+            }
+            else
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary mt-1" data-testid="automation-no-notes">
+                    No notes yet. Use the pencil to write down why this automation exists or what to keep in mind, and to add links and tags.
+                </MudText>
+            }
+        </section>
+    </div>
+
+    <section>
+        <MudText Typo="Typo.h6">Rules</MudText>
+        @if (Automation.Rules.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">No rules yet. Add one with Edit.</MudText>
+        }
+        else
+        {
+            var rules = Automation.GetRulesInOrder();
+            <div class="d-none d-sm-block" style="overflow-x: auto;">
+                <MudSimpleTable Dense="true" Class="mt-2">
+                    <thead>
+                        <tr>
+                            <th>Rule</th>
+                            <th>Mode</th>
+                            <th>Status</th>
+                            <th>Last triggered</th>
+                            <th>Runs</th>
+                            <th aria-label="Actions"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var (key, rule) in rules)
+                        {
+                            <tr class="automation-rule-row" style="cursor: pointer;" @onclick="@(() => RuleOpened.InvokeAsync(key))" data-testid="automation-rule-row">
+                                <td>
+                                    <MudText Typo="Typo.body2" Style="font-weight: 500;">@(rule.Name ?? key)</MudText>
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@DescribeScope(rule)</MudText>
+                                    @if (GetDryRunHint(rule) is { } dryRunHint)
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Info" Class="d-block" data-testid="automation-dry-run-hint">@dryRunHint</MudText>
+                                    }
+                                </td>
+                                <td>@AutomationSummary.FormatMode(rule.Mode)</td>
+                                <td style="overflow-wrap: anywhere;">
+                                    @StatusChip(rule.Status)
+                                </td>
+                                <td>@FormatInstant(rule.LastTriggeredAt, "Never")</td>
+                                <td>@(rule.RunCount ?? 0)</td>
+                                <td>
+                                    <div class="d-flex align-center justify-end gap-2">
+                                        <span @onclick:stopPropagation="true">
+                                            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Science"
+                                                       OnClick="@(() => TestRequested.InvokeAsync((key, rule)))" data-testid="automation-test-now">Test now</MudButton>
+                                        </span>
+                                        <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Class="mud-text-secondary" />
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            </div>
+
+            <div class="d-flex d-sm-none flex-column gap-2 mt-2">
+                @foreach (var (key, rule) in rules)
+                {
+                    <MudPaper Outlined="true" Class="pa-3" Style="cursor: pointer;" @onclick="@(() => RuleOpened.InvokeAsync(key))" data-testid="automation-rule-card">
+                        <div class="d-flex align-center gap-2">
+                            <div class="flex-grow-1" style="min-width: 0;">
+                                <MudText Typo="Typo.body2" Style="font-weight: 500; overflow-wrap: anywhere;">@(rule.Name ?? key)</MudText>
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">@JoinScopeAndMode(rule)</MudText>
+                            </div>
+                            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Class="mud-text-secondary" />
+                        </div>
+                        @if (GetDryRunHint(rule) is { } dryRunHint)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Info" Class="d-block">@dryRunHint</MudText>
+                        }
+                        <div class="d-flex flex-wrap align-center gap-2 mt-2">
+                            @StatusChip(rule.Status)
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary flex-grow-1">
+                                Last @FormatInstant(rule.LastTriggeredAt, "never") · @(rule.RunCount ?? 0) runs
+                            </MudText>
+                            <span @onclick:stopPropagation="true">
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Science"
+                                           OnClick="@(() => TestRequested.InvokeAsync((key, rule)))" data-testid="automation-test-now-card">Test now</MudButton>
+                            </span>
+                        </div>
+                    </MudPaper>
+                }
+            </div>
+
+            @if (Automation.Rules.Values.Any(rule => rule.Mode == AutomationRuleMode.DryRun))
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2" data-testid="automation-last-triggered-note">
+                    Last triggered is when the first action of the last run that was not a dry run started. Cooldowns read it, and dry runs leave it unchanged.
+                </MudText>
+            }
+        }
+    </section>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Automation Automation { get; set; } = null!;
+
+    [Parameter, EditorRequired] public StateDiagramLayout Layout { get; set; } = null!;
+
+    /// <summary>The text below the name of the current state in the diagram.</summary>
+    [Parameter] public string? CurrentDetail { get; set; }
+
+    /// <summary>Called with the key and the rule whose Test now button is clicked.</summary>
+    [Parameter] public EventCallback<(string Key, AutomationRule Rule)> TestRequested { get; set; }
+
+    /// <summary>Called with the key of the rule whose row or card is clicked.</summary>
+    [Parameter] public EventCallback<string> RuleOpened { get; set; }
+
+    /// <summary>Called when the button to edit the notes, links and tags of the automation is clicked.</summary>
+    [Parameter] public EventCallback NotesEditRequested { get; set; }
+
+    private static RenderFragment? StatusChip(string? status) =>
+        AutomationSummary.GetStatusText(status) is { } text
+            ? @<MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@AutomationColors.GetRuleStatusColor(text)" Class="ma-0">@text</MudChip>
+            : null;
+
+    private Task OpenTagFilterAsync(string tag) => MetadataTagFilterDialog.ShowAsync(DialogService, tag);
+
+    private static string? GetDryRunHint(AutomationRule rule) =>
+        AutomationSummary.GetDryRunHint(rule.Mode, rule.InState, (rule.Actions ?? []).OfType<ChangeStateAction>().Select(action => action.TargetState));
+
+    private string FormatInstant(DateTimeOffset? instant, string fallback) =>
+        instant is { } value ? AutomationTime.Format(TimeZone, value, TimeProvider.GetUtcNow()) : fallback;
+
+    private string? DescribeScope(AutomationRule rule)
+    {
+        if (rule.InState is { } state)
+        {
+            return $"Active in state {state}";
+        }
+
+        return Automation.States.Length > 0 ? "Any state" : null;
+    }
+
+    private string JoinScopeAndMode(AutomationRule rule) =>
+        DescribeScope(rule) is { } scope ? $"{scope} · {AutomationSummary.FormatMode(rule.Mode)}" : AutomationSummary.FormatMode(rule.Mode);
+}
