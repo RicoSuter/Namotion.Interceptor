@@ -307,19 +307,22 @@ internal class OpcUaSubjectLoader
         var childCount = childNodes.Count;
         var children = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>(childCount);
 
+        // Each subject once, at its first position, as a server publishes a subject a collection holds several times.
         var existingChildren = property.Children;
-
-        // A subject the property holds at several positions stays bound to the node of its first one.
-        var reusedSubjects = new HashSet<IInterceptorSubject>(System.Collections.Generic.ReferenceEqualityComparer.Instance);
+        var existingSubjects = new List<IInterceptorSubject>(existingChildren.Length);
+        var seenSubjects = new HashSet<IInterceptorSubject>(System.Collections.Generic.ReferenceEqualityComparer.Instance);
+        foreach (var child in existingChildren)
+        {
+            if (seenSubjects.Add(child.Subject))
+            {
+                existingSubjects.Add(child.Subject);
+            }
+        }
 
         for (var i = 0; i < childCount; i++)
         {
             var (childNode, nodeId) = childNodes[i];
-            var childSubject = i < existingChildren.Length ? existingChildren[i].Subject : null;
-            if (childSubject is not null && !reusedSubjects.Add(childSubject))
-            {
-                childSubject = null;
-            }
+            var childSubject = i < existingSubjects.Count ? existingSubjects[i] : null;
 
             if (childSubject is null)
             {
@@ -358,21 +361,24 @@ internal class OpcUaSubjectLoader
     {
         var rawChildNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken).ConfigureAwait(false);
         var childNodes = DistinctByResolvedNodeId(rawChildNodes, session);
-        var existingChildren = property.Children.ToDictionary(c => c.Index!, c => c.Subject);
         var entries = new Dictionary<object, IInterceptorSubject>();
         var nodesByKey = new Dictionary<object, ReferenceDescription>();
 
-        // A subject the property holds under several keys stays bound to the node of the first one browsed.
-        var reusedSubjects = new HashSet<IInterceptorSubject>(System.Collections.Generic.ReferenceEqualityComparer.Instance);
+        // Each subject under its first key only, as a server publishes a subject a dictionary holds under several keys.
+        var existingChildren = new Dictionary<object, IInterceptorSubject>();
+        var seenSubjects = new HashSet<IInterceptorSubject>(System.Collections.Generic.ReferenceEqualityComparer.Instance);
+        foreach (var child in property.Children)
+        {
+            if (seenSubjects.Add(child.Subject))
+            {
+                existingChildren.TryAdd(child.Index!, child.Subject);
+            }
+        }
 
         foreach (var (childNode, nodeId) in childNodes)
         {
             var key = childNode.BrowseName.Name; // Use BrowseName as dictionary key
             var childSubject = existingChildren.GetValueOrDefault(key);
-            if (childSubject is not null && !reusedSubjects.Add(childSubject))
-            {
-                childSubject = null;
-            }
 
             if (childSubject is null)
             {
