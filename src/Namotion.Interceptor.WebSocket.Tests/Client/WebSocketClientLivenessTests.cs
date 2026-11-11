@@ -434,7 +434,7 @@ public class WebSocketClientLivenessTests
         {
             // Act
             await receiveCts.CancelAsync();
-            await oldCompletion.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await oldCompletion.Task.WaitAsync(TestTimeouts.Default);
 
             // Assert
             Assert.True(source.Diagnostics.IsOperational);
@@ -506,17 +506,17 @@ public class WebSocketClientLivenessTests
         {
             // Act
             var cancellationTask = receiveCts.CancelAsync();
-            await oldLoopReachedLivenessTransition.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await oldLoopReachedLivenessTransition.Task.WaitAsync(TestTimeouts.Default);
             var replacementPublicationTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
             {
                 SetReceiveLoopCompletion(source, replacementCompletion);
                 PublishReceiveLoopAndMarkOperational(source, replacementCompletion);
             });
-            await replacementPublicationStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await replacementPublicationStarted.Task.WaitAsync(TestTimeouts.Default);
             allowOldLoopToContinue.TrySetResult();
             await cancellationTask;
             await replacementPublicationTask;
-            await oldCompletion.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await oldCompletion.Task.WaitAsync(TestTimeouts.Default);
 
             // Assert
             Assert.True(source.Diagnostics.IsOperational);

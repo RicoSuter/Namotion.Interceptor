@@ -60,13 +60,13 @@ public class MqttServerDiagnosticsTests
             .GetValue(server)!;
 
         await using var executionGate = HostedExecutionGate.Install(server);
-        await executionGate.Started.WaitAsync(TimeSpan.FromSeconds(5));
+        await executionGate.Started.WaitAsync(TestTimeouts.Default);
 
         // Act
         var disposal = server.DisposeAsync().AsTask();
         try
         {
-            await executionGate.CancellationObserved.WaitAsync(TimeSpan.FromSeconds(5));
+            await executionGate.CancellationObserved.WaitAsync(TestTimeouts.Default);
 
             // Assert
             Assert.False(disposal.IsCompleted);

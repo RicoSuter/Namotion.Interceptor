@@ -59,7 +59,7 @@ public class SourceRegistrationHostingTests
         gate.ReleaseStart();
 
         await AsyncTestHelpers.WaitUntilAsync(() => monitor.IsRegistrationComplete);
-        await wait.WaitAsync(TimeSpan.FromSeconds(5));
+        await wait.WaitAsync(TestTimeouts.Default);
 
         await host.StopAsync();
     }
@@ -89,7 +89,7 @@ public class SourceRegistrationHostingTests
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => monitor.IsRegistrationComplete);
-        await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeouts.Default);
 
         await host.StopAsync();
     }
@@ -159,7 +159,7 @@ public class SourceRegistrationHostingTests
         Assert.False(monitor.IsRegistrationComplete);
 
         gate.ReleaseStart();
-        await attach.WaitAsync(TimeSpan.FromSeconds(10));
+        await attach.WaitAsync(TestTimeouts.Default);
         await AsyncTestHelpers.WaitUntilAsync(() => monitor.IsRegistrationComplete);
 
         await host.StopAsync();
@@ -229,7 +229,7 @@ public class SourceRegistrationHostingTests
 
         // Assert
         Assert.True(monitor.IsRegistrationComplete);
-        await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeouts.Default);
 
         await host.StopAsync();
     }
@@ -243,7 +243,7 @@ internal sealed class GatedStartHostedService : IHostedService, IDisposable
     public void ReleaseStart() => _release.Set();
 
     public Task StartAsync(CancellationToken cancellationToken) =>
-        Task.Run(() => _release.Wait(TimeSpan.FromSeconds(10), cancellationToken), cancellationToken);
+        Task.Run(() => _release.Wait(TestTimeouts.Default, cancellationToken), cancellationToken);
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
