@@ -3,8 +3,9 @@
 @inject ITimeZoneDisplay TimeZone
 @inject TimeProvider TimeProvider
 @inject IDialogService DialogService
+@inject SubjectPathResolver PathResolver
 
-<div class="d-flex flex-column gap-6">
+<div class="automation-overview d-flex flex-column gap-6">
     @* The diagram keeps its width and the notes take the rest, at least 320 px, else they wrap below it. *@
     <div class="d-flex flex-wrap align-start" style="gap: 24px 40px;">
         @if (Automation.States.Length > 0)
@@ -21,6 +22,11 @@
             @{
                 var metadata = Automation.GetMetadata();
                 var store = MetadataEditing.FindStore(Automation);
+                if (metadata is null)
+                {
+                    // The first metadata adds a property that this render could not read, which changes PathsVersion.
+                    _ = PathResolver.PathsVersion;
+                }
             }
             <div class="d-flex align-center gap-1">
                 <MudText Typo="Typo.h6">Notes</MudText>
@@ -71,7 +77,7 @@
                         {
                             <tr class="automation-rule-row" style="cursor: pointer;" @onclick="@(() => RuleOpened.InvokeAsync(key))" data-testid="automation-rule-row">
                                 <td>
-                                    <MudText Typo="Typo.body2" Style="font-weight: 500;">@(rule.Name ?? key)</MudText>
+                                    @RuleNameButton(key, rule)
                                     <MudText Typo="Typo.caption" Class="mud-text-secondary">@DescribeScope(rule)</MudText>
                                     @if (GetDryRunHint(rule) is { } dryRunHint)
                                     {
@@ -90,7 +96,7 @@
                                             <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Science"
                                                        OnClick="@(() => TestRequested.InvokeAsync((key, rule)))" data-testid="automation-test-now">Test now</MudButton>
                                         </span>
-                                        <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Class="mud-text-secondary" />
+                                        <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Class="mud-text-secondary" aria-hidden="true" />
                                     </div>
                                 </td>
                             </tr>
@@ -105,10 +111,10 @@
                     <MudPaper Outlined="true" Class="pa-3" Style="cursor: pointer;" @onclick="@(() => RuleOpened.InvokeAsync(key))" data-testid="automation-rule-card">
                         <div class="d-flex align-center gap-2">
                             <div class="flex-grow-1" style="min-width: 0;">
-                                <MudText Typo="Typo.body2" Style="font-weight: 500; overflow-wrap: anywhere;">@(rule.Name ?? key)</MudText>
+                                @RuleNameButton(key, rule)
                                 <MudText Typo="Typo.caption" Class="mud-text-secondary">@JoinScopeAndMode(rule)</MudText>
                             </div>
-                            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Class="mud-text-secondary" />
+                            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Class="mud-text-secondary" aria-hidden="true" />
                         </div>
                         @if (GetDryRunHint(rule) is { } dryRunHint)
                         {
@@ -149,7 +155,7 @@
     /// <summary>Called with the key and the rule whose Test now button is clicked.</summary>
     [Parameter] public EventCallback<(string Key, AutomationRule Rule)> TestRequested { get; set; }
 
-    /// <summary>Called with the key of the rule whose row or card is clicked.</summary>
+    /// <summary>Called with the key of the rule whose name, row or card is clicked.</summary>
     [Parameter] public EventCallback<string> RuleOpened { get; set; }
 
     /// <summary>Called when the button to edit the notes, links and tags of the automation is clicked.</summary>
@@ -157,8 +163,14 @@
 
     private static RenderFragment? StatusChip(string? status) =>
         AutomationSummary.GetStatusText(status) is { } text
-            ? @<MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@AutomationColors.GetRuleStatusColor(text)" Class="ma-0">@text</MudChip>
+            ? @<MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@AutomationColors.GetRuleStatusColor(text)" Class="automation-rule-status ma-0">@text</MudChip>
             : null;
+
+    // The keyboard opens a rule with its name; a click on the row or card around it is a convenience for the mouse, which
+    // the name must not raise a second time.
+    private RenderFragment RuleNameButton(string key, AutomationRule rule) => @<button type="button" class="automation-rule-name"
+        aria-label="@($"Edit rule {rule.Name ?? key}")" @onclick="@(() => RuleOpened.InvokeAsync(key))" @onclick:stopPropagation="true"
+        data-testid="automation-rule-name">@(rule.Name ?? key)</button>;
 
     private Task OpenTagFilterAsync(string tag) => MetadataTagFilterDialog.ShowAsync(DialogService, tag);
 

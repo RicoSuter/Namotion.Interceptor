@@ -12,7 +12,8 @@ namespace HomeBlaze.Automation.Blazor.Runs;
 /// </summary>
 internal static class RecentRuns
 {
-    private const int MaxRuns = 20;
+    /// <summary>The most runs a load reads from history.</summary>
+    public const int MaxRuns = 20;
 
     private static readonly TimeSpan Window = TimeSpan.FromDays(7);
 
@@ -44,6 +45,12 @@ internal static class RecentRuns
             return new RecentRunsResult(true, [], $"The runs could not be read from history: {exception.Message}", false);
         }
     }
+
+    /// <summary>The number of runs, with a plus when history may hold more than <see cref="MaxRuns"/>.</summary>
+    public static string FormatCount(RecentRunsResult result) =>
+        result.HasHistory && result.Runs.Count >= MaxRuns
+            ? $"{MaxRuns}+"
+            : result.Runs.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>A hash of the names and run counts of the rules, which changes with every run, for a page to know when to load the runs again.</summary>
     public static int GetKey(Automation automation)

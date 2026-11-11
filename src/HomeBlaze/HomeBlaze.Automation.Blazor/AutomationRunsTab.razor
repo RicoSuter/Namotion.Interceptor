@@ -13,7 +13,8 @@ else
 {
     var ruleNames = Automation.GetRulesInOrder().Select(pair => pair.Value.Name ?? pair.Key).Distinct(StringComparer.Ordinal).ToArray();
     // A rule that was renamed or deleted has no chip anymore, so the selection falls back to all rules.
-    var selectedRuleName = _selectedRuleName is { } name && ruleNames.Contains(name, StringComparer.Ordinal) ? name : null;
+    var selectedRuleName = SelectedRuleName is { } name && ruleNames.Contains(name, StringComparer.Ordinal) ? name : null;
+    var runs = RunFilter.Apply(recentRuns.Runs, selectedRuleName);
     <div class="d-flex flex-column gap-2">
         @if (ruleNames.Length > 1)
         {
@@ -36,14 +37,18 @@ else
         {
             <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="automation-no-runs">No runs yet.</MudText>
         }
+        else if (runs.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="automation-no-rule-runs">No runs of this rule.</MudText>
+        }
         else
         {
-            var runs = RunFilter.Apply(recentRuns.Runs, selectedRuleName);
             @* Read in every render, which resolves the subjects of the actions, so that a subject that is attached, detached
                or renamed renders the runs again. *@
             _ = PathResolver.PathsVersion;
-            <div style="overflow-x: auto;">
-                <MudSimpleTable Dense="true" Hover="true">
+            @* Both variants render, so neither flashes in after prerendering; CSS shows one per breakpoint. *@
+            <div class="d-none d-sm-block" style="overflow-x: auto;">
+                <MudSimpleTable Dense="true">
                     <thead>
                         <tr>
                             <th>Time</th>
@@ -56,35 +61,27 @@ else
                         @foreach (var run in runs)
                         {
                             <tr data-testid="automation-run">
-                                <td style="white-space: nowrap;">@(run.At is { } at ? AutomationTime.FormatWithSeconds(TimeZone, at, TimeProvider.GetUtcNow()) : "Last run")</td>
+                                <td style="white-space: nowrap;">@FormatTime(run)</td>
                                 <td style="font-weight: 500; min-width: 120px;">@run.RuleName</td>
-                                <td>
-                                    @if (run.Outcome is { } outcome)
-                                    {
-                                        <MudChip T="string" Size="Size.Small" Color="@AutomationColors.GetOutcomeColor(outcome)" Class="ma-0">@AutomationSummary.FormatOutcome(outcome)</MudChip>
-                                    }
-                                </td>
-                                @* The minimum width keeps the actions readable on a phone, where the table scrolls sideways instead. *@
-                                <td style="min-width: 240px; overflow-wrap: anywhere;">
-                                    @foreach (var action in RunMessage.Parse(run.Message))
-                                    {
-                                        <div class="d-flex flex-wrap align-baseline" style="column-gap: 6px;" data-testid="automation-run-action">
-                                            @if (action.Name is { } actionName)
-                                            {
-                                                <span style="font-weight: 500; overflow-wrap: normal;">@actionName</span>
-                                            }
-                                            @if (action.SubjectPath is { } subjectPath)
-                                            {
-                                                @RenderSubject(subjectPath)
-                                            }
-                                            <span class="@(action.Name is null ? null : "mud-text-secondary")" style="@(action.Name is null ? null : "font-family: monospace; font-size: 0.75rem;")">@action.Detail</span>
-                                        </div>
-                                    }
-                                </td>
+                                <td>@OutcomeChip(run)</td>
+                                <td style="min-width: 240px; overflow-wrap: anywhere;">@RenderActions(run)</td>
                             </tr>
                         }
                     </tbody>
                 </MudSimpleTable>
+            </div>
+            <div class="d-flex d-sm-none flex-column gap-2">
+                @foreach (var run in runs)
+                {
+                    <MudPaper Outlined="true" Class="pa-3" Style="overflow-wrap: anywhere;" data-testid="automation-run-card">
+                        <div class="d-flex flex-wrap align-center gap-2 mb-1">
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">@FormatTime(run)</MudText>
+                            <MudText Typo="Typo.body2" Class="flex-grow-1" Style="font-weight: 500;">@run.RuleName</MudText>
+                            @OutcomeChip(run)
+                        </div>
+                        @RenderActions(run)
+                    </MudPaper>
+                }
             </div>
         }
     </div>
@@ -93,15 +90,43 @@ else
 @code {
     private const string AllRules = "";
 
-    private string? _selectedRuleName;
-
     [Parameter, EditorRequired] public Automation Automation { get; set; } = null!;
 
     /// <summary>The runs to list, or null while they load.</summary>
     [Parameter] public RecentRunsResult? RecentRuns { get; set; }
 
-    private void OnSelectedValueChanged(string? value) =>
-        _selectedRuleName = string.IsNullOrEmpty(value) ? null : value;
+    /// <summary>The name of the rule whose runs are listed, or null for the runs of all rules.</summary>
+    [Parameter] public string? SelectedRuleName { get; set; }
+
+    [Parameter] public EventCallback<string?> SelectedRuleNameChanged { get; set; }
+
+    private Task OnSelectedValueChanged(string? value) =>
+        SelectedRuleNameChanged.InvokeAsync(string.IsNullOrEmpty(value) ? null : value);
+
+    private string FormatTime(RunEntry run) =>
+        run.At is { } at ? AutomationTime.FormatWithSeconds(TimeZone, at, TimeProvider.GetUtcNow()) : "Last run";
+
+    private static RenderFragment? OutcomeChip(RunEntry run) =>
+        run.Outcome is { } outcome
+            ? @<MudChip T="string" Size="Size.Small" Color="@AutomationColors.GetOutcomeColor(outcome)" Class="ma-0">@AutomationSummary.FormatOutcome(outcome)</MudChip>
+            : null;
+
+    private RenderFragment RenderActions(RunEntry run) => @<text>
+        @foreach (var action in RunMessage.Parse(run.Message))
+        {
+            <div class="d-flex flex-wrap align-baseline" style="column-gap: 6px;" data-testid="automation-run-action">
+                @if (action.Name is { } actionName)
+                {
+                    <span style="font-weight: 500; overflow-wrap: normal;">@actionName</span>
+                }
+                @if (action.SubjectPath is { } subjectPath)
+                {
+                    @RenderSubject(subjectPath)
+                }
+                <span class="@(action.Name is null ? null : "mud-text-secondary")" style="@(action.Name is null ? null : "font-family: monospace; font-size: 0.75rem;")">@action.Detail</span>
+            </div>
+        }
+    </text>;
 
     // A subject that does not resolve, or has no address to open, shows the last segment of its path as text.
     private RenderFragment RenderSubject(string subjectPath)

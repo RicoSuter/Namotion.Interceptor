@@ -187,20 +187,7 @@ public class AutomationPageTests
     {
         // Arrange
         await using var motor = await _fixture.AddStoredMotorAsync();
-        await using var writer = await _fixture.AddStoredAutomationAsync(created =>
-        {
-            created.Name = "Writer";
-            created.Rules = new Dictionary<string, AutomationRule>
-            {
-                ["write"] = new()
-                {
-                    Name = "Write",
-                    Mode = AutomationRuleMode.On,
-                    Triggers = [new PropertyTrigger { Expression = "../Name == Go" }],
-                    Actions = [new SetPropertyAction { Id = "set-1", PropertyPath = $"/{motor.Name}/IsPowered", Value = "false" }]
-                }
-            };
-        });
+        await using var writer = await AddWriterAsync(motor.Name);
         var page = await _fixture.OpenSubjectPageAsync(writer.Name);
         await OpenRunsTabAsync(page);
         await Assertions.Expect(page.GetByTestId("automation-no-runs")).ToBeVisibleAsync(new() { Timeout = Timeout });
@@ -210,13 +197,63 @@ public class AutomationPageTests
         writer.Subject.Name = "Go";
 
         // Assert
-        var action = page.GetByTestId("automation-run-action");
+        var action = page.GetByTestId("automation-run").GetByTestId("automation-run-action");
         await Assertions.Expect(action).ToHaveCountAsync(1, new() { Timeout = Timeout });
         await Assertions.Expect(action).ToContainTextAsync("IsPowered");
         await Assertions.Expect(action).ToContainTextAsync("= False");
         var link = action.GetByRole(AriaRole.Link);
         await Assertions.Expect(link).ToHaveAttributeAsync("title", $"/{motor.Name}");
         await Assertions.Expect(link).ToHaveAttributeAsync("href", new Regex(Regex.Escape(motor.Name)));
+    }
+
+    [Fact]
+    public async Task WhenARuleWithoutRunsIsSelected_ThenTheRunsTabSaysSoAndKeepsTheSelectionAcrossTabs()
+    {
+        // Arrange
+        await using var motor = await _fixture.AddStoredMotorAsync();
+        await using var writer = await AddWriterAsync(motor.Name);
+        var page = await _fixture.OpenSubjectPageAsync(writer.Name);
+        await OpenRunsTabAsync(page);
+        await Assertions.Expect(page.GetByTestId("automation-no-runs")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await WaitUntilRunCountIsStoredAsync(writer.Subject.Rules["write"], 0);
+        writer.Subject.Name = "Go";
+        await Assertions.Expect(page.GetByTestId("automation-run")).ToHaveCountAsync(1, new() { Timeout = Timeout });
+
+        // Act
+        await page.GetByTestId("automation-run-filter").GetByText("Idle", new() { Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByTestId("automation-no-rule-runs")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await page.GetByRole(AriaRole.Tab, new() { Name = "Overview" }).ClickAsync();
+        await Assertions.Expect(page.GetByTestId("automation-rule-row").First).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await OpenRunsTabAsync(page);
+
+        // Assert
+        await Assertions.Expect(page.GetByTestId("automation-no-rule-runs")).ToHaveTextAsync("No runs of this rule.", new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("automation-run")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenRunsAreShownOnAPhone_ThenEachRunIsACard()
+    {
+        // Arrange
+        await using var motor = await _fixture.AddStoredMotorAsync();
+        await using var writer = await AddWriterAsync(motor.Name);
+        var page = await _fixture.CreatePageAsync(new() { ViewportSize = new() { Width = 390, Height = 844 } });
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/{writer.Name}");
+        await page.WaitUntilInteractiveAsync();
+        await OpenRunsTabAsync(page);
+        await Assertions.Expect(page.GetByTestId("automation-no-runs")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await WaitUntilRunCountIsStoredAsync(writer.Subject.Rules["write"], 0);
+
+        // Act
+        writer.Subject.Name = "Go";
+
+        // Assert
+        var card = page.GetByTestId("automation-run-card");
+        await Assertions.Expect(card).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        await Assertions.Expect(card).ToBeVisibleAsync();
+        await Assertions.Expect(card).ToContainTextAsync("Write");
+        await Assertions.Expect(card.GetByTestId("automation-run-action")).ToContainTextAsync("IsPowered");
+        await Assertions.Expect(page.GetByTestId("automation-run")).ToBeHiddenAsync();
     }
 
     [Fact]
@@ -254,7 +291,7 @@ public class AutomationPageTests
         await Assertions.Expect(row).ToContainTextAsync("Finished", new() { Timeout = Timeout });
 
         // Act
-        await row.GetByText("Finished", new() { Exact = true }).ClickAsync();
+        await row.GetByRole(AriaRole.Button, new() { Name = "Edit rule Finished" }).ClickAsync();
 
         // Assert
         await Assertions.Expect(page.GetByTestId("automation-editor")).ToBeVisibleAsync(new() { Timeout = Timeout });
@@ -299,6 +336,28 @@ public class AutomationPageTests
     }
 
     [Fact]
+    public async Task WhenNotesAreSavedInAnotherBrowser_ThenTheOverviewShowsThemAndTheirChanges()
+    {
+        // Arrange
+        await using var washer = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        var page = await _fixture.OpenSubjectPageAsync(washer.Name);
+        await using var otherContext = await _fixture.Browser.NewContextAsync();
+        var otherPage = await otherContext.NewPageAsync();
+        await otherPage.GotoAsync($"{_fixture.ServerAddress}pages/{washer.Name}");
+        await otherPage.WaitUntilInteractiveAsync();
+        var notes = page.GetByTestId("automation-page").GetByTestId("metadata-notes");
+        await Assertions.Expect(page.GetByTestId("automation-no-notes")).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await SaveNotesAsync(otherPage, "First notes");
+        await Assertions.Expect(notes).ToHaveTextAsync("First notes", new() { Timeout = Timeout });
+        await SaveNotesAsync(otherPage, "Second notes");
+
+        // Assert
+        await Assertions.Expect(notes).ToHaveTextAsync("Second notes", new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenThePageIsShownOnAPhone_ThenTheRulesAreCards()
     {
         // Arrange
@@ -335,6 +394,42 @@ public class AutomationPageTests
                 }
             };
         });
+
+    /// <summary>Adds an automation whose rule Write sets IsPowered of the motor to false once the automation is named Go, and whose rule Idle never runs.</summary>
+    private Task<StoredSubject<HomeBlaze.Automation.Automation>> AddWriterAsync(string motorName) =>
+        _fixture.AddStoredAutomationAsync(created =>
+        {
+            created.Name = "Writer";
+            created.RuleOrder = ["write", "idle"];
+            created.Rules = new Dictionary<string, AutomationRule>
+            {
+                ["write"] = new()
+                {
+                    Name = "Write",
+                    Mode = AutomationRuleMode.On,
+                    Triggers = [new PropertyTrigger { Expression = "../Name == Go" }],
+                    Actions = [new SetPropertyAction { Id = "set-1", PropertyPath = $"/{motorName}/IsPowered", Value = "false" }]
+                },
+                ["idle"] = new()
+                {
+                    Name = "Idle",
+                    Mode = AutomationRuleMode.DryRun,
+                    Triggers = [new PropertyTrigger { Expression = "../Name == Never" }],
+                    Actions = [new SetPropertyAction { Id = "set-1", PropertyPath = $"/{motorName}/IsPowered", Value = "true" }]
+                }
+            };
+        });
+
+    /// <summary>Writes the notes of the automation of the page with the pencil and the metadata dialog.</summary>
+    private static async Task SaveNotesAsync(IPage page, string notes)
+    {
+        await page.GetByTestId("automation-notes-edit").ClickAsync();
+        // MudDialog puts its test id on its content, which does not hold the actions.
+        var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
+        await dialog.GetByTestId("metadata-notes-input").FillAsync(notes);
+        await dialog.GetByTestId("metadata-save").ClickAsync();
+        await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = Timeout });
+    }
 
     private static Task OpenRunsTabAsync(IPage page) =>
         page.GetByRole(AriaRole.Tab, new() { Name = "Runs" }).ClickAsync();

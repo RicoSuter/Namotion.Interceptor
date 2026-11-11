@@ -64,6 +64,10 @@ namespace HomeBlaze.Automation.Blazor
         public HomeBlaze.Automation.Automation Automation { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.Blazor.Runs.RecentRunsResult? RecentRuns { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? SelectedRuleName { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string?> SelectedRuleNameChanged { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Automation.Automation))]

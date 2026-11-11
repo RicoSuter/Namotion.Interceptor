@@ -70,12 +70,12 @@
                         Runs
                         @if (_recentRuns is { Runs.Count: > 0 } recentRuns)
                         {
-                            <span class="automation-tab-count" data-testid="automation-tab-runs-count">@recentRuns.Runs.Count</span>
+                            <span class="automation-tab-count" data-testid="automation-tab-runs-count">@RecentRuns.FormatCount(recentRuns)</span>
                         }
                     </span>
                 </TabContent>
                 <ChildContent>
-                    <AutomationRunsTab Automation="automation" RecentRuns="_recentRuns" />
+                    <AutomationRunsTab Automation="automation" RecentRuns="_recentRuns" @bind-SelectedRuleName="_selectedRunRuleName" />
                 </ChildContent>
             </MudTabPanel>
         </MudTabs>
@@ -91,6 +91,8 @@
     private RunReloadSchedule _reloads = new(ReloadInterval, RetryWindow);
     private IInterceptorSubject? _runsSubject;
     private RecentRunsResult? _recentRuns;
+    // Kept here, as the tabs render only the content of the selected tab.
+    private string? _selectedRunRuleName;
     private int? _renderedRunsKey;
     private int? _loadedRunsKey;
     private int _loadVersion;
@@ -105,6 +107,7 @@
         {
             _runsSubject = Subject;
             _recentRuns = null;
+            _selectedRunRuleName = null;
             _loadedRunsKey = null;
             _loadVersion++;
             _reloads = new RunReloadSchedule(ReloadInterval, RetryWindow);
@@ -217,12 +220,7 @@
             return;
         }
 
-        var dialog = await MetadataEditDialog.ShowAsync(DialogService, automation, $"Metadata of {automation.Title}");
-
-        // The first metadata of a subject adds its property, which no render has read yet, so no change of a read value
-        // renders the notes.
-        await dialog.Result;
-        StateHasChanged();
+        await MetadataEditDialog.ShowAsync(DialogService, automation, $"Metadata of {automation.Title}");
     }
 
     private async Task ResetAsync(Automation automation)

@@ -1,3 +1,42 @@
 .automation-rule-row:hover td {
     background: var(--mud-palette-action-default-hover);
 }
+
+.automation-rule-name {
+    display: block;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    font-size: var(--mud-typography-body2-size);
+    font-weight: 500;
+    line-height: var(--mud-typography-body2-lineheight);
+    text-align: start;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+}
+
+.automation-rule-name:hover {
+    text-decoration: underline;
+}
+
+.automation-rule-name:focus-visible {
+    outline: 2px solid var(--mud-palette-primary);
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+
+/* A long status, such as the missing paths of a rule, wraps inside its chip instead of widening the table. */
+.automation-overview ::deep .automation-rule-status {
+    height: auto;
+    min-height: 24px;
+    max-width: 280px;
+}
+
+.automation-overview ::deep .automation-rule-status .mud-chip-content {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.3;
+    padding: 2px 0;
+}
