@@ -290,7 +290,7 @@ public class AnthropicAgentTests
 
         // Act
         test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Unavailable);
+        await test.WaitUntilTurnEndedAsync(ServiceStatus.Unavailable);
 
         // Assert
         Assert.Contains("API key", test.Agent.StatusMessage);

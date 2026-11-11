@@ -209,6 +209,16 @@ internal sealed class AgentTestContext<TAgent> : IAsyncDisposable
         await AsyncTestHelpers.WaitUntilAsync(() => Agent.RunCount > runCount && !Agent.IsBusy);
     }
 
+    /// <summary>Waits until the running turn has ended with <paramref name="status"/>.</summary>
+    /// <remarks>
+    /// The status and its message are two writes, so a wait on the status alone can resume before the message is
+    /// written; the turn ends after both.
+    /// </remarks>
+    public Task WaitUntilTurnEndedAsync(ServiceStatus status) =>
+        AsyncTestHelpers.WaitUntilAsync(
+            () => Agent.Status == status && !Agent.IsBusy,
+            () => $"The turn should end with status {status}, but the status is {Agent.Status} ({Agent.StatusMessage}) and the agent is {(Agent.IsBusy ? "busy" : "not busy")}.");
+
     /// <summary>Writes the timeline entries and the status of the agent to the test output.</summary>
     public void WriteTimeline(ITestOutputHelper output)
     {

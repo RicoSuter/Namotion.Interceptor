@@ -260,7 +260,7 @@ public class LlmAgentBaseTests
 
         // Act
         test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Unavailable);
+        await test.WaitUntilTurnEndedAsync(ServiceStatus.Unavailable);
 
         // Assert
         Assert.Contains("not logged in", test.Agent.StatusMessage);
@@ -426,7 +426,7 @@ public class LlmAgentBaseTests
                 AgentFailureKind.UsageLimit, "Usage limit reached", retryAfter: time.GetUtcNow().AddMinutes(10)),
             timeProvider: time);
         test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Unavailable && !test.Agent.IsBusy);
+        await test.WaitUntilTurnEndedAsync(ServiceStatus.Unavailable);
         await AsyncTestHelpers.WaitUntilAsync(() => time.PendingTimerCount == 1);
 
         // Act
@@ -830,7 +830,7 @@ public class LlmAgentBaseTests
 
         // Act
         time.Advance(TimeSpan.FromMinutes(5));
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Error);
+        await test.WaitUntilTurnEndedAsync(ServiceStatus.Error);
 
         // Assert
         Assert.Contains("did not finish", test.Agent.StatusMessage);
@@ -1039,7 +1039,7 @@ public class LlmAgentBaseTests
 
         // Act
         test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Error);
+        await test.WaitUntilTurnEndedAsync(ServiceStatus.Error);
 
         // Assert
         var entry = Assert.Single(test.Agent.Timeline.Entries);
