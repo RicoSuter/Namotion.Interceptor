@@ -307,7 +307,7 @@ internal class OpcUaSubjectLoader
         var childCount = childNodes.Count;
         var children = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>(childCount);
 
-        // Each subject once, at its first position, where a server publishes a subject that a collection holds more than once.
+        // Each subject once, at its first position: a server publishes a repeated subject there only.
         var existingChildren = property.Children;
         var existingSubjects = new List<IInterceptorSubject>(existingChildren.Length);
         var seenSubjects = new HashSet<IInterceptorSubject>(System.Collections.Generic.ReferenceEqualityComparer.Instance);
@@ -364,7 +364,7 @@ internal class OpcUaSubjectLoader
         var entries = new Dictionary<object, IInterceptorSubject>();
         var nodesByKey = new Dictionary<object, ReferenceDescription>();
 
-        // Each subject under its first key only, where a server publishes a subject that a dictionary holds under several keys.
+        // Each subject under its first key only: a server publishes a repeated subject there only.
         var existingChildren = new Dictionary<object, IInterceptorSubject>();
         var seenSubjects = new HashSet<IInterceptorSubject>(System.Collections.Generic.ReferenceEqualityComparer.Instance);
         foreach (var child in property.Children)
