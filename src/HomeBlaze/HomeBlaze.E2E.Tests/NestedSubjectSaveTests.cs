@@ -71,7 +71,7 @@ public class NestedSubjectSaveTests
             // Assert
             await Assertions.Expect(page.GetByText("Configuration applied but not saved"))
                 .ToBeVisibleAsync(new() { Timeout = 30000 });
-            await Assertions.Expect(page.GetByText("Configuration saved.")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.GetByText("Configuration saved.")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
             Assert.Equal(3, cell.ColumnSpan);
         });
     }

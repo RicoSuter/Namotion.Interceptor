@@ -81,11 +81,12 @@ public class PropertyHistoryDialogTests
         var page = await OpenMotorHistoryAsync("Speed");
 
         // Act
+        await WaitForTheQueryAsync(page);
         var notice = page.Locator("[data-testid='history-truncation-notice']");
 
         // Assert - nothing was dropped, so the notice must be absent. A chart holding a few seconds of
         // samples has no oldest data to hide.
-        await Assertions.Expect(notice).ToBeHiddenAsync(new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(notice).ToBeHiddenAsync(new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -97,9 +98,14 @@ public class PropertyHistoryDialogTests
         var page = await OpenMotorHistoryAsync("Speed");
 
         // Act
+        await WaitForTheQueryAsync(page);
         var alert = page.Locator("[data-testid='property-history-dialog'] .mud-alert");
 
         // Assert
-        await Assertions.Expect(alert).ToBeHiddenAsync(new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(alert).ToBeHiddenAsync(new() { Timeout = AssertionTimeouts.Absence });
     }
+
+    // The dialog shows its progress from its first render until its query has ended, and only then a notice or an error.
+    private static Task WaitForTheQueryAsync(IPage page) =>
+        Assertions.Expect(page.GetByTestId("property-history-loading")).ToHaveCountAsync(0);
 }

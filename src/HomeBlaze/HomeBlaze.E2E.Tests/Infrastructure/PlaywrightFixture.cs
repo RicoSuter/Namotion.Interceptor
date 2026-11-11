@@ -17,9 +17,6 @@ namespace HomeBlaze.E2E.Tests.Infrastructure;
 /// </summary>
 public class PlaywrightFixture : IAsyncLifetime
 {
-    // The default timeout of AsyncTestHelpers.WaitUntilAsync, which the polls of the files use.
-    private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(30);
-
     private IPlaywright? _playwright;
     private IBrowser? _browser;
     private WebTestingHostFactory<App>? _factory;
@@ -85,8 +82,8 @@ public class PlaywrightFixture : IAsyncLifetime
         }
 
         // An assertion without its own timeout waits 5 seconds by default, which a busy build server can exceed for a round
-        // trip of the circuit or the first render of a component; it gets the 30 seconds that the tests give everywhere else.
-        Assertions.SetDefaultExpectTimeout(30000);
+        // trip of the circuit or the first render of a component. An assertion of an absence takes AssertionTimeouts.Absence.
+        Assertions.SetDefaultExpectTimeout(AssertionTimeouts.Default);
 
         // Initialize Playwright and launch browser
         _playwright = await Playwright.CreateAsync();
@@ -333,7 +330,7 @@ public class PlaywrightFixture : IAsyncLifetime
 
         // Limited like the polls, so that a worker that hangs fails the test instead of holding it. Run on the thread
         // pool for the reason given in WriteDemoPageAsync.
-        using var cancellation = new CancellationTokenSource(ReadTimeout);
+        using var cancellation = new CancellationTokenSource(TestTimeouts.Default);
         Task.Run(() => FluentStorageContainer.RunOperationAsync(
             connection,
             _ =>

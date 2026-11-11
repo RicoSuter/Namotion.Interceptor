@@ -111,7 +111,7 @@ public class CardLayoutTests
         // Assert
         await Assertions.Expect(page.GetByTestId("widget-argument-error"))
             .ToHaveTextAsync("AspectRatio must look like 4:3: 2/1", new() { Timeout = Timeout });
-        await Assertions.Expect(page.GetByText("Body of the invalid ratio card.")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByText("Body of the invalid ratio card.")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Theory]
@@ -162,7 +162,7 @@ public class CardLayoutTests
         // Assert
         await Assertions.Expect(wrapper).ToHaveAttributeAsync("aria-current", "true", new() { Timeout = Timeout });
         await page.OpenDialogAfterSelectionAsync(actionBar.GetByTestId("edit-subject-button"));
-        await Assertions.Expect(place.GetByTestId("block-insert-line")).ToHaveCountAsync(0);
+        await Assertions.Expect(place.GetByTestId("block-insert-line")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         await CloseEditDialogAsync(page);
         var heights = await card.EvaluateAsync<double[]>(
             "(card, container) => [card.getBoundingClientRect().height, card.closest(container).getBoundingClientRect().height]",
@@ -176,7 +176,7 @@ public class CardLayoutTests
         await Assertions.Expect(wrapper).Not.ToHaveAttributeAsync("aria-current", "true", new() { Timeout = Timeout });
         await Assertions.Expect(page.Locator(".subject-component-wrapper.selected")).ToHaveCountAsync(1, new() { Timeout = Timeout });
         await page.OpenDialogAfterSelectionAsync(page.GetWidgetActionBar().GetByTestId("edit-subject-button"));
-        await Assertions.Expect(place.GetByTestId("block-insert-line")).ToHaveCountAsync(0);
+        await Assertions.Expect(place.GetByTestId("block-insert-line")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     private static async Task CloseEditDialogAsync(IPage page)

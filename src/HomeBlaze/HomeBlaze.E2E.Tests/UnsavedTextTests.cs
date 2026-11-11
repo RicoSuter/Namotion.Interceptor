@@ -68,7 +68,7 @@ public class UnsavedTextTests
 
         // Assert
         await _fixture.WaitForUrlAsync(page, url => url.EndsWith("/browser", StringComparison.Ordinal), Timeout);
-        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Keep editing", Exact = true })).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Keep editing", Exact = true })).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         Assert.Contains(Typed, await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(PageName)));
     }
 

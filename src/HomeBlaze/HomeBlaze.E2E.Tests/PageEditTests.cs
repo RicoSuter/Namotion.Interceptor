@@ -115,7 +115,7 @@ public class PageEditTests
 
         // Split view should NOT be visible
         var splitter = page.Locator("[data-testid='edit-splitter']");
-        await Assertions.Expect(splitter).Not.ToBeVisibleAsync(new() { Timeout = 30000 });
+        await Assertions.Expect(splitter).Not.ToBeVisibleAsync(new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -131,7 +131,7 @@ public class PageEditTests
 
         var textArea = page.GetByTestId("markdown-source-text");
         await Assertions.Expect(textArea).ToHaveValueAsync(source, new() { Timeout = 30000 });
-        await Assertions.Expect(page.Locator(".monaco-editor")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".monaco-editor")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
         // Act
         await textArea.FillAsync(source.Replace("before", "after"));
@@ -292,7 +292,7 @@ public class PageEditTests
                 }
             }
 
-            await Assertions.Expect(page.Locator("#blazor-error-ui")).ToBeHiddenAsync();
+            await Assertions.Expect(page.Locator("#blazor-error-ui")).ToBeHiddenAsync(new() { Timeout = AssertionTimeouts.Absence });
         }
     }
 
@@ -429,7 +429,7 @@ public class PageEditTests
             // The subject has no file of its own, so nothing is written and the notification says so.
             await Assertions.Expect(page.GetByText("Configuration applied but not saved")).ToBeVisibleAsync(new() { Timeout = 30000 });
             Assert.Equal(3, subject.Limit);
-            await Assertions.Expect(page.GetByText("Configuration was changed externally")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.GetByText("Configuration was changed externally")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         }
         finally
         {

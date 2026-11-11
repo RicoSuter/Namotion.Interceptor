@@ -169,9 +169,9 @@ public class SubjectSetupDialogTests
         await Assertions.Expect(DialogTitle(page)).ToHaveTextAsync("Create subject");
         await Assertions.Expect(SearchInput(page)).ToBeFocusedAsync(new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(page.Locator("[data-testid='type-group-all']")).ToBeVisibleAsync();
-        await Assertions.Expect(page.Locator("[data-testid='create-name-input']")).ToHaveCountAsync(0);
-        await Assertions.Expect(CreateButton(page)).ToHaveCountAsync(0);
-        await Assertions.Expect(BackButton(page)).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator("[data-testid='create-name-input']")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(CreateButton(page)).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(BackButton(page)).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         await Assertions.Expect(page.Locator("[data-testid='cancel-button']")).ToBeVisibleAsync();
     }
 
@@ -189,7 +189,7 @@ public class SubjectSetupDialogTests
         await Assertions.Expect(TypeRow(page, "tablayout")).ToBeVisibleAsync();
         foreach (var typeName in new[] { "tab", "valuerow", "expansionpanel", "valuemapcase" })
         {
-            await Assertions.Expect(TypeRow(page, typeName)).ToHaveCountAsync(0);
+            await Assertions.Expect(TypeRow(page, typeName)).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         }
 
         await Assertions.Expect(Dialog(page).GetByText("Value tile", new() { Exact = true })).ToBeVisibleAsync();
@@ -197,7 +197,7 @@ public class SubjectSetupDialogTests
         // the names that the dialog would show for the excluded types.
         foreach (var displayName in new[] { "Tab", "Value row", "Expansion panel", "Value map case" })
         {
-            await Assertions.Expect(Dialog(page).GetByText(displayName, new() { Exact = true })).ToHaveCountAsync(0);
+            await Assertions.Expect(Dialog(page).GetByText(displayName, new() { Exact = true })).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         }
     }
 
@@ -357,7 +357,7 @@ public class SubjectSetupDialogTests
 
         // Assert
         await Assertions.Expect(TypeRow(page, "gridlayout")).ToBeVisibleAsync();
-        await Assertions.Expect(SearchInput(page)).Not.ToBeFocusedAsync();
+        await Assertions.Expect(SearchInput(page)).Not.ToBeFocusedAsync(new() { Timeout = AssertionTimeouts.Absence });
         var focusedAfterOpening = await page.EvaluateAsync<string[]>("() => window.focusedTestIds");
         Assert.Contains("type-group-dashboard", focusedAfterOpening);
         Assert.DoesNotContain("type-search-input", focusedAfterOpening);
@@ -410,9 +410,9 @@ public class SubjectSetupDialogTests
 
         // Assert - the cell and node types only exist inside a layout, and the test root already has a plugin manager.
         await Assertions.Expect(TypeRow(page, "gridlayout")).ToBeVisibleAsync();
-        await Assertions.Expect(TypeRow(page, "gridcell")).ToHaveCountAsync(0);
-        await Assertions.Expect(TypeRow(page, "canvasnode")).ToHaveCountAsync(0);
-        await Assertions.Expect(TypeRow(page, "pluginmanager")).ToHaveCountAsync(0);
+        await Assertions.Expect(TypeRow(page, "gridcell")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(TypeRow(page, "canvasnode")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(TypeRow(page, "pluginmanager")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -521,7 +521,7 @@ public class SubjectSetupDialogTests
 
         // Assert
         await Assertions.Expect(TypeRow(page, "gridlayout")).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
-        await Assertions.Expect(TypeRow(page, "motor")).ToHaveCountAsync(0);
+        await Assertions.Expect(TypeRow(page, "motor")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         await Assertions.Expect(dashboardGroup).ToHaveAttributeAsync("aria-pressed", "true");
     }
 
@@ -604,7 +604,7 @@ public class SubjectSetupDialogTests
         var inMemoryOnlyField = Dialog(page).GetByLabel("Max Points Per Property");
         var sqliteOnlyField = Dialog(page).GetByLabel("Database Path");
         await Assertions.Expect(inMemoryOnlyField).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
-        await Assertions.Expect(sqliteOnlyField).ToHaveCountAsync(0);
+        await Assertions.Expect(sqliteOnlyField).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
         // Act
         await BackButton(page).ClickAsync();
@@ -677,7 +677,7 @@ public class SubjectSetupDialogTests
         // Assert
         await Assertions.Expect(DialogTitle(page)).ToHaveTextAsync("Create Motor");
         await Assertions.Expect(NameInput(page)).ToHaveValueAsync("Motor");
-        await Assertions.Expect(NameHelperText(page, "File name is required")).ToHaveCountAsync(0);
+        await Assertions.Expect(NameHelperText(page, "File name is required")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -724,7 +724,7 @@ public class SubjectSetupDialogTests
         // Assert - the required number is prefilled, so nothing has to be touched first.
         await Assertions.Expect(intervalInput).ToHaveValueAsync("5", new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
-        await Assertions.Expect(Dialog(page).GetByText("Required")).ToHaveCountAsync(0);
+        await Assertions.Expect(Dialog(page).GetByText("Required")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
         // Act
         await intervalInput.FillAsync("");
@@ -824,7 +824,7 @@ public class SubjectSetupDialogTests
         // Assert
         await Assertions.Expect(editDialog.GetByLabel(argument, new() { Exact = true }))
             .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
-        await Assertions.Expect(editDialog.GetByText(slot)).ToHaveCountAsync(0);
+        await Assertions.Expect(editDialog.GetByText(slot)).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -1021,7 +1021,7 @@ public class SubjectSetupDialogTests
                 .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
             Assert.Equal("Original label", subject.Label);
             Assert.Equal(1, subject.Level);
-            await Assertions.Expect(editDialog.GetByText(externalChangeWarning)).ToHaveCountAsync(0);
+            await Assertions.Expect(editDialog.GetByText(externalChangeWarning)).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
             // Act
             subject.Interval = 9;
@@ -1099,7 +1099,7 @@ public class SubjectSetupDialogTests
 
             // The dialog persists nothing here, because its caller stores the subject. A notification of the
             // dialog would be shown by the time it has closed.
-            await Assertions.Expect(page.GetByText("Configuration applied but not saved")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.GetByText("Configuration applied but not saved")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
             // The file holds the edits of the motor form only when they were applied before it was written.
             await _fixture.WaitForFileTextAsync(
@@ -1262,7 +1262,7 @@ public class SubjectSetupDialogTests
             await PickTypeAsync(page, "inmemoryhistorystoresubject");
 
             // A grid cell has no name, so the dialog must not ask for one.
-            await Assertions.Expect(page.Locator("[data-testid='create-name-input']")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.Locator("[data-testid='create-name-input']")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
             var isEnabledCheckBox = page.GetByLabel("Enabled (auto-start on application startup)");
             await Assertions.Expect(isEnabledCheckBox).ToBeCheckedAsync(new() { Timeout = ElementVisibilityTimeout });

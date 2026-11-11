@@ -68,7 +68,7 @@ public class MarkdownBlockTests
 
         // Assert
         await Assertions.Expect(page.GetByTestId("card").First).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -82,7 +82,7 @@ public class MarkdownBlockTests
         await Assertions.Expect(card).ToBeVisibleAsync(new() { Timeout = 30000 });
         await Assertions.Expect(card).ToContainTextAsync("CardMotor", new() { Timeout = 30000 });
         await Assertions.Expect(card).ToContainTextAsync("Test Motor", new() { Timeout = 30000 });
-        await Assertions.Expect(card).Not.ToContainTextAsync("Cannot resolve path");
+        await Assertions.Expect(card).Not.ToContainTextAsync("Cannot resolve path", new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -265,7 +265,7 @@ public class MarkdownBlockTests
         var tabs = page.GetByTestId("tab-layout").GetByRole(AriaRole.Tab);
         await Assertions.Expect(tabs).ToHaveTextAsync(new[] { "First Tab", "Second Tab" }, new() { Timeout = 30000 });
         await Assertions.Expect(tabs.Nth(0).Locator("svg")).ToHaveCountAsync(1);
-        await Assertions.Expect(tabs.Nth(1).Locator("svg")).ToHaveCountAsync(0);
+        await Assertions.Expect(tabs.Nth(1).Locator("svg")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -275,7 +275,7 @@ public class MarkdownBlockTests
         var page = await OpenPageAsync("Blocks.md");
         var tabs = page.GetByTestId("tab-layout");
         await Assertions.Expect(tabs.GetByText("Content of the first tab")).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await Assertions.Expect(tabs.GetByText("Content of the second tab")).ToBeHiddenAsync();
+        await Assertions.Expect(tabs.GetByText("Content of the second tab")).ToBeHiddenAsync(new() { Timeout = AssertionTimeouts.Absence });
 
         // Act
         await GetTab(tabs, "Second Tab").ClickAsync();
@@ -330,7 +330,7 @@ public class MarkdownBlockTests
         await Assertions.Expect(tabs.GetByRole(AriaRole.Tab)).ToHaveTextAsync(new[] { "First", "Alpha", "Beta", "Gamma" });
         await Assertions.Expect(GetSelectedTab(tabs)).ToHaveTextAsync("Beta");
         await Assertions.Expect(tabs.GetByText("Content of beta")).ToBeVisibleAsync();
-        await Assertions.Expect(tabs.GetByText("Content of first")).ToBeHiddenAsync();
+        await Assertions.Expect(tabs.GetByText("Content of first")).ToBeHiddenAsync(new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -352,7 +352,7 @@ public class MarkdownBlockTests
             new[] { "Gamma", "Alpha", "Beta Renamed" }, new() { Timeout = 30000 });
         await Assertions.Expect(GetSelectedTab(tabs)).ToHaveTextAsync("Beta Renamed");
         await Assertions.Expect(tabs.GetByText("Content of beta")).ToBeVisibleAsync();
-        await Assertions.Expect(tabs.GetByText("Content of gamma")).ToBeHiddenAsync();
+        await Assertions.Expect(tabs.GetByText("Content of gamma")).ToBeHiddenAsync(new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -373,7 +373,7 @@ public class MarkdownBlockTests
             new[] { "Alpha", "Gamma" }, new() { Timeout = 30000 });
         await Assertions.Expect(GetSelectedTab(tabs)).ToHaveTextAsync("Alpha");
         await Assertions.Expect(tabs.GetByText("Content of alpha")).ToBeVisibleAsync();
-        await Assertions.Expect(tabs.GetByText("Content of gamma")).ToBeHiddenAsync();
+        await Assertions.Expect(tabs.GetByText("Content of gamma")).ToBeHiddenAsync(new() { Timeout = AssertionTimeouts.Absence });
         await Assertions.Expect(tabs.GetByText("Content of beta")).ToHaveCountAsync(0);
     }
 
@@ -610,7 +610,7 @@ public class MarkdownBlockTests
 
         // Assert
         await Assertions.Expect(card).ToContainTextAsync("/ 1500 RPM", new() { Timeout = 30000 });
-        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
         var sourceAfter = await File.ReadAllLinesAsync(GetPagePath(ScratchPage));
         Assert.Equal(sourceBefore.Length, sourceAfter.Length);
@@ -669,7 +669,7 @@ public class MarkdownBlockTests
         await page.SelectEditModeAsync("View");
         await Assertions.Expect(card).ToContainTextAsync("/ 1500 RPM", new() { Timeout = 30000 });
         await Assertions.Expect(page.GetCard("Other Card")).ToContainTextAsync("The text of the other card.");
-        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
         var written = (await File.ReadAllTextAsync(GetPagePath(ScratchPage))).Replace("\r\n", "\n");
         Assert.Equal(source.Replace("TargetSpeed=1200", "TargetSpeed=1500"), written);
@@ -714,7 +714,7 @@ public class MarkdownBlockTests
         // Assert: the notification comes after the last refresh of the decorations. Refreshes that overlapped
         // would each have added their decorations, and one of them would have stayed beside the later ones.
         await Assertions.Expect(savedNotification).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await Assertions.Expect(page.GetByText("Error saving configuration")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByText("Error saving configuration")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
         var decorationCounts = await page.EvaluateAsync<int[]>(
             """
@@ -756,7 +756,7 @@ public class MarkdownBlockTests
         // of a motor is required, so Create is enabled only once it is entered, and from then on only the
         // block name can disable it.
         await Assertions.Expect(blockNameInput).ToHaveValueAsync("Motor", new() { Timeout = 30000 });
-        await Assertions.Expect(dialog.GetByText(".json", new() { Exact = true })).ToHaveCountAsync(0);
+        await Assertions.Expect(dialog.GetByText(".json", new() { Exact = true })).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         await SubjectSetupDialogTests.EnterMotorNameAsync(page, "Living Room Motor");
         await Assertions.Expect(createButton).ToBeEnabledAsync(new() { Timeout = 30000 });
 
@@ -779,7 +779,7 @@ public class MarkdownBlockTests
         var headLine = page.Locator(
             ".monaco-editor .view-line", new() { HasTextString = "HomeBlaze.Samples.Motor#livingroom" });
         await Assertions.Expect(headLine).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
         // The editor shows the block before the page is saved, so the file is read until it has the block.
         var source = await _fixture.WaitForDemoPageTextAsync(
@@ -823,7 +823,7 @@ public class MarkdownBlockTests
         await page.SelectEditModeAsync("View");
         await Assertions.Expect(card).ToContainTextAsync("Inner Motor", new() { Timeout = 30000 });
         await Assertions.Expect(card.GetByText("Text inside the card")).ToBeVisibleAsync();
-        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
         var source = (await File.ReadAllTextAsync(GetPagePath(ScratchPage))).Replace("\r\n", "\n");
         var lines = source.Split('\n');
@@ -886,7 +886,7 @@ public class MarkdownBlockTests
         Assert.Contains("Path=scratchmotor/CurrentSpeed", lines[headLineIndex]);
         Assert.Equal("::", lines[headLineIndex + 1]);
         Assert.Contains("Text before the block", lines);
-        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
