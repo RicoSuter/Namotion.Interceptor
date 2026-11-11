@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
@@ -31,11 +30,9 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     private OutboundWriter? _writer;
 
     private readonly SemaphoreSlim _structureLock = new(1, 1);
-    private volatile CancellationTokenSource? _reconnectCts; // Cancelled by KillAsync to abort in-flight reconnection
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
 
     private volatile bool _isStarted;
-    private long _reconnectStartedTimestamp; // 0 = not reconnecting, otherwise Stopwatch timestamp when reconnection started (for stall detection)
 
     internal string OpcUaNodeIdKey { get; } = "OpcUaNodeId:" + Guid.NewGuid();
 
@@ -376,32 +373,17 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             try
             {
                 var sessionManager = _sessionManager;
-                var propertyWriter = _propertyWriter;
-                if (sessionManager is not null && propertyWriter is not null && _isStarted)
+                if (sessionManager is not null && _propertyWriter is not null && _isStarted)
                 {
-                    if (sessionManager.HasSessionsToDispose)
+                    // Reconnection is owned by the managed session; while it recovers there is nothing
+                    // to heal, and liveness follows its state transitions.
+                    if (sessionManager.IsConnected)
                     {
-                        await sessionManager.DisposePendingSessionsAsync(stoppingToken).ConfigureAwait(false);
-                    }
-
-                    var isReconnecting = sessionManager.IsReconnecting;
-                    var currentSession = sessionManager.CurrentSession;
-                    var sessionIsConnected = currentSession?.Connected ?? false;
-
-                    if (currentSession is not null && sessionIsConnected && !isReconnecting)
-                    {
-                        if (await HandleHealthySessionAsync(sessionManager, stoppingToken).ConfigureAwait(false))
-                        {
-                            continue;
-                        }
-                    }
-                    else if (!isReconnecting)
-                    {
-                        await HandleDeadSessionAsync(currentSession, sessionIsConnected, stoppingToken).ConfigureAwait(false);
+                        await HandleHealthySessionAsync(sessionManager, stoppingToken).ConfigureAwait(false);
                     }
                     else
                     {
-                        await HandleReconnectionStallDetectionAsync(sessionManager, currentSession, sessionIsConnected, stoppingToken).ConfigureAwait(false);
+                        sessionManager.ReportLivenessFromSessionState();
                     }
                 }
 
@@ -413,7 +395,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             catch (Exception ex)
             {
                 ReportBackgroundError(ex, stoppingToken);
-                _logger.LogError(ex, "Error during health check or session restart. Retrying after delay.");
+                _logger.LogError(ex, "Error during health check. Retrying after delay.");
                 try { await Task.Delay(_configuration.SubscriptionHealthCheckInterval, stoppingToken).ConfigureAwait(false); }
                 catch (OperationCanceledException) { return; }
             }
@@ -422,24 +404,20 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         _logger.LogInformation("OPC UA client health loop has stopped.");
     }
 
-    private async Task<bool> HandleHealthySessionAsync(SessionManager sessionManager, CancellationToken cancellationToken)
+    private async Task HandleHealthySessionAsync(SessionManager sessionManager, CancellationToken cancellationToken)
     {
-        Interlocked.Exchange(ref _reconnectStartedTimestamp, 0);
-
         await sessionManager.PerformFullStateSyncIfNeededAsync(cancellationToken).ConfigureAwait(false);
 
-        // Re-read rather than taken from the caller's snapshot, because the full state sync above
-        // clears the session when it fails. Kept ahead of the network-touching steps below, so a
-        // throw in either cannot skip this tick's report and leave a client that is genuinely
-        // serving subscription data reporting itself as down.
+        // Kept ahead of the network-touching steps below, so a throw in either cannot skip this
+        // tick's report and leave a client that is serving subscription data reporting itself down.
         sessionManager.ReportLivenessFromSessionState();
 
         if (sessionManager.SubscriptionManager.HasStoppedPublishing)
         {
             _logger.LogWarning(
-                "OPC UA subscription has stopped publishing. Starting manual reconnection to recover notification flow...");
-            await ReconnectSessionAsync(cancellationToken).ConfigureAwait(false);
-            return sessionManager.IsConnected;
+                "OPC UA subscription has stopped publishing. Recreating subscriptions to recover notification flow...");
+            await RecreateSubscriptionsAsync(sessionManager, cancellationToken).ConfigureAwait(false);
+            return;
         }
 
         await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(
@@ -448,181 +426,54 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
         await sessionManager.SubscriptionManager
             .EscalatePersistentlyFailedItemsAsync(cancellationToken).ConfigureAwait(false);
-
-        return false;
-    }
-
-    private async Task HandleDeadSessionAsync(Session? currentSession, bool sessionIsConnected, CancellationToken cancellationToken)
-    {
-        Interlocked.Exchange(ref _reconnectStartedTimestamp, 0);
-        _logger.LogWarning(
-            "OPC UA session is dead (session={HasSession}, connected={IsConnected}). " +
-            "Starting manual reconnection...",
-            currentSession is not null,
-            sessionIsConnected);
-
-        await ReconnectSessionAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task HandleReconnectionStallDetectionAsync(SessionManager sessionManager, Session? currentSession, bool sessionIsConnected, CancellationToken cancellationToken)
-    {
-        var startedAt = Interlocked.Read(ref _reconnectStartedTimestamp);
-        if (startedAt == 0)
-        {
-            Interlocked.CompareExchange(ref _reconnectStartedTimestamp, Stopwatch.GetTimestamp(), 0);
-        }
-        else
-        {
-            var elapsed = Stopwatch.GetElapsedTime(startedAt);
-            if (elapsed > _configuration.MaxReconnectDuration)
-            {
-                if (sessionManager.TryForceResetIfStalled())
-                {
-                    _logger.LogWarning(
-                        "SDK reconnection stalled (session={HasSession}, connected={IsConnected}, elapsed={Elapsed}s). " +
-                        "Starting manual reconnection...",
-                        currentSession is not null,
-                        sessionIsConnected,
-                        elapsed.TotalSeconds);
-
-                    Interlocked.Exchange(ref _reconnectStartedTimestamp, 0);
-                    await ReconnectSessionAsync(cancellationToken).ConfigureAwait(false);
-                }
-            }
-        }
     }
 
     /// <summary>
-    /// Restarts the session when connection is lost.
-    /// Reuses existing SessionManager (CreateSessionAsync disposes old session internally).
-    /// Thread-safe: Only called from single-threaded ExecuteAsync loop.
+    /// Replaces every subscription on the current session and reloads the full state. Used when a
+    /// subscription stopped publishing while the session itself stayed connected.
     /// </summary>
-    private async Task ReconnectSessionAsync(CancellationToken cancellationToken)
+    private async Task RecreateSubscriptionsAsync(SessionManager sessionManager, CancellationToken cancellationToken)
     {
-        var sessionManager = _sessionManager;
-        if (sessionManager is null)
-        {
-            return;
-        }
-
+        var session = sessionManager.CurrentSession;
         var propertyWriter = _propertyWriter;
-        if (propertyWriter is null)
+        if (session is null || propertyWriter is null)
         {
             return;
         }
 
-        ReconnectionMetrics.RecordAttemptStart();
+        propertyWriter.StartBuffering();
 
-        // Create a linked CTS so KillAsync can cancel this reconnection mid-flight.
-        // Without this, KillAsync disposes the session while we're still using it,
-        // leading to BadSessionNotActivated errors and 60s hangs.
-        using var reconnectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _reconnectCts = reconnectCts;
-
-        // Prevent OnKeepAlive from triggering SDK reconnection during manual reconnection.
-        // Without this, keep-alive on the newly created session can fire immediately,
-        // triggering OnKeepAlive → BeginReconnect → OnReconnectComplete → AbandonCurrentSession,
-        // which nullifies the session while we're still setting up subscriptions and loading state.
-        // Report at detection, matching OnKeepAlive (see ReportConnectionLost remarks for why not
-        // StartBuffering here).
-        NotifyConnectionLost();
-
-        sessionManager.SetReconnecting(true);
-
+        await _structureLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var token = reconnectCts.Token;
-            _logger.LogInformation("Restarting OPC UA session...");
-
-            // Start collecting updates - any incoming subscription notifications will be buffered
-            // until we complete the full state reload
-            propertyWriter.StartBuffering();
-
-            // Create new session (CreateSessionAsync disposes old session internally)
-            var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
-            var session = await sessionManager.CreateSessionAsync(application, _configuration, token).ConfigureAwait(false);
-
-            // Clear all read-after-write state - new session means old pending reads and registrations are invalid
-            sessionManager.ReadAfterWriteManager?.ClearAll();
-
-            _logger.LogInformation(
-                "New OPC UA session created successfully (id={SessionId}, connected={Connected}).",
-                session.SessionId,
-                session.Connected);
-
-            await _structureLock.WaitAsync(token).ConfigureAwait(false);
-            try
+            var staleSubscriptions = sessionManager.Subscriptions.ToList();
+            if (staleSubscriptions.Count > 0)
             {
-                // Recreate MonitoredItems from owned properties (avoids memory leak from holding SDK objects)
-                var monitoredItems = CreateMonitoredItemsForReconnection();
-                if (monitoredItems.Count > 0)
+                try
                 {
-                    await sessionManager.CreateSubscriptionsAsync(monitoredItems, session, token).ConfigureAwait(false);
-
-                    _logger.LogInformation(
-                        "Subscriptions recreated successfully with {Count} monitored items.",
-                        monitoredItems.Count);
+                    await session.RemoveSubscriptionsAsync(staleSubscriptions, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(ex, "Failed to remove stopped OPC UA subscriptions before recreating them.");
                 }
             }
-            finally
+
+            var monitoredItems = CreateMonitoredItemsForReconnection();
+            if (monitoredItems.Count > 0)
             {
-                _structureLock.Release();
+                await sessionManager.CreateSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
             }
-
-            await propertyWriter.LoadInitialStateAndResumeAsync(token).ConfigureAwait(false);
-
-            ReconnectionMetrics.RecordSuccess();
-            _logger.LogInformation("Session restart complete (id={SessionId}).", session.SessionId);
-        }
-        catch (OperationCanceledException) when (reconnectCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-        {
-            ReconnectionMetrics.RecordAbandoned();
-            _logger.LogInformation("Reconnection cancelled by kill. Will retry on next health check.");
-
-            // Clear the session so health check can trigger a fresh reconnection attempt
-            await sessionManager.ClearSessionAsync(cancellationToken).ConfigureAwait(false);
-
-            return; // The health loop retries on its next tick.
-        }
-        catch (Exception ex)
-        {
-            // This token is the listen lifetime's, cancelled both when the source stops and when the
-            // base retry loop tears the attempt down, and either cancels the kill source with it. What
-            // lands here is then the cancellation a session, a lock wait or an initial load raises on
-            // the way down rather than a genuine fault. Counted as abandoned instead of failed, so it
-            // neither overwrites the sticky last error nor leaves an attempt without an outcome.
-            if (cancellationToken.IsCancellationRequested)
-            {
-                ReconnectionMetrics.RecordAbandoned();
-                _logger.LogInformation("Reconnection abandoned because the listen attempt is being torn down.");
-            }
-            else
-            {
-                ReconnectionMetrics.RecordFailure();
-                ReportBackgroundError(ex, cancellationToken);
-                _logger.LogError(ex, "Failed to restart session. Will retry on next health check.");
-            }
-
-            // Clear the session so health check can trigger a new reconnection attempt
-            await sessionManager.ClearSessionAsync(cancellationToken).ConfigureAwait(false);
-
-            return; // The health loop retries on its next tick.
         }
         finally
         {
-            // Always clear the reconnecting flag when manual reconnection completes.
-            // On failure paths, ClearSessionAsync already resets this, but the explicit
-            // reset ensures it's always cleared (especially on the success path).
-            sessionManager.SetReconnecting(false);
-            _reconnectCts = null;
+            _structureLock.Release();
         }
 
-        // Must stay after the finally cleared the reconnecting flag, so no reader sees the connector
-        // reported as operational and reconnecting at once.
-        sessionManager.ReportLivenessFromSessionState();
+        await propertyWriter.LoadInitialStateAndResumeAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<ReferenceDescription?> TryGetRootNodeAsync(Session session, CancellationToken cancellationToken)
+    private async Task<ReferenceDescription?> TryGetRootNodeAsync(ISession session, CancellationToken cancellationToken)
     {
         if (_configuration.RootPath is { Length: > 0 } rootPath)
         {
@@ -697,44 +548,17 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         }
     }
 
-    private async Task KillSessionAsync()
+    private Task KillSessionAsync()
     {
         var sessionManager = _sessionManager;
         if (sessionManager != null)
         {
-            _logger.LogWarning("Chaos: killing OPC UA client session.");
-
-            var reconnectCts = _reconnectCts;
-            if (reconnectCts is not null)
-            {
-                // Manual reconnection in progress — just cancel it.
-                // ReconnectSessionAsync's catch block will handle cleanup via ClearSessionAsync.
-                // Calling ClearSessionAsync here would race: it disposes the session that
-                // ReconnectSessionAsync just created, causing BadSessionNotActivated on the
-                // next read and triggering a permanent failure loop.
-                try { await reconnectCts.CancelAsync().ConfigureAwait(false); }
-                catch (ObjectDisposedException) { /* CTS disposed between check and cancel */ }
-            }
-            else
-            {
-                // No manual reconnection in progress, so clear the session directly.
-                await sessionManager.ClearSessionAsync(CancellationToken.None).ConfigureAwait(false);
-
-                // After the clear rather than before it, because the clear waits for the reconnection
-                // lock and an SDK reconnect completing while it waits would raise liveness again on
-                // the very session the clear is about to take away.
-                Metrics.MarkNotOperational();
-
-                // If ReconnectSessionAsync started between our _reconnectCts check and ClearSessionAsync,
-                // cancel it to speed up recovery instead of waiting for it to fail naturally.
-                var lateCts = _reconnectCts;
-                if (lateCts is not null)
-                {
-                    try { await lateCts.CancelAsync().ConfigureAwait(false); }
-                    catch (ObjectDisposedException) { /* CTS disposed between check and cancel */ }
-                }
-            }
+            _logger.LogWarning("Chaos: killing OPC UA client transport.");
+            sessionManager.KillTransport();
+            Metrics.MarkNotOperational();
         }
+
+        return Task.CompletedTask;
     }
 
     private async Task DisconnectTransportAsync(CancellationToken cancellationToken)
@@ -744,24 +568,17 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         {
             if (sessionManager.IsReconnecting)
             {
-                // Reconnection in progress — transport disconnect would destroy the session
-                // being set up, causing the reconnection to fail. Skip is safe because the
-                // reconnection itself will establish a fresh connection.
                 _logger.LogDebug("Chaos: skipping disconnect during active reconnection.");
                 return;
             }
 
             _logger.LogWarning("Chaos: disconnecting OPC UA client transport.");
-
-            // Note: TOCTOU — reconnection could start between the IsReconnecting check and
-            // DisconnectTransportAsync(). This is benign: the transport close triggers keep-alive
-            // failure on the new session, which is caught and retried by the health check loop.
             await sessionManager.DisconnectTransportAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 
     private async Task<ArrayOf<ReferenceDescription>> BrowseNodeAsync(
-        Session session,
+        ISession session,
         NodeId nodeId,
         CancellationToken cancellationToken)
     {

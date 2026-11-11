@@ -124,7 +124,7 @@ internal class SubscriptionManager : IAsyncDisposable
 
     public async Task CreateBatchedSubscriptionsAsync(
         IReadOnlyList<MonitoredItem> monitoredItems,
-        Session session,
+        ISession session,
         CancellationToken cancellationToken)
     {
         // Clear any existing subscriptions and monitored items from previous session (reconnection scenario).

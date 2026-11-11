@@ -106,7 +106,7 @@ public class OpcUaClientLivenessTests
     /// remain visible after the next health tick reconnects successfully.
     /// </summary>
     [Fact]
-    public async Task WhenTheStateSyncAfterAnSdkReconnectFails_ThenFailureRemainsVisibleAfterRecovery()
+    public async Task WhenTheStateSyncAfterAReconnectFails_ThenItIsRetriedOnTheSameSessionAndTheFailureStaysVisible()
     {
         // Arrange
         var logger = new TestLogger(_output);
@@ -171,30 +171,29 @@ public class OpcUaClientLivenessTests
                 timeout: TimeSpan.FromSeconds(30),
                 message: "The failing keep-alive should drop liveness");
 
-            // Assert - raised again by the completed transfer on the reconnect callback's own thread,
-            // far inside the health check interval, so no tick can be what raised it.
+            // Assert - raised again by the managed session's transition back to Connected, far
+            // inside the health check interval, so no tick can be what raised it.
             await AsyncTestHelpers.WaitUntilAsync(
                 () => source.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(30),
-                message: "The completed subscription transfer should raise liveness again");
+                message: "The recovered connection should raise liveness again");
 
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational == false,
+                () => converter.PoisonWasHandedOut && source.Diagnostics.LastError is not null,
                 timeout: TimeSpan.FromSeconds(75),
-                message: "The failed full state sync should drop liveness with the session it cleared");
+                message: "The full state sync after the reconnect should fail and be reported");
 
-            Assert.True(converter.PoisonWasHandedOut);
-            Assert.Null(source.Diagnostics.SessionId);
-
+            // The managed session keeps the recovered session; the sync is retried on it.
             var error = source.Diagnostics.LastError;
-            Assert.NotNull(error);
+            Assert.NotNull(source.Diagnostics.SessionId);
+            Assert.NotEqual(SourceState.Synchronized, source.State);
 
             // Act
             converter.Disarm();
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational == true,
+                () => source.State == SourceState.Synchronized,
                 timeout: TimeSpan.FromSeconds(75),
-                message: "The health loop should reconnect after the failed full state sync");
+                message: "The next health check should retry the full state sync and complete it");
 
             // Assert
             Assert.Same(error, source.Diagnostics.LastError);

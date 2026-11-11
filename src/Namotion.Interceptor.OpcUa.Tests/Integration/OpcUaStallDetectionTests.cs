@@ -35,11 +35,11 @@ public class OpcUaStallDetectionTests
     }
 
     [Fact]
-    public async Task StallDetection_WhenServerNeverReturns_ClientForcesReset()
+    public async Task StallDetection_WhenServerNeverReturns_ThenTheReconnectAttemptStaysOpen()
     {
-        // Tests that when server goes down and never comes back,
-        // stall detection kicks in and resets the reconnection state
-        // so the client can try fresh reconnection attempts.
+        // When the server goes down and never comes back, the managed session keeps retrying across
+        // reconnect policy cycles. That is one outage, so it is one open attempt: it neither
+        // succeeds nor is abandoned, and the client stays non-operational.
 
         var logger = new TestLogger(_output);
         OpcUaTestServer<TestRoot>? server = null;
@@ -103,37 +103,16 @@ public class OpcUaStallDetectionTests
                 message: "Client should start reconnecting");
             logger.Log($"Client started reconnecting (attempts: {client.Source!.Diagnostics.Reconnects.TotalAttempts})");
 
-            // Wait for client to demonstrate ongoing recovery behavior.
-            // Two possible paths depending on timing:
-            // 1. SDK keep-alive detects loss first → BeginReconnect → IsReconnecting=true for MaxReconnectDuration
-            //    → stall detection triggers → manual reconnection takes over
-            // 2. Health check detects PublishingStopped first → manual reconnection immediately
-            //    → repeated attempts (server never returns)
-            // Both paths are correct — the key is the client keeps retrying and doesn't get stuck.
-            var recoveryTimeout = TimeSpan.FromSeconds(90);
-            var startTime = DateTime.UtcNow;
+            var attemptsAfterStart = client.Source!.Diagnostics.Reconnects.TotalAttempts;
+            var succeededAfterStart = client.Source!.Diagnostics.Reconnects.TotalSucceeded;
 
-            await AsyncTestHelpers.WaitUntilAsync(
-                () =>
-                {
-                    var attempts = client.Source!.Diagnostics.Reconnects.TotalAttempts;
-                    if (attempts > initialReconnectAttempts + 2)
-                    {
-                        logger.Log($"Recovery verified: IsReconnecting={client.Source!.Diagnostics.IsReconnecting}, " +
-                                   $"Attempts={attempts}");
-                        return true;
-                    }
-                    return false;
-                },
-                timeout: recoveryTimeout,
-                message: "Client should keep retrying reconnection");
+            // A check that something does not happen: spans two reconnect policy budgets
+            // (MaxReconnectDuration), so a new policy cycle starting is covered.
+            await Task.Delay(TimeSpan.FromSeconds(30));
 
-            var elapsed = DateTime.UtcNow - startTime;
-            logger.Log($"Recovery behavior confirmed in {elapsed.TotalSeconds:F1}s");
-
-            // Verify recovery happened within expected timeframe
-            Assert.True(elapsed < TimeSpan.FromSeconds(85),
-                $"Recovery should be confirmed within 85s (actual: {elapsed.TotalSeconds:F1}s)");
+            Assert.False(client.Source!.Diagnostics.IsOperational);
+            Assert.Equal(attemptsAfterStart, client.Source!.Diagnostics.Reconnects.TotalAttempts);
+            Assert.Equal(succeededAfterStart, client.Source!.Diagnostics.Reconnects.TotalSucceeded);
 
             logger.Log("Test passed - client correctly handles server-never-returns scenario");
         }

@@ -123,6 +123,7 @@ public class OpcUaReconnectionTests
                 Assert.Same(errorAfterConnecting, client.Source!.Diagnostics.LastError);
 
                 var initialAttempts = client.Source!.Diagnostics.Reconnects.TotalAttempts;
+                var sessionBeforeRestart = client.Source.CurrentSession;
 
                 // Stop server and wait for client to detect disconnection
                 logger.Log("Stopping server...");
@@ -168,18 +169,12 @@ public class OpcUaReconnectionTests
                     message: "Client should report itself operational again after reconnecting");
                 Assert.NotNull(client.Source.CurrentSession);
 
-                // Session swap visible to consumers. The reconnect cycle takes one of two paths
-                // depending on timing and server behavior:
-                //   A) SDK transfer succeeds → single (HadPrevious=true, HasCurrent=true) swap
-                //   B) SDK transfer fails / preserved session / stall reset →
-                //      (HadPrevious=true, HasCurrent=false) abandon + (HadPrevious=false, HasCurrent=true) recreate
-                // Either way, the consumer must see at least one transition releasing a previous
-                // session AND at least one transition with a current session — which together prove
-                // the connector raises events for both sides of the swap, including null transitions.
+                // The managed session recovers in place, so consumers keep the same session object and
+                // see no session change across the restart.
+                Assert.Same(sessionBeforeRestart, client.Source.CurrentSession);
                 lock (transitionsLock)
                 {
-                    Assert.Contains(sessionTransitions, t => t.HadPrevious);
-                    Assert.Contains(sessionTransitions, t => t.HasCurrent);
+                    Assert.Empty(sessionTransitions);
                 }
 
                 // Reconnection counter invariant: once all in-flight attempts have resolved,
