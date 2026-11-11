@@ -13,7 +13,6 @@ namespace HomeBlaze.E2E.Tests;
 [Trait("Category", "Integration")]
 public class AutomationAuthorizationTests
 {
-    private const int Timeout = 30000;
     private const string Denial = "/Demo/Motor/RunTest: no role of the automation allows calling it";
 
     private readonly PlaywrightFixture _fixture;
@@ -35,22 +34,22 @@ public class AutomationAuthorizationTests
         var (page, dialog) = await OpenEditorAsync(automation.Name);
         await AddRunTestCallAsync(dialog);
         var save = dialog.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true });
-        await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToContainTextAsync(Denial, new() { Timeout = Timeout });
+        await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToContainTextAsync(Denial);
         await Assertions.Expect(save).ToBeDisabledAsync();
 
         // Act
         await AddRoleAsync(page, dialog, "operator");
 
         // Assert
-        await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToHaveCountAsync(0);
         await Assertions.Expect(save).ToBeEnabledAsync();
         await save.ClickAsync();
-        await Assertions.Expect(page.GetByText("Configuration saved.")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByText("Configuration saved.")).ToBeVisibleAsync();
         await Assertions.Expect(dialog).ToHaveCountAsync(0);
         using var saved = JsonDocument.Parse(await _fixture.ReadFileAsync(automation.FilePath));
         var roles = saved.RootElement.GetProperty("roles").EnumerateArray().Select(role => role.GetString()!).ToArray();
         Assert.Equal(["reader", "operator"], roles);
-        await Assertions.Expect(page.GetByTestId("automation-roles")).ToContainTextAsync("reader, operator", new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("automation-roles")).ToContainTextAsync("reader, operator");
     }
 
     [Fact]
@@ -65,21 +64,21 @@ public class AutomationAuthorizationTests
         var (page, dialog) = await OpenEditorAsync(automation.Name);
         var editor = dialog.GetByTestId("automation-editor");
         await Assertions.Expect(editor).ToHaveAttributeAsync("data-dirty", "false");
-        await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToContainTextAsync(Denial, new() { Timeout = Timeout });
+        await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToContainTextAsync(Denial);
 
         // Act
         await AddRoleAsync(page, dialog, "operator");
 
         // Assert
-        await Assertions.Expect(editor).ToHaveAttributeAsync("data-dirty", "true", new() { Timeout = Timeout });
-        await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await Assertions.Expect(editor).ToHaveAttributeAsync("data-dirty", "true");
+        await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToHaveCountAsync(0);
 
         // Act
         await dialog.GetByTestId("automation-role-operator").GetByRole(AriaRole.Button).ClickAsync();
 
         // Assert
-        await Assertions.Expect(dialog.GetByTestId("automation-role-operator")).ToHaveCountAsync(0, new() { Timeout = Timeout });
-        await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToContainTextAsync(Denial, new() { Timeout = Timeout });
+        await Assertions.Expect(dialog.GetByTestId("automation-role-operator")).ToHaveCountAsync(0);
+        await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToContainTextAsync(Denial);
     }
 
     [Fact]
@@ -101,10 +100,10 @@ public class AutomationAuthorizationTests
         var picker = await BrowseMotorAsync(page, action);
 
         // Assert
-        await Assertions.Expect(picker.GetByText("Temperature", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(picker.GetByText("RunTest", new() { Exact = true })).ToHaveCountAsync(0);
+        await Assertions.Expect(picker.GetByText("Temperature", new() { Exact = true })).ToBeVisibleAsync();
+        await Assertions.Expect(picker.GetByText("RunTest", new() { Exact = true })).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         await page.GetByRole(AriaRole.Button, new() { Name = "Cancel", Exact = true }).Last.ClickAsync();
-        await Assertions.Expect(picker).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await Assertions.Expect(picker).ToHaveCountAsync(0);
 
         // Act
         await AddRoleAsync(page, dialog, "operator");
@@ -112,7 +111,7 @@ public class AutomationAuthorizationTests
         picker = await BrowseMotorAsync(page, dialog.GetByTestId("automation-action").Last);
 
         // Assert
-        await Assertions.Expect(picker.GetByText("RunTest", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(picker.GetByText("RunTest", new() { Exact = true })).ToBeVisibleAsync();
     }
 
     [Fact]
@@ -129,10 +128,10 @@ public class AutomationAuthorizationTests
         var page = await _fixture.OpenSubjectPageAsync(automation.Name);
 
         // Assert
-        await Assertions.Expect(page.GetByTestId("automation-status")).ToHaveTextAsync("Error", new() { Timeout = Timeout });
-        await Assertions.Expect(page.GetByTestId("automation-page")).ToContainTextAsync(Denial, new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("automation-status")).ToHaveTextAsync("Error");
+        await Assertions.Expect(page.GetByTestId("automation-page")).ToContainTextAsync(Denial);
         await Assertions.Expect(page.GetByTestId("automation-roles")).ToContainTextAsync("reader");
-        await Assertions.Expect(page.GetByTestId("automation-roles-error")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByTestId("automation-roles-error")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -149,11 +148,10 @@ public class AutomationAuthorizationTests
         var page = await _fixture.OpenSubjectPageAsync(automation.Name);
 
         // Assert
-        await Assertions.Expect(page.GetByTestId("automation-status")).ToHaveTextAsync("Running", new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("automation-status")).ToHaveTextAsync("Running");
         await Assertions.Expect(page.GetByTestId("automation-roles")).ToContainTextAsync("none");
         await Assertions.Expect(page.GetByTestId("automation-roles-error")).ToHaveTextAsync(
-            "The actions that call operations or write properties are refused: the roles of the automation cannot be used: No roles are assigned.",
-            new() { Timeout = Timeout });
+            "The actions that call operations or write properties are refused: the roles of the automation cannot be used: No roles are assigned.");
     }
 
     // The washer with a call of the demo motor in the dry-run rule Started, whose condition never becomes true, so nothing runs.
@@ -176,7 +174,7 @@ public class AutomationAuthorizationTests
         await action.GetByLabel("Call operation", new() { Exact = true }).FillAsync("/Demo/Motor");
         await action.GetByLabel("Browse Call operation").ClickAsync();
         var picker = page.GetByTestId("subject-path-picker-dialog");
-        await Assertions.Expect(picker).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(picker).ToBeVisibleAsync();
         foreach (var segment in new[] { "Root", "Demo" })
         {
             await picker.GetByText(segment, new() { Exact = true }).ClickAsync();
@@ -193,8 +191,8 @@ public class AutomationAuthorizationTests
         await roles.Locator(".mud-select").First.ClickAsync();
         await page.Locator(".mud-popover-open .mud-list-item").Filter(new() { HasTextString = role }).First.ClickAsync();
         await roles.Locator(".mud-select input").First.PressAsync("Escape");
-        await Assertions.Expect(roles.GetByTestId($"automation-role-{role}")).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(page.Locator(".mud-popover-open")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await Assertions.Expect(roles.GetByTestId($"automation-role-{role}")).ToBeVisibleAsync();
+        await Assertions.Expect(page.Locator(".mud-popover-open")).ToHaveCountAsync(0);
     }
 
     private async Task<(IPage Page, ILocator Dialog)> OpenEditorAsync(string name)
@@ -202,7 +200,8 @@ public class AutomationAuthorizationTests
         var page = await _fixture.OpenSubjectPageAsync(name);
         await page.GetByTestId("automation-edit").ClickAsync();
         var dialog = page.GetByRole(AriaRole.Dialog);
-        await Assertions.Expect(dialog.GetByTestId("automation-editor")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(dialog.GetByTestId("automation-editor")).ToBeVisibleAsync();
+        await dialog.WaitForDialogFocusAsync();
         return (page, dialog);
     }
 }
