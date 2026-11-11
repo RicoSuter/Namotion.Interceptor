@@ -2,6 +2,10 @@
     background: var(--mud-palette-action-default-hover);
 }
 
+.automation-nowrap {
+    white-space: nowrap;
+}
+
 .automation-rule-name {
     display: block;
     padding: 0;

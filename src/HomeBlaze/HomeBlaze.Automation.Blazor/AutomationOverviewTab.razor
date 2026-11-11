@@ -65,10 +65,10 @@
                     <thead>
                         <tr>
                             <th>Rule</th>
-                            <th>Mode</th>
+                            <th class="automation-nowrap">Mode</th>
                             <th>Status</th>
-                            <th>Last triggered</th>
-                            <th>Runs</th>
+                            <th class="automation-nowrap">Last triggered</th>
+                            <th class="automation-nowrap">Runs</th>
                             <th aria-label="Actions"></th>
                         </tr>
                     </thead>
@@ -84,13 +84,13 @@
                                         <MudText Typo="Typo.caption" Color="Color.Info" Class="d-block" data-testid="automation-dry-run-hint">@dryRunHint</MudText>
                                     }
                                 </td>
-                                <td>@AutomationSummary.FormatMode(rule.Mode)</td>
-                                <td style="overflow-wrap: anywhere;">
+                                <td class="automation-nowrap">@AutomationSummary.FormatMode(rule.Mode)</td>
+                                <td>
                                     @StatusChip(rule.Status)
                                 </td>
-                                <td>@FormatInstant(rule.LastTriggeredAt, "Never")</td>
-                                <td>@(rule.RunCount ?? 0)</td>
-                                <td>
+                                <td class="automation-nowrap">@FormatInstant(rule.LastTriggeredAt, "Never")</td>
+                                <td class="automation-nowrap">@(rule.RunCount ?? 0)</td>
+                                <td class="automation-nowrap">
                                     <div class="d-flex align-center justify-end gap-2">
                                         <span @onclick:stopPropagation="true">
                                             <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Science"
@@ -123,7 +123,7 @@
                         <div class="d-flex flex-wrap align-center gap-2 mt-2">
                             @StatusChip(rule.Status)
                             <MudText Typo="Typo.caption" Class="mud-text-secondary flex-grow-1">
-                                Last @FormatInstant(rule.LastTriggeredAt, "never") · @(rule.RunCount ?? 0) runs
+                                Last @FormatInstant(rule.LastTriggeredAt, "never") · @FormatRunCount(rule.RunCount ?? 0)
                             </MudText>
                             <span @onclick:stopPropagation="true">
                                 <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Science"
@@ -179,6 +179,8 @@
 
     private string FormatInstant(DateTimeOffset? instant, string fallback) =>
         instant is { } value ? AutomationTime.Format(TimeZone, value, TimeProvider.GetUtcNow()) : fallback;
+
+    private static string FormatRunCount(long count) => count == 1 ? "1 run" : $"{count} runs";
 
     private string? DescribeScope(AutomationRule rule)
     {
