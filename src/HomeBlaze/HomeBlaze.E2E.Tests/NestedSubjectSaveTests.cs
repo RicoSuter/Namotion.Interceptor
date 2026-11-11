@@ -51,6 +51,9 @@ public class NestedSubjectSaveTests
         {
             cell.ColumnSpan = originalColumnSpan;
             await File.WriteAllTextAsync(layoutFilePath, originalContent);
+
+            // File watching is off in testRoot.json, so the pass loads the restored file now and not in a later test.
+            await _fixture.ReconcileStorageAsync();
         }
     }
 

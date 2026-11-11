@@ -297,9 +297,15 @@ public class PlaywrightFixture : IAsyncLifetime
     /// Reads a page of the demo folder, given by its file name, until its text with line feeds only is the expected
     /// one, and returns that text. A write that the page refuses leaves the text as it was.
     /// </summary>
-    public async Task<string> WaitForDemoPageTextAsync(string name, Func<string, bool> isExpected, string message)
+    public Task<string> WaitForDemoPageTextAsync(string name, Func<string, bool> isExpected, string message)
+        => WaitForFileTextAsync(GetDemoPagePath(name), isExpected, message);
+
+    /// <summary>
+    /// Reads a file of the storage of the server between the writes of the server until its text with line feeds only is
+    /// the expected one, and returns that text. A file that does not exist yet is read again.
+    /// </summary>
+    public async Task<string> WaitForFileTextAsync(string path, Func<string, bool> isExpected, string message)
     {
-        var path = GetDemoPagePath(name);
         var text = string.Empty;
 
         await AsyncTestHelpers.WaitUntilAsync(

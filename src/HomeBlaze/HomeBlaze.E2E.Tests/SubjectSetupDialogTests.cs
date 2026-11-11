@@ -136,19 +136,6 @@ public class SubjectSetupDialogTests
         return dialog;
     }
 
-    private static bool FileContains(string filePath, string text)
-    {
-        try
-        {
-            return File.ReadAllText(filePath).Contains(text, StringComparison.Ordinal);
-        }
-        catch (IOException)
-        {
-            // The writer can still hold the file, or has not created it yet.
-            return false;
-        }
-    }
-
     [Fact]
     public void WhenTypesAreOfferedForCreation_ThenEveryIconNameResolves()
     {
@@ -936,10 +923,10 @@ public class SubjectSetupDialogTests
     [Fact]
     public async Task WhenTheNameOfAMotorIsClearedInTheEditDialog_ThenSaveIsDisabledUntilANameIsEntered()
     {
-        // Saving rewrites the motor file in the test output directory, which later runs reuse. Restoring it
-        // only restores the file: file watching is off in testRoot.json, so the live motor keeps the saved
-        // target speed for the rest of the host's life. Its name is entered again unchanged, because the
-        // property history tests find the motor by it.
+        // Saving rewrites the motor file in the test output directory, which later runs reuse, so the file is
+        // restored. File watching is off in testRoot.json, so a pass of the storage loads the restored file before
+        // the next test does it at a time of its own. Its name is entered again unchanged, because the property
+        // history tests find the motor by it.
         const string motorName = "Test Motor";
         const int targetSpeed = 1200;
         var motorFilePath = Path.Combine(AppContext.BaseDirectory, "TestData", "Demo", "Motor.json");
@@ -986,10 +973,11 @@ public class SubjectSetupDialogTests
             await Assertions.Expect(editDialog).ToHaveCountAsync(0, new() { Timeout = ElementVisibilityTimeout });
             Assert.Equal(motorName, motor.Name);
             Assert.Equal(targetSpeed, motor.TargetSpeed);
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => FileContains(motorFilePath, $"\"targetSpeed\": {targetSpeed}") &&
-                      FileContains(motorFilePath, $"\"name\": \"{motorName}\""),
-                message: "The motor file does not contain the values that were saved in the edit dialog.");
+            await _fixture.WaitForFileTextAsync(
+                motorFilePath,
+                text => text.Contains($"\"targetSpeed\": {targetSpeed}", StringComparison.Ordinal) &&
+                        text.Contains($"\"name\": \"{motorName}\"", StringComparison.Ordinal),
+                "The motor file does not contain the values that were saved in the edit dialog.");
             isCompleted = true;
         }
         finally
@@ -997,6 +985,7 @@ public class SubjectSetupDialogTests
             try
             {
                 await File.WriteAllBytesAsync(motorFilePath, originalMotorFile);
+                await _fixture.ReconcileStorageAsync();
             }
             catch (Exception exception) when (!isCompleted)
             {
@@ -1083,8 +1072,8 @@ public class SubjectSetupDialogTests
     public async Task WhenASubjectIsCreated_ThenItIsStoredUnderTheChosenName()
     {
         // The file is written to the test output directory, which later runs reuse, so it is removed again.
-        // File watching is off in testRoot.json, so the created motor stays in the live graph for the rest
-        // of the host's life, which is why the name is unique per run.
+        // File watching is off in testRoot.json, so a pass of the storage takes the created motor out of the
+        // live graph after its file is gone, before the next test does it at a time of its own.
         var name = $"CreatedMotor{Guid.NewGuid():N}";
         var motorName = $"Motor of {name}";
         var filePath = Path.Combine(AppContext.BaseDirectory, "TestData", $"{name}.json");
@@ -1112,12 +1101,11 @@ public class SubjectSetupDialogTests
             // dialog would be shown by the time it has closed.
             await Assertions.Expect(page.GetByText("Configuration applied but not saved")).ToHaveCountAsync(0);
 
-            await AsyncTestHelpers.WaitUntilAsync(() => File.Exists(filePath));
-
             // The file holds the edits of the motor form only when they were applied before it was written.
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => FileContains(filePath, motorName),
-                message: "The created file does not contain the motor name that was entered in the form.");
+            await _fixture.WaitForFileTextAsync(
+                filePath,
+                text => text.Contains(motorName, StringComparison.Ordinal),
+                "The created file does not contain the motor name that was entered in the form.");
 
             await AsyncTestHelpers.WaitUntilAsync(
                 () => FindCreatedMotor()?.Status == MotorStatus.Running,
@@ -1139,6 +1127,7 @@ public class SubjectSetupDialogTests
             try
             {
                 File.Delete(filePath);
+                await _fixture.ReconcileStorageAsync();
             }
             catch (Exception exception) when (!isCompleted)
             {
@@ -1313,6 +1302,7 @@ public class SubjectSetupDialogTests
             try
             {
                 await File.WriteAllBytesAsync(layoutFilePath, originalLayoutFile);
+                await _fixture.ReconcileStorageAsync();
             }
             catch (Exception exception) when (!isCompleted)
             {
