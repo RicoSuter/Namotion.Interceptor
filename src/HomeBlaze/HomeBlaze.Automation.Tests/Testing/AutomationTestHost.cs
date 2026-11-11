@@ -200,6 +200,10 @@ internal sealed class AutomationTestHost : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // These calls ignore their cancellation, so a test that fails while one holds a worker would otherwise wait
+        // in the stop for a timeout of the fake time, which nothing advances any more.
+        Blinds.EndStall();
+        Blinds.Unblock();
         foreach (var automation in _automations)
         {
             await ((IHostedService)automation).StopAsync(CancellationToken.None);

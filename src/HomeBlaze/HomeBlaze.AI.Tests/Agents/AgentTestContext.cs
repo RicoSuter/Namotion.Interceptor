@@ -222,7 +222,17 @@ internal sealed class AgentTestContext<TAgent> : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await StopAgentAsync();
+        // A turn that a failed test leaves waiting on one of its gates holds the stop forever, which would hang the
+        // test run instead of failing the test.
+        try
+        {
+            await StopAgentAsync().WaitAsync(TestTimeouts.Default);
+        }
+        catch (TimeoutException exception)
+        {
+            throw new TimeoutException(
+                "The agent did not stop. A turn may still wait on a gate of the test that an earlier failure left closed.", exception);
+        }
         Directory.Delete(DataDirectory, recursive: true);
     }
 
