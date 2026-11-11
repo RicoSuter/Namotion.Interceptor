@@ -4,6 +4,7 @@ using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Registry.Tests.Models;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Tests;
@@ -379,7 +380,7 @@ public class RegisteredSubjectAttachmentTests
     }
 
     [Fact]
-    public void WhenADetachingParentRemovesTheLastParentOfASubject_ThenAReaderUnderTheSubjectsLockSeesItNoLongerAttached()
+    public async Task WhenADetachingParentRemovesTheLastParentOfASubject_ThenAReaderUnderTheSubjectsLockSeesItNoLongerAttached()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
@@ -393,15 +394,15 @@ public class RegisteredSubjectAttachmentTests
         bool hasReachedSecond;
         int firstParentCount, secondParentCount;
         bool isFirstAttached, isSecondAttached;
-        var writer = new Thread(() => person.Mother = null);
+        Task writer;
 
         // Act
         using (GetLock(registeredSecond).EnterScope())
         {
             // The detaching mother removes the parent of first, then waits for the lock of second, held here, inside
             // the same registry change.
-            writer.Start();
-            hasReachedSecond = SpinWait.SpinUntil(() => registeredFirst.Parents.IsEmpty, TimeSpan.FromSeconds(30));
+            writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => person.Mother = null);
+            hasReachedSecond = SpinWait.SpinUntil(() => registeredFirst.Parents.IsEmpty, TestTimeouts.Default);
 
             using (GetLock(registeredFirst).EnterScope())
             {
@@ -413,7 +414,7 @@ public class RegisteredSubjectAttachmentTests
             isSecondAttached = registeredSecond.IsAttached;
         }
 
-        writer.Join();
+        await writer;
 
         // Assert
         Assert.True(hasReachedSecond);
