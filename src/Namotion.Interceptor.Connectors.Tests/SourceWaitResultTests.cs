@@ -436,7 +436,7 @@ public class SourceWaitResultTests
             var source = new TestStateSource(new Person(context));
 
             using var ready = new Barrier(2);
-            var disposal = Task.Run(() =>
+            var disposal = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
             {
                 ready.SignalAndWait();
 
