@@ -104,7 +104,10 @@ public static class InterceptorSubjectContextExtensions
     /// </summary>
     /// <param name="context">The context.</param>
     /// <param name="scheduler">The scheduler to run the callbacks on (defaults to Scheduler.Default).
-    /// Use ImmediateScheduler.Instance for zero-allocation synchronous delivery.</param>
+    /// Use ImmediateScheduler.Instance for zero-allocation synchronous delivery. Such an observer runs on the
+    /// writing thread inside the dispatch lock of the observable: it must be fast and non-blocking, and it must
+    /// not write a property that holds subjects, because that write waits for the lifecycle lock and can
+    /// deadlock with an attach on another thread that publishes a change.</param>
     /// <returns>The observable.</returns>
     public static IObservable<SubjectPropertyChange> GetPropertyChangeObservable(this IInterceptorSubjectContext context, IScheduler? scheduler = null)
     {
