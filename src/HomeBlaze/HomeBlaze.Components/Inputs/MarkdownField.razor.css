@@ -1,0 +1,48 @@
+.markdown-field-box {
+    border: 1px solid var(--mud-palette-lines-inputs);
+    border-radius: var(--mud-default-borderradius);
+    overflow: hidden;
+}
+
+/* Each column draws the line above and before it, moved by -1px so that the box clips the lines of the first row and the
+   first column. Side by side the columns get a line between them, wrapped one above the other. */
+.markdown-field-column {
+    flex: 1 1 320px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    margin: -1px 0 0 -1px;
+    border-top: 1px solid var(--mud-palette-lines-default);
+    border-left: 1px solid var(--mud-palette-lines-default);
+}
+
+.markdown-field-header {
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--mud-palette-lines-default);
+}
+
+/* 16px, because a phone zooms into a field with a smaller font when it takes the focus. */
+.markdown-field-source {
+    flex: 1;
+    min-height: 220px;
+    resize: vertical;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 12px;
+    border: none;
+    outline: none;
+    background: var(--mud-palette-background-gray);
+    color: var(--mud-palette-text-primary);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 16px;
+    line-height: 1.5;
+}
+
+.markdown-field-preview {
+    flex: 1;
+    min-height: 220px;
+    max-height: 420px;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+    padding: 12px 16px;
+}

@@ -1850,6 +1850,32 @@ namespace HomeBlaze.Components.Inputs
         public bool IsOpen { get; }
         public bool Read(char character) { }
     }
+    public class MarkdownField : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public MarkdownField() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Class { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Func<string, string?> GetError { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Hint { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter(CaptureUnmatchedValues=true)]
+        public System.Collections.Generic.IReadOnlyDictionary<string, object>? InputAttributes { get; set; }
+        public bool IsValid { get; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Label { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public int? MaxSize { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Func<string, string?> ToHtml { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Value { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string?> ValueChanged { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnParametersSet() { }
+    }
     public sealed class PreviewTicker : System.IDisposable
     {
         public PreviewTicker(System.TimeProvider timeProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Components.Inputs.PreviewTicker> logger) { }
