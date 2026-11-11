@@ -14,8 +14,8 @@ public class TrackingScopeRenderCountTests
 {
     private const int SiblingCount = 20;
 
-    // Some of the renders a settle waits for happen only in some interleavings, so this wait can expire in a passing test.
-    private static readonly TimeSpan SettleTimeout = TimeSpan.FromSeconds(3);
+    // An optional render happens only in some interleavings, so this wait expires in a passing test.
+    private static readonly TimeSpan OptionalRenderTimeout = TimeSpan.FromSeconds(3);
 
     private readonly ITestOutputHelper _output;
 
@@ -77,7 +77,7 @@ public class TrackingScopeRenderCountTests
 
         // The render after the first render of the outer scope renders the inner scope again, and the inner scope then
         // renders once more on its own, unless it already waits for a render when the outer one renders.
-        await SettleAsync(renderer, () => log.Renders("outer") >= 2 && log.Renders("inner") >= 3);
+        await SettleAsync(renderer, () => log.Renders("outer") >= 2 && log.Renders("inner") >= 2, () => log.Renders("inner") >= 3);
         var (outerInitial, innerInitial) = (log.Renders("outer"), log.Renders("inner"));
 
         // Act
@@ -273,11 +273,16 @@ public class TrackingScopeRenderCountTests
         Assert.Empty(renderer.Exceptions);
     }
 
-    // Waits until the renders that the first render causes have happened, or reports what happened after a while.
-    private static async Task SettleAsync(TestRenderer renderer, Func<bool> condition)
+    // Waits until the renders that the first render requires have happened, and briefly for an optional one. Neither
+    // wait throws, so the assertions of the test report the counts.
+    private static async Task SettleAsync(TestRenderer renderer, Func<bool> required, Func<bool>? optional = null)
     {
         await WaitAsync(() => renderer.IsSettled);
-        await TryWaitAsync(renderer, condition, SettleTimeout);
+        await TryWaitAsync(renderer, required, TestTimeouts.Default);
+        if (optional is not null)
+        {
+            await TryWaitAsync(renderer, optional, OptionalRenderTimeout);
+        }
     }
 
     private static async Task<int> IsStaleAsync(TestRenderer renderer, Func<bool> condition)
