@@ -8,6 +8,13 @@
     <AssemblyMetadata Include="Namotion.Build.RunUrl" Value="$(BuildRunUrl)" Condition="'$(BuildRunUrl)' != ''" />
   </ItemGroup>
 
+  <!-- Test assemblies run their collections in parallel, and many tests block a thread on purpose. A pool that starts
+       at the core count of a small CI runner grows too slowly for that, so waits on pool work time out although the
+       code under test is correct. -->
+  <PropertyGroup Condition="'$(IsTestProject)' == 'true'">
+    <ThreadPoolMinThreads>32</ThreadPoolMinThreads>
+  </PropertyGroup>
+
   <ItemGroup>
     <None Include="$(MSBuildThisFileDirectory)../assets/NuGetIcon.png" Pack="true" PackagePath="\" Visible="false" />
   </ItemGroup>

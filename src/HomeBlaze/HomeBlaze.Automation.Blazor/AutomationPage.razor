@@ -121,33 +121,40 @@
 
         <section>
             <MudText Typo="Typo.h6">Recent runs</MudText>
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                @_recentRuns.Caption
-            </MudText>
-            @if (_recentRuns.Error is { } runsError)
+            @if (_recentRuns is not { } recentRuns)
             {
-                <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">@runsError</MudAlert>
-            }
-            else if (_recentRuns.Runs.Count == 0)
-            {
-                <MudText Typo="Typo.body2" Class="mud-text-secondary mt-2" data-testid="automation-no-runs">No runs yet.</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary mt-2" data-testid="automation-runs-loading">Loading runs...</MudText>
             }
             else
             {
-                <MudStack Spacing="1" Class="mt-2">
-                    @foreach (var run in _recentRuns.Runs)
-                    {
-                        <div class="d-flex flex-wrap align-center gap-2" data-testid="automation-run">
-                            <MudText Typo="Typo.caption" Style="min-width: 160px;">@(run.At is { } at ? AutomationTime.FormatWithSeconds(TimeZone, at, TimeProvider.GetUtcNow()) : "Last run")</MudText>
-                            <MudText Typo="Typo.body2" Style="font-weight: 500;">@run.RuleName</MudText>
-                            @if (run.Outcome is { } outcome)
-                            {
-                                <MudChip T="string" Size="Size.Small" Color="@AutomationColors.GetOutcomeColor(outcome)" Class="ma-0">@AutomationSummary.FormatOutcome(outcome)</MudChip>
-                            }
-                            <MudText Typo="Typo.body2" Class="mud-text-secondary" Style="overflow-wrap: anywhere;">@run.Message</MudText>
-                        </div>
-                    }
-                </MudStack>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    @recentRuns.Caption
+                </MudText>
+                @if (recentRuns.Error is { } runsError)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">@runsError</MudAlert>
+                }
+                else if (recentRuns.Runs.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary mt-2" data-testid="automation-no-runs">No runs yet.</MudText>
+                }
+                else
+                {
+                    <MudStack Spacing="1" Class="mt-2">
+                        @foreach (var run in recentRuns.Runs)
+                        {
+                            <div class="d-flex flex-wrap align-center gap-2" data-testid="automation-run">
+                                <MudText Typo="Typo.caption" Style="min-width: 160px;">@(run.At is { } at ? AutomationTime.FormatWithSeconds(TimeZone, at, TimeProvider.GetUtcNow()) : "Last run")</MudText>
+                                <MudText Typo="Typo.body2" Style="font-weight: 500;">@run.RuleName</MudText>
+                                @if (run.Outcome is { } outcome)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="@AutomationColors.GetOutcomeColor(outcome)" Class="ma-0">@AutomationSummary.FormatOutcome(outcome)</MudChip>
+                                }
+                                <MudText Typo="Typo.body2" Class="mud-text-secondary" Style="overflow-wrap: anywhere;">@run.Message</MudText>
+                            </div>
+                        }
+                    </MudStack>
+                }
             }
         </section>
     </div>
@@ -157,15 +164,30 @@
     private static readonly TimeSpan ReloadInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan RetryWindow = TimeSpan.FromSeconds(30);
 
-    private readonly RunReloadSchedule _reloads = new(ReloadInterval, RetryWindow);
     private readonly CancellationTokenSource _disposal = new();
     private readonly StateDiagramLayoutCache _layouts = new();
-    private RecentRunsResult _recentRuns = new(false, [], null, false);
+    private RunReloadSchedule _reloads = new(ReloadInterval, RetryWindow);
+    private IInterceptorSubject? _runsSubject;
+    private RecentRunsResult? _recentRuns;
     private int? _renderedRunsKey;
     private int? _loadedRunsKey;
     private int _loadVersion;
 
     [Parameter] public IInterceptorSubject? Subject { get; set; }
+
+    // The host keeps this page and passes it the other automation when it navigates to one, so the runs, the pending
+    // reads and their schedule of the previous automation are dropped.
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(Subject, _runsSubject))
+        {
+            _runsSubject = Subject;
+            _recentRuns = null;
+            _loadedRunsKey = null;
+            _loadVersion++;
+            _reloads = new RunReloadSchedule(ReloadInterval, RetryWindow);
+        }
+    }
 
     // The page reads the run counts in its render, so a run or a saved configuration renders it again. The runs are read
     // at most once per interval, and once more after it while the history lags behind the counts, for a limited time after
@@ -175,14 +197,16 @@
         if (Subject is Automation && _renderedRunsKey != _loadedRunsKey)
         {
             _loadedRunsKey = _renderedRunsKey;
-            if (_reloads.Request(TimeProvider.GetUtcNow()) is { } delay)
+            var reloads = _reloads;
+            if (reloads.Request(TimeProvider.GetUtcNow()) is { } delay)
             {
-                _ = LoadAfterAsync(delay);
+                _ = LoadAfterAsync(reloads, delay);
             }
         }
     }
 
-    private async Task LoadAfterAsync(TimeSpan delay)
+    // A read of a schedule that a change of the automation replaced does nothing.
+    private async Task LoadAfterAsync(RunReloadSchedule reloads, TimeSpan delay)
     {
         var cancellationToken = _disposal.Token;
         try
@@ -192,24 +216,28 @@
                 await Task.Delay(delay, TimeProvider, cancellationToken);
             }
 
-            _reloads.Start(TimeProvider.GetUtcNow());
-            if (Subject is not Automation automation || cancellationToken.IsCancellationRequested)
+            if (!ReferenceEquals(reloads, _reloads) || Subject is not Automation automation || cancellationToken.IsCancellationRequested)
             {
                 return;
             }
 
-            // A load that a newer one superseded leaves the runs alone, so a slow older query cannot replace newer runs.
+            reloads.Start(TimeProvider.GetUtcNow());
+
+            // A load that a newer one or a change of the automation superseded leaves the runs alone, so a slow older query
+            // cannot replace newer runs or show the runs of another automation.
             var version = ++_loadVersion;
             var recentRuns = await RecentRuns.LoadAsync(automation, PathResolver, TimeProvider.GetUtcNow(), cancellationToken);
-            if (version == _loadVersion && !cancellationToken.IsCancellationRequested)
+            if (version != _loadVersion || cancellationToken.IsCancellationRequested)
             {
-                _recentRuns = recentRuns;
-                StateHasChanged();
+                return;
             }
 
-            if (recentRuns.IsBehind && !cancellationToken.IsCancellationRequested && _reloads.Retry(TimeProvider.GetUtcNow()) is { } retryDelay)
+            _recentRuns = recentRuns;
+            StateHasChanged();
+
+            if (recentRuns.IsBehind && reloads.Retry(TimeProvider.GetUtcNow()) is { } retryDelay)
             {
-                _ = LoadAfterAsync(retryDelay);
+                _ = LoadAfterAsync(reloads, retryDelay);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

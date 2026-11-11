@@ -15,12 +15,14 @@ public static class DedicatedThreadTestHelpers
     /// A test that then bounds how long it waits for that body to reach its gate fails for a reason that
     /// has nothing to do with what it is testing. Worse, a body that was never scheduled has also never
     /// completed, so an assertion phrased as "this has not finished yet" passes without proving anything.
+    /// The task completes on the dedicated thread and resumes its waiters there, so a bounded wait on it,
+    /// such as <see cref="Task.WaitAsync(TimeSpan)"/>, needs no pool thread either.
     /// </remarks>
     /// <param name="body">The work to run. Expected to block.</param>
     /// <param name="name">Optional thread name, to make a hung test readable in a dump.</param>
     public static Task<T> RunOnDedicatedThreadAsync<T>(Func<T> body, string? name = null)
     {
-        var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completion = new TaskCompletionSource<T>();
         var thread = new Thread(() =>
         {
             try

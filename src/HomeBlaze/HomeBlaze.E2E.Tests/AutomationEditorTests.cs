@@ -1009,6 +1009,23 @@ public class AutomationEditorTests
         // Arrange
         await using var washer = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
         var (page, dialog) = await OpenEditorAsync(washer.Name, tab: StatesTab);
+        var state = dialog.GetByTestId("automation-state-node-Running");
+
+        // The diagram attaches its Space guard in the browser after its first render, so a key pressed right after the tab
+        // opens can come before it. A synthetic Space on the state shows when the guard is there. It is stopped above the
+        // diagram, before Blazor handles it on the document, so that it does not select the state itself.
+        await page.WaitForFunctionAsync("""
+            () => {
+                const state = document.querySelector('[data-testid="automation-state-node-Running"]');
+                const outside = state?.closest('[data-testid="automation-state-diagram"]')?.parentElement;
+                if (!outside) { return false; }
+                const stop = event => event.stopPropagation();
+                const probe = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+                outside.addEventListener('keydown', stop);
+                try { state.dispatchEvent(probe); } finally { outside.removeEventListener('keydown', stop); }
+                return probe.defaultPrevented;
+            }
+            """, null, new() { Timeout = Timeout });
         await page.EvaluateAsync("""
             () => {
                 window.__spacePrevented = [];
@@ -1017,7 +1034,7 @@ public class AutomationEditorTests
             """);
 
         // Act
-        await dialog.GetByTestId("automation-state-node-Running").FocusAsync();
+        await state.FocusAsync();
         await page.Keyboard.PressAsync("Space");
 
         // Assert
