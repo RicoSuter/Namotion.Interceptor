@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Connectors.Tests.Models;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -205,7 +206,7 @@ public class SourceStateTests
             };
 
             using var barrier = new Barrier(2);
-            var hammerTask = Task.Run(() =>
+            var hammerTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
             {
                 barrier.SignalAndWait();
                 for (var i = 0; i < hammerCountPerIteration; i++)
@@ -214,7 +215,7 @@ public class SourceStateTests
                     source.ReportSynchronized();
                 }
             });
-            var stopTask = Task.Run(() =>
+            var stopTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
             {
                 barrier.SignalAndWait();
                 source.ReportStopped();
