@@ -35,6 +35,7 @@
 
     <ItemGroup>
         <Compile Include="..\HomeBlaze.Components.Tests\Access\TestUserPermissions.cs" Link="Access\TestUserPermissions.cs" />
+        <Compile Include="..\HomeBlaze.Components.Tests\BunitWaitTimeout.cs" Link="BunitWaitTimeout.cs" />
     </ItemGroup>
 
     <ItemGroup>

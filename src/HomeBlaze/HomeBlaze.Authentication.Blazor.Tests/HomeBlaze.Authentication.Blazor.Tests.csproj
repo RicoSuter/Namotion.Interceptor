@@ -33,4 +33,8 @@
         <ProjectReference Include="..\..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+        <Compile Include="..\HomeBlaze.Components.Tests\BunitWaitTimeout.cs" Link="BunitWaitTimeout.cs" />
+    </ItemGroup>
+
 </Project>
