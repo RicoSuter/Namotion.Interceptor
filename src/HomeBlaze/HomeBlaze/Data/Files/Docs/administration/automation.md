@@ -15,7 +15,7 @@ This page is the operator guide. The syntax of expressions is the one of [page e
 
 1. In the subject browser, create an **Automation** from the group Automation, for example in a folder `Automations`.
 2. Open its page and click **Edit**. In the **Rules** tab, add a rule, write its condition under **Runs when any of these happens**, and add an action under **Then, in this order**. Save is available once nothing is invalid or unfinished.
-3. Keep the rule in **Dry run** and save. Each time the rule would run, the page lists the run with its actions and their values, and nothing is executed.
+3. Keep the rule in **Dry run** and save. Each time the rule would run, the **Runs** tab of the page lists the run with its actions and their values, and nothing is executed.
 4. Switch the rule to **On** once its runs look right.
 
 The demo data has `Demo/ConveyorGuard`, an automation in dry run over the demo conveyor:
@@ -244,9 +244,18 @@ New rules start in Dry run. A rule in Dry run with a Change state action does no
 
 ## The page and the widget
 
-The page of an automation shows its status and last error, a **Reset state**, which asks for confirmation, and an **Edit** button, the read-only state diagram with the current state and the time it was entered (when the automation has states), the rules with their mode, status, last trigger time, run count and **Test now**, and the recent runs. **Last triggered** is when the first action of the last run that was not a dry run started, so a rule in Dry run can list runs while it shows **Never**.
+The header of the page of an automation shows its title, its status and last error, **Reset state**, which asks for confirmation, and **Edit**. Below it are the tabs **Overview** and **Runs**. The header and the tabs stay in view, and only the content of the tab scrolls.
 
-**Recent runs** lists the runs of the last seven days, at most 20, with the outcome and the message of each run, read from history, see [Recent runs from history](#recent-runs-from-history). Without a [history store](../architecture/design/history.md), the page shows the last run of each rule.
+**Overview** shows:
+
+- **State**: the read-only state diagram with the current state and the time it was entered, when the automation has states.
+- **Notes**: the notes, links and tags of the [metadata](metadata.md#notes-links-and-tags) of the automation, beside the diagram, or below it on a narrow screen. The pencil opens the [Metadata dialog](metadata.md#the-metadata-dialog). It is shown only when a storage keeps the metadata of the automation, and disabled while that storage is not connected. A click on a tag lists everything that has the tag.
+- **Rules**: the rules in run order, each with the state it is active in, its mode, status, last trigger time and run count, and **Test now**. A click on a rule, or on its name with the keyboard, opens the editor on that rule in the **Rules** tab. On a phone the rules are cards. **Last triggered** is when the first action of the last run that was not a dry run started, so a rule in Dry run can list runs while it shows **Never**.
+
+**Runs** lists the runs of the last seven days, at most 20, read from history, see [Recent runs from history](#recent-runs-from-history). The tab shows their number, or `20+` when the list is full. Without a [history store](../architecture/design/history.md), it lists the last run of each rule.
+
+- **Filter**: with more than one rule, chips filter the runs by rule, and the filter stays while you switch tabs. A rule without runs in the list shows "No runs of this rule."
+- **Each run**: its time, its rule and its outcome. A run that completed its actions shows one line per action: an action whose path is absolute names the subject by its title, with a link to it and the path as tooltip, and one whose path is relative to the rule shows the text as written. Any other run, such as a dry run or a failed one, shows its message as written. On a phone the runs are cards.
 
 The widget of an automation, placed on a page, shows its title with a link to its page, its status, its state and since when, and the error of the automation or, when there is none, the first rule that waits for Only if, holds a condition, misses values or did not run its last request.
 
