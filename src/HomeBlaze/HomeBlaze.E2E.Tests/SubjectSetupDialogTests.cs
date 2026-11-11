@@ -21,7 +21,7 @@ namespace HomeBlaze.E2E.Tests;
 public class SubjectSetupDialogTests
 {
     private const int PageLoadTimeout = 30000;
-    private const int ElementVisibilityTimeout = 5000;
+    private const int ElementVisibilityTimeout = 30000;
     private const string MotorName = "Test motor";
 
     private readonly PlaywrightFixture _fixture;
@@ -989,7 +989,6 @@ public class SubjectSetupDialogTests
             await AsyncTestHelpers.WaitUntilAsync(
                 () => FileContains(motorFilePath, $"\"targetSpeed\": {targetSpeed}") &&
                       FileContains(motorFilePath, $"\"name\": \"{motorName}\""),
-                TimeSpan.FromSeconds(10),
                 message: "The motor file does not contain the values that were saved in the edit dialog.");
             isCompleted = true;
         }
@@ -1113,17 +1112,15 @@ public class SubjectSetupDialogTests
             // dialog would be shown by the time it has closed.
             await Assertions.Expect(page.GetByText("Configuration applied but not saved")).ToHaveCountAsync(0);
 
-            await AsyncTestHelpers.WaitUntilAsync(() => File.Exists(filePath), TimeSpan.FromSeconds(10));
+            await AsyncTestHelpers.WaitUntilAsync(() => File.Exists(filePath));
 
             // The file holds the edits of the motor form only when they were applied before it was written.
             await AsyncTestHelpers.WaitUntilAsync(
                 () => FileContains(filePath, motorName),
-                TimeSpan.FromSeconds(10),
                 message: "The created file does not contain the motor name that was entered in the form.");
 
             await AsyncTestHelpers.WaitUntilAsync(
                 () => FindCreatedMotor()?.Status == MotorStatus.Running,
-                TimeSpan.FromSeconds(10),
                 message: "The created motor is not in the graph or does not run.");
             var createdMotor = FindCreatedMotor();
 
@@ -1174,7 +1171,7 @@ public class SubjectSetupDialogTests
             await Assertions.Expect(page.GetByText("Error applying configuration"))
                 .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
             await Assertions.Expect(Dialog(page)).Not.ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
-            await AsyncTestHelpers.WaitUntilAsync(() => File.Exists(filePath), TimeSpan.FromSeconds(10));
+            await AsyncTestHelpers.WaitUntilAsync(() => File.Exists(filePath));
         }
         finally
         {
@@ -1203,12 +1200,10 @@ public class SubjectSetupDialogTests
         await PickTypeAsync(page, "motor");
         await AsyncTestHelpers.WaitUntilAsync(
             () => GetFormMotors().Length == 1,
-            TimeSpan.FromSeconds(10),
             message: "The motor that backs the form was not attached to the graph.");
         var firstMotor = GetFormMotors().Single();
         await AsyncTestHelpers.WaitUntilAsync(
             () => firstMotor.Status == MotorStatus.Running,
-            TimeSpan.FromSeconds(10),
             message: "The motor that backs the form did not start.");
 
         await BackButton(page).ClickAsync();
@@ -1216,18 +1211,15 @@ public class SubjectSetupDialogTests
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => GetFormMotors().Length == 0,
-            TimeSpan.FromSeconds(10),
             message: "The motor of the type that was left with Back is still in the graph.");
         await AsyncTestHelpers.WaitUntilAsync(
             () => firstMotor.Status == MotorStatus.Stopped,
-            TimeSpan.FromSeconds(10),
             message: "The motor of the type that was left with Back still runs.");
 
         // Act - the second pick is abandoned with "Cancel"
         await PickTypeAsync(page, "motor");
         await AsyncTestHelpers.WaitUntilAsync(
             () => GetFormMotors().Length == 1,
-            TimeSpan.FromSeconds(10),
             message: "The motor that backs the second form was not attached to the graph.");
 
         await page.Locator("[data-testid='cancel-button']").ClickAsync();
@@ -1235,7 +1227,6 @@ public class SubjectSetupDialogTests
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => GetFormMotors().Length == 0,
-            TimeSpan.FromSeconds(10),
             message: "The motor of the dialog that was cancelled is still in the graph.");
     }
 

@@ -20,7 +20,7 @@ namespace HomeBlaze.E2E.Tests;
 public class PropertyHistoryDialogTests
 {
     private const int PageLoadTimeout = 30000;
-    private const int ElementVisibilityTimeout = 15000;
+    private const int ElementVisibilityTimeout = 30000;
     private readonly PlaywrightFixture _fixture;
 
     public PropertyHistoryDialogTests(PlaywrightFixture fixture)

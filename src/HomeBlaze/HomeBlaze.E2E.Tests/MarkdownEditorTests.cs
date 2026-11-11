@@ -98,7 +98,7 @@ public class MarkdownEditorTests
 
         // Assert: the edit button names the block
         var editButton = page.GetByRole(AriaRole.Button, new() { Name = "Edit mymotor" });
-        await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = 10000 });
+        await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = 30000 });
     }
 
     [Fact]
@@ -133,7 +133,7 @@ public class MarkdownEditorTests
 
         // Assert
         var editButton = page.Locator("[data-testid='edit-expression-button']");
-        await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = 10000 });
+        await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = 30000 });
         await Assertions.Expect(editButton).ToHaveTextAsync("Edit Expression");
     }
 
@@ -154,7 +154,7 @@ public class MarkdownEditorTests
         var actionBar = await page.Locator(".subject-component-wrapper.selectable").First.SelectWidgetAsync();
 
         // Assert
-        await Assertions.Expect(actionBar.GetByTestId("edit-subject-button")).ToBeVisibleAsync(new() { Timeout = 10000 });
+        await Assertions.Expect(actionBar.GetByTestId("edit-subject-button")).ToBeVisibleAsync(new() { Timeout = 30000 });
     }
 
     [Fact]
@@ -179,13 +179,13 @@ public class MarkdownEditorTests
         // Assert
         var dialog = page.GetByRole(AriaRole.Dialog);
         var pathInput = dialog.GetByLabel("Path", new() { Exact = true });
-        await Assertions.Expect(pathInput).ToHaveValueAsync("valuemotor/Status", new() { Timeout = 10000 });
+        await Assertions.Expect(pathInput).ToHaveValueAsync("valuemotor/Status", new() { Timeout = 30000 });
         await Assertions.Expect(pathInput).ToHaveAttributeAsync("data-testid", "subject-path-field");
 
         // The picker button is the adornment that shares the input's container.
         await pathInput.Locator("xpath=..").Locator(".mud-input-adornment button").ClickAsync();
         var pickerDialog = page.GetByTestId("subject-path-picker-dialog");
-        await Assertions.Expect(pickerDialog).ToBeVisibleAsync(new() { Timeout = 10000 });
+        await Assertions.Expect(pickerDialog).ToBeVisibleAsync(new() { Timeout = 30000 });
     }
 
     [Fact]

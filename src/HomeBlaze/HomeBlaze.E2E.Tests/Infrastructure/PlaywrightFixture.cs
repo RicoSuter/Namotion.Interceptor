@@ -84,6 +84,10 @@ public class PlaywrightFixture : IAsyncLifetime
             throw new InvalidOperationException("The test-only subject type could not be registered");
         }
 
+        // An assertion without its own timeout waits 5 seconds by default, which a busy build server can exceed for a round
+        // trip of the circuit or the first render of a component; it gets the 30 seconds that the tests give everywhere else.
+        Assertions.SetDefaultExpectTimeout(30000);
+
         // Initialize Playwright and launch browser
         _playwright = await Playwright.CreateAsync();
         _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions

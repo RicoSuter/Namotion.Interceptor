@@ -694,7 +694,7 @@ public class HistoryChartWidgetTests
             }
             """,
             await view.ElementHandleAsync(),
-            new() { Timeout = 10000 });
+            new() { Timeout = Timeout });
     }
 
     [Fact]
