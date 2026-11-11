@@ -312,14 +312,16 @@ public static class HistoryStoreMerger
         CancellationToken cancellationToken)
     {
         var instant = asOf;
-        var hasHopped = false;
         while (true)
         {
             DateTimeOffset? unchangedFrom = null;
             foreach (var store in ordered)
             {
-                // After a hop, a store that does not cover the instant cannot answer for it.
-                if (hasHopped && GetContainingRangeFrom(store, instant) is null)
+                // The lookup is coverage-scoped, so a store that does not cover the instant has no answer for it,
+                // and skipping it saves a database query that would wait behind a flush. The read must precede the
+                // lookup: a range that grows to include the instant while the lookup waits was not searched for it,
+                // so it must not vouch below.
+                if (HistoryCoverage.CoverageStartAt(store.CoverageRanges, instant) is null)
                 {
                     continue;
                 }
@@ -332,9 +334,10 @@ public static class HistoryStoreMerger
                     return sample;
                 }
 
-                // Coverage is read after the lookup, so that a range that moved on meanwhile vouches only for
-                // its newer, shorter span.
-                if (GetContainingRangeFrom(store, instant) is { } from && (unchangedFrom is null || from < unchangedFrom))
+                // Read again after the lookup, so that a range start that moved on meanwhile vouches only for its
+                // newer, shorter span, and a range that no longer contains the instant does not vouch at all.
+                if (HistoryCoverage.CoverageStartAt(store.CoverageRanges, instant) is { } from &&
+                    (unchangedFrom is null || from < unchangedFrom))
                 {
                     unchangedFrom = from;
                 }
@@ -347,21 +350,7 @@ public static class HistoryStoreMerger
             }
 
             instant = earliest.AddTicks(-1);
-            hasHopped = true;
         }
-    }
-
-    private static DateTimeOffset? GetContainingRangeFrom(IHistoryStore store, DateTimeOffset instant)
-    {
-        foreach (var range in store.CoverageRanges)
-        {
-            if (range.From <= instant && range.To > instant)
-            {
-                return range.From;
-            }
-        }
-
-        return null;
     }
 
     private static Task<HistorySeries> QuerySegment(
