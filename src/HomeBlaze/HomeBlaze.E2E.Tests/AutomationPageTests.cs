@@ -175,8 +175,12 @@ public class AutomationPageTests
         await Assertions.Expect(run).ToHaveCountAsync(1, new() { Timeout = Timeout });
         await Assertions.Expect(run).ToContainTextAsync("Ran");
         await Assertions.Expect(run).ToContainTextAsync("Would have run (dry run)");
-        // A dry run describes its actions as text, which the Actions cell shows as one line.
-        await Assertions.Expect(run.GetByTestId("automation-run-action")).ToHaveTextAsync("Would run ChangeState(Done)");
+        // The Actions cell shows the action that the dry run describes, with its target state.
+        var action = run.GetByTestId("automation-run-action");
+        await Assertions.Expect(action).ToHaveCountAsync(1);
+        await Assertions.Expect(action).ToContainTextAsync("ChangeState");
+        await Assertions.Expect(action).ToContainTextAsync("Done");
+        await Assertions.Expect(action).Not.ToContainTextAsync("Would run");
         await Assertions.Expect(page.GetByTestId("automation-tab-runs-count")).ToHaveTextAsync("1");
         await Assertions.Expect(run).ToContainTextAsync(new Regex(@"\d:\d\d:\d\d"));
         await Assertions.Expect(page.GetByText("From history: the runs of the last seven days. Runs within about 250 ms can show as one, and a crash can drop runs.")).ToBeVisibleAsync();

@@ -9,10 +9,14 @@ namespace HomeBlaze.Automation.Blazor.Runs;
 /// </summary>
 internal sealed record RunMessageAction(string? Name, string? SubjectPath, string Detail);
 
-/// <summary>Splits the message of a successful run into its actions; any other message is one text action.</summary>
+/// <summary>
+/// Splits the message of a successful run or of a dry run into its actions; any other message, such as the failures of
+/// a run, is one text action.
+/// </summary>
 internal static partial class RunMessage
 {
     private const string RanPrefix = "Ran ";
+    private const string DryRunPrefix = "Would run ";
 
     // The end of a message that the runtime cut to AutomationRule.MaxRunMessageLength.
     private const string Ellipsis = "...";
@@ -24,12 +28,21 @@ internal static partial class RunMessage
             return [];
         }
 
-        if (!message.StartsWith(RanPrefix, StringComparison.Ordinal))
+        int prefixLength;
+        if (message.StartsWith(RanPrefix, StringComparison.Ordinal))
+        {
+            prefixLength = RanPrefix.Length;
+        }
+        else if (message.StartsWith(DryRunPrefix, StringComparison.Ordinal))
+        {
+            prefixLength = DryRunPrefix.Length;
+        }
+        else
         {
             return [new RunMessageAction(null, null, message)];
         }
 
-        var descriptions = message[RanPrefix.Length..];
+        var descriptions = message[prefixLength..];
         if (string.IsNullOrWhiteSpace(descriptions))
         {
             return [];
@@ -59,17 +72,41 @@ internal static partial class RunMessage
             return new RunMessageAction("ChangeState", null, changeState.Groups["state"].Value);
         }
 
-        if (OperationPattern().Match(part) is { Success: true } operation)
+        if (OperationPattern().Match(part) is { Success: true } operation && !NamesAnError(operation))
         {
             return new RunMessageAction(operation.Groups["name"].Value, GetSubjectPath(operation), operation.Groups["arguments"].Value);
         }
 
-        if (WritePattern().Match(part) is { Success: true } write)
+        if (WritePattern().Match(part) is { Success: true } write && !NamesAnError(write))
         {
             return new RunMessageAction(write.Groups["name"].Value, GetSubjectPath(write), "= " + write.Groups["value"].Value);
         }
 
         return new RunMessageAction(null, null, part);
+    }
+
+    // A dry run describes an action it cannot prepare by its path, ": " and the error, and the error can quote a path and
+    // a value that read as a description of their own. A path holds ": " only inside the brackets of a key.
+    private static bool NamesAnError(Match match)
+    {
+        var path = match.Groups["path"].ValueSpan;
+        var depth = 0;
+        for (var index = 0; index < path.Length; index++)
+        {
+            switch (path[index])
+            {
+                case '[':
+                    depth++;
+                    break;
+                case ']':
+                    depth = Math.Max(0, depth - 1);
+                    break;
+                case ':' when depth == 0 && index + 1 < path.Length && path[index + 1] == ' ':
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     private static string GetSubjectPath(Match match) => match.Groups["path"] is { Success: true } path ? path.Value : "/";

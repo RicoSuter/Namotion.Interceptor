@@ -255,7 +255,7 @@ The header of the page of an automation shows its title, its status and last err
 **Runs** lists the runs of the last seven days, at most 20, read from history, see [Recent runs from history](#recent-runs-from-history). The tab shows their number, or `20+` when the list is full. Without a [history store](../architecture/design/history.md), it lists the last run of each rule.
 
 - **Filter**: with more than one rule, chips filter the runs by rule, and the filter stays while you switch tabs. A rule without runs in the list shows "No runs of this rule."
-- **Each run**: its time, its rule and its outcome. A run that completed its actions shows one line per action: an action whose path is absolute names the subject by its title, with a link to it and the path as tooltip, and one whose path is relative to the rule shows the text as written. Any other run, such as a dry run or a failed one, shows its message as written. On a phone the runs are cards.
+- **Each run**: its time, its rule and its outcome. A run that completed its actions, and a dry run, shows one line per action: an action whose path is absolute names the subject by its title, with a link to it and the path as tooltip, and one whose path is relative to the rule, or that a dry run could not prepare, shows the text as written. Any other run, such as a failed one, shows its message as written. On a phone the runs are cards.
 
 The widget of an automation, placed on a page, shows its title with a link to its page, its status, its state and since when, and the error of the automation or, when there is none, the first rule that waits for Only if, holds a condition, misses values or did not run its last request.
 

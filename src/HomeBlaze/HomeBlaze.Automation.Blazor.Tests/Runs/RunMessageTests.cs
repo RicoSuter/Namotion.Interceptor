@@ -209,4 +209,56 @@ public class RunMessageTests
             new RunMessageAction("Set", "/Lamp", "color.Name: a/b = c")
         ], actions);
     }
+
+    [Fact]
+    public void WhenADryRunDescribesItsActions_ThenItHasOneActionPerPart()
+    {
+        // Act
+        var actions = RunMessage.Parse("Would run /Blinds/MoveTo(position: 18); /Lamp/On = true; ChangeState(Night)");
+
+        // Assert
+        Assert.Equal(
+        [
+            new RunMessageAction("MoveTo", "/Blinds", "position: 18"),
+            new RunMessageAction("On", "/Lamp", "= true"),
+            new RunMessageAction("ChangeState", null, "Night")
+        ], actions);
+    }
+
+    [Fact]
+    public void WhenADryRunHadNoActions_ThenThereAreNoActions()
+    {
+        // Act & Assert
+        Assert.Empty(RunMessage.Parse("Would run "));
+    }
+
+    [Theory]
+    [InlineData("/Blinds/Close: the authorization failed: The policy store is offline")]
+    [InlineData("/Lamp/Toggle is disabled")]
+    [InlineData("/Lamp/On is configuration, which an automation cannot change")]
+    [InlineData("/Lamp/On: speed: cannot read /Sensors/Speed = unknown")]
+    [InlineData("/Lamp/Toggle: brightness: no value at /Sensors/Read(x: 1)")]
+    [InlineData("/Lamp/Toggle: No operation at /Lamp/Toggle")]
+    public void WhenADryRunCannotPrepareAnAction_ThenItIsTextWithoutASubject(string description)
+    {
+        // Act
+        var actions = RunMessage.Parse("Would run ChangeState(Night); " + description);
+
+        // Assert
+        Assert.Equal([new RunMessageAction("ChangeState", null, "Night"), new RunMessageAction(null, null, description)], actions);
+    }
+
+    [Fact]
+    public void WhenAKeyHoldsAColonAndASpace_ThenItStaysInThePath()
+    {
+        // Act
+        var actions = RunMessage.Parse("Ran /Rooms[a: b]/Lamp/Toggle(); /Rooms[a: b]/Lamp/On = true");
+
+        // Assert
+        Assert.Equal(
+        [
+            new RunMessageAction("Toggle", "/Rooms[a: b]/Lamp", ""),
+            new RunMessageAction("On", "/Rooms[a: b]/Lamp", "= true")
+        ], actions);
+    }
 }
