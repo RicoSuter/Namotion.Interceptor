@@ -62,6 +62,9 @@
 
     [Parameter] public bool IsCreating { get; set; }
 
+    /// <summary>The key of a rule to show on the Rules tab when the editor opens, or null for the General tab.</summary>
+    [Parameter] public string? InitialRuleKey { get; set; }
+
     public event Action<bool>? IsValidChanged;
 
     public event Action<bool>? IsDirtyChanged;
@@ -83,6 +86,11 @@
             _draft = AutomationDraft.From(automation);
             Validate();
             _selectedRuleKey = _draft.Rules.Count > 0 ? _draft.Rules[0].Key : null;
+
+            if (InitialRuleKey is { } ruleKey && _draft.FindRule(ruleKey) is not null)
+            {
+                OpenRule(ruleKey);
+            }
         }
 
         _wasValid = IsValid;

@@ -1710,10 +1710,12 @@ namespace HomeBlaze.Components.Dialogs
     {
         public SubjectEditDialog() { }
         [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyDictionary<string, object?>? EditorParameters { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public MudBlazor.MaxWidth GetPreferredDialogSize() { }
-        public static System.Threading.Tasks.Task<MudBlazor.IDialogReference> ShowAsync(MudBlazor.IDialogService dialogService, HomeBlaze.Services.Components.SubjectComponentRegistry componentRegistry, Namotion.Interceptor.IInterceptorSubject subject, string? title = null) { }
+        public static System.Threading.Tasks.Task<MudBlazor.IDialogReference> ShowAsync(MudBlazor.IDialogService dialogService, HomeBlaze.Services.Components.SubjectComponentRegistry componentRegistry, Namotion.Interceptor.IInterceptorSubject subject, string? title = null, System.Collections.Generic.IReadOnlyDictionary<string, object?>? editorParameters = null) { }
     }
     public sealed class SubjectNameOptions : System.IEquatable<HomeBlaze.Components.Dialogs.SubjectNameOptions>
     {
@@ -1794,6 +1796,8 @@ namespace HomeBlaze.Components.Editors
     {
         public SubjectEditPanel() { }
         public HomeBlaze.Components.Abstractions.ISubjectComponent? EditComponent { get; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyDictionary<string, object?>? EditorParameters { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public bool IsCreating { get; set; }
         public bool IsValid { get; }

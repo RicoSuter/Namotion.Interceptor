@@ -8,6 +8,8 @@ namespace HomeBlaze.Automation.Blazor
     {
         public AutomationEditComponent() { }
         [Microsoft.AspNetCore.Components.Parameter]
+        public string? InitialRuleKey { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public bool IsCreating { get; set; }
         public bool IsDirty { get; }
         public bool IsValid { get; }
