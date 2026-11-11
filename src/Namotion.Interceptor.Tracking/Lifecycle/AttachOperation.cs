@@ -3,8 +3,8 @@ using System.Runtime.ExceptionServices;
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 /// <summary>
-/// Tracks one attach operation of a <see cref="LifecycleInterceptor"/>, including the attaches nested in it, and runs
-/// the callbacks registered during it once it is done. Accessed only under that interceptor's lock, except for the
+/// Tracks one attach or detach operation of a <see cref="LifecycleInterceptor"/>, including the operations nested in
+/// it, and runs the callbacks registered during it once it is done. Accessed only under that interceptor's lock, except for the
 /// action <see cref="End"/> returns.
 /// </summary>
 internal sealed class AttachOperation

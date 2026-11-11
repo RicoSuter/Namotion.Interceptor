@@ -112,23 +112,35 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     public void DetachSubjectFromContext(IInterceptorSubject subject)
     {
         var collectedSubjects = GetList();
+        Action? afterLock = null;
         try
         {
             lock (_attachedSubjects)
             {
-                FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Use);
-
-                foreach (var child in collectedSubjects)
+                // A handler may attach subjects while this detaches: as one operation, so that what those attaches
+                // leave to run after the lock waits until this lock is released as well.
+                _attachOperation.Begin();
+                try
                 {
-                    DetachFromProperty(child.subject, subject.Context, child.property, child.index);
-                }
+                    FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Use);
 
-                DetachFromContext(subject, subject.Context);
+                    foreach (var child in collectedSubjects)
+                    {
+                        DetachFromProperty(child.subject, subject.Context, child.property, child.index);
+                    }
+
+                    DetachFromContext(subject, subject.Context);
+                }
+                finally
+                {
+                    afterLock = _attachOperation.End();
+                }
             }
         }
         finally
         {
             ReturnList(collectedSubjects);
+            afterLock?.Invoke();
         }
     }
 

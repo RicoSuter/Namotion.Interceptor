@@ -1,5 +1,6 @@
 using System.Reactive.Concurrency;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -124,5 +125,47 @@ public class DerivedPropertyAttachEvaluationTests
         // Assert
         var usedByProperties = new PropertyReference(root, nameof(EvaluatorRoot.Anchor)).GetUsedByProperties().Items.ToArray();
         Assert.DoesNotContain(usedByProperties, property => ReferenceEquals(property.Subject, worker));
+    }
+
+    [Fact]
+    public void WhenDetachHandlerAttachesAnotherRoot_ThenChangedDerivedValueIsPublishedOutsideTheLifecycleLock()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var outgoingRoot = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var incomingRoot = new EvaluatorRoot { Machine = machine };
+        machine.Worker.Evaluator = worker =>
+        {
+            // Changes between the two evaluations: the configuration has no parent before it is attached.
+            var configuration = worker.TryGetFirstParent<EvaluatorMachine>()!.Configuration;
+            return configuration.TryGetFirstParent<EvaluatorMachine>() is not null ? 1 : 0;
+        };
+
+        var interceptor = context.GetService<LifecycleInterceptor>();
+        interceptor.SubjectDetaching += change =>
+        {
+            if (ReferenceEquals(change.Subject, outgoingRoot))
+            {
+                ((IInterceptorSubject)incomingRoot).Context.AddFallbackContext(context);
+            }
+        };
+
+        var lifecycleLockWasFree = new List<bool>();
+        using var subscription = context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (ReferenceEquals(change.Property.Subject, machine.Worker) && change.Property.Name == nameof(EvaluatorWorker.Result))
+            {
+                // Another thread gets the lifecycle lock only if this thread does not hold it.
+                var otherThread = Task.Run(() => interceptor.TryRunWhileAttached(incomingRoot, () => { }));
+                lifecycleLockWasFree.Add(otherThread.Wait(TimeSpan.FromSeconds(2)));
+            }
+        });
+
+        // Act
+        ((IInterceptorSubject)outgoingRoot).Context.RemoveFallbackContext(context);
+
+        // Assert
+        Assert.True(Assert.Single(lifecycleLockWasFree));
     }
 }
