@@ -66,6 +66,12 @@ internal static class ParentTraversalGraph
     /// </summary>
     public static Task<ITraversalMarker?> FindMarkerWithinTimeoutAsync(IInterceptorSubject subject)
     {
-        return Task.Run(() => subject.TryGetFirstParent<ITraversalMarker>()).WaitAsync(SearchTimeout);
+        // A dedicated thread, so the timeout measures the search rather than the wait for a starved pool.
+        return Task.Factory.StartNew(
+                () => subject.TryGetFirstParent<ITraversalMarker>(),
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default)
+            .WaitAsync(SearchTimeout);
     }
 }
