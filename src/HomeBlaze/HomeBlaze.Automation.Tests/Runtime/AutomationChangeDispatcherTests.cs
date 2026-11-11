@@ -6,6 +6,7 @@ using Namotion.Interceptor;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -164,7 +165,7 @@ public class AutomationChangeDispatcherTests
     }
 
     [Fact]
-    public void WhenALifecycleHandlerFailsTheAttachOfASubject_ThenAPropertyAddedToItAfterAnotherChangeIsAnnounced()
+    public async Task WhenALifecycleHandlerFailsTheAttachOfASubject_ThenAPropertyAddedToItAfterAnotherChangeIsAnnounced()
     {
         // Arrange
         var (graph, _) = CreateGraph();
@@ -179,11 +180,11 @@ public class AutomationChangeDispatcherTests
         using var changed = new ManualResetEventSlim();
         var graphChangesBeforeTheAdd = -1;
         Exception? attachError = null;
-        var writer = new Thread(() =>
+        var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
         {
             attachError = Record.Exception(() => graph.Add("Garden", garden));
             failed.Set();
-            changed.Wait(TimeSpan.FromSeconds(30));
+            changed.Wait(TestTimeouts.Default);
             registration.OnGraphChangeReleased();
             graphChangesBeforeTheAdd = listener.GraphChanges;
 
@@ -192,11 +193,10 @@ public class AutomationChangeDispatcherTests
         });
 
         // Act
-        writer.Start();
-        failed.Wait(TimeSpan.FromSeconds(30));
+        Assert.True(failed.Wait(TestTimeouts.Default));
         holder.Sensor = new TestSensor();
         changed.Set();
-        writer.Join(TimeSpan.FromSeconds(30));
+        await writer.WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.IsType<InvalidOperationException>(attachError);
