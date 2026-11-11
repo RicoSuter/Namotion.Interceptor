@@ -160,23 +160,7 @@ public class AutomationPageTests
     public async Task WhenARuleRuns_ThenThePageListsTheRunFromHistoryWithItsOutcomeAndMessage()
     {
         // Arrange
-        // The rule runs as a dry run once the automation is named Go.
-        await using var recorder = await _fixture.AddStoredAutomationAsync(created =>
-        {
-            created.Name = "Recorder";
-            created.States = ["Idle", "Done"];
-            created.InitialState = "Idle";
-            created.Rules = new Dictionary<string, AutomationRule>
-            {
-                ["ran"] = new()
-                {
-                    Name = "Ran",
-                    Mode = AutomationRuleMode.DryRun,
-                    Triggers = [new PropertyTrigger { Expression = "../Name == Go" }],
-                    Actions = [new ChangeStateAction { Id = "state-1", TargetState = "Done" }]
-                }
-            };
-        });
+        await using var recorder = await AddRecorderAsync();
         var page = await _fixture.OpenSubjectPageAsync(recorder.Name);
         await Assertions.Expect(page.GetByTestId("automation-no-runs")).ToBeVisibleAsync(new() { Timeout = Timeout });
         // A run is a count that follows a stored one, so the restored count must be stored before the run.
@@ -194,6 +178,49 @@ public class AutomationPageTests
         await Assertions.Expect(run).ToContainTextAsync(new Regex(@"\d:\d\d:\d\d"));
         await Assertions.Expect(page.GetByText("From history: the runs of the last seven days. Runs within about 250 ms can show as one, and a crash can drop runs.")).ToBeVisibleAsync();
     }
+
+    [Fact]
+    public async Task WhenThePageNavigatesToAnotherAutomation_ThenItShowsNoRunsOfThePreviousOne()
+    {
+        // Arrange
+        await using var recorder = await AddRecorderAsync();
+        await using var washer = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        var page = await _fixture.OpenSubjectPageAsync(recorder.Name);
+        await Assertions.Expect(page.GetByTestId("automation-no-runs")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await WaitUntilRunCountIsStoredAsync(recorder.Subject.Rules["ran"], 0);
+        recorder.Subject.Name = "Go";
+        await Assertions.Expect(page.GetByTestId("automation-run")).ToHaveCountAsync(1, new() { Timeout = Timeout });
+
+        // Act
+        // Navigating within the circuit passes the other automation to the same page component.
+        await page.EvaluateAsync("url => Blazor.navigateTo(url)", $"/pages/{washer.Name}");
+
+        // Assert
+        var automationPage = page.GetByTestId("automation-page");
+        await Assertions.Expect(automationPage.GetByRole(AriaRole.Heading, new() { Name = "Washer" })).ToBeVisibleAsync(new() { Timeout = Timeout });
+        // Read once, without waiting, because the next read of the runs would replace a stale list after a few seconds.
+        Assert.Equal(0, await page.GetByTestId("automation-run").CountAsync());
+        await Assertions.Expect(page.GetByTestId("automation-no-runs")).ToBeVisibleAsync(new() { Timeout = Timeout });
+    }
+
+    /// <summary>Adds an automation whose rule runs as a dry run once the automation is named Go.</summary>
+    private Task<StoredSubject<HomeBlaze.Automation.Automation>> AddRecorderAsync() =>
+        _fixture.AddStoredAutomationAsync(created =>
+        {
+            created.Name = "Recorder";
+            created.States = ["Idle", "Done"];
+            created.InitialState = "Idle";
+            created.Rules = new Dictionary<string, AutomationRule>
+            {
+                ["ran"] = new()
+                {
+                    Name = "Ran",
+                    Mode = AutomationRuleMode.DryRun,
+                    Triggers = [new PropertyTrigger { Expression = "../Name == Go" }],
+                    Actions = [new ChangeStateAction { Id = "state-1", TargetState = "Done" }]
+                }
+            };
+        });
 
     /// <summary>Resets the state with the Reset state button of the page and confirms it.</summary>
     internal static async Task ResetStateAsync(IPage page)
