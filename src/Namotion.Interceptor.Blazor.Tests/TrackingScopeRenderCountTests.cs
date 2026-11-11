@@ -14,7 +14,8 @@ public class TrackingScopeRenderCountTests
 {
     private const int SiblingCount = 20;
 
-    private static readonly TimeSpan StaleTimeout = TimeSpan.FromSeconds(3);
+    // Some of the renders a settle waits for happen only in some interleavings, so this wait can expire in a passing test.
+    private static readonly TimeSpan SettleTimeout = TimeSpan.FromSeconds(3);
 
     private readonly ITestOutputHelper _output;
 
@@ -276,12 +277,12 @@ public class TrackingScopeRenderCountTests
     private static async Task SettleAsync(TestRenderer renderer, Func<bool> condition)
     {
         await WaitAsync(() => renderer.IsSettled);
-        await TryWaitAsync(renderer, condition, StaleTimeout);
+        await TryWaitAsync(renderer, condition, SettleTimeout);
     }
 
     private static async Task<int> IsStaleAsync(TestRenderer renderer, Func<bool> condition)
     {
-        return await TryWaitAsync(renderer, condition, StaleTimeout) ? 0 : 1;
+        return await TryWaitAsync(renderer, condition, TestTimeouts.Default) ? 0 : 1;
     }
 
     private static async Task<bool> TryWaitAsync(TestRenderer renderer, Func<bool> condition, TimeSpan timeout)
