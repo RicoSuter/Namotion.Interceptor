@@ -1,7 +1,5 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
-using System.Globalization;
-using System.Text;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -11,7 +9,8 @@ namespace HomeBlaze.Authorization.Internal;
 
 /// <summary>
 /// The roles of the graph at one version, with the policies compiled from them and the statuses they give the
-/// <see cref="Authorization"/> and <see cref="Role"/> subjects. Immutable apart from the policy cache, which is thread-safe.
+/// <see cref="Authorization"/> and <see cref="Role"/> subjects. Immutable apart from the cache of policies, which is
+/// thread-safe.
 /// </summary>
 internal sealed class AuthorizationSnapshot
 {
@@ -168,6 +167,26 @@ internal sealed class AuthorizationSnapshot
         return _policies.GetOrAdd(key, Compile(key.Names));
     }
 
+    /// <summary>
+    /// Compiles the policy of a principal holding only <paramref name="editedRole"/>, which replaces the custom role of
+    /// the same name ignoring case, or is added. Its error is the status the role would have once saved.
+    /// </summary>
+    public AuthorizationResult Preview(AuthorizationRole editedRole)
+    {
+        var name = editedRole.Name;
+        var reason = AuthorizationService.GetRoleNameError(name) ?? _unavailableRoles.GetValueOrDefault(name) ?? _customRolesError;
+        if (reason is not null)
+        {
+            return new AuthorizationResult(AuthorizationPolicy.DenyAll, reason);
+        }
+
+        var index = IndexOfRole(name);
+        var roles = index >= 0 ? _roles.SetItem(index, editedRole) : _roles.Add(editedRole);
+        return Compile(
+            roles, [name], PathPatternChecks.GetLeadingSeparatorErrors(roles, _pathProvider.PathSeparator),
+            new RoleCompiler(roles, _pathProvider));
+    }
+
     private AuthorizationResult Compile(string[] roleNames)
     {
         foreach (var name in roleNames)
@@ -180,13 +199,35 @@ internal sealed class AuthorizationSnapshot
             }
         }
 
-        if (_leadingSeparatorErrors is not null &&
-            PathPatternChecks.FindLeadingSeparatorError(roleNames, _roles, _leadingSeparatorErrors) is { } patternError)
+        return Compile(_roles, roleNames, _leadingSeparatorErrors, _compiler);
+    }
+
+    private static AuthorizationResult Compile(
+        ImmutableArray<AuthorizationRole> roles,
+        string[] roleNames,
+        Dictionary<string, string>? leadingSeparatorErrors,
+        RoleCompiler compiler)
+    {
+        if (leadingSeparatorErrors is not null &&
+            PathPatternChecks.FindLeadingSeparatorError(roleNames, roles, leadingSeparatorErrors) is { } patternError)
         {
             return new AuthorizationResult(AuthorizationPolicy.DenyAll, patternError);
         }
 
-        return _compiler.Compile(roleNames);
+        return compiler.Compile(roleNames);
+    }
+
+    private int IndexOfRole(string name)
+    {
+        for (var index = 0; index < _roles.Length; index++)
+        {
+            if (string.Equals(_roles[index].Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return index;
+            }
+        }
+
+        return -1;
     }
 
     // Each usable role compiled on its own gives its status and is the policy of a principal holding only it.
@@ -224,50 +265,10 @@ internal sealed class AuthorizationSnapshot
         return roles;
     }
 
-    private static string? GetNameError(string name, int count)
-    {
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return "A role needs a name.";
-        }
-
-        if (HasOuterWhitespaceOrInvisibleCharacter(name))
-        {
-            return $"The name '{name}' cannot start or end with whitespace or contain an invisible character, such as a zero-width space or a control character.";
-        }
-
-        if (BuiltInRoles.IsBuiltIn(name))
-        {
-            return $"The name '{name}' is reserved for a built-in role.";
-        }
-
-        if (string.Equals(name, AuthorizationPolicy.SystemRoleName, StringComparison.OrdinalIgnoreCase))
-        {
-            return $"The name '{name}' is reserved for the system rules.";
-        }
-
-        return count > 1 ? $"The name '{name}' is used by more than one role, ignoring case." : null;
-    }
-
-    // The authorization library refuses such a name for the whole definition, which would deny every role. Checked per
-    // code point, which also refuses format characters outside the BMP, such as tag characters, that the library accepts.
-    private static bool HasOuterWhitespaceOrInvisibleCharacter(string name)
-    {
-        if (char.IsWhiteSpace(name[0]) || char.IsWhiteSpace(name[^1]))
-        {
-            return true;
-        }
-
-        foreach (var rune in name.EnumerateRunes())
-        {
-            if (Rune.GetUnicodeCategory(rune) is UnicodeCategory.Control or UnicodeCategory.Format)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    // Gets why a name held by count roles, ignoring case, cannot name a custom role, or null.
+    private static string? GetNameError(string name, int count) =>
+        AuthorizationService.GetRoleNameError(name) ??
+        (count > 1 ? $"The name '{name}' is used by more than one role, ignoring case." : null);
 
     private static AuthorizationRole ToAuthorizationRole(string name, Role role) =>
         new()

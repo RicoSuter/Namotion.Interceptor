@@ -170,3 +170,13 @@ public class CatalogEmptyAttributesSubject;
 [DisplayName("  ")]
 [SubjectIcon(" ")]
 public class CatalogBlankAttributesSubject;
+
+[SubjectAbstraction]
+public interface ICatalogLight;
+
+// Differs from ICatalogLight only in case; type names match case-sensitively, so both are distinct names.
+[SubjectAbstraction]
+public interface ICataloglight;
+
+[InterceptorSubject]
+public partial class CatalogCaseSubject : ICatalogLight, ICataloglight;

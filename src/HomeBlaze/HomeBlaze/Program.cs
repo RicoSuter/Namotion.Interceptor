@@ -160,7 +160,8 @@ typeProvider
     .AddAssembly(typeof(HomeBlaze.Automation.Blazor.AutomationPage).Assembly)               // HomeBlaze.Automation.Blazor
     .AddAssembly(typeof(ClaudeCliAgent).Assembly)                                           // HomeBlaze.AI
     .AddAssembly(typeof(HomeBlaze.AI.Blazor.AgentPage).Assembly)                            // HomeBlaze.AI.Blazor
-    .AddAssembly(typeof(HomeBlaze.Authorization.Role).Assembly);                            // HomeBlaze.Authorization
+    .AddAssembly(typeof(HomeBlaze.Authorization.Role).Assembly)                             // HomeBlaze.Authorization
+    .AddAssembly(typeof(HomeBlaze.Authorization.Blazor.RoleSelector).Assembly);             // HomeBlaze.Authorization.Blazor
 
 // Register HomeBlaze.Plugins subject types
 typeProvider.AddAssembly(typeof(PluginManager).Assembly);

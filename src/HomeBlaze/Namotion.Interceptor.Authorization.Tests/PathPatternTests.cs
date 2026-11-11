@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Authorization.Internal;
+using Namotion.Interceptor.Authorization.Tests.Models;
 using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Authorization.Tests;
@@ -193,6 +194,27 @@ public class PathPatternTests
         Assert.Equal("Rooms[Kitchen].Lights[Ceiling].Brightness", path);
         Assert.True(result);
         Assert.False(canReadKitchenCounter);
+    }
+
+    [Theory]
+    [InlineData("/Rooms[Living room, left]/Lights[Ceiling]/IsOn")]
+    [InlineData("/Rooms['Living room, left']/Lights/*")]
+    [InlineData("/Rooms[Living room, left]/**")]
+    public void WhenASegmentOfThePatternContainsAComma_ThenItMatchesTheMemberBelowTheSubjectKeyedWithThatComma(string pattern)
+    {
+        // Arrange
+        var home = TestGraph.Create();
+        var livingRoom = new Room { Lights = new Dictionary<string, Light> { ["Ceiling"] = new Light() } };
+        home.Rooms = new Dictionary<string, Room>(home.Rooms) { ["Living room, left"] = livingRoom };
+        var isOn = TestGraph.Member(livingRoom.Lights["Ceiling"], nameof(Light.IsOn));
+        var policy = Policies.Compile(Policies.Role("Reader", allow: [Policies.Rule([PermissionAction.Read], paths: [pattern])]));
+
+        // Act
+        var result = policy.CanRead(isOn);
+
+        // Assert
+        Assert.True(result);
+        Assert.False(policy.CanRead(TestGraph.Member(home.Rooms["Kitchen"].Lights["Ceiling"], nameof(Light.IsOn))));
     }
 
     [Theory]

@@ -96,6 +96,7 @@ public class SubjectPaneDeleteTests
         await deleteButton.ClickAsync();
         var dialog = page.GetByRole(AriaRole.Dialog);
         await Assertions.Expect(dialog).ToContainTextAsync("Delete '", new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(dialog).ToContainTextAsync("Deletes the file of this subject from the storage.");
         await dialog.GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true }).ClickAsync();
 
         // Assert

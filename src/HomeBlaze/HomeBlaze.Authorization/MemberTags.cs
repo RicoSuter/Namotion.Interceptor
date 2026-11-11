@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+
 namespace HomeBlaze.Authorization;
 
 /// <summary>
@@ -31,4 +33,8 @@ public static class MemberTags
 
     /// <summary>The metadata of a subject or, as an attribute, of a property.</summary>
     public const string Metadata = "metadata";
+
+    /// <summary>Every tag, in the order above.</summary>
+    public static readonly ImmutableArray<string> All =
+        [State, Configuration, Secret, Query, Operation, RequiresConfirmation, Subjects, Attribute, Metadata];
 }

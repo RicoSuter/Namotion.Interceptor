@@ -1,0 +1,502 @@
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Role))]
+@implements ISubjectEditComponent
+@implements IDisposable
+
+@using System.Reactive.Concurrency
+@using System.Reactive.Linq
+@using Namotion.Interceptor.Tracking
+
+@inject AuthorizationService AuthorizationService
+@inject SubjectTypeCatalog TypeCatalog
+
+@if (Role is { } role)
+{
+    var checks = GetChecks();
+    <div class="role-edit" data-testid="role-edit">
+        @if (checks.Preview.Error is { } error)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2" data-testid="role-edit-status">@error</MudAlert>
+        }
+        @if (checks.Warning is { } warning)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2" data-testid="role-edit-warning">@warning</MudAlert>
+        }
+        <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="role-edit-used-by">
+            Used by @role.UsedByAgents @(role.UsedByAgents == 1 ? "agent" : "agents")
+        </MudText>
+
+        @* Kept alive, so that switching tabs keeps the text typed into a rule and the subject chosen for the preview. A tab
+           narrows with the window down to its label, so that the four tabs fit on a phone. *@
+        <MudTabs Elevation="0" KeepPanelsAlive="true" MinimumTabWidth="min(160px, 12vw)" Class="role-edit-tabs"
+                 TabPanelsClass="role-edit-panels" data-testid="role-edit-tabs">
+            <ChildContent>
+                <MudTabPanel>
+                    <TabContent>
+                        <span data-testid="role-edit-tab-roles">Roles</span>
+                        @if (HasUnusableInclude())
+                        {
+                            @RenderErrorMarker("Includes a role that cannot be used", "roles")
+                        }
+                    </TabContent>
+                    <ChildContent>
+                        <MudForm>
+                            <MudText Typo="Typo.body2" Class="mb-2">The roles whose rules this role has as well, built-in or custom.</MudText>
+                            <div data-testid="role-edit-includes">
+                                <RoleSelector @bind-Selected="_includes" @bind-Selected:after="OnChanged" Excluded="@_excluded"
+                                              Label="Includes" TestId="role-edit-include" HelperText="Optional." />
+                            </div>
+                            @RenderBuiltInRoles()
+                        </MudForm>
+                    </ChildContent>
+                </MudTabPanel>
+                <MudTabPanel>
+                    <TabContent>@RenderTabLabel("Allow", _allow, "allow")</TabContent>
+                    <ChildContent>
+                        <MudForm>
+                            <MudText Typo="Typo.body2" Class="mb-2">
+                                What the role grants. A rule applies to a member when each of its selectors matches; an empty selector matches any.
+                            </MudText>
+                            @RenderFieldHint()
+                            @RenderRules(_allow, "allow")
+                        </MudForm>
+                    </ChildContent>
+                </MudTabPanel>
+                <MudTabPanel>
+                    <TabContent>@RenderTabLabel("Deny", _deny, "deny")</TabContent>
+                    <ChildContent>
+                        <MudForm>
+                            <MudText Typo="Typo.body2" Class="mb-2">What the role takes away again, whichever role granted it.</MudText>
+                            @RenderFieldHint()
+                            @RenderRules(_deny, "deny")
+                        </MudForm>
+                    </ChildContent>
+                </MudTabPanel>
+                <MudTabPanel>
+                    <TabContent><span data-testid="role-edit-tab-preview">Preview</span></TabContent>
+                    <ChildContent>
+                        <RolePreview Result="@checks.Preview" />
+                    </ChildContent>
+                </MudTabPanel>
+            </ChildContent>
+        </MudTabs>
+    </div>
+}
+
+<style>
+    /* A fixed height, so that switching tabs does not resize the dialog; 240px of the window height stay free for the dialog's
+       title and buttons. */
+    .role-edit {
+        display: flex;
+        flex-direction: column;
+        /* 100vh for browsers without dvh */
+        height: clamp(240px, calc(100vh - 240px), 760px);
+        height: clamp(240px, calc(100dvh - 240px), 760px);
+    }
+
+    .role-edit > * {
+        flex: 0 0 auto;
+    }
+
+    /* The minimum height keeps the active tab usable under tall alerts, which scroll the dialog content instead. */
+    .role-edit > .role-edit-tabs {
+        flex: 1 1 auto;
+        min-height: 200px;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .role-edit-tab-mark {
+        margin-left: 4px;
+    }
+
+    /* Narrower tabs, so that the four tabs fit on a phone with their error marks. */
+    @@media (max-width: 600px) {
+        .role-edit-tabs .mud-tab {
+            padding-left: 2px;
+            padding-right: 2px;
+            font-size: 0.8125rem;
+            letter-spacing: 0;
+        }
+
+        .role-edit-tab-mark {
+            margin-left: 2px;
+        }
+
+        .role-edit-tab-mark .mud-icon-root {
+            font-size: 1rem;
+        }
+    }
+
+    /* Edge-aligned icon buttons, such as the arrow of a field with suggestions, reach 12px past the content; the padding
+       keeps them inside the scrolling panels, which would otherwise scroll sideways, and the negative margin keeps the
+       content aligned with the alerts and the tab bar. The header of the preview's matrix sticks over the top padding,
+       see RolePreview. */
+    .role-edit-tabs > .role-edit-panels {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        margin: 0 -12px;
+        padding: 16px 12px 0;
+    }
+</style>
+
+@code {
+    internal const string ConcurrentChangeMessage = "The roles changed while this dialog was open. Close it and open it again.";
+
+    private static readonly (string Name, string Description)[] BuiltInRoleDescriptions =
+    [
+        (BuiltInRoles.ReaderName, "Reads every member and its history and executes queries."),
+        (BuiltInRoles.OperatorName, "Includes Reader, writes every member and executes operations."),
+        (BuiltInRoles.EverythingName, "Allows every action on every member.")
+    ];
+
+    private string? _name;
+    private Authorization? _authorization;
+    private LoadedLists _loadedLists;
+    private string[] _excluded = [];
+    private IReadOnlyList<string> _includes = [];
+    private List<RuleEntry> _allow = [];
+    private List<RuleEntry> _deny = [];
+    private IReadOnlyList<string> _typeNames = [];
+    private AuthorizationRole? _editedRole;
+    private bool _isDirty;
+    private bool _wasValid = true;
+    private AuthorizationRole? _checkedRole;
+    private IReadOnlyList<string>? _checkedRoleNames;
+    private RoleChecks _checks = new(default, null);
+    private IDisposable? _usedBySubscription;
+    private bool _isDisposed;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    public event Action<bool>? IsValidChanged;
+
+    public event Action<bool>? IsDirtyChanged;
+
+    public string PreferredDialogSize => "Large";
+
+    public bool IsDirty => _isDirty;
+
+    /// <summary>
+    /// Gets whether every rule can be saved and no selector field holds invalid text, which would otherwise be dropped.
+    /// </summary>
+    public bool IsValid => _allow.All(IsValidEntry) && _deny.All(IsValidEntry);
+
+    private Role? Role => Subject as Role;
+
+    /// <summary>
+    /// Gets the role as currently edited, unsaved changes included, named by its key in <see cref="Authorization.Roles"/>;
+    /// the same instance until the next change or rename.
+    /// </summary>
+    internal AuthorizationRole GetEditedRole()
+    {
+        UpdateName();
+        return _editedRole ??= new AuthorizationRole
+        {
+            Name = _name ?? string.Empty,
+            Includes = [.. _includes],
+            Allow = [.. _allow.Select(entry => entry.Rule)],
+            Deny = [.. _deny.Select(entry => entry.Rule)]
+        };
+    }
+
+    protected override void OnInitialized()
+    {
+        if (Role is not { } role)
+        {
+            return;
+        }
+
+        (_authorization, _name) = role.FindParent();
+        _loadedLists = new LoadedLists(role);
+        _excluded = _name is null ? [] : [_name];
+        // Normalized as the selector shows it, so saving without a change writes what was shown. Reading the role
+        // names also writes the role's status and agent count.
+        _includes = RoleSelector.Normalize(role.Includes ?? [], AuthorizationService.GetRoleNames());
+        _allow = (role.Allow ?? []).Select(rule => new RuleEntry(rule)).ToList();
+        _deny = (role.Deny ?? []).Select(rule => new RuleEntry(rule)).ToList();
+        _typeNames = TypeCatalog.GetTypeNames();
+        _wasValid = IsValid;
+        AuthorizationService.PoliciesChanged += OnPoliciesChanged;
+
+        // The filter runs inside each write of the graph; the rest runs off it, which every other writer waits for.
+        _usedBySubscription = ((IInterceptorSubject)role).Context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change => ReferenceEquals(change.Property.Subject, role) && change.Property.Name == nameof(Role.UsedByAgents))
+            .ObserveOn(Scheduler.Default)
+            .Subscribe(_ => Refresh(), _ => { });
+    }
+
+    public void Dispose()
+    {
+        _isDisposed = true;
+        AuthorizationService.PoliciesChanged -= OnPoliciesChanged;
+        _usedBySubscription?.Dispose();
+    }
+
+    public async Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (Role is not { } role)
+        {
+            return;
+        }
+
+        // Text typed but not added would be lost, and a rule saved without it applies to more members than intended.
+        foreach (var card in _allow.Concat(_deny).Select(entry => entry.Card).OfType<RuleCard>().ToList())
+        {
+            await card.CommitTextAsync();
+        }
+
+        // The host saves only while the role is valid, so this is a defect to report rather than a save to skip.
+        if (!IsValid)
+        {
+            throw new InvalidOperationException("The role has invalid rules and cannot be saved.");
+        }
+
+        // New instances, as the authorization service notices only replaced lists.
+        List<string> includes = [.. _includes];
+        List<PermissionRule> allow = [.. _allow.Select(entry => entry.Rule)];
+        List<PermissionRule> deny = [.. _deny.Select(entry => entry.Rule)];
+
+        lock (AuthorizationEditLock.Instance)
+        {
+            // A reload of the roles replaces them, so this role would be saved nowhere, or into a file it is no longer
+            // part of; so would a role that no Authorization held when the dialog opened. Every save assigns new lists,
+            // so other lists are the save of another dialog, which this one would revert.
+            if (_authorization is null || !ReferenceEquals(role.FindParent().Authorization, _authorization) || !_loadedLists.AreHeldBy(role))
+            {
+                throw new InvalidOperationException(ConcurrentChangeMessage);
+            }
+
+            // In one update, so that no policy has the includes without the deny rules.
+            using (AuthorizationService.BeginUpdate())
+            {
+                role.Includes = includes;
+                role.Allow = allow;
+                role.Deny = deny;
+            }
+        }
+
+        // What this dialog wrote, not what the role holds now, which may already be the save of another dialog.
+        _loadedLists = new LoadedLists(includes, allow, deny);
+
+        _isDirty = false;
+        IsDirtyChanged?.Invoke(false);
+    }
+
+    // Reads the name again, as the role can be renamed while this dialog is open.
+    private void UpdateName()
+    {
+        if (Role?.Title is { } name && !string.Equals(name, _name, StringComparison.Ordinal))
+        {
+            _name = name;
+            _excluded = [name];
+            _editedRole = null;
+        }
+    }
+
+    // Another role saved meanwhile, such as an included one, changes the checks of the same edited role. Raised on the
+    // thread pool, also right after this component was disposed, and also for the roles this component checked already,
+    // which then render nothing new.
+    private void OnPoliciesChanged() =>
+        _ = InvokeAsync(() =>
+        {
+            if (!_isDisposed && !ReferenceEquals(AuthorizationService.GetRoleNames(), _checkedRoleNames))
+            {
+                _checkedRole = null;
+                StateHasChanged();
+            }
+        });
+
+    // Called on the thread pool, also right after this component was disposed.
+    private void Refresh() =>
+        _ = InvokeAsync(() =>
+        {
+            if (!_isDisposed)
+            {
+                StateHasChanged();
+            }
+        });
+
+    // Checked again for each edited role and after the saved roles changed, so that the checks follow unsaved changes
+    // and the other roles.
+    private RoleChecks GetChecks()
+    {
+        var role = GetEditedRole();
+        if (!ReferenceEquals(role, _checkedRole))
+        {
+            _checkedRole = role;
+
+            // Read before the policy, so that roles compiled in between are checked again.
+            _checkedRoleNames = AuthorizationService.GetRoleNames();
+            var result = AuthorizationService.PreviewPolicy(role);
+            _checks = new RoleChecks(result, result.Error is null ? GetWarning(role) : null);
+        }
+
+        return _checks;
+    }
+
+    // Worded as Role.Warning once the role is saved: the warning of each path pattern once, allow rules first.
+    private string? GetWarning(AuthorizationRole role)
+    {
+        List<string>? warnings = null;
+        foreach (var rule in role.Allow.Concat(role.Deny))
+        {
+            foreach (var pattern in rule.Paths)
+            {
+                if (AuthorizationService.GetPathPatternWarning(pattern) is { } warning && warnings?.Contains(warning) != true)
+                {
+                    (warnings ??= []).Add(warning);
+                }
+            }
+        }
+
+        return warnings is null ? null : string.Join(' ', warnings);
+    }
+
+    // A selected name that is not one of the role names, which lists only the roles that can be used.
+    private bool HasUnusableInclude()
+    {
+        var roleNames = AuthorizationService.GetRoleNames();
+        return !_includes.All(name => roleNames.Contains(name, StringComparer.Ordinal));
+    }
+
+    private RenderFragment RenderTabLabel(string title, List<RuleEntry> rules, string section) => __builder =>
+    {
+        <span data-testid="@($"role-edit-tab-{section}")">@title (@rules.Count)</span>
+        @if (!rules.TrueForAll(IsValidEntry))
+        {
+            @RenderErrorMarker("Has an invalid rule", section)
+        }
+    };
+
+    private static RenderFragment RenderErrorMarker(string label, string section) => __builder =>
+    {
+        <span role="img" aria-label="@label" title="@label" class="role-edit-tab-mark" data-testid="@($"role-edit-tab-{section}-error")">
+            <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Color="Color.Error" Size="Size.Small" Style="vertical-align: middle;" />
+        </span>
+    };
+
+    private static RenderFragment RenderFieldHint() => __builder =>
+    {
+        <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2" data-testid="role-edit-field-hint">
+            In each field, press Enter, click Add or leave the field to add the typed text. Types, Members and Tags take several values separated by commas.
+        </MudText>
+    };
+
+    private RenderFragment RenderRules(List<RuleEntry> rules, string section) => __builder =>
+    {
+        <MudStack Spacing="2">
+            @for (var index = 0; index < rules.Count; index++)
+            {
+                var entry = rules[index];
+                <RuleCard @key="entry" @ref="entry.Card" Rule="@entry.Rule" RuleChanged="@(rule => ChangeRule(entry, rule))"
+                          HasInvalidTextChanged="@(hasInvalidText => SetInvalidText(entry, hasInvalidText))" IsDeny="@(section == "deny")"
+                          OnRemove="@(() => RemoveRule(rules, entry))" TypeNames="@_typeNames" AccessibleName="@($"{section} rule {index + 1}")"
+                          TestId="@($"role-edit-{section}-rule-{index}")" />
+            }
+        </MudStack>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mt-2">
+            <MudButton StartIcon="@Icons.Material.Filled.Add" Variant="Variant.Text" Color="Color.Primary"
+                       OnClick="@(() => AddRule(rules))" data-testid="@($"role-edit-add-{section}")">Add rule</MudButton>
+            @if (rules.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="@($"role-edit-{section}-empty")">No @(section) rules yet</MudText>
+            }
+        </MudStack>
+    };
+
+    private static RenderFragment RenderBuiltInRoles() => __builder =>
+    {
+        <div data-testid="role-edit-builtin-roles">
+            <MudText Typo="Typo.subtitle2" Class="mt-6">Built-in roles</MudText>
+            <MudText Typo="Typo.body2" Class="mb-2">Defined in code, always available and not editable. The system rules apply to every role.</MudText>
+            <MudStack Spacing="1">
+                @foreach (var (name, description) in BuiltInRoleDescriptions)
+                {
+                    <MudText Typo="Typo.body2" data-testid="@($"role-edit-builtin-role-{name}")"><b>@name</b>: @description</MudText>
+                }
+            </MudStack>
+        </div>
+    };
+
+    // A new rule has no action, so the role is invalid until one is chosen rather than granting or denying every action.
+    private void AddRule(List<RuleEntry> rules)
+    {
+        rules.Add(new RuleEntry(new PermissionRule()));
+        OnChanged();
+    }
+
+    private void RemoveRule(List<RuleEntry> rules, RuleEntry entry)
+    {
+        rules.Remove(entry);
+        OnChanged();
+    }
+
+    private void ChangeRule(RuleEntry entry, PermissionRule rule)
+    {
+        entry.Rule = rule;
+        OnChanged();
+    }
+
+    private void SetInvalidText(RuleEntry entry, bool hasInvalidText)
+    {
+        entry.HasInvalidText = hasInvalidText;
+        ReportValidity();
+    }
+
+    private bool IsValidEntry(RuleEntry entry) => !entry.HasInvalidText && RuleCard.IsValid(entry.Rule, AuthorizationService);
+
+    private void OnChanged()
+    {
+        _editedRole = null;
+        if (!_isDirty)
+        {
+            _isDirty = true;
+            IsDirtyChanged?.Invoke(true);
+        }
+
+        ReportValidity();
+    }
+
+    private void ReportValidity()
+    {
+        // Raised on transitions only, because the host re-renders its save button on each event.
+        var isValid = IsValid;
+        if (isValid != _wasValid)
+        {
+            _wasValid = isValid;
+            IsValidChanged?.Invoke(isValid);
+        }
+    }
+
+    // What the edited role would have once saved: its preview, with the error that makes it unusable, and the warning about
+    // its paths, which is null when there is an error.
+    private sealed record RoleChecks(AuthorizationResult Preview, string? Warning);
+
+    // The lists of the role as this dialog read them, compared by reference.
+    private readonly record struct LoadedLists(IReadOnlyList<string>? Includes, IReadOnlyList<PermissionRule>? Allow, IReadOnlyList<PermissionRule>? Deny)
+    {
+        public LoadedLists(Role role)
+            : this(role.Includes, role.Allow, role.Deny)
+        {
+        }
+
+        public bool AreHeldBy(Role role) =>
+            ReferenceEquals(role.Includes, Includes) && ReferenceEquals(role.Allow, Allow) && ReferenceEquals(role.Deny, Deny);
+    }
+
+    // A rule by reference, so that a card keeps its typed text when another card is removed.
+    private sealed class RuleEntry(PermissionRule rule)
+    {
+        public PermissionRule Rule { get; set; } = rule;
+
+        public RuleCard? Card { get; set; }
+
+        public bool HasInvalidText { get; set; }
+    }
+}

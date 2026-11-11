@@ -21,22 +21,9 @@ namespace HomeBlaze.Authorization;
 /// </remarks>
 public sealed class HomeBlazeMemberTagProvider : IMemberTagProvider
 {
-    // In the order of the bits of Markers.
-    private static readonly string[] TagNames =
-    [
-        MemberTags.State,
-        MemberTags.Configuration,
-        MemberTags.Secret,
-        MemberTags.Query,
-        MemberTags.Operation,
-        MemberTags.RequiresConfirmation,
-        MemberTags.Subjects,
-        MemberTags.Attribute,
-        MemberTags.Metadata
-    ];
+    private static readonly string[]?[] TagsByMarkers = new string[]?[1 << MemberTags.All.Length];
 
-    private static readonly string[]?[] TagsByMarkers = new string[]?[1 << TagNames.Length];
-
+    // In the order of MemberTags.All, whose tag of each bit is given.
     [Flags]
     private enum Markers
     {
@@ -144,12 +131,12 @@ public sealed class HomeBlazeMemberTagProvider : IMemberTagProvider
 
     private static string[] CreateTags(int index)
     {
-        var tags = new List<string>(TagNames.Length);
-        for (var bit = 0; bit < TagNames.Length; bit++)
+        var tags = new List<string>(MemberTags.All.Length);
+        for (var bit = 0; bit < MemberTags.All.Length; bit++)
         {
             if ((index & (1 << bit)) != 0)
             {
-                tags.Add(TagNames[bit]);
+                tags.Add(MemberTags.All[bit]);
             }
         }
 

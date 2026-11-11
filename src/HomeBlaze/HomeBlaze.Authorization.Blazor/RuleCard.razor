@@ -1,0 +1,264 @@
+@* Edits one rule of a role: a chip field per selector, a checkbox per action, and a button to remove the rule. *@
+@using HomeBlaze.Abstractions
+
+@inject AuthorizationService AuthorizationService
+@inject IDialogService DialogService
+@inject SubjectPathResolver PathResolver
+
+<MudPaper Outlined="true" Class="pa-2" data-testid="@TestId">
+    <MudGrid Spacing="1">
+        <MudItem xs="12" md="6">
+            <ChipListInput @ref="_paths" Label="Paths" Placeholder="/Devices/Sonos/*" HelperText="Member paths; * matches one segment and ** any depth, as in /Devices/**/Volume. One path at a time, as a path can contain commas."
+                           Values="@_rule.Paths" ValuesChanged="@(values => ChangeAsync(_rule with { Paths = [.. values] }))"
+                           Validator="@ValidatePath" Warning="@WarnPath" Pick="@PickPathAsync" SplitsAtCommas="@PathsSplitAtCommas"
+                           HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-paths" />
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <ChipListInput @ref="_types" Label="Types" HelperText="Subject types or interfaces, by simple or full name, case-sensitive."
+                           Values="@_rule.Types" ValuesChanged="@(values => ChangeAsync(_rule with { Types = [.. values] }))"
+                           Suggestions="@TypeNames" Validator="@ValidateTypeName" Warning="@WarnTypeName" SplitsAtCommas="@NamesSplitAtCommas" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-types" />
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <ChipListInput @ref="_members" Label="Members" Placeholder="Set*" HelperText="Member names, case-sensitive; * matches any text."
+                           Values="@_rule.Members" ValuesChanged="@(values => ChangeAsync(_rule with { Members = [.. values] }))"
+                           Validator="@ValidateMemberName" SplitsAtCommas="@NamesSplitAtCommas" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-members" />
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <ChipListInput @ref="_tags" Label="Tags" HelperText="Tags a member must all carry."
+                           Values="@_rule.Tags" ValuesChanged="@(values => ChangeAsync(_rule with { Tags = [.. values] }))"
+                           Suggestions="@TagSuggestions" Validator="@ValidateTag" SplitsAtCommas="@NamesSplitAtCommas" Comparer="@StringComparer.OrdinalIgnoreCase" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-tags" />
+        </MudItem>
+    </MudGrid>
+    <MudStack Row="true" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center" Spacing="1" Class="mt-1">
+        <MudText Typo="Typo.body2" Class="mr-2">Actions</MudText>
+        @foreach (var action in AuthorizationActions.All)
+        {
+            <MudCheckBox T="bool" Label="@action.Name" Value="@_rule.Actions.Contains(action)" Color="Color.Primary" Dense="true"
+                         ValueChanged="@((bool isChecked) => ToggleActionAsync(action, isChecked))" data-testid="@($"rule-action-{action.Name}")" />
+        }
+        @foreach (var action in _rule.Actions.Where(action => !IsKnownAction(action)))
+        {
+            <MudTooltip Text="Unknown action">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Icon="@Icons.Material.Filled.ErrorOutline"
+                         Class="ma-0">
+                    @action.Name<ChipRemoveButton Value="@action.Name" OnRemove="@(() => ToggleActionAsync(action, false))" />
+                </MudChip>
+            </MudTooltip>
+        }
+        <MudSpacer />
+        <MudButton StartIcon="@Icons.Material.Filled.Delete" Variant="Variant.Text" Color="Color.Error" OnClick="@OnRemove"
+                   aria-label="@($"Remove {AccessibleName}")" data-testid="rule-remove">Remove</MudButton>
+    </MudStack>
+    @if (_rule.Actions.IsEmpty)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Error">Select at least one action.</MudText>
+    }
+    @if (_rule.Paths.IsEmpty && _rule.Types.IsEmpty && _rule.Members.IsEmpty && _rule.Tags.IsEmpty)
+    {
+        @* Saving is not blocked, as a rule for every member is valid, but an allow rule should never be one by accident. *@
+        <MudAlert Severity="@(IsDeny ? Severity.Warning : Severity.Error)" Dense="true" Class="mt-1"
+                  data-testid="rule-any-member-warning">This rule applies to every member.</MudAlert>
+    }
+    @if (IsDeny && GetSingleMemberPaths() is { Count: > 0 } singleMemberPaths)
+    {
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mt-1" data-testid="rule-single-member-hint">
+            @DescribeSingleMemberPaths(singleMemberPaths)
+        </MudAlert>
+    }
+</MudPaper>
+
+@code {
+    // How each field and IsValid treat commas: a name in a path can hold one, so Paths takes one path at a time, while
+    // the other selectors take several values separated by commas.
+    private const bool PathsSplitAtCommas = false;
+    private const bool NamesSplitAtCommas = true;
+
+    private const string SeveralPathsHint =
+        "Looks like several paths separated by a comma, which is part of a path here; add each path on its own.";
+
+    // Boxed once rather than on each render.
+    private static readonly IReadOnlyList<string> TagSuggestions = MemberTags.All;
+
+    private PermissionRule _rule = null!;
+    private ChipListInput? _paths;
+    private ChipListInput? _types;
+    private ChipListInput? _members;
+    private ChipListInput? _tags;
+    private bool _reportedInvalidText;
+
+    [Parameter, EditorRequired]
+    public PermissionRule Rule { get; set; } = null!;
+
+    [Parameter]
+    public EventCallback<PermissionRule> RuleChanged { get; set; }
+
+    [Parameter]
+    public EventCallback OnRemove { get; set; }
+
+    /// <summary>Whether the rule is a deny rule, for which a rule without selectors is a lesser risk than an allow rule.</summary>
+    [Parameter]
+    public bool IsDeny { get; set; }
+
+    /// <summary>Raised with <see cref="HasInvalidText"/> when it changes.</summary>
+    [Parameter]
+    public EventCallback<bool> HasInvalidTextChanged { get; set; }
+
+    /// <summary>The type names suggested for the types selector.</summary>
+    [Parameter]
+    public IReadOnlyList<string> TypeNames { get; set; } = [];
+
+    /// <summary>The rule as screen readers name it, such as "allow rule 2".</summary>
+    [Parameter]
+    public string AccessibleName { get; set; } = "rule";
+
+    [Parameter]
+    public string? TestId { get; set; }
+
+    /// <summary>
+    /// Gets whether a rule can be saved: it has at least one action, every action is known, every path pattern is valid,
+    /// every tag is one of <see cref="MemberTags"/> and no selector lists a value twice.
+    /// </summary>
+    internal static bool IsValid(PermissionRule rule, AuthorizationService authorizationService) =>
+        !rule.Actions.IsEmpty &&
+        rule.Actions.All(IsKnownAction) &&
+        ChipListInput.AreValid(rule.Paths, authorizationService.ValidatePathPattern, StringComparer.Ordinal, PathsSplitAtCommas) &&
+        ChipListInput.AreValid(rule.Types, ValidateTypeName, StringComparer.Ordinal, NamesSplitAtCommas) &&
+        ChipListInput.AreValid(rule.Members, ValidateMemberName, StringComparer.Ordinal, NamesSplitAtCommas) &&
+        ChipListInput.AreValid(rule.Tags, ValidateTag, StringComparer.OrdinalIgnoreCase, NamesSplitAtCommas);
+
+    /// <summary>
+    /// Gets whether a selector field holds typed text that is invalid, which keeps the rule from being saved, as it is
+    /// neither added nor dropped.
+    /// </summary>
+    internal bool HasInvalidText =>
+        _paths?.HasInvalidText == true || _types?.HasInvalidText == true ||
+        _members?.HasInvalidText == true || _tags?.HasInvalidText == true;
+
+    /// <summary>
+    /// Adds the valid text typed into each selector field and not added yet, so that a save never drops it.
+    /// </summary>
+    internal async Task CommitTextAsync()
+    {
+        foreach (var input in new[] { _paths, _types, _members, _tags }.OfType<ChipListInput>())
+        {
+            await input.CommitTextAsync();
+        }
+    }
+
+    protected override void OnParametersSet() => _rule = Rule;
+
+    private static bool IsKnownAction(PermissionAction action) => AuthorizationActions.All.Contains(action);
+
+    // Tags compare ignoring case; no member carries another tag, so a rule naming one would never match.
+    private static string? ValidateTag(string tag)
+    {
+        if (HasWhiteSpace(tag))
+        {
+            return "A tag contains no whitespace.";
+        }
+
+        return MemberTags.All.Contains(tag, StringComparer.OrdinalIgnoreCase) ? null : $"Unknown tag; use one of {string.Join(", ", MemberTags.All)}.";
+    }
+
+    // No type or member name has whitespace, so a rule naming one would never match.
+    private static string? ValidateTypeName(string name) => HasWhiteSpace(name) ? "A type name contains no whitespace." : null;
+
+    private static string? ValidateMemberName(string name) => HasWhiteSpace(name) ? "A member name contains no whitespace." : null;
+
+    private static bool HasWhiteSpace(string text) => text.Any(char.IsWhiteSpace);
+
+    // Only a warning, as a rule may name a type that is not loaded yet, or a full name, whose simple name is checked.
+    private string? WarnTypeName(string name)
+    {
+        var simpleName = name[(name.LastIndexOf('.') + 1)..];
+        return TypeNames.Contains(simpleName, StringComparer.Ordinal)
+            ? null
+            : "No known subject type or interface has this name; check its spelling and case.";
+    }
+
+    // Pasted paths with a space after the comma give a segment with trailing whitespace, whose error alone would not say why.
+    private string? ValidatePath(string pattern)
+    {
+        var error = AuthorizationService.ValidatePathPattern(pattern);
+        return error is not null && LooksLikeSeveralPaths(pattern) ? $"{error} {SeveralPathsHint}" : error;
+    }
+
+    private string? WarnPath(string pattern) =>
+        LooksLikeSeveralPaths(pattern) ? SeveralPathsHint : AuthorizationService.GetPathPatternWarning(pattern);
+
+    // A comma followed by the separator, directly or after a space, rather starts another pasted path than continues a name.
+    private bool LooksLikeSeveralPaths(string pattern)
+    {
+        var separator = AuthorizationService.PathProvider.PathSeparator;
+        for (var comma = pattern.IndexOf(','); comma >= 0; comma = pattern.IndexOf(',', comma + 1))
+        {
+            var next = comma + 1 < pattern.Length && pattern[comma + 1] == ' ' ? comma + 2 : comma + 1;
+            if (next < pattern.Length && pattern[next] == separator)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // The paths of a deny rule that match one member and leave what is below it allowed: valid, without a wildcard and
+    // naming a member that holds subjects. An entry is left to the path warning, and a value has nothing below it.
+    private List<string> GetSingleMemberPaths()
+    {
+        var root = PathResolver.ResolveSubject("/", PathStyle.Canonical);
+        return _rule.Paths
+            .Where(pattern => !pattern.Contains('*') &&
+                AuthorizationService.ValidatePathPattern(pattern) is null &&
+                RulePaths.NamesMemberHoldingSubjects(pattern, root, AuthorizationService.PathProvider))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private string DescribeSingleMemberPaths(List<string> paths)
+    {
+        var branch = $"{AuthorizationService.PathProvider.PathSeparator}**";
+        var list = string.Join(", ", paths.Select(path => $"'{path}'"));
+        return paths.Count == 1
+            ? $"{list} matches only that one member, not what is below it; add {branch} to deny everything below it as well."
+            : $"{list} match only those members, not what is below them; add {branch} to deny everything below them as well.";
+    }
+
+    // The rule is kept here as changed, as the parameter is set again only once the parent rendered, which a second
+    // change before that, such as committing the text of each field, would otherwise undo.
+    private Task ChangeAsync(PermissionRule rule)
+    {
+        _rule = rule;
+        return RuleChanged.InvokeAsync(rule);
+    }
+
+    private async Task ReportInvalidTextAsync()
+    {
+        if (HasInvalidText != _reportedInvalidText)
+        {
+            _reportedInvalidText = HasInvalidText;
+            await HasInvalidTextChanged.InvokeAsync(_reportedInvalidText);
+        }
+    }
+
+    private Task ToggleActionAsync(PermissionAction action, bool isChecked) =>
+        ChangeAsync(_rule with { Actions = isChecked ? _rule.Actions.Add(action) : _rule.Actions.Remove(action) });
+
+    // Subjects and every member a rule can match can be picked; the pattern goes into the field to be edited first.
+    private async Task<string?> PickPathAsync()
+    {
+        var parameters = new DialogParameters<SubjectPathPickerDialog>
+        {
+            { dialog => dialog.Label, "Path" },
+            { dialog => dialog.CanSelectProperty, property => !RulePaths.IsMarker(property) },
+            { dialog => dialog.ListsPropertiesWithoutState, true }
+        };
+
+        var dialog = await DialogService.ShowAsync<SubjectPathPickerDialog>("Select Path", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var result = await dialog.Result;
+        return result is { Canceled: false, Data: string path } && !string.IsNullOrWhiteSpace(path)
+            ? RulePaths.GetPickedPattern(path.Trim(), PathResolver, AuthorizationService.PathProvider)
+            : null;
+    }
+}
