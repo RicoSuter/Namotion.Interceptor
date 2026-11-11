@@ -1,9 +1,8 @@
 using HomeBlaze.Abstractions;
-using HomeBlaze.Services;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
 
-namespace HomeBlaze.Host.Services.Display;
+namespace HomeBlaze.Services.Display;
 
 /// <summary>
 /// Extension methods for resolving display properties from subjects.

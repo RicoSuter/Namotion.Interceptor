@@ -1,13 +1,12 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Components.Abstractions.Attributes;
-using HomeBlaze.Host.Services.Display;
-using HomeBlaze.Services;
 using HomeBlaze.Services.Components;
-using HomeBlaze.Services.Metadata;
+using HomeBlaze.Services.Display;
+using HomeBlaze.Services.Navigation;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 
-namespace HomeBlaze.Host.Services.Navigation;
+namespace HomeBlaze.Services.Metadata;
 
 /// <summary>
 /// A link of metadata as the browser shows it.

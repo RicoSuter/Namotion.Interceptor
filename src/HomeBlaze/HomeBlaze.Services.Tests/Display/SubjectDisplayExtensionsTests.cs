@@ -1,6 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Host.Services.Display;
+using HomeBlaze.Services.Display;
 using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -9,7 +9,7 @@ using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
-namespace HomeBlaze.Host.Services.Tests.Display;
+namespace HomeBlaze.Services.Tests.Display;
 
 public class SubjectDisplayExtensionsTests
 {

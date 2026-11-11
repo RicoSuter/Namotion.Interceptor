@@ -449,6 +449,13 @@ namespace HomeBlaze.Services.Display
         public static string? GetUnitSuffix(HomeBlaze.Abstractions.Attributes.StateUnit unit) { }
         public static bool TryGetScaledUnit(HomeBlaze.Abstractions.Attributes.StateUnit unit, decimal magnitude, out string suffix, out decimal factor) { }
     }
+    public static class SubjectDisplayExtensions
+    {
+        public static string GetChildDisplayName(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.Registry.Abstractions.SubjectPropertyChild child) { }
+        public static string GetIdentifyingDisplayName(string displayName, object? index) { }
+        public static string GetTitle(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static bool IsShownAsValue(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+    }
     public readonly struct ValueBinding
     {
         public ValueBinding(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property, object? value, Namotion.Interceptor.IInterceptorSubject? subject) { }
@@ -519,6 +526,13 @@ namespace HomeBlaze.Services.Metadata
         public static bool IsAllowedScheme(string scheme) { }
         public static bool IsWebAddress(string url) { }
     }
+    public sealed class MetadataLinkResolver
+    {
+        public const string PropertyQueryParameter = "property";
+        public MetadataLinkResolver(HomeBlaze.Services.SubjectPathResolver pathResolver, HomeBlaze.Services.Components.SubjectComponentRegistry componentRegistry) { }
+        public HomeBlaze.Services.Metadata.ResolvedMetadataLink Resolve(HomeBlaze.Services.Metadata.MetadataLink link) { }
+        public HomeBlaze.Services.Metadata.ResolvedMetadataLink Resolve(Namotion.Interceptor.IInterceptorSubject subject, string? propertyName, string? title = null) { }
+    }
     public static class MetadataSearch
     {
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
@@ -543,12 +557,29 @@ namespace HomeBlaze.Services.Metadata
         public const int MaxTagLength = 64;
         public static bool HasControlOrFormatCharacter(string text) { }
     }
+    public sealed class ResolvedMetadataLink : System.IEquatable<HomeBlaze.Services.Metadata.ResolvedMetadataLink>
+    {
+        public ResolvedMetadataLink(string Title, string? Href, bool IsExternal) { }
+        public string? Href { get; init; }
+        public bool IsBroken { get; }
+        public bool IsExternal { get; init; }
+        public string Title { get; init; }
+    }
     public static class SubjectMetadataExtensions
     {
         public static HomeBlaze.Storage.Abstractions.Metadata.IMetadataStore? FindMetadataStore(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static System.Collections.Immutable.ImmutableDictionary<string, System.Text.Json.JsonElement>? GetMetadata(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static System.Collections.Immutable.ImmutableDictionary<string, System.Text.Json.JsonElement>? GetMetadata(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
         public static bool IsMetadata(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+    }
+}
+namespace HomeBlaze.Services.Navigation
+{
+    public static class BrowserUrls
+    {
+        public const string Root = "/browser";
+        public static string Create(System.Collections.Generic.IEnumerable<string> segments) { }
+        public static string FromRoutePath(string routePath) { }
     }
 }
 namespace HomeBlaze.Services.Serialization

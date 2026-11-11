@@ -153,7 +153,8 @@ Storage.Abs.   Components.Abs.   Abstractions
 - **Method Discovery**: Find `[Operation]` and `[Query]` methods on subjects
 - **Method Invocation**: Execute operations with parameter conversion
 - **Method Properties**: `MethodPropertyInitializer` creates virtual properties for methods, enabling `[PropertyAttribute]` on operations (e.g., `IsEnabled`)
-- **Metadata**: Read and search the metadata of subjects and properties and order children, in the namespace `HomeBlaze.Services.Metadata`
+- **Metadata**: Read and search the metadata of subjects and properties, order children and resolve metadata links to what the browser opens, in the namespace `HomeBlaze.Services.Metadata`
+- **Display Helpers**: Subject titles and whether the browser shows a property as a value (`HomeBlaze.Services.Display`), and the URLs of the subject browser (`HomeBlaze.Services.Navigation`)
 
 **Dependencies**: `HomeBlaze.Abstractions`, `HomeBlaze.Storage.Abstractions`, `HomeBlaze.Components.Abstractions`
 
@@ -168,7 +169,7 @@ Storage.Abs.   Components.Abs.   Abstractions
 **Features**:
 - **Navigation Tree**: Build navigation from subject graph
 - **Route Resolution**: Subjects to URL-friendly paths
-- **Display Helpers**: Title, icon, formatted state values
+- **Display Helpers**: Icon, formatted state values
 - **Developer Mode**: Toggle developer features
 
 **Dependencies**: `HomeBlaze.Services`
