@@ -8,6 +8,8 @@ namespace HomeBlaze.Automation.Blazor
     {
         public AutomationEditComponent() { }
         [Microsoft.AspNetCore.Components.Parameter]
+        public string? InitialRuleKey { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public bool IsCreating { get; set; }
         public bool IsDirty { get; }
         public bool IsValid { get; }
@@ -21,6 +23,28 @@ namespace HomeBlaze.Automation.Blazor
         protected override void OnInitialized() { }
         public System.Threading.Tasks.Task SaveAsync(System.Threading.CancellationToken cancellationToken) { }
     }
+    public class AutomationOverviewTab : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public AutomationOverviewTab() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Automation Automation { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? CurrentDetail { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Blazor.Diagram.StateDiagramLayout Layout { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback NotesEditRequested { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string> RuleOpened { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        [System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Key",
+                "Rule"})]
+        public Microsoft.AspNetCore.Components.EventCallback<System.ValueTuple<string, HomeBlaze.Automation.AutomationRule>> TestRequested { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Page, typeof(HomeBlaze.Automation.Automation))]
     public class AutomationPage : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, System.IDisposable
     {
@@ -31,6 +55,20 @@ namespace HomeBlaze.Automation.Blazor
         public void Dispose() { }
         protected override void OnAfterRender(bool firstRender) { }
         protected override void OnParametersSet() { }
+    }
+    public class AutomationRunsTab : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public AutomationRunsTab() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Automation Automation { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Automation.Blazor.Runs.RecentRunsResult? RecentRuns { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? SelectedRuleName { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string?> SelectedRuleNameChanged { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Automation.Automation))]
     public class AutomationWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
@@ -342,5 +380,25 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public void Dispose() { }
         protected override void OnInitialized() { }
         protected override void OnParametersSet() { }
+    }
+}
+namespace HomeBlaze.Automation.Blazor.Runs
+{
+    public sealed class RecentRunsResult : System.IEquatable<HomeBlaze.Automation.Blazor.Runs.RecentRunsResult>
+    {
+        public RecentRunsResult(bool HasHistory, System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Runs.RunEntry> Runs, string? Error, bool IsBehind) { }
+        public string Caption { get; }
+        public string? Error { get; init; }
+        public bool HasHistory { get; init; }
+        public bool IsBehind { get; init; }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.Blazor.Runs.RunEntry> Runs { get; init; }
+    }
+    public sealed class RunEntry : System.IEquatable<HomeBlaze.Automation.Blazor.Runs.RunEntry>
+    {
+        public RunEntry(System.DateTimeOffset? At, string RuleName, HomeBlaze.Automation.AutomationRunOutcome? Outcome, string? Message) { }
+        public System.DateTimeOffset? At { get; init; }
+        public string? Message { get; init; }
+        public HomeBlaze.Automation.AutomationRunOutcome? Outcome { get; init; }
+        public string RuleName { get; init; }
     }
 }

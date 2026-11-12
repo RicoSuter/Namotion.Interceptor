@@ -1,5 +1,5 @@
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Host.Services.Navigation;
+using HomeBlaze.Components.Abstractions.Attributes;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Components;
 using HomeBlaze.Services.Lifecycle;
@@ -12,7 +12,7 @@ using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Xunit;
 
-namespace HomeBlaze.Host.Services.Tests.Navigation;
+namespace HomeBlaze.Services.Tests.Metadata;
 
 public class MetadataLinkResolverTests
 {
@@ -28,7 +28,7 @@ public class MetadataLinkResolverTests
         {
             Children = new Dictionary<string, IInterceptorSubject>
             {
-                ["Readme.md"] = new NavigationTestPage(context),
+                ["Readme.md"] = new MetadataLinkTestPage(context),
                 ["Devices"] = new MetadataLinkTestFolder(context)
             }
         };
@@ -180,4 +180,14 @@ public partial class MetadataLinkTestFolder
     {
         Children = new();
     }
+}
+
+[InterceptorSubject]
+public partial class MetadataLinkTestPage
+{
+}
+
+[SubjectComponent(SubjectComponentType.Page, typeof(MetadataLinkTestPage))]
+public class MetadataLinkTestPageComponent
+{
 }

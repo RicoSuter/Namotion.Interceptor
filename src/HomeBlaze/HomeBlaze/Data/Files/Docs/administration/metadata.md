@@ -111,6 +111,8 @@ The pane shows the tags of its folder or subject below its header, and the [Meta
 
 A click on a tag lists everything that has the tag, except what the browser does not show.
 
+The page of an automation shows its notes, links and tags too, see [Automation](automation.md#the-page-and-the-widget).
+
 ### Notes
 
 Notes are Markdown of up to 4 KB, shown formatted. A save is refused, with the rule it breaks, when notes hold:
@@ -120,6 +122,8 @@ Notes are Markdown of up to 4 KB, shown formatted. A save is refused, with the r
 - A link that leads anywhere other than an http, https or mailto address or a route of HomeBlaze: `/`, the browser, such as `/browser/Devices/Pump`, or a page, such as `/pages/Docs/Setup.md`. A route may not contain `.` or `..` segments or backslashes, and relative paths and links to a `#` fragment alone are refused
 
 Braces with only names, such as `{low}`, and footnotes are shown as text. A link to an http or https address opens in a new tab. Notes that break the rules, for example after an edit by hand, are shown as plain text.
+
+In the [Metadata dialog](#the-metadata-dialog), **Notes** shows the Markdown beside a live preview of how it is shown, which moves below it on a narrow screen, with the size in bytes and the rule that the notes break. Notes that break the rules and that you leave unchanged are kept as they are, and the other fields can still be saved; the dialog says so below the notes.
 
 ### Links
 

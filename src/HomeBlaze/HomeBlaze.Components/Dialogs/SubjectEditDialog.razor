@@ -17,7 +17,7 @@
         }
     </TitleContent>
     <DialogContent>
-        <SubjectEditPanel @ref="_editPanel" Subject="@Subject" IsValidChanged="OnEditPanelIsValidChanged" />
+        <SubjectEditPanel @ref="_editPanel" Subject="@Subject" EditorParameters="@EditorParameters" IsValidChanged="OnEditPanelIsValidChanged" />
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
@@ -31,6 +31,11 @@
     [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
 
     [Parameter] public IInterceptorSubject? Subject { get; set; }
+
+    /// <summary>
+    /// Gets or sets extra parameters for the hosted editor, see <see cref="SubjectEditPanel.EditorParameters"/>.
+    /// </summary>
+    [Parameter] public IReadOnlyDictionary<string, object?>? EditorParameters { get; set; }
 
     private SubjectEditPanel? _editPanel;
 
@@ -81,15 +86,26 @@
         _ => $"Edit {itemName}: {title}"
     };
 
+    /// <summary>Shows the dialog that edits the subject with its registered edit component or the generated properties editor.</summary>
+    /// <param name="dialogService">The dialog service.</param>
+    /// <param name="componentRegistry">The registry that finds the edit component of the subject.</param>
+    /// <param name="subject">The subject to edit.</param>
+    /// <param name="title">The title of the dialog, or null for "Edit Subject".</param>
+    /// <param name="editorParameters">
+    /// Extra parameters for the registered edit component, or null. Pass them only for a subject whose edit component
+    /// declares every entry, as Blazor throws for an unknown parameter.
+    /// </param>
     public static Task<IDialogReference> ShowAsync(
         IDialogService dialogService,
         SubjectComponentRegistry componentRegistry,
         IInterceptorSubject subject,
-        string? title = null)
+        string? title = null,
+        IReadOnlyDictionary<string, object?>? editorParameters = null)
     {
         var parameters = new DialogParameters<SubjectEditDialog>
         {
-            { x => x.Subject, subject }
+            { x => x.Subject, subject },
+            { x => x.EditorParameters, editorParameters }
         };
 
         var editRegistration = componentRegistry.GetComponent(

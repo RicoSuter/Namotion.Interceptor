@@ -73,4 +73,21 @@ public class RecentRunsTests
         // Assert
         Assert.Equal("From history: the runs of the last seven days. Runs within about 250 ms can show as one, and a crash can drop runs.", result.Caption);
     }
+
+    [Theory]
+    [InlineData(true, 3, "3")]
+    [InlineData(true, RecentRuns.MaxRuns, "20+")]
+    [InlineData(false, RecentRuns.MaxRuns, "20")]
+    public void WhenTheRunsAreCounted_ThenAFullListFromHistoryHasAPlus(bool hasHistory, int count, string expected)
+    {
+        // Arrange
+        var run = new RunEntry(DateTimeOffset.UnixEpoch, "Rule", AutomationRunOutcome.Succeeded, null);
+        var result = new RecentRunsResult(hasHistory, Enumerable.Repeat(run, count).ToArray(), null, false);
+
+        // Act
+        var text = RecentRuns.FormatCount(result);
+
+        // Assert
+        Assert.Equal(expected, text);
+    }
 }

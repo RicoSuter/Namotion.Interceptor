@@ -133,6 +133,116 @@ public class MetadataSearchTests
         // Assert
         Assert.Equal(["pump"], tags);
     }
+
+    // A storage below the root of the application, with its own device Pump beside a device Pump of the application root.
+    private static (MetadataSearchTestFolder ApplicationRoot, MetadataSearchTestFolder Storage) CreateStorageTree(bool withResolver = true)
+    {
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var storage = new MetadataSearchTestFolder(context)
+        {
+            Children = new Dictionary<string, IInterceptorSubject> { ["Pump"] = new MetadataSearchTestDevice { Channels = [new MetadataSearchTestDevice()] } }
+        };
+        var applicationRoot = new MetadataSearchTestFolder(context)
+        {
+            Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage, ["Pump"] = new MetadataSearchTestDevice() }
+        };
+        if (withResolver)
+        {
+            var resolver = new SubjectPathResolver(() => applicationRoot);
+            context.WithService<ISubjectPathResolver>(() => resolver);
+        }
+
+        return (applicationRoot, storage);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("/")]
+    [InlineData(" // ")]
+    public void WhenThePathHasOnlyWhitespaceAndSlashes_ThenTheRootIsResolved(string path)
+    {
+        // Arrange
+        var (_, storage) = CreateStorageTree();
+
+        // Act
+        var subject = MetadataSearch.ResolvePath(storage, path);
+
+        // Assert
+        Assert.Same(storage, subject);
+    }
+
+    [Theory]
+    [InlineData("Pump")]
+    [InlineData("/Pump")]
+    [InlineData("//Pump")]
+    [InlineData(" /Pump ")]
+    public void WhenThePathHasLeadingSlashes_ThenItIsResolvedRelativeToTheRootAndNotToTheApplicationRoot(string path)
+    {
+        // Arrange
+        var (_, storage) = CreateStorageTree();
+
+        // Act
+        var subject = MetadataSearch.ResolvePath(storage, path);
+
+        // Assert
+        Assert.Same(storage.Children["Pump"], subject);
+    }
+
+    [Fact]
+    public void WhenThePathLeadsBelowASubject_ThenTheSubjectAtItIsResolved()
+    {
+        // Arrange
+        var (_, storage) = CreateStorageTree();
+
+        // Act
+        var subject = MetadataSearch.ResolvePath(storage, "Pump/Channels[0]");
+
+        // Assert
+        Assert.Same(((MetadataSearchTestDevice)storage.Children["Pump"]).Channels[0], subject);
+    }
+
+    [Fact]
+    public void WhenThePathStartsWithAParentSegment_ThenItDoesNotLeaveTheRoot()
+    {
+        // Arrange
+        var (applicationRoot, storage) = CreateStorageTree();
+
+        // Act
+        var subject = MetadataSearch.ResolvePath(storage, "../Pump");
+
+        // Assert
+        Assert.NotSame(applicationRoot.Children["Pump"], subject);
+        Assert.Null(subject);
+    }
+
+    [Fact]
+    public void WhenNoSubjectIsAtThePath_ThenNullIsResolved()
+    {
+        // Arrange
+        var (_, storage) = CreateStorageTree();
+
+        // Act
+        var subject = MetadataSearch.ResolvePath(storage, "Missing");
+
+        // Assert
+        Assert.Null(subject);
+    }
+
+    [Fact]
+    public void WhenTheContextHasNoResolver_ThenNullIsResolvedForAPathAndTheRootForAnEmptyOne()
+    {
+        // Arrange
+        var (_, storage) = CreateStorageTree(withResolver: false);
+
+        // Act
+        var subject = MetadataSearch.ResolvePath(storage, "Pump");
+        var root = MetadataSearch.ResolvePath(storage, "/");
+
+        // Assert
+        Assert.Null(subject);
+        Assert.Same(storage, root);
+    }
 }
 
 [InterceptorSubject]
