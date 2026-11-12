@@ -32,13 +32,13 @@ internal class OpcUaSubjectLoader
         _logger = logger;
     }
 
-    public async Task<IReadOnlyList<MonitoredItem>> LoadSubjectAsync(
+    public async Task<IReadOnlyList<MonitoredItemRequest>> LoadSubjectAsync(
         IInterceptorSubject subject,
         ReferenceDescription node,
         ISession session,
         CancellationToken cancellationToken)
     {
-        var monitoredItems = new List<MonitoredItem>();
+        var monitoredItems = new List<MonitoredItemRequest>();
         var loadedSubjects = new HashSet<IInterceptorSubject>(System.Collections.Generic.ReferenceEqualityComparer.Instance);
         var subjectsByNodeId = new Dictionary<NodeId, IInterceptorSubject>();
         await LoadSubjectAsync(subject, node, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
@@ -48,7 +48,7 @@ internal class OpcUaSubjectLoader
     private async Task LoadSubjectAsync(IInterceptorSubject subject,
         ReferenceDescription node,
         ISession session,
-        List<MonitoredItem> monitoredItems,
+        List<MonitoredItemRequest> monitoredItems,
         HashSet<IInterceptorSubject> loadedSubjects,
         Dictionary<NodeId, IInterceptorSubject> subjectsByNodeId,
         CancellationToken cancellationToken)
@@ -157,7 +157,7 @@ internal class OpcUaSubjectLoader
         RegisteredSubjectProperty property,
         NodeId parentNodeId,
         ISession session,
-        List<MonitoredItem> monitoredItems,
+        List<MonitoredItemRequest> monitoredItems,
         HashSet<NodeId> visitedNodes,
         CancellationToken cancellationToken)
     {
@@ -255,7 +255,7 @@ internal class OpcUaSubjectLoader
         NodeId nodeId,
         IInterceptorSubject subject,
         ISession session,
-        List<MonitoredItem> monitoredItems,
+        List<MonitoredItemRequest> monitoredItems,
         HashSet<IInterceptorSubject> loadedSubjects,
         Dictionary<NodeId, IInterceptorSubject> subjectsByNodeId,
         CancellationToken cancellationToken)
@@ -295,7 +295,7 @@ internal class OpcUaSubjectLoader
 
     private async Task LoadSubjectCollectionAsync(RegisteredSubjectProperty property,
         NodeId childNodeId,
-        List<MonitoredItem> monitoredItems,
+        List<MonitoredItemRequest> monitoredItems,
         ISession session,
         HashSet<IInterceptorSubject> loadedSubjects,
         Dictionary<NodeId, IInterceptorSubject> subjectsByNodeId,
@@ -343,7 +343,7 @@ internal class OpcUaSubjectLoader
     private async Task LoadSubjectDictionaryAsync(
         RegisteredSubjectProperty property,
         NodeId childNodeId,
-        List<MonitoredItem> monitoredItems,
+        List<MonitoredItemRequest> monitoredItems,
         ISession session,
         HashSet<IInterceptorSubject> loadedSubjects,
         Dictionary<NodeId, IInterceptorSubject> subjectsByNodeId,
@@ -398,7 +398,7 @@ internal class OpcUaSubjectLoader
     }
 
     private void MonitorValueNode(
-        NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems, CancellationToken cancellationToken)
+        NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItemRequest> monitoredItems, CancellationToken cancellationToken)
     {
         var monitoredItem = MonitoredItemFactory.Create(_configuration, nodeId, property, _subject);
         property.Reference.SetPropertyData(_source.OpcUaNodeIdKey, nodeId);
@@ -424,7 +424,7 @@ internal class OpcUaSubjectLoader
         RegisteredSubjectProperty property,
         NodeId nodeId,
         ISession session,
-        List<MonitoredItem> monitoredItems,
+        List<MonitoredItemRequest> monitoredItems,
         CancellationToken cancellationToken)
     {
         var children = property.Children;

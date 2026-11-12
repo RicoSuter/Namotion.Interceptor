@@ -8,8 +8,9 @@ using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
 using Opc.Ua;
-using Opc.Ua.Client;
+using Opc.Ua.Client.Subscriptions;
 using static Namotion.Interceptor.OpcUa.Tests.Client.ClientSourceTestFactory;
+using static Namotion.Interceptor.OpcUa.Tests.Client.SubscriptionTestFactory;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
@@ -20,6 +21,7 @@ public class SubscriptionManagerDiagnosticsTests
     {
         // Arrange
         var configuration = CreateConfiguration();
+        configuration.MaxItemsPerSubscription = 1;
         await using var source = CreateClientSource(configuration: configuration);
         var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
         await using var manager = CreateManager(
@@ -27,34 +29,31 @@ public class SubscriptionManagerDiagnosticsTests
             propertyWriter,
             configuration,
             new ConcurrentQueue<Exception>());
-        var firstSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        var secondSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        var replacementSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        var property = new RegisteredSubject((TestRoot)source.RootSubject)
-            .TryGetProperty(nameof(TestRoot.Name))!;
-        var monitoredItem = new MonitoredItem(NullTelemetryContext.Instance)
-        {
-            StartNodeId = new NodeId("Name", 2),
-            AttributeId = Opc.Ua.Attributes.Value,
-            Handle = property
-        };
+        var session = CreateSession();
+        var nameRequest = CreateRequest(source, nameof(TestRoot.Name));
+        var unitRequest = CreateRequest(source, nameof(TestRoot.Number_Unit));
+        var monitoredItem = CreateMonitoredItem();
 
         // Act & Assert
         Assert.Equal(
             (Subscriptions: 0, MonitoredItems: 0),
             (Subscriptions: manager.SubscriptionCount, MonitoredItems: manager.MonitoredItemCount));
-        manager.UpdateTransferredSubscriptions([firstSubscription, secondSubscription]);
-        Assert.Equal(2, manager.SubscriptionCount);
-        manager.UpdateTransferredSubscriptions([replacementSubscription]);
-        Assert.Equal(1, manager.SubscriptionCount);
+        await manager.CreateBatchedSubscriptionsAsync([nameRequest, unitRequest], session, CancellationToken.None);
+        Assert.Equal(
+            (Subscriptions: 2, MonitoredItems: 2),
+            (Subscriptions: manager.SubscriptionCount, MonitoredItems: manager.MonitoredItemCount));
+        await manager.CreateBatchedSubscriptionsAsync([nameRequest], session, CancellationToken.None);
+        Assert.Equal(
+            (Subscriptions: 1, MonitoredItems: 1),
+            (Subscriptions: manager.SubscriptionCount, MonitoredItems: manager.MonitoredItemCount));
 
-        manager.TrackMonitoredItem(monitoredItem);
-        Assert.Equal(1, manager.MonitoredItemCount);
-        manager.TrackMonitoredItem(monitoredItem);
-        Assert.Equal(1, manager.MonitoredItemCount);
+        manager.TrackMonitoredItem(monitoredItem, unitRequest);
+        Assert.Equal(2, manager.MonitoredItemCount);
+        manager.TrackMonitoredItem(monitoredItem, unitRequest);
+        Assert.Equal(2, manager.MonitoredItemCount);
         manager.RemoveItemsForSubject(source.RootSubject);
         Assert.Equal(0, manager.MonitoredItemCount);
-        manager.TrackMonitoredItem(monitoredItem);
+        manager.TrackMonitoredItem(monitoredItem, unitRequest);
         Assert.Equal(1, manager.MonitoredItemCount);
 
         await manager.DisposeAsync();
@@ -64,32 +63,59 @@ public class SubscriptionManagerDiagnosticsTests
     }
 
     [Fact]
-    public async Task WhenTheSdkTransfersSubscriptions_ThenAcceptedOnesStayHookedAndARefusedOneIsReplacedByItsClone()
+    public async Task WhenATrackedSubscriptionStopsPublishing_ThenHasStoppedPublishingIsTrue()
     {
-        // Arrange - the SDK hands back an accepted subscription as the same object and a refused one
-        // as a clone that already carries the callback.
+        // Arrange
         var configuration = CreateConfiguration();
         await using var source = CreateClientSource(configuration: configuration);
         var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
         await using var manager = CreateManager(source, propertyWriter, configuration, new ConcurrentQueue<Exception>());
-        var acceptedSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        var refusedSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        manager.UpdateTransferredSubscriptions([acceptedSubscription, refusedSubscription]);
-        var recreatedSubscription = new Subscription(refusedSubscription, copyEventHandlers: true);
+        var subscription = await CreateTrackedSubscriptionAsync(manager, source, CreateSession());
+        var stoppedBefore = manager.HasStoppedPublishing;
 
         // Act
-        manager.UpdateTransferredSubscriptions([acceptedSubscription, recreatedSubscription]);
+        await manager.OnSubscriptionStateChangedAsync(
+            subscription, SubscriptionState.Modified, PublishState.Stopped | PublishState.Timeout);
 
         // Assert
-        Assert.Equal(2, manager.SubscriptionCount);
-        Assert.Contains(acceptedSubscription, manager.Subscriptions);
-        Assert.Contains(recreatedSubscription, manager.Subscriptions);
-        Assert.DoesNotContain(refusedSubscription, manager.Subscriptions);
-#pragma warning disable CS0618 // SubscriptionManager still wires the classic fast callback
-        Assert.Single(acceptedSubscription.FastDataChangeCallback!.GetInvocationList());
-        Assert.Single(recreatedSubscription.FastDataChangeCallback!.GetInvocationList());
-        Assert.Null(refusedSubscription.FastDataChangeCallback);
-#pragma warning restore CS0618
+        Assert.False(stoppedBefore);
+        Assert.True(manager.HasStoppedPublishing);
+    }
+
+    [Fact]
+    public async Task WhenAStoppedSubscriptionPublishesAgain_ThenHasStoppedPublishingIsFalse()
+    {
+        // Arrange
+        var configuration = CreateConfiguration();
+        await using var source = CreateClientSource(configuration: configuration);
+        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
+        await using var manager = CreateManager(source, propertyWriter, configuration, new ConcurrentQueue<Exception>());
+        var subscription = await CreateTrackedSubscriptionAsync(manager, source, CreateSession());
+        await manager.OnSubscriptionStateChangedAsync(subscription, SubscriptionState.Modified, PublishState.Stopped);
+
+        // Act
+        await manager.OnSubscriptionStateChangedAsync(subscription, SubscriptionState.Modified, PublishState.Recovered);
+
+        // Assert
+        Assert.False(manager.HasStoppedPublishing);
+    }
+
+    [Fact]
+    public async Task WhenAnUntrackedSubscriptionStopsPublishing_ThenHasStoppedPublishingIsFalse()
+    {
+        // Arrange
+        var configuration = CreateConfiguration();
+        await using var source = CreateClientSource(configuration: configuration);
+        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
+        await using var manager = CreateManager(source, propertyWriter, configuration, new ConcurrentQueue<Exception>());
+        await CreateTrackedSubscriptionAsync(manager, source, CreateSession());
+
+        // Act
+        await manager.OnSubscriptionStateChangedAsync(
+            CreateSubscription(), SubscriptionState.Modified, PublishState.Stopped);
+
+        // Assert
+        Assert.False(manager.HasStoppedPublishing);
     }
 
     [Fact]
@@ -108,10 +134,7 @@ public class SubscriptionManagerDiagnosticsTests
 
         // Act & Assert
         var thrown = Assert.Throws<InvalidOperationException>(() =>
-            manager.OnFastDataChange(
-                new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions()),
-                notification,
-                []));
+            manager.OnDataChange(CreateSubscription(), sequenceNumber: 0, notification));
 
         Assert.Same(error, thrown);
         var reported = Assert.Single(reportedErrors);
@@ -134,10 +157,7 @@ public class SubscriptionManagerDiagnosticsTests
         await using var manager = CreateManager(source, propertyWriter, configuration, reportedErrors);
         var clientHandle = TrackNameProperty(manager, source);
 
-        manager.OnFastDataChange(
-            new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions()),
-            CreateNotification(clientHandle, "value"),
-            []);
+        manager.OnDataChange(CreateSubscription(), sequenceNumber: 0, CreateNotification(clientHandle, "value"));
 
         // Act
         await propertyWriter.LoadInitialStateAndResumeAsync(CancellationToken.None);
@@ -164,10 +184,8 @@ public class SubscriptionManagerDiagnosticsTests
         await using var manager = CreateManager(source, propertyWriter, configuration, reportedErrors);
         var clientHandle = TrackNameProperty(manager, source);
 
-        var callback = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => manager.OnFastDataChange(
-            new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions()),
-            CreateNotification(clientHandle, "value"),
-            []));
+        var callback = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => manager.OnDataChange(
+            CreateSubscription(), sequenceNumber: 0, CreateNotification(clientHandle, "value")));
         await converter.Entered.Task.WaitAsync(TestTimeouts.Default);
 
         // Act
@@ -181,228 +199,87 @@ public class SubscriptionManagerDiagnosticsTests
         Assert.Null(source.Diagnostics.LastError);
     }
 
-    [Fact]
-    public async Task WhenPrimaryApplyChangesThrows_ThenSourceReportsExactFailureOnceAndFallsBack()
+    [Theory]
+    [InlineData(nameof(StatusCodes.BadTimeout), true, 0)]
+    [InlineData(nameof(StatusCodes.BadNotSupported), false, 1)]
+    [InlineData(nameof(StatusCodes.BadMonitoredItemFilterUnsupported), false, 1)]
+    [InlineData(nameof(StatusCodes.BadNodeIdUnknown), false, 0)]
+    public async Task WhenAMonitoredItemFailed_ThenItIsKeptForRetryOrPolledOrRemoved(
+        string statusCodeName, bool expectKept, int expectedPollingItemCount)
     {
         // Arrange
-        var error = new ServiceResultException(StatusCodes.BadUnexpectedError, "primary apply failed");
         var configuration = CreateConfiguration();
         await using var source = CreateClientSource(configuration: configuration);
-        var reportedErrors = new ConcurrentQueue<Exception>();
         var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
-        await using var pollingManager = new PollingManager(
-            source,
-            sessionProvider: () => null,
-            propertyWriter,
-            configuration,
-            source.PollingMetrics,
-            source.ReportBackgroundError,
-            NullLogger.Instance);
-        var applyAttempts = 0;
-        await using var manager = CreateManager(
-            source,
-            propertyWriter,
-            configuration,
-            reportedErrors,
-            (_, _) => Interlocked.Increment(ref applyAttempts) == 1
-                ? Task.FromException(error)
-                : Task.CompletedTask,
-            pollingManager);
-        var subscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        var monitoredItem = CreateFailedNameItem(source, StatusCodes.BadNotSupported);
-        subscription.AddItem(monitoredItem);
-        manager.TrackMonitoredItem(monitoredItem);
+        await using var pollingManager = CreatePollingManager(source, propertyWriter, configuration);
+        var reportedErrors = new ConcurrentQueue<Exception>();
+        await using var manager = CreateManager(source, propertyWriter, configuration, reportedErrors, pollingManager);
+        var monitoredItem = CreateMonitoredItem(created: false, error: StatusCodeNames.Resolve(statusCodeName));
+        var subscription = CreateSubscription([monitoredItem]);
+        manager.TrackMonitoredItem(monitoredItem, CreateRequest(source, nameof(TestRoot.Name)));
 
         // Act
-        await manager.ApplyChangesAndFilterFailedMonitoredItemsAsync(subscription, CancellationToken.None);
+        manager.FilterOutFailedMonitoredItems(subscription);
 
         // Assert
-        var reported = Assert.Single(reportedErrors);
-        Assert.Same(error, reported);
-        Assert.Same(error, source.Diagnostics.LastError);
-        Assert.Equal(2, applyAttempts);
-        Assert.Empty(subscription.MonitoredItems);
+        Assert.Equal(expectKept ? [monitoredItem] : [], subscription.MonitoredItems.Items);
+        Assert.Equal(expectKept ? 1 : 0, manager.MonitoredItemCount);
+        Assert.Equal(expectedPollingItemCount, pollingManager.PollingItemCount);
+        Assert.Empty(reportedErrors);
+    }
+
+    [Fact]
+    public async Task WhenAMonitoredItemWasNotAttemptedYet_ThenFilteringLeavesItAlone()
+    {
+        // Arrange
+        var configuration = CreateConfiguration();
+        await using var source = CreateClientSource(configuration: configuration);
+        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
+        await using var pollingManager = CreatePollingManager(source, propertyWriter, configuration);
+        await using var manager = CreateManager(
+            source, propertyWriter, configuration, new ConcurrentQueue<Exception>(), pollingManager);
+        var notAttemptedYet = CreateMonitoredItem(created: false);
+        var created = CreateMonitoredItem();
+        var subscription = CreateSubscription([notAttemptedYet, created]);
+        manager.TrackMonitoredItem(notAttemptedYet, CreateRequest(source, nameof(TestRoot.Name)));
+        manager.TrackMonitoredItem(created, CreateRequest(source, nameof(TestRoot.Number_Unit)));
+
+        // Act
+        manager.FilterOutFailedMonitoredItems(subscription);
+
+        // Assert
+        Assert.Equal([notAttemptedYet, created], subscription.MonitoredItems.Items);
+        Assert.Equal(2, manager.MonitoredItemCount);
+        Assert.Equal(0, pollingManager.PollingItemCount);
+    }
+
+    [Fact]
+    public async Task WhenARetryableItemKeepsFailing_ThenItIsEscalatedToPollingAfterTheRetryBound()
+    {
+        // Arrange
+        var configuration = CreateConfiguration();
+        await using var source = CreateClientSource(configuration: configuration);
+        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
+        await using var pollingManager = CreatePollingManager(source, propertyWriter, configuration);
+        await using var manager = CreateManager(
+            source, propertyWriter, configuration, new ConcurrentQueue<Exception>(), pollingManager);
+        var session = CreateSession(_ => CreateMonitoredItem(created: false, error: StatusCodes.BadTimeout));
+        var subscription = await CreateTrackedSubscriptionAsync(manager, source, session);
+        for (var i = 1; i < SubscriptionManager.MaxHealAttemptsBeforeEscalation; i++)
+        {
+            manager.EscalatePersistentlyFailedItems();
+        }
+
+        var polledWithinTheBound = pollingManager.PollingItemCount;
+
+        // Act
+        manager.EscalatePersistentlyFailedItems();
+
+        // Assert
+        Assert.Equal(0, polledWithinTheBound);
         Assert.Equal(1, pollingManager.PollingItemCount);
-    }
-
-    [Fact]
-    public async Task WhenPrimaryApplyChangesTokenIsCancelled_ThenFailureIsNotReportedAndFilteringContinues()
-    {
-        // Arrange
-        using var cancellationTokenSource = new CancellationTokenSource();
-        cancellationTokenSource.Cancel();
-        var error = new ServiceResultException(StatusCodes.BadRequestCancelledByClient, "cancelled primary apply failed");
-        var configuration = CreateConfiguration();
-        configuration.EnablePollingFallback = false;
-        await using var source = CreateClientSource(configuration: configuration);
-        var reportedErrors = new ConcurrentQueue<Exception>();
-        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
-        var applyAttempts = 0;
-        await using var manager = CreateManager(
-            source,
-            propertyWriter,
-            configuration,
-            reportedErrors,
-            (_, _) => Interlocked.Increment(ref applyAttempts) == 1
-                ? Task.FromException(error)
-                : Task.CompletedTask);
-        var subscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        subscription.AddItem(CreateFailedNameItem(source, StatusCodes.BadAttributeIdInvalid));
-
-        // Act
-        await manager.ApplyChangesAndFilterFailedMonitoredItemsAsync(subscription, cancellationTokenSource.Token);
-
-        // Assert
-        Assert.Empty(reportedErrors);
-        Assert.Null(source.Diagnostics.LastError);
-        Assert.Equal(2, applyAttempts);
-        Assert.Empty(subscription.MonitoredItems);
-    }
-
-    [Fact]
-    public async Task WhenDisposalWinsDuringPrimaryApplyChanges_ThenFailureIsNotReportedAndFilteringContinues()
-    {
-        // Arrange
-        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var error = new ServiceResultException(StatusCodes.BadSessionClosed, "shutdown primary apply failed");
-        var configuration = CreateConfiguration();
-        configuration.EnablePollingFallback = false;
-        await using var source = CreateClientSource(configuration: configuration);
-        var reportedErrors = new ConcurrentQueue<Exception>();
-        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
-        var applyAttempts = 0;
-        await using var manager = CreateManager(
-            source,
-            propertyWriter,
-            configuration,
-            reportedErrors,
-            async (_, _) =>
-            {
-                if (Interlocked.Increment(ref applyAttempts) == 1)
-                {
-                    entered.TrySetResult();
-                    await release.Task;
-                    throw error;
-                }
-            });
-        var subscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        subscription.AddItem(CreateFailedNameItem(source, StatusCodes.BadAttributeIdInvalid));
-
-        var applyChanges = manager.ApplyChangesAndFilterFailedMonitoredItemsAsync(
-            subscription,
-            CancellationToken.None);
-        await entered.Task.WaitAsync(TestTimeouts.Default);
-
-        // Act
-        await manager.DisposeAsync();
-        release.TrySetResult();
-        await applyChanges;
-
-        // Assert
-        Assert.Empty(reportedErrors);
-        Assert.Null(source.Diagnostics.LastError);
-        Assert.Equal(2, applyAttempts);
-        Assert.Empty(subscription.MonitoredItems);
-    }
-
-    [Fact]
-    public async Task WhenFallbackApplyChangesThrows_ThenSourceReportsExactFailureOnceAndContinues()
-    {
-        // Arrange
-        var error = new InvalidOperationException("fallback apply failed");
-        var configuration = CreateConfiguration();
-        await using var source = CreateClientSource(configuration: configuration);
-        var reportedErrors = new ConcurrentQueue<Exception>();
-        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
-        await using var manager = CreateManager(
-            source,
-            propertyWriter,
-            configuration,
-            reportedErrors,
-            (_, _) => Task.FromException(error));
-
-        // Act
-        await manager.RemoveAndFallBackToPollingAsync(
-            new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions()),
-            [],
-            [],
-            CancellationToken.None);
-
-        // Assert
-        var reported = Assert.Single(reportedErrors);
-        Assert.Same(error, reported);
-        Assert.Same(error, source.Diagnostics.LastError);
-    }
-
-    [Fact]
-    public async Task WhenFallbackApplyChangesIsCancelledByWorkToken_ThenFailureIsNotReportedAndContinues()
-    {
-        // Arrange
-        using var cancellationTokenSource = new CancellationTokenSource();
-        cancellationTokenSource.Cancel();
-        var error = new OperationCanceledException(cancellationTokenSource.Token);
-        var configuration = CreateConfiguration();
-        await using var source = CreateClientSource(configuration: configuration);
-        var reportedErrors = new ConcurrentQueue<Exception>();
-        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
-        await using var manager = CreateManager(
-            source,
-            propertyWriter,
-            configuration,
-            reportedErrors,
-            (_, _) => Task.FromException(error));
-
-        // Act
-        await manager.RemoveAndFallBackToPollingAsync(
-            new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions()),
-            [],
-            [],
-            cancellationTokenSource.Token);
-
-        // Assert
-        Assert.Empty(reportedErrors);
-        Assert.Null(source.Diagnostics.LastError);
-    }
-
-    [Fact]
-    public async Task WhenDisposalWinsDuringFallbackApplyChanges_ThenFailureIsNotReportedAndContinues()
-    {
-        // Arrange
-        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var error = new InvalidOperationException("shutdown fallback apply failed");
-        var configuration = CreateConfiguration();
-        await using var source = CreateClientSource(configuration: configuration);
-        var reportedErrors = new ConcurrentQueue<Exception>();
-        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
-        await using var manager = CreateManager(
-            source,
-            propertyWriter,
-            configuration,
-            reportedErrors,
-            async (_, _) =>
-            {
-                entered.TrySetResult();
-                await release.Task;
-                throw error;
-            });
-
-        var applyChanges = manager.RemoveAndFallBackToPollingAsync(
-            new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions()),
-            [],
-            [],
-            CancellationToken.None);
-        await entered.Task.WaitAsync(TestTimeouts.Default);
-
-        // Act
-        await manager.DisposeAsync();
-        release.TrySetResult();
-        await applyChanges;
-
-        // Assert
-        Assert.Empty(reportedErrors);
-        Assert.Null(source.Diagnostics.LastError);
+        Assert.Empty(subscription.MonitoredItems.Items);
+        Assert.Equal(0, manager.MonitoredItemCount);
     }
 
     private static SubscriptionManager CreateManager(
@@ -410,7 +287,6 @@ public class SubscriptionManagerDiagnosticsTests
         SubjectPropertyWriter propertyWriter,
         OpcUaClientConfiguration configuration,
         ConcurrentQueue<Exception> reportedErrors,
-        Func<Subscription, CancellationToken, Task>? applyChangesAsync = null,
         PollingManager? pollingManager = null) =>
         new(
             source,
@@ -423,53 +299,41 @@ public class SubscriptionManagerDiagnosticsTests
                 reportedErrors.Enqueue(error);
                 source.ReportBackgroundError(error);
             },
-            NullLogger.Instance,
-            applyChangesAsync);
+            NullLogger.Instance);
 
-    private static MonitoredItem CreateFailedNameItem(OpcUaSubjectClientSource source, StatusCode statusCode)
+    private static PollingManager CreatePollingManager(
+        OpcUaSubjectClientSource source,
+        SubjectPropertyWriter propertyWriter,
+        OpcUaClientConfiguration configuration) =>
+        new(
+            source,
+            sessionProvider: () => null,
+            propertyWriter,
+            configuration,
+            source.PollingMetrics,
+            source.ReportBackgroundError,
+            NullLogger.Instance);
+
+    /// <summary>
+    /// Creates the one subscription the manager tracks, with a monitored item for the name property.
+    /// </summary>
+    private static async Task<ISubscription> CreateTrackedSubscriptionAsync(
+        SubscriptionManager manager, OpcUaSubjectClientSource source, Opc.Ua.Client.ISession session)
     {
-        var property = new RegisteredSubject((TestRoot)source.RootSubject)
-            .TryGetProperty(nameof(TestRoot.Name))!;
-        var monitoredItem = new MonitoredItem(NullTelemetryContext.Instance)
-        {
-            StartNodeId = new NodeId("Name", 2),
-            AttributeId = Opc.Ua.Attributes.Value,
-            DisplayName = nameof(TestRoot.Name),
-            Handle = property
-        };
-        monitoredItem.SetError(new ServiceResult(statusCode));
-        return monitoredItem;
+        await manager.CreateBatchedSubscriptionsAsync(
+            [CreateRequest(source, nameof(TestRoot.Name))], session, CancellationToken.None);
+        return Assert.Single(manager.Subscriptions);
     }
 
     private static uint TrackNameProperty(SubscriptionManager manager, OpcUaSubjectClientSource source)
     {
-        var property = new RegisteredSubject((TestRoot)source.RootSubject)
-            .TryGetProperty(nameof(TestRoot.Name))!;
-        var monitoredItem = new MonitoredItem(NullTelemetryContext.Instance)
-        {
-            StartNodeId = new NodeId("Name", 2),
-            AttributeId = Opc.Ua.Attributes.Value,
-            Handle = property
-        };
-        var subscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        subscription.AddItem(monitoredItem);
-        manager.TrackMonitoredItem(monitoredItem);
+        var monitoredItem = CreateMonitoredItem();
+        manager.TrackMonitoredItem(monitoredItem, CreateRequest(source, nameof(TestRoot.Name)));
         return monitoredItem.ClientHandle;
     }
 
-    private static DataChangeNotification CreateNotification(uint clientHandle, object value) =>
-        new()
-        {
-            MonitoredItems =
-            [
-                new MonitoredItemNotification
-                {
-                    ClientHandle = clientHandle,
-                    Value = new DataValue(VariantHelper.CastFromWithReflectionFallback(value), StatusCodes.Good, DateTime.UtcNow)
-                }
-            ],
-            DiagnosticInfos = []
-        };
+    private static DataValueChange[] CreateNotification(uint clientHandle, string value) =>
+        [CreateDataChange(clientHandle, value, DateTime.UtcNow)];
 
     private sealed class ThrowingConverter(Exception error) : OpcUaValueConverter
     {

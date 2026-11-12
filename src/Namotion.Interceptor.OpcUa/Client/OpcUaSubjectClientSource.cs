@@ -352,10 +352,10 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     /// This recreates SDK objects on demand instead of holding them in memory.
     /// Called by SessionManager when subscription transfer fails after server restart.
     /// </summary>
-    private IReadOnlyList<MonitoredItem> CreateMonitoredItemsForReconnection()
+    private IReadOnlyList<MonitoredItemRequest> CreateMonitoredItemsForReconnection()
     {
         var ownedProperties = GetOwnedPropertiesWithNodeIds();
-        var monitoredItems = new List<MonitoredItem>(ownedProperties.Count);
+        var monitoredItems = new List<MonitoredItemRequest>(ownedProperties.Count);
 
         foreach (var (property, nodeId) in ownedProperties)
         {
@@ -420,12 +420,9 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             return;
         }
 
-        await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(
-            sessionManager.Subscriptions,
-            cancellationToken).ConfigureAwait(false);
+        _subscriptionHealthMonitor.CheckAndHealSubscriptions(sessionManager.Subscriptions, cancellationToken);
 
-        await sessionManager.SubscriptionManager
-            .EscalatePersistentlyFailedItemsAsync(cancellationToken).ConfigureAwait(false);
+        sessionManager.SubscriptionManager.EscalatePersistentlyFailedItems();
     }
 
     /// <summary>
@@ -446,19 +443,6 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         await _structureLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var staleSubscriptions = sessionManager.Subscriptions.ToList();
-            if (staleSubscriptions.Count > 0)
-            {
-                try
-                {
-                    await session.RemoveSubscriptionsAsync(staleSubscriptions, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    _logger.LogWarning(ex, "Failed to remove stopped OPC UA subscriptions before recreating them.");
-                }
-            }
-
             var monitoredItems = CreateMonitoredItemsForReconnection();
             if (monitoredItems.Count > 0)
             {

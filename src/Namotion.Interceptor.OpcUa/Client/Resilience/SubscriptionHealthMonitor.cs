@@ -1,116 +1,86 @@
 using Microsoft.Extensions.Logging;
 using Opc.Ua;
-using Opc.Ua.Client;
+using Opc.Ua.Client.Subscriptions;
+using Opc.Ua.Client.Subscriptions.MonitoredItems;
 
 namespace Namotion.Interceptor.OpcUa.Client.Resilience;
 
 /// <summary>
-/// Monitors OPC UA subscription health and automatically retries failed monitored items.
-/// Periodically checks for unhealthy items and attempts to heal them by calling ApplyChanges.
+/// Monitors OPC UA subscription health and retries failed monitored items. The subscription engine
+/// retries a failed item a bounded number of times by itself; this requeues the retryable ones that
+/// are still failing afterwards, on every health check.
 /// </summary>
 internal sealed class SubscriptionHealthMonitor
 {
     private readonly ILogger _logger;
     private readonly Action<Exception> _reportError;
-    private readonly Func<Subscription, CancellationToken, Task> _applyChangesAsync;
 
-    public SubscriptionHealthMonitor(
-        ILogger logger,
-        Action<Exception> reportError,
-        Func<Subscription, CancellationToken, Task>? applyChangesAsync = null)
+    public SubscriptionHealthMonitor(ILogger logger, Action<Exception> reportError)
     {
         _logger = logger;
         _reportError = reportError;
-        _applyChangesAsync = applyChangesAsync ??
-            (static (subscription, cancellationToken) => subscription.ApplyChangesAsync(cancellationToken));
     }
 
-    public async Task CheckAndHealSubscriptionsAsync(IReadOnlyCollection<Subscription> subscriptions, CancellationToken cancellationToken)
+    public void CheckAndHealSubscriptions(IReadOnlyCollection<ISubscription> subscriptions, CancellationToken cancellationToken)
     {
         try
         {
             foreach (var subscription in subscriptions)
             {
-                var unhealthyCount = GetUnhealthyCount(subscription);
-                if (unhealthyCount == 0)
-                {
-                    continue;
-                }
+                var unhealthyCount = 0;
+                var requeuedCount = 0;
+                var retryCollection = subscription.MonitoredItems as IMonitoredItemRetryCollection;
 
-                try
+                foreach (var item in subscription.MonitoredItems.Items)
                 {
-                    // Try to heal failed monitored items by reapplying the subscription changes
-                    await _applyChangesAsync(subscription, cancellationToken).ConfigureAwait(false);
-
-                    var stillUnhealthyCount = GetUnhealthyCount(subscription);
-                    if (stillUnhealthyCount == 0)
+                    if (!IsUnhealthy(item) || !IsRetryable(item))
                     {
-                        _logger.LogInformation(
-                            "OPC UA subscription {Id} healed successfully: All {Count} items now healthy.",
-                            subscription.Id, unhealthyCount);
+                        continue;
                     }
-                    else
+
+                    unhealthyCount++;
+
+                    // Returns false while the engine is still applying the item by itself.
+                    if (retryCollection is not null && retryCollection.TryRequeue(item.ClientHandle))
                     {
-                        _logger.LogWarning(
-                            "OPC UA subscription {Id} healed partially: {Healthy}/{Total} items recovered.",
-                            subscription.Id, unhealthyCount - stillUnhealthyCount, unhealthyCount);
+                        requeuedCount++;
                     }
                 }
-                catch (Exception ex)
+
+                if (unhealthyCount > 0)
                 {
-                    ReportErrorIfRunning(ex, cancellationToken);
-                    _logger.LogError(ex, "Failed to heal OPC UA subscription {Id}.", subscription.Id);
+                    _logger.LogWarning(
+                        "OPC UA subscription has {Unhealthy} failed monitored items that can be retried; requeued {Requeued}.",
+                        unhealthyCount, requeuedCount);
                 }
             }
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
         }
         catch (Exception ex)
         {
-            ReportErrorIfRunning(ex, cancellationToken);
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                _reportError(ex);
+            }
+
             _logger.LogError(ex, "OPC UA subscription health check failed.");
         }
-    }
-
-    private void ReportErrorIfRunning(Exception error, CancellationToken cancellationToken)
-    {
-        if (!cancellationToken.IsCancellationRequested)
-        {
-            _reportError(error);
-        }
-    }
-
-    private static int GetUnhealthyCount(Subscription subscription)
-    {
-        var count = 0;
-        foreach (var item in subscription.MonitoredItems)
-        {
-            if (IsUnhealthy(item) && IsRetryable(item))
-            {
-                count++;
-            }
-        }
-        return count;
     }
 
     /// <summary>
     /// Determines if a monitored item is unhealthy (not created or has bad status).
     /// </summary>
-    internal static bool IsUnhealthy(MonitoredItem item)
+    internal static bool IsUnhealthy(IMonitoredItem item)
     {
-        var statusCode = item.Status?.Error?.StatusCode ?? StatusCodes.Good;
-        return !item.Created || StatusCode.IsBad(statusCode);
+        return !item.Created || ServiceResult.IsBad(item.Error);
     }
 
     /// <summary>
     /// Determines if a failed monitored item should be retried.
     /// Returns false for permanent design-time errors, true for transient errors.
     /// </summary>
-    internal static bool IsRetryable(MonitoredItem item)
+    internal static bool IsRetryable(IMonitoredItem item)
     {
-        var statusCode = item.Status?.Error?.StatusCode ?? StatusCodes.Good;
+        var statusCode = item.Error?.StatusCode ?? StatusCodes.Good;
         return OpcUaStatusCodeClassifier.IsTransientError(statusCode);
     }
 }
