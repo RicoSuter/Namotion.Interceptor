@@ -1,4 +1,5 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Benchmark")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.OpcUa.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace Microsoft.Extensions.DependencyInjection
