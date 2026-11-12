@@ -36,16 +36,37 @@ internal static class OpcUaVariantExtensions
                 variant = Variant.From(Array.ConvertAll(byteArrays, static bytes => ByteString.From(bytes)).ToArrayOf());
                 return true;
 
+            // DateTime.MaxValue is Unspecified, so converting it to UTC would shift it below the OPC UA
+            // maximum in time zones east of UTC, and it would no longer map back to DateTime.MaxValue.
+            case DateTime dateTime:
+                variant = Variant.From(ToDateTimeUtc(dateTime));
+                return true;
+
+            case DateTime[] dateTimes:
+                variant = Variant.From(Array.ConvertAll(dateTimes, ToDateTimeUtc).ToArrayOf());
+                return true;
+
             // The SDK derives the enumeration type from the static type of the value, which is object here.
+            // OPC UA enumerations are Int32; a value outside that range has no representation.
             case Enum enumeration:
-                variant = Variant.From(EnumValue.From(enumeration, enumeration.GetType()));
+                if (!TryGetInt32(enumeration, out var number))
+                {
+                    variant = default;
+                    return false;
+                }
+
+                variant = Variant.From(EnumValue.From(number, enumeration.GetType()));
                 return true;
 
             case Array { Rank: 1 } array when array.GetType().GetElementType() is { IsEnum: true }:
                 var numbers = new int[array.Length];
                 for (var i = 0; i < numbers.Length; i++)
                 {
-                    numbers[i] = Convert.ToInt32(array.GetValue(i), System.Globalization.CultureInfo.InvariantCulture);
+                    if (!TryGetInt32(array.GetValue(i), out numbers[i]))
+                    {
+                        variant = default;
+                        return false;
+                    }
                 }
 
                 variant = Variant.From(numbers.ToArrayOf());
@@ -54,6 +75,26 @@ internal static class OpcUaVariantExtensions
             default:
                 return VariantHelper.TryCastFromWithReflectionFallback(value, out variant);
         }
+    }
+
+    private static DateTimeUtc ToDateTimeUtc(DateTime value)
+    {
+        return value.Ticks == DateTime.MaxValue.Ticks ? DateTimeUtc.MaxValue : new DateTimeUtc(value);
+    }
+
+    private static bool TryGetInt32(object? enumeration, out int value)
+    {
+        // An unsigned underlying type above long.MaxValue throws in ToInt64 and is out of range anyway.
+        if (enumeration is Enum && Type.GetTypeCode(Enum.GetUnderlyingType(enumeration.GetType())) == TypeCode.UInt64)
+        {
+            var unsigned = Convert.ToUInt64(enumeration, System.Globalization.CultureInfo.InvariantCulture);
+            value = (int)unsigned;
+            return unsigned <= int.MaxValue;
+        }
+
+        var signed = Convert.ToInt64(enumeration, System.Globalization.CultureInfo.InvariantCulture);
+        value = (int)signed;
+        return signed is >= int.MinValue and <= int.MaxValue;
     }
 
     /// <summary>
