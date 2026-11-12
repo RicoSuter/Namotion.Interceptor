@@ -12,8 +12,7 @@ using Xunit.Abstractions;
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
 /// <summary>
-/// Verifies that an outage during the SDK's own auto-reconnect window (triggered from
-/// SessionManager.OnKeepAlive, before any manual reconnection takes over) is visible on
+/// Verifies that an outage while the managed session reconnects is visible on
 /// <see cref="ISubjectSource.State"/> instead of leaving the source reporting Synchronized
 /// throughout the whole outage.
 /// </summary>
@@ -121,10 +120,9 @@ public class OutageStateTests
                 SourceState.Synchronized);
 
             // Act - Disconnect is the soft fault: it breaks the transport without stopping the
-            // connector, which is exactly what a real network blip does. It kills the transport
-            // channel while the session stays assigned, so OnKeepAlive sees the bad status and
-            // hands off to the SDK's SessionReconnectHandler.BeginReconnect - the code path this
-            // test exists to cover.
+            // connector, which is exactly what a real network blip does. It closes the transport
+            // channel while the session stays assigned, so the managed session detects the loss and
+            // reconnects, the code path this test exists to cover.
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
 
             // Assert

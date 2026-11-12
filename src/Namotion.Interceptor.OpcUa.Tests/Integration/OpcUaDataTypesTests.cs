@@ -188,7 +188,7 @@ public class OpcUaDataTypesTests : SharedServerTestBase
     }
 
     [Fact]
-    public async Task EnumType_ShouldSyncBothDirections()
+    public async Task WhenEnumChanges_ThenItSyncsBothDirections()
     {
         // Arrange
         var serverArea = ServerFixture.ServerRoot.DataTypes;
@@ -214,7 +214,7 @@ public class OpcUaDataTypesTests : SharedServerTestBase
     }
 
     [Fact]
-    public async Task EnumArrayType_ShouldSyncBothDirections()
+    public async Task WhenEnumArrayChanges_ThenItSyncsBothDirections()
     {
         // Arrange
         var serverArea = ServerFixture.ServerRoot.DataTypes;
@@ -242,7 +242,7 @@ public class OpcUaDataTypesTests : SharedServerTestBase
     }
 
     [Fact]
-    public async Task SByteArrayType_ShouldSyncBothDirections()
+    public async Task WhenSByteArrayChanges_ThenItSyncsBothDirections()
     {
         // Arrange
         var serverArea = ServerFixture.ServerRoot.DataTypes;
@@ -270,7 +270,7 @@ public class OpcUaDataTypesTests : SharedServerTestBase
     }
 
     [Fact]
-    public async Task DefaultDateTime_ShouldRoundTripAsMinValue()
+    public async Task WhenDateTimeIsMinOrMaxValue_ThenClientReceivesItUnchanged()
     {
         // Arrange
         var serverArea = ServerFixture.ServerRoot.DataTypes;
@@ -291,5 +291,14 @@ public class OpcUaDataTypesTests : SharedServerTestBase
             () => clientArea.DefaultDateTimeValue == DateTime.MinValue,
             timeout: TimeSpan.FromSeconds(90),
             message: () => $"Client should receive DateTime.MinValue, but has {clientArea.DefaultDateTimeValue:O}");
+
+        // Act
+        serverArea.DefaultDateTimeValue = DateTime.MaxValue;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => clientArea.DefaultDateTimeValue.Ticks == DateTime.MaxValue.Ticks,
+            timeout: TimeSpan.FromSeconds(90),
+            message: () => $"Client should receive DateTime.MaxValue, but has {clientArea.DefaultDateTimeValue:O}");
     }
 }
