@@ -2519,6 +2519,7 @@ public class SubjectSourceBaseTests
         using var source = new TestSubjectSource(person, context, NullLogger.Instance,
             bufferTime: TimeSpan.FromMinutes(5))
         {
+            TeardownTimeProvider = new ManualTeardownClock(),
             WriteChangesOverride = (changes, _) =>
             {
                 foreach (var change in changes.ToArray())
@@ -2570,7 +2571,7 @@ public class SubjectSourceBaseTests
         }
         finally
         {
-            await source.StopAsync(CancellationToken.None);
+            await source.StopAsync(CancellationToken.None).WaitAsync(TestTimeout);
         }
 
         // Assert

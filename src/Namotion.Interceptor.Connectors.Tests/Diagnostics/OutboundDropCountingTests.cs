@@ -441,7 +441,10 @@ public class OutboundDropCountingTests
             bufferTime: TimeSpan.FromMinutes(5),
             maxQueueDepth: maxQueueDepth,
             logger: NullLogger.Instance,
-            dropHandler: dropHandler);
+            dropHandler: dropHandler)
+        {
+            TeardownTimeProvider = new ManualTeardownClock()
+        };
     }
 
     /// <summary>
@@ -469,7 +472,7 @@ public class OutboundDropCountingTests
         await cancellation.CancelAsync();
         try
         {
-            await processing;
+            await processing.WaitAsync(TestTimeout);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
