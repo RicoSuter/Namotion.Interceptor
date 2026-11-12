@@ -1451,16 +1451,14 @@ public class SubjectSourceBaseTests
         using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var watchdogRegistration = watchdog.Token.Register(() => releaseCurrentWrite.TrySetResult());
         await source.StartAsync(CancellationToken.None);
-        var probeValue = 0;
-        await AsyncTestHelpers.WaitUntilAsync(() =>
-        {
-            subject.LastName = "probe" + probeValue++;
-            return source.Diagnostics.OutboundChanges.Depth > 0;
-        }, message: "The connected processor did not start buffering the warmup write.");
+        // StartAsync subscribes before it returns, so the warmup write reaches the source through either
+        // the reconcile or the connected processor. Either way the reconcile is over, so only the
+        // processor can deliver the fence.
+        subject.LastName = "warmup";
         await warmupWritten.Task.WaitAsync(TestTimeout);
-        // Changes are delivered in order, so once the fence is written no probe is left to share the
-        // current write's batch, which the single drop asserted below relies on.
-        subject.FirstName_MaxLength = -probeValue;
+        // Changes are delivered in order, so once the fence is written no earlier write is left to share
+        // the current write's batch, which the single drop asserted below relies on.
+        subject.FirstName_MaxLength = -1;
         await warmupFenceWritten.Task.WaitAsync(TestTimeout);
 
         Volatile.Write(ref failCurrentWrite, true);
@@ -2036,6 +2034,7 @@ public class SubjectSourceBaseTests
             .WithRegistry();
         var subject = new Person(context);
         var warmupWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fenceWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var stoppedNotificationEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseStoppedNotification = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var postStoppedTransportEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -2057,6 +2056,11 @@ public class SubjectSourceBaseTests
                 {
                     warmupWritten.TrySetResult();
                 }
+                if (changeArray.Any(change => change.Property.Name == nameof(Person.LastName) &&
+                                              change.GetNewValue<string?>() == "fence"))
+                {
+                    fenceWritten.TrySetResult();
+                }
                 if (changeArray.Any(change => change.Property.Name == nameof(Person.FirstName)))
                 {
                     postStoppedTransportEntered.TrySetResult();
@@ -2077,16 +2081,14 @@ public class SubjectSourceBaseTests
         };
 
         await source.StartAsync(CancellationToken.None);
-        var probeValue = 0;
-        await AsyncTestHelpers.WaitUntilAsync(() =>
-        {
-            subject.LastName = "probe" + probeValue++;
-            return source.Diagnostics.OutboundChanges.Depth > 0;
-        }, message: "The connected processor did not buffer the warmup write.");
+        // StartAsync subscribes before it returns, so the warmup write reaches the source through either
+        // the reconcile or the connected processor. Either way the reconcile is over, so only the
+        // processor can deliver the fence, and changes are delivered in order, so once the fence is
+        // written nothing earlier is left to be dropped by the disposal below.
+        subject.LastName = "warmup";
         await warmupWritten.Task.WaitAsync(TestTimeout);
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => source.Diagnostics.OutboundChanges.Depth == 0,
-            message: "The warmup write did not leave the connected processor.");
+        subject.LastName = "fence";
+        await fenceWritten.Task.WaitAsync(TestTimeout);
         var droppedBeforeDispose = source.Diagnostics.OutboundRetries.TotalDropped;
 
         var disposal = Task.Run(source.Dispose);
