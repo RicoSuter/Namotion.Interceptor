@@ -170,7 +170,7 @@ public class OutboundDropCountingTests
         var context = InterceptorSubjectContext.Create().WithRegistry().WithFullPropertyTracking();
         var person = new Person(context);
 
-        var warmupWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fenceWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var writeFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -191,7 +191,14 @@ public class OutboundDropCountingTests
                 }
                 else
                 {
-                    warmupWritten.TrySetResult();
+                    foreach (var change in changes.Span)
+                    {
+                        if (change.Property.Name == nameof(Person.LastName) &&
+                            change.GetNewValue<string?>() == "fence")
+                        {
+                            fenceWritten.TrySetResult();
+                        }
+                    }
                 }
 
                 return WriteResult.Success;
@@ -209,11 +216,12 @@ public class OutboundDropCountingTests
         {
             person.LastName = "probe" + probeValue++;
             return source.Diagnostics.OutboundChanges.Depth > 0;
-        }, message: "The connected processor did not start buffering the warmup write.");
-        await warmupWritten.Task.WaitAsync(TestTimeout);
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => source.Diagnostics.OutboundChanges.Depth == 0,
-            message: "The warmup write did not leave the processor queue.");
+        }, message: "The connected processor did not start buffering the probe writes.");
+
+        // The subscription and the processor queue are FIFO and a merged batch keeps the last write per
+        // property, so once the fence is written no earlier probe is still pending to join the next batch.
+        person.LastName = "fence";
+        await fenceWritten.Task.WaitAsync(TestTimeout);
         var droppedBeforeDeadline = source.Diagnostics.OutboundRetries.TotalDropped;
 
         Volatile.Write(ref blockWrite, true);
