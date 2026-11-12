@@ -175,6 +175,7 @@ public class OutboundDropCountingTests
         var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var writeFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var blockWrite = false;
+        var probeWritten = false;
         var clock = new ManualTeardownClock();
         using var source = new TestSubjectSource(person, context, NullLogger.Instance,
             bufferTime: TimeSpan.FromMilliseconds(8), writeRetryQueueSize: 0)
@@ -191,6 +192,7 @@ public class OutboundDropCountingTests
                 }
                 else
                 {
+                    Volatile.Write(ref probeWritten, true);
                     foreach (var change in changes.Span)
                     {
                         if (change.Property.Name == nameof(Person.LastName) &&
@@ -211,12 +213,19 @@ public class OutboundDropCountingTests
         using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var watchdogRegistration = watchdog.Token.Register(() => releaseWrite.TrySetResult());
         await source.StartAsync(CancellationToken.None);
+        // The retry queue is disabled, so a write captured before the connected processor runs is dropped
+        // and only one the processor delivers reaches the source.
         var probeValue = 0;
         await AsyncTestHelpers.WaitUntilAsync(() =>
         {
+            if (Volatile.Read(ref probeWritten))
+            {
+                return true;
+            }
+
             person.LastName = "probe" + probeValue++;
-            return source.Diagnostics.OutboundChanges.Depth > 0;
-        }, message: "The connected processor did not start buffering the probe writes.");
+            return false;
+        }, message: "The connected processor did not deliver a probe write.");
 
         // The subscription and the processor queue are FIFO and a merged batch keeps the last write per
         // property, so once the fence is written no earlier probe is still pending to join the next batch.
