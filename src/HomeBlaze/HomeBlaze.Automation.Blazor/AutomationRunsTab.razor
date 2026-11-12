@@ -64,7 +64,7 @@ else
                                 <td style="white-space: nowrap;">@FormatTime(run)</td>
                                 <td style="font-weight: 500; min-width: 120px;">@run.RuleName</td>
                                 <td>@OutcomeChip(run)</td>
-                                <td style="min-width: 240px; overflow-wrap: anywhere;">@RenderActions(run)</td>
+                                <td style="min-width: 240px; overflow-wrap: anywhere;">@RenderActions(run, "automation-run-action")</td>
                             </tr>
                         }
                     </tbody>
@@ -79,7 +79,7 @@ else
                             <MudText Typo="Typo.body2" Class="flex-grow-1" Style="font-weight: 500;">@run.RuleName</MudText>
                             @OutcomeChip(run)
                         </div>
-                        @RenderActions(run)
+                        @RenderActions(run, "automation-run-action-card")
                     </MudPaper>
                 }
             </div>
@@ -111,10 +111,10 @@ else
             ? @<MudChip T="string" Size="Size.Small" Color="@AutomationColors.GetOutcomeColor(outcome)" Class="ma-0">@AutomationSummary.FormatOutcome(outcome)</MudChip>
             : null;
 
-    private RenderFragment RenderActions(RunEntry run) => @<text>
+    private RenderFragment RenderActions(RunEntry run, string testId) => @<text>
         @foreach (var action in RunMessage.Parse(run.Message))
         {
-            <div class="d-flex flex-wrap align-baseline" style="column-gap: 6px;" data-testid="automation-run-action">
+            <div class="d-flex flex-wrap align-baseline" style="column-gap: 6px;" data-testid="@testId">
                 @if (action.Name is { } actionName)
                 {
                     <span style="font-weight: 500; overflow-wrap: normal;">@actionName</span>

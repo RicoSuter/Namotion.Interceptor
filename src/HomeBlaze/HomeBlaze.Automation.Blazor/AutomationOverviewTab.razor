@@ -77,7 +77,7 @@
                         {
                             <tr class="automation-rule-row" style="cursor: pointer;" @onclick="@(() => RuleOpened.InvokeAsync(key))" data-testid="automation-rule-row">
                                 <td>
-                                    @RuleNameButton(key, rule)
+                                    @RuleNameButton(key, rule, "automation-rule-name")
                                     <MudText Typo="Typo.caption" Class="mud-text-secondary">@DescribeScope(rule)</MudText>
                                     @if (GetDryRunHint(rule) is { } dryRunHint)
                                     {
@@ -111,7 +111,7 @@
                     <MudPaper Outlined="true" Class="pa-3" Style="cursor: pointer;" @onclick="@(() => RuleOpened.InvokeAsync(key))" data-testid="automation-rule-card">
                         <div class="d-flex align-center gap-2">
                             <div class="flex-grow-1" style="min-width: 0;">
-                                @RuleNameButton(key, rule)
+                                @RuleNameButton(key, rule, "automation-rule-name-card")
                                 <MudText Typo="Typo.caption" Class="mud-text-secondary">@JoinScopeAndMode(rule)</MudText>
                             </div>
                             <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Class="mud-text-secondary" aria-hidden="true" />
@@ -168,9 +168,9 @@
 
     // The keyboard opens a rule with its name; a click on the row or card around it is a convenience for the mouse, which
     // the name must not raise a second time.
-    private RenderFragment RuleNameButton(string key, AutomationRule rule) => @<button type="button" class="automation-rule-name"
+    private RenderFragment RuleNameButton(string key, AutomationRule rule, string testId) => @<button type="button" class="automation-rule-name"
         aria-label="@($"Edit rule {rule.Name ?? key}")" @onclick="@(() => RuleOpened.InvokeAsync(key))" @onclick:stopPropagation="true"
-        data-testid="automation-rule-name">@(rule.Name ?? key)</button>;
+        data-testid="@testId">@(rule.Name ?? key)</button>;
 
     private Task OpenTagFilterAsync(string tag) => MetadataTagFilterDialog.ShowAsync(DialogService, tag);
 

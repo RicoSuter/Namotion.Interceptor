@@ -201,7 +201,7 @@ public class AutomationPageTests
         writer.Subject.Name = "Go";
 
         // Assert
-        var action = page.GetByTestId("automation-run").GetByTestId("automation-run-action");
+        var action = page.GetByTestId("automation-run-action");
         await Assertions.Expect(action).ToHaveCountAsync(1, new() { Timeout = Timeout });
         await Assertions.Expect(action).ToContainTextAsync("IsPowered");
         await Assertions.Expect(action).ToContainTextAsync("= False");
@@ -256,7 +256,7 @@ public class AutomationPageTests
         await Assertions.Expect(card).ToHaveCountAsync(1, new() { Timeout = Timeout });
         await Assertions.Expect(card).ToBeVisibleAsync();
         await Assertions.Expect(card).ToContainTextAsync("Write");
-        await Assertions.Expect(card.GetByTestId("automation-run-action")).ToContainTextAsync("IsPowered");
+        await Assertions.Expect(card.GetByTestId("automation-run-action-card")).ToContainTextAsync("IsPowered");
         await Assertions.Expect(page.GetByTestId("automation-run")).ToBeHiddenAsync();
     }
 
@@ -375,6 +375,7 @@ public class AutomationPageTests
         // Assert
         await Assertions.Expect(page.GetByTestId("automation-rule-card")).ToHaveCountAsync(2, new() { Timeout = Timeout });
         await Assertions.Expect(page.GetByTestId("automation-rule-card").First).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByTestId("automation-rule-name-card").First).ToHaveAttributeAsync("aria-label", "Edit rule Started");
         await Assertions.Expect(page.GetByTestId("automation-rule-row").First).ToBeHiddenAsync();
         await Assertions.Expect(page.GetByTestId("automation-reset-icon")).ToBeVisibleAsync();
         await Assertions.Expect(page.GetByTestId("automation-reset")).ToBeHiddenAsync();
