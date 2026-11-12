@@ -35,15 +35,14 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     [ThreadStatic]
     private static DerivedPropertyRecorder? _recorder;
 
-    // Writes of a type that can reference a subject, which includes every publication of a derived value, that have
-    // not returned yet on this thread, and the derived properties whose evaluation at the end of an attach found a
-    // changed value while such a write was running. The outermost of those writes recalculates them once it has been
-    // announced.
+    // Writes that can attach subjects and have not returned yet on this thread, and the derived properties whose
+    // evaluation at the end of an attach found a changed value while such a write was running, each with its
+    // recalculation sequence at that time. The outermost of those writes recalculates them once it has been announced.
     [ThreadStatic]
     private static int _attachingWriteDepth;
 
     [ThreadStatic]
-    private static List<PropertyReference>? _changedAfterAttach;
+    private static List<(PropertyReference Property, long Sequence)>? _changedAfterAttach;
 
     internal static bool IsRecordingDerivedProperty
     {
@@ -92,16 +91,20 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
 
         object? value = null;
-        var dependenciesChanged = false;
+        var isChanged = false;
         var isEvaluated = false;
         try
         {
-            value = EvaluateAndStabilize(data, property, callerHoldsLock: false, out dependenciesChanged);
+            value = EvaluateAndStabilize(data, property, callerHoldsLock: false, out var dependenciesChanged);
+
+            // Compared without lock(data) as well: Equals is code of the application, like the getter.
+            isChanged = IsChangedValue(value, lastKnownValue, dependenciesChanged);
             isEvaluated = true;
         }
         catch (Exception)
         {
-            // Getter threw. The value will be computed on the next write to a dependency it has recorded.
+            // The getter or the comparison threw. The value will be computed on the next write to a dependency it
+            // has recorded.
         }
 
         lock (data)
@@ -127,8 +130,15 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 return null;
             }
 
-            // LastKnownValue stays as it is, so that the recalculation publishes the change from it.
-            return IsChangedValue(value, lastKnownValue, dependenciesChanged) ? RecalculateAfterAttach : null;
+            if (isChanged)
+            {
+                // LastKnownValue stays as it is, so that the recalculation publishes the change from it.
+                return RecalculateAfterAttach;
+            }
+
+            // Not published, but it is what the getter returns by now, so the next change is one from this value.
+            data.LastKnownValue = value;
+            return null;
         }
     }
 
@@ -202,7 +212,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         if (_attachingWriteDepth > 0)
         {
-            (_changedAfterAttach ??= []).Add(property);
+            (_changedAfterAttach ??= []).Add((property, GetRecalculationSequence(property)));
             return;
         }
 
@@ -218,6 +228,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 $"DerivedPropertyChangeHandler: publishing '{property.Name}' on {property.Subject.GetType().Name} " +
                 $"after an attach failed: {exception}");
         }
+    }
+
+    private static long GetRecalculationSequence(in PropertyReference property)
+    {
+        return property.TryGetDerivedPropertyData() is { } data ? Volatile.Read(ref data.RecalculationSequence) : -1;
     }
 
     private static bool TryAttach(DerivedPropertyData data, in PropertyReference property)
@@ -340,9 +355,13 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        // A write of a type without references, or of a string, attaches no subject. For value types the JIT resolves
-        // this per TProperty, so such a write pays nothing for the bookkeeping below.
-        if (!RuntimeHelpers.IsReferenceOrContainsReferences<TProperty>() || typeof(TProperty) == typeof(string))
+        // Only a write that the lifecycle interceptor reconciles attaches subjects. For a type without references the
+        // JIT resolves this per TProperty, so such a write pays nothing for the bookkeeping below.
+        var metadata = context.Property.Metadata;
+        if (!RuntimeHelpers.IsReferenceOrContainsReferences<TProperty>() ||
+            typeof(TProperty) == typeof(string) ||
+            !metadata.IsIntercepted ||
+            !metadata.Type.CanContainSubjects())
         {
             WriteAndRecalculateDependents(ref context, next);
             return;
@@ -378,12 +397,16 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
         var storageTimestamp = rawTimestamp > 0 ? rawTimestamp : 0L;
         ExceptionDispatchInfo? firstException = null;
-        foreach (var changedProperty in properties)
+        foreach (var (changedProperty, sequence) in properties)
         {
             var property = changedProperty;
             try
             {
-                RecalculateDerivedProperty(ref property, storageTimestamp, rawTimestamp);
+                // A recalculation since then, such as the cascade of the write itself, has published the change.
+                if (GetRecalculationSequence(property) == sequence)
+                {
+                    RecalculateDerivedProperty(ref property, storageTimestamp, rawTimestamp);
+                }
             }
             catch (Exception exception)
             {

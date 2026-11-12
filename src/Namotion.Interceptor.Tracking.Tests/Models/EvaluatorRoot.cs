@@ -11,6 +11,8 @@ public partial class EvaluatorRoot
     public partial EvaluatorConfiguration? Spare { get; set; }
 
     public partial int Anchor { get; set; }
+
+    public partial byte[]? Data { get; set; }
 }
 
 /// <summary>
@@ -48,6 +50,11 @@ public partial class EvaluatorWorker
 
     [Derived]
     public int Result => Evaluator?.Invoke(this) ?? 0;
+
+    public Func<EvaluatorWorker, object?>? ObjectEvaluator { get; set; }
+
+    [Derived]
+    public object? ObjectResult => ObjectEvaluator?.Invoke(this);
 
     /// <summary>
     /// An evaluator whose value changes, and that gains a dependency, once the configuration is attached: before that

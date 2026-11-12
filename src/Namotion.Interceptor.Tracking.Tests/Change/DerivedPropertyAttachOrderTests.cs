@@ -1,6 +1,7 @@
 using System.Reactive.Concurrency;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
@@ -195,6 +196,101 @@ public class DerivedPropertyAttachOrderTests
 
         // Assert
         AssertSingleChange(changes, machine.Worker, nameof(EvaluatorWorker.Result), 1);
+    }
+
+    [Fact]
+    public void WhenChangedInstanceIsNotPublishedByTheAttach_ThenChangeBackToTheFirstInstanceIsPublished()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var first = new object();
+        var second = new object();
+        machine.Worker.ObjectEvaluator = worker =>
+        {
+            // Reads the same tracked properties in both evaluations: the parent of the configuration is not tracked.
+            var anchor = root.Anchor;
+            var configuration = worker.TryGetFirstParent<EvaluatorMachine>()!.Configuration;
+            return anchor == 0 && configuration.TryGetFirstParent<EvaluatorMachine>() is not null ? second : first;
+        };
+        root.Machine = machine;
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        root.Anchor = 1;
+
+        // Assert
+        var change = Assert.Single(changes, c => c.Property.Name == nameof(EvaluatorWorker.ObjectResult));
+        Assert.Same(second, change.GetOldValue<object?>());
+        Assert.Same(first, change.GetNewValue<object?>());
+    }
+
+    [Fact]
+    public void WhenComparisonOfTheValuesThrows_ThenAttachCompletesAndOtherDerivedPropertiesFollowTheSibling()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.ObjectEvaluator = _ => new ValueThatCannotBeCompared();
+        machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        var exception = Record.Exception(() => root.Machine = machine);
+
+        // Assert
+        Assert.Null(exception);
+        AssertSingleChange(changes, machine.Worker, nameof(EvaluatorWorker.Result), 1);
+    }
+
+    [Fact]
+    public void WhenGetterAlsoReadsTheWrittenProperty_ThenValueBuiltAnewIsPublishedOnce()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+
+        // Gains the dependency on the value when the attach ends, and is recalculated by the write of the machine.
+        machine.Worker.ObjectEvaluator = _ => new List<int> { root.Machine?.Configuration.Value ?? 0 };
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        root.Machine = machine;
+
+        // Assert
+        Assert.Single(changes, change => change.Property.Name == nameof(EvaluatorWorker.ObjectResult));
+    }
+
+    [Fact]
+    public void WhenSubtreeIsAssignedWithinAWriteThatAttachesNoSubject_ThenChangedDerivedValueCarriesTheTimestampOfTheAssignment()
+    {
+        // Arrange
+        var timestamp = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
+        context.WithService(() => new AfterWriteInterceptor(property =>
+        {
+            if (property.Name == nameof(EvaluatorRoot.Data))
+            {
+                using (SubjectChangeContext.WithChangedTimestamp(timestamp))
+                {
+                    root.Machine = machine;
+                }
+            }
+        }));
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        root.Data = [1];
+
+        // Assert
+        var change = Assert.Single(changes, c => c.Property.Name == nameof(EvaluatorWorker.Result));
+        Assert.Equal(timestamp, change.ChangedTimestamp);
     }
 
     [Fact]
@@ -428,6 +524,31 @@ public class DerivedPropertyAttachOrderTests
         Assert.IsType<InvalidOperationException>(exception);
         Assert.Contains(changes, change => change.Property.Subject == root && change.Property.Name == nameof(SiblingReadingRoot.Machines));
         AssertSingleChange(changes, second.Device, nameof(SiblingReadingDevice.IsInstalled), true);
+    }
+
+    private sealed class ValueThatCannotBeCompared
+    {
+#pragma warning disable S3877 // An Equals that throws is what the test is about.
+        public override bool Equals(object? obj)
+        {
+            throw new InvalidOperationException();
+        }
+#pragma warning restore S3877
+
+        public override int GetHashCode()
+        {
+            return 0;
+        }
+    }
+
+    [RunsAfter(typeof(DerivedPropertyChangeHandler))]
+    private sealed class AfterWriteInterceptor(Action<PropertyReference> callback) : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+            callback(context.Property);
+        }
     }
 
     private sealed class CallbackLifecycleHandler(Action<SubjectLifecycleChange> callback) : ILifecycleHandler
