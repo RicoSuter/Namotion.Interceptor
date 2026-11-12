@@ -7,6 +7,7 @@ using Namotion.Interceptor.OpcUa.Client.Polling;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking;
 using Opc.Ua;
 using Opc.Ua.Client;
 using static Namotion.Interceptor.OpcUa.Tests.Client.ClientSourceTestFactory;
@@ -88,6 +89,30 @@ public class SubscriptionManagerDiagnosticsTests
         Assert.Single(acceptedSubscription.FastDataChangeCallback!.GetInvocationList());
         Assert.Single(recreatedSubscription.FastDataChangeCallback!.GetInvocationList());
         Assert.Null(refusedSubscription.FastDataChangeCallback);
+    }
+
+    [Fact]
+    public async Task WhenANotificationIsApplied_ThenTheSubscriptionsApplyLockIsHeld()
+    {
+        // Arrange - read-after-write registers this lock, so it must be the one notifications apply under.
+        var configuration = CreateConfiguration();
+        await using var source = CreateClientSource(configuration: configuration);
+        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
+        await using var manager = CreateManager(source, propertyWriter, configuration, new ConcurrentQueue<Exception>());
+        var clientHandle = TrackNameProperty(manager, source);
+        await propertyWriter.LoadInitialStateAndResumeAsync(CancellationToken.None);
+        var subscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        var applyLock = manager.GetApplyLock(subscription);
+        bool? lockHeldDuringApply = null;
+        using var changes = source.RootSubject.Context
+            .GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(_ => lockHeldDuringApply = applyLock.IsHeldByCurrentThread);
+
+        // Act
+        manager.OnFastDataChange(subscription, CreateNotification(clientHandle, "value"), []);
+
+        // Assert
+        Assert.True(lockHeldDuringApply);
     }
 
     [Fact]

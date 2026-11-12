@@ -306,6 +306,11 @@ internal class SubscriptionManager : IAsyncDisposable
     private SubscriptionApplyState GetApplyState(Subscription subscription) =>
         _applyStates.GetValue(subscription, static _ => new SubscriptionApplyState());
 
+    /// <summary>
+    /// Gets the lock under which the notifications of <paramref name="subscription"/> are applied.
+    /// </summary>
+    internal Lock GetApplyLock(Subscription subscription) => GetApplyState(subscription).Lock;
+
     private void ReportErrorIfRunning(Exception error, CancellationToken cancellationToken = default)
     {
         if (!_shuttingDown && !cancellationToken.IsCancellationRequested)
@@ -601,14 +606,24 @@ internal class SubscriptionManager : IAsyncDisposable
             return;
         }
 
-        var applyLock = GetApplyState(subscription).Lock;
+        var applyLock = GetApplyLock(subscription);
         foreach (var item in subscription.MonitoredItems)
         {
-            if (item.Handle is RegisteredSubjectProperty property && item.Status?.Created == true)
+            if (item.Handle is not RegisteredSubjectProperty property)
+            {
+                continue;
+            }
+
+            if (item.Status?.Created == true)
             {
                 var requestedInterval = GetRequestedSamplingInterval(property);
                 var revisedInterval = TimeSpan.FromMilliseconds(item.Status.SamplingInterval);
                 _readAfterWriteManager.RegisterProperty(item.StartNodeId, property, requestedInterval, revisedInterval, applyLock);
+            }
+            else
+            {
+                // An earlier registration would still carry a replaced subscription's lock.
+                _readAfterWriteManager.UnregisterProperty(item.StartNodeId);
             }
         }
     }
