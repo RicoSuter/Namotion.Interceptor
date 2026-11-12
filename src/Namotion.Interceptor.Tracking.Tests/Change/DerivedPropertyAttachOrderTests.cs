@@ -261,7 +261,11 @@ public class DerivedPropertyAttachOrderTests
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
-        machine.Worker.ObjectEvaluator = _ => new ValueThatCannotBeCompared();
+        var comparisons = 0;
+
+        // Gains a dependency on the configuration once it is attached, so that the values are compared.
+        machine.Worker.ObjectEvaluator = worker => new ValueThatCannotBeCompared(
+            worker.TryGetFirstParent<EvaluatorMachine>()!.Configuration.Value, () => comparisons++);
         machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
         var changes = SubscribeToChanges(context);
 
@@ -270,7 +274,64 @@ public class DerivedPropertyAttachOrderTests
 
         // Assert
         Assert.Null(exception);
+        Assert.True(comparisons > 0);
         AssertSingleChange(changes, machine.Worker, nameof(EvaluatorWorker.Result), 1);
+    }
+
+    [Fact]
+    public void WhenGetterReadsTheSamePropertiesInAnotherOrder_ThenValueBuiltAnewIsNotPublished()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.ObjectEvaluator = worker =>
+        {
+            // The parent of the configuration is not tracked: it only switches the order of the two reads.
+            var configuration = worker.TryGetFirstParent<EvaluatorMachine>()!.Configuration;
+            if (configuration.TryGetFirstParent<EvaluatorMachine>() is null)
+            {
+                var anchor = root.Anchor;
+                return new List<object?> { anchor, root.Data };
+            }
+
+            var data = root.Data;
+            return new List<object?> { root.Anchor, data };
+        };
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        root.Machine = machine;
+
+        // Assert
+        Assert.DoesNotContain(changes, change => change.Property.Name == nameof(EvaluatorWorker.ObjectResult));
+    }
+
+    [Fact]
+    public void WhenDerivedPropertyIsAddedAtRuntimeByAHandlerOfTheLastSibling_ThenItFollowsThatSibling()
+    {
+        // Arrange
+        const string propertyName = "ConfigurationValueAtRuntime";
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents().WithRegistry();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        context.WithService(() => new BeforeContextInheritanceLifecycleHandler(change =>
+        {
+            // The configuration is the last subject of the operation and has no context yet.
+            if (change.IsContextAttach && change.Subject == machine.Configuration)
+            {
+                machine.Worker.TryGetRegisteredSubject()!.AddDerivedProperty<int>(propertyName, subject =>
+                    ((EvaluatorWorker)subject).TryGetFirstParent<EvaluatorMachine>()!.Configuration.Value);
+            }
+        }));
+        root.Machine = machine;
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        machine.Configuration.Value = 5;
+
+        // Assert
+        AssertSingleChange(changes, machine.Worker, propertyName, 5);
     }
 
     [Fact]
@@ -368,6 +429,26 @@ public class DerivedPropertyAttachOrderTests
         // Assert
         var change = Assert.Single(changes, c => c.Property.Name == nameof(EvaluatorWorker.Result));
         Assert.Equal(timestamp, change.ChangedTimestamp);
+    }
+
+    [Fact]
+    public void WhenValueTypeThatEnumeratesSubjectsIsAssigned_ThenItIsAnnouncedBeforeItsChangedDerivedValue()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        root.MachineSet = EvaluatorMachineSet.Create(machine);
+
+        // Assert
+        Assert.Equal(2, changes.Count);
+        Assert.Equal(new PropertyReference(root, nameof(EvaluatorRoot.MachineSet)), changes[0].Property);
+        Assert.Equal(new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)), changes[1].Property);
+        Assert.Equal(changes[0].ChangedTimestamp, changes[1].ChangedTimestamp);
     }
 
     [Fact]
@@ -604,11 +685,14 @@ public class DerivedPropertyAttachOrderTests
         AssertSingleChange(changes, second.Device, nameof(SiblingReadingDevice.IsInstalled), true);
     }
 
-    private sealed class ValueThatCannotBeCompared
+    private sealed class ValueThatCannotBeCompared(int value, Action onCompared)
     {
+        public int Value { get; } = value;
+
 #pragma warning disable S3877 // An Equals that throws is what the test is about.
         public override bool Equals(object? obj)
         {
+            onCompared();
             throw new InvalidOperationException();
         }
 #pragma warning restore S3877

@@ -31,21 +31,9 @@ public static class SubjectPropertyTypeExtensions
     /// <c>TProperty</c> throughout the interceptor interfaces, not just here).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1067", Justification = "The single predicate groups JIT-constant exclusions for types that cannot contain subjects, preserving the readable fast path.")]
     public static bool CanContainSubjects<TProperty>(this Type type)
     {
-        if (typeof(TProperty).IsPrimitive ||
-            typeof(TProperty) == typeof(decimal) ||
-            typeof(TProperty) == typeof(string) ||
-            typeof(TProperty) == typeof(DateTime) ||
-            typeof(TProperty) == typeof(DateTimeOffset) ||
-            typeof(TProperty) == typeof(TimeSpan) ||
-            typeof(TProperty) == typeof(Guid))
-        {
-            return false;
-        }
-
-        return type.CanContainSubjects();
+        return !IsScalarType<TProperty>() && type.CanContainSubjects();
     }
 
     /// <summary>
@@ -58,6 +46,23 @@ public static class SubjectPropertyTypeExtensions
         return CanContainSubjectsCache.TryGetValue(type, out var result)
             ? result
             : CanContainSubjectsSlow(type);
+    }
+
+    /// <summary>
+    /// Whether <typeparamref name="TProperty"/> is a type that cannot contain subjects, resolved by the JIT per type.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1067", Justification = "The single predicate groups JIT-constant exclusions for types that cannot contain subjects, preserving the readable fast path.")]
+    internal static bool IsScalarType<TProperty>()
+    {
+        return typeof(TProperty).IsPrimitive ||
+            typeof(TProperty).IsEnum ||
+            typeof(TProperty) == typeof(decimal) ||
+            typeof(TProperty) == typeof(string) ||
+            typeof(TProperty) == typeof(DateTime) ||
+            typeof(TProperty) == typeof(DateTimeOffset) ||
+            typeof(TProperty) == typeof(TimeSpan) ||
+            typeof(TProperty) == typeof(Guid);
     }
 
     /// <summary>

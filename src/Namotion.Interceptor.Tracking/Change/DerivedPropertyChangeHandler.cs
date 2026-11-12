@@ -350,11 +350,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        // Only a write that the lifecycle interceptor reconciles attaches subjects. For a type without references the
-        // JIT resolves this per TProperty, so such a write pays nothing for the bookkeeping below, and neither it nor
-        // the write of a string reads the metadata.
-        if (!RuntimeHelpers.IsReferenceOrContainsReferences<TProperty>() ||
-            typeof(TProperty) == typeof(string) ||
+        // Only a write that the lifecycle interceptor reconciles attaches subjects, which includes a value type that
+        // enumerates subjects. For a primitive, an enum, a string and a few other types the JIT resolves this per
+        // TProperty, so such a write pays nothing for the bookkeeping below.
+        if (SubjectPropertyTypeExtensions.IsScalarType<TProperty>() ||
             !LifecycleInterceptor.CanAttachSubjects<TProperty>(context.Property.Metadata))
         {
             WriteAndRecalculateDependents(ref context, next);

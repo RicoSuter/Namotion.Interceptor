@@ -138,8 +138,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             return;
         }
 
-        _attachOperation.OnSubjectAttached();
-
         var count = subject.GetReferenceCount();
         var change = new SubjectLifecycleChange
         {
@@ -149,7 +147,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         };
 
         var properties = subject.Properties.Keys;
-        InvokeAddedLifecycleHandlers(subject, context, change);
+        InvokeAddedLifecycleHandlersOfAttachedSubject(subject, context, change);
 
         SubjectAttached?.Invoke(change);
         foreach (var propertyName in properties)
@@ -172,11 +170,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             return;
         }
 
-        if (isFirstAttach)
-        {
-            _attachOperation.OnSubjectAttached();
-        }
-
         var count = subject.IncrementReferenceCount();
         var change = new SubjectLifecycleChange
         {
@@ -189,7 +182,14 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         };
 
         var properties = subject.Properties.Keys;
-        InvokeAddedLifecycleHandlers(subject, context, change);
+        if (isFirstAttach)
+        {
+            InvokeAddedLifecycleHandlersOfAttachedSubject(subject, context, change);
+        }
+        else
+        {
+            InvokeAddedLifecycleHandlers(subject, context, change);
+        }
 
         if (isFirstAttach)
         {
@@ -202,6 +202,20 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
     }
     
+    // The subject counts as attached for the attach operation once its handlers have run, among them the one that
+    // gives it its context: a derived property registered by one of them may read it before it can be tracked.
+    private void InvokeAddedLifecycleHandlersOfAttachedSubject(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
+    {
+        try
+        {
+            InvokeAddedLifecycleHandlers(subject, context, change);
+        }
+        finally
+        {
+            _attachOperation.OnSubjectAttached();
+        }
+    }
+
     private static void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
     {
         var array = context.GetServices<ILifecycleHandler>();
