@@ -395,7 +395,7 @@ internal sealed class PollingManager : IAsyncDisposable
             }
 
             var state = (source: _source, manager: this, property: pollingItem.Property, value: newValue,
-                timestamp: dataValue.SourceTimestamp.ToDateTimeOffset(), receivedTimestamp, logger: _logger);
+                timestamp: dataValue.SourceTimestamp.ToClrTimestamp(), receivedTimestamp, logger: _logger);
             _propertyWriter.Write(state, static s =>
             {
                 try

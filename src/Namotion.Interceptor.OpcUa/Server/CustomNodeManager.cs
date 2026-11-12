@@ -400,7 +400,18 @@ internal class CustomNodeManager : CustomNodeManager2
                 .ToArrayOf();
         }
 
-        variableNode.Value = OpcUaVariantExtensions.ToVariant(value);
+        if (OpcUaVariantExtensions.TryToVariant(value, out var nodeValue))
+        {
+            variableNode.Value = nodeValue;
+        }
+        else
+        {
+            // Only this node is unusable; throwing here would keep the whole server from starting.
+            variableNode.StatusCode = StatusCodes.BadTypeMismatch;
+            _logger.LogWarning(
+                "The value of property {PropertyName} of type {Type} has no OPC UA representation. Its node reports BadTypeMismatch.",
+                property.Name, value?.GetType().FullName);
+        }
 
         var writeTimestamp = property.Reference.TryGetWriteTimestamp();
         if (writeTimestamp.HasValue)
@@ -421,7 +432,7 @@ internal class CustomNodeManager : CustomNodeManager2
                 // the same actor under that same hold, or a later flush misattributes it as a client write.
                 _serverService.UpdateProperty(
                     property.Reference,
-                    variableNode.Timestamp.ToDateTimeOffset(),
+                    variableNode.Timestamp.ToClrTimestamp(),
                     variableNode.Value);
             }
         };

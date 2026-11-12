@@ -69,6 +69,13 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
     internal const int MaxHealAttemptsBeforeEscalation = 3;
 
     private volatile bool _shuttingDown; // Prevents new callbacks during cleanup
+    private volatile bool _subscriptionsIncomplete;
+
+    /// <summary>
+    /// Gets whether the last attempt to create the subscriptions did not finish, so that only some or
+    /// none of the items are monitored and the subscriptions have to be created again.
+    /// </summary>
+    public bool NeedsRecreate => _subscriptionsIncomplete;
 
     /// <summary>
     /// Gets the current list of subscriptions (thread-safe collection).
@@ -128,6 +135,8 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
         ISession session,
         CancellationToken cancellationToken)
     {
+        _subscriptionsIncomplete = true;
+
         if (!session.TryGetSubscriptionManager(out var subscriptionManager) || subscriptionManager is null)
         {
             throw new InvalidOperationException(
@@ -198,6 +207,8 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
             // Add to collection AFTER initialization (temporal separation - health monitor never sees partial state)
             TryAddSubscription(subscription);
         }
+
+        _subscriptionsIncomplete = false;
     }
 
     internal void TrackMonitoredItem(IMonitoredItem item, MonitoredItemRequest request)
@@ -341,7 +352,7 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
                         monitoredItem,
                         _configuration.ValueConverter.ConvertToPropertyValue(
                             change.Value.WrappedValue.ToClrValue(), monitoredItem.Property),
-                        change.Value.SourceTimestamp.ToDateTimeOffset()));
+                        change.Value.SourceTimestamp.ToClrTimestamp()));
                 }
             }
         }
@@ -435,6 +446,19 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
         if (!_shuttingDown && !cancellationToken.IsCancellationRequested)
         {
             _reportError(error);
+        }
+    }
+
+    /// <summary>
+    /// Starts a new ranking of notification messages for every subscription. Called when the server
+    /// session was created again: the subscriptions are restored in place and number their messages
+    /// from the start again, which must not be ranked against the messages applied before.
+    /// </summary>
+    internal void ResetNotificationRanking()
+    {
+        foreach (var (_, tracking) in _tracking)
+        {
+            tracking.ResetApplyStates();
         }
     }
 
@@ -552,7 +576,7 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
     /// <summary>
     /// Escalates a retryable item that keeps failing past <see cref="MaxHealAttemptsBeforeEscalation"/>
     /// to polling instead of retrying forever. Runs only when polling is enabled; recreating the
-    /// subscriptions clears the polling set and re-attempts every item, so escalation is not permanent.
+    /// subscriptions clears the polling set and re-attempts every item.
     /// </summary>
     public void EscalatePersistentlyFailedItems()
     {

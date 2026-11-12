@@ -171,8 +171,17 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                         var convertedValue = _configuration.ValueConverter
                             .ConvertToNodeValue(value, registeredProperty);
 
-                        var nodeValue = OpcUaVariantExtensions.ToVariant(convertedValue);
+                        // A value without an OPC UA representation fails its own node, not the batch.
+                        var statusCode = OpcUaVariantExtensions.TryToVariant(convertedValue, out var nodeValue)
+                            ? StatusCodes.Good
+                            : StatusCodes.BadTypeMismatch;
+
                         node.Value = nodeValue;
+                        if (node.StatusCode != statusCode)
+                        {
+                            node.StatusCode = statusCode;
+                        }
+
                         node.Timestamp = change.ChangedTimestamp.UtcDateTime;
                         SelfWrittenNodeValue = nodeValue;
                         node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
@@ -331,6 +340,11 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                     {
                         try { server.Dispose(); }
                         catch (Exception ex) { _logger.LogDebug(ex, "Error disposing OPC UA server."); }
+
+                        // The application instance owns the certificate manager, which keeps a timer
+                        // alive until it is disposed.
+                        try { await application.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false); }
+                        catch (Exception ex) { _logger.LogDebug(ex, "Error disposing OPC UA application instance."); }
                     }
                 }
             }).ConfigureAwait(false);

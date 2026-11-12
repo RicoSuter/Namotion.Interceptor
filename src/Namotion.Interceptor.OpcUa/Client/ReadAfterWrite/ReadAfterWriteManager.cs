@@ -346,7 +346,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                     }
 
                     var (_, property) = _dueReadsList[i];
-                    var sourceTimestamp = result.SourceTimestamp.ToDateTimeOffset();
+                    var sourceTimestamp = result.SourceTimestamp.ToClrTimestamp();
 
                     // Skip if property already has a newer value from subscription notification
                     var currentWriteTimestamp = property.Reference.TryGetWriteTimestamp();

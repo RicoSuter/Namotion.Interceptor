@@ -50,7 +50,7 @@ internal sealed class OutboundWriter
                 return WriteResult.Success;
             }
 
-            var writeResponse = await session.WriteAsync(requestHeader: null, writeValues.ToArrayOf(), cancellationToken).ConfigureAwait(false);
+            var writeResponse = await session.WriteAsync(requestHeader: null, writeValues, cancellationToken).ConfigureAwait(false);
             var result = ProcessWriteResults(writeResponse.Results, changes);
             if (result.IsFullySuccessful || result.IsPartialFailure)
             {
@@ -139,10 +139,11 @@ internal sealed class OutboundWriter
         return true;
     }
 
-    private List<WriteValue> CreateWriteValuesCollection(ReadOnlyMemory<SubjectPropertyChange> changes)
+    private ArrayOf<WriteValue> CreateWriteValuesCollection(ReadOnlyMemory<SubjectPropertyChange> changes)
     {
         var span = changes.Span;
-        var writeValues = new List<WriteValue>(span.Length);
+        var writeValues = new WriteValue[span.Length];
+        var count = 0;
 
         for (var i = 0; i < span.Length; i++)
         {
@@ -157,7 +158,7 @@ internal sealed class OutboundWriter
                 change.GetNewValue<object?>(),
                 registeredProperty);
 
-            writeValues.Add(new WriteValue
+            writeValues[count++] = new WriteValue
             {
                 NodeId = nodeId,
                 AttributeId = Opc.Ua.Attributes.Value,
@@ -165,10 +166,10 @@ internal sealed class OutboundWriter
                     OpcUaVariantExtensions.ToVariant(convertedValue),
                     StatusCodes.Good,
                     change.ChangedTimestamp.UtcDateTime)
-            });
+            };
         }
 
-        return writeValues;
+        return ((ArrayOf<WriteValue>)writeValues).Slice(0, count);
     }
 
     private void NotifyPropertiesWritten(ReadOnlyMemory<SubjectPropertyChange> changes)

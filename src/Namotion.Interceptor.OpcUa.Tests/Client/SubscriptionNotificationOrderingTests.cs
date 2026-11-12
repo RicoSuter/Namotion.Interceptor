@@ -167,6 +167,22 @@ public class SubscriptionNotificationOrderingTests
         Assert.Equal("AfterRecreate", harness.Root.Name);
     }
 
+    [Fact]
+    public async Task WhenTheServerSessionIsCreatedAgain_ThenTheRestartedNumberingIsNotRankedAgainstTheEarlierMessages()
+    {
+        // Arrange
+        await using var harness = await Harness.CreateAsync();
+        var name = harness.Track(nameof(TestRoot.Name));
+        harness.Notify(sequenceNumber: 1000, (name, "BeforeNewSession"));
+
+        // Act
+        harness.ResetNotificationRanking();
+        harness.Notify(sequenceNumber: 1, (name, "AfterNewSession"));
+
+        // Assert
+        Assert.Equal("AfterNewSession", harness.Root.Name);
+    }
+
     [Theory]
     [InlineData(SubscriptionState.Modified)]
     [InlineData(SubscriptionState.Error)]
@@ -380,6 +396,8 @@ public class SubscriptionNotificationOrderingTests
         /// <summary>
         /// Reports a state change of the current subscription, as the engine does.
         /// </summary>
+        public void ResetNotificationRanking() => _manager.ResetNotificationRanking();
+
         public ValueTask ChangeStateAsync(SubscriptionState state) =>
             _manager.OnSubscriptionStateChangedAsync(_subscription, state, PublishState.None);
 
