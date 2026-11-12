@@ -2515,16 +2515,27 @@ public class SubjectSourceBaseTests
 
         var person = new Person(context);
         var receivedWrites = new ConcurrentQueue<string>();
+        var parkedWriteSent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         using var source = new TestSubjectSource(person, context, NullLogger.Instance,
             bufferTime: TimeSpan.FromMinutes(5))
         {
             TeardownTimeProvider = new ManualTeardownClock(),
+            LoadInitialStateOverride = _ =>
+            {
+                // Captured during the load, so it is parked in the retry queue and sent by the reconcile.
+                person.LastName = "Parked";
+                return Task.FromResult<Action?>(null);
+            },
             WriteChangesOverride = (changes, _) =>
             {
                 foreach (var change in changes.ToArray())
                 {
                     receivedWrites.Enqueue($"{change.Property.Name}={change.GetNewValue<object?>()}");
+                    if (change.Property.Name == nameof(Person.LastName))
+                    {
+                        parkedWriteSent.TrySetResult();
+                    }
                 }
                 return ValueTask.FromResult(WriteResult.Success);
             },
@@ -2536,37 +2547,14 @@ public class SubjectSourceBaseTests
         await source.StartAsync(CancellationToken.None);
         try
         {
-            // The probe is re-written on each poll because writes captured before the change processor
-            // runs are parked in the retry queue and reconciled rather than buffered.
-            var probeValue = 0;
-            await AsyncTestHelpers.WaitUntilAsync(
-                () =>
-                {
-                    person.LastName = "Probe" + probeValue++;
-                    return source.Diagnostics.OutboundChanges.Depth > 0;
-                },
-                message: "The pump did not start buffering changes.");
-
-            // The probe written by the last predicate evaluation may not be dequeued yet, and one that
-            // lands after the depth is read would satisfy the wait below on its own: the wait would then
-            // return before FirstName is dequeued, and the stop strands it in the subscription. Wait for
-            // the depth to hold across two polls first, so only the FirstName write can still grow it.
-            var previousDepth = -1;
-            await AsyncTestHelpers.WaitUntilAsync(
-                () =>
-                {
-                    var depth = source.Diagnostics.OutboundChanges.Depth;
-                    var isSettled = depth == previousDepth;
-                    previousDepth = depth;
-                    return isSettled;
-                },
-                message: "The buffered depth did not settle after the probe loop.");
+            // The reconcile runs after the last drain into the retry queue, so every later write is left
+            // in the subscription for the change processor, and FirstName is the only one.
+            await parkedWriteSent.Task.WaitAsync(TestTimeout);
 
             // Act
-            var bufferedBeforeWrite = previousDepth;
             person.FirstName = "John";
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.OutboundChanges.Depth > bufferedBeforeWrite,
+                () => source.Diagnostics.OutboundChanges.Depth == 1,
                 message: "The write was not buffered by the change processor.");
         }
         finally
