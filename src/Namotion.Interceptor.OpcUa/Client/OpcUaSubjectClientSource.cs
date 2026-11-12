@@ -422,7 +422,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
         _subscriptionHealthMonitor.CheckAndHealSubscriptions(sessionManager.Subscriptions, cancellationToken);
 
-        sessionManager.SubscriptionManager.EscalatePersistentlyFailedItems();
+        subscriptionManager.EscalatePersistentlyFailedItems();
+        subscriptionManager.RegisterCreatedItemsWithReadAfterWriteManager();
     }
 
     /// <summary>

@@ -130,6 +130,12 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
         _logger = logger;
     }
 
+    /// <summary>
+    /// Replaces the subscriptions with new ones for <paramref name="monitoredItems"/>, one subscription
+    /// per <see cref="OpcUaClientConfiguration.MaxItemsPerSubscription"/> items. Waits up to
+    /// <see cref="OpcUaClientConfiguration.OperationTimeout"/> per subscription for the engine to apply
+    /// its items, so the total wait grows with the number of subscriptions.
+    /// </summary>
     public async Task CreateBatchedSubscriptionsAsync(
         IReadOnlyList<MonitoredItemRequest> monitoredItems,
         ISession session,
@@ -147,7 +153,7 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
         // on it and have to be removed before their replacements are created.
         var previousSubscriptions = _subscriptions.Keys.ToArray();
         ClearTrackedCollections();
-        await DisposeSubscriptionsAsync(previousSubscriptions).ConfigureAwait(false);
+        await DisposeSubscriptionsAsync(previousSubscriptions, cancellationToken).ConfigureAwait(false);
 
         _healAttempts.Clear();
         // Re-attempt every owned property as a real subscription; failed nodes are re-added to
@@ -173,9 +179,10 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
                 MaxNotificationsPerPublish = _configuration.SubscriptionMaxNotificationsPerPublish
             }));
 
+            var batchEnd = Math.Min(i + maxItemsPerSubscription, itemCount);
+            var trackedClientHandles = new List<uint>(batchEnd - i);
             try
             {
-                var batchEnd = Math.Min(i + maxItemsPerSubscription, itemCount);
                 for (var j = i; j < batchEnd; j++)
                 {
                     var request = monitoredItems[j];
@@ -184,6 +191,7 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
                         item is not null)
                     {
                         TrackMonitoredItem(item, request);
+                        trackedClientHandles.Add(item.ClientHandle);
                     }
                     else
                     {
@@ -195,7 +203,12 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
             }
             catch
             {
-                await DisposeSubscriptionsAsync([subscription]).ConfigureAwait(false);
+                foreach (var clientHandle in trackedClientHandles)
+                {
+                    TryRemoveMonitoredItem(clientHandle, out _);
+                }
+
+                await DisposeSubscriptionsAsync([subscription], cancellationToken).ConfigureAwait(false);
                 throw;
             }
 
@@ -217,8 +230,9 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
     }
 
     /// <summary>
-    /// Waits until the engine created the subscription and attempted every monitored item once, which
-    /// it does asynchronously. Items that failed carry their error afterwards.
+    /// Waits up to <see cref="OpcUaClientConfiguration.OperationTimeout"/> until the engine created the
+    /// subscription and attempted every monitored item once, which it does asynchronously. Items that
+    /// failed carry their error afterwards.
     /// </summary>
     private async Task WaitUntilAppliedAsync(ISubscription subscription, CancellationToken cancellationToken)
     {
@@ -451,7 +465,7 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
 
     /// <summary>
     /// Starts a new ranking of notification messages for every subscription. Called when the server
-    /// session was created again: the subscriptions are restored in place and number their messages
+    /// session was created again: a subscription the engine had to create again numbers its messages
     /// from the start again, which must not be ranked against the messages applied before.
     /// </summary>
     internal void ResetNotificationRanking()
@@ -654,8 +668,26 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
     }
 
     /// <summary>
-    /// Registers all successfully created monitored items with ReadAfterWriteManager.
-    /// Called once the items were applied, when the revised sampling intervals are known.
+    /// Registers the monitored items the engine created since the last call with the
+    /// <see cref="ReadAfterWriteManager"/>, which needs their revised sampling intervals. Covers the
+    /// items created after the subscriptions were set up, such as a retried item that succeeded.
+    /// </summary>
+    public void RegisterCreatedItemsWithReadAfterWriteManager()
+    {
+        if (_readAfterWriteManager is null)
+        {
+            return;
+        }
+
+        foreach (var subscription in _subscriptions.Keys)
+        {
+            RegisterPropertiesWithReadAfterWriteManager(subscription);
+        }
+    }
+
+    /// <summary>
+    /// Registers the created monitored items of <paramref name="subscription"/> that are not registered
+    /// yet with the <see cref="ReadAfterWriteManager"/>.
     /// </summary>
     private void RegisterPropertiesWithReadAfterWriteManager(ISubscription subscription)
     {
@@ -666,7 +698,9 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
 
         foreach (var item in subscription.MonitoredItems.Items)
         {
-            if (item.Created && _monitoredItems.TryGetValue(item.ClientHandle, out var state))
+            if (item.Created &&
+                _monitoredItems.TryGetValue(item.ClientHandle, out var state) &&
+                state.TryMarkRegisteredWithReadAfterWrite())
             {
                 var requestedInterval = GetRequestedSamplingInterval(state.Property);
                 _readAfterWriteManager.RegisterProperty(state.NodeId, state.Property, requestedInterval, item.CurrentSamplingInterval);
@@ -749,25 +783,54 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
         var subscriptions = _subscriptions.Keys.ToArray();
         ClearTrackedCollections();
 
-        await DisposeSubscriptionsAsync(subscriptions).ConfigureAwait(false);
+        await DisposeSubscriptionsAsync(subscriptions, CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Disposes the subscriptions, which removes them from the session and deletes them on the server.
+    /// Disposes the subscriptions concurrently, which removes them from the session and deletes them on
+    /// the server. Waits up to <see cref="OpcUaClientConfiguration.SessionDisposalTimeout"/> for all of
+    /// them together; a disposal still running after that or after cancellation continues in the background.
     /// </summary>
-    private async Task DisposeSubscriptionsAsync(IReadOnlyList<ISubscription> subscriptions)
+    private async Task DisposeSubscriptionsAsync(IReadOnlyList<ISubscription> subscriptions, CancellationToken cancellationToken)
     {
-        foreach (var subscription in subscriptions)
+        if (subscriptions.Count == 0)
         {
-            try
-            {
-                await subscription.DisposeAsync().AsTask()
-                    .WaitAsync(_configuration.SessionDisposalTimeout).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to remove an OPC UA subscription.");
-            }
+            return;
+        }
+
+        var disposals = new Task[subscriptions.Count];
+        for (var i = 0; i < disposals.Length; i++)
+        {
+            disposals[i] = DisposeSubscriptionAsync(subscriptions[i]);
+        }
+
+        try
+        {
+            await Task.WhenAll(disposals)
+                .WaitAsync(_configuration.SessionDisposalTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning(
+                "Not all OPC UA subscriptions were removed within {Timeout}; the remaining removals continue in the background.",
+                _configuration.SessionDisposalTimeout);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The caller is stopping; the remaining removals continue in the background.
+        }
+    }
+
+    // Never faults, so a disposal that outlives the shared wait is still observed and logged.
+    private async Task DisposeSubscriptionAsync(ISubscription subscription)
+    {
+        try
+        {
+            await subscription.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to remove an OPC UA subscription.");
         }
     }
 
@@ -791,6 +854,15 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
         // Interlocked rather than the partition's lock alone: a callback ranked against an apply state
         // that was reset meanwhile writes it under its own lock.
         public ulong LastAppliedStamp;
+
+        private int _registeredWithReadAfterWrite;
+
+        /// <summary>
+        /// Marks the item as registered with the <see cref="ReadAfterWriteManager"/>. Returns false if it
+        /// was registered already.
+        /// </summary>
+        public bool TryMarkRegisteredWithReadAfterWrite() =>
+            Interlocked.Exchange(ref _registeredWithReadAfterWrite, 1) == 0;
     }
 
     /// <summary>

@@ -384,9 +384,10 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             "OPC UA server session recreated ({PreviousSessionId} -> {SessionId}). Full state sync pending.",
             e.PreviousSessionId, e.SessionId);
 
-        // The subscription engine restores the subscriptions onto the new server session by itself,
-        // where they number their messages from the start again. Notifications may have been missed
-        // while no server session existed, hence the full read.
+        // The subscription engine moves the subscriptions to the new server session by itself. A
+        // transferred one keeps its message numbers, but one created again after a failed transfer
+        // numbers them from the start again, hence the new ranking. Notifications may have been
+        // missed while no server session existed, hence the full read.
         SubscriptionManager.ResetNotificationRanking();
         ReadAfterWriteManager?.ClearPendingReads();
         Interlocked.Exchange(ref _needsFullStateSync, 1);

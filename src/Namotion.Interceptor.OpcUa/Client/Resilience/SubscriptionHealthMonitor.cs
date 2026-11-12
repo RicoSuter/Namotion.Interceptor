@@ -23,46 +23,51 @@ internal sealed class SubscriptionHealthMonitor
 
     public void CheckAndHealSubscriptions(IReadOnlyCollection<ISubscription> subscriptions, CancellationToken cancellationToken)
     {
-        try
+        foreach (var subscription in subscriptions)
         {
-            foreach (var subscription in subscriptions)
+            try
             {
-                var unhealthyCount = 0;
-                var requeuedCount = 0;
-                var retryCollection = subscription.MonitoredItems as IMonitoredItemRetryCollection;
-
-                foreach (var item in subscription.MonitoredItems.Items)
+                CheckAndHealSubscription(subscription);
+            }
+            catch (Exception ex)
+            {
+                if (!cancellationToken.IsCancellationRequested)
                 {
-                    if (!IsUnhealthy(item) || !IsRetryable(item))
-                    {
-                        continue;
-                    }
-
-                    unhealthyCount++;
-
-                    // Returns false while the engine is still applying the item by itself.
-                    if (retryCollection is not null && retryCollection.TryRequeue(item.ClientHandle))
-                    {
-                        requeuedCount++;
-                    }
+                    _reportError(ex);
                 }
 
-                if (unhealthyCount > 0)
-                {
-                    _logger.LogWarning(
-                        "OPC UA subscription has {Unhealthy} failed monitored items that can be retried; requeued {Requeued}.",
-                        unhealthyCount, requeuedCount);
-                }
+                _logger.LogError(ex, "OPC UA subscription health check failed.");
             }
         }
-        catch (Exception ex)
+    }
+
+    private void CheckAndHealSubscription(ISubscription subscription)
+    {
+        var unhealthyCount = 0;
+        var requeuedCount = 0;
+        var retryCollection = subscription.MonitoredItems as IMonitoredItemRetryCollection;
+
+        foreach (var item in subscription.MonitoredItems.Items)
         {
-            if (!cancellationToken.IsCancellationRequested)
+            if (!IsUnhealthy(item) || !IsRetryable(item))
             {
-                _reportError(ex);
+                continue;
             }
 
-            _logger.LogError(ex, "OPC UA subscription health check failed.");
+            unhealthyCount++;
+
+            // Returns false while the engine is still applying the item by itself.
+            if (retryCollection is not null && retryCollection.TryRequeue(item.ClientHandle))
+            {
+                requeuedCount++;
+            }
+        }
+
+        if (unhealthyCount > 0)
+        {
+            _logger.LogWarning(
+                "OPC UA subscription has {Unhealthy} failed monitored items that can be retried; requeued {Requeued}.",
+                unhealthyCount, requeuedCount);
         }
     }
 

@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Client.Polling;
+using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
@@ -282,17 +284,117 @@ public class SubscriptionManagerDiagnosticsTests
         Assert.Equal(0, manager.MonitoredItemCount);
     }
 
+    [Fact]
+    public async Task WhenABatchFailsToBeApplied_ThenItsItemsAreNoLongerTracked()
+    {
+        // Arrange
+        var configuration = CreateConfiguration();
+        configuration.OperationTimeout = TimeSpan.FromMilliseconds(100);
+        await using var source = CreateClientSource(configuration: configuration);
+        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
+        await using var manager = CreateManager(source, propertyWriter, configuration, new ConcurrentQueue<Exception>());
+        var session = CreateSession(subscriptionsCreated: false);
+
+        // Act
+        await Assert.ThrowsAsync<TimeoutException>(() => manager.CreateBatchedSubscriptionsAsync(
+            [CreateRequest(source, nameof(TestRoot.Name)), CreateRequest(source, nameof(TestRoot.Number_Unit))],
+            session,
+            CancellationToken.None));
+
+        // Assert
+        Assert.Equal(
+            (Subscriptions: 0, MonitoredItems: 0, NeedsRecreate: true),
+            (Subscriptions: manager.SubscriptionCount, MonitoredItems: manager.MonitoredItemCount, manager.NeedsRecreate));
+    }
+
+    [Fact]
+    public async Task WhenAnItemIsCreatedAfterTheSubscriptionWasSetUp_ThenTheHealthCheckRegistersItForReadAfterWrite()
+    {
+        // Arrange
+        var configuration = CreateConfiguration();
+        configuration.DefaultSamplingInterval = 0;
+        await using var source = CreateClientSource(configuration: configuration);
+        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
+        await using var readAfterWriteManager = new ReadAfterWriteManager(
+            () => null, source, configuration, new ReadAfterWriteMetrics(), _ => { }, NullLogger.Instance);
+        await using var manager = CreateManager(
+            source, propertyWriter, configuration, new ConcurrentQueue<Exception>(), readAfterWriteManager: readAfterWriteManager);
+
+        var monitoredItem = CreateMonitoredItem(created: false, error: StatusCodes.BadTimeout);
+        var request = CreateRequest(source, nameof(TestRoot.Name));
+        await manager.CreateBatchedSubscriptionsAsync([request], CreateSession(_ => monitoredItem), CancellationToken.None);
+
+        readAfterWriteManager.OnPropertyWritten(request.NodeId);
+        var pendingReadsBeforeCreation = readAfterWriteManager.PendingReadCount;
+
+        var item = Mock.Get(monitoredItem);
+        item.SetupGet(i => i.Created).Returns(true);
+        item.SetupGet(i => i.Error).Returns(ServiceResult.Good);
+        item.SetupGet(i => i.CurrentSamplingInterval).Returns(TimeSpan.FromMinutes(1));
+
+        // Act
+        manager.RegisterCreatedItemsWithReadAfterWriteManager();
+
+        // Assert
+        readAfterWriteManager.OnPropertyWritten(request.NodeId);
+        Assert.Equal(0, pendingReadsBeforeCreation);
+        Assert.Equal(1, readAfterWriteManager.PendingReadCount);
+    }
+
+    [Fact]
+    public async Task WhenSubscriptionsAreDisposed_ThenTheirDisposalsRunConcurrently()
+    {
+        // Arrange
+        var configuration = CreateConfiguration();
+        configuration.MaxItemsPerSubscription = 1;
+        await using var source = CreateClientSource(configuration: configuration);
+        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
+        var manager = CreateManager(source, propertyWriter, configuration, new ConcurrentQueue<Exception>());
+        await manager.CreateBatchedSubscriptionsAsync(
+            [
+                CreateRequest(source, nameof(TestRoot.Name)),
+                CreateRequest(source, nameof(TestRoot.Number_Unit)),
+                CreateRequest(source, nameof(TestRoot.Connected))
+            ],
+            CreateSession(),
+            CancellationToken.None);
+
+        var subscriptions = manager.Subscriptions.ToArray();
+        using var allStarted = new CountdownEvent(subscriptions.Length);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        foreach (var subscription in subscriptions)
+        {
+            Mock.Get(subscription)
+                .Setup(s => s.DisposeAsync())
+                .Returns(() =>
+                {
+                    allStarted.Signal();
+                    return new ValueTask(release.Task);
+                });
+        }
+
+        // Act
+        var disposal = manager.DisposeAsync().AsTask();
+
+        // Assert
+        Assert.True(allStarted.Wait(TestTimeouts.Default));
+        Assert.False(disposal.IsCompleted);
+        release.SetResult();
+        await disposal;
+    }
+
     private static SubscriptionManager CreateManager(
         OpcUaSubjectClientSource source,
         SubjectPropertyWriter propertyWriter,
         OpcUaClientConfiguration configuration,
         ConcurrentQueue<Exception> reportedErrors,
-        PollingManager? pollingManager = null) =>
+        PollingManager? pollingManager = null,
+        ReadAfterWriteManager? readAfterWriteManager = null) =>
         new(
             source,
             propertyWriter,
             pollingManager,
-            readAfterWriteManager: null,
+            readAfterWriteManager,
             configuration,
             error =>
             {

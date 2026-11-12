@@ -43,10 +43,12 @@ internal static class SubscriptionTestFactory
     /// <param name="items">The items the subscription starts with.</param>
     /// <param name="tryRequeue">Called with the client handle of a requeued item, or <c>null</c> to accept every requeue.</param>
     /// <param name="createItem">Creates the item for options added later, or <c>null</c> for an item the server created.</param>
+    /// <param name="created">Whether the server created the subscription.</param>
     internal static ISubscription CreateSubscription(
         IEnumerable<IMonitoredItem>? items = null,
         Func<uint, bool>? tryRequeue = null,
-        Func<MonitoredItemOptions, IMonitoredItem>? createItem = null)
+        Func<MonitoredItemOptions, IMonitoredItem>? createItem = null,
+        bool created = true)
     {
         var currentItems = new List<IMonitoredItem>(items ?? []);
 
@@ -72,7 +74,7 @@ internal static class SubscriptionTestFactory
             .Returns((uint clientHandle) => tryRequeue?.Invoke(clientHandle) ?? true);
 
         var subscription = new Mock<ISubscription>();
-        subscription.SetupGet(s => s.Created).Returns(true);
+        subscription.SetupGet(s => s.Created).Returns(created);
         subscription.SetupGet(s => s.MonitoredItems).Returns(collection.Object);
         return subscription.Object;
     }
@@ -81,12 +83,15 @@ internal static class SubscriptionTestFactory
     /// Creates a session whose subscription engine hands out subscriptions from <see cref="CreateSubscription"/>.
     /// </summary>
     /// <param name="createItem">Creates the item for added options, or <c>null</c> for an item the server created.</param>
-    internal static ISession CreateSession(Func<MonitoredItemOptions, IMonitoredItem>? createItem = null)
+    /// <param name="subscriptionsCreated">Whether the server creates the subscriptions.</param>
+    internal static ISession CreateSession(
+        Func<MonitoredItemOptions, IMonitoredItem>? createItem = null,
+        bool subscriptionsCreated = true)
     {
         var subscriptionManager = new Mock<ISubscriptionManager>();
         subscriptionManager
             .Setup(m => m.Add(It.IsAny<ISubscriptionNotificationHandler>(), It.IsAny<IOptionsMonitor<SubscriptionOptions>>()))
-            .Returns(() => CreateSubscription(createItem: createItem));
+            .Returns(() => CreateSubscription(createItem: createItem, created: subscriptionsCreated));
 
         var engine = subscriptionManager.Object;
         var session = new Mock<ISession>();

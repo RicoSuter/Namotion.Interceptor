@@ -167,6 +167,36 @@ public class SubscriptionHealthMonitorTests
     }
 
     [Fact]
+    public void WhenOneSubscriptionThrows_ThenTheOtherSubscriptionsAreStillHealed()
+    {
+        // Arrange
+        var error = new ObjectDisposedException("subscription");
+        var throwingSubscription = CreateSubscription(
+            [CreateMonitoredItem(created: false, error: StatusCodes.BadTimeout)],
+            tryRequeue: _ => throw error);
+
+        var failedItem = CreateMonitoredItem(created: false, error: StatusCodes.BadTimeout);
+        var requeuedClientHandles = new List<uint>();
+        var healthySubscription = CreateSubscription(
+            [failedItem],
+            tryRequeue: clientHandle =>
+            {
+                requeuedClientHandles.Add(clientHandle);
+                return true;
+            });
+
+        var reportedErrors = new List<Exception>();
+        var monitor = new SubscriptionHealthMonitor(NullLogger.Instance, reportedErrors.Add);
+
+        // Act
+        monitor.CheckAndHealSubscriptions([throwingSubscription, healthySubscription], CancellationToken.None);
+
+        // Assert
+        Assert.Equal([failedItem.ClientHandle], requeuedClientHandles);
+        Assert.Same(error, Assert.Single(reportedErrors));
+    }
+
+    [Fact]
     public void WhenRequeueThrowsAfterCancellation_ThenFailureIsNotReported()
     {
         // Arrange
