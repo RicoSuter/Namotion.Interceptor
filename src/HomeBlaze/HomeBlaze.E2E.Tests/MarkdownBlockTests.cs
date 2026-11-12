@@ -861,7 +861,7 @@ public class MarkdownBlockTests
 
         var dialog = SubjectSetupDialogTests.Dialog(page);
         var createButton = SubjectSetupDialogTests.CreateButton(page);
-        await Assertions.Expect(createButton).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await SubjectSetupDialogTests.ExpectConfigurePageAsync(page);
         await dialog.GetByLabel("Path", new() { Exact = true }).FillAsync("scratchmotor/CurrentSpeed");
         await Assertions.Expect(createButton).ToBeEnabledAsync(new() { Timeout = 30000 });
         await createButton.ClickAsync();

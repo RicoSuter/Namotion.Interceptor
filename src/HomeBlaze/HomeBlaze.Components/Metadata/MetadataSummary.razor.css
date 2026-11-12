@@ -1,0 +1,5 @@
+/* The theme resets the padding of lists, which would put their markers outside the notes. */
+.metadata-notes ::deep ul,
+.metadata-notes ::deep ol {
+    padding-left: 1.5em;
+}

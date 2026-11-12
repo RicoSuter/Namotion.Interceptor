@@ -22,7 +22,7 @@
             <SubjectComponent @key="Subject"
                               Subject="@Subject"
                               Type="hostedComponentType"
-                              AdditionalParameters="@(IsCreating ? CreatingParameters : EditingParameters)"
+                              AdditionalParameters="@GetHostedComponentParameters()"
                               ComponentInstance="_subjectComponent"
                               ComponentInstanceChanged="OnSubjectComponentRendered" />
         }
@@ -37,13 +37,26 @@
 }
 
 @code {
-    // SubjectComponent builds the parameters of the hosted component again whenever it is given another instance.
-    private static readonly Dictionary<string, object?> CreatingParameters = new() { ["IsCreating"] = true };
-    private static readonly Dictionary<string, object?> EditingParameters = new() { ["IsCreating"] = false };
+    private const string IsCreatingParameterName = "IsCreating";
+
+    // Shared instances, for the reason given at _mergedParameters.
+    private static readonly Dictionary<string, object?> CreatingParameters = new() { [IsCreatingParameterName] = true };
+    private static readonly Dictionary<string, object?> EditingParameters = new() { [IsCreatingParameterName] = false };
 
     [Parameter] public IInterceptorSubject? Subject { get; set; }
 
     [Parameter] public bool IsCreating { get; set; }
+
+    /// <summary>
+    /// Gets or sets extra parameters for the hosted edit or setup component, or null for none. The panel's own
+    /// <c>IsCreating</c> entry takes precedence over one of the same name.
+    /// </summary>
+    /// <remarks>
+    /// Every entry must name a parameter the hosted component declares, as Blazor throws for an unknown one, and is
+    /// not passed to the generated properties editor of a subject without a registered component. Pass the same
+    /// instance on every render, another instance rebuilds the parameters of the hosted component.
+    /// </remarks>
+    [Parameter] public IReadOnlyDictionary<string, object?>? EditorParameters { get; set; }
 
     /// <summary>
     /// Raised with the current validity once the hosted editor is ready, and again whenever the validity changes.
@@ -63,6 +76,11 @@
     private ConfigurationPropertiesEditor? _propertiesEditor;
     private bool? _reportedIsValid;
     private Func<Task> _refreshIsValid = () => Task.CompletedTask;
+    // SubjectComponent builds the parameters of the hosted component again whenever it is given another instance, so
+    // the merged dictionary is kept until EditorParameters or IsCreating change.
+    private IReadOnlyDictionary<string, object?>? _mergedEditorParameters;
+    private bool _mergedIsCreating;
+    private Dictionary<string, object?>? _mergedParameters;
 
     private SubjectComponentType? HostedComponentType
     {
@@ -81,6 +99,47 @@
 
             return ComponentRegistry.HasComponent(subjectType, SubjectComponentType.Edit) ? SubjectComponentType.Edit : null;
         }
+    }
+
+    private Dictionary<string, object?> GetHostedComponentParameters()
+    {
+        if (EditorParameters is null)
+        {
+            return CreateHostedComponentParameters(IsCreating, null);
+        }
+
+        if (_mergedParameters is null ||
+            !ReferenceEquals(_mergedEditorParameters, EditorParameters) ||
+            _mergedIsCreating != IsCreating)
+        {
+            _mergedEditorParameters = EditorParameters;
+            _mergedIsCreating = IsCreating;
+            _mergedParameters = CreateHostedComponentParameters(IsCreating, EditorParameters);
+        }
+
+        return _mergedParameters;
+    }
+
+    /// <summary>
+    /// Creates the parameters of the hosted component: the <c>IsCreating</c> entry and the given editor parameters.
+    /// Returns a shared instance when there are no editor parameters.
+    /// </summary>
+    internal static Dictionary<string, object?> CreateHostedComponentParameters(
+        bool isCreating, IReadOnlyDictionary<string, object?>? editorParameters)
+    {
+        if (editorParameters is null)
+        {
+            return isCreating ? CreatingParameters : EditingParameters;
+        }
+
+        var parameters = new Dictionary<string, object?>(editorParameters.Count + 1);
+        foreach (var (name, value) in editorParameters)
+        {
+            parameters[name] = value;
+        }
+
+        parameters[IsCreatingParameterName] = isCreating;
+        return parameters;
     }
 
     // A null instance cannot stand for "not reported yet": a registered component that is not an

@@ -1451,16 +1451,14 @@ public class SubjectSourceBaseTests
         using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var watchdogRegistration = watchdog.Token.Register(() => releaseCurrentWrite.TrySetResult());
         await source.StartAsync(CancellationToken.None);
-        var probeValue = 0;
-        await AsyncTestHelpers.WaitUntilAsync(() =>
-        {
-            subject.LastName = "probe" + probeValue++;
-            return source.Diagnostics.OutboundChanges.Depth > 0;
-        }, message: "The connected processor did not start buffering the warmup write.");
+        // StartAsync subscribes before it returns, so the warmup write reaches the source through either
+        // the reconcile or the connected processor. No drain into the retry queue follows the reconcile,
+        // so only the processor can deliver the fence.
+        subject.LastName = "warmup";
         await warmupWritten.Task.WaitAsync(TestTimeout);
-        // Changes are delivered in order, so once the fence is written no probe is left to share the
-        // current write's batch, which the single drop asserted below relies on.
-        subject.FirstName_MaxLength = -probeValue;
+        // Changes are delivered in order, so once the fence is written no earlier write is left to share
+        // the current write's batch, which the single drop asserted below relies on.
+        subject.FirstName_MaxLength = -1;
         await warmupFenceWritten.Task.WaitAsync(TestTimeout);
 
         Volatile.Write(ref failCurrentWrite, true);
@@ -2036,6 +2034,7 @@ public class SubjectSourceBaseTests
             .WithRegistry();
         var subject = new Person(context);
         var warmupWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fenceWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var stoppedNotificationEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseStoppedNotification = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var postStoppedTransportEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -2057,6 +2056,11 @@ public class SubjectSourceBaseTests
                 {
                     warmupWritten.TrySetResult();
                 }
+                if (changeArray.Any(change => change.Property.Name == nameof(Person.LastName) &&
+                                              change.GetNewValue<string?>() == "fence"))
+                {
+                    fenceWritten.TrySetResult();
+                }
                 if (changeArray.Any(change => change.Property.Name == nameof(Person.FirstName)))
                 {
                     postStoppedTransportEntered.TrySetResult();
@@ -2077,16 +2081,14 @@ public class SubjectSourceBaseTests
         };
 
         await source.StartAsync(CancellationToken.None);
-        var probeValue = 0;
-        await AsyncTestHelpers.WaitUntilAsync(() =>
-        {
-            subject.LastName = "probe" + probeValue++;
-            return source.Diagnostics.OutboundChanges.Depth > 0;
-        }, message: "The connected processor did not buffer the warmup write.");
+        // StartAsync subscribes before it returns, so the warmup write reaches the source through either
+        // the reconcile or the connected processor. No drain into the retry queue follows the reconcile,
+        // so only the processor can deliver the fence, and changes are delivered in order, so once the fence is
+        // written nothing earlier is left to be dropped by the disposal below.
+        subject.LastName = "warmup";
         await warmupWritten.Task.WaitAsync(TestTimeout);
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => source.Diagnostics.OutboundChanges.Depth == 0,
-            message: "The warmup write did not leave the connected processor.");
+        subject.LastName = "fence";
+        await fenceWritten.Task.WaitAsync(TestTimeout);
         var droppedBeforeDispose = source.Diagnostics.OutboundRetries.TotalDropped;
 
         var disposal = Task.Run(source.Dispose);
@@ -2515,15 +2517,27 @@ public class SubjectSourceBaseTests
 
         var person = new Person(context);
         var receivedWrites = new ConcurrentQueue<string>();
+        var parkedWriteSent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         using var source = new TestSubjectSource(person, context, NullLogger.Instance,
             bufferTime: TimeSpan.FromMinutes(5))
         {
+            TeardownTimeProvider = new ManualTeardownClock(),
+            LoadInitialStateOverride = _ =>
+            {
+                // Captured during the load, so it is parked in the retry queue and sent by the reconcile.
+                person.LastName = "Parked";
+                return Task.FromResult<Action?>(null);
+            },
             WriteChangesOverride = (changes, _) =>
             {
                 foreach (var change in changes.ToArray())
                 {
                     receivedWrites.Enqueue($"{change.Property.Name}={change.GetNewValue<object?>()}");
+                    if (change.Property.Name == nameof(Person.LastName))
+                    {
+                        parkedWriteSent.TrySetResult();
+                    }
                 }
                 return ValueTask.FromResult(WriteResult.Success);
             },
@@ -2535,42 +2549,19 @@ public class SubjectSourceBaseTests
         await source.StartAsync(CancellationToken.None);
         try
         {
-            // The probe is re-written on each poll because writes captured before the change processor
-            // runs are parked in the retry queue and reconciled rather than buffered.
-            var probeValue = 0;
-            await AsyncTestHelpers.WaitUntilAsync(
-                () =>
-                {
-                    person.LastName = "Probe" + probeValue++;
-                    return source.Diagnostics.OutboundChanges.Depth > 0;
-                },
-                message: "The pump did not start buffering changes.");
-
-            // The probe written by the last predicate evaluation may not be dequeued yet, and one that
-            // lands after the depth is read would satisfy the wait below on its own: the wait would then
-            // return before FirstName is dequeued, and the stop strands it in the subscription. Wait for
-            // the depth to hold across two polls first, so only the FirstName write can still grow it.
-            var previousDepth = -1;
-            await AsyncTestHelpers.WaitUntilAsync(
-                () =>
-                {
-                    var depth = source.Diagnostics.OutboundChanges.Depth;
-                    var isSettled = depth == previousDepth;
-                    previousDepth = depth;
-                    return isSettled;
-                },
-                message: "The buffered depth did not settle after the probe loop.");
+            // The reconcile runs after the last drain into the retry queue, so every later write is left
+            // in the subscription for the change processor, and FirstName is the only one.
+            await parkedWriteSent.Task.WaitAsync(TestTimeout);
 
             // Act
-            var bufferedBeforeWrite = previousDepth;
             person.FirstName = "John";
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.OutboundChanges.Depth > bufferedBeforeWrite,
+                () => source.Diagnostics.OutboundChanges.Depth == 1,
                 message: "The write was not buffered by the change processor.");
         }
         finally
         {
-            await source.StopAsync(CancellationToken.None);
+            await source.StopAsync(CancellationToken.None).WaitAsync(TestTimeout);
         }
 
         // Assert

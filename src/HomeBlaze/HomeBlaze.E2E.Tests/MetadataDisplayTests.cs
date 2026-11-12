@@ -289,6 +289,44 @@ public class MetadataDisplayTests
     });
 
     [Fact]
+    public Task WhenNotesAreTyped_ThenThePreviewShowsThemRendered() => WithSidecarAsync("Motor.metadata.json", "{}", async () =>
+    {
+        // Arrange
+        var (page, pane) = await OpenPaneAsync("Demo/Motor");
+        var row = GetRow(page, pane, "Temperature");
+        await row.HoverAsync();
+        await row.GetByTestId("subject-pane-value-metadata").ClickAsync();
+
+        // MudDialog puts its test id on its content, which does not hold the actions.
+        var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
+
+        // Act
+        await dialog.GetByTestId("metadata-notes-input").FillAsync("Some **bold** text");
+
+        // Assert
+        await Assertions.Expect(dialog.GetByTestId("markdown-field-preview").Locator("strong"))
+            .ToHaveTextAsync("bold", new() { Timeout = PageLoadTimeout });
+    });
+
+    [Fact]
+    public Task WhenTypedNotesBreakTheRules_ThenTheErrorShowsAndSaveIsDisabled() => WithSidecarAsync("Motor.metadata.json", "{}", async () =>
+    {
+        // Arrange
+        var (page, pane) = await OpenPaneAsync("Demo/Motor");
+        await pane.GetByTestId("edit-metadata-button").ClickAsync();
+
+        // MudDialog puts its test id on its content, which does not hold the actions.
+        var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
+
+        // Act
+        await dialog.GetByTestId("metadata-notes-input").FillAsync("Raw <b>bold</b> text");
+
+        // Assert
+        await Assertions.Expect(dialog.GetByTestId("markdown-field-error")).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(dialog.GetByTestId("metadata-save")).ToBeDisabledAsync();
+    });
+
+    [Fact]
     public Task WhenTagsAreTypedAndAddedWithEnter_ThenEachIsOneChipAndARemovedChipIsNotWritten() => WithSidecarAsync("Motor.metadata.json", TagInUseSidecar, async () =>
     {
         // Arrange
@@ -444,6 +482,8 @@ public class MetadataDisplayTests
 
         // MudDialog puts its test id on its content, which does not hold the actions.
         var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
+        await Assertions.Expect(dialog.GetByTestId("metadata-notes-kept"))
+            .ToHaveTextAsync("These notes break the rules and are kept as they are unless you change them.", new() { Timeout = PageLoadTimeout });
         await dialog.GetByTestId("metadata-icon").FillAsync("Settings");
 
         // Act

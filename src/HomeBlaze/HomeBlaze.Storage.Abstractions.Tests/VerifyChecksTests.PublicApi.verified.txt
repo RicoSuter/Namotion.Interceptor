@@ -77,6 +77,13 @@ namespace HomeBlaze.Storage.Abstractions.Metadata
     {
         System.Collections.Immutable.ImmutableArray<string> ChildOrder { get; }
     }
+    public interface IMetadataNotesFormat
+    {
+        int MaxSize { get; }
+        string? GetError(string notes);
+        string? ToHtml(string notes);
+        string ToText(string notes);
+    }
     public interface IMetadataStore
     {
         void ApplyStoredMetadata(Namotion.Interceptor.IInterceptorSubject subject, string? propertyName);

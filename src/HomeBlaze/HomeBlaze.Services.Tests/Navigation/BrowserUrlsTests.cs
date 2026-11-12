@@ -1,7 +1,7 @@
-using HomeBlaze.Host.Services.Navigation;
+using HomeBlaze.Services.Navigation;
 using Xunit;
 
-namespace HomeBlaze.Host.Services.Tests.Navigation;
+namespace HomeBlaze.Services.Tests.Navigation;
 
 public class BrowserUrlsTests
 {
