@@ -90,6 +90,7 @@ namespace HomeBlaze.Automation
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class AutomationRule : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
+        public const int MaxRunMessageLength = 500;
         public AutomationRule() { }
         public AutomationRule(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
@@ -227,6 +228,15 @@ namespace HomeBlaze.Automation
         public HomeBlaze.Automation.TriggerActivation OnActivation { get; init; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Rearm { get; init; }
+    }
+    public static class RuleStatusTexts
+    {
+        public const string AlreadyTrueWaitingToRearm = "Already true, waiting to rearm";
+        public const string AlreadyTrueWaitingUntilFalse = "Already true, waiting until false";
+        public const string Armed = "Armed";
+        public const string ArmedWaitingUntilFalse = "Armed, waiting until false";
+        public const string Off = "Off";
+        public const string TriggeredWaitingToRearm = "Triggered, waiting to rearm";
     }
     public sealed class SetPropertyAction : HomeBlaze.Automation.AutomationAction, System.IEquatable<HomeBlaze.Automation.SetPropertyAction>
     {

@@ -2,10 +2,10 @@
 @using System.Text.Json
 @using HomeBlaze.Services.Metadata
 @using HomeBlaze.Storage.Abstractions.Metadata
-@using HomeBlaze.Storage.Metadata
 
 @inject MetadataLinkResolver LinkResolver
 @inject SubjectPathResolver PathResolver
+@inject IMetadataNotesFormat NotesFormat
 
 @if (_notes is not null || _links.Length > 0 || _tags.Length > 0)
 {
@@ -14,7 +14,7 @@
         {
             @if (_notesHtml is not null)
             {
-                @* Only the HTML of MetadataNotes.ToHtml, which renders notes that pass the rules of pages. *@
+                @* Only the HTML of IMetadataNotesFormat.ToHtml, which renders notes that pass the rules of pages. *@
                 <div class="metadata-notes" data-testid="metadata-notes">@((MarkupString)_notesHtml)</div>
             }
             else
@@ -83,9 +83,9 @@
             return;
 
         _notes = Metadata.GetString(MetadataKeys.Notes);
-        _notesHtml = _notes is null ? null : MetadataNotes.ToHtml(_notes);
+        _notesHtml = _notes is null ? null : NotesFormat.ToHtml(_notes);
         if (_notes is not null && _notesHtml is null)
-            _notes = MetadataNotes.ToText(_notes);
+            _notes = NotesFormat.ToText(_notes);
 
         _links = Metadata.GetLinks();
     }

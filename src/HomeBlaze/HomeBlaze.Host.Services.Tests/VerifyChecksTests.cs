@@ -13,7 +13,7 @@ public class VerifyChecksTests
     /// review the diff and accept by replacing the .verified.txt file with the test's .received.txt.
     /// </summary>
     [Fact]
-    public Task PublicApi() => Verify(typeof(SubjectDisplayExtensions).Assembly.GeneratePublicApi(new ApiGeneratorOptions
+    public Task PublicApi() => Verify(typeof(PropertyRowLayoutService).Assembly.GeneratePublicApi(new ApiGeneratorOptions
     {
         DenyNamespacePrefixes = ["System", "XamlGeneratedNamespace"]
     }));
