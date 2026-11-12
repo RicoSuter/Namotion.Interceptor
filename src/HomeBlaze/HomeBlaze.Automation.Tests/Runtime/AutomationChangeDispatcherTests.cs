@@ -596,6 +596,7 @@ public class AutomationChangeDispatcherTests
     {
         // Arrange
         const int writes = 1000;
+        const int limit = writes * 8;
         var (graph, weather) = CreateGraph();
         var holder = new TestSensorHolder();
         var first = new TestSensor();
@@ -611,11 +612,17 @@ public class AutomationChangeDispatcherTests
         registration.PublishRoute(Watch(Gust(weather)), isUnbounded: false);
 
         // Act
-        var withListener = MeasureAllocations(writes, holder, first, second);
+        // A GC from a parallel test can make the runtime rebuild a cache it trims or holds weakly, which allocates once in
+        // whichever measurement it falls into; only an allocation in every round comes from the dispatcher.
+        var allocated = long.MaxValue;
+        for (var round = 0; round < 3 && allocated >= limit; round++)
+        {
+            allocated = Math.Min(allocated, MeasureAllocations(writes, holder, first, second) - withoutListener);
+        }
 
         // Assert
         Assert.Equal(0, listener.GraphChanges);
-        Assert.True(withListener - withoutListener < writes * 8, $"{withListener - withoutListener} bytes for {writes} writes");
+        Assert.True(allocated < limit, $"{allocated} bytes for {writes} writes");
     }
 
     private static long MeasureAllocations(int writes, TestSensorHolder holder, TestSensor first, TestSensor second)
