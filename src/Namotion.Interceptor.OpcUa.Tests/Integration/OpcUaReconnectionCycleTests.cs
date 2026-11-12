@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 /// keeps retrying in new cycles and recovers once the server is back.
 /// </summary>
 [Trait("Category", "Integration")]
-public class OpcUaStallDetectionTests
+public class OpcUaReconnectionCycleTests
 {
     private readonly ITestOutputHelper _output;
 
@@ -26,13 +26,13 @@ public class OpcUaStallDetectionTests
         config.KeepAliveInterval = TimeSpan.FromSeconds(1); // Fast disconnection detection
     };
 
-    public OpcUaStallDetectionTests(ITestOutputHelper output)
+    public OpcUaReconnectionCycleTests(ITestOutputHelper output)
     {
         _output = output;
     }
 
     [Fact]
-    public async Task StallDetection_WhenServerNeverReturns_ClientKeepsRetrying()
+    public async Task WhenServerNeverReturns_ThenClientKeepsRetryingInNewCycles()
     {
         // When the server goes down and never comes back, each reconnection cycle that exhausts
         // MaxReconnectDuration counts as a failed attempt and the managed session starts the next
@@ -135,7 +135,7 @@ public class OpcUaStallDetectionTests
     }
 
     [Fact]
-    public async Task StallDetection_WhenServerRestartsAfterAnExhaustedCycle_ClientRecovers()
+    public async Task WhenServerRestartsAfterAnExhaustedCycle_ThenClientRecovers()
     {
         // After a whole reconnection cycle failed, a later cycle reconnects once the server is back,
         // and values keep arriving through the subscription afterwards.
@@ -240,11 +240,10 @@ public class OpcUaStallDetectionTests
     }
 
     [Fact]
-    public async Task StallDetection_WhenServerRestartsQuickly_SdkReconnectsWithoutStallTrigger()
+    public async Task WhenServerRestartsWithinOneCycle_ThenClientRecoversWithoutAFailedCycle()
     {
-        // Tests that when server restarts quickly (before MaxReconnectDuration),
-        // the SDK reconnection succeeds without stall detection triggering.
-        // This verifies we don't have false positive stall triggers.
+        // A server that is back before MaxReconnectDuration is exhausted is reconnected within the
+        // first cycle, so no cycle is counted as failed.
 
         var logger = new TestLogger(_output);
         OpcUaTestServer<TestRoot>? server = null;
@@ -298,6 +297,7 @@ public class OpcUaStallDetectionTests
 
             var initialReconnectAttempts = client.Source!.Diagnostics.Reconnects.TotalAttempts;
             var initialSuccessfulReconnects = client.Source!.Diagnostics.Reconnects.TotalSucceeded;
+            var initialFailedReconnects = client.Source!.Diagnostics.Reconnects.TotalFailed;
             logger.Log($"Before restart - attempts: {initialReconnectAttempts}, successful: {initialSuccessfulReconnects}");
 
             // Stop server briefly
@@ -311,7 +311,7 @@ public class OpcUaStallDetectionTests
                 message: "Client should detect disconnection or start reconnecting");
             logger.Log($"Client state after stop - Connected: {client.Source!.Diagnostics.IsOperational}, Reconnecting: {client.Source!.Diagnostics.IsReconnecting}");
 
-            // Restart server quickly (well before MaxReconnectDuration of 30s)
+            // Restart server well before MaxReconnectDuration (60s) is exhausted
             logger.Log("Restarting server quickly...");
             await server.RestartAsync();
 
@@ -334,7 +334,7 @@ public class OpcUaStallDetectionTests
                        $"successful: {client.Source!.Diagnostics.Reconnects.TotalSucceeded}, " +
                        $"connected: {client.Source!.Diagnostics.IsOperational}");
 
-            logger.Log("Test passed - SDK reconnected without stall detection trigger");
+            Assert.Equal(initialFailedReconnects, client.Source!.Diagnostics.Reconnects.TotalFailed);
         }
         finally
         {

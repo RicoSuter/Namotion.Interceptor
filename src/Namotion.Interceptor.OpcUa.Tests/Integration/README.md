@@ -49,7 +49,7 @@ public class MyNewTests : SharedServerTestBase
 
 ### 2. Dedicated Server Tests (Lifecycle Tests)
 
-These tests create their own server and client instances. Use this pattern when testing lifecycle scenarios like reconnection, stall detection, or server restarts.
+These tests create their own server and client instances. Use this pattern when testing lifecycle scenarios like reconnection, outages, or server restarts.
 
 **No base class** - Implements `IAsyncLifetime` directly
 
@@ -92,7 +92,7 @@ public class MyLifecycleTests
 
 **Existing dedicated server test classes:**
 - `OpcUaReconnectionTests` - Server restart recovery
-- `OpcUaStallDetectionTests` - Stall detection and recovery
+- `OpcUaReconnectionCycleTests` - Outages longer and shorter than one reconnection cycle
 - `OpcUaConcurrencyTests` - Concurrent operations during reconnection
 
 ## Shared Test Model

@@ -175,18 +175,29 @@ internal class SubscriptionManager : IAsyncDisposable
             }
 
             subscription.FastDataChangeCallback += OnFastDataChange;
-            await subscription.CreateAsync(cancellationToken).ConfigureAwait(false);
-
-            var batchEnd = Math.Min(i + maxItemsPerSubscription, itemCount);
-            for (var j = i; j < batchEnd; j++)
+            try
             {
-                var item = monitoredItems[j];
-                subscription.AddItem(item);
+                await subscription.CreateAsync(cancellationToken).ConfigureAwait(false);
 
-                TrackMonitoredItem(item);
+                var batchEnd = Math.Min(i + maxItemsPerSubscription, itemCount);
+                for (var j = i; j < batchEnd; j++)
+                {
+                    var item = monitoredItems[j];
+                    subscription.AddItem(item);
+
+                    TrackMonitoredItem(item);
+                }
+
+                await ApplyChangesAndFilterFailedMonitoredItemsAsync(subscription, cancellationToken).ConfigureAwait(false);
             }
-
-            await ApplyChangesAndFilterFailedMonitoredItemsAsync(subscription, cancellationToken).ConfigureAwait(false);
+            catch
+            {
+                // Not tracked yet, so a later recreate would not remove it: it would stay on the
+                // session, keep publishing and be restored by the managed session after a reconnect.
+                subscription.FastDataChangeCallback -= OnFastDataChange;
+                await TryRemoveUntrackedSubscriptionAsync(session, subscription, cancellationToken).ConfigureAwait(false);
+                throw;
+            }
 
             // Register properties with ReadAfterWriteManager now that we know revised sampling intervals
             RegisterPropertiesWithReadAfterWriteManager(subscription);
@@ -196,6 +207,18 @@ internal class SubscriptionManager : IAsyncDisposable
         }
 
         _subscriptionsIncomplete = false;
+    }
+
+    private async Task TryRemoveUntrackedSubscriptionAsync(ISession session, Subscription subscription, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await session.RemoveSubscriptionsAsync([subscription], cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to remove a partially created OPC UA subscription.");
+        }
     }
 
     internal void TrackMonitoredItem(MonitoredItem item)

@@ -167,6 +167,11 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
+    /// Requests a full state synchronization on the next <see cref="PerformFullStateSyncIfNeededAsync"/> call.
+    /// </summary>
+    internal void RequestFullStateSync() => Interlocked.Exchange(ref _needsFullStateSync, 1);
+
+    /// <summary>
     /// Reports the source's liveness from the current session state: raised when the session is
     /// connected and not reconnecting, dropped otherwise.
     /// </summary>
@@ -258,11 +263,15 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         session.DeleteSubscriptionsOnClose = false;
         session.MinPublishRequestCount = _configuration.MinPublishRequestCount;
         session.KeepAliveInterval = (int)_configuration.KeepAliveInterval.TotalMilliseconds;
-        session.ConnectionStateChanged += OnConnectionStateChanged;
-        session.SessionGenerationChanged += OnSessionGenerationChanged;
-
         Volatile.Write(ref _connectionState, (int)ConnectionState.Connected);
         var previousSession = Interlocked.Exchange(ref _session, session);
+
+        // Attached after the session is published, so the handlers do not drop its transitions as
+        // coming from a foreign session; a connection loss raised before that is caught up below.
+        session.ConnectionStateChanged += OnConnectionStateChanged;
+        session.SessionGenerationChanged += OnSessionGenerationChanged;
+        CatchUpMissedConnectionLoss(session);
+
         _pendingSessionTransitions.Enqueue((previousSession, session));
         DrainPendingSessionTransitions();
 
@@ -272,6 +281,31 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         }
 
         return session;
+    }
+
+    private void CatchUpMissedConnectionLoss(ManagedSession session)
+    {
+        if (!session.Reconnecting)
+        {
+            return;
+        }
+
+        lock (_stateLock)
+        {
+            if (Volatile.Read(ref _disposed) == 1 ||
+                !ReferenceEquals(session, Volatile.Read(ref _session)) ||
+                (ConnectionState)Volatile.Read(ref _connectionState) is not ConnectionState.Connected)
+            {
+                return;
+            }
+
+            Volatile.Write(ref _connectionState, (int)ConnectionState.Reconnecting);
+            if (Interlocked.Exchange(ref _reconnectInProgress, 1) == 0)
+            {
+                _source.NotifyConnectionLost();
+                _source.ReconnectionMetrics.RecordAttemptStart();
+            }
+        }
     }
 
     public async Task CreateSubscriptionsAsync(

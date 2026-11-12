@@ -430,9 +430,10 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
     /// <summary>
     /// Replaces every subscription on the current session and reloads the full state. Used when a
-    /// subscription stopped publishing while the session itself stayed connected. When it fails, the
-    /// subscription manager reports that it needs a recreate and the next health check runs it again;
-    /// the property writer keeps buffering until then.
+    /// subscription stopped publishing while the session itself stayed connected. When creating the
+    /// subscriptions fails, the subscription manager reports that it needs a recreate; the full state
+    /// read is requested up front, so the next health check performs it (ending the buffering) before
+    /// it runs the recreate again.
     /// </summary>
     private async Task RecreateSubscriptionsAsync(SessionManager sessionManager, CancellationToken cancellationToken)
     {
@@ -443,6 +444,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             return;
         }
 
+        sessionManager.RequestFullStateSync();
         propertyWriter.StartBuffering();
 
         await _structureLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -472,7 +474,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             _structureLock.Release();
         }
 
-        await propertyWriter.LoadInitialStateAndResumeAsync(cancellationToken).ConfigureAwait(false);
+        await sessionManager.PerformFullStateSyncIfNeededAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<ReferenceDescription?> TryGetRootNodeAsync(ISession session, CancellationToken cancellationToken)

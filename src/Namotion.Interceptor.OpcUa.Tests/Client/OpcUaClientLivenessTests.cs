@@ -135,8 +135,7 @@ public class OpcUaClientLivenessTests
             loggerFactory,
             converter,
 
-            // Wide enough that the rise asserted below cannot be a health check tick's, and that
-            // reconnection stall detection (two ticks) cannot take the recovery away from the SDK.
+            // Wide enough that the rise asserted below cannot be a health check tick's.
             healthCheckInterval: TimeSpan.FromSeconds(60),
 
             // The outage has to be detected while the server is still down, so the SDK's first
