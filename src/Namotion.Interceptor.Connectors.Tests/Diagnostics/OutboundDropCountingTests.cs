@@ -170,11 +170,12 @@ public class OutboundDropCountingTests
         var context = InterceptorSubjectContext.Create().WithRegistry().WithFullPropertyTracking();
         var person = new Person(context);
 
-        var warmupWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fenceWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var writeFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var blockWrite = false;
+        var probeWritten = false;
         var clock = new ManualTeardownClock();
         using var source = new TestSubjectSource(person, context, NullLogger.Instance,
             bufferTime: TimeSpan.FromMilliseconds(8), writeRetryQueueSize: 0)
@@ -191,7 +192,15 @@ public class OutboundDropCountingTests
                 }
                 else
                 {
-                    warmupWritten.TrySetResult();
+                    Volatile.Write(ref probeWritten, true);
+                    foreach (var change in changes.Span)
+                    {
+                        if (change.Property.Name == nameof(Person.LastName) &&
+                            change.GetNewValue<string?>() == "fence")
+                        {
+                            fenceWritten.TrySetResult();
+                        }
+                    }
                 }
 
                 return WriteResult.Success;
@@ -204,16 +213,24 @@ public class OutboundDropCountingTests
         using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var watchdogRegistration = watchdog.Token.Register(() => releaseWrite.TrySetResult());
         await source.StartAsync(CancellationToken.None);
+        // The retry queue is disabled, so a write captured before the connected processor runs is dropped
+        // and only one the processor delivers reaches the source.
         var probeValue = 0;
         await AsyncTestHelpers.WaitUntilAsync(() =>
         {
+            if (Volatile.Read(ref probeWritten))
+            {
+                return true;
+            }
+
             person.LastName = "probe" + probeValue++;
-            return source.Diagnostics.OutboundChanges.Depth > 0;
-        }, message: "The connected processor did not start buffering the warmup write.");
-        await warmupWritten.Task.WaitAsync(TestTimeout);
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => source.Diagnostics.OutboundChanges.Depth == 0,
-            message: "The warmup write did not leave the processor queue.");
+            return false;
+        }, message: "The connected processor did not deliver a probe write.");
+
+        // The subscription and the processor queue are FIFO and a merged batch keeps the last write per
+        // property, so once the fence is written no earlier probe is still pending to join the next batch.
+        person.LastName = "fence";
+        await fenceWritten.Task.WaitAsync(TestTimeout);
         var droppedBeforeDeadline = source.Diagnostics.OutboundRetries.TotalDropped;
 
         Volatile.Write(ref blockWrite, true);
@@ -441,7 +458,10 @@ public class OutboundDropCountingTests
             bufferTime: TimeSpan.FromMinutes(5),
             maxQueueDepth: maxQueueDepth,
             logger: NullLogger.Instance,
-            dropHandler: dropHandler);
+            dropHandler: dropHandler)
+        {
+            TeardownTimeProvider = new ManualTeardownClock()
+        };
     }
 
     /// <summary>
@@ -469,7 +489,7 @@ public class OutboundDropCountingTests
         await cancellation.CancelAsync();
         try
         {
-            await processing;
+            await processing.WaitAsync(TestTimeout);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {

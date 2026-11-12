@@ -220,10 +220,17 @@ public class ChangeQueueProcessor : IDisposable
     }
 
     /// <summary>
-    /// Processes changes from the queue until cancellation is requested.
+    /// Processes changes from the queue until cancellation is requested, then flushes what is still
+    /// buffered before completing.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The task.</returns>
+    /// <remarks>
+    /// The final flush is limited by an internal five-second teardown bound. When the bound elapses first,
+    /// the task completes while the run is still finishing: the processor is disposed, changes still queued
+    /// and a write the processor still owns are counted in <see cref="DropCount"/>, and the write handler
+    /// may still be running.
+    /// </remarks>
     public async Task ProcessAsync(CancellationToken cancellationToken)
     {
         var cancellationSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

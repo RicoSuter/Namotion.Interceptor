@@ -411,7 +411,10 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.FromMinutes(10),
             maxQueueDepth: 4,
             logger: NullLogger.Instance,
-            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale)
+        {
+            TeardownTimeProvider = new ManualTeardownClock()
+        };
 
         subject.FirstName = "a";
         for (var i = 1; i <= 10; i++)
@@ -431,7 +434,7 @@ public class ChangeQueueProcessorTests
         await cancellation.CancelAsync();
         try
         {
-            await processing;
+            await processing.WaitAsync(TestTimeout);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
@@ -830,7 +833,10 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.FromMinutes(10),
             maxQueueDepth: 1,
             logger: NullLogger.Instance,
-            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale)
+        {
+            TeardownTimeProvider = new ManualTeardownClock()
+        };
 
         using var cancellation = new CancellationTokenSource(TestTimeout);
         var processing = processor.ProcessAsync(cancellation.Token);
@@ -861,7 +867,7 @@ public class ChangeQueueProcessorTests
         await cancellation.CancelAsync();
         try
         {
-            await processing;
+            await processing.WaitAsync(TestTimeout);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
@@ -1187,7 +1193,12 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.Zero,
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale)
+        {
+            // Never advanced: once the teardown bound elapses, ProcessAsync may return before the run
+            // clears the buffer.
+            TeardownTimeProvider = new ManualTeardownClock()
+        };
         using var cancellation = new CancellationTokenSource();
         var processing = processor.ProcessAsync(cancellation.Token);
         subject.FirstName = "retained";
@@ -1349,7 +1360,10 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.FromMinutes(5),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale)
+        {
+            TeardownTimeProvider = new ManualTeardownClock()
+        };
 
         using var cancellation = new CancellationTokenSource();
         var processing = processor.ProcessAsync(cancellation.Token);
@@ -1361,7 +1375,7 @@ public class ChangeQueueProcessorTests
 
         // Act
         await cancellation.CancelAsync();
-        await processing;
+        await processing.WaitAsync(TestTimeout);
 
         // Assert
         Assert.Equal(["buffered"], writtenValues.ToArray());
@@ -1665,7 +1679,10 @@ public class ChangeQueueProcessorTests
             {
                 completionReached.TrySetResult();
                 return ValueTask.CompletedTask;
-            });
+            })
+        {
+            TeardownTimeProvider = new ManualTeardownClock()
+        };
 
         using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var watchdogRegistration = watchdog.Token.Register(() => releaseFilter.TrySetResult());
@@ -1822,7 +1839,10 @@ public class ChangeQueueProcessorTests
                     subject.LastName = "third";
                     throw new DropHandlerException();
                 }
-            });
+            })
+        {
+            TeardownTimeProvider = new ManualTeardownClock()
+        };
         var processing = processor.ProcessAsync(cancellation.Token);
         subject.FirstName = "first";
         await AsyncTestHelpers.WaitUntilAsync(
@@ -2250,7 +2270,10 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.FromMilliseconds(10),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale)
+        {
+            TeardownTimeProvider = new ManualTeardownClock()
+        };
 
         var firstName = new PropertyReference(subject, nameof(Person.FirstName));
         var lastName = new PropertyReference(subject, nameof(Person.LastName));
