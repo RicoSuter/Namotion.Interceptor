@@ -8,9 +8,7 @@
 @using HomeBlaze.Components.Operations
 @using HomeBlaze.Services.Metadata
 @using HomeBlaze.Storage
-@using HomeBlaze.Storage.Abstractions
 @using HomeBlaze.Components.Abstractions.TimeZones
-@using HomeBlaze.Host.Components.Dialogs
 @using HomeBlaze.Storage.Abstractions.Metadata
 @using HomeBlaze.Storage.Metadata
 @using Microsoft.Extensions.Logging
@@ -42,7 +40,7 @@
 
                 var subjectMetadata = Subject.GetMetadata();
                 var hasNotesLinksOrTags = subjectMetadata.HasNotesLinksOrTags();
-                _metadataStore = GetMetadataStore();
+                _metadataStore = MetadataEditing.FindStore(Subject);
             }
             <MudListSubheader Class="d-flex align-center gap-1" Style="flex-shrink: 0;">
                 @{
@@ -77,7 +75,7 @@
                                        Color="@(subjectMetadata is { Count: > 0 } ? Color.Primary : Color.Default)"
                                        Variant="Variant.Text"
                                        Size="Size.Small"
-                                       Disabled="@(!hasNotesLinksOrTags && !IsConnected(_metadataStore!))"
+                                       Disabled="@(!hasNotesLinksOrTags && !MetadataEditing.IsConnected(_metadataStore!))"
                                        aria-label="Metadata"
                                        data-testid="edit-metadata-button" />
                     </MudTooltip>
@@ -92,7 +90,7 @@
                                        Color="@(_isReordering ? Color.Primary : Color.Default)"
                                        Variant="Variant.Text"
                                        Size="Size.Small"
-                                       Disabled="@(!_isReordering && !IsConnected(reorderContainer))"
+                                       Disabled="@(!_isReordering && !MetadataEditing.IsConnected(reorderContainer))"
                                        aria-label="@reorderLabel"
                                        data-testid="reorder-children-button" />
                     </MudTooltip>
@@ -1022,14 +1020,6 @@
         await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, $"Edit {title}");
     }
 
-    // The store that keeps the metadata of the shown subject, null when none does and for the storage root: a store
-    // without a store above it.
-    private IMetadataStore? GetMetadataStore()
-        => Subject?.FindMetadataStore() is { } store && store.CanStoreMetadata(Subject) &&
-           (!ReferenceEquals(store, Subject) || Subject.TryGetRegisteredSubject() is { Parents: [var parent, ..] } && parent.Property.Parent.Subject.FindMetadataStore() is not null)
-            ? store
-            : null;
-
     private Task OpenTagFilterAsync(string tag) => MetadataTagFilterDialog.ShowAsync(DialogService, tag);
 
     // Shows the notes, links and tags of the shown subject, or of its property with the given name, with a button to edit
@@ -1044,10 +1034,10 @@
     // Edits the metadata of the shown subject, or of its property with the given name.
     private async Task OpenMetadataEditorAsync(string title, string? propertyName)
     {
-        if (Subject is null || GetMetadataStore() is not { } store)
+        if (Subject is null || MetadataEditing.FindStore(Subject) is not { } store)
             return;
 
-        if (!IsConnected(store))
+        if (!MetadataEditing.IsConnected(store))
         {
             Snackbar.Add("The metadata cannot be edited while the storage is not connected.", Severity.Warning);
             return;
@@ -1206,11 +1196,11 @@
     {
         _reorderContainer = container;
         _reorderedChildren = children;
-        var canDrag = !_isMovingChild && IsConnected(container);
+        var canDrag = !_isMovingChild && MetadataEditing.IsConnected(container);
 
         // Stays enabled while a move is written, as a focused button that turns disabled loses the focus. A press
         // meanwhile is ignored.
-        var canPressArrows = IsConnected(container);
+        var canPressArrows = MetadataEditing.IsConnected(container);
 
         @* The script drags the rows, see SubjectPropertyPanel.razor.js. *@
         <div class="subject-pane-reorder-list"
@@ -1287,10 +1277,6 @@
             _arrowToFocus = (child, reachesEnd ? !isUp : isUp);
         }
     }
-
-    // A folder reports the status of its storage. A container or store that is no storage has no connection to lose.
-    private static bool IsConnected(object container)
-        => container is not IStorageContainer { Status: not StorageStatus.Connected };
 
     // Returns whether the order was written: the whole order the list shows, with the child in the place of the
     // target, as agents write it. Nothing is written when the child or the target is no longer a child of the container.

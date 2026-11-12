@@ -17,13 +17,6 @@ namespace HomeBlaze.Host.Services.Display
         public void Load(string? storedValue) { }
         public void SetLayout(HomeBlaze.Host.Services.Display.PropertyRowLayout layout) { }
     }
-    public static class SubjectDisplayExtensions
-    {
-        public static string GetChildDisplayName(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.Registry.Abstractions.SubjectPropertyChild child) { }
-        public static string GetIdentifyingDisplayName(string displayName, object? index) { }
-        public static string GetTitle(this Namotion.Interceptor.IInterceptorSubject subject) { }
-        public static bool IsShownAsValue(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
-    }
     public sealed class SubjectMemberCategory<TValue, TMethod>
     {
         public System.Collections.Generic.IReadOnlyList<TMethod> Methods { get; }
@@ -43,19 +36,6 @@ namespace HomeBlaze.Host.Services.Display
 }
 namespace HomeBlaze.Host.Services.Navigation
 {
-    public static class BrowserUrls
-    {
-        public const string Root = "/browser";
-        public static string Create(System.Collections.Generic.IEnumerable<string> segments) { }
-        public static string FromRoutePath(string routePath) { }
-    }
-    public sealed class MetadataLinkResolver
-    {
-        public const string PropertyQueryParameter = "property";
-        public MetadataLinkResolver(HomeBlaze.Services.SubjectPathResolver pathResolver, HomeBlaze.Services.Components.SubjectComponentRegistry componentRegistry) { }
-        public HomeBlaze.Host.Services.Navigation.ResolvedMetadataLink Resolve(HomeBlaze.Services.Metadata.MetadataLink link) { }
-        public HomeBlaze.Host.Services.Navigation.ResolvedMetadataLink Resolve(Namotion.Interceptor.IInterceptorSubject subject, string? propertyName, string? title = null) { }
-    }
     public class NavigationItem
     {
         public NavigationItem() { }
@@ -77,14 +57,6 @@ namespace HomeBlaze.Host.Services.Navigation
         public System.Collections.Generic.IReadOnlyList<HomeBlaze.Host.Services.Navigation.NavigationItem> GetAppBarItems(Namotion.Interceptor.IInterceptorSubject root) { }
         public System.Collections.Generic.IEnumerable<HomeBlaze.Host.Services.Navigation.NavigationItem> GetChildItems(Namotion.Interceptor.IInterceptorSubject parent) { }
         public System.Collections.Immutable.ImmutableArray<HomeBlaze.Host.Services.Navigation.NavigationItem> GetRecentAppBarItems(Namotion.Interceptor.IInterceptorSubject root, System.TimeSpan maximumAge) { }
-    }
-    public sealed class ResolvedMetadataLink : System.IEquatable<HomeBlaze.Host.Services.Navigation.ResolvedMetadataLink>
-    {
-        public ResolvedMetadataLink(string Title, string? Href, bool IsExternal) { }
-        public string? Href { get; init; }
-        public bool IsBroken { get; }
-        public bool IsExternal { get; init; }
-        public string Title { get; init; }
     }
 }
 namespace HomeBlaze.Host.Services

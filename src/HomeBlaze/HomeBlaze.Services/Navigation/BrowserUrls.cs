@@ -1,7 +1,7 @@
 using System.Text;
 using HomeBlaze.Abstractions;
 
-namespace HomeBlaze.Host.Services.Navigation;
+namespace HomeBlaze.Services.Navigation;
 
 /// <summary>
 /// Builds the URLs of the subject browser.

@@ -75,7 +75,7 @@ internal static class AgentMetadataAccess
     // The subject at the path of the storage when the tools resolve the path to it and it is readable for them, else null.
     private static RegisteredSubject? TryGetReadableTarget(RegisteredSubject storage, string path, PathProviderBase pathProvider, Type[] excludeTypes)
     {
-        var target = FluentStorageContainer.ResolveMetadataPath(storage.Subject, path);
+        var target = MetadataSearch.ResolvePath(storage.Subject, path);
         var trimmedPath = path.Trim();
         var visibleTarget = trimmedPath.AsSpan().TrimStart('/').IsEmpty ? storage : pathProvider.TryGetSubjectFromPath(storage, trimmedPath);
         return target is not null && ReferenceEquals(visibleTarget?.Subject, target) && !IsOfExcludedType(visibleTarget, storage.Subject, excludeTypes)
