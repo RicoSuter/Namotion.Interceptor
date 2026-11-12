@@ -7,6 +7,13 @@ namespace Namotion.Interceptor.Connectors.Tests;
 /// <remarks>
 /// Due timers fire on the thread pool, as real timers do, so code that runs when the bound elapses never
 /// runs inline on the test thread and cannot block it.
+/// <para>
+/// A clock that is never advanced keeps the bound from elapsing, so a stop waits for the run to finish,
+/// including its teardown flush. A test that asserts what the stop delivers or releases needs one: on the
+/// wall clock a stalled runner can let the bound elapse first, and the stop then returns while the run is
+/// still finishing. Pair it with a timeout on the awaited stop, so a run that never finishes fails the
+/// test instead of hanging the suite.
+/// </para>
 /// </remarks>
 internal sealed class ManualTeardownClock : TimeProvider
 {
