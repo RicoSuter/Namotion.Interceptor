@@ -1452,8 +1452,8 @@ public class SubjectSourceBaseTests
         using var watchdogRegistration = watchdog.Token.Register(() => releaseCurrentWrite.TrySetResult());
         await source.StartAsync(CancellationToken.None);
         // StartAsync subscribes before it returns, so the warmup write reaches the source through either
-        // the reconcile or the connected processor. Either way the reconcile is over, so only the
-        // processor can deliver the fence.
+        // the reconcile or the connected processor. No drain into the retry queue follows the reconcile,
+        // so only the processor can deliver the fence.
         subject.LastName = "warmup";
         await warmupWritten.Task.WaitAsync(TestTimeout);
         // Changes are delivered in order, so once the fence is written no earlier write is left to share
@@ -2082,8 +2082,8 @@ public class SubjectSourceBaseTests
 
         await source.StartAsync(CancellationToken.None);
         // StartAsync subscribes before it returns, so the warmup write reaches the source through either
-        // the reconcile or the connected processor. Either way the reconcile is over, so only the
-        // processor can deliver the fence, and changes are delivered in order, so once the fence is
+        // the reconcile or the connected processor. No drain into the retry queue follows the reconcile,
+        // so only the processor can deliver the fence, and changes are delivered in order, so once the fence is
         // written nothing earlier is left to be dropped by the disposal below.
         subject.LastName = "warmup";
         await warmupWritten.Task.WaitAsync(TestTimeout);
