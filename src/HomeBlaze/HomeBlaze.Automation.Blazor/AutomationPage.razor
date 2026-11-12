@@ -50,9 +50,10 @@
                            data-testid="automation-edit">Edit</MudButton>
             </div>
         </MudStack>
-        @* A plain underlined tab bar on the page background, with the content aligned to the title. *@
+        @* A plain underlined tab bar on the page background, with the content aligned to the title. The gap below the tab
+           bar is a margin of the scrolling panel rather than its padding, so scrolled content keeps clear of the tab bar. *@
         <MudTabs Elevation="0" Border="true" MinimumTabWidth="0px" TabHeaderClass="mud-background" TabButtonsClass="px-2 px-sm-4"
-                 Class="flex-grow-1 overflow-hidden" TabPanelsClass="flex-grow-1 pt-3 overflow-y-auto">
+                 Class="flex-grow-1 overflow-hidden" TabPanelsClass="flex-grow-1 mt-5 overflow-y-auto">
             @* MudTabPanel does not pass its attributes to the tab, so the test ids are on its content. *@
             <MudTabPanel Text="Overview">
                 <TabContent><span data-testid="automation-tab-overview">Overview</span></TabContent>
