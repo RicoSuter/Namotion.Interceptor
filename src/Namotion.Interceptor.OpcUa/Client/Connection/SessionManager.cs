@@ -32,7 +32,11 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private readonly ConcurrentQueue<(ISession? Previous, ISession? Current)> _pendingSessionTransitions = new();
     private readonly Lock _drainLock = new();
 
-    private int _reconnectInProgress; // 1 = a reconnect cycle started from Connected has not resolved yet
+    // The managed session's own Connected only says that a server session id exists, which stays true
+    // through an outage, so the state is tracked from its transitions.
+    private int _connectionState = (int)ConnectionState.Disconnected;
+    private ServiceResult? _lastReconnectError; // guarded by _stateLock
+    private int _reconnectInProgress; // 1 = a reconnect cycle has not resolved yet
     private int _needsFullStateSync;
     private int _disposed;
 
@@ -49,12 +53,17 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// Gets a value indicating whether the session is connected and not reconnecting.
     /// </summary>
     public bool IsConnected =>
-        Volatile.Read(ref _session) is { Connected: true, Reconnecting: false };
+        Volatile.Read(ref _session) is { Connected: true } &&
+        (ConnectionState)Volatile.Read(ref _connectionState) is ConnectionState.Connected;
 
     /// <summary>
-    /// Gets a value indicating whether the managed session is recovering the connection.
+    /// Gets a value indicating whether the managed session is recovering the connection, including
+    /// the pause between two reconnection cycles.
     /// </summary>
-    public bool IsReconnecting => Volatile.Read(ref _session)?.Reconnecting ?? false;
+    public bool IsReconnecting =>
+        Volatile.Read(ref _session) is not null &&
+        (ConnectionState)Volatile.Read(ref _connectionState)
+            is ConnectionState.Reconnecting or ConnectionState.Failover or ConnectionState.Disconnected;
 
     /// <summary>
     /// Gets a value indicating whether this manager has been disposed.
@@ -129,13 +138,15 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Performs a full state synchronization after the managed session recreated the server session.
+    /// Performs a full state synchronization after the managed session recovered the connection.
     /// Buffers incoming notifications, reads all property values from the server, replays the buffer
-    /// and resumes. On failure the flag stays set, so the next health check tick retries.
+    /// and resumes. On failure the request is restored, so the next health check tick retries.
     /// </summary>
     internal async Task PerformFullStateSyncIfNeededAsync(CancellationToken cancellationToken)
     {
-        if (Volatile.Read(ref _needsFullStateSync) != 1)
+        // Taken before the load rather than cleared after it: a recovery that happens while the load
+        // runs requests another sync, and the load it supersedes returns without applying anything.
+        if (Interlocked.Exchange(ref _needsFullStateSync, 0) != 1)
         {
             return;
         }
@@ -145,11 +156,11 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         try
         {
             await _propertyWriter.LoadInitialStateAndResumeAsync(cancellationToken).ConfigureAwait(false);
-            Interlocked.Exchange(ref _needsFullStateSync, 0);
             _logger.LogInformation("Full state sync completed successfully.");
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
+            Interlocked.Exchange(ref _needsFullStateSync, 1);
             _source.ReportBackgroundError(ex, cancellationToken);
             _logger.LogError(ex, "Full state sync failed. Retrying on the next health check.");
         }
@@ -250,6 +261,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         session.ConnectionStateChanged += OnConnectionStateChanged;
         session.SessionGenerationChanged += OnSessionGenerationChanged;
 
+        Volatile.Write(ref _connectionState, (int)ConnectionState.Connected);
         var previousSession = Interlocked.Exchange(ref _session, session);
         _pendingSessionTransitions.Enqueue((previousSession, session));
         DrainPendingSessionTransitions();
@@ -278,20 +290,29 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
     private void OnConnectionStateChanged(object? sender, ConnectionStateChangedEventArgs e)
     {
-        if (Volatile.Read(ref _disposed) == 1 || !ReferenceEquals(sender, Volatile.Read(ref _session)))
-        {
-            return;
-        }
-
         _logger.LogInformation(
             "OPC UA connection state changed from {PreviousState} to {NewState} (attempt {Attempt}).",
             e.PreviousState, e.NewState, e.ReconnectAttempt);
 
         lock (_stateLock)
         {
+            // Checked under the lock DisposeAsync settles the open attempt under, so no attempt can
+            // start after that.
+            if (Volatile.Read(ref _disposed) == 1 || !ReferenceEquals(sender, Volatile.Read(ref _session)))
+            {
+                return;
+            }
+
+            Volatile.Write(ref _connectionState, (int)e.NewState);
+
             switch (e.NewState)
             {
                 case ConnectionState.Reconnecting or ConnectionState.Failover:
+                    if (e.Error is not null && ServiceResult.IsBad(e.Error))
+                    {
+                        _lastReconnectError = e.Error;
+                    }
+
                     if (Interlocked.Exchange(ref _reconnectInProgress, 1) == 0)
                     {
                         _source.NotifyConnectionLost();
@@ -309,16 +330,22 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                     if (Interlocked.Exchange(ref _reconnectInProgress, 0) == 1)
                     {
                         _source.ReconnectionMetrics.RecordFailure();
-                        if (e.Error is not null)
+
+                        // The error of the last failed connect attempt of the cycle: the one this
+                        // transition carries is the result of the failover that follows it.
+                        var error = _lastReconnectError ?? e.Error;
+                        if (error is not null)
                         {
-                            _source.ReportBackgroundError(new ServiceResultException(e.Error));
+                            _source.ReportBackgroundError(new ServiceResultException(error));
                         }
                     }
 
+                    _lastReconnectError = null;
                     _source.NotifySessionNotHealthy();
                     break;
 
                 case ConnectionState.Connected:
+                    _lastReconnectError = null;
                     if (Interlocked.Exchange(ref _reconnectInProgress, 0) == 1)
                     {
                         _source.ReconnectionMetrics.RecordSuccess();
@@ -332,6 +359,10 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                     {
                         _source.NotifySessionHealthy();
                     }
+                    break;
+
+                default:
+                    _source.NotifySessionNotHealthy();
                     break;
             }
         }
@@ -354,10 +385,10 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             "OPC UA server session recreated ({PreviousSessionId} -> {SessionId}). Full state sync pending.",
             e.PreviousSessionId, e.SessionId);
 
-        // Recreation can clone subscriptions into new objects, so tracking and the data change
-        // callback move to whatever the session now holds. Notifications may have been missed while
+        // The managed session restores the subscriptions onto the new server session in place, where
+        // they number their messages from the start again. Notifications may have been missed while
         // no server session existed, hence the full read.
-        SubscriptionManager.UpdateTransferredSubscriptions(session.Subscriptions.ToList());
+        SubscriptionManager.ResetNotificationRanking();
         ReadAfterWriteManager?.ClearPendingReads();
         Interlocked.Exchange(ref _needsFullStateSync, 1);
     }
@@ -438,9 +469,12 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             return;
         }
 
-        if (Interlocked.Exchange(ref _reconnectInProgress, 0) == 1)
+        lock (_stateLock)
         {
-            _source.ReconnectionMetrics.RecordAbandoned();
+            if (Interlocked.Exchange(ref _reconnectInProgress, 0) == 1)
+            {
+                _source.ReconnectionMetrics.RecordAbandoned();
+            }
         }
 
         if (ReadAfterWriteManager is not null)

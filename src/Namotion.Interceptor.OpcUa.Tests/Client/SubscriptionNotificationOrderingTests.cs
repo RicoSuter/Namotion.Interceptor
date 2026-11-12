@@ -132,6 +132,22 @@ public class SubscriptionNotificationOrderingTests
     }
 
     [Fact]
+    public async Task WhenTheServerSessionIsCreatedAgain_ThenTheRestartedNumberingIsNotRankedAgainstTheEarlierMessages()
+    {
+        // Arrange - the same subscription object survives, but the server numbers from 1 again.
+        await using var harness = await Harness.CreateAsync();
+        var name = harness.Track(nameof(TestRoot.Name));
+        harness.Notify(sequenceNumber: 1000, (name, "before"));
+
+        // Act
+        harness.ResetNotificationRanking();
+        harness.Notify(sequenceNumber: 1, (name, "after"));
+
+        // Assert
+        Assert.Equal("after", harness.Root.Name);
+    }
+
+    [Fact]
     public async Task WhenTheReplacedSubscriptionDeliversLate_ThenTheNewSubscriptionStillApplies()
     {
         // Arrange
@@ -317,6 +333,8 @@ public class SubscriptionNotificationOrderingTests
 
         public void Notify(uint sequenceNumber, params (uint ClientHandle, string Value)[] values)
             => Notify(_subscription, sequenceNumber, values);
+
+        public void ResetNotificationRanking() => _manager.ResetNotificationRanking();
 
         public void Notify(Subscription subscription, uint sequenceNumber, params (uint ClientHandle, string Value)[] values)
         {

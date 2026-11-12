@@ -27,9 +27,6 @@ public class SubscriptionManagerDiagnosticsTests
             propertyWriter,
             configuration,
             new ConcurrentQueue<Exception>());
-        var firstSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        var secondSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        var replacementSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
         var property = new RegisteredSubject((TestRoot)source.RootSubject)
             .TryGetProperty(nameof(TestRoot.Name))!;
         var monitoredItem = new MonitoredItem(NullTelemetryContext.Instance)
@@ -43,11 +40,6 @@ public class SubscriptionManagerDiagnosticsTests
         Assert.Equal(
             (Subscriptions: 0, MonitoredItems: 0),
             (Subscriptions: manager.SubscriptionCount, MonitoredItems: manager.MonitoredItemCount));
-        manager.UpdateTransferredSubscriptions([firstSubscription, secondSubscription]);
-        Assert.Equal(2, manager.SubscriptionCount);
-        manager.UpdateTransferredSubscriptions([replacementSubscription]);
-        Assert.Equal(1, manager.SubscriptionCount);
-
         manager.TrackMonitoredItem(monitoredItem);
         Assert.Equal(1, manager.MonitoredItemCount);
         manager.TrackMonitoredItem(monitoredItem);
@@ -61,35 +53,6 @@ public class SubscriptionManagerDiagnosticsTests
         Assert.Equal(
             (Subscriptions: 0, MonitoredItems: 0),
             (Subscriptions: manager.SubscriptionCount, MonitoredItems: manager.MonitoredItemCount));
-    }
-
-    [Fact]
-    public async Task WhenTheSdkTransfersSubscriptions_ThenAcceptedOnesStayHookedAndARefusedOneIsReplacedByItsClone()
-    {
-        // Arrange - the SDK hands back an accepted subscription as the same object and a refused one
-        // as a clone that already carries the callback.
-        var configuration = CreateConfiguration();
-        await using var source = CreateClientSource(configuration: configuration);
-        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
-        await using var manager = CreateManager(source, propertyWriter, configuration, new ConcurrentQueue<Exception>());
-        var acceptedSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        var refusedSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        manager.UpdateTransferredSubscriptions([acceptedSubscription, refusedSubscription]);
-        var recreatedSubscription = new Subscription(refusedSubscription, copyEventHandlers: true);
-
-        // Act
-        manager.UpdateTransferredSubscriptions([acceptedSubscription, recreatedSubscription]);
-
-        // Assert
-        Assert.Equal(2, manager.SubscriptionCount);
-        Assert.Contains(acceptedSubscription, manager.Subscriptions);
-        Assert.Contains(recreatedSubscription, manager.Subscriptions);
-        Assert.DoesNotContain(refusedSubscription, manager.Subscriptions);
-#pragma warning disable CS0618 // SubscriptionManager still wires the classic fast callback
-        Assert.Single(acceptedSubscription.FastDataChangeCallback!.GetInvocationList());
-        Assert.Single(recreatedSubscription.FastDataChangeCallback!.GetInvocationList());
-        Assert.Null(refusedSubscription.FastDataChangeCallback);
-#pragma warning restore CS0618
     }
 
     [Fact]

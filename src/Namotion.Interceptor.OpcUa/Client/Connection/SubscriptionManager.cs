@@ -48,9 +48,8 @@ internal class SubscriptionManager : IAsyncDisposable
     private readonly Func<Subscription, CancellationToken, Task> _applyChangesAsync;
 
     private readonly ConcurrentDictionary<uint, MonitoredItemState> _monitoredItems = new();
-    // Keyed by object, not by the server-assigned id: a subscription recreated after a failed transfer
-    // is a new object numbering from 1 again, possibly under the same id, while a transferred one keeps
-    // its object and its numbering.
+    // Keyed by object, not by the server-assigned id, which a subscription created again on the
+    // server can reuse. Cleared when the server session is created again, see ResetNotificationRanking.
     private readonly ConditionalWeakTable<Subscription, SubscriptionApplyState> _applyStates = new();
     private readonly ConcurrentDictionary<Subscription, byte> _subscriptions = new();
     private readonly ConcurrentDictionary<uint, int> _healAttempts = new();
@@ -65,6 +64,13 @@ internal class SubscriptionManager : IAsyncDisposable
     internal const int MaxHealAttemptsBeforeEscalation = 3;
 
     private volatile bool _shuttingDown; // Prevents new callbacks during cleanup
+    private volatile bool _subscriptionsIncomplete;
+
+    /// <summary>
+    /// Gets whether the last attempt to create the subscriptions did not finish, so that only some or
+    /// none of the items are monitored and the subscriptions have to be created again.
+    /// </summary>
+    public bool NeedsRecreate => _subscriptionsIncomplete;
 
     /// <summary>
     /// Gets the current list of subscriptions (thread-safe collection).
@@ -127,16 +133,18 @@ internal class SubscriptionManager : IAsyncDisposable
         ISession session,
         CancellationToken cancellationToken)
     {
-        // Clear any existing subscriptions and monitored items from previous session (reconnection scenario).
-        // Old subscriptions are orphaned (belong to dead session), so we just need to remove our references.
+        _subscriptionsIncomplete = true;
+
+        // Drop the references to the subscriptions of a previous call; the caller removes them from
+        // the session.
         foreach (var oldSubscription in _subscriptions.Keys)
         {
             oldSubscription.FastDataChangeCallback -= OnFastDataChange;
         }
         ClearTrackedCollections();
         _healAttempts.Clear();
-        // On reconnect, re-attempt every owned property as a real subscription; failed nodes are
-        // re-added to polling. Prevents double delivery of an escalated item that later recovers.
+        // Re-attempt every owned property as a real subscription; failed nodes are re-added to
+        // polling. Prevents double delivery of an escalated item that later recovers.
         _pollingManager?.Clear();
 
         // Reset shutdown flag AFTER clearing collections - prevents old callbacks from processing
@@ -186,6 +194,8 @@ internal class SubscriptionManager : IAsyncDisposable
             // Add to collection AFTER initialization (temporal separation - health monitor never sees partial state)
             TryAddSubscription(subscription);
         }
+
+        _subscriptionsIncomplete = false;
     }
 
     internal void TrackMonitoredItem(MonitoredItem item)
@@ -317,42 +327,11 @@ internal class SubscriptionManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Replaces the tracked subscriptions with the ones the reconnected session holds. Subscriptions
-    /// already tracked are left as they are, new ones are hooked exactly once, and the ones missing
-    /// from the new set are unhooked and dropped.
+    /// Starts a new ranking of notification messages for every subscription. Called when the server
+    /// session was created again: the subscriptions are restored in place and number their messages
+    /// from the start again, which must not be ranked against the messages applied before.
     /// </summary>
-    public void UpdateTransferredSubscriptions(IReadOnlyCollection<Subscription> transferredSubscriptions)
-    {
-        var oldSubscriptions = _subscriptions.Keys;
-        foreach (var subscription in transferredSubscriptions)
-        {
-            if (TryAddSubscription(subscription))
-            {
-                // A subscription the SDK recreated is a clone that already carries the original's
-                // callback and may be publishing. Replace it in one write: a plain += would deliver
-                // twice, and a -= followed by += leaves the callback null in between, which drops a batch.
-                FastDataChangeNotificationEventHandler handler = OnFastDataChange;
-                subscription.FastDataChangeCallback = (FastDataChangeNotificationEventHandler?)Delegate.Combine(
-                    Delegate.Remove(subscription.FastDataChangeCallback, handler), handler);
-            }
-        }
-
-        var removedCount = 0;
-        foreach (var oldSubscription in oldSubscriptions)
-        {
-            if (transferredSubscriptions.Contains(oldSubscription))
-            {
-                continue;
-            }
-
-            TryRemoveSubscription(oldSubscription);
-            oldSubscription.FastDataChangeCallback -= OnFastDataChange;
-            removedCount++;
-        }
-
-        _logger.LogInformation("Reconnected session holds {Count} subscriptions, dropped {RemovedCount} previous ones.",
-            transferredSubscriptions.Count, removedCount);
-    }
+    internal void ResetNotificationRanking() => _applyStates.Clear();
 
     internal async Task ApplyChangesAndFilterFailedMonitoredItemsAsync(
         Subscription subscription,
@@ -509,8 +488,8 @@ internal class SubscriptionManager : IAsyncDisposable
 
     /// <summary>
     /// Escalates a retryable item that keeps failing past <see cref="MaxHealAttemptsBeforeEscalation"/>
-    /// to polling instead of retrying forever. Runs only when polling is enabled; reconnect clears the
-    /// polling set and re-attempts every item, so escalation is not permanent.
+    /// to polling instead of retrying forever. Runs only when polling is enabled; recreating the
+    /// subscriptions clears the polling set and re-attempts every item.
     /// </summary>
     public async Task EscalatePersistentlyFailedItemsAsync(CancellationToken cancellationToken)
     {

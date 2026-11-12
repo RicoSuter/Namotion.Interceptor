@@ -6,18 +6,15 @@ using Xunit.Abstractions;
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 
 /// <summary>
-/// Tests for OPC UA client stall detection and recovery.
-/// These tests verify that the client can detect when SDK reconnection is stuck
-/// and force a manual reconnection.
+/// Tests for outages that outlast a reconnection cycle (<c>MaxReconnectDuration</c>): the client
+/// keeps retrying in new cycles and recovers once the server is back.
 /// </summary>
 [Trait("Category", "Integration")]
 public class OpcUaStallDetectionTests
 {
     private readonly ITestOutputHelper _output;
 
-    // Stall detection config for tests: 15s max reconnect duration
-    // Note: Under parallel execution, SDK can take 20-30s to even start reconnecting,
-    // so we use the same 15s as OpcUaTestClient defaults for consistency.
+    // A reconnection cycle of 15s, the same as the OpcUaTestClient defaults.
     // SessionTimeout determines when connection is considered lost (min 10s due to server MinSessionTimeout)
     // KeepAliveInterval is set to 1s for fast disconnection detection.
     private readonly Action<OpcUaClientConfiguration> _fastStallConfig = config =>
@@ -138,10 +135,10 @@ public class OpcUaStallDetectionTests
     }
 
     [Fact]
-    public async Task StallDetection_WhenServerRestartsAfterStall_ClientRecovers()
+    public async Task StallDetection_WhenServerRestartsAfterAnExhaustedCycle_ClientRecovers()
     {
-        // Tests that after stall detection resets the state,
-        // the client can successfully reconnect when the server comes back.
+        // After a whole reconnection cycle failed, a later cycle reconnects once the server is back,
+        // and values keep arriving through the subscription afterwards.
 
         var logger = new TestLogger(_output);
         OpcUaTestServer<TestRoot>? server = null;
@@ -174,24 +171,35 @@ public class OpcUaStallDetectionTests
             Assert.NotNull(client.Root);
             Assert.NotNull(client.Source!.Diagnostics);
 
-            // Verify initial sync
-            server.Root.Name = "BeforeStall";
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => client.Root.Name == "BeforeStall",
-                timeout: TimeSpan.FromSeconds(120),
-                message: "Initial sync should complete");
+            // Several notification messages before the outage, so the subscription's sequence numbers
+            // are well past the ones a subscription created again on the server starts with.
+            for (var i = 0; i < 20; i++)
+            {
+                var name = $"BeforeOutage{i}";
+                server.Root.Name = name;
+                await AsyncTestHelpers.WaitUntilAsync(
+                    () => client.Root.Name == name,
+                    timeout: TimeSpan.FromSeconds(120),
+                    message: "Initial sync should complete");
+            }
             logger.Log("Initial sync verified");
+
+            var failedBeforeOutage = client.Source!.Diagnostics.Reconnects.TotalFailed;
 
             // Stop server
             logger.Log("Stopping server...");
             await server.StopAsync();
 
-            // Wait for stall detection to trigger (don't restart yet)
-            await Task.Delay(TimeSpan.FromSeconds(8)); // Let stall detection do its thing
-            logger.Log("Waited for stall detection window");
+            // Stay down until a whole reconnection cycle was exhausted.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Source!.Diagnostics.Reconnects.TotalFailed > failedBeforeOutage,
+                timeout: TimeSpan.FromSeconds(120),
+                message: "A reconnection cycle should be exhausted while the server stays down");
+            Assert.False(client.Source!.Diagnostics.IsOperational);
+            logger.Log("A reconnection cycle was exhausted");
 
             // Now restart the server
-            logger.Log("Restarting server after stall detection window...");
+            logger.Log("Restarting server after the exhausted cycle...");
             await server.RestartAsync();
 
             // Verify client recovers and data flows
@@ -207,7 +215,21 @@ public class OpcUaStallDetectionTests
                 () => client.Source!.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(120),
                 message: "Client should report as connected after recovery");
-            logger.Log("Test passed - client recovered after stall");
+
+            // Several changes one after the other: the single full state read after the recovery can
+            // deliver at most one of them, the others have to arrive through the subscription, which
+            // proves that notifications of the restarted numbering are applied.
+            for (var i = 0; i < 3; i++)
+            {
+                var name = $"AfterRecovery{i}";
+                server.Root.Name = name;
+                await AsyncTestHelpers.WaitUntilAsync(
+                    () => client.Root.Name == name,
+                    timeout: TimeSpan.FromSeconds(120),
+                    message: "A change after the recovery should arrive through the subscription");
+            }
+
+            logger.Log("Test passed - client recovered after an exhausted reconnection cycle");
         }
         finally
         {

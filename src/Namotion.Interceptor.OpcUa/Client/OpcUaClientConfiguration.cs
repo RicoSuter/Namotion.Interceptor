@@ -504,6 +504,15 @@ public class OpcUaClientConfiguration
                 nameof(MaxReconnectDuration));
         }
 
+        // The delay runs before each attempt and counts against the cycle's budget, so a cycle
+        // shorter than two delays may end without a single connect attempt.
+        if (MaxReconnectDuration < ReconnectInterval * 2)
+        {
+            throw new ArgumentException(
+                $"MaxReconnectDuration must be at least twice ReconnectInterval, got: {MaxReconnectDuration} and {ReconnectInterval}",
+                nameof(MaxReconnectDuration));
+        }
+
         if (MinPublishRequestCount < 1)
         {
             throw new ArgumentException(

@@ -110,22 +110,19 @@ public sealed class ReconnectDiagnostics
     public long TotalAttempts => _metrics.TotalAttempts;
 
     /// <summary>
-    /// Gets the number of attempts that produced a usable session.
+    /// Gets the number of attempts that ended with the session connected again.
     /// </summary>
     public long TotalSucceeded => _metrics.Successful;
 
     /// <summary>
-    /// Gets the number of attempts that ended with a genuine fault, which is an exception raised while
-    /// the attempt was still live. An exception raised by a teardown counts as
-    /// <see cref="TotalAbandoned"/> instead.
+    /// Gets the number of attempts whose reconnection cycle was exhausted without a connection. The
+    /// next cycle is the next attempt.
     /// </summary>
     public long TotalFailed => _metrics.Failed;
 
     /// <summary>
-    /// Gets the number of attempts that ended without a usable session and without a fault: a null
-    /// session, a failed transfer, a preserved session after a server restart, a stall reset, or a
-    /// cancellation from a kill or from the listen attempt being torn down, which happens both when the
-    /// source stops and when the retry loop ends an attempt.
+    /// Gets the number of attempts still in flight when the listen attempt was torn down, which
+    /// happens both when the source stops and when the retry loop ends an attempt.
     /// </summary>
     public long TotalAbandoned => _metrics.Abandoned;
 }

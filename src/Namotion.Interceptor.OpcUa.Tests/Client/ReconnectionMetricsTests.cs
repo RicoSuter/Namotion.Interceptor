@@ -123,7 +123,7 @@ public class ReconnectionMetricsTests
     }
 
     [Fact]
-    public async Task WhenSdkReconnectCompletesAfterDisposal_ThenAttemptIsNotClassifiedAgain()
+    public async Task WhenTheConnectionIsLostAfterDisposal_ThenNoAttemptIsStarted()
     {
         // Arrange
         var configuration = CreateConfigurationWithDisabledSubcomponents();
@@ -132,8 +132,8 @@ public class ReconnectionMetricsTests
         MarkSdkReconnectPending(sessionManager, source.ReconnectionMetrics);
         await sessionManager.DisposeAsync();
 
-        // Act
-        InvokeReconnectComplete(sessionManager);
+        // Act - a state change still in flight when the manager was disposed
+        InvokeConnectionStateChange(sessionManager, ConnectionState.Reconnecting);
 
         // Assert
         Assert.Equal(1, source.ReconnectionMetrics.TotalAttempts);
@@ -177,13 +177,13 @@ public class ReconnectionMetricsTests
         GetField("_reconnectInProgress").SetValue(sessionManager, 1);
     }
 
-    private static void InvokeReconnectComplete(SessionManager sessionManager) =>
+    private static void InvokeConnectionStateChange(SessionManager sessionManager, ConnectionState newState) =>
         typeof(SessionManager)
             .GetMethod("OnConnectionStateChanged", BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(sessionManager, [null, new ConnectionStateChangedEventArgs
             {
-                PreviousState = ConnectionState.Reconnecting,
-                NewState = ConnectionState.Connected
+                PreviousState = ConnectionState.Connected,
+                NewState = newState
             }]);
 
     private static FieldInfo GetField(string name) =>

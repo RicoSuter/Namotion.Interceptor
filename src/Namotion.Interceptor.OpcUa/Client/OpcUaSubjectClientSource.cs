@@ -223,8 +223,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
                     // Reached on every way out of this attempt, including a failure raised after this
                     // method returned, which the retry loop records without touching liveness. Must
-                    // stay after the disposal that latches the manager's disposed flag: an
-                    // OnReconnectComplete still in flight would otherwise raise liveness again behind
+                    // stay after the disposal that latches the manager's disposed flag: a connection
+                    // state change still in flight would otherwise raise liveness again behind
                     // this call, and that stale rise would stand for the whole retry delay.
                     Metrics.MarkNotOperational();
                 });
@@ -348,9 +348,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     }
 
     /// <summary>
-    /// Creates MonitoredItems for reconnection from owned properties.
+    /// Creates MonitoredItems from owned properties for recreating the subscriptions.
     /// This recreates SDK objects on demand instead of holding them in memory.
-    /// Called by SessionManager when subscription transfer fails after server restart.
     /// </summary>
     private IReadOnlyList<MonitoredItem> CreateMonitoredItemsForReconnection()
     {
@@ -412,10 +411,11 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         // tick's report and leave a client that is serving subscription data reporting itself down.
         sessionManager.ReportLivenessFromSessionState();
 
-        if (sessionManager.SubscriptionManager.HasStoppedPublishing)
+        var subscriptionManager = sessionManager.SubscriptionManager;
+        if (subscriptionManager.HasStoppedPublishing || subscriptionManager.NeedsRecreate)
         {
             _logger.LogWarning(
-                "OPC UA subscription has stopped publishing. Recreating subscriptions to recover notification flow...");
+                "OPC UA subscriptions have stopped publishing or were not created completely. Recreating subscriptions to recover notification flow...");
             await RecreateSubscriptionsAsync(sessionManager, cancellationToken).ConfigureAwait(false);
             return;
         }
@@ -430,7 +430,9 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
     /// <summary>
     /// Replaces every subscription on the current session and reloads the full state. Used when a
-    /// subscription stopped publishing while the session itself stayed connected.
+    /// subscription stopped publishing while the session itself stayed connected. When it fails, the
+    /// subscription manager reports that it needs a recreate and the next health check runs it again;
+    /// the property writer keeps buffering until then.
     /// </summary>
     private async Task RecreateSubscriptionsAsync(SessionManager sessionManager, CancellationToken cancellationToken)
     {

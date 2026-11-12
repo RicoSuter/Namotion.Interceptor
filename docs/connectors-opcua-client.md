@@ -442,7 +442,7 @@ builder.Services.AddOpcUaSubjectClientSource(
 - With polling disabled there is nothing better to escalate to, so the item keeps being retried and recovers on its own once the node returns; it is never dropped.
 - Nodes that do not support subscriptions (`BadNotSupported`, `BadMonitoredItemFilterUnsupported`) fall back to polling immediately when enabled.
 - Skips permanent design-time errors (`BadNodeIdUnknown`, `BadAttributeIdInvalid`, `BadIndexRangeInvalid`).
-- Reconnect re-attempts a real subscription for every item, so escalation to polling is not permanent.
+- Recreating the subscriptions re-attempts a real subscription for every item. A reconnect alone keeps an escalated item on polling.
 - Health checks run at configurable intervals (minimum: 1 second, default: 5 seconds).
 
 **Configuration validation:**
@@ -471,11 +471,11 @@ The session object stays the same across all of this, so `CurrentSession` keeps 
 
 #### When the Server Stays Away
 
-Reconnection runs in cycles bounded by `MaxReconnectDuration` (default: 30 seconds). A cycle that ends without a connection counts as one failed reconnect attempt in `Reconnects`, its last error is reported, and the managed session starts the next cycle. This continues until the server returns or the source stops, so an outage of any length recovers without a restart, and a long one is visible as `Reconnects.TotalAttempts` climbing without `Reconnects.TotalSucceeded` keeping up.
+Reconnection runs in cycles bounded by `MaxReconnectDuration` (default: 30 seconds), which has to be at least twice `ReconnectInterval`. A cycle that ends without a connection counts as one failed reconnect attempt in `Reconnects`, the error of its last connect attempt is reported, and after a pause of one `ReconnectInterval` the managed session starts the next cycle. `IsReconnecting` stays true and `IsOperational` false through the pause. This continues until the server returns or the source stops, so an outage of any length recovers without a restart, and a long one is visible as `Reconnects.TotalAttempts` climbing without `Reconnects.TotalSucceeded` keeping up.
 
 #### Subscriptions That Stop Publishing
 
-When a subscription stops publishing while the session itself stays connected, the health check loop removes the subscriptions, creates them again on the same session and reloads the server state.
+When a subscription stops publishing while the session itself stays connected, the health check loop removes the subscriptions, creates them again on the same session and reloads the server state. When that fails part way, the next health check runs it again.
 
 #### Consistency Guarantees and Trade-offs
 
@@ -643,7 +643,7 @@ This built-in client registers the `ClaimedPropertyCount` gauge, so it reports t
 
 | Member | Meaning |
 |---|---|
-| `IsReconnecting` | A reconnection attempt is in flight. A distinct sub-state of not being operational, not a second spelling of it. |
+| `IsReconnecting` | The managed session is recovering the connection, including the pause between two reconnection cycles. A distinct sub-state of not being operational, not a second spelling of it. |
 | `SessionId` | The current session identifier, `null` when there is no session. |
 | `SubscriptionCount` | Active OPC UA subscriptions. |
 | `MonitoredItemCount` | Monitored items across all subscriptions. |
@@ -696,7 +696,7 @@ if (source.CurrentSession is { } session)
 }
 ```
 
-**Lifecycle contract:** read `CurrentSession` immediately before each use. It is `null` before the first connection and between connect attempts, and the instance is replaced when the source restarts its connection, which happens when the initial connection or initial load fails. It is the SDK's `ManagedSession`, so the same instance survives reconnects, including those that create a new server session, and calls made while it reconnects wait until it has recovered. For long-running session-bound state (e.g. an A&C `Subscription`), subscribe to `CurrentSessionChanged` (below).
+**Lifecycle contract:** read `CurrentSession` immediately before each use. It is `null` before the first connection and between connect attempts, and the instance is replaced when the source restarts its connection, which happens when the initial connection or initial load fails. It is the SDK's `ManagedSession`, so the same instance survives reconnects, including those that create a new server session. Calls made while it reconnects wait until it has recovered, and fail in the pause between two reconnection cycles. For long-running session-bound state (e.g. an A&C `Subscription`), subscribe to `CurrentSessionChanged` (below).
 
 ### Reacting to session swaps with `CurrentSessionChanged`
 
