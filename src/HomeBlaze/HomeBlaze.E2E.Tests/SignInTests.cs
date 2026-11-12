@@ -213,6 +213,7 @@ public class SignInTests
             await Assertions.Expect(dialog.GetByTestId("account-name")).ToHaveTextAsync(userName);
             await Assertions.Expect(dialog.GetByTestId("account-roles")).ToHaveTextAsync(BuiltInRoles.ReaderName);
             await Assertions.Expect(page.GetByTestId("unencrypted-http-warning")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+            await page.GetByRole(AriaRole.Dialog).WaitForDialogFocusAsync();
 
             // Act
             await page.Locator("#account-password-current").FillAsync(PlaywrightFixture.Password);
@@ -230,6 +231,40 @@ public class SignInTests
             var newPasswordPage = await _fixture.CreatePageAsync();
             await _fixture.SignInAsync(newPasswordPage, userName, NewPassword);
             await AssertSignedInAsync(newPasswordPage, userName);
+        }
+        finally
+        {
+            await _fixture.RemovePersonAsync(userName);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAPersonOpensTheAccountDialogFromTheUserMenu_ThenTheDialogHasTheFocusAndEscapeReturnsItToTheMenu()
+    {
+        // Arrange
+        var userName = TestNames.Create("focusing");
+        await _fixture.AddPersonAsync(userName, BuiltInRoles.ReaderName);
+        try
+        {
+            var page = await _fixture.CreatePageAsync(SignedInAs.User(userName));
+            await page.WaitUntilInteractiveAsync();
+            var menuButton = page.GetByRole(AriaRole.Button, new() { Name = "Open the user menu" });
+            await menuButton.ClickAsync();
+
+            // Act
+            await page.GetByTestId("user-menu-account").ClickAsync();
+
+            // Assert
+            var dialog = page.GetByRole(AriaRole.Dialog);
+            await Assertions.Expect(dialog.GetByTestId("account-name")).ToHaveTextAsync(userName);
+            await Assertions.Expect(dialog.Locator(":focus")).ToBeFocusedAsync();
+
+            // Act
+            await page.Keyboard.PressAsync("Escape");
+
+            // Assert
+            await Assertions.Expect(dialog).ToHaveCountAsync(0);
+            await Assertions.Expect(menuButton).ToBeFocusedAsync();
         }
         finally
         {
