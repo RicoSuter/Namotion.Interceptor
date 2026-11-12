@@ -72,7 +72,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
         // The getter records only reads of attached subjects, so it misses a dependency on a subject attached later in
         // the same operation, such as a sibling of an ancestor.
-        change.AttachOperation?.RunAtEndIfSubjectsAttachedLater(EvaluateAfterAttach, change.Property);
+        AttachOperation.Current?.RunAtEndIfSubjectsAttachedLater(EvaluateAfterAttach, change.Property);
     }
 
     /// <summary>

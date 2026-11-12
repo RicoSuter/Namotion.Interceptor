@@ -154,7 +154,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         SubjectAttached?.Invoke(change);
         foreach (var propertyName in properties)
         {
-            subject.AttachSubjectProperty(new PropertyReference(subject, propertyName), _attachOperation);
+            subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
         }
     }
 
@@ -197,7 +197,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
             foreach (var propertyName in properties)
             {
-                subject.AttachSubjectProperty(new PropertyReference(subject, propertyName), _attachOperation);
+                subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
             }
         }
     }

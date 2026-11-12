@@ -2,6 +2,7 @@ using System.Reactive.Concurrency;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
@@ -45,6 +46,32 @@ public class DerivedPropertyAttachOrderTests
 
         // Assert
         AssertSingleChange(changes, machine.Device, nameof(SiblingReadingDevice.IsInstalled), true);
+    }
+
+    [Fact]
+    public void WhenDerivedPropertyIsAddedAtRuntimeDuringTheAttach_ThenItFollowsSiblingAttachedAfterIt()
+    {
+        // Arrange
+        const string propertyName = "IsInstalledAtRuntime";
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents().WithRegistry();
+        context.WithService(() => new AfterRegistryLifecycleHandler(change =>
+        {
+            if (change is { IsContextAttach: true, Subject: SiblingReadingDevice device })
+            {
+                device.TryGetRegisteredSubject()!.AddDerivedProperty<bool>(propertyName, subject =>
+                    ((SiblingReadingDevice)subject).TryGetFirstParent<SiblingReadingMachine>()?.Configuration.Installed ?? false);
+            }
+        }));
+        var root = new SiblingReadingRoot(context);
+        var machine = new SiblingReadingMachine();
+        root.Machine = machine;
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        machine.Configuration.Installed = true;
+
+        // Assert
+        AssertSingleChange(changes, machine.Device, propertyName, true);
     }
 
     [Fact]
@@ -604,6 +631,17 @@ public class DerivedPropertyAttachOrderTests
     }
 
     private sealed class CallbackLifecycleHandler(Action<SubjectLifecycleChange> callback) : ILifecycleHandler
+    {
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            callback(change);
+        }
+    }
+
+    [RunsAfter(typeof(SubjectRegistry))]
+    [RunsAfter(typeof(ContextInheritanceHandler))]
+    [RunsAfter(typeof(ParentTrackingHandler))]
+    private sealed class AfterRegistryLifecycleHandler(Action<SubjectLifecycleChange> callback) : ILifecycleHandler
     {
         public void HandleLifecycleChange(SubjectLifecycleChange change)
         {

@@ -43,13 +43,8 @@ public static class LifecycleInterceptorExtensions
     }
 
     public static void AttachSubjectProperty(this IInterceptorSubject subject, PropertyReference property)
-    {
-        AttachSubjectProperty(subject, property, null);
-    }
-
-    internal static void AttachSubjectProperty(this IInterceptorSubject subject, PropertyReference property, AttachOperation? attachOperation)
-    {
-        var change = new SubjectPropertyLifecycleChange(subject, property) { AttachOperation = attachOperation };
+    {            
+        var change = new SubjectPropertyLifecycleChange(subject, property);
 
         foreach (var handler in subject.Context.GetServices<IPropertyLifecycleHandler>())
         {

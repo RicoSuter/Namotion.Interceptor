@@ -18,6 +18,9 @@ internal sealed class AttachOperation
     [ThreadStatic]
     private static List<(Action<PropertyReference> Action, PropertyReference Property)>? _afterLocks;
 
+    [ThreadStatic]
+    private static AttachOperation? _current;
+
     private readonly List<(Func<PropertyReference, Action<PropertyReference>?> Callback, PropertyReference Property, int AttachedSubjectCount)> _callbacks = [];
     private int _depth;
     private int _attachedSubjectCount;
@@ -33,10 +36,18 @@ internal sealed class AttachOperation
         Monitor.Enter(lifecycleLock);
         _depth++;
         _heldLocks++;
-        return new Scope(this, lifecycleLock);
+        var outerOperation = _current;
+        _current = this;
+        return new Scope(this, lifecycleLock, outerOperation);
     }
 
-    public readonly struct Scope(AttachOperation operation, object lifecycleLock) : IDisposable
+    /// <summary>
+    /// The innermost operation that runs on this thread, or null: the one of the interceptor that attaches subjects
+    /// and their properties right now.
+    /// </summary>
+    public static AttachOperation? Current => _current;
+
+    public readonly struct Scope(AttachOperation operation, object lifecycleLock, AttachOperation? outerOperation) : IDisposable
     {
         public void Dispose()
         {
@@ -54,6 +65,7 @@ internal sealed class AttachOperation
                     operation.Reset();
                 }
 
+                _current = outerOperation;
                 Monitor.Exit(lifecycleLock);
                 _heldLocks--;
             }
