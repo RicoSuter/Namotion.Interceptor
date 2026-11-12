@@ -9,7 +9,7 @@
 @if (_user?.Identity is { IsAuthenticated: true } identity)
 {
     var displayName = CurrentUser.DisplayName;
-    <MudMenu Icon="@Icons.Material.Filled.AccountCircle" Color="Color.Inherit" AriaLabel="Open the user menu"
+    <MudMenu @ref="_menu" Icon="@Icons.Material.Filled.AccountCircle" Color="Color.Inherit" AriaLabel="Open the user menu"
              title="@(displayName is null ? identity.Name : $"{displayName} ({identity.Name})")"
              AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" data-testid="user-menu">
         <div class="px-4 py-2">
@@ -20,7 +20,8 @@
             }
         </div>
         <MudDivider/>
-        <MudMenuItem Icon="@Icons.Material.Filled.ManageAccounts" OnClick="OpenAccountAsync" data-testid="user-menu-account">
+        <MudMenuItem Icon="@Icons.Material.Filled.ManageAccounts" OnClick="OpenAccountAsync" AutoClose="false"
+                     data-testid="user-menu-account">
             Account
         </MudMenuItem>
         <SignOutForm TestId="user-menu-sign-out" IsMenuItem="true" />
@@ -38,6 +39,7 @@ else
     private Task<AuthenticationState>? AuthenticationState { get; set; }
 
     private ClaimsPrincipal? _user;
+    private MudMenu? _menu;
     private bool _isDisposed;
 
     protected override void OnInitialized() => CurrentUser.Changed += OnCurrentUserChanged;
@@ -66,5 +68,15 @@ else
 
     private Task OpenSignInAsync() => SignInDialog.ShowAsync(DialogService, Navigation.GetPathAndQuery(), isClosable: true);
 
-    private Task OpenAccountAsync() => AccountDialog.ShowAsync(DialogService, Navigation.GetPathAndQuery());
+    // Closes the menu before the dialog shows: closing it focuses its button, which would take the focus from the dialog,
+    // and the dialog returns the focus to that button once it closes.
+    private async Task OpenAccountAsync()
+    {
+        if (_menu is not null)
+        {
+            await _menu.CloseAllMenusAsync();
+        }
+
+        await AccountDialog.ShowAsync(DialogService, Navigation.GetPathAndQuery());
+    }
 }
