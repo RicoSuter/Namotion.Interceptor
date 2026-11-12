@@ -93,7 +93,28 @@ public class SubjectSetupDialogTests
     internal static async Task PickTypeAsync(IPage page, string typeName)
     {
         await TypeRow(page, typeName).ClickAsync();
+        await ExpectConfigurePageAsync(page);
+    }
+
+    /// <summary>
+    /// Waits until the configure page of the picked type is shown and, on a device with a fine pointer, its name
+    /// field has taken the focus.
+    /// </summary>
+    /// <remarks>
+    /// The name field takes the focus one round trip to the server after the page is shown. When that lands while
+    /// another field is filled, after the fill focused that field and before it typed, the text goes into the name field.
+    /// </remarks>
+    internal static async Task ExpectConfigurePageAsync(IPage page)
+    {
         await Assertions.Expect(CreateButton(page)).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+
+        // The name field is rendered with the button, so a name field that is missing now does not come.
+        var nameInput = page.Locator("[data-testid='create-name-input']");
+        if (await nameInput.CountAsync() > 0 &&
+            await page.EvaluateAsync<bool>("() => matchMedia('(hover: hover) and (pointer: fine)').matches"))
+        {
+            await Assertions.Expect(nameInput).ToBeFocusedAsync(new() { Timeout = ElementVisibilityTimeout });
+        }
     }
 
     /// <summary>
@@ -582,8 +603,9 @@ public class SubjectSetupDialogTests
         await OpenDialogAsync(page);
         var moduleRequest = await heldModuleRequest.Task.WaitAsync(TimeSpan.FromMilliseconds(PageLoadTimeout));
 
-        // Act
-        await PickTypeAsync(page, "motor");
+        // Act - not PickTypeAsync, which waits for the focus that the held module holds back.
+        await TypeRow(page, "motor").ClickAsync();
+        await Assertions.Expect(CreateButton(page)).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
         await moduleRequest.ContinueAsync();
 
         // Assert
