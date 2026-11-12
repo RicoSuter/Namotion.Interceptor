@@ -18,6 +18,7 @@ public sealed class AutomationRuleSerializationTests : IDisposable
         var services = new ServiceCollection();
         services.AddSingleton(new SubjectPathResolver(() => null));
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+        services.AddSingleton<IAutomationAuthorizer, AllowAllAutomationAuthorizer>();
         services.AddHomeBlazeAutomation();
         return services.BuildServiceProvider();
     }

@@ -1,4 +1,5 @@
 using HomeBlaze.Automation.Blazor.Editing;
+using HomeBlaze.Automation.Blazor.Tests.Testing;
 
 namespace HomeBlaze.Automation.Blazor.Tests.Editing;
 
@@ -6,7 +7,7 @@ public class StateSelectionTests
 {
     private static AutomationDraft CreateDraft()
     {
-        var draft = new AutomationDraft();
+        var draft = AutomationDraft.From(TestAutomations.Create());
         draft.States.AddRange(["Idle", "Running"]);
         draft.InitialState = "Idle";
         return draft;

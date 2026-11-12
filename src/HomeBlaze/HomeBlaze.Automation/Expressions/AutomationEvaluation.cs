@@ -1,5 +1,7 @@
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services;
 using Namotion.Interceptor.Expressions;
+using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Automation.Expressions;
 
@@ -12,15 +14,27 @@ internal sealed class AutomationEvaluation
 {
     private List<string>? _missingPaths;
     private readonly TimeZoneInfo _timeZone;
+    private readonly IUserPermissions? _permissions;
     private TimeSpan? _timeOfDay;
 
+    /// <param name="resolver">Resolves the paths of expressions.</param>
+    /// <param name="rule">The rule that relative paths start at.</param>
+    /// <param name="now">The instant of the evaluation.</param>
+    /// <param name="timeZone">The zone that <c>time</c> is read in.</param>
+    /// <param name="capturedEvent">The event behind <c>event</c> and <c>subject</c>, or null.</param>
+    /// <param name="values">The observed values that paths read instead of the graph, or null to read the graph.</param>
+    /// <param name="permissions">
+    /// The permissions of the caller, for evaluations shown to a caller; a property they do not allow to read is missing, and
+    /// so is a value map they do not allow to read. Null, as for the runtime, reads every property an expression may read.
+    /// </param>
     public AutomationEvaluation(
         SubjectPathResolver resolver,
         AutomationRule rule,
         DateTimeOffset now,
         TimeZoneInfo timeZone,
         CapturedEvent? capturedEvent = null,
-        ObservedValues? values = null)
+        ObservedValues? values = null,
+        IUserPermissions? permissions = null)
     {
         Resolver = resolver;
         Rule = rule;
@@ -28,6 +42,7 @@ internal sealed class AutomationEvaluation
         _timeZone = timeZone;
         Event = capturedEvent;
         Values = values;
+        _permissions = permissions;
     }
 
     public SubjectPathResolver Resolver { get; }
@@ -46,6 +61,12 @@ internal sealed class AutomationEvaluation
 
     /// <summary>The distinct paths of the last evaluation that led to no value, in order of first appearance.</summary>
     public IReadOnlyList<string> MissingPaths => _missingPaths ?? (IReadOnlyList<string>)[];
+
+    /// <summary>Gets whether the caller of the evaluation may read the property.</summary>
+    public bool CanRead(RegisteredSubjectProperty property) => _permissions?.CanRead(property) ?? true;
+
+    /// <summary>The permissions that value maps are read with: those of the caller, or every property for the runtime.</summary>
+    public IUserPermissions MapPermissions => _permissions ?? UnrestrictedPermissions.Instance;
 
     public bool? EvaluateCondition(ParsedExpression expression)
     {

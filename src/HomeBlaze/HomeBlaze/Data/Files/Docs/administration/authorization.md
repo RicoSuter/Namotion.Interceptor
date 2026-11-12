@@ -5,7 +5,7 @@ navTitle: Authorization
 
 # Authorization
 
-Roles decide what people who sign in, visitors who are not signed in, the built-in [AI agents](ai-agents.md) and the clients of the external `/mcp` endpoint may read, change, run and read the history of. People sign in with a user name and password and hold roles; agents name their roles; `/mcp` uses the roles of the built-in user `mcp`; signed-out visitors use the roles of the built-in user `anonymous`. Fixed system rules apply on top of every role. The design is in [Security Design](../architecture/design/security.md).
+Roles decide what people who sign in, visitors who are not signed in, the built-in [AI agents](ai-agents.md), the [automations](automation.md#authorization) and the clients of the external `/mcp` endpoint may read, change, run and read the history of. People sign in with a user name and password and hold roles; agents and automations name their roles; `/mcp` uses the roles of the built-in user `mcp`; signed-out visitors use the roles of the built-in user `anonymous`. Fixed system rules apply on top of every role. The design is in [Security Design](../architecture/design/security.md).
 
 On this page:
 
@@ -21,6 +21,7 @@ On this page:
 - [System Rules](#system-rules): the deny rules no role can lift, per kind of principal
 - [One Authorization Subject](#one-authorization-subject): what happens with two
 - [Agents](#agents): the `Roles` setting, the "Invalid roles" status and who may chat with an agent
+- [Automations](#automations): the `Roles` of an automation
 - [Anonymous and MCP](#anonymous-and-mcp): the roles of signed-out visitors and of `/mcp` clients, and the `mcp` key
 - [Watch Paths](#watch-paths) and [Page Expressions](#page-expressions)
 - [Role Recipes](#role-recipes): household member, guest, user manager and a wall tablet
@@ -235,6 +236,7 @@ Users, agents and the custom roles that include a role name it. A rename keeps t
 - **Delete**: the Delete button is refused while a user or an agent uses the role, with "Delete Failed" and "The role 'light-operator' is used by users or agents; remove it from them first."
 - **Never a broken principal**: a save, rename or deletion that would make the roles of any user, agent or the built-in users fail to compile, or name a role that does not exist, is refused with the reason, and so is a change that would take the last full administrator away, see [People and Users](#people-and-users). One broken role therefore never leaves an administrator without access.
 - **Includes**: a custom role that includes a deleted role shows the status "Role '...' includes 'light-operator', which is not defined." and cannot be used until its includes are changed. A deletion that would leave a role in use in that state is refused, as it would break the principals that use that role.
+- **Automations**: an automation names roles in its `Roles` too, but is not counted: a rename leaves the old name in its `Roles`, and a deletion is not refused for it, see [Automations](#automations).
 
 ### Status and Usage
 
@@ -501,6 +503,17 @@ Turns still run, but every tool call is denied, so the agent can tell you what i
 An agent has one conversation, timeline and memory, shared by everyone who chats with it, and its background runs feed their findings into that conversation. A person may therefore chat with an agent, read its timeline, activity, memory and `Last Analysis` and start a new conversation only when they hold every role of the agent, counting the roles those include, or are a full administrator, and the agent's roles include each of the person's roles with deny rules, see [Roles With Deny Rules](#roles-with-deny-rules). Everything the agent can see or do is then something every person who may chat with it may see or do, so shared history, findings and memory cannot leak or escalate between people. The agent page shows why it is refused, such as "You can chat with this agent only if you hold its roles. Missing: operator." or "You can chat with this agent only if it holds your roles with deny rules, so that it cannot do what they deny you. Missing: kid." An agent without roles can be used only by a full administrator. **Run now** needs the same and, as it ignores the limits of the background runs, a full administrator, see [Triggers](ai-agents.md#triggers). Each tool call of a turn uses the agent's roles at that call, see [Agents](#agents).
 
 A change of the agent's roles applies to its open pages at once: a person who may no longer act through the new roles sees the reason in place of the chat, the activity and the memory. The conversation, the timeline, the memory and the session of the LLM are kept, so what the agent saw and wrote under earlier roles stays visible to everyone who may act through its current roles, and the agent can repeat it in the chat. Before you narrow the roles of an agent that saw more than the people who will chat with it may see, start a new conversation, which discards the session, and remove the memory entries that must not reach them; the timeline keeps the earlier runs and chats.
+
+---
+
+## Automations
+
+An automation names its roles in `Roles`, as an agent does, and has none by default, so it calls no operation and writes no property until a role allows it. It needs `execute` on each operation it calls and `write` on each property it writes, with the system rules of agents and `/mcp` clients; its conditions and texts read without its roles. The roles are checked when its configuration is applied and before each action, see [Authorization](automation.md#authorization) in the automation guide.
+
+- **Edit form**: the field "Roles" on the tab General of its edit dialog, the same picker as for agents. Unlike an agent, an automation may have no roles; the dialog then lists every action that calls an operation or writes a property as refused.
+- **Usage**: `UsedByAgents` does not count automations, and the dialogs of Rename and Delete do not name them. An automation that names a renamed or deleted role refuses its calls and writes with "the roles of the automation cannot be used: Role '...' is not defined." until it is given the new name.
+- **People**: only a full administrator creates or changes an automation, as for any configuration, see [Administration](#administration).
+- **Agents and `/mcp` clients** can neither create nor change an automation, whatever their roles: the [system rules](#system-rules) deny writing its configuration, and the Markdown tools cannot add or change a block of a page other than a layout block. An agent therefore cannot give an automation roles it does not have itself.
 
 ---
 

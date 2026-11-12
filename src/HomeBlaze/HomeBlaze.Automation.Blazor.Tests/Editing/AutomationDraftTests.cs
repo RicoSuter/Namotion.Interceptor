@@ -3,6 +3,11 @@ using HomeBlaze.Automation.Blazor.Editing;
 using HomeBlaze.Automation.Blazor.Tests.Testing;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking;
 
 namespace HomeBlaze.Automation.Blazor.Tests.Editing;
 
@@ -19,7 +24,7 @@ public class AutomationDraftTests
 
     private static ChangeStateAction Enter(string state) => new() { Id = "state-1", TargetState = state };
 
-    private static Automation CreateWasher() => TestAutomations.Create(automation =>
+    private static Automation CreateWasher(IAutomationAuthorizer? authorizer = null) => TestAutomations.Create(automation =>
     {
         automation.Name = "Washer";
         automation.States = ["Idle", "Running"];
@@ -30,7 +35,7 @@ public class AutomationDraftTests
             ["finished"] = Rule("Finished", "Running", new InvokeOperationAction { Id = "call-1", OperationPath = "/Notify/Send" }, Enter("Idle")),
             ["started"] = Rule("Started", "Idle", Enter("Running"))
         };
-    });
+    }, authorizer);
 
     [Fact]
     public void WhenARuleFileHoldsExplicitNulls_ThenTheDraftOpensValidatesAndSavesWithoutThem()
@@ -118,6 +123,97 @@ public class AutomationDraftTests
         Assert.Equal("Start", automation.Rules["started"].Name);
         Assert.Equal(AutomationRuleMode.DryRun, automation.Rules[added.Key].Mode);
         Assert.Equal("Idle", automation.InitialState);
+    }
+
+    [Fact]
+    public void WhenTheRolesOfTheDraftAreChangedAndApplied_ThenTheAutomationHasThem()
+    {
+        // Arrange
+        var automation = CreateWasher();
+        automation.Roles = ["Reader"];
+        var draft = AutomationDraft.From(automation);
+
+        // Act
+        var read = draft.Roles.ToArray();
+        draft.Roles = ["Reader", "Operator"];
+        draft.ApplyTo(automation);
+
+        // Assert
+        Assert.Equal(["Reader"], read);
+        Assert.Equal(["Reader", "Operator"], automation.Roles);
+    }
+
+    [Fact]
+    public void WhenTheDraftIsApplied_ThenTheRolesAreWrittenBeforeTheRules()
+    {
+        // Arrange
+        var automation = CreateWasher();
+        var recorder = new WriteRecorder(automation);
+        ((IInterceptorSubject)automation).Context.AddFallbackContext(InterceptorSubjectContext.Create().WithRegistry().WithParents());
+        ((IInterceptorSubject)automation).Context.AddService<IWriteInterceptor>(recorder);
+        var draft = AutomationDraft.From(automation);
+
+        // Act
+        draft.ApplyTo(automation);
+
+        // Assert
+        Assert.Contains(nameof(Automation.Roles), recorder.Written);
+        Assert.True(recorder.Written.IndexOf(nameof(Automation.Roles)) < recorder.Written.IndexOf(nameof(Automation.Rules)), string.Join(", ", recorder.Written));
+        Assert.Equal(nameof(Automation.Rules), recorder.Written[^1]);
+    }
+
+    private sealed class WriteRecorder(Automation automation) : IWriteInterceptor
+    {
+        public List<string> Written { get; } = [];
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (ReferenceEquals(context.Property.Subject, automation))
+            {
+                Written.Add(context.Property.Name);
+            }
+
+            next(ref context);
+        }
+    }
+
+    [Fact]
+    public void WhenTheRolesCannotBeUsedAndARuleCallsAnOperation_ThenTheDraftHasTheRolesErrorWhichBlocksSave()
+    {
+        // Arrange
+        var automation = TestAutomations.Create(
+            authorizer: new UnusableRolesAuthorizer("the roles of the automation cannot be used: No roles are assigned."));
+        automation.Rules = new Dictionary<string, AutomationRule>
+        {
+            ["call"] = Rule("Call", null, new InvokeOperationAction { Id = "call-1", OperationPath = "/Notify/Send" })
+        };
+        var draft = AutomationDraft.From(automation);
+
+        // Act
+        var errors = draft.Validate();
+
+        // Assert
+        Assert.Contains(errors, error => error.RuleKey is null && error.Message ==
+            "The actions that call operations or write properties are refused: the roles of the automation cannot be used: No roles are assigned.");
+    }
+
+    [Fact]
+    public void WhenAResolvedTargetIsWhatAnAutomationNeverWrites_ThenTheRuleHasTheSameErrorAsTheRuntime()
+    {
+        // Arrange
+        var automation = TestAutomations.Create();
+        ((IInterceptorSubject)automation).Context.AddFallbackContext(InterceptorSubjectContext.Create().WithRegistry().WithParents());
+        automation.Rules = new Dictionary<string, AutomationRule>
+        {
+            ["rule"] = Rule("Rule", null, new SetPropertyAction { Id = "set-1", PropertyPath = "./Status", Value = "x" })
+        };
+        var draft = AutomationDraft.From(automation);
+
+        // Act
+        var errors = draft.Validate();
+
+        // Assert
+        Assert.Contains(errors, error => error.RuleKey == "rule" && error.Message == "action 'set-1': ./Status is read-only");
     }
 
     [Fact]
@@ -358,5 +454,71 @@ public class AutomationDraftTests
         var calls = saved.Actions.OfType<InvokeOperationAction>().ToDictionary(action => action.Id);
         Assert.Equal(["gone", "speed"], calls["call-2"].Arguments.Keys.Order(StringComparer.Ordinal).ToArray());
         Assert.Equal(["speed"], calls["call-3"].Arguments.Keys.ToArray());
+    }
+
+    [Fact]
+    public void WhenThePermissionsOfTheDraftAreRequested_ThenTheyAreThoseOfItsUnsavedRoles()
+    {
+        // Arrange
+        var authorizer = new RecordingAuthorizer();
+        var draft = AutomationDraft.From(TestAutomations.Create(automation => automation.Roles = ["Reader"], authorizer));
+
+        // Act
+        draft.Roles = ["Operator"];
+        var permissions = draft.GetPermissions();
+
+        // Assert
+        Assert.Equal("Operator", permissions.Error);
+        Assert.Equal(["Operator"], authorizer.LastRoles!.ToArray());
+    }
+
+    [Fact]
+    public void WhenTheDraftRolesCannotBeUsedAndARuleCallsAnOperation_ThenTheDraftIsInvalid()
+    {
+        // Arrange
+        var draft = AutomationDraft.From(CreateWasher(new RecordingAuthorizer()));
+
+        // Act
+        draft.Roles = [];
+        var errors = draft.Validate();
+
+        // Assert
+        Assert.Contains(errors, error => error.RuleKey is null && error.Message == "The actions that call operations or write properties are refused: ");
+    }
+
+    [Fact]
+    public void WhenTheRolesOfTheDraftAreNull_ThenTheyAreAppliedAsNoRoles()
+    {
+        // Arrange
+        var automation = CreateWasher();
+        var draft = AutomationDraft.From(automation);
+
+        // Act
+        draft.Roles = null!;
+        draft.ApplyTo(automation);
+
+        // Assert
+        Assert.Empty(automation.Roles);
+    }
+
+    // Answers every request with permissions whose error is the requested roles, so a test sees which roles were asked.
+    private sealed class RecordingAuthorizer : IAutomationAuthorizer
+    {
+        public IReadOnlyList<string>? LastRoles { get; private set; }
+
+        public IAutomationPermissions GetPermissions(IReadOnlyList<string> roles)
+        {
+            LastRoles = roles;
+            return new NamedPermissions(string.Join(", ", roles));
+        }
+
+        private sealed class NamedPermissions(string error) : IAutomationPermissions
+        {
+            public string? Error { get; } = error;
+
+            public string? GetOperationDenial(RegisteredSubjectProperty operation) => Error;
+
+            public string? GetPropertyWriteDenial(RegisteredSubjectProperty property) => Error;
+        }
     }
 }

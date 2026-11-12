@@ -1,3 +1,4 @@
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Components.Abstractions.Expressions;
 using HomeBlaze.Components.Abstractions.TimeZones;
 
@@ -5,11 +6,14 @@ namespace HomeBlaze.Automation.Blazor.Editing;
 
 /// <summary>
 /// Validates and previews the expressions and templates of one rule for the fields of the editor, with relative paths
-/// from the saved rule with the key. Previews show instants in the zone of <paramref name="timeZone"/>, as the pages do for the viewer.
+/// from the saved rule with the key. Previews show instants in the zone of <paramref name="timeZone"/>, as the pages do for the viewer,
+/// and only the values that <paramref name="permissions"/> allow to read; null shows none.
 /// </summary>
-public sealed class RuleExpressions(Automation automation, string ruleKey, bool allowsEvent, ITimeZoneDisplay? timeZone = null)
+public sealed class RuleExpressions(Automation automation, string ruleKey, bool allowsEvent, ITimeZoneDisplay? timeZone = null, IUserPermissions? permissions = null)
 {
     internal Automation Automation => automation;
+
+    private IUserPermissions Permissions => permissions ?? DenyAllPermissions.Instance;
 
     /// <summary>Whether the rule has an event trigger, so that the expressions of its actions may read <c>event</c> and <c>subject</c>.</summary>
     internal bool AllowsEvent => allowsEvent;
@@ -31,7 +35,7 @@ public sealed class RuleExpressions(Automation automation, string ruleKey, bool 
     /// </summary>
     internal Func<ExpressionPreview>? PrepareConditionPreview(string text) =>
         AutomationValidator.TryParseExpression(text, allowsEvent: false, out var parsed, out _)
-            ? () => AutomationPreview.Evaluate(automation, ruleKey, parsed, timeZone)
+            ? () => AutomationPreview.Evaluate(automation, ruleKey, parsed, Permissions, timeZone)
             : null;
 
     /// <summary>
@@ -39,5 +43,5 @@ public sealed class RuleExpressions(Automation automation, string ruleKey, bool 
     /// Null when the template is invalid.
     /// </summary>
     internal Func<string>? PrepareTemplatePreview(string text) =>
-        AutomationValidator.TryParseTemplate(text, allowsEvent, out var parsed, out _) ? () => AutomationPreview.Render(automation, ruleKey, parsed) : null;
+        AutomationValidator.TryParseTemplate(text, allowsEvent, out var parsed, out _) ? () => AutomationPreview.Render(automation, ruleKey, parsed, Permissions) : null;
 }

@@ -72,7 +72,7 @@ internal sealed class AutomationTestHost : IAsyncDisposable
         Action<Automation> configure,
         DateTimeOffset? start = null,
         TimeZoneInfo? timeZone = null,
-        IAutomationAuthorizer? authorizer = null,
+        Func<TestGraph, IAutomationAuthorizer>? authorizer = null,
         bool makesEveryRouteUnbounded = false,
         bool keepsCheckpoints = true)
     {
@@ -85,7 +85,7 @@ internal sealed class AutomationTestHost : IAsyncDisposable
             graph.Context.AddService<IDataDirectoryProvider>(new TestDataDirectory(dataDirectory));
         }
 
-        var host = new AutomationTestHost(graph, time, dataDirectory, authorizer ?? new AllowAllAutomationAuthorizer());
+        var host = new AutomationTestHost(graph, time, dataDirectory, authorizer?.Invoke(graph) ?? new AllowAllAutomationAuthorizer());
         host.ChangeDispatcher.MakesEveryRouteUnbounded = makesEveryRouteUnbounded;
         graph.Add("Weather", host.Weather);
         graph.Add("Blinds", host.Blinds);

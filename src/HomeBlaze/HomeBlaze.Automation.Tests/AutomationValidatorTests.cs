@@ -1,12 +1,19 @@
+using HomeBlaze.Authorization;
 using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Automation.Tests.Testing;
+using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HomeBlaze.Automation.Tests;
 
-public class AutomationValidatorTests
+public sealed class AutomationValidatorTests : IDisposable
 {
+    private readonly Automation _automation = new(
+        new SubjectPathResolver(() => null), TimeProvider.System, new AllowAllAutomationAuthorizer(), new ServiceCollection().BuildServiceProvider(), NullLogger<Automation>.Instance);
+
+    public void Dispose() => _automation.Dispose();
+
     private const string EventOnly = "'event' is only available in event filters and in the arguments of a rule with an event trigger";
 
     private static AutomationRule Rule(
@@ -29,7 +36,7 @@ public class AutomationValidatorTests
         var rules = new Dictionary<string, AutomationRule> { ["a"] = Rule(), ["b"] = Rule("Rain") };
 
         // Act
-        var errors = AutomationValidator.Validate(["Day", "Night"], "Day", rules, ["b"]);
+        var errors = AutomationValidator.Validate(_automation, [], ["Day", "Night"], "Day", rules, ["b"]);
 
         // Assert
         Assert.Empty(errors);
@@ -45,7 +52,7 @@ public class AutomationValidatorTests
         };
 
         // Act
-        var errors = AutomationValidator.Validate([], null, rules, []);
+        var errors = AutomationValidator.Validate(_automation, [], [], null, rules, []);
 
         // Assert
         Assert.Contains(errors, error => error.RuleKey == "a" && error.Message.Contains("the arguments are missing", StringComparison.Ordinal));
@@ -58,7 +65,7 @@ public class AutomationValidatorTests
         var rules = new Dictionary<string, AutomationRule> { ["a"] = Rule(onlyIf: "/Weather/Gust >", actions: []) };
 
         // Act
-        var errors = AutomationValidator.Validate([], null, rules, []);
+        var errors = AutomationValidator.Validate(_automation, [], [], null, rules, []);
 
         // Assert
         Assert.Equal(2, errors.Length);
@@ -74,7 +81,7 @@ public class AutomationValidatorTests
         var rules = new Dictionary<string, AutomationRule> { ["a"] = null! };
 
         // Act
-        var errors = AutomationValidator.Validate(null!, null, rules, null!);
+        var errors = AutomationValidator.Validate(_automation, [], null!, null, rules, null!);
 
         // Assert
         Assert.Equal(["it has no trigger", "it has no action"], errors.Select(error => error.Message).ToArray());
@@ -92,7 +99,7 @@ public class AutomationValidatorTests
         };
 
         // Act
-        var errors = AutomationValidator.Validate([], null, rules, ["b", "a"]);
+        var errors = AutomationValidator.Validate(_automation, [], [], null, rules, ["b", "a"]);
 
         // Assert
         Assert.Equal(["b", "a"], errors.Select(error => error.RuleKey!).ToArray());
@@ -102,7 +109,7 @@ public class AutomationValidatorTests
     public void WhenAStateIsDefinedTwice_ThenTheErrorBelongsToTheAutomation()
     {
         // Act
-        var errors = AutomationValidator.Validate(["Day", "Day"], "Day", new Dictionary<string, AutomationRule>(), []);
+        var errors = AutomationValidator.Validate(_automation, [], ["Day", "Day"], "Day", new Dictionary<string, AutomationRule>(), []);
 
         // Assert
         var error = Assert.Single(errors);
@@ -114,7 +121,7 @@ public class AutomationValidatorTests
     public void WhenAStateNameStartsOrEndsWithWhiteSpace_ThenItIsAnError()
     {
         // Act
-        var errors = AutomationValidator.Validate([" Day", "Night"], " Day", new Dictionary<string, AutomationRule>(), []);
+        var errors = AutomationValidator.Validate(_automation, [], [" Day", "Night"], " Day", new Dictionary<string, AutomationRule>(), []);
 
         // Assert
         var error = Assert.Single(errors);
@@ -129,7 +136,7 @@ public class AutomationValidatorTests
         var rules = new Dictionary<string, AutomationRule> { ["a"] = Rule("Storm"), ["b"] = Rule("storm ") };
 
         // Act
-        var errors = AutomationValidator.Validate([], null, rules, ["a", "b"]);
+        var errors = AutomationValidator.Validate(_automation, [], [], null, rules, ["a", "b"]);
 
         // Assert
         var error = Assert.Single(errors);
@@ -149,12 +156,75 @@ public class AutomationValidatorTests
         };
 
         // Act
-        var errors = AutomationValidator.Validate([], null, rules, []);
+        var errors = AutomationValidator.Validate(_automation, [], [], null, rules, []);
 
         // Assert
         var error = Assert.Single(errors);
         Assert.Equal("a", error.RuleKey);
         Assert.Equal("The action id 'close' is used 2 times", error.Message);
+    }
+
+    [Fact]
+    public void WhenTheRolesCannotBeUsedAndARuleCallsAnOperation_ThenTheAutomationHasTheRolesError()
+    {
+        // Arrange
+        using var automation = new Automation(
+            new SubjectPathResolver(() => null),
+            TimeProvider.System,
+            new RecordingAuthorizer(new DenyingPermissions("the roles of the automation cannot be used: No roles are assigned.")),
+            new ServiceCollection().BuildServiceProvider(),
+            NullLogger<Automation>.Instance);
+        var calling = new Dictionary<string, AutomationRule> { ["a"] = Rule() };
+        var stateOnly = new Dictionary<string, AutomationRule> { ["a"] = Rule(actions: [new ChangeStateAction { Id = "night", TargetState = "Night" }]) };
+
+        // Act
+        var callingErrors = AutomationValidator.Validate(automation, [], ["Night"], "Night", calling, []);
+        var stateOnlyErrors = AutomationValidator.Validate(automation, [], ["Night"], "Night", stateOnly, []);
+
+        // Assert
+        var error = Assert.Single(callingErrors);
+        Assert.Null(error.RuleKey);
+        Assert.Equal(
+            "The actions that call operations or write properties are refused: the roles of the automation cannot be used: No roles are assigned.",
+            error.Message);
+        Assert.Empty(stateOnlyErrors);
+    }
+
+    [Fact]
+    public async Task WhenTheRolesOfAnEditDenyAResolvedTarget_ThenTheRuleHasTheDenial()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(_ => { }, authorizer: graph => TestAuthorization.Create(graph));
+        var rules = new Dictionary<string, AutomationRule> { ["a"] = Rule() };
+
+        // Act
+        var reader = AutomationValidator.Validate(host.Automation, [BuiltInRoles.ReaderName], [], null, rules, []);
+        var operatorErrors = AutomationValidator.Validate(host.Automation, [BuiltInRoles.OperatorName], [], null, rules, []);
+
+        // Assert
+        var error = Assert.Single(reader);
+        Assert.Equal("a", error.RuleKey);
+        Assert.Equal("action 'close': /Blinds/Close: no role of the automation allows calling it", error.Message);
+        Assert.Empty(operatorErrors);
+    }
+
+    [Fact]
+    public async Task WhenARuleIsNotSavedYet_ThenItsRelativeTargetsAreNotCheckedAndThoseOfASavedRuleAre()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(
+            automation => automation.Rules = new Dictionary<string, AutomationRule> { ["saved"] = Rule() },
+            authorizer: graph => TestAuthorization.Create(graph));
+        var reset = new AutomationAction[] { new InvokeOperationAction { Id = "reset", OperationPath = "../ResetState" } };
+        var rules = new Dictionary<string, AutomationRule> { ["saved"] = Rule(actions: reset), ["new"] = Rule("New", actions: reset) };
+
+        // Act
+        var errors = AutomationValidator.Validate(host.Automation, [BuiltInRoles.ReaderName], [], null, rules, []);
+
+        // Assert
+        var error = Assert.Single(errors);
+        Assert.Equal("saved", error.RuleKey);
+        Assert.Equal("action 'reset': ../ResetState: no role of the automation allows calling it", error.Message);
     }
 
     [Theory]

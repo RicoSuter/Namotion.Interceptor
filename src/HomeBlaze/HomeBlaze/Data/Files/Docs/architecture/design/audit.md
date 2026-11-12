@@ -31,3 +31,4 @@ The audit trail tracks who changed what and when across the knowledge graph. Thi
 - Retention and archival policy
 - Integration with external audit/compliance systems
 - How to attribute changes from built-in agents (agent subject identity) vs external agents (MCP session identity)
+- How to attribute the operation calls and property writes of automations, which run as their own principal; today each run is recorded in the `LastRunMessage` and `RunCount` of its rule and in the log

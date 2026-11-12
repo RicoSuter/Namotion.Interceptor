@@ -53,6 +53,7 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         ChangeDispatcher = AutomationChangeDispatcher.From(serviceProvider);
         _logger = logger;
         Enabled = true;
+        Roles = [];
         States = [];
         RuleOrder = [];
         Rules = new Dictionary<string, AutomationRule>();
@@ -65,6 +66,13 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
     /// <summary>Whether the rules are active. A disabled automation keeps its state and its checkpoint.</summary>
     [Configuration]
     public partial bool Enabled { get; set; }
+
+    /// <summary>
+    /// The names of the roles that decide which operations the rules may call and which properties they may write. What the rules may call and
+    /// write for these roles is decided by the registered <see cref="IAutomationAuthorizer"/>; a state change needs no role. Replaced as a whole, never changed in place.
+    /// </summary>
+    [Configuration]
+    public partial string[] Roles { get; set; }
 
     /// <summary>The names of the states, or none for an automation without named states.</summary>
     [Configuration]
@@ -270,6 +278,8 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
 
     // A configuration file may hold an explicit null, which the runtime never expects.
     partial void OnStatesChanging(ref string[] newValue, ref bool cancel) => newValue ??= [];
+
+    partial void OnRolesChanging(ref string[] newValue, ref bool cancel) => newValue ??= [];
 
     partial void OnRuleOrderChanging(ref string[] newValue, ref bool cancel) => newValue ??= [];
 

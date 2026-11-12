@@ -1,4 +1,6 @@
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Automation.Expressions;
+using HomeBlaze.Services;
 
 namespace HomeBlaze.Automation.Runtime;
 
@@ -9,7 +11,7 @@ namespace HomeBlaze.Automation.Runtime;
 /// </summary>
 internal static class RuleTester
 {
-    public static AutomationRuleTestResult Test(Automation automation, AutomationRule rule)
+    public static AutomationRuleTestResult Test(Automation automation, AutomationRule rule, IUserPermissions permissions)
     {
         var key = automation.Rules.FirstOrDefault(pair => ReferenceEquals(pair.Value, rule)).Key ?? string.Empty;
         if (!AutomationCompiler.TryCompileRule(key, rule, automation.States, out var compiled, out var error))
@@ -17,7 +19,7 @@ internal static class RuleTester
             return new AutomationRuleTestResult { Error = error };
         }
 
-        var evaluation = new AutomationEvaluation(automation.PathResolver, rule, automation.TimeProvider.GetUtcNow(), automation.TimeProvider.LocalTimeZone);
+        var evaluation = new AutomationEvaluation(automation.PathResolver, rule, automation.TimeProvider.GetUtcNow(), automation.TimeProvider.LocalTimeZone, permissions: permissions);
         var onlyIf = compiled.OnlyIf is { } onlyIfExpression ? evaluation.EvaluateCondition(onlyIfExpression) : true;
         IReadOnlyList<string> onlyIfMissingPaths = onlyIf is null ? [.. evaluation.MissingPaths] : [];
         var triggers = compiled.PropertyTriggers.Select(trigger => TestPropertyTrigger(trigger, evaluation))
@@ -25,7 +27,7 @@ internal static class RuleTester
             .OrderBy(trigger => trigger.Number)
             .ToList();
         var executor = ActionExecutor.For(automation);
-        var scope = new ActionScope(automation, rule, evaluation, compiled.AllowsEvent);
+        var scope = new ActionScope(automation, rule, evaluation, compiled.AllowsEvent, automation.Roles);
         return new AutomationRuleTestResult
         {
             IsActive = compiled.IsActiveIn(automation.Enabled, automation.CurrentState) && IsCurrentStateValid(automation),

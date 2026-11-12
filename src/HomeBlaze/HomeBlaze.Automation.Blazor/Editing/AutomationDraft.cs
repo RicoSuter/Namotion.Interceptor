@@ -10,16 +10,19 @@ namespace HomeBlaze.Automation.Blazor.Editing;
 /// </summary>
 public sealed class AutomationDraft
 {
-    private Automation? _automation;
+    private Automation _automation = null!;
     private (string State, Regex Word)? _mentionPattern;
 
-    internal AutomationDraft()
+    private AutomationDraft()
     {
     }
 
     internal string? Name { get; set; }
 
     internal bool Enabled { get; set; } = true;
+
+    /// <summary>The roles of the automation, see <see cref="Automation.Roles"/>.</summary>
+    internal IReadOnlyList<string> Roles { get; set; } = [];
 
     internal List<string> States { get; } = [];
 
@@ -30,47 +33,52 @@ public sealed class AutomationDraft
 
     internal static AutomationDraft From(Automation automation)
     {
-        var draft = new AutomationDraft { Name = automation.Name, Enabled = automation.Enabled, InitialState = automation.InitialState, _automation = automation };
+        var draft = new AutomationDraft { Name = automation.Name, Enabled = automation.Enabled, InitialState = automation.InitialState, Roles = [.. automation.Roles], _automation = automation };
         draft.States.AddRange(automation.States);
         draft.Rules.AddRange(automation.GetRulesInOrder().Select(pair => RuleDraft.From(pair.Key, pair.Value)));
         return draft;
     }
 
     /// <summary>
-    /// Writes the configuration to the automation, the rules last, so that the automation reads a complete configuration
-    /// when it applies it. New rule instances take the run properties of the instances they replace.
+    /// Writes the configuration to the automation, the rules last and the roles before them, so that the automation reads a
+    /// complete configuration when it applies it and never runs new rules with old roles. New rule instances take the run
+    /// properties of the instances they replace.
     /// </summary>
     internal void ApplyTo(Automation automation)
     {
         automation.Name = string.IsNullOrWhiteSpace(Name) ? null : Name.Trim();
         automation.Enabled = Enabled;
+        automation.Roles = [.. Roles ?? []];
         automation.States = [.. States];
         automation.InitialState = States.Count == 0 ? null : InitialState;
         automation.RuleOrder = [.. Rules.Select(rule => rule.Key)];
         automation.Rules = Rules.ToDictionary(rule => rule.Key, rule => rule.ToRule(path => ActionInputs.GetMethod(automation, rule.Key, path)));
     }
 
+    /// <summary>What the automation may call and write with the roles of the draft, for the targets the editor offers.</summary>
+    internal IAutomationPermissions GetPermissions() => AutomationTargets.GetPermissions(_automation, Roles ?? []);
+
     /// <summary>The errors of the configuration as the automation and the editor check it.</summary>
     internal ImmutableArray<AutomationValidationError> Validate() =>
     [
         .. AutomationValidator.Validate(
+            _automation,
+            Roles,
             States,
             States.Count == 0 ? null : InitialState,
-            Rules.ToDictionary(rule => rule.Key, rule => rule.ToRule(path => _automation is null ? null : ActionInputs.GetMethod(_automation, rule.Key, path))),
+            Rules.ToDictionary(rule => rule.Key, rule => rule.ToRule(path => ActionInputs.GetMethod(_automation, rule.Key, path))),
             [.. Rules.Select(rule => rule.Key)]),
         .. CheckActionInputs()
     ];
 
     // The inputs of the actions are checked against the operations and properties they target, wherever the editor is showing.
     private IEnumerable<AutomationValidationError> CheckActionInputs() =>
-        _automation is not { } automation
-            ? []
-            : Rules.SelectMany(rule =>
-            {
-                var expressions = new RuleExpressions(automation, rule.Key, rule.AllowsEvent);
-                return rule.Actions.SelectMany((item, index) => ActionInputs.Check(item.Value, automation, rule.Key, expressions)
-                    .Select(error => new AutomationValidationError(rule.Key, $"{ActionInputs.Name(item.Value, index)}: {error.Label}: {error.Error}")));
-            });
+        Rules.SelectMany(rule =>
+        {
+            var expressions = new RuleExpressions(_automation, rule.Key, rule.AllowsEvent);
+            return rule.Actions.SelectMany((item, index) => ActionInputs.Check(item.Value, _automation, rule.Key, expressions)
+                .Select(error => new AutomationValidationError(rule.Key, $"{ActionInputs.Name(item.Value, index)}: {error.Label}: {error.Error}")));
+        });
 
     internal RuleDraft? FindRule(string? key) => key is null ? null : Rules.Find(rule => rule.Key == key);
 

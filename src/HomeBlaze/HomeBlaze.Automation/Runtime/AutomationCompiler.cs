@@ -18,13 +18,37 @@ internal static class AutomationCompiler
         IReadOnlyDictionary<string, AutomationRule> rules,
         IReadOnlyList<string> ruleOrder,
         [NotNullWhen(true)] out CompiledAutomation? compiled,
+        [NotNullWhen(false)] out string? error) =>
+        TryCompile(states, initialState, rules, ruleOrder, targets: null, out compiled, out error);
+
+    /// <summary>
+    /// Compiles the configuration of the automation with the rules and roles read from it, checking the targets of actions
+    /// that resolve against the roles.
+    /// </summary>
+    public static bool TryCompile(
+        Automation automation,
+        IReadOnlyList<string> roles,
+        IReadOnlyDictionary<string, AutomationRule> rules,
+        [NotNullWhen(true)] out CompiledAutomation? compiled,
+        [NotNullWhen(false)] out string? error) =>
+        TryCompile(
+            automation.States, automation.InitialState, rules, automation.RuleOrder, ActionTargetCheck.Create(automation, roles), out compiled, out error);
+
+    /// <summary>Compiles the configuration; <paramref name="targets"/> also checks the targets of actions that resolve.</summary>
+    public static bool TryCompile(
+        IReadOnlyList<string> states,
+        string? initialState,
+        IReadOnlyDictionary<string, AutomationRule> rules,
+        IReadOnlyList<string> ruleOrder,
+        ActionTargetCheck? targets,
+        [NotNullWhen(true)] out CompiledAutomation? compiled,
         [NotNullWhen(false)] out string? error)
     {
         var errors = CheckStates(states, initialState);
         var compiledRules = new List<CompiledRule>();
         foreach (var key in OrderKeys(rules.Keys, ruleOrder))
         {
-            if (TryCompileRule(key, rules[key], states, out var rule, out var ruleError))
+            if (TryCompileRule(key, rules[key], states, targets, out var rule, out var ruleError))
             {
                 compiledRules.Add(rule);
             }
@@ -51,9 +75,18 @@ internal static class AutomationCompiler
         AutomationRule rule,
         IReadOnlyList<string> states,
         [NotNullWhen(true)] out CompiledRule? compiled,
+        [NotNullWhen(false)] out string? error) =>
+        TryCompileRule(key, rule, states, targets: null, out compiled, out error);
+
+    public static bool TryCompileRule(
+        string key,
+        AutomationRule rule,
+        IReadOnlyList<string> states,
+        ActionTargetCheck? targets,
+        [NotNullWhen(true)] out CompiledRule? compiled,
         [NotNullWhen(false)] out string? error)
     {
-        var candidate = Compile(key, rule, states, out var errors);
+        var candidate = Compile(key, rule, states, targets, out var errors);
         if (errors.Count > 0)
         {
             compiled = null;
@@ -66,14 +99,17 @@ internal static class AutomationCompiler
         return true;
     }
 
-    /// <summary>The errors of a rule as <see cref="TryCompileRule"/> finds them, without the name of the rule in front.</summary>
-    public static IReadOnlyList<string> GetRuleErrors(string key, AutomationRule rule, IReadOnlyList<string> states)
+    /// <summary>
+    /// The errors of a rule as <see cref="TryCompileRule(string, AutomationRule, IReadOnlyList{string}, ActionTargetCheck, out CompiledRule, out string)"/>
+    /// finds them, without the name of the rule in front.
+    /// </summary>
+    public static IReadOnlyList<string> GetRuleErrors(string key, AutomationRule rule, IReadOnlyList<string> states, ActionTargetCheck? targets = null)
     {
-        Compile(key, rule, states, out var errors);
+        Compile(key, rule, states, targets, out var errors);
         return errors;
     }
 
-    private static CompiledRule Compile(string key, AutomationRule rule, IReadOnlyList<string> states, out List<string> errors)
+    private static CompiledRule Compile(string key, AutomationRule rule, IReadOnlyList<string> states, ActionTargetCheck? targets, out List<string> errors)
     {
         errors = [];
         var candidate = new CompiledRule(key, rule, CompileOnlyIf(rule.OnlyIf, errors));
@@ -96,7 +132,7 @@ internal static class AutomationCompiler
         }
 
         CompileTriggers(candidate, rule.Triggers, errors);
-        CheckActions(rule.Actions, candidate.AllowsEvent, states, errors);
+        CheckActions(key, rule.Actions, candidate.AllowsEvent, states, targets, errors);
         return candidate;
     }
 
@@ -258,7 +294,8 @@ internal static class AutomationCompiler
         return null;
     }
 
-    private static void CheckActions(AutomationAction[] actions, bool allowsEvent, IReadOnlyList<string> states, List<string> errors)
+    private static void CheckActions(
+        string key, AutomationAction[] actions, bool allowsEvent, IReadOnlyList<string> states, ActionTargetCheck? targets, List<string> errors)
     {
         if (actions.Length == 0)
         {
@@ -268,9 +305,10 @@ internal static class AutomationCompiler
 
         for (var index = 0; index < actions.Length; index++)
         {
-            if (CheckAction(actions[index], allowsEvent, states) is { } error)
+            var action = actions[index];
+            if ((CheckAction(action, allowsEvent, states) ?? targets?.Check(key, action)) is { } error)
             {
-                errors.Add($"{DescribeAction(actions[index], index)}: {error}");
+                errors.Add($"{DescribeAction(action, index)}: {error}");
             }
         }
     }

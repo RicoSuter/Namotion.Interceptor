@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\HomeBlaze.Authorization\HomeBlaze.Authorization.csproj" />
+    <ProjectReference Include="..\HomeBlaze.Automation\HomeBlaze.Automation.csproj" />
     <ProjectReference Include="..\HomeBlaze.Components\HomeBlaze.Components.csproj" />
     <ProjectReference Include="..\HomeBlaze.History.Blazor\HomeBlaze.History.Blazor.csproj" />
     <ProjectReference Include="..\HomeBlaze.Samples\HomeBlaze.Samples.csproj" />

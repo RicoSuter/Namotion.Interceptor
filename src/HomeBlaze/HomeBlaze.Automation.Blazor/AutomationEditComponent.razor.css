@@ -77,3 +77,7 @@
     align-self: flex-start;
     max-height: 100%;
 }
+
+.automation-editor ::deep .automation-general > * {
+    flex: 0 0 auto;
+}

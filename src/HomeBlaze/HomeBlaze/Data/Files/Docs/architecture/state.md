@@ -59,7 +59,7 @@ Tracks the implementation status of building blocks described in [Architecture O
 | Building Block | Status | Notes |
 |---|---|---|
 | Automations | Implemented | `HomeBlaze.Automation` with rules on property conditions and events, named states, dry runs, Test now and a checkpoint, and `HomeBlaze.Automation.Blazor` with the page, the widget and the editor. See [Automations](../administration/automation.md) |
-| Authorization of automations | Planned | Roles and rules for the principal of an automation |
+| Authorization of automations | Implemented | Each automation runs with its own `Roles`, none by default, checked when its configuration is applied and before each action. See [Automations](../administration/automation.md#authorization) |
 
 ## Platform
 

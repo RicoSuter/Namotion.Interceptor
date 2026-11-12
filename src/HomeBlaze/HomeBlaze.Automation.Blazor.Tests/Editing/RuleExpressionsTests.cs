@@ -1,6 +1,7 @@
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Automation.Blazor.Editing;
 using HomeBlaze.Automation.Blazor.Tests.Testing;
 using HomeBlaze.Components.Abstractions.TimeZones;
@@ -84,7 +85,7 @@ public class RuleExpressionsTests
         var automation = TestAutomations.Create();
         ((IInterceptorSubject)automation).Context.AddFallbackContext(InterceptorSubjectContext.Create().WithRegistry().WithParents());
         automation.Rules = new Dictionary<string, AutomationRule> { ["rule"] = new() { Name = "Rule" } };
-        var withViewerZone = new RuleExpressions(automation, "rule", allowsEvent: false, viewerZone);
+        var withViewerZone = new RuleExpressions(automation, "rule", allowsEvent: false, viewerZone, UnrestrictedPermissions.Instance);
 
         // Act
         var relative = withViewerZone.PrepareConditionPreview("./Name == Rule")?.Invoke();

@@ -21,6 +21,8 @@ internal sealed class AutomationEngine : IRuleRunHost
     private readonly AutomationInputQueue _queue;
     private readonly ILogger _logger;
     private CompiledAutomation _snapshot = CompiledAutomation.Empty;
+    private IReadOnlyList<string> _roles = [];
+    private IReadOnlyList<string>? _rejectedRoles;
     private int _appliedConfigurationVersion = -1;
     private bool _hasConfigurationError;
 
@@ -65,6 +67,10 @@ internal sealed class AutomationEngine : IRuleRunHost
     IInterceptorSubject IRuleRunHost.Automation => _automation;
 
     public string? CurrentState => _automation.CurrentState;
+
+    public IReadOnlyList<string> Roles => _roles;
+
+    public IReadOnlyList<string>? RejectedRoles => _rejectedRoles;
 
     // White-box test hook: the compiled rules applied last.
     internal IReadOnlyList<CompiledRule> Rules => _snapshot.Rules;
@@ -152,14 +158,19 @@ internal sealed class AutomationEngine : IRuleRunHost
         var requestedAt = _queue.ConfigurationRequestedAt;
         _appliedConfigurationVersion = version;
         var rules = _automation.Rules;
+        var roles = _automation.Roles;
         TakeRunsOfReplacedRules(rules);
         _keeper.RestoreRules(rules);
-        if (AutomationCompiler.TryCompile(_automation.States, _automation.InitialState, rules, _automation.RuleOrder, out var compiled, out var error))
+        if (AutomationCompiler.TryCompile(_automation, roles, rules, out var compiled, out var error))
         {
+            _roles = [.. roles];
+            _rejectedRoles = null;
             Replace(compiled, requestedAt);
         }
         else
         {
+            // The kept rules run only what both role sets allow, so that roles narrowed in a rejected file still apply.
+            _rejectedRoles = roles.All(_roles.Contains) && _roles.All(roles.Contains) ? null : [.. roles];
             KeepPrevious(rules, error);
         }
     }
@@ -335,6 +346,8 @@ internal sealed class AutomationEngine : IRuleRunHost
     {
         Stop();
         _snapshot = CompiledAutomation.Empty;
+        _roles = [];
+        _rejectedRoles = null;
         _appliedConfigurationVersion = -1;
     }
 

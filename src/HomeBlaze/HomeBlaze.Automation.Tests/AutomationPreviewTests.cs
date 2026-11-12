@@ -1,7 +1,10 @@
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Automation.Tests.Testing;
+using HomeBlaze.Components.Tests.Access;
 using HomeBlaze.Components.Abstractions.Expressions;
 using HomeBlaze.Components.Abstractions.TimeZones;
 using HomeBlaze.Services;
+using Namotion.Interceptor.Registry;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
 namespace HomeBlaze.Automation.Tests;
@@ -39,11 +42,11 @@ public class AutomationPreviewTests
         Assert.True(AutomationValidator.TryParseTemplate("Gust {{ /Weather/Gust | raw }}", allowsEvent: false, out var template, out var templateError), templateError);
 
         // Act
-        var before = AutomationPreview.Evaluate(host.Automation, "retract", expression);
-        var renderedBefore = AutomationPreview.Render(host.Automation, "retract", template);
+        var before = AutomationPreview.Evaluate(host.Automation, "retract", expression, UnrestrictedPermissions.Instance);
+        var renderedBefore = AutomationPreview.Render(host.Automation, "retract", template, UnrestrictedPermissions.Instance);
         host.Weather.Gust = 5;
-        var after = AutomationPreview.Evaluate(host.Automation, "retract", expression);
-        var renderedAfter = AutomationPreview.Render(host.Automation, "retract", template);
+        var after = AutomationPreview.Evaluate(host.Automation, "retract", expression, UnrestrictedPermissions.Instance);
+        var renderedAfter = AutomationPreview.Render(host.Automation, "retract", template, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.True(before.Result);
@@ -153,6 +156,26 @@ public class AutomationPreviewTests
     }
 
     [Fact]
+    public async Task WhenTheCallerMayNotReadAValue_ThenThePreviewTreatsItAsMissing()
+    {
+        // Arrange
+        await using var host = await StartAsync();
+        host.Weather.Gust = 12345;
+
+        var permissions = new TestUserPermissions { CannotRead = [host.Weather.TryGetRegisteredProperty(nameof(TestSensor.Gust))!] };
+
+        // Act
+        var condition = Evaluate(host.Automation, "retract", "/Weather/Gust > 8", permissions: permissions);
+        var template = Render(host.Automation, "retract", "Gust {{ /Weather/Gust | raw }}", permissions);
+
+        // Assert
+        Assert.Null(condition.Result);
+        Assert.Null(condition.Value);
+        Assert.Null(condition.Text);
+        Assert.Equal("Gust ", template);
+    }
+
+    [Fact]
     public async Task WhenReadingAValueThrows_ThenThePreviewSaysWhyInsteadOfThrowing()
     {
         // Arrange
@@ -170,15 +193,35 @@ public class AutomationPreviewTests
         Assert.Equal("cannot be read: The reading is corrupt", template);
     }
 
-    private static ExpressionPreview Evaluate(Automation automation, string ruleKey, string expression, ITimeZoneDisplay? timeZone = null)
+    [Fact]
+    public async Task WhenTheCallerMayNotReadAValueThatThrows_ThenThePreviewTreatsItAsMissingWithoutReadingIt()
     {
-        Assert.True(AutomationValidator.TryParseExpression(expression, allowsEvent: false, out var parsed, out var error), error);
-        return AutomationPreview.Evaluate(automation, ruleKey, parsed, timeZone);
+        // Arrange
+        await using var host = await StartAsync();
+        host.Weather.Reading = new UnreadableReading();
+
+        var permissions = new TestUserPermissions { CannotRead = [host.Weather.TryGetRegisteredProperty(nameof(TestSensor.Reading))!] };
+
+        // Act
+        var value = Evaluate(host.Automation, "retract", "/Weather/Reading", permissions: permissions);
+        var template = Render(host.Automation, "retract", "Reading {{ /Weather/Reading }}", permissions);
+
+        // Assert
+        Assert.Null(value.Value);
+        Assert.Null(value.Text);
+        Assert.Equal("Reading ", template);
     }
 
-    private static string Render(Automation automation, string ruleKey, string template)
+    private static ExpressionPreview Evaluate(
+        Automation automation, string ruleKey, string expression, ITimeZoneDisplay? timeZone = null, IUserPermissions? permissions = null)
+    {
+        Assert.True(AutomationValidator.TryParseExpression(expression, allowsEvent: false, out var parsed, out var error), error);
+        return AutomationPreview.Evaluate(automation, ruleKey, parsed, permissions ?? UnrestrictedPermissions.Instance, timeZone);
+    }
+
+    private static string Render(Automation automation, string ruleKey, string template, IUserPermissions? permissions = null)
     {
         Assert.True(AutomationValidator.TryParseTemplate(template, allowsEvent: false, out var parsed, out var error), error);
-        return AutomationPreview.Render(automation, ruleKey, parsed);
+        return AutomationPreview.Render(automation, ruleKey, parsed, permissions ?? UnrestrictedPermissions.Instance);
     }
 }
