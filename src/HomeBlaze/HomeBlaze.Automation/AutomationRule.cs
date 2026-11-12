@@ -14,6 +14,12 @@ namespace HomeBlaze.Automation;
 [InterceptorSubject]
 public partial class AutomationRule : IConfigurable, ITitleProvider
 {
+    /// <summary>
+    /// The longest <see cref="LastRunMessage"/>, which keeps it within what history stores for a text. A longer message is
+    /// cut to this length, with "..." as its last three characters.
+    /// </summary>
+    public const int MaxRunMessageLength = 500;
+
     public AutomationRule()
     {
         Mode = AutomationRuleMode.DryRun;

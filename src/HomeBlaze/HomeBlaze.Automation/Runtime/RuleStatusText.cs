@@ -14,7 +14,7 @@ internal static class RuleStatusText
     {
         if (mode == AutomationRuleMode.Off)
         {
-            return "Off";
+            return RuleStatusTexts.Off;
         }
 
         if (inactiveReason is not null)
@@ -69,22 +69,22 @@ internal static class RuleStatusText
     {
         if (triggers.Count == 0 || !triggers.All(trigger => trigger.Phase is TriggerPhase.WaitingToRearm or TriggerPhase.WaitingForFalse or TriggerPhase.RearmedWhileTrue))
         {
-            return "Armed";
+            return RuleStatusTexts.Armed;
         }
 
         if (triggers.Any(trigger => trigger.Phase == TriggerPhase.RearmedWhileTrue))
         {
-            return "Armed, waiting until false";
+            return RuleStatusTexts.ArmedWaitingUntilFalse;
         }
 
         if (triggers.All(trigger => trigger.Phase == TriggerPhase.WaitingForFalse))
         {
-            return "Already true, waiting until false";
+            return RuleStatusTexts.AlreadyTrueWaitingUntilFalse;
         }
 
         return triggers.All(trigger => trigger.Phase == TriggerPhase.WaitingForFalse || trigger.WasTrueAtActivation)
-            ? "Already true, waiting to rearm"
-            : "Triggered, waiting to rearm";
+            ? RuleStatusTexts.AlreadyTrueWaitingToRearm
+            : RuleStatusTexts.TriggeredWaitingToRearm;
     }
 
     private static string DescribeUnknown(DateTimeOffset since, IReadOnlyList<string> missingPaths, TimeZoneInfo timeZone) =>

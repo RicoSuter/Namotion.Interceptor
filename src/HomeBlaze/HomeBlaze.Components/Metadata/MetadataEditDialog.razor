@@ -9,6 +9,7 @@
 
 @inject ISnackbar Snackbar
 @inject RootManager RootManager
+@inject IMetadataNotesFormat NotesFormat
 
 <MudDialog data-testid="metadata-edit-dialog">
     <DialogContent>
@@ -37,7 +38,7 @@
                           Clearable="true"
                           DebounceInterval="300"
                           Adornment="Adornment.End"
-                          AdornmentIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(GetValue(_iconPreview) ?? _iconPlaceholder)"
+                          AdornmentIcon="@MudBlazorIconResolver.Resolve(GetValue(_iconPreview) ?? _iconPlaceholder)"
                           HelperText="A MudBlazor icon name, such as Dashboard or Settings"
                           data-testid="metadata-icon" />
             @if (!_isFolder)
@@ -65,13 +66,20 @@
                 </MudSelect>
             }
         }
-        <MudTextField @bind-Value="_notes"
-                      Label="Notes"
-                      Lines="4"
-                      Sizing="InputSizing.Auto"
-                      MaxLines="12"
-                      HelperText="Markdown, without HTML, pictures or blocks"
-                      data-testid="metadata-notes-input" />
+        <MarkdownField @bind-Value="_notes"
+                       @ref="_notesField"
+                       Label="Notes"
+                       Hint="Markdown, without HTML, pictures or blocks"
+                       ToHtml="NotesFormat.ToHtml"
+                       GetError="NotesFormat.GetError"
+                       MaxSize="NotesFormat.MaxSize"
+                       data-testid="metadata-notes-input" />
+        @if (_areLoadedNotesInvalid && _notes == _loadedNotes)
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1" data-testid="metadata-notes-kept">
+                These notes break the rules and are kept as they are unless you change them.
+            </MudText>
+        }
         <MudText Typo="Typo.subtitle2" Class="mt-4">Links</MudText>
         @foreach (var link in _links)
         {
@@ -108,7 +116,7 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel" Disabled="@_isSaving">Cancel</MudButton>
-        <MudButton Color="Color.Primary" OnClick="SaveAsync" Disabled="@_isSaving" data-testid="metadata-save">Save</MudButton>
+        <MudButton Color="Color.Primary" OnClick="SaveAsync" Disabled="@(_isSaving || AreNotesRefused)" data-testid="metadata-save">Save</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -132,6 +140,9 @@
     private NavigationLocation? _location;
     private AppBarAlignment? _alignment;
     private string? _notes;
+    private string? _loadedNotes;
+    private bool _areLoadedNotesInvalid;
+    private MarkdownField? _notesField;
     private readonly List<LinkInput> _links = [];
     private readonly List<string> _tags = [];
     private IReadOnlyList<string> _tagsInUse = [];
@@ -150,7 +161,8 @@
             ? Owner.GetMetadata()
             : Owner.TryGetRegisteredSubject()?.TryGetProperty(PropertyName)?.GetMetadata();
 
-        _notes = metadata.GetString(MetadataKeys.Notes);
+        _notes = _loadedNotes = metadata.GetString(MetadataKeys.Notes);
+        _areLoadedNotesInvalid = _loadedNotes is not null && NotesFormat.GetError(_loadedNotes) is not null;
         foreach (var link in metadata.GetLinks())
         {
             _links.Add(new LinkInput { Title = link.Title, Address = link.Url ?? link.Path });
@@ -256,6 +268,10 @@
         var matches = _tagsInUse.Where(tag => tag.Contains(typed, StringComparison.OrdinalIgnoreCase));
         return Task.FromResult(_tagsInUse.Contains(typed, StringComparer.OrdinalIgnoreCase) ? matches : matches.Prepend(typed));
     }
+
+    // Notes that break the rules but were not changed, such as after an edit of the file by hand, are not written, so they
+    // do not keep the other fields from being saved.
+    private bool AreNotesRefused => _notesField?.IsValid == false && _notes != _loadedNotes;
 
     private void Cancel() => MudDialog?.Cancel();
 
@@ -391,7 +407,7 @@
 
         var options = new DialogOptions
         {
-            MaxWidth = MaxWidth.Small,
+            MaxWidth = MaxWidth.Medium,
             FullWidth = true,
             CloseButton = true
         };

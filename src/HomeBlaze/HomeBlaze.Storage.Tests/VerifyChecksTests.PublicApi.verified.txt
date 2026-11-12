@@ -209,7 +209,6 @@ namespace HomeBlaze.Storage
         public System.Threading.Tasks.Task<bool> WriteConfigurationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
         public static string GetNoPropertyMessage(string propertyName) { }
         public static string GetNoSubjectMessage(string path) { }
-        public static Namotion.Interceptor.IInterceptorSubject? ResolveMetadataPath(Namotion.Interceptor.IInterceptorSubject storage, string path) { }
     }
     public static class MarkdownPageLayoutPermission
     {
@@ -359,6 +358,14 @@ namespace HomeBlaze.Storage.Metadata
         public static string? GetError(string notes) { }
         public static string? ToHtml(string notes) { }
         public static string ToText(string notes) { }
+    }
+    public sealed class MetadataNotesFormat : HomeBlaze.Storage.Abstractions.Metadata.IMetadataNotesFormat
+    {
+        public MetadataNotesFormat() { }
+        public int MaxSize { get; }
+        public string? GetError(string notes) { }
+        public string? ToHtml(string notes) { }
+        public string ToText(string notes) { }
     }
     public static class MetadataStoreExtensions
     {
