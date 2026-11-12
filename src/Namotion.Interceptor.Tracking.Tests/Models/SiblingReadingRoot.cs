@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Parent;
 
@@ -38,6 +39,13 @@ public partial class SiblingReadingMachine
     /// </summary>
     [Derived]
     public List<bool> InstalledStateList => [Configuration.Installed];
+
+    /// <summary>
+    /// A value type that is not equal to another one with the same items, of a subject that is attached before this
+    /// property.
+    /// </summary>
+    [Derived]
+    public ImmutableArray<bool> InstalledStateValues => [Configuration.Installed];
 }
 
 [InterceptorSubject]

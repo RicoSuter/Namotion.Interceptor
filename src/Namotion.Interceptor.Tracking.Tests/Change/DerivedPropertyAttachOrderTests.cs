@@ -177,7 +177,7 @@ public class DerivedPropertyAttachOrderTests
     }
 
     [Fact]
-    public void WhenValueChangesWithoutNewDependency_ThenAttachPublishesTheChange()
+    public void WhenValueChangesWithoutNewDependency_ThenAttachPublishesNoChange()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
@@ -194,8 +194,9 @@ public class DerivedPropertyAttachOrderTests
         // Act
         root.Machine = machine;
 
-        // Assert
-        AssertSingleChange(changes, machine.Worker, nameof(EvaluatorWorker.Result), 1);
+        // Assert: what the getter reads besides tracked properties is not followed, see docs/tracking.md.
+        Assert.Equal(1, machine.Worker.Result);
+        Assert.DoesNotContain(changes, change => change.Property.Name == nameof(EvaluatorWorker.Result));
     }
 
     [Fact]
@@ -375,9 +376,10 @@ public class DerivedPropertyAttachOrderTests
         // Act: the first machine is evaluated again, because the second one is attached after it.
         root.Machines = [machine, new SiblingReadingMachine()];
 
-        // Assert: the list gained no dependency, and the array gained one but has the same items.
+        // Assert: the list and the immutable array gained no dependency, and the array gained one but has the same items.
         AssertEvaluatedAgain(machine.Device);
         Assert.DoesNotContain(changes, change => change.Property.Name == nameof(SiblingReadingMachine.InstalledStateList));
+        Assert.DoesNotContain(changes, change => change.Property.Name == nameof(SiblingReadingMachine.InstalledStateValues));
         Assert.DoesNotContain(changes, change => change.Property.Name == nameof(SiblingReadingDevice.InstalledStates));
     }
 

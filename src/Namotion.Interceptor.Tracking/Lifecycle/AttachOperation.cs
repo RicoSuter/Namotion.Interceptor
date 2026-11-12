@@ -24,7 +24,9 @@ internal sealed class AttachOperation
 
     /// <summary>
     /// Takes <paramref name="lifecycleLock"/> and begins an operation. Disposing the scope ends the operation and
-    /// releases the lock. Once the thread holds no lifecycle lock anymore, it runs what the callbacks left to run.
+    /// releases the lock. Ending the outermost operation runs the callbacks, also when the operation failed, since the
+    /// subjects it attached before failing stay attached. Once the thread holds no lifecycle lock anymore, it runs what
+    /// the callbacks left to run.
     /// </summary>
     public Scope Enter(object lifecycleLock)
     {
@@ -40,10 +42,18 @@ internal sealed class AttachOperation
         {
             try
             {
-                operation.End();
+                if (operation._depth == 1)
+                {
+                    operation.RunCallbacks();
+                }
             }
             finally
             {
+                if (--operation._depth == 0)
+                {
+                    operation.Reset();
+                }
+
                 Monitor.Exit(lifecycleLock);
                 _heldLocks--;
             }
@@ -52,15 +62,10 @@ internal sealed class AttachOperation
             {
                 // Taken over first, because an action may start an operation that leaves its own.
                 _afterLocks = null;
-                RunAfterLocks(actions);
-            }
-        }
-
-        private static void RunAfterLocks(List<(Action<PropertyReference> Action, PropertyReference Property)> actions)
-        {
-            foreach (var (action, property) in actions)
-            {
-                action(property);
+                foreach (var (action, property) in actions)
+                {
+                    action(property);
+                }
             }
         }
     }
@@ -80,32 +85,15 @@ internal sealed class AttachOperation
         _callbacks.Add((callback, property, _attachedSubjectCount));
     }
 
-    /// <summary>
-    /// Ends an operation. Ending the outermost one runs the callbacks, also when the operation failed, since the subjects
-    /// it attached before failing stay attached.
-    /// </summary>
-    private void End()
+    private void Reset()
     {
-        try
+        _callbacks.Clear();
+        if (_callbacks.Capacity > MaxRetainedCallbacks)
         {
-            if (_depth == 1)
-            {
-                RunCallbacks();
-            }
+            _callbacks.Capacity = 0;
         }
-        finally
-        {
-            if (--_depth == 0)
-            {
-                _callbacks.Clear();
-                if (_callbacks.Capacity > MaxRetainedCallbacks)
-                {
-                    _callbacks.Capacity = 0;
-                }
 
-                _attachedSubjectCount = 0;
-            }
-        }
+        _attachedSubjectCount = 0;
     }
 
     private void RunCallbacks()

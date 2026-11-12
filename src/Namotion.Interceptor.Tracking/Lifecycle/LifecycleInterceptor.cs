@@ -358,9 +358,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         var metadata = context.Property.Metadata;
 
-        // A non-intercepted property stores nothing, so it owns no subject, yet derived notifications still
-        // publish through this chain. The attach scan and both detach paths already skip these properties.
-        if (!metadata.IsIntercepted || !metadata.Type.CanContainSubjects<TProperty>())
+        if (!CanAttachSubjects<TProperty>(metadata))
         {
             return;
         }
@@ -389,6 +387,17 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
             ReconcilePropertySubjects(ref context, lastProcessed, newValue);
         }
+    }
+
+    /// <summary>
+    /// Whether a write of the property can attach or detach subjects, which is when this interceptor reconciles it.
+    /// </summary>
+    // A non-intercepted property stores nothing, so it owns no subject, yet derived notifications still publish
+    // through the write chain. The attach scan and both detach paths already skip these properties.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool CanAttachSubjects<TProperty>(in SubjectPropertyMetadata metadata)
+    {
+        return metadata.IsIntercepted && metadata.Type.CanContainSubjects<TProperty>();
     }
 
     private static bool IsScalarValue(object? value)

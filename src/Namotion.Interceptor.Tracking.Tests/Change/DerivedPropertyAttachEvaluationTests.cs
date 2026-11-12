@@ -199,17 +199,7 @@ public class DerivedPropertyAttachEvaluationTests
             }
         };
 
-        var lifecycleLockWasFree = new List<bool>();
-        using var subscription = context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
-        {
-            if (ReferenceEquals(change.Property.Subject, machine.Worker) && change.Property.Name == nameof(EvaluatorWorker.Result))
-            {
-                // Another thread gets the lifecycle lock only if this thread does not hold it.
-                var otherThread = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(
-                    () => interceptor.TryRunWhileAttached(incomingRoot, () => { }));
-                lifecycleLockWasFree.Add(otherThread.Wait(TestTimeouts.Default));
-            }
-        });
+        var lifecycleLockWasFree = RecordWhetherLifecycleLocksAreFree(context, machine.Worker, incomingRoot, interceptor);
 
         // Act
         ((IInterceptorSubject)outgoingRoot).Context.RemoveFallbackContext(context);
@@ -230,23 +220,8 @@ public class DerivedPropertyAttachEvaluationTests
         var machine = new EvaluatorMachine();
         machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
 
-        LifecycleInterceptor[] interceptors = [firstContext.GetService<LifecycleInterceptor>(), secondContext.GetService<LifecycleInterceptor>()];
-        var lifecycleLocksWereFree = new List<bool>();
-        using var subscription = firstContext.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
-        {
-            if (ReferenceEquals(change.Property.Subject, machine.Worker) && change.Property.Name == nameof(EvaluatorWorker.Result))
-            {
-                // Another thread gets both lifecycle locks only if this thread holds neither.
-                var otherThread = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
-                {
-                    foreach (var interceptor in interceptors)
-                    {
-                        interceptor.TryRunWhileAttached(root, () => { });
-                    }
-                });
-                lifecycleLocksWereFree.Add(otherThread.Wait(TestTimeouts.Default));
-            }
-        });
+        var lifecycleLocksWereFree = RecordWhetherLifecycleLocksAreFree(
+            firstContext, machine.Worker, root, firstContext.GetService<LifecycleInterceptor>(), secondContext.GetService<LifecycleInterceptor>());
 
         // Act
         root.Machine = machine;
@@ -269,23 +244,8 @@ public class DerivedPropertyAttachEvaluationTests
         var root = new EvaluatorRoot { Machine = machine };
         machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
 
-        LifecycleInterceptor[] interceptors = [firstContext.GetService<LifecycleInterceptor>(), secondContext.GetService<LifecycleInterceptor>()];
-        var lifecycleLocksWereFree = new List<bool>();
-        using var subscription = firstContext.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
-        {
-            if (ReferenceEquals(change.Property.Subject, machine.Worker) && change.Property.Name == nameof(EvaluatorWorker.Result))
-            {
-                // Another thread gets both lifecycle locks only if this thread holds neither.
-                var otherThread = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
-                {
-                    foreach (var interceptor in interceptors)
-                    {
-                        interceptor.TryRunWhileAttached(root, () => { });
-                    }
-                });
-                lifecycleLocksWereFree.Add(otherThread.Wait(TestTimeouts.Default));
-            }
-        });
+        var lifecycleLocksWereFree = RecordWhetherLifecycleLocksAreFree(
+            firstContext, machine.Worker, root, firstContext.GetService<LifecycleInterceptor>(), secondContext.GetService<LifecycleInterceptor>());
 
         // Act
         ((IInterceptorSubject)root).Context.AddFallbackContext(bothContexts);
@@ -293,5 +253,31 @@ public class DerivedPropertyAttachEvaluationTests
         // Assert
         Assert.NotEmpty(lifecycleLocksWereFree);
         Assert.All(lifecycleLocksWereFree, Assert.True);
+    }
+
+    /// <summary>
+    /// Records, for every published change of the worker's result, whether another thread gets the lifecycle locks,
+    /// which it does only if the publishing thread holds none of them.
+    /// </summary>
+    private static List<bool> RecordWhetherLifecycleLocksAreFree(
+        IInterceptorSubjectContext context, EvaluatorWorker worker, IInterceptorSubject attachedSubject, params LifecycleInterceptor[] interceptors)
+    {
+        var lifecycleLocksWereFree = new List<bool>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (ReferenceEquals(change.Property.Subject, worker) && change.Property.Name == nameof(EvaluatorWorker.Result))
+            {
+                var otherThread = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+                {
+                    foreach (var interceptor in interceptors)
+                    {
+                        interceptor.TryRunWhileAttached(attachedSubject, () => { });
+                    }
+                });
+                lifecycleLocksWereFree.Add(otherThread.Wait(TestTimeouts.Default));
+            }
+        });
+
+        return lifecycleLocksWereFree;
     }
 }
