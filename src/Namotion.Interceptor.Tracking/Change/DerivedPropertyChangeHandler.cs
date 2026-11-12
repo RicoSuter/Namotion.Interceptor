@@ -114,7 +114,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             {
                 // A write or an attach found this evaluation in flight and left its recalculation to it.
                 data.RecalculationNeeded = false;
-                data.IsPublicationPendingAfterAttach = true;
+                data.PublicationPendingAfterAttachThreadId = Environment.CurrentManagedThreadId;
                 return RecalculateAfterAttach;
             }
 
@@ -134,7 +134,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             if (isChanged)
             {
                 // LastKnownValue stays as it is, so that the recalculation publishes the change from it.
-                data.IsPublicationPendingAfterAttach = true;
+                data.PublicationPendingAfterAttachThreadId = Environment.CurrentManagedThreadId;
                 return RecalculateAfterAttach;
             }
 
@@ -249,6 +249,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             }
 
             data.IsAttached = true;
+            data.PublicationPendingAfterAttachThreadId = 0;
             Volatile.Write(ref data.IsDerived, true);
             try
             {
@@ -577,8 +578,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         lock (data)
         {
             // A recalculation since the attach, such as the cascade of the write itself or one on another thread,
-            // has published the change already.
-            if (onlyIfPendingAfterAttach && !data.IsPublicationPendingAfterAttach)
+            // has published the change already, or the property was attached again and that attach publishes it.
+            if (onlyIfPendingAfterAttach && data.PublicationPendingAfterAttachThreadId != Environment.CurrentManagedThreadId)
             {
                 return null;
             }
@@ -644,7 +645,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 }
 
                 data.LastKnownValue = newValue;
-                data.IsPublicationPendingAfterAttach = false;
+                data.PublicationPendingAfterAttachThreadId = 0;
                 sequence = ++data.RecalculationSequence;
                 derivedProperty.SetWriteTimestamp(storageTimestamp);
                 return true;

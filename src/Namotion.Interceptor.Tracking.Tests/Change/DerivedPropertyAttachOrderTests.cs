@@ -294,6 +294,55 @@ public class DerivedPropertyAttachOrderTests
     }
 
     [Fact]
+    public async Task WhenSubtreeIsAttachedAgainOnAnotherThreadBeforeTheWriteReturns_ThenTheLaterAttachPublishesTheChangedDerivedValue()
+    {
+        // Arrange
+        var timeout = TimeSpan.FromSeconds(30);
+        var timestamp = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
+        using var secondAttachIsDone = new ManualResetEventSlim();
+        using var firstWriteHasReturned = new ManualResetEventSlim();
+        var secondWriter = Task.CompletedTask;
+        var machineWrites = 0;
+        context.WithService(() => new AfterWriteInterceptor(property =>
+        {
+            var write = property.Name == nameof(EvaluatorRoot.Machine) ? Interlocked.Increment(ref machineWrites) : 0;
+            if (write == 1)
+            {
+                // The first write has attached the machine and has not published its derived value yet.
+                secondWriter = Task.Run(() =>
+                {
+                    root.Machine = null;
+                    using (SubjectChangeContext.WithChangedTimestamp(timestamp))
+                    {
+                        root.Machine = machine;
+                    }
+                });
+                Assert.True(secondAttachIsDone.Wait(timeout));
+            }
+            else if (write == 3)
+            {
+                // The second attach is done as well: the first write returns before this one publishes.
+                secondAttachIsDone.Set();
+                Assert.True(firstWriteHasReturned.Wait(timeout));
+            }
+        }));
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        root.Machine = machine;
+        firstWriteHasReturned.Set();
+        await secondWriter.WaitAsync(timeout);
+
+        // Assert
+        var change = Assert.Single(changes, c => c.Property.Name == nameof(EvaluatorWorker.Result));
+        Assert.Equal(timestamp, change.ChangedTimestamp);
+    }
+
+    [Fact]
     public void WhenSubtreeIsAssigned_ThenItIsAnnouncedBeforeItsChangedDerivedValue()
     {
         // Arrange
@@ -542,6 +591,7 @@ public class DerivedPropertyAttachOrderTests
     }
 
     [RunsAfter(typeof(DerivedPropertyChangeHandler))]
+    [RunsBefore(typeof(LifecycleInterceptor))]
     private sealed class AfterWriteInterceptor(Action<PropertyReference> callback) : IWriteInterceptor
     {
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)

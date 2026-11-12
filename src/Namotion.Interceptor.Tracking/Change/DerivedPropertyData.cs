@@ -61,12 +61,13 @@ internal sealed class DerivedPropertyData
     internal bool RecalculationNeeded;
 
     /// <summary>
-    /// Set under lock(this) by the evaluation at the end of an attach operation when it leaves a recalculation
-    /// behind that publishes a change, and cleared when a recalculation commits a value. The recalculation left
-    /// behind runs only while it is set, so a change is not published a second time after another recalculation
-    /// has published it.
+    /// The thread whose evaluation at the end of an attach operation left a recalculation behind that publishes a
+    /// change, or 0. Set under lock(this) by that evaluation, and cleared when a recalculation commits a value or
+    /// the property is attached again. The recalculation left behind, which runs on the same thread, runs only
+    /// while it finds its own thread here: a change is not published a second time after another recalculation
+    /// has published it, and not by the write of one thread for an attach of another.
     /// </summary>
-    internal bool IsPublicationPendingAfterAttach;
+    internal int PublicationPendingAfterAttachThreadId;
 
     /// <summary>
     /// Lifecycle flag cleared during DetachProperty under lock(this).
