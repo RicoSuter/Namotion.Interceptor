@@ -61,6 +61,14 @@ internal sealed class DerivedPropertyData
     internal bool RecalculationNeeded;
 
     /// <summary>
+    /// Set under lock(this) by the evaluation at the end of an attach operation when it leaves a recalculation
+    /// behind that publishes a change, and cleared when a recalculation commits a value. The recalculation left
+    /// behind runs only while it is set, so a change is not published a second time after another recalculation
+    /// has published it.
+    /// </summary>
+    internal bool IsPublicationPendingAfterAttach;
+
+    /// <summary>
     /// Lifecycle flag cleared during DetachProperty under lock(this).
     /// Checked by RecalculateDerivedProperty to prevent zombie used-by property resurrection.
     /// Set by AttachProperty on every attach of a derived property. Not read for source properties,

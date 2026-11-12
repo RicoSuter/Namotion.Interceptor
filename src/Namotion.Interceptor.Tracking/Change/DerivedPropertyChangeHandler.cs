@@ -36,13 +36,13 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     private static DerivedPropertyRecorder? _recorder;
 
     // Writes that can attach subjects and have not returned yet on this thread, and the derived properties whose
-    // evaluation at the end of an attach found a changed value while such a write was running, each with its
-    // recalculation sequence at that time. The outermost of those writes recalculates them once it has been announced.
+    // evaluation at the end of an attach found a changed value while such a write was running. The outermost of those
+    // writes recalculates them once it has been announced.
     [ThreadStatic]
     private static int _attachingWriteDepth;
 
     [ThreadStatic]
-    private static List<(PropertyReference Property, long Sequence)>? _changedAfterAttach;
+    private static List<PropertyReference>? _changedAfterAttach;
 
     internal static bool IsRecordingDerivedProperty
     {
@@ -114,6 +114,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             {
                 // A write or an attach found this evaluation in flight and left its recalculation to it.
                 data.RecalculationNeeded = false;
+                data.IsPublicationPendingAfterAttach = true;
                 return RecalculateAfterAttach;
             }
 
@@ -133,6 +134,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             if (isChanged)
             {
                 // LastKnownValue stays as it is, so that the recalculation publishes the change from it.
+                data.IsPublicationPendingAfterAttach = true;
                 return RecalculateAfterAttach;
             }
 
@@ -212,13 +214,14 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         if (_attachingWriteDepth > 0)
         {
-            (_changedAfterAttach ??= []).Add((property, GetRecalculationSequence(property)));
+            (_changedAfterAttach ??= []).Add(property);
             return;
         }
 
         try
         {
-            property.RecalculateDerivedProperty();
+            var timestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
+            RecalculateDerivedProperty(ref property, timestamp, timestamp, onlyIfPendingAfterAttach: true);
         }
         catch (Exception exception)
         {
@@ -228,11 +231,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 $"DerivedPropertyChangeHandler: publishing '{property.Name}' on {property.Subject.GetType().Name} " +
                 $"after an attach failed: {exception}");
         }
-    }
-
-    private static long GetRecalculationSequence(in PropertyReference property)
-    {
-        return property.TryGetDerivedPropertyData() is { } data ? Volatile.Read(ref data.RecalculationSequence) : -1;
     }
 
     private static bool TryAttach(DerivedPropertyData data, in PropertyReference property)
@@ -397,16 +395,12 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
         var storageTimestamp = rawTimestamp > 0 ? rawTimestamp : 0L;
         ExceptionDispatchInfo? firstException = null;
-        foreach (var (changedProperty, sequence) in properties)
+        foreach (var changedProperty in properties)
         {
             var property = changedProperty;
             try
             {
-                // A recalculation since then, such as the cascade of the write itself, has published the change.
-                if (GetRecalculationSequence(property) == sequence)
-                {
-                    RecalculateDerivedProperty(ref property, storageTimestamp, rawTimestamp);
-                }
+                RecalculateDerivedProperty(ref property, storageTimestamp, rawTimestamp, onlyIfPendingAfterAttach: true);
             }
             catch (Exception exception)
             {
@@ -485,12 +479,13 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// IsRecalculating serializes concurrent recalculations; RecalculationNeeded catches state changes
     /// (writes, attach, detach) that occur during the unlocked evaluation window.
     /// </summary>
-    internal static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long storageTimestamp, long rawTimestamp)
+    internal static void RecalculateDerivedProperty(
+        ref PropertyReference derivedProperty, long storageTimestamp, long rawTimestamp, bool onlyIfPendingAfterAttach = false)
     {
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
 
         // Phase 1: Acquire recalculation ownership (brief lock).
-        var data = TryBeginRecalculation(derivedProperty, out var oldValue);
+        var data = TryBeginRecalculation(derivedProperty, onlyIfPendingAfterAttach, out var oldValue);
         if (data is null)
         {
             return;
@@ -566,7 +561,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// nothing to recalculate or another recalculation owns it, which is then told to re-evaluate.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static DerivedPropertyData? TryBeginRecalculation(in PropertyReference derivedProperty, out object? oldValue)
+    private static DerivedPropertyData? TryBeginRecalculation(
+        in PropertyReference derivedProperty, bool onlyIfPendingAfterAttach, out object? oldValue)
     {
         oldValue = null;
 
@@ -580,6 +576,13 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
         lock (data)
         {
+            // A recalculation since the attach, such as the cascade of the write itself or one on another thread,
+            // has published the change already.
+            if (onlyIfPendingAfterAttach && !data.IsPublicationPendingAfterAttach)
+            {
+                return null;
+            }
+
             if (data.IsRecalculating)
             {
                 data.RecalculationNeeded = true;
@@ -641,6 +644,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 }
 
                 data.LastKnownValue = newValue;
+                data.IsPublicationPendingAfterAttach = false;
                 sequence = ++data.RecalculationSequence;
                 derivedProperty.SetWriteTimestamp(storageTimestamp);
                 return true;
