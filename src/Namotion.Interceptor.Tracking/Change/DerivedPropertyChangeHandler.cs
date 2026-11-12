@@ -486,7 +486,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
 
         // Phase 1: Acquire recalculation ownership (brief lock).
-        var data = TryBeginRecalculation(derivedProperty, onlyIfPendingAfterAttach, out var oldValue);
+        var data = TryBeginRecalculation(derivedProperty, onlyIfPendingAfterAttach);
         if (data is null)
         {
             return;
@@ -502,7 +502,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         {
             for (var outerIteration = 0; outerIteration < MaxStabilizationIterations; outerIteration++)
             {
-                if (!TryEvaluateAndCommit(data, ref derivedProperty, storageTimestamp, out var newValue, out var sequence))
+                if (!TryEvaluateAndCommit(data, ref derivedProperty, storageTimestamp, out var oldValue, out var newValue, out var sequence))
                 {
                     return;
                 }
@@ -520,7 +520,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                     }
 
                     data.RecalculationNeeded = false;
-                    oldValue = data.LastKnownValue;
                 }
             }
 
@@ -563,10 +562,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static DerivedPropertyData? TryBeginRecalculation(
-        in PropertyReference derivedProperty, bool onlyIfPendingAfterAttach, out object? oldValue)
+        in PropertyReference derivedProperty, bool onlyIfPendingAfterAttach)
     {
-        oldValue = null;
-
         // TryGet and the IsDerived check: data removed by a detach, or recreated by a dependent's
         // registration, must not bring a detached derived property back from a stale used-by snapshot.
         var data = derivedProperty.TryGetDerivedPropertyData();
@@ -596,7 +593,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             }
 
             data.IsRecalculating = true;
-            oldValue = data.LastKnownValue;
             return data;
         }
     }
@@ -609,9 +605,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         DerivedPropertyData data,
         ref PropertyReference derivedProperty,
         long storageTimestamp,
+        out object? oldValue,
         out object? newValue,
         out long sequence)
     {
+        oldValue = null;
         newValue = null;
         sequence = 0;
 
@@ -644,6 +642,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                     continue;
                 }
 
+                // Read here and not when the recalculation began: an attach during the evaluation has replaced it.
+                oldValue = data.LastKnownValue;
                 data.LastKnownValue = newValue;
                 data.PublicationPendingAfterAttachThreadId = 0;
                 sequence = ++data.RecalculationSequence;

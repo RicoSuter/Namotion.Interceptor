@@ -287,7 +287,6 @@ RecalculateDerivedProperty(FullName, timestamp)
       return
     if !data.IsAttached → return
     data.IsRecalculating = true
-    oldValue = data.LastKnownValue
 
   // Outer loop: handles post-notification RecalculationNeeded without recursion.
   // The try-finally wraps the entire loop so IsRecalculating stays true during
@@ -309,6 +308,7 @@ RecalculateDerivedProperty(FullName, timestamp)
           if data.RecalculationNeeded:           // state changed during evaluation
             data.RecalculationNeeded = false
             continue                             // discard stale result, re-evaluate
+          oldValue = data.LastKnownValue         // the value it replaces, also after an attach during the evaluation
           data.LastKnownValue = newValue
           sequence = ++data.RecalculationSequence
           SetWriteTimestamp(timestamp)
@@ -323,7 +323,6 @@ RecalculateDerivedProperty(FullName, timestamp)
         if !data.RecalculationNeeded → return    // done (triggers finally)
         data.RecalculationNeeded = false
         // IsRecalculating stays true for next iteration
-        oldValue = data.LastKnownValue
 
     // Safety: log warning if outer loop exhausted.
   finally:
@@ -609,7 +608,7 @@ Two race conditions must be handled when `DetachProperty` runs concurrently with
 Both orderings produce a correct final state:
 - **Detach wins lock during evaluation**: sets `IsAttached = false` and `RecalculationNeeded = true`. `EvaluateAndStabilize` bails on the next `UpdateDependencies` lock acquisition (sees `!IsAttached`). Phase 3 sees `!IsAttached` and returns. No stale deps.
 - **Evaluation's UpdateDependencies wins lock**: registers used-by entries. Detach then runs, clears them. Final state is clean.
-- **Detach + reattach during evaluation**: `RecalculationNeeded` is set by both operations. Phase 3 sees the flag, discards the stale result, and re-evaluates with the post-reattach state.
+- **Detach + reattach during evaluation**: `RecalculationNeeded` is set by both operations. Phase 3 sees the flag, discards the stale result, and re-evaluates with the post-reattach state. The old value of the change is read in Phase 3 as well, so it is the value the attach evaluated and not the one from before the detach.
 
 **Race 2: Missed used-by property in Case 2 snapshot:** When a source property X is being detached, `DetachProperty` Case 2 takes a snapshot of `X.UsedByProperties` to find dependent derived properties. Concurrently, `UpdateDependencies` may be adding a new used-by entry (D → X) to `X.UsedByProperties`. If the Add completes after the snapshot, `DetachProperty` misses D, leaving a stale dependency (`D.RequiredProperties` contains X) and a stale used-by entry (D in `X.UsedByProperties`).
 
