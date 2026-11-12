@@ -3,32 +3,29 @@ using Opc.Ua;
 namespace Namotion.Interceptor.OpcUa.Client;
 
 /// <summary>
-/// Classifies OPC UA <see cref="StatusCode"/>s as transient (worth retrying) or permanent.
-/// A single shared list backs every callsite, so a code is classified the same way whether
-/// it surfaced from a write or from a subscription.
+/// Classifies OPC UA <see cref="StatusCode"/>s for retry decisions. The two predicates cannot share
+/// one list: a per-node status the subscribe path keeps retrying is usually one a load should skip.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Permanent means <em>the answer cannot change without a new session</em>, not merely that
-/// re-issuing the request right now returns the same status. Access-scoped codes such as
-/// <c>BadUserAccessDenied</c>, <c>BadNotReadable</c> and <c>BadNotImplemented</c> are therefore
-/// treated as transient: role permissions and the <c>AccessLevel</c> attribute are mutable
-/// server-side, so the same request can start succeeding mid-session. <c>BadSecurityModeInsufficient</c>
-/// is permanent because it is bound to the SecureChannel's <c>MessageSecurityMode</c>, which can
-/// only change by establishing a new channel, and reconnect re-attempts everything anyway.
+/// <see cref="IsRecoverableWithinSession"/> answers whether a status can recover without a new
+/// session and backs the subscribe and write paths. <see cref="ThrowIfLoadMustRetry"/> answers
+/// whether the load must abort and retry and backs the browse and read paths; it aborts only for
+/// statuses about the session, the connection or the server as a whole, and skips the node for every
+/// other bad status. The reasoning is in docs/design/opcua-client-loader.md.
 /// </para>
 /// <para>
-/// This type only classifies; each caller decides the disposition. Subscription setup acts on it
-/// via <c>FailedMonitoredItemDisposition</c>, where a permanent code drops the monitored item and
-/// forfeits both in-session recovery routes (health-monitor healing and escalation to polling).
-/// The write path currently uses it for diagnostics only: <c>WriteResult.FailedChanges</c> must
-/// stay complete for the retry queue and the transaction writer, so permanently-failed writes are
-/// still requeued (#332).
+/// The write path uses <see cref="IsRecoverableWithinSession"/> for diagnostics only:
+/// <c>WriteResult.FailedChanges</c> must stay complete for the retry queue and the transaction
+/// writer, so permanently failed writes are still requeued.
 /// </para>
 /// </remarks>
 internal static class OpcUaStatusCodeClassifier
 {
-    private static readonly HashSet<uint> PermanentCodes =
+    /// <summary>
+    /// Bad statuses that cannot recover without a new session. Used by the subscribe and write paths.
+    /// </summary>
+    private static readonly HashSet<uint> SessionPermanentCodes =
     [
         StatusCodes.BadNodeIdUnknown,
         StatusCodes.BadNodeIdInvalid,
@@ -41,12 +38,66 @@ internal static class OpcUaStatusCodeClassifier
     ];
 
     /// <summary>
-    /// True iff <paramref name="statusCode"/> is a bad status that could succeed on
-    /// retry (e.g. transport glitch, server-side resource exhaustion). Returns false
-    /// for good and uncertain statuses, and for permanent design-time errors.
+    /// Bad statuses about the session, the connection or the server as a whole, which a fresh load
+    /// can clear. Any other bad status on a browse or read describes the node or a device behind it,
+    /// such as a gateway reporting an offline device, and would fail every reload the same way.
     /// </summary>
-    public static bool IsTransientError(StatusCode statusCode)
+    private static readonly HashSet<uint> LoadRetryCodes =
+    [
+        StatusCodes.BadTimeout,
+        StatusCodes.BadRequestTimeout,
+        StatusCodes.BadServerHalted,
+        StatusCodes.BadShutdown,
+        StatusCodes.BadResourceUnavailable,
+        StatusCodes.BadOutOfMemory,
+        StatusCodes.BadTooManyOperations,
+        StatusCodes.BadTcpServerTooBusy,
+        StatusCodes.BadNoContinuationPoints,
+        StatusCodes.BadContinuationPointInvalid,
+        StatusCodes.BadCommunicationError,
+        StatusCodes.BadConnectionClosed,
+        StatusCodes.BadNotConnected,
+        StatusCodes.BadDisconnect,
+        StatusCodes.BadSecureChannelClosed,
+        StatusCodes.BadSecureChannelIdInvalid,
+        StatusCodes.BadSessionClosed,
+        StatusCodes.BadSessionIdInvalid,
+        StatusCodes.BadSessionNotActivated,
+        // Also what ReadNodesAsync pads a short read response with.
+        StatusCodes.BadUnexpectedError
+    ];
+
+    /// <summary>
+    /// True iff <paramref name="statusCode"/> is a bad status that could recover without a new
+    /// session (e.g. transport glitch, server-side resource exhaustion, a later permission grant).
+    /// Returns false for good and uncertain statuses. Used by the subscribe and write paths.
+    /// </summary>
+    public static bool IsRecoverableWithinSession(StatusCode statusCode)
     {
-        return StatusCode.IsBad(statusCode) && !PermanentCodes.Contains(statusCode.Code);
+        return StatusCode.IsBad(statusCode) && !SessionPermanentCodes.Contains(statusCode.Code);
     }
+
+    /// <summary>
+    /// Throws <see cref="OpcUaTransientServiceException"/> if <paramref name="statusCode"/> is a bad
+    /// status about the session, the connection or the server that a fresh load could clear, so the
+    /// browse/read caller aborts and lets the source retry. Every other status is ignored, so for a
+    /// bad one the caller logs and skips the node.
+    /// </summary>
+    public static void ThrowIfLoadMustRetry(StatusCode statusCode, string operation, NodeId? nodeId)
+    {
+        if (StatusCode.IsBad(statusCode) && LoadRetryCodes.Contains(statusCode.Code))
+        {
+            throw new OpcUaTransientServiceException(operation, nodeId, statusCode);
+        }
+    }
+
+    /// <summary>
+    /// True iff the <see cref="ServiceResultException"/> indicates the server rejected
+    /// the batch size rather than the operation itself.
+    /// </summary>
+    public static bool IsBatchTooLarge(ServiceResultException exception) =>
+        exception.StatusCode is StatusCodes.BadTooManyOperations
+            or StatusCodes.BadEncodingLimitsExceeded
+            or StatusCodes.BadRequestTooLarge
+            or StatusCodes.BadResponseTooLarge;
 }
