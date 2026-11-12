@@ -376,6 +376,7 @@ public class AutomationPageTests
         await Assertions.Expect(page.GetByTestId("automation-rule-card")).ToHaveCountAsync(2, new() { Timeout = Timeout });
         await Assertions.Expect(page.GetByTestId("automation-rule-card").First).ToBeVisibleAsync();
         await Assertions.Expect(page.GetByTestId("automation-rule-name-card").First).ToHaveAttributeAsync("aria-label", "Edit rule Started");
+        await Assertions.Expect(page.GetByTestId("automation-rule-card").First).ToContainTextAsync("Never triggered · 0 runs");
         await Assertions.Expect(page.GetByTestId("automation-rule-row").First).ToBeHiddenAsync();
         await Assertions.Expect(page.GetByTestId("automation-reset-icon")).ToBeVisibleAsync();
         await Assertions.Expect(page.GetByTestId("automation-reset")).ToBeHiddenAsync();

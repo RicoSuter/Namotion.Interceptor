@@ -42,11 +42,15 @@
             {
                 <MetadataSummary Metadata="@metadata" OnTagClick="OpenTagFilterAsync" Class="mt-1" />
             }
-            else
+            else if (store is not null)
             {
                 <MudText Typo="Typo.body2" Class="mud-text-secondary mt-1" data-testid="automation-no-notes">
                     No notes yet. Use the pencil to write down why this automation exists or what to keep in mind, and to add links and tags.
                 </MudText>
+            }
+            else
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary mt-1" data-testid="automation-no-notes">No notes.</MudText>
             }
         </section>
     </div>
@@ -123,7 +127,7 @@
                         <div class="d-flex flex-wrap align-center gap-2 mt-2">
                             @StatusChip(rule.Status)
                             <MudText Typo="Typo.caption" Class="mud-text-secondary flex-grow-1">
-                                Last @FormatInstant(rule.LastTriggeredAt, "never") · @FormatRunCount(rule.RunCount ?? 0)
+                                @FormatLastTriggered(rule.LastTriggeredAt) · @FormatRunCount(rule.RunCount ?? 0)
                             </MudText>
                             <span @onclick:stopPropagation="true">
                                 <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Science"
@@ -179,6 +183,9 @@
 
     private string FormatInstant(DateTimeOffset? instant, string fallback) =>
         instant is { } value ? AutomationTime.Format(TimeZone, value, TimeProvider.GetUtcNow()) : fallback;
+
+    private string FormatLastTriggered(DateTimeOffset? instant) =>
+        instant is { } value ? $"Last {AutomationTime.Format(TimeZone, value, TimeProvider.GetUtcNow())}" : "Never triggered";
 
     private static string FormatRunCount(long count) => count == 1 ? "1 run" : $"{count} runs";
 

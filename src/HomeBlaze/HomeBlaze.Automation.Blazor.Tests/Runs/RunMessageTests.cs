@@ -149,7 +149,7 @@ public class RunMessageTests
     public void WhenTheMessageWasShortened_ThenTheLastPartIsText(string shortenedPart)
     {
         // Arrange
-        const int maxMessageLength = 500;
+        const int maxMessageLength = AutomationRule.MaxRunMessageLength;
         var prefix = "Ran /Lamp/Toggle(); /Display/Text = " + new string('x', 400) + "; ";
         var lastPart = shortenedPart + new string('m', maxMessageLength - 3 - prefix.Length - shortenedPart.Length) + "...";
         var message = prefix + lastPart;

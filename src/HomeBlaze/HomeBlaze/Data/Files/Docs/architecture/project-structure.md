@@ -224,9 +224,9 @@ Storage.Abs.   Components.Abs.   Abstractions
 - **Inputs**: The expression field, the subject path picker and `MarkdownField`, the Markdown source beside a live preview, in the namespace `HomeBlaze.Components.Inputs`
 - **Metadata**: `MetadataSummary`, `MetadataEditDialog`, `MetadataSummaryDialog`, `MetadataTagFilterDialog` and `MetadataEditing`, in the namespace `HomeBlaze.Components.Metadata`
 
-**Dependencies**: `HomeBlaze.Services`, `HomeBlaze.Storage.Abstractions`, `HomeBlaze.Components.Abstractions`, `MudBlazor`
+**Dependencies**: `HomeBlaze.Abstractions`, `HomeBlaze.Services`, `HomeBlaze.Storage.Abstractions`, `HomeBlaze.Components.Abstractions`, `MudBlazor`
 
-**Use when**: Building cross-framework UI components.
+**Use when**: Building MudBlazor based UI that several HomeBlaze libraries share.
 
 ---
 

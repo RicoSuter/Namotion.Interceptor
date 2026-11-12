@@ -39,8 +39,7 @@
 @code {
     private const string IsCreatingParameterName = "IsCreating";
 
-    // Shared, as SubjectComponent builds the parameters of the hosted component again whenever it is given another
-    // instance; see _mergedParameters for the merged ones.
+    // Shared instances, for the reason given at _mergedParameters.
     private static readonly Dictionary<string, object?> CreatingParameters = new() { [IsCreatingParameterName] = true };
     private static readonly Dictionary<string, object?> EditingParameters = new() { [IsCreatingParameterName] = false };
 

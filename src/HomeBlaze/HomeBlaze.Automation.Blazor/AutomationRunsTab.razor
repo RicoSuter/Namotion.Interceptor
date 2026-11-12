@@ -12,8 +12,9 @@
 else
 {
     var ruleNames = Automation.GetRulesInOrder().Select(pair => pair.Value.Name ?? pair.Key).Distinct(StringComparer.Ordinal).ToArray();
-    // A rule that was renamed or deleted has no chip anymore, so the selection falls back to all rules.
-    var selectedRuleName = SelectedRuleName is { } name && ruleNames.Contains(name, StringComparer.Ordinal) ? name : null;
+    // A rule that was renamed or deleted has no chip anymore, and with one rule no chips show, so the selection falls back
+    // to all rules rather than hide runs with no way to clear it.
+    var selectedRuleName = ruleNames.Length > 1 && SelectedRuleName is { } name && ruleNames.Contains(name, StringComparer.Ordinal) ? name : null;
     var runs = RunFilter.Apply(recentRuns.Runs, selectedRuleName);
     <div class="d-flex flex-column gap-2">
         @if (ruleNames.Length > 1)
