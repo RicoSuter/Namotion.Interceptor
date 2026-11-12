@@ -100,15 +100,14 @@ public class SubjectSetupDialogTests
     /// Waits until the configure page of the picked type is shown and, on a device with a fine pointer, its name
     /// field has taken the focus.
     /// </summary>
-    /// <remarks>
-    /// The name field takes the focus one round trip to the server after the page is shown. When that lands while
-    /// another field is filled, after the fill focused that field and before it typed, the text goes into the name field.
-    /// </remarks>
     internal static async Task ExpectConfigurePageAsync(IPage page)
     {
         await Assertions.Expect(CreateButton(page)).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
 
-        // The name field is rendered with the button, so a name field that is missing now does not come.
+        // The name field takes the focus one round trip to the server after the page is shown. When that lands while
+        // another field is filled, after the fill focused that field and before it typed, the text goes into the name
+        // field. The name field is rendered with the button, so a name field that is missing now does not come. The media
+        // query is the one hasFinePointer in SubjectSetupDialog.razor.js uses to decide whether to focus the name field.
         var nameInput = page.Locator("[data-testid='create-name-input']");
         if (await nameInput.CountAsync() > 0 &&
             await page.EvaluateAsync<bool>("() => matchMedia('(hover: hover) and (pointer: fine)').matches"))
