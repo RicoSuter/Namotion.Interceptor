@@ -21,7 +21,7 @@ public class SetPropertyToolTests
         var config = new McpServerConfiguration
         {
             PathProvider = DefaultPathProvider.Instance,
-            IsReadOnly = false
+            AccessPolicy = AllowAllMcpAccessPolicy.Instance
         };
         var factory = new McpToolFactory(room, config);
         var tool = factory.CreateTools().First(t => t.Name == "set_property");
@@ -38,7 +38,7 @@ public class SetPropertyToolTests
     }
 
     [Fact]
-    public async Task WhenReadOnly_ThenSetIsBlocked()
+    public async Task WhenNoPolicyIsSet_ThenSetIsBlocked()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -49,8 +49,7 @@ public class SetPropertyToolTests
 
         var config = new McpServerConfiguration
         {
-            PathProvider = DefaultPathProvider.Instance,
-            IsReadOnly = true
+            PathProvider = DefaultPathProvider.Instance
         };
         var factory = new McpToolFactory(room, config);
         var tool = factory.CreateTools().First(t => t.Name == "set_property");
@@ -78,7 +77,7 @@ public class SetPropertyToolTests
         var config = new McpServerConfiguration
         {
             PathProvider = DefaultPathProvider.Instance,
-            IsReadOnly = false
+            AccessPolicy = AllowAllMcpAccessPolicy.Instance
         };
         var factory = new McpToolFactory(room, config);
         var tool = factory.CreateTools().First(t => t.Name == "set_property");

@@ -23,7 +23,7 @@ public class SetPropertyToolEdgeCaseTests
         var config = new McpServerConfiguration
         {
             PathProvider = DefaultPathProvider.Instance,
-            IsReadOnly = false
+            AccessPolicy = AllowAllMcpAccessPolicy.Instance
         };
         var factory = new McpToolFactory(room, config);
         var tool = factory.CreateTools().First(t => t.Name == "set_property");
@@ -51,7 +51,7 @@ public class SetPropertyToolEdgeCaseTests
         var config = new McpServerConfiguration
         {
             PathProvider = DefaultPathProvider.Instance,
-            IsReadOnly = false
+            AccessPolicy = AllowAllMcpAccessPolicy.Instance
         };
         var factory = new McpToolFactory(room, config);
         var tool = factory.CreateTools().First(t => t.Name == "set_property");
@@ -116,7 +116,7 @@ public class SetPropertyToolEdgeCaseTests
         var config = new McpServerConfiguration
         {
             PathProvider = DefaultPathProvider.Instance,
-            IsReadOnly = false
+            AccessPolicy = AllowAllMcpAccessPolicy.Instance
         };
         var tool = new McpToolFactory(schedule, config).CreateTools().First(t => t.Name == "set_property");
         return (schedule, tool);
@@ -135,7 +135,7 @@ public class SetPropertyToolEdgeCaseTests
         var config = new McpServerConfiguration
         {
             PathProvider = DefaultPathProvider.Instance,
-            IsReadOnly = false
+            AccessPolicy = AllowAllMcpAccessPolicy.Instance
         };
         var factory = new McpToolFactory(room, config);
         var tool = factory.CreateTools().First(t => t.Name == "set_property");

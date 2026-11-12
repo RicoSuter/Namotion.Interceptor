@@ -1,14 +1,17 @@
 @using HomeBlaze.Abstractions.Metadata
+@using HomeBlaze.Components.Controls
 @using HomeBlaze.Components.Operations
 @implements IDisposable
 @inject IDialogService DialogService
 @inject IServiceProvider ServiceProvider
+@inject IUserPermissions Permissions
 
 @{
     // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var property = Property;
     var method = property?.GetValue() as MethodMetadata;
     var isEnabled = method is not null && property!.IsMethodEnabled();
+    var isDenied = isEnabled && !Permissions.CanInvoke(property!);
     var text = !string.IsNullOrEmpty(Label) ? Label : method?.Title ?? Path ?? string.Empty;
     var icon = MudBlazorIconResolver.ResolveOrNull(!string.IsNullOrEmpty(Icon) ? Icon : method is null ? null : OperationInvoker.GetIconName(method));
     // A tile shows the icon alone when the method gives one, but never nothing: without a method it shows the path.
@@ -18,8 +21,8 @@
     {
         tileLabel = ValueReader.MissingText;
     }
-    var tooltip = method is null ? Path : method.Description;
-    var isDisabled = IsEditing || _isRunning || !isEnabled;
+    var tooltip = isDenied ? AccessDeniedTexts.Tooltip : method is null ? Path : !isEnabled ? property!.GetMethodDisabledReason() ?? method.Description : method.Description;
+    var isDisabled = IsEditing || _isRunning || !isEnabled || isDenied;
 }
 
 @if (Kind == OperationButtonKind.Tile)
@@ -126,7 +129,8 @@ else
 
     private async Task RunAsync()
     {
-        if (_isRunning || Property?.GetValue() is not MethodMetadata method)
+        var property = Property;
+        if (_isRunning || property?.GetValue() is not MethodMetadata)
         {
             return;
         }
@@ -134,7 +138,7 @@ else
         _isRunning = true;
         try
         {
-            await OperationInvoker.InvokeAsync(DialogService, ServiceProvider, method, _lifetime.Token);
+            await OperationInvoker.InvokeAsync(DialogService, ServiceProvider, Permissions, property, _lifetime.Token);
         }
         finally
         {

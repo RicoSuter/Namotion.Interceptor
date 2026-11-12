@@ -1,5 +1,8 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(FritzBoxWlan))]
 @implements ISubjectComponent
+@inherits PermissionsComponentBase
+@inject IServiceProvider ServiceProvider
+@inject IDialogService DialogService
 
 <MudPaper Class="pa-4">
     <MudStack Spacing="2">
@@ -9,11 +12,13 @@
             <MudSpacer />
             @if (Wlan is FritzBoxGuestWlan guest)
             {
+                var canSwitch = Permissions.CanInvoke(guest, GetSwitchMethod(guest.IsOn != true));
                 <MudSwitch @key="_switchKey"
                            T="bool"
                            Value="@(guest.IsOn == true)"
                            ValueChanged="isOn => SetGuestWlanAsync(guest, isOn)"
-                           Disabled="_isSwitching"
+                           Disabled="@(_isSwitching || !canSwitch)"
+                           title="@(canSwitch ? null : AccessDeniedTexts.Tooltip)"
                            Color="Color.Primary"
                            aria-label="@($"Turn {guest.Title ?? "the guest WLAN"} on or off")" />
             }
@@ -67,13 +72,15 @@
         _errorMessage = null;
         try
         {
-            if (isOn)
+            var invocation = await Permissions.TryInvokeAsync(guest, GetSwitchMethod(isOn), null, ServiceProvider, CancellationToken.None);
+            if (invocation.Outcome == PermittedOperationOutcome.Failed)
             {
-                await guest.TurnOnAsync(CancellationToken.None);
+                _errorMessage = invocation.Exception?.Message;
             }
-            else
+            else if (invocation.Outcome == PermittedOperationOutcome.Denied)
             {
-                await guest.TurnOffAsync(CancellationToken.None);
+                await DialogService.ShowMessageBoxAsync(
+                    new MessageBoxOptions { Title = AccessDeniedTexts.Title, Message = AccessDeniedTexts.Invoke, YesText = "OK" });
             }
         }
         catch (Exception exception)
@@ -91,4 +98,7 @@
             _isSwitching = false;
         }
     }
+
+    private static string GetSwitchMethod(bool isOn) =>
+        isOn ? nameof(FritzBoxGuestWlan.TurnOnAsync) : nameof(FritzBoxGuestWlan.TurnOffAsync);
 }

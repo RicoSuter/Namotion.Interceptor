@@ -46,7 +46,7 @@ public class McpBrowseBenchmark
             PreviousCars = Enumerable.Range(0, 400).Select(_ => new Car()).ToArray()
         };
 
-        var tools = new McpToolFactory(car, CreateConfiguration(accessPolicy: null)).CreateTools();
+        var tools = new McpToolFactory(car, CreateConfiguration(ReadOnlyMcpAccessPolicy.Instance)).CreateTools();
         _browse = tools.First(tool => tool.Name == "browse");
         _search = tools.First(tool => tool.Name == "search");
 
@@ -67,13 +67,14 @@ public class McpBrowseBenchmark
     [Benchmark]
     public object? SearchWithPolicy() => _searchWithPolicy.Handler(SearchInput, CancellationToken.None).GetAwaiter().GetResult();
 
-    private static McpServerConfiguration CreateConfiguration(IMcpAccessPolicy? accessPolicy) => new()
+    private static McpServerConfiguration CreateConfiguration(IMcpAccessPolicy accessPolicy) => new()
     {
         PathProvider = DefaultPathProvider.Instance,
         MaxSubjectsPerResponse = 10_000,
         AccessPolicy = accessPolicy
     };
 
+    // Unlike the policies of the package, the tools cannot tell that it allows every read, so they evaluate it.
     private sealed class AllowAllAccessPolicy : IMcpAccessPolicy
     {
         public static AllowAllAccessPolicy Instance { get; } = new();

@@ -385,7 +385,6 @@ public class AgentPageTests
         await Assertions.Expect(editMarkdown).ToContainTextAsync("Replaces a passage of a Markdown page or document.", new() { Timeout = PageLoadTimeout });
         await Assertions.Expect(editMarkdown.GetByTestId("agent-edit-tool-pages-warning")).ToHaveTextAsync("Changes pages and documents");
         await Assertions.Expect(dialog.GetByTestId("agent-edit-tool-write_markdown").GetByTestId("agent-edit-tool-pages-warning")).ToHaveCountAsync(1);
-        await Assertions.Expect(dialog.GetByTestId("agent-edit-tool-create_markdown").GetByTestId("agent-edit-tool-pages-warning")).ToHaveCountAsync(1);
         await Assertions.Expect(dialog.GetByTestId("agent-edit-tool-invoke_operation").GetByTestId("agent-edit-tool-pages-warning")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         await Assertions.Expect(dialog.GetByTestId("agent-edit-tool-invoke_operation")).ToContainTextAsync("Can change devices and send notifications");
     }

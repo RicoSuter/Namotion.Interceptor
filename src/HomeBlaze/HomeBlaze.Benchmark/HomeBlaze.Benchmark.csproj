@@ -12,6 +12,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<ProjectReference Include="..\HomeBlaze.Authentication.Blazor\HomeBlaze.Authentication.Blazor.csproj" />
 		<ProjectReference Include="..\Namotion.Interceptor.Authorization\Namotion.Interceptor.Authorization.csproj" />
 		<ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>

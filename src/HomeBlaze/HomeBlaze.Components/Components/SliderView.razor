@@ -4,6 +4,7 @@
 @using HomeBlaze.Components.Controls
 @using HomeBlaze.Services.Display
 @inject PropertyWriter Writer
+@inject IUserPermissions Permissions
 
 @{
     // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
@@ -17,13 +18,14 @@
 }
 else
 {
-    var value = property?.GetValue();
+    var value = property is null ? null : Permissions.GetValue(property);
     var canWrite = isNumber && PropertyWriter.IsWritable(property!, value);
+    var isDenied = canWrite && !PropertyWriter.MayWrite(Permissions, property!);
     var label = ValueReader.GetLabel(property, Label, Path);
 
     @* The input events of the range input bubble here, so the text follows the thumb while the slider writes only on release.
        A drag that ends where it started writes nothing, so the pointer up clears the drag text as well. *@
-    <div class="slider-widget" data-testid="slider" @oninput="_dragCallback" @onpointerup="_clearDragCallback" @onfocusout="_clearDragCallback">
+    <div class="slider-widget" data-testid="slider" title="@(isDenied ? AccessDeniedTexts.Tooltip : null)" @oninput="_dragCallback" @onpointerup="_clearDragCallback" @onfocusout="_clearDragCallback">
         <div class="d-flex align-center gap-2">
             <MudText Typo="Typo.body2" Class="flex-grow-1 ma-0" data-testid="slider-label">@label</MudText>
             <MudText Typo="Typo.subtitle2" Class="ma-0" data-testid="slider-value">@GetValueText(property, value, range, step, scale)</MudText>
@@ -36,7 +38,7 @@ else
                    Max="@SliderMath.ToSliderScale(range.Maximum, scale)"
                    Step="@SliderMath.ToSliderScale(step, scale)"
                    Immediate="false"
-                   Disabled="@(IsEditing || !canWrite)"
+                   Disabled="@(IsEditing || !canWrite || isDenied)"
                    aria-label="@label" />
     </div>
 }
@@ -154,7 +156,7 @@ else
         Writer.TryWrite(property, SliderMath.ToPropertyValue(sliderValue, range, step, scale, property.Type));
 
         // The slider keeps the position the user gave it, and only a new key makes it show the property again.
-        if (Math.Abs(SliderMath.ToSliderValue(property.GetValue(), range, scale) - sliderValue) > step * scale / 2)
+        if (Math.Abs(SliderMath.ToSliderValue(Permissions.GetValue(property), range, scale) - sliderValue) > step * scale / 2)
         {
             _resetKey = new object();
         }

@@ -1,6 +1,8 @@
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Components.Dialogs;
 using HomeBlaze.Storage.Abstractions;
 using MudBlazor;
+using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Blazor;
 
@@ -15,9 +17,11 @@ public class BlazorSubjectSetupService : ISubjectSetupService
 
     public Task<CreateSubjectResult?> CreateSubjectAsync(IStorageContainer target, CancellationToken cancellationToken)
     {
+        // The Create operation of the folder requires administration, which creating the subject in the folder is.
         return SubjectSetupDialog.ShowAsync(_dialogService, new SubjectSetupOptions
         {
-            NameField = new SubjectNameOptions("File name", FileExtensions.Json, target.ChildNames)
+            NameField = new SubjectNameOptions("File name", FileExtensions.Json, target.ChildNames),
+            InvokeMember = (target as IInterceptorSubject)?.TryGetMethodMember(nameof(VirtualFolder.CreateAsync))
         });
     }
 }

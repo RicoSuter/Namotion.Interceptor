@@ -1,5 +1,6 @@
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(SonosSystem))]
 @implements ISubjectEditComponent
+@inject IUserPermissions Permissions
 
 <MudForm>
     <MudTextField @bind-Value="_seedHost"
@@ -39,7 +40,7 @@
                 @(SystemSubject.AreEventsActive ? "Events: live" : "Events: polling only")
             </MudChip>
         </MudStack>
-        <MudText Class="mt-1">Rooms: @SystemSubject.Players.Count</MudText>
+        <MudText Class="mt-1">Rooms: @SystemSubject.Players.Values.Count(player => Permissions.CanShow(player))</MudText>
         @if (SystemSubject.StatusMessage is not null)
         {
             <MudText Color="Color.Error">@SystemSubject.StatusMessage</MudText>

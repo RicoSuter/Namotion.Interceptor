@@ -1,12 +1,13 @@
 using Bunit;
 using HomeBlaze.Services;
+using HomeBlaze.Authorization.Abstractions;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
 using MudBlazor;
+using MudBlazor.Extensions;
 using MudBlazor.Services;
 using Namotion.Interceptor.Authorization;
-using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Registry;
 using Xunit;
 
@@ -19,13 +20,15 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
     private const int AllowTabIndex = 1;
     private const int PreviewTabIndex = 3;
 
-    private readonly TestAuthorizationGraph _graph = TestAuthorizationGraph.Create("Kitchen", "Garden");
+    private readonly TestAuthorizationGraph _graph = TestAuthorizationGraph.Create("kitchen", "garden", "system");
 
     public RolePreviewTests()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
         Services.AddMudServices();
         Services.AddSingleton(_graph.Service);
+        Services.AddSingleton<IRoleStore>(_graph.RoleStore);
+        Services.AddSingleton<IUserPermissions>(UnrestrictedPermissions.Instance);
         Services.AddSingleton(_graph.PathResolver);
 
         var typeProvider = new TypeProvider();
@@ -48,8 +51,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
     public async Task WhenTheRoleIncludesReader_ThenTheChosenSubjectIsReadableWithAMatrixOfItsMembers()
     {
         // Arrange
-        var role = _graph.GetRole("Kitchen");
-        role.Includes = [BuiltInRoles.ReaderName];
+        var role = _graph.SetRole("kitchen", includes: [BuiltInRoles.ReaderName]);
         var component = RenderEditor(role);
 
         // Act
@@ -62,18 +64,17 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
             ["Temperature", "Password", "Child", "Start", "Temperature@Minimum"],
             GetMemberNames(component).ToArray());
 
-        Assert.Equal([Allowed, Denied, null, Allowed], GetCellStates(component, "Temperature"));
-        Assert.Equal([Allowed, null, Denied, null], GetCellStates(component, "Start"));
-        Assert.Equal([Denied, Denied, null, Denied], GetCellStates(component, "Password"));
-        Assert.Equal([Allowed, Denied, null, Allowed], GetCellStates(component, "Temperature@Minimum"));
+        Assert.Equal([Allowed, Denied, null, Allowed, Denied], GetCellStates(component, "Temperature"));
+        Assert.Equal([Allowed, null, Denied, null, Denied], GetCellStates(component, "Start"));
+        Assert.Equal([Denied, Denied, null, Denied, Denied], GetCellStates(component, "Password"));
+        Assert.Equal([Allowed, Denied, null, Allowed, Denied], GetCellStates(component, "Temperature@Minimum"));
     }
 
     [Fact]
     public async Task WhenASubjectIsChosen_ThenEachMemberShowsThePathARuleMatchesItBy()
     {
         // Arrange
-        var role = _graph.GetRole("Kitchen");
-        role.Includes = [BuiltInRoles.ReaderName];
+        var role = _graph.SetRole("kitchen", includes: [BuiltInRoles.ReaderName]);
         var component = RenderEditor(role);
 
         // Act
@@ -90,8 +91,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
     public async Task WhenAMethodCanBeExecutedButNotRead_ThenItsExecuteCellSaysItCannotBeUsed()
     {
         // Arrange
-        var role = _graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Members = ["Start"], Actions = [AuthorizationActions.Execute] }];
+        var role = _graph.SetRole("kitchen", allow: [new PermissionRule { Members = ["Start"], Actions = [AuthorizationActions.Execute] }]);
         var component = RenderEditor(role);
         await ChoosePathAsync(component, "/Devices");
 
@@ -99,7 +99,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
         await component.Find("[data-testid='role-preview-cell-Start-execute'] button").ClickAsync(new MouseEventArgs());
 
         // Assert
-        Assert.Equal([Denied, null, Allowed, null], GetCellStates(component, "Start"));
+        Assert.Equal([Denied, null, Allowed, null, Denied], GetCellStates(component, "Start"));
         Assert.Equal("execute-without-read", component.Find("[data-testid='role-preview-cell-Start-execute']").GetAttribute("data-note"));
         Assert.Equal("Start, execute: allowed, cannot be used",
             component.Find("[data-testid='role-preview-cell-Start-execute'] button").GetAttribute("aria-label"));
@@ -114,9 +114,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
     public async Task WhenACellIsDeniedByTheEditedRole_ThenItsExplanationNamesTheRule()
     {
         // Arrange
-        var role = _graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read, PermissionAction.Write] }];
-        role.Deny = [new PermissionRule { Paths = ["/Devices/*"], Members = ["Temperature"], Actions = [PermissionAction.Write] }];
+        var role = _graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read, PermissionAction.Write] }], deny: [new PermissionRule { Paths = ["/Devices/*"], Members = ["Temperature"], Actions = [PermissionAction.Write] }]);
         var component = RenderEditor(role);
         await ChoosePathAsync(component, "/Devices");
 
@@ -125,8 +123,8 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
 
         // Assert
         const string expected =
-            "Denied by Kitchen: deny paths /Devices/*; members Temperature; actions write. " +
-            "It overrides Kitchen: allow any member; actions read, write.";
+            "Denied by kitchen: deny write · paths: /Devices/* · members: Temperature. " +
+            "It overrides kitchen: allow read, write.";
         Assert.Equal($"Temperature, write: {expected}", component.Find("[data-testid='role-preview-explanation']").TextContent.Trim());
         Assert.Contains(component.FindComponents<MudTooltip>(), tooltip => tooltip.Instance.Text == expected);
     }
@@ -135,8 +133,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
     public async Task WhenASecretIsDeniedByASystemRule_ThenItsExplanationSaysSo()
     {
         // Arrange
-        var role = _graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = _graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
         await ChoosePathAsync(component, "/Devices");
 
@@ -145,8 +142,26 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
 
         // Assert
         Assert.Equal(
-            "Password, read: Denied by a system rule: deny tags secret; actions read, write, history. " +
-            "It overrides Kitchen: allow any member; actions read.",
+            "Password, read: Denied by a system rule: deny read, history · tags: secret. " +
+            "It overrides kitchen: allow read.",
+            component.Find("[data-testid='role-preview-explanation']").TextContent.Trim());
+    }
+
+    [Fact]
+    public async Task WhenACellIsDeniedByARoleNamedSystem_ThenItsExplanationNamesTheRole()
+    {
+        // Arrange
+        var role = _graph.SetRole("system", allow: [new PermissionRule { Actions = [PermissionAction.Read] }], deny: [new PermissionRule { Members = ["Temperature"], Actions = [PermissionAction.Read] }]);
+        var component = RenderEditor(role);
+        await ChoosePathAsync(component, "/Devices");
+
+        // Act
+        await component.Find("[data-testid='role-preview-cell-Temperature-read'] button").ClickAsync(new MouseEventArgs());
+
+        // Assert
+        Assert.Equal(
+            "Temperature, read: Denied by system: deny read · members: Temperature. " +
+            "It overrides system: allow read.",
             component.Find("[data-testid='role-preview-explanation']").TextContent.Trim());
     }
 
@@ -154,8 +169,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
     public async Task WhenNoRoleAllowsAnAction_ThenItsExplanationSaysSo()
     {
         // Arrange
-        var role = _graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Members = ["Temperature"], Actions = [PermissionAction.Read] }];
+        var role = _graph.SetRole("kitchen", allow: [new PermissionRule { Members = ["Temperature"], Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
         await ChoosePathAsync(component, "/Devices");
 
@@ -170,8 +184,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
     public async Task WhenAnActionDoesNotApplyToAMember_ThenItsCellShowsADashLabeledAsNotApplyingUnderAStickyHeader()
     {
         // Arrange
-        var role = _graph.GetRole("Kitchen");
-        role.Includes = [BuiltInRoles.ReaderName];
+        var role = _graph.SetRole("kitchen", includes: [BuiltInRoles.ReaderName]);
         var component = RenderEditor(role);
 
         // Act
@@ -192,12 +205,11 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
     public async Task WhenAnUnsavedRuleChanges_ThenTheMatrixChangesAndTheRoleIsNotWritten()
     {
         // Arrange
-        var role = _graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = _graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var savedAllow = role.Allow;
         var component = RenderEditor(role);
         await ChoosePathAsync(component, "/Devices");
-        Assert.Equal([Allowed, Denied, null, Denied], GetCellStates(component, "Temperature"));
+        Assert.Equal([Allowed, Denied, null, Denied, Denied], GetCellStates(component, "Temperature"));
 
         // Act
         await ActivateTabAsync(component, AllowTabIndex);
@@ -207,7 +219,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
 
         // Assert
         Assert.Equal("/Devices", component.Find("[data-testid='role-preview-path'] input").GetAttribute("value"));
-        Assert.Equal([Allowed, Allowed, null, Denied], GetCellStates(component, "Temperature"));
+        Assert.Equal([Allowed, Allowed, null, Denied, Denied], GetCellStates(component, "Temperature"));
         Assert.Same(savedAllow, role.Allow);
     }
 
@@ -215,7 +227,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
     public async Task WhenThePreviewIsShown_ThenTheSubjectIsBrowsedWithAButtonTheKeyboardReaches()
     {
         // Arrange
-        var component = RenderEditor(_graph.GetRole("Kitchen"));
+        var component = RenderEditor(_graph.GetRole("kitchen"));
 
         // Act
         await ActivateTabAsync(component, PreviewTabIndex);
@@ -230,20 +242,17 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
     public async Task WhenAnIncludedRoleIsSavedElsewhere_ThenTheMatrixFollowsIt()
     {
         // Arrange
-        var garden = _graph.GetRole("Garden");
-        garden.Allow = [new PermissionRule { Members = ["Temperature"], Actions = [PermissionAction.Read] }];
-        var role = _graph.GetRole("Kitchen");
-        role.Includes = ["Garden"];
+        _graph.SetRole("garden", allow: [new PermissionRule { Members = ["Temperature"], Actions = [PermissionAction.Read] }]);
+        var role = _graph.SetRole("kitchen", includes: ["garden"]);
         var component = RenderEditor(role);
         await ChoosePathAsync(component, "/Devices");
 
         // Act
-        garden.Allow = [new PermissionRule { Members = ["Temperature"], Actions = [PermissionAction.Write] }];
+        _graph.SetRole("garden", allow: [new PermissionRule { Members = ["Temperature"], Actions = [PermissionAction.Write] }]);
 
         // Assert
         await component.WaitForAssertionAsync(
-            () => Assert.Equal([Denied, Allowed, null, Denied], GetCellStates(component, "Temperature")),
-            TestTimeouts.Default);
+            () => Assert.Equal([Denied, Allowed, null, Denied, Denied], GetCellStates(component, "Temperature")));
     }
 
     [Fact]
@@ -254,8 +263,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
         _graph.Devices.TryGetRegisteredSubject()!.AddProperty(
             "Broken", typeof(object), _ => isGetterThrowing ? throw new InvalidOperationException("The getter was called.") : null, null);
         isGetterThrowing = true;
-        var role = _graph.GetRole("Kitchen");
-        role.Includes = [BuiltInRoles.ReaderName];
+        var role = _graph.SetRole("kitchen", includes: [BuiltInRoles.ReaderName]);
         var component = RenderEditor(role);
 
         // Act
@@ -263,16 +271,14 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
 
         // Assert
         Assert.Contains("Broken", GetMemberNames(component));
-        Assert.Equal([Allowed, Denied, null, Allowed], GetCellStates(component, "Broken"));
+        Assert.Equal([Allowed, Denied, null, Allowed, Denied], GetCellStates(component, "Broken"));
     }
 
     [Fact]
     public async Task WhenTheSubjectIsHidden_ThenTheUnreadableLinkIsShown()
     {
         // Arrange
-        var role = _graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
-        role.Deny = [new PermissionRule { Paths = ["/Devices/*"], Members = ["Child"], Actions = [PermissionAction.Read] }];
+        var role = _graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }], deny: [new PermissionRule { Paths = ["/Devices/*"], Members = ["Child"], Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -288,8 +294,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
     public async Task WhenNoMemberIsReadable_ThenTheSubjectIsHidden()
     {
         // Arrange
-        var role = _graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Types = ["Unknown"], Actions = [PermissionAction.Read] }];
+        var role = _graph.SetRole("kitchen", allow: [new PermissionRule { Types = ["unknown"], Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -305,15 +310,14 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
     public async Task WhenTheRoleDoesNotCompile_ThenTheErrorIsShownAboveTheTabsInsteadOfTheMatrix()
     {
         // Arrange
-        var role = _graph.GetRole("Kitchen");
-        role.Includes = ["Ghost"];
+        var role = _graph.SetRole("kitchen", includes: ["ghost"]);
         var component = RenderEditor(role);
 
         // Act
         await ChoosePathAsync(component, "/Devices");
 
         // Assert
-        Assert.Contains("Ghost", Assert.Single(component.FindAll("[data-testid='role-edit-status']")).TextContent);
+        Assert.Contains("ghost", Assert.Single(component.FindAll("[data-testid='role-edit-status']")).TextContent);
         Assert.Empty(component.FindAll("[data-testid='role-preview-matrix']"));
         Assert.Empty(component.FindAll("[data-testid='role-preview-not-found']"));
     }
@@ -322,7 +326,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
     public async Task WhenNoSubjectHasThePath_ThenItIsSaid()
     {
         // Arrange
-        var component = RenderEditor(_graph.GetRole("Kitchen"));
+        var component = RenderEditor(_graph.GetRole("kitchen"));
 
         // Act
         await ChoosePathAsync(component, "/Nowhere");
@@ -330,6 +334,90 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
         // Assert
         Assert.NotEmpty(component.FindAll("[data-testid='role-preview-not-found']"));
         Assert.Empty(component.FindAll("[data-testid='role-preview-matrix']"));
+    }
+
+    [Fact]
+    public async Task WhenThePreviewOpens_ThenItPreviewsAsAPerson()
+    {
+        // Arrange
+        var component = RenderEditor(_graph.GetRole("kitchen"));
+
+        // Act
+        await ActivateTabAsync(component, 1);
+
+        // Assert
+        Assert.Equal(PrincipalKind.Person, component.FindComponent<MudSelect<PrincipalKind>>().Instance.GetState(select => select.Value));
+    }
+
+    [Theory]
+    [InlineData(PrincipalKind.Person, Allowed)]
+    [InlineData(PrincipalKind.NonHuman, Denied)]
+    [InlineData(PrincipalKind.Anonymous, Denied)]
+    public async Task WhenTheRoleIsPreviewedAsAKindOfPrincipal_ThenAdministerFollowsTheSystemRulesOfThatKind(PrincipalKind kind, string expectedAdminister)
+    {
+        // Arrange
+        var role = _graph.SetRole("kitchen", includes: [BuiltInRoles.EverythingName]);
+        var component = RenderEditor(role);
+        await ChoosePathAsync(component, "/Devices");
+
+        // Act
+        await ChooseKindAsync(component, kind);
+
+        // Assert
+        var members = GetMemberNames(component);
+        Assert.NotEmpty(members);
+        Assert.All(members, member => Assert.Equal(expectedAdminister, GetCellStates(component, member)[4]));
+    }
+
+    [Fact]
+    public async Task WhenDenyRulesMatchMembersOfTheSubject_ThenEachShowsHowManyItMatches()
+    {
+        // Arrange
+        var role = _graph.SetRole(
+            "kitchen",
+            allow: [new PermissionRule { Actions = [PermissionAction.Read] }],
+            deny:
+            [
+                new PermissionRule { Paths = ["/Devices/*"], Members = ["Temperature", "Start"], Actions = [PermissionAction.Write, AuthorizationActions.Execute] },
+                new PermissionRule { Paths = ["/Devices/Child/Temperature"], Actions = [PermissionAction.Read] },
+                new PermissionRule { Paths = ["/Devices/*"], Members = ["Temperature", "Start"], Actions = [AuthorizationActions.Execute] }
+            ]);
+        var component = RenderEditor(role);
+
+        // Act
+        await ChoosePathAsync(component, "/Devices");
+
+        // Assert
+        var first = component.Find("[data-testid='role-preview-deny-0']");
+        Assert.Equal("2", first.GetAttribute("data-count"));
+        Assert.Equal("Deny rule 1 (deny write, execute · paths: /Devices/* · members: Temperature, Start) matches 2 members of this subject.", first.TextContent.Trim());
+        var second = component.Find("[data-testid='role-preview-deny-1']");
+        Assert.Equal("0", second.GetAttribute("data-count"));
+        Assert.Equal("false", second.GetAttribute("data-matches-nothing"));
+        Assert.Equal("Deny rule 2 (deny read · paths: /Devices/Child/Temperature) matches no member of this subject.", second.TextContent.Trim());
+        // Execute applies to methods alone, as in the matrix.
+        Assert.Equal("1", component.Find("[data-testid='role-preview-deny-2']").GetAttribute("data-count"));
+    }
+
+    [Fact]
+    public async Task WhenADenyRuleMatchesNoMemberAnywhere_ThenItIsWarnedThatItMatchesNothing()
+    {
+        // Arrange
+        var role = _graph.SetRole(
+            "kitchen",
+            allow: [new PermissionRule { Actions = [PermissionAction.Read] }],
+            deny: [new PermissionRule { Paths = ["/Kitchen/**"], Actions = [PermissionAction.Read] }]);
+        var component = RenderEditor(role);
+
+        // Act
+        await ChoosePathAsync(component, "/Devices");
+
+        // Assert
+        var hint = component.Find("[data-testid='role-preview-deny-0']");
+        Assert.Equal("0", hint.GetAttribute("data-count"));
+        Assert.Equal("true", hint.GetAttribute("data-matches-nothing"));
+        Assert.Contains("mud-alert-text-warning", hint.ClassName);
+        Assert.Equal("Deny rule 1 (deny read · paths: /Kitchen/**) matches nothing: no member of any subject, so it denies nothing.", hint.TextContent.Trim());
     }
 
     private IRenderedComponent<RoleEditComponent> RenderEditor(Role role) =>
@@ -341,6 +429,12 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
         await component.Find("[data-testid='role-preview-path'] input").InputAsync(new ChangeEventArgs { Value = path });
     }
 
+    private static async Task ChooseKindAsync(IRenderedComponent<RoleEditComponent> component, PrincipalKind kind)
+    {
+        var select = component.FindComponent<MudSelect<PrincipalKind>>();
+        await component.InvokeAsync(() => select.Instance.ValueChanged.InvokeAsync(kind));
+    }
+
     private static Task ActivateTabAsync(IRenderedComponent<RoleEditComponent> component, int index)
     {
         var tabs = component.FindComponent<MudTabs>();
@@ -350,7 +444,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
     private static IReadOnlyList<string> GetMemberNames(IRenderedComponent<RoleEditComponent> component) =>
         component.FindAll("[data-testid='role-preview-matrix'] [data-member]").Select(row => row.GetAttribute("data-member")!).ToList();
 
-    // In the order read, write, execute, history; null where the action does not apply.
+    // In the order read, write, execute, history, administer; null where the action does not apply.
     private static IReadOnlyList<string?> GetCellStates(IRenderedComponent<RoleEditComponent> component, string member) =>
         AuthorizationActions.All
             .Select(action => component.Find($"[data-testid='role-preview-cell-{member}-{action.Name}']").GetAttribute("data-decision"))

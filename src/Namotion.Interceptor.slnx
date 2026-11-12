@@ -38,7 +38,10 @@
   <Folder Name="/HomeBlaze/">
     <Project Path="HomeBlaze/HomeBlaze.AI/HomeBlaze.AI.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.AI.Blazor/HomeBlaze.AI.Blazor.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Authentication/HomeBlaze.Authentication.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Authentication.Blazor/HomeBlaze.Authentication.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Authorization/HomeBlaze.Authorization.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Authorization.Abstractions/HomeBlaze.Authorization.Abstractions.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Authorization.Blazor/HomeBlaze.Authorization.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Automation/HomeBlaze.Automation.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Automation.Blazor/HomeBlaze.Automation.Blazor.csproj" />
@@ -141,12 +144,16 @@
   </Folder>
   <Folder Name="/HomeBlaze/Tests/">
     <Project Path="HomeBlaze/HomeBlaze.AI.Tests/HomeBlaze.AI.Tests.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Authentication.Tests/HomeBlaze.Authentication.Tests.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Authentication.Blazor.Tests/HomeBlaze.Authentication.Blazor.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Authorization.Tests/HomeBlaze.Authorization.Tests.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Authorization.Abstractions.Tests/HomeBlaze.Authorization.Abstractions.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Authorization.Blazor.Tests/HomeBlaze.Authorization.Blazor.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Automation.Tests/HomeBlaze.Automation.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Automation.Blazor.Tests/HomeBlaze.Automation.Blazor.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.E2E.Tests/HomeBlaze.E2E.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Host.Services.Tests/HomeBlaze.Host.Services.Tests.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Host.Tests/HomeBlaze.Host.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Installation.Tests/HomeBlaze.Installation.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Services.Tests/HomeBlaze.Services.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage.Abstractions.Tests/HomeBlaze.Storage.Abstractions.Tests.csproj" />

@@ -107,7 +107,7 @@ public class ValueFilterTests
     private static McpServerConfiguration CreateConfiguration() => new()
     {
         PathProvider = DefaultPathProvider.Instance,
-        IsReadOnly = false,
+        AccessPolicy = AllowAllMcpAccessPolicy.Instance,
         ValueFilters = { new TestValueFilter() }
     };
 

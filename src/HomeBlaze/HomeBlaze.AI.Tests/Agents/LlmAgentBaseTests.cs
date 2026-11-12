@@ -1341,7 +1341,7 @@ public class LlmAgentBaseTests
 /// <summary>Offers tools whose result is whether the permission to edit page layout is granted where they run.</summary>
 internal sealed class PermissionRecordingToolSource : IAgentToolSource
 {
-    public IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly, IMcpAccessPolicy accessPolicy) =>
+    public IReadOnlyList<McpToolInfo> CreateTools(IMcpAccessPolicy accessPolicy) =>
         new[] { "browse", "edit_markdown", "invoke_operation" }.Select(name => new McpToolInfo
         {
             Name = name,

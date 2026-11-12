@@ -1,4 +1,6 @@
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Components;
+using HomeBlaze.Components.Abstractions.Access;
 using HomeBlaze.Components.Dialogs;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Blazor.Models;
@@ -8,10 +10,15 @@ using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.Logging;
 using MudBlazor;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Storage.Blazor.Files;
 
-/// <summary>Changes the blocks of a markdown page that is edited inline, with the dialogs that ask for them.</summary>
+/// <summary>
+/// Changes the blocks of a markdown page that is edited inline, with the dialogs that ask for them. Every change requires
+/// that the viewer may administer the content of the page, see <see cref="EditPermissions.CanAdministerFileContent"/>; without
+/// it the editor offers no action and refuses every edit.
+/// </summary>
 internal sealed class MarkdownPageStructureEditor : PageStructureEditor
 {
     private const string ChangedWhileAskingMessage = "The page changed while the dialog was open. Try again.";
@@ -28,6 +35,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
     private readonly ISnackbar _snackbar;
     private readonly SubjectFactory _subjectFactory;
     private readonly ILogger _logger;
+    private readonly IUserPermissions _permissions;
     private readonly Func<bool> _isDarkMode;
 
     public MarkdownPageStructureEditor(
@@ -39,6 +47,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
         ISnackbar snackbar,
         SubjectFactory subjectFactory,
         ILogger logger,
+        IUserPermissions permissions,
         Func<bool> isDarkMode)
     {
         SourceEditor = sourceEditor;
@@ -49,6 +58,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
         _snackbar = snackbar;
         _subjectFactory = subjectFactory;
         _logger = logger;
+        _permissions = permissions;
         _isDarkMode = isDarkMode;
     }
 
@@ -64,8 +74,15 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
     /// <summary>Gets the page, which switches to an editor of its source to show the lines of a block, or null.</summary>
     public ISubjectRevealTarget? SourceEditor { get; }
 
+    private bool CanChangePage => _permissions.CanAdministerFileContent(_file);
+
     public override PageBlockActions GetActions(IInterceptorSubject subject)
     {
+        if (!CanChangePage)
+        {
+            return default;
+        }
+
         var actions = _file.GetBlockActions(subject);
         return new PageBlockActions(
             actions.CanDelete,
@@ -96,7 +113,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
     // The bar renders again after every reload, as GetAddSlots reads the children of the page, and every add checks the page again.
     public override IReadOnlyList<PageAddTarget> GetAddTargets(IInterceptorSubject owner)
     {
-        var slots = _file.GetAddSlots(owner);
+        var slots = CanChangePage ? _file.GetAddSlots(owner) : [];
         if (slots.Count == 0)
         {
             return [];
@@ -121,10 +138,15 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
 
     public override string? GetBlockName(IInterceptorSubject subject) => _file.GetBlockName(subject);
 
-    public override bool CanInsertInto(IInterceptorSubject content) => _file.IsContentOfPage(content);
+    public override bool CanInsertInto(IInterceptorSubject content) => CanChangePage && _file.IsContentOfPage(content);
 
     public override async Task DeleteAsync(IInterceptorSubject subject)
     {
+        if (!CanDelete(subject))
+        {
+            return;
+        }
+
         var selectsResult = SelectsResultOfRemoval(subject);
         if (subject is HtmlSegment segment)
         {
@@ -134,7 +156,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
             }
 
             var isConfirmed = await _dialogService.ShowMessageBoxAsync("Delete text", "Delete this text?", yesText: "Delete", cancelText: "Cancel");
-            if (isConfirmed == true)
+            if (isConfirmed == true && CanDelete(subject))
             {
                 await RunAsync(() => _file.ReplaceTextBlockAsync(segment, text, string.Empty, CancellationToken.None), selectsResult: selectsResult);
             }
@@ -158,10 +180,25 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
 
         var content = _file.Content;
         var confirmed = await _dialogService.ShowMessageBoxAsync("Delete block", message, yesText: "Delete", cancelText: "Cancel");
-        if (confirmed == true && IsUnchangedSince(content))
+        if (confirmed == true && CanDelete(subject) && IsUnchangedSince(content))
         {
             await RunAsync(() => _file.DeleteBlockAsync(subject, CancellationToken.None), selectsResult: selectsResult);
         }
+    }
+
+    // Deleting a block changes the page and the member that holds the subject of the block.
+    private bool CanDelete(IInterceptorSubject subject) =>
+        IsAllowedOrRefused(CanChangePage && _permissions.CanAdministerHoldingMembers(subject));
+
+    // Checked before a dialog opens, so that nothing is asked for that cannot be saved; RunAsync checks again before the write.
+    private bool IsAllowedOrRefused(bool isAllowed)
+    {
+        if (!isAllowed)
+        {
+            _snackbar.Add(AccessDeniedTexts.Administer, Severity.Error);
+        }
+
+        return isAllowed;
     }
 
     public override async Task MoveAsync(IInterceptorSubject subject, int direction) =>
@@ -180,13 +217,13 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
 
     public override async Task AddListItemAsync(IInterceptorSubject owner, PageAddTarget target)
     {
-        if (target is not { SlotName: { } slotName, ItemType: { } itemType })
+        if (target is not { SlotName: { } slotName, ItemType: { } itemType } || !IsAllowedOrRefused(CanChangePage))
         {
             return;
         }
 
         var pageContent = _file.Content;
-        var result = await SubjectSetupDialog.ShowAsync(_dialogService, new SubjectSetupOptions { Type = itemType });
+        var result = await SubjectSetupDialog.ShowAsync(_dialogService, new SubjectSetupOptions { Type = itemType, AdministerMember = ContentMember });
         if (result is null)
         {
             return;
@@ -207,7 +244,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
 
     public override async Task EditTextAsync(IInterceptorSubject subject)
     {
-        if (subject is not HtmlSegment segment || _file.GetTextBlockText(segment) is not { } text)
+        if (subject is not HtmlSegment segment || _file.GetTextBlockText(segment) is not { } text || !IsAllowedOrRefused(CanChangePage))
         {
             return;
         }
@@ -237,7 +274,8 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
                 return result.IsWritten || _file.GetTextBlockText(segment) == text
                     ? result.Refusal
                     : TextChangedWhileEditingMessage;
-            });
+            },
+            ContentMember);
     }
 
     // Whether the item that takes the place of the removed block of the subject takes the selection and the focus: on the page,
@@ -247,7 +285,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
         _selection.Selected is not { SelectableAncestor: not null } selected || !ReferenceEquals(selected.Subject, subject);
 
     public override bool CanInsertText(IInterceptorSubject content, IInterceptorSubject? before) =>
-        _file.CanInsertTextAt(content, before);
+        CanChangePage && _file.CanInsertTextAt(content, before);
 
     public override Task InsertTextAsync(IInterceptorSubject content, IInterceptorSubject? before) =>
         CreateTextAsync(
@@ -257,10 +295,16 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
     // Asks for a widget and its name, and writes it unless the page changed while the dialog was open.
     private async Task CreateWidgetAsync(Func<IInterceptorSubject, string?, Task<MarkdownEditResult>> write)
     {
+        if (!IsAllowedOrRefused(CanChangePage))
+        {
+            return;
+        }
+
         var pageContent = _file.Content;
         var result = await SubjectSetupDialog.ShowAsync(_dialogService, new SubjectSetupOptions
         {
-            NameField = MarkdownBlockNames.CreateNameOptions(pageContent ?? string.Empty)
+            NameField = MarkdownBlockNames.CreateNameOptions(pageContent ?? string.Empty),
+            AdministerMember = ContentMember
         });
 
         if (result is null)
@@ -286,6 +330,11 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
     // the top level of the text, and the save raises its fence to the depth of the content.
     private async Task CreateTextAsync(string title, Func<string, Task<MarkdownEditResult>> write)
     {
+        if (!IsAllowedOrRefused(CanChangePage))
+        {
+            return;
+        }
+
         var pageContent = _file.Content;
         await MarkdownTextDialog.ShowAsync(
             _dialogService,
@@ -304,8 +353,12 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
 
                 var result = await RunAsync(() => write(text), reportsInSnackbar: false);
                 return result.Refusal;
-            });
+            },
+            ContentMember);
     }
+
+    // A widget configured in a dialog goes into the page, so creating it is an edit of the page.
+    private RegisteredSubjectProperty? ContentMember => EditPermissions.TryGetContentMember(_file);
 
     // A dialog asked about the blocks as they were. A reload while it was open can have given an unnamed subject another
     // block, so the edit would hit a block the user did not choose. The same text means the same blocks.
@@ -328,6 +381,17 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
     private async Task<MarkdownEditResult> RunAsync(
         Func<Task<MarkdownEditResult>> edit, bool reportsInSnackbar = true, bool selectsResult = true)
     {
+        // Checked right before the write: the roles may have changed while a dialog was open.
+        if (!CanChangePage)
+        {
+            if (reportsInSnackbar)
+            {
+                _snackbar.Add(AccessDeniedTexts.Administer, Severity.Error);
+            }
+
+            return MarkdownEditResult.Refused(AccessDeniedTexts.Administer);
+        }
+
         MarkdownEditResult result;
         try
         {

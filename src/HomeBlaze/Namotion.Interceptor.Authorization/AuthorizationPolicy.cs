@@ -14,9 +14,6 @@ namespace Namotion.Interceptor.Authorization;
 /// </summary>
 public sealed class AuthorizationPolicy
 {
-    /// <summary>Gets the name of the role that <see cref="Explain(RegisteredSubjectProperty, PermissionAction)"/> reports for a system deny rule; no role may use it.</summary>
-    public static string SystemRoleName { get; } = "System";
-
     private static readonly TypeNameCache TypeNames = new();
 
     private readonly CompiledRule[] _allow;

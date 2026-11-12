@@ -4,10 +4,11 @@
 @implements IBrowserViewportObserver
 @implements IAsyncDisposable
 @inject IBrowserViewportService BrowserViewportService
+@inject IUserPermissions Permissions
 
 @{
     // Read once per render and never kept: a reload assigns a new array.
-    var tabs = Layout?.Tabs ?? [];
+    var tabs = GetShownTabs();
     var position = GetPosition();
 }
 
@@ -124,6 +125,28 @@
         _ => "pt-4"
     };
 
+    protected override void OnInitialized()
+    {
+        Permissions.Changed += OnPermissionsChanged;
+    }
+
+    private void OnPermissionsChanged() => _ = InvokeAsync(StateHasChanged);
+
+    // A tab the roles hide is neither named nor rendered. The array of the layout is returned when every tab is shown.
+    private Tab[] GetShownTabs()
+    {
+        var tabs = Layout?.Tabs ?? [];
+        foreach (var tab in tabs)
+        {
+            if (!Permissions.CanShow(tab))
+            {
+                return tabs.Where(shown => Permissions.CanShow(shown)).ToArray();
+            }
+        }
+
+        return tabs;
+    }
+
     protected override void OnParametersSet()
     {
         // A tab that an add made the pending subject of the selection is shown, see ShowPendingTab.
@@ -142,7 +165,7 @@
     // The reload that adds a tab can render the layout before the selection learns the new tab, or after.
     private void OnSelectionChanged()
     {
-        if (ShowPendingTab(Layout?.Tabs ?? []))
+        if (ShowPendingTab(GetShownTabs()))
         {
             _ = InvokeAsync(StateHasChanged);
         }
@@ -216,6 +239,7 @@
     public async ValueTask DisposeAsync()
     {
         _isDisposed = true;
+        Permissions.Changed -= OnPermissionsChanged;
         UnsubscribeSelection();
         if (_isSubscribed)
         {

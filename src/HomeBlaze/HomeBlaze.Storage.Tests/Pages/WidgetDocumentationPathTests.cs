@@ -2,12 +2,13 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components;
 using HomeBlaze.Services;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services.Display;
-using Namotion.Interceptor.Expressions;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Expressions;
 using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Storage.Tests.Pages;
@@ -117,7 +118,7 @@ public class WidgetDocumentationPathTests : IClassFixture<AdministrationFolderFi
             : ExpressionUse.WidgetText;
 
         // What the widget binds to 'subject' depends on the widget that applies the map, so that a case is not followed.
-        var boundSubject = subject is Card or ValueMapCase ? null : ValueBinding.FromPath(resolver, subject, GetPath(subject)).Subject;
+        var boundSubject = subject is Card or ValueMapCase ? null : ValueBinding.FromPath(resolver, subject, GetPath(subject), UnrestrictedPermissions.Instance).Subject;
 
         foreach (var expression in parsed.Expressions)
         {

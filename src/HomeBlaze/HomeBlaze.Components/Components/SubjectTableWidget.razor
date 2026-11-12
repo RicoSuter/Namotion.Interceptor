@@ -1,5 +1,6 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(SubjectTable))]
 @implements ISubjectComponent
+@inherits PermissionsComponentBase
 @inject SubjectPathResolver PathResolver
 @inject ITimeZoneDisplay TimeZone
 
@@ -10,7 +11,7 @@
 @if (table is not null)
 {
     // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
-    if (!SubjectTableRows.TryGetRows(PathResolver, table, table.Source, table.Type, out var rows, out var error))
+    if (!SubjectTableRows.TryGetRows(PathResolver, table, table.Source, table.Type, Permissions, out var rows, out var error))
     {
         <WidgetArgumentError Message="@error" />
     }
@@ -24,7 +25,7 @@
         var hasMapError = false;
         for (var index = 0; index < columns.Length; index++)
         {
-            maps[index] = ValueReader.ResolveMap(PathResolver, columns[index], columns[index].Map, out var mapError);
+            maps[index] = ValueReader.ResolveMap(PathResolver, columns[index], columns[index].Map, Permissions, out var mapError);
             if (mapError is not null)
             {
                 hasMapError = true;
@@ -65,7 +66,7 @@
                             @for (var index = 0; index < columns.Length; index++)
                             {
                                 var column = columns[index];
-                                var reading = ValueReader.ReadProperty(PathResolver, row.Subject, column.Property, maps[index], TimeZone);
+                                var reading = ValueReader.ReadProperty(PathResolver, row.Subject, column.Property, maps[index], TimeZone, Permissions);
 
                                 <td data-testid="subject-table-cell">
                                     @if (index == 0)

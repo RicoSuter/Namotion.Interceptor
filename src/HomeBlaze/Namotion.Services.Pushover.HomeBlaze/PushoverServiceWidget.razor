@@ -1,4 +1,5 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(PushoverService))]
+@inherits PermissionsComponentBase
 @implements ISubjectComponent
 
 <MudPaper Class="pa-4">
@@ -22,9 +23,12 @@
 
         <MudDivider />
 
-        @{ var targets = Service?.Targets; }
+        @{
+            // A target the roles hide is neither named nor counted.
+            var targets = Service?.Targets.Values.Where(target => Permissions.CanShow(target)).ToList();
+        }
 
-        @foreach (var target in targets?.Values ?? Enumerable.Empty<PushoverTarget>())
+        @foreach (var target in targets ?? [])
         {
             <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
                 <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Small" Color="@GetStatusColor(target.Status)" />

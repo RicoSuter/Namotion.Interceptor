@@ -1,3 +1,4 @@
+@using HomeBlaze.Authorization.Abstractions
 @using HomeBlaze.Components.Abstractions.Pages
 @using Microsoft.Extensions.Logging
 
@@ -5,7 +6,7 @@
 @inject NavigationManager NavigationManager
 @inject ILogger<NavMenu> Logger
 
-@implements IDisposable
+@inherits PermissionsComponentBase
 
 <MudNavMenu>
     @if (Root != null)
@@ -14,7 +15,7 @@
         {
             @if (item.HasNavigationBarPages)
             {
-                <NavFolder @key="item.Path" Item="item" NavigationResolver="NavigationResolver" CurrentPath="@_currentPath" />
+                <NavFolder @key="item.Path" Item="item" NavigationResolver="NavigationResolver" Permissions="Permissions" CurrentPath="@_currentPath" />
             }
             else if (item.IsPage)
             {
@@ -46,6 +47,7 @@
 
     protected override void OnInitialized()
     {
+        base.OnInitialized();
         // Periodically refresh to catch new files
         _refreshTimer = new Timer(_ => InvokeAsync(StateHasChanged),
             null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
@@ -72,7 +74,7 @@
 
         try
         {
-            return NavigationResolver.GetChildItems(Root);
+            return NavigationResolver.GetChildItems(Root, Permissions);
         }
         catch (Exception ex)
         {
@@ -81,9 +83,14 @@
         }
     }
 
-    public void Dispose()
+    protected override void Dispose(bool disposing)
     {
-        _refreshTimer?.Dispose();
-        NavigationManager.LocationChanged -= OnLocationChanged;
+        if (disposing)
+        {
+            _refreshTimer?.Dispose();
+            NavigationManager.LocationChanged -= OnLocationChanged;
+        }
+
+        base.Dispose(disposing);
     }
 }

@@ -14,7 +14,7 @@ public abstract partial class LlmAgentBase
     private const int RecentResultCount = 5;
 
     /// <summary>Starts a background run now, also while automatic runs are paused.</summary>
-    [Operation(Title = "Run Now", Icon = "PlayArrow", Position = 1)]
+    [Operation(Title = "Run Now", Icon = "PlayArrow", Position = 1, RequiresAdministration = true)]
     public void RunNow()
     {
         lock (_stateLock)
@@ -68,7 +68,7 @@ public abstract partial class LlmAgentBase
         {
             var subjectPath = resolver.GetPath(change.Property.Subject, PathStyle.Canonical);
             if (subjectPath is not null && AgentWatchPaths.Matches(subjectPath, change.Property.Name, watchPaths) &&
-                IsReadable(change.Property, policy ??= _services.AuthorizationService.GetPolicy(Roles).Policy))
+                IsReadable(change.Property, policy ??= _services.AuthorizationService.GetPolicy(Roles ?? []).Policy))
             {
                 if (_logger.IsEnabled(LogLevel.Debug))
                 {
@@ -106,7 +106,7 @@ public abstract partial class LlmAgentBase
         AgentWatchPaths.FetchStateAsync(
             Volatile.Read(ref _normalizedWatchPaths),
             _services.ToolSource,
-            McpAuthorization.GetAccessPolicy(_services.AuthorizationService, Roles),
+            McpAuthorization.GetAccessPolicy(_services.AuthorizationService, Roles ?? []),
             cancellationToken);
 
     // The scheduler callback: an exception escaping it ends the scheduler loop, so only cancellation of the

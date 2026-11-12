@@ -44,8 +44,8 @@ public sealed class AuthorizationDefinition
     /// <param name="pathProvider">Defines path syntax and builds the paths that patterns are matched against.</param>
     /// <param name="tagProvider">Supplies the tags of members; required when a rule selects tags.</param>
     /// <exception cref="AuthorizationException">
-    /// A role is null, has no name, has a name with leading or trailing whitespace or a control or format character, is
-    /// defined more than once or uses <see cref="AuthorizationPolicy.SystemRoleName"/>.
+    /// A role is null, has no name, has a name with leading or trailing whitespace or a control or format character, or
+    /// is defined more than once.
     /// A system deny rule is invalid, as listed for rules under <see cref="Compile"/>.
     /// A known action has no name, or there are more than 64 known actions.
     /// </exception>
@@ -65,21 +65,17 @@ public sealed class AuthorizationDefinition
         var actionBits = PolicyCompiler.BuildActionBits(knownActions);
 
         var hasTagProvider = tagProvider is not null;
-        var system = new AuthorizationRole
-        {
-            Name = AuthorizationPolicy.SystemRoleName,
-            Deny = systemDenyRules is ImmutableArray<PermissionRule> { IsDefault: true } ? [] : [.. systemDenyRules]
-        };
-        var systemDeny = PolicyCompiler.CompileRules(system, system.Deny, actionBits, pathProvider, hasTagProvider);
+        ImmutableArray<PermissionRule> systemDenyRuleArray = systemDenyRules is ImmutableArray<PermissionRule> { IsDefault: true } ? [] : [.. systemDenyRules];
+        var systemDeny = PolicyCompiler.CompileRules(role: null, systemDenyRuleArray, actionBits, pathProvider, hasTagProvider);
 
-        var compiledRoles = new Dictionary<string, CompiledRole>(rolesByName.Count, StringComparer.OrdinalIgnoreCase);
+        var compiledRoles = new Dictionary<string, CompiledRole>(rolesByName.Count, StringComparer.Ordinal);
         foreach (var role in rolesByName.Values)
         {
             compiledRoles.Add(role.Name, CompileRole(role, actionBits, pathProvider, hasTagProvider));
         }
 
         return new AuthorizationDefinition(
-            compiledRoles.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase),
+            compiledRoles.ToFrozenDictionary(StringComparer.Ordinal),
             systemDeny,
             actionBits,
             tagProvider ?? EmptyTagProvider.Instance,

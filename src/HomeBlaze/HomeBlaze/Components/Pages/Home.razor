@@ -1,44 +1,87 @@
 @page "/"
 
+@using HomeBlaze.Authorization.Abstractions
 @using HomeBlaze.Components.Abstractions.Pages
 @using Microsoft.Extensions.Logging
+@using Namotion.Interceptor.Registry
 
 @inherits HomeBlazorComponentBase
+
+@implements IDisposable
 
 @inject NavigationItemResolver NavigationResolver
 @inject NavigationManager Navigation
 @inject ILogger<Home> Logger
+@inject IUserPermissions Permissions
+
+@if (_showsNothing)
+{
+    <PageTitle>HomeBlaze</PageTitle>
+    <MudAlert Severity="Severity.Info" data-testid="no-roles">No roles yet. Ask an administrator.</MudAlert>
+}
 
 @code {
+    // Whether the viewer may see nothing at all, such as a person whose roles are none or compile into no policy.
+    private bool _showsNothing;
+
     protected override void OnInitialized()
     {
         base.OnInitialized();
+        Permissions.Changed += OnPermissionsChanged;
         RedirectToDefaultPage();
     }
+
+    // Roles given while the message shows lead on to the default page.
+    private void OnPermissionsChanged() => _ = InvokeAsync(() =>
+    {
+        if (_showsNothing)
+        {
+            RedirectToDefaultPage();
+            StateHasChanged();
+        }
+    });
 
     private void RedirectToDefaultPage()
     {
         if (Root == null)
             return;
 
+        _showsNothing = !CanShowRoot(Root);
+        if (_showsNothing)
+            return;
+
         // Outside the try: during prerendering a navigation throws to redirect the response.
         Navigation.NavigateTo(GetDefaultPageUrl(Root), replace: true);
+    }
+
+    private bool CanShowRoot(IInterceptorSubject root)
+    {
+        try
+        {
+            return root.TryGetRegisteredSubject() is not { } registered || Permissions.CanShow(registered);
+        }
+        catch (Exception exception)
+        {
+            // The graph changes on other threads while this reads it; the next change of the permissions checks again.
+            Logger.LogWarning(exception, "Error checking whether the viewer may see the root");
+            return false;
+        }
     }
 
     private string GetDefaultPageUrl(IInterceptorSubject root)
     {
         try
         {
-            // The first page of the top bar as it shows it: left aligned first, then right, then the menu, each in
-            // navigation order.
-            var appBarItems = NavigationResolver.GetAppBarItems(root);
+            // The first page of the top bar as it shows it to the viewer: left aligned first, then right, then the menu,
+            // each in navigation order.
+            var appBarItems = NavigationResolver.GetAppBarItems(root, Permissions);
             var appBarPage = appBarItems.FirstOrDefault(i => i.Alignment == AppBarAlignment.Left) ??
                 appBarItems.FirstOrDefault(i => i.Alignment == AppBarAlignment.Right) ??
                 appBarItems.FirstOrDefault();
             if (appBarPage != null)
                 return appBarPage.PageUrl;
 
-            var navBarPage = NavigationResolver.GetChildItems(root)
+            var navBarPage = NavigationResolver.GetChildItems(root, Permissions)
                 .FirstOrDefault(i => i is { IsPage: true, Location: NavigationLocation.NavBar });
             if (navBarPage != null)
                 return navBarPage.PageUrl;
@@ -50,5 +93,10 @@
         }
 
         return "/browser";
+    }
+
+    public void Dispose()
+    {
+        Permissions.Changed -= OnPermissionsChanged;
     }
 }

@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Storage.Abstractions;
 using Namotion.Interceptor.Expressions;
 using HomeBlaze.Storage.Files;
@@ -287,14 +288,15 @@ public sealed partial class MarkdownContentParser
     /// one in the front matter or in an invalid block, which the page itself does not evaluate; an expression in the
     /// arguments of a block is left as written, because the widget evaluates it. An expression with an error, and one inside markdown code, is kept as written, and everything
     /// else stays as written. Only a displayable property is shown (<see cref="SubjectRegistryExtensions.IsDisplayable"/>),
-    /// and only one that <see cref="PropertyReadAccess"/> allows on the current flow, with its source path.
+    /// and only one that <paramref name="permissions"/> allow to read, with its source path.
     /// Uses the same resolution semantics as <see cref="RenderExpression"/> (in the scope of the markdown file).
     /// </summary>
     /// <param name="content">The markdown content.</param>
     /// <param name="parent">The markdown file the expressions are relative to.</param>
+    /// <param name="permissions">The permissions of the reader of the text, for whom a property they may not read is missing.</param>
     /// <param name="includeSourcePaths">When true, each resolved value is followed by the absolute canonical path of
     /// its property in parentheses. An expression that is not one path, or that does not resolve to a property, renders as without it.</param>
-    public string? RenderContent(string? content, MarkdownFile parent, bool includeSourcePaths = false)
+    public string? RenderContent(string? content, MarkdownFile parent, IUserPermissions permissions, bool includeSourcePaths = false)
     {
         if (string.IsNullOrEmpty(content))
             return content;
@@ -314,7 +316,7 @@ public sealed partial class MarkdownContentParser
             {
                 try
                 {
-                    rendered.Append(RenderExpressionValue(expression, parent, includeSourcePaths));
+                    rendered.Append(RenderExpressionValue(expression, parent, permissions, includeSourcePaths));
                 }
                 catch
                 {
@@ -330,15 +332,14 @@ public sealed partial class MarkdownContentParser
             : rendered.Append(content, copiedLength, content.Length - copiedLength).ToString();
     }
 
-    private string RenderExpressionValue(ParsedExpression expression, MarkdownFile parent, bool includeSourcePaths)
+    private string RenderExpressionValue(ParsedExpression expression, MarkdownFile parent, IUserPermissions permissions, bool includeSourcePaths)
     {
         // The reader of the text is not a viewer with a time zone, so dates are in that of the server.
-        var context = new MarkdownExpressionContext(_pathResolver, parent, timeZone: null);
+        var context = new MarkdownExpressionContext(_pathResolver, parent, timeZone: null, permissions);
         var valueText = context.ToText(expression.Evaluate(ref context));
         if (!includeSourcePaths ||
             expression.SinglePath is not { } path ||
-            _pathResolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, parent) is not { } property ||
-            !PropertyReadAccess.CanRead(property) ||
+            _pathResolver.ResolveShownProperty(path, parent, permissions) is not { } property ||
             GetAbsolutePath(property) is not { } sourcePath)
         {
             return valueText;

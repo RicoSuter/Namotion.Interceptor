@@ -1,0 +1,8 @@
+/* Takes away the look of a browser button, so that only the menu item classes of the theme apply. */
+.sign-out-menu-item {
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}

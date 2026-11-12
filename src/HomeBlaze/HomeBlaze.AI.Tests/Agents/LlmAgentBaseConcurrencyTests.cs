@@ -423,7 +423,7 @@ internal sealed class BlockingToolSource : IAgentToolSource
 
     public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly, IMcpAccessPolicy accessPolicy) =>
+    public IReadOnlyList<McpToolInfo> CreateTools(IMcpAccessPolicy accessPolicy) =>
     [
         new McpToolInfo
         {

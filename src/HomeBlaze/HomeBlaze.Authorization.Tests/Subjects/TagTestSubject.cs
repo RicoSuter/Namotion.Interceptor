@@ -38,4 +38,7 @@ public partial class TagTestSubject
 
     [Operation(RequiresConfirmation = true)]
     public Task ResetAsync() => Task.CompletedTask;
+
+    [Operation(RequiresAdministration = true)]
+    public Task ConfigureAsync() => Task.CompletedTask;
 }

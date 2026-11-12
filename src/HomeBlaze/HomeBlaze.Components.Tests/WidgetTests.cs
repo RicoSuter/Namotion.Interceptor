@@ -1,4 +1,5 @@
 using HomeBlaze.Services;
+using HomeBlaze.Authorization.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
@@ -174,7 +175,7 @@ public class WidgetTests
         widget.Path = "/Footer";
 
         // Act
-        var resolved = widget.ResolveSubject("/Content");
+        var resolved = widget.ResolveSubject("/Content", UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Same(first, resolved);
@@ -194,7 +195,7 @@ public class WidgetTests
         root.Footer = widget;
 
         // Act
-        var resolved = widget.ResolveSubject(path);
+        var resolved = widget.ResolveSubject(path, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Null(resolved);
@@ -209,9 +210,9 @@ public class WidgetTests
         var widget = new Widget(new SubjectPathResolver(() => root));
 
         // Act
-        var absolute = widget.ResolveSubject("/Content");
-        var parent = widget.ResolveSubject("..");
-        var relative = widget.ResolveSubject("Content");
+        var absolute = widget.ResolveSubject("/Content", UnrestrictedPermissions.Instance);
+        var parent = widget.ResolveSubject("..", UnrestrictedPermissions.Instance);
+        var relative = widget.ResolveSubject("Content", UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Same(content, absolute);

@@ -6,6 +6,7 @@ using HomeBlaze.AI.Agents.ClaudeCli;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.AI.Tests.Agents;
 using HomeBlaze.Authorization;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage;
@@ -365,7 +366,7 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
 
         // Assert
         Assert.IsType<ClaudeCliAgent>(storage.Children["Agent"]);
-        Assert.Equal(["Agent", "Docs", "Secret"], storage.GetOrder().Order(StringComparer.Ordinal));
+        Assert.Equal(["Agent", "Docs", "Secret"], storage.GetOrder(UnrestrictedPermissions.Instance).Order(StringComparer.Ordinal));
         Assert.Equal(["Docs"], result.GetProperty("result").EnumerateArray().Select(name => name.GetString()));
     }
 
@@ -406,7 +407,7 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         var result = await CallAsync(tools["invoke_query"], new { path = "/Storage/Probe.md", method = "ReadEvaluatedContent" });
 
         // Assert
-        var unfiltered = ((MarkdownFile)storage.Children["Probe.md"]).ReadEvaluatedContent();
+        var unfiltered = ((MarkdownFile)storage.Children["Probe.md"]).ReadEvaluatedContent(UnrestrictedPermissions.Instance);
         Assert.Contains("Secret", unfiltered);
         var evaluated = result.GetProperty("result").GetString();
         Assert.Contains("Docs", evaluated);
@@ -478,7 +479,7 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         var result = await CallAsync(tools["invoke_query"], new { path = "/Storage", method = "SearchMetadata", parameters = new { key = "order", value = name } });
 
         // Assert
-        Assert.Single(storage.SearchMetadata(null, "order", name, null));
+        Assert.Single(storage.SearchMetadata(null, "order", name, null, UnrestrictedPermissions.Instance));
         Assert.Equal(matches ? ["|"] : [], GetMatches(result));
     }
 
@@ -678,6 +679,28 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         Assert.Equal("The subject has no property 'Host'.", set.GetProperty("error").GetString());
     }
 
+    [Theory]
+    [InlineData("Docs/Device/Host@HomeBlaze:Metadata")]
+    [InlineData("Docs/Hidden/HomeBlaze:Metadata")]
+    public async Task WhenAPageExpressionShowsMetadataTheToolsDoNotList_ThenItRendersEmpty(string path)
+    {
+        // Arrange
+        WriteFile("Docs/Device.json", $$"""{ "$type": "{{typeof(MetadataSearchTestDevice).FullName}}" }""");
+        WriteFile("Docs/Device.metadata.json", """{ "$properties": { "Host": { "comment": "kitchen" } } }""");
+        WriteFile("Docs/Hidden.json", $$"""{ "$type": "{{typeof(AgentExcludedDevice).FullName}}" }""");
+        WriteFile("Docs/Hidden.metadata.json", """{ "comment": "kitchen" }""");
+        WriteFile("Probe.md", $"Metadata: {{{{ /Storage/{path} }}}}");
+        var (tools, storage) = await CreateToolsAsync();
+
+        // Act
+        var result = await CallAsync(tools["invoke_query"], new { path = "/Storage/Probe.md", method = "ReadEvaluatedContent" });
+
+        // Assert
+        var unfiltered = ((MarkdownFile)storage.Children["Probe.md"]).ReadEvaluatedContent(UnrestrictedPermissions.Instance);
+        Assert.Contains("kitchen", unfiltered);
+        Assert.DoesNotContain("kitchen", result.GetProperty("result").GetString());
+    }
+
     [Fact]
     public async Task WhenARoleHidesABranchOrTheMetadataOfASubject_ThenSearchMetadataLeavesThemOut()
     {
@@ -754,22 +777,6 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         Assert.Equal("Docs/Pump099.json|", matches[^1]);
     }
 
-    [Fact]
-    public async Task WhenSearchMetadataReturnsAResultOfAnotherShape_ThenNoMatchIsReturned()
-    {
-        // Arrange
-        var (_, storage) = await CreateToolsAsync();
-        var subject = storage.TryGetRegisteredSubject()!;
-        var method = subject.TryGetProperty(nameof(FluentStorageContainer.SearchMetadata))!.TryGetMethodMetadata()!;
-
-        // Act
-        var result = AgentMetadataAccess.FilterSearchMetadataResult(
-            subject, method, [], new[] { "Docs/Hidden.json" }, new McpServerConfiguration { PathProvider = new StateAttributePathProvider() });
-
-        // Assert
-        Assert.Empty(Assert.IsType<MetadataSearchMatch[]>(result));
-    }
-
     private static string[] GetMatches(JsonElement result)
         => [.. result.GetProperty("result").EnumerateArray().Select(match =>
             $"{match.GetProperty("path").GetString()}|{(match.TryGetProperty("property", out var property) ? property.GetString() : null)}")];
@@ -816,7 +823,7 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
 
         root = new AgentTestRoot(context) { Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage } };
         await storage.ConnectAsync(CancellationToken.None);
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(serviceProvider, () => root, isReadOnly: false, accessPolicy);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(serviceProvider, () => root, accessPolicy);
         return (new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name), storage, configuration);
     }
 

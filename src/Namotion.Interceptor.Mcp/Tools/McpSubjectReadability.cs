@@ -7,12 +7,14 @@ using Namotion.Interceptor.Registry.Paths;
 namespace Namotion.Interceptor.Mcp.Tools;
 
 /// <summary>
-/// Whether a subject is readable for the tools, for one tool call. Without an access policy every subject is readable.
-/// With one, a subject is readable when it is the root, or when it is not empty for the policy and has a readable path:
-/// a path from the root, through one of its parents, that passes only properties the configuration's tool path
-/// provider effectively includes, which are ones the path provider effectively includes and the policy allows to read.
-/// A subject reached only through a link the registry does not track as a parent, such as a [Derived] property that
-/// returns it, has no such parent, so with a policy it is not readable, also when the policy allows every read.
+/// Whether a subject is readable for the tools, for one tool call. The policy is the configuration's
+/// <see cref="McpServerConfiguration.ReadPolicy"/>: without one, as when the access policy allows every read, every
+/// subject is readable. With one, a subject is readable when it is the root, or when it is not empty for the policy and
+/// has a readable path: a path from the root, through one of its parents, that passes only properties the
+/// configuration's tool path provider effectively includes, which are ones the path provider effectively includes and
+/// the policy allows to read. A subject reached only through a link the registry does not track as a parent, such as a
+/// [Derived] property that returns it, has no such parent, so with a policy it is not readable, also when that policy
+/// allows every read.
 /// </summary>
 /// <remarks>An instance with a policy caches per subject and is not thread-safe, so it serves one call only.</remarks>
 internal sealed class McpSubjectReadability
@@ -46,7 +48,7 @@ internal sealed class McpSubjectReadability
     /// <see cref="Unrestricted"/> instance.
     /// </summary>
     public static McpSubjectReadability For(McpServerConfiguration configuration, IInterceptorSubject rootSubject) =>
-        configuration.AccessPolicy is { } policy
+        configuration.ReadPolicy is { } policy
             ? new McpSubjectReadability(policy, rootSubject, configuration)
             : Unrestricted;
 

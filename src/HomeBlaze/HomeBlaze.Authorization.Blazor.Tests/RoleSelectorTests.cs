@@ -9,8 +9,8 @@ namespace HomeBlaze.Authorization.Blazor.Tests;
 
 public sealed class RoleSelectorTests : BunitContext, IAsyncLifetime
 {
-    // Twin and TWIN differ only in case, so neither can be used.
-    private readonly TestAuthorizationGraph _graph = TestAuthorizationGraph.Create("Kitchen", "Twin", "TWIN");
+    // A path character is not allowed in a role name, so the role cannot be used.
+    private readonly TestAuthorizationGraph _graph = TestAuthorizationGraph.Create("kitchen", "kitchen/lights");
 
     private readonly IRenderedComponent<MudPopoverProvider> _popoverProvider;
 
@@ -34,26 +34,26 @@ public sealed class RoleSelectorTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
-    public void WhenNamesDifferInCaseOrAreBlank_ThenChipsShowEachRoleOnceInItsCanonicalCasing()
+    public void WhenNamesRepeatOrAreBlank_ThenChipsShowEachNameOnceAsWritten()
     {
         // Arrange
-        IReadOnlyList<string> selected = ["everything", " ", "kitchen", "Everything", "READER"];
+        IReadOnlyList<string> selected = ["everything", " ", "kitchen", "everything", "reader"];
 
         // Act
         var component = RenderSelector(selected);
 
         // Assert
-        Assert.Equal(["Everything", "Kitchen", "Reader"], GetChipNames(component));
+        Assert.Equal(["everything", "kitchen", "reader"], GetChipNames(component));
     }
 
     [Fact]
-    public void WhenNamesAreNormalized_ThenCanonicalCasingIsUsedAndDuplicatesAndBlanksAreDropped()
+    public void WhenNamesAreNormalized_ThenDuplicatesAndBlanksAreDroppedAndNamesDifferingInCaseStayApart()
     {
         // Act
-        var names = RoleSelector.Normalize(["kitchen", "", "Ghost", "KITCHEN", "ghost", "reader"], ["Reader", "Kitchen"]);
+        var names = RoleSelector.Normalize(["kitchen", "", "ghost", "kitchen", "Kitchen"]);
 
         // Assert
-        Assert.Equal(["Kitchen", "Ghost", "Reader"], names);
+        Assert.Equal(["kitchen", "ghost", "Kitchen"], names);
     }
 
     [Fact]
@@ -65,21 +65,21 @@ public sealed class RoleSelectorTests : BunitContext, IAsyncLifetime
 
         // Act
         await component.InvokeAsync(() => select.Instance.SelectedValuesChanged.InvokeAsync(
-            [BuiltInRoles.OperatorName, BuiltInRoles.ReaderName, "Kitchen"]));
+            [BuiltInRoles.OperatorName, BuiltInRoles.ReaderName, "kitchen"]));
 
         // Assert
-        Assert.Equal([BuiltInRoles.ReaderName, BuiltInRoles.OperatorName, "Kitchen"], _changedSelection);
+        Assert.Equal([BuiltInRoles.ReaderName, BuiltInRoles.OperatorName, "kitchen"], _changedSelection);
     }
 
     [Fact]
     public void WhenARoleIsUnknown_ThenItIsShownAsAnErrorChipWithATooltip()
     {
         // Act
-        var component = RenderSelector([BuiltInRoles.ReaderName, "Ghost"]);
+        var component = RenderSelector([BuiltInRoles.ReaderName, "ghost"]);
 
         // Assert
-        Assert.Contains("mud-chip-color-error", component.Find("[data-testid='role-Ghost']").ClassName);
-        Assert.DoesNotContain("mud-chip-color-error", component.Find("[data-testid='role-Reader']").ClassName);
+        Assert.Contains("mud-chip-color-error", component.Find("[data-testid='role-ghost']").ClassName);
+        Assert.DoesNotContain("mud-chip-color-error", component.Find("[data-testid='role-reader']").ClassName);
         var tooltip = Assert.Single(component.FindComponents<MudTooltip>());
         Assert.Equal("Unknown role", tooltip.Instance.Text);
     }
@@ -88,29 +88,29 @@ public sealed class RoleSelectorTests : BunitContext, IAsyncLifetime
     public void WhenARoleExistsButCannotBeUsed_ThenItIsShownAsAnErrorChipWithTheReason()
     {
         // Act
-        var component = RenderSelector(["twin"]);
+        var component = RenderSelector(["kitchen/lights"]);
 
         // Assert
-        Assert.Contains("mud-chip-color-error", component.Find("[data-testid='role-twin']").ClassName);
+        Assert.Contains("mud-chip-color-error", component.Find("[data-testid='role-kitchen/lights']").ClassName);
         var tooltip = Assert.Single(component.FindComponents<MudTooltip>());
-        Assert.Equal("The name 'Twin' is used by more than one role, ignoring case.", tooltip.Instance.Text);
+        Assert.Equal(NameRules.GetNameError("kitchen/lights", "role name"), tooltip.Instance.Text);
     }
 
     [Fact]
     public async Task WhenTheSelectIsOpened_ThenItOffersTheRolesAndTheUnknownSelectedNames()
     {
         // Arrange
-        var component = RenderSelector(["Ghost"]);
+        var component = RenderSelector(["ghost"]);
 
         // Act
         var options = await GetOfferedNamesAsync(component);
 
         // Assert
-        Assert.Equal([BuiltInRoles.ReaderName, BuiltInRoles.OperatorName, BuiltInRoles.EverythingName, "Kitchen", "Ghost"], options);
+        Assert.Equal([BuiltInRoles.ReaderName, BuiltInRoles.OperatorName, BuiltInRoles.EverythingName, "kitchen", "ghost"], options);
     }
 
     [Fact]
-    public async Task WhenNamesAreExcluded_ThenTheyAreNotOfferedIgnoringCase()
+    public async Task WhenNamesAreExcluded_ThenExactlyTheseAreNotOffered()
     {
         // Arrange
         var component = RenderSelector([], parameters => parameters.Add(selector => selector.Excluded, ["kitchen", "READER"]));
@@ -119,26 +119,26 @@ public sealed class RoleSelectorTests : BunitContext, IAsyncLifetime
         var options = await GetOfferedNamesAsync(component);
 
         // Assert
-        Assert.Equal([BuiltInRoles.OperatorName, BuiltInRoles.EverythingName], options);
+        Assert.Equal([BuiltInRoles.ReaderName, BuiltInRoles.OperatorName, BuiltInRoles.EverythingName], options);
     }
 
     [Fact]
     public async Task WhenAChipIsClosed_ThenTheRoleIsRemovedFromTheSelection()
     {
         // Arrange
-        var component = RenderSelector([BuiltInRoles.ReaderName, "Ghost", "Kitchen"]);
+        var component = RenderSelector([BuiltInRoles.ReaderName, "ghost", "kitchen"]);
 
         // Act
-        await component.Find("[data-testid='role-Ghost'] .mud-chip-close-button").ClickAsync(new MouseEventArgs());
+        await component.Find("[data-testid='role-ghost'] .mud-chip-close-button").ClickAsync(new MouseEventArgs());
 
         // Assert
-        Assert.Equal([BuiltInRoles.ReaderName, "Kitchen"], _changedSelection);
+        Assert.Equal([BuiltInRoles.ReaderName, "kitchen"], _changedSelection);
     }
 
     [Theory]
     [InlineData(new string[0], "")]
-    [InlineData(new[] { "Reader" }, "1 role")]
-    [InlineData(new[] { "Reader", "Kitchen" }, "2 roles")]
+    [InlineData(new[] { "reader" }, "1 role")]
+    [InlineData(new[] { "reader", "kitchen" }, "2 roles")]
     public void WhenRolesAreSelected_ThenTheFieldCountsThemAndShowsNothingForNone(string[] selected, string expectedText)
     {
         // Act
@@ -156,7 +156,7 @@ public sealed class RoleSelectorTests : BunitContext, IAsyncLifetime
         var component = RenderSelector([BuiltInRoles.ReaderName], parameters => parameters.Add(selector => selector.TestId, "agent-edit-role"));
 
         // Assert
-        Assert.Equal(BuiltInRoles.ReaderName, component.Find("[data-testid='agent-edit-role-Reader']").TextContent.Trim());
+        Assert.Equal(BuiltInRoles.ReaderName, component.Find("[data-testid='agent-edit-role-reader']").TextContent.Trim());
     }
 
     private IRenderedComponent<RoleSelector> RenderSelector(

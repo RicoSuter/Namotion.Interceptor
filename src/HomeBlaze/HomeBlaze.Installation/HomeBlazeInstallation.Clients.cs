@@ -3,9 +3,11 @@ using System.ComponentModel;
 using System.Runtime.ExceptionServices;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Messaging;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services.Clients;
 using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.Installation;
@@ -160,16 +162,11 @@ public partial class HomeBlazeInstallation
         }
     }
 
-    private Task RenameConnectionAsync(ClientConnection connection, string name, CancellationToken cancellationToken)
-    {
-        var clientId = connection.ClientId;
-        if (clientId is null || !Clients.TryGetValue(clientId, out var client))
-        {
-            throw new InvalidOperationException("This browser is not known to the installation yet.");
-        }
-
-        return client.RenameAsync(name, cancellationToken);
-    }
+    // The UI runs the operation for the viewer, so that renaming requires what the operation requires.
+    private RegisteredSubjectProperty? GetRenameMember(ClientConnection connection) =>
+        connection.ClientId is { } clientId && Clients.TryGetValue(clientId, out var client)
+            ? client.TryGetMethodMember(nameof(HomeBlazeClient.RenameAsync))
+            : null;
 
     private async Task StoreClientTokenAsync(ClientConnection connection, string token)
     {

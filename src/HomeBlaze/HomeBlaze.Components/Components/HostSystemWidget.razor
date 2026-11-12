@@ -4,24 +4,27 @@
 @using HomeBlaze.Services.Display
 
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(HostSystem))]
+@inherits PermissionsComponentBase
 @implements ISubjectComponent
 
 @if (Subject is HostSystem host)
 {
+    var cpuUsage = Read(host, nameof(HostSystem.CpuUsage), host.CpuUsage);
+    var memoryUsage = Read(host, nameof(HostSystem.MemoryUsage), host.MemoryUsage);
     <MudPaper Class="pa-4" data-testid="host-system-widget">
         <MudStack Spacing="2">
             <MudStack Row="true" AlignItems="AlignItems.Center">
                 <MudIcon Icon="@Icons.Material.Filled.Computer" Class="mr-2" />
                 <MudStack Spacing="0">
-                    <MudText Typo="Typo.h6">@host.Title</MudText>
-                    <MudText Typo="Typo.caption">@host.OperatingSystemName (@host.Architecture)</MudText>
+                    <MudText Typo="Typo.h6">@ReadText(host, nameof(HostSystem.Title), host.Title)</MudText>
+                    <MudText Typo="Typo.caption">@ReadText(host, nameof(HostSystem.OperatingSystemName), host.OperatingSystemName) (@ReadText(host, nameof(HostSystem.Architecture), host.Architecture))</MudText>
                 </MudStack>
                 <MudSpacer />
-                @if (host.ContainerCpuLimit is { } cpuLimit)
+                @if (Read(host, nameof(HostSystem.ContainerCpuLimit), host.ContainerCpuLimit) is { } cpuLimit)
                 {
                     <MudChip T="string" Size="Size.Small">@cpuLimit.ToString("0.##", CultureInfo.InvariantCulture) cores</MudChip>
                 }
-                @if (host.ContainerMemoryLimit is { } memoryLimit)
+                @if (Read(host, nameof(HostSystem.ContainerMemoryLimit), host.ContainerMemoryLimit) is { } memoryLimit)
                 {
                     <MudChip T="string" Size="Size.Small">@StateUnitExtensions.FormatWithUnit(memoryLimit, StateUnit.Byte) limit</MudChip>
                 }
@@ -29,18 +32,21 @@
 
             <MudDivider />
 
-            <MudText Typo="Typo.caption">CPU @FormatPercent(host.CpuUsage)</MudText>
-            <MudProgressLinear Value="@(ValueReader.GetProgressPercent(host.CpuUsage, 0, 1) ?? 0)" Min="0" Max="100" Rounded="true" />
+            <MudText Typo="Typo.caption">CPU @FormatPercent(cpuUsage)</MudText>
+            <MudProgressLinear Value="@(ValueReader.GetProgressPercent(cpuUsage, 0, 1) ?? 0)" Min="0" Max="100" Rounded="true" />
 
-            <MudText Typo="Typo.caption">Memory @FormatMemory(host.TotalMemory, host.AvailableMemory, host.MemoryUsage)</MudText>
-            <MudProgressLinear Value="@(ValueReader.GetProgressPercent(host.MemoryUsage, 0, 1) ?? 0)" Min="0" Max="100" Rounded="true" />
+            <MudText Typo="Typo.caption">Memory @FormatMemory(Read(host, nameof(HostSystem.TotalMemory), host.TotalMemory), Read(host, nameof(HostSystem.AvailableMemory), host.AvailableMemory), memoryUsage)</MudText>
+            <MudProgressLinear Value="@(ValueReader.GetProgressPercent(memoryUsage, 0, 1) ?? 0)" Min="0" Max="100" Rounded="true" />
 
-            <MudText Typo="Typo.caption">Uptime @FormatUptime(host.Uptime)</MudText>
-            <MudText Typo="Typo.caption">
-                Process: CPU @FormatPercent(host.Process.CpuUsage),
-                memory @FormatBytes(host.Process.WorkingSet),
-                allocations @FormatRate(host.Process.AllocationRate)
-            </MudText>
+            <MudText Typo="Typo.caption">Uptime @FormatUptime(Read(host, nameof(HostSystem.Uptime), host.Uptime))</MudText>
+            @if (Shown(host) is { } process)
+            {
+                <MudText Typo="Typo.caption">
+                    Process: CPU @FormatPercent(Read(process, nameof(HostProcess.CpuUsage), process.CpuUsage)),
+                    memory @FormatBytes(Read(process, nameof(HostProcess.WorkingSet), process.WorkingSet)),
+                    allocations @FormatRate(Read(process, nameof(HostProcess.AllocationRate), process.AllocationRate))
+                </MudText>
+            }
         </MudStack>
     </MudPaper>
 }
@@ -48,6 +54,20 @@
 @code {
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
+
+    // A value the roles hide renders as missing, and a process they hide, or whose reference they hide, as absent.
+    private HostProcess? Shown(HostSystem host) =>
+        host.Process is { } process && CanRead(host, nameof(HostSystem.Process)) && Permissions.CanShow(process) ? process : null;
+
+    private bool CanRead(IInterceptorSubject subject, string propertyName) =>
+        subject.TryGetRegisteredProperty(propertyName) is { } property && Permissions.CanReadShown(property);
+
+    private T? Read<T>(IInterceptorSubject subject, string propertyName, T? value)
+        where T : struct =>
+        CanRead(subject, propertyName) ? value : null;
+
+    private string ReadText(IInterceptorSubject subject, string propertyName, string? value) =>
+        CanRead(subject, propertyName) && value is not null ? value : ValueReader.MissingText;
 
     private static string FormatPercent(decimal? fraction) =>
         fraction is { } value ? StateUnitExtensions.FormatPercent(value) : ValueReader.MissingText;

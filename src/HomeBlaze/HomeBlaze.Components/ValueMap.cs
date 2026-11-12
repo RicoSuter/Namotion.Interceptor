@@ -3,6 +3,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.TimeZones;
 using HomeBlaze.Services;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services.Display;
 using Namotion.Interceptor.Attributes;
 
@@ -37,7 +38,8 @@ public partial class ValueMap : IConfigurable, ITitleProvider, IValueMap
     /// </summary>
     /// <param name="binding">The value and its subject.</param>
     /// <param name="resolver">The resolver of the paths of the conditions.</param>
-    public ValueMapCase? FindCase(in ValueBinding binding, SubjectPathResolver resolver)
+    /// <param name="permissions">The permissions of the viewer, for whom a property of a condition that it may not read is missing.</param>
+    public ValueMapCase? FindCase(in ValueBinding binding, SubjectPathResolver resolver, IUserPermissions permissions)
     {
         // Formatted once, when the first case with a value needs it: formatting a number allocates a text.
         string? rawText = null;
@@ -50,7 +52,7 @@ public partial class ValueMap : IConfigurable, ITitleProvider, IValueMap
                 isFormatted = true;
             }
 
-            if (valueCase.Matches(rawText, binding, resolver))
+            if (valueCase.Matches(rawText, binding, resolver, permissions))
             {
                 return valueCase;
             }
@@ -91,8 +93,8 @@ public partial class ValueMap : IConfigurable, ITitleProvider, IValueMap
     }
 
     /// <inheritdoc />
-    public string? GetText(in ValueBinding binding, SubjectPathResolver resolver, ITimeZoneDisplay? timeZone) =>
-        FindCase(binding, resolver)?.GetText(binding, resolver, timeZone);
+    public string? GetText(in ValueBinding binding, SubjectPathResolver resolver, ITimeZoneDisplay? timeZone, IUserPermissions permissions) =>
+        FindCase(binding, resolver, permissions)?.GetText(binding, resolver, timeZone, permissions);
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }

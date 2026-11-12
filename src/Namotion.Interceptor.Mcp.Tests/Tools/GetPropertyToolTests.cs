@@ -21,7 +21,7 @@ public class GetPropertyToolTests
         var config = new McpServerConfiguration
         {
             PathProvider = DefaultPathProvider.Instance,
-            IsReadOnly = false
+            AccessPolicy = AllowAllMcpAccessPolicy.Instance
         };
         var factory = new McpToolFactory(room, config);
         var tool = factory.CreateTools().First(t => t.Name == "get_property");
@@ -64,7 +64,7 @@ public class GetPropertyToolTests
     }
 
     [Fact]
-    public async Task WhenReadOnly_ThenIsWritableIsOmitted()
+    public async Task WhenNoPolicyIsSet_ThenIsWritableIsOmitted()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -75,8 +75,7 @@ public class GetPropertyToolTests
 
         var config = new McpServerConfiguration
         {
-            PathProvider = DefaultPathProvider.Instance,
-            IsReadOnly = true
+            PathProvider = DefaultPathProvider.Instance
         };
         var factory = new McpToolFactory(room, config);
         var tool = factory.CreateTools().First(t => t.Name == "get_property");
@@ -103,7 +102,7 @@ public class GetPropertyToolTests
         var config = new McpServerConfiguration
         {
             PathProvider = DefaultPathProvider.Instance,
-            IsReadOnly = false
+            AccessPolicy = AllowAllMcpAccessPolicy.Instance
         };
         var factory = new McpToolFactory(sensor, config);
         var tool = factory.CreateTools().First(t => t.Name == "get_property");

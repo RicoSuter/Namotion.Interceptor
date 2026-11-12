@@ -9,7 +9,7 @@ public class RoleClosureTests
     private static List<CompiledRole> Resolve(AuthorizationRole[] roles, params string[] roleNames)
         => RoleClosure.Resolve(
             RoleClosure.Index(roles).ToDictionary(
-                pair => pair.Key, pair => new CompiledRole(pair.Value, [], [], Error: null), StringComparer.OrdinalIgnoreCase),
+                pair => pair.Key, pair => new CompiledRole(pair.Value, [], [], Error: null), StringComparer.Ordinal),
             roleNames);
 
     [Fact]
@@ -26,16 +26,16 @@ public class RoleClosureTests
     }
 
     [Fact]
-    public void WhenRoleNamesDifferInCase_ThenTheyResolveToTheSameRole()
+    public void WhenRoleNamesDifferInCase_ThenTheyNameDifferentRoles()
     {
         // Arrange
         AuthorizationRole[] roles = [Role("Reader"), Role("Agent", "READER")];
 
         // Act
-        var closure = Resolve(roles, "agent");
+        var exception = Assert.Throws<AuthorizationException>(() => Resolve(roles, "Agent"));
 
         // Assert
-        Assert.Equal(["Reader", "Agent"], closure.Select(compiled => compiled.Role.Name));
+        Assert.Equal("Role 'Agent' includes 'READER', which is not defined.", exception.Message);
     }
 
     [Fact]
@@ -68,13 +68,13 @@ public class RoleClosureTests
     public void WhenTwoRolesShareAName_ThenResolveThrows()
     {
         // Arrange
-        AuthorizationRole[] roles = [Role("Reader"), Role("reader")];
+        AuthorizationRole[] roles = [Role("Reader"), Role("Reader")];
 
         // Act
         var exception = Assert.Throws<AuthorizationException>(() => Resolve(roles, "Reader"));
 
         // Assert
-        Assert.Equal("Role 'reader' is defined more than once.", exception.Message);
+        Assert.Equal("Role 'Reader' is defined more than once.", exception.Message);
     }
 
     [Fact]
@@ -116,10 +116,10 @@ public class RoleClosureTests
     public void WhenARoleIsNamedTwiceAndAlsoIncluded_ThenItIsResolvedOnce()
     {
         // Arrange
-        AuthorizationRole[] roles = [Role("Reader"), Role("Agent", "reader")];
+        AuthorizationRole[] roles = [Role("Reader"), Role("Agent", "Reader")];
 
         // Act
-        var closure = Resolve(roles, "READER", "agent", "Reader");
+        var closure = Resolve(roles, "Reader", "Agent", "Reader");
 
         // Assert
         Assert.Equal(["Reader", "Agent"], closure.Select(compiled => compiled.Role.Name));

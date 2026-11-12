@@ -85,7 +85,7 @@ public partial class HomeBlazeClient :
     public Task<NotificationResult> SendNotificationAsync(Notification notification, CancellationToken cancellationToken) =>
         RequiredInstallation.SendNotificationAsync(this, notification, cancellationToken);
 
-    [Operation(Title = "Rename", Icon = "Edit", Position = 1, Description = "Names this client, which keeps it when its browser closes.")]
+    [Operation(Title = "Rename", Icon = "Edit", Position = 1, RequiresAdministration = true, Description = "Names this client, which keeps it when its browser closes.")]
     public async Task RenameAsync(string name, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -96,7 +96,7 @@ public partial class HomeBlazeClient :
         await installation.WriteClientConfigurationAsync(cancellationToken);
     }
 
-    [Operation(Title = "Forget", Icon = "Delete", Position = 2, RequiresConfirmation = true,
+    [Operation(Title = "Forget", Icon = "Delete", Position = 2, RequiresConfirmation = true, RequiresAdministration = true,
         Description = "Removes the name of this client; its open tabs become anonymous clients again.")]
     public async Task ForgetAsync(CancellationToken cancellationToken)
     {

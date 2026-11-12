@@ -1,10 +1,11 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Widget))]
 @implements ISubjectComponent
+@inherits PermissionsComponentBase
 
 @{
-    // Resolved once per render and never kept: its render records the read, so that it renders again when it changes.
+    // Resolved once per render and never kept: its render records the reads, so that it renders again when one changes.
     var widget = Subject as Widget;
-    var resolvedSubject = widget?.ResolvedSubject;
+    var resolvedSubject = widget?.ResolveSubject(widget.Path, Permissions);
 }
 
 @if (widget is null || resolvedSubject is null)

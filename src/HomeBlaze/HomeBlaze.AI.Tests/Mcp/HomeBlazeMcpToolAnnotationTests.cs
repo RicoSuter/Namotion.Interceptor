@@ -17,9 +17,9 @@ public class HomeBlazeMcpToolAnnotationTests
     public async Task WhenAClientListsTheToolsOverHttp_ThenReadToolsAreReadOnlyWriteToolsDestructiveAndOnlyOperationsOpenWorld()
     {
         // Arrange
-        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
+        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup();
         var configuration = HomeBlazeMcpConfigurationFactory.Create(
-            HomeBlazeMcpConfigurationFactoryTests.CreateServices(), () => room, isReadOnly: false, TestAccessPolicies.Everything);
+            HomeBlazeMcpConfigurationFactoryTests.CreateServices(), () => room, TestAccessPolicies.Everything);
 
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
@@ -48,7 +48,7 @@ public class HomeBlazeMcpToolAnnotationTests
             Assert.False(tools[name]!.OpenWorldHint, name);
         }
 
-        foreach (var name in new[] { "set_property", "invoke_operation", "edit_markdown", "write_markdown", "create_markdown" })
+        foreach (var name in new[] { "set_property", "invoke_operation", "edit_markdown", "write_markdown" })
         {
             Assert.False(tools[name]!.ReadOnlyHint, name);
             Assert.True(tools[name]!.DestructiveHint, name);

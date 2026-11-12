@@ -86,16 +86,16 @@ public abstract partial class LlmAgentBase
         var rolesError = GetRolesError(result);
         lock (_stateLock)
         {
-            StoreRolesErrorIfNewer(computation, rolesError);
+            StoreRolesErrorIfNewer(computation, roles, rolesError);
         }
 
-        return new AuthorizationMcpAccessPolicy(() => _services.AuthorizationService.GetPolicy(Roles).Policy);
+        return new AuthorizationMcpAccessPolicy(() => _services.AuthorizationService.GetPolicy(Roles ?? []).Policy);
     }
 
     private AgentToolSet CreateToolSet(string[] allowedTools, AuthorizationMcpAccessPolicy accessPolicy, IProgress<AgentTurnUpdate> progress)
     {
         var canEditPageLayout = AgentToolSet.CanEditPageLayout(allowedTools);
-        var available = _services.ToolSource.CreateTools(AgentToolSet.IsReadOnly(allowedTools), accessPolicy)
+        var available = _services.ToolSource.CreateTools(accessPolicy)
             .Select(tool => WithCallScope(tool, canEditPageLayout && AgentToolSet.WritesPages(tool.Name), accessPolicy))
             .ToList();
         return AgentToolSet.Create(available, allowedTools, Memory.CreateUpdateTool(), MaxToolCallsPerTurn, progress);

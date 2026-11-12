@@ -1,5 +1,8 @@
 using Bunit;
+using HomeBlaze.Authorization.Abstractions;
+using HomeBlaze.Components.Tests.Access;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Components;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,7 +14,7 @@ using Xunit;
 namespace HomeBlaze.Authorization.Blazor.Tests;
 
 /// <summary>
-/// Renders the role editor over a graph with the custom roles Kitchen and Garden, with the services it needs and helpers
+/// Renders the role editor over a graph with the custom roles Kitchen and Garden, with the services it needs, a fake role store, a viewer who may do everything until a test restricts them, and helpers
 /// to drive its rule cards.
 /// </summary>
 public abstract class RoleEditorTestContext : BunitContext, IAsyncLifetime
@@ -19,9 +22,12 @@ public abstract class RoleEditorTestContext : BunitContext, IAsyncLifetime
     private readonly ServiceProvider _serializerServices = new ServiceCollection().BuildServiceProvider();
     private readonly RootManager _rootManager;
 
-    private protected TestAuthorizationGraph Graph { get; } = TestAuthorizationGraph.Create("Kitchen", "Garden");
+    private protected TestAuthorizationGraph Graph { get; } = TestAuthorizationGraph.Create("kitchen", "garden");
 
     protected IRenderedComponent<MudPopoverProvider> PopoverProvider { get; }
+
+    /// <summary>The permissions of the viewer, who may do everything until a test restricts them.</summary>
+    private protected TestUserPermissions Permissions { get; } = new();
 
     protected RoleEditorTestContext()
     {
@@ -29,6 +35,8 @@ public abstract class RoleEditorTestContext : BunitContext, IAsyncLifetime
         Services.AddMudServices();
         Services.AddSingleton(Graph.Service);
         Services.AddSingleton(Graph.PathResolver);
+        Services.AddSingleton<IRoleStore>(Graph.RoleStore);
+        Services.AddSingleton<IUserPermissions>(Permissions);
 
         // The path picker lists the subjects of the root manager, which has none here; a path is typed into it instead.
         var pickerTypes = new TypeProvider();
@@ -42,6 +50,7 @@ public abstract class RoleEditorTestContext : BunitContext, IAsyncLifetime
         var typeProvider = new TypeProvider();
         typeProvider.AddTypes([typeof(Role), typeof(TestRoot)]);
         Services.AddSingleton(new SubjectTypeCatalog(new SubjectTypeRegistry(typeProvider)));
+        Services.AddSingleton(new SubjectComponentRegistry(new TypeProvider().AddAssembly(typeof(RoleEditComponent).Assembly)));
 
         PopoverProvider = Render<MudPopoverProvider>();
     }

@@ -1,13 +1,20 @@
 using System.Text;
+using HomeBlaze.Authentication;
+using HomeBlaze.Authentication.Data;
+using HomeBlaze.Authorization;
 using HomeBlaze.Components;
 using HomeBlaze.E2E.Tests.Models;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Files;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Testing;
+
+// Every fixture starts a server over the same test data, so no two collections may run at once.
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
 
 namespace HomeBlaze.E2E.Tests.Infrastructure;
 
@@ -17,10 +24,22 @@ namespace HomeBlaze.E2E.Tests.Infrastructure;
 /// </summary>
 public class PlaywrightFixture : IAsyncLifetime
 {
+    /// <summary>The password of the administrator, once the fixture claimed it, and of every person of <see cref="AddPersonAsync"/>.</summary>
+    public const string Password = "e2e-test-password";
+
+
+    private readonly string _authenticationDirectory = Path.Combine(Path.GetTempPath(), "HomeBlaze.E2E", Guid.NewGuid().ToString("N"));
+
     private IPlaywright? _playwright;
     private IBrowser? _browser;
     private WebTestingHostFactory<App>? _factory;
     private IBrowserContext? _context;
+
+    // The cookies of the signed-in administrator, which every page signed in as the administrator starts with.
+    private string? _adminStorageState;
+
+    // Counts the browser contexts of every fixture, each of which gets a client address of its own.
+    private static int _clientCount;
 
     // Where the server log stood when the current page was created, see WaitForUrlAsync.
     private int _serverLogCountAtPage;
@@ -44,10 +63,19 @@ public class PlaywrightFixture : IAsyncLifetime
     /// </summary>
     public ServerLogRecorder ServerLog => _factory?.ServerLog ?? throw new InvalidOperationException("Server not started");
 
+    /// <summary>
+    /// Whether the fixture sets <see cref="Password"/> for the seeded administrator and signs them in, so that the pages of
+    /// <see cref="CreatePageAsync(BrowserNewContextOptions?)"/> are signed in as a full administrator. When false, the
+    /// administrator keeps the empty password of seeding and those pages are not signed in.
+    /// </summary>
+    protected virtual bool ClaimsAdministrator => true;
+
     public async Task InitializeAsync()
     {
         // Start the test server with Kestrel. It learns the test subjects and the widget before it loads anything.
-        _factory = new WebTestingHostFactory<App>([typeof(ControlsTestSubject), typeof(ControlsTestWidget), typeof(HistoryValuesSubject), typeof(LiveValuesSubject), typeof(LiveGridSubject), typeof(LiveGridWidget)]);
+        _factory = new WebTestingHostFactory<App>(
+            [typeof(ControlsTestSubject), typeof(ControlsTestWidget), typeof(HistoryValuesSubject), typeof(LiveValuesSubject), typeof(LiveGridSubject), typeof(LiveGridWidget)],
+            Path.Combine(_authenticationDirectory, "authentication.db"));
         // Accessing the address starts the server
         var address = _factory.ServerAddress;
         Console.WriteLine($"Test server started at: {address}");
@@ -91,6 +119,35 @@ public class PlaywrightFixture : IAsyncLifetime
         {
             Headless = true,
         });
+
+        // The startup seeds the administrator and loads the users in the background, after the root is loaded.
+        var database = ServerServices.GetRequiredService<AuthenticationDatabase>();
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => database.IsReady, TimeSpan.FromSeconds(60));
+        }
+        catch (TimeoutException exception)
+        {
+            throw new TimeoutException($"Authentication was not ready before the tests started: {database.UnavailableReason}", exception);
+        }
+
+        // The user operations act on the members of the Authorization subject, which the startup adds to the root
+        // storage in the background after its scan; until the users are written to it, every user change is refused.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => GetRoot().Children.Values.OfType<Authorization.Authorization>().Any(
+                authorization => authorization.Users.ContainsKey(AdminSeeding.AdminUserName)),
+            () => "The Authorization subject did not show the users before the tests started: " +
+                string.Join(", ", GetRoot().Children.Select(child => $"{child.Key}={child.Value.GetType().Name}" +
+                    (child.Value is Authorization.Authorization authorization ? $"[{string.Join(",", authorization.Users.Keys)}]" : ""))),
+            TimeSpan.FromSeconds(60));
+
+        if (ClaimsAdministrator)
+        {
+            await SetPasswordAsync(AdminSeeding.AdminUserName);
+            var page = await CreatePageAsync(SignedInAs.None);
+            await SignInAsync(page, AdminSeeding.AdminUserName, Password);
+            _adminStorageState = await page.Context.StorageStateAsync();
+        }
     }
 
     public async Task DisposeAsync()
@@ -108,6 +165,119 @@ public class PlaywrightFixture : IAsyncLifetime
 
         _playwright?.Dispose();
         _factory?.Dispose();
+
+        try
+        {
+            Directory.Delete(_authenticationDirectory, recursive: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Below the temporary folder, which the system cleans up.
+        }
+    }
+
+    /// <summary>
+    /// Adds a person holding <paramref name="roles"/> as the seeded administrator does in the Users tab, and gives them
+    /// <see cref="Password"/>, so that <see cref="SignedInAs.User"/> signs them in at once.
+    /// </summary>
+    public async Task AddPersonAsync(string userName, params string[] roles)
+    {
+        var result = await CreateAdministration().AddUserAsync(userName, null, roles, CancellationToken.None);
+        if (!result.Succeeded)
+        {
+            throw new InvalidOperationException($"The person {userName} could not be added: {result.Error}");
+        }
+
+        await SetPasswordAsync(userName);
+    }
+
+    /// <summary>Removes a person of <see cref="AddPersonAsync"/> as the seeded administrator.</summary>
+    public async Task RemovePersonAsync(string userName)
+    {
+        var result = await CreateAdministration().RemoveAsync(userName, CancellationToken.None);
+        if (!result.Succeeded)
+        {
+            throw new InvalidOperationException($"The person {userName} could not be removed: {result.Error}");
+        }
+    }
+
+    /// <summary>The user administration acting as the seeded administrator, a full administrator.</summary>
+    public IUserAdministration CreateAdministration()
+    {
+        var userStore = ServerServices.GetRequiredService<UserStore>();
+        var adminId = userStore.GetUserId(AdminSeeding.AdminUserName)
+            ?? throw new InvalidOperationException("The seeded administrator does not exist");
+        return new UserAdministration(userStore, () => adminId);
+    }
+
+    /// <summary>
+    /// Signs in through the sign-in dialog of the app at <paramref name="path"/>, the one the app shows to a visitor it stops
+    /// or the one of the user menu, and waits until the page has loaded anew signed in: with the user menu, or, for a
+    /// person who must set a password, with the dialog that sets it.
+    /// </summary>
+    public async Task SignInAsync(IPage page, string userName, string password, string path = "")
+    {
+        await page.GotoAsync($"{ServerAddress}{path}");
+        await FillSignInDialogAsync(page, userName, password);
+        await Assertions.Expect(page.GetByTestId("user-menu").Or(page.GetByTestId("set-password-dialog")))
+            .ToBeVisibleAsync();
+    }
+
+    /// <summary>
+    /// Opens the sign-in dialog of the current page, from the user menu when the app shows, and submits
+    /// <paramref name="userName"/> and <paramref name="password"/>.
+    /// </summary>
+    public static async Task FillSignInDialogAsync(IPage page, string userName, string password)
+    {
+        var userNameInput = page.Locator("#sign-in-user-name");
+        var menuSignIn = page.GetByTestId("user-menu-sign-in");
+        await Assertions.Expect(userNameInput.Or(menuSignIn)).ToBeVisibleAsync();
+        if (!await userNameInput.IsVisibleAsync())
+        {
+            await page.WaitUntilInteractiveAsync();
+            await menuSignIn.ClickAsync();
+        }
+
+        await page.GetByRole(AriaRole.Dialog).WaitForDialogFocusAsync();
+        await userNameInput.FillAsync(userName);
+        await page.Locator("#sign-in-password").FillAsync(password);
+        // Enabled once the script of the form is attached, which posts it to the endpoint that sets the cookie.
+        await page.GetByTestId("sign-in-form").GetByRole(AriaRole.Button, new() { Name = "Sign in", Exact = true }).ClickAsync();
+    }
+
+    /// <summary>
+    /// Resets the seeded administrator to the empty password of seeding, as <c>--reset-admin</c> does, which ends every
+    /// session, and reloads the users.
+    /// </summary>
+    public async Task RestoreUnclaimedAdministratorAsync()
+    {
+        await AdminSeeding.ResetAdminAsync(
+            ServerServices.GetRequiredService<IServiceScopeFactory>(), ServerServices.GetRequiredService<AuthenticationDatabase>(), CancellationToken.None);
+        await ServerServices.GetRequiredService<UserStore>().LoadAsync(CancellationToken.None);
+    }
+
+    // Through Identity, as the password endpoint stores a password, so that the person signs in without setting one first.
+    private async Task SetPasswordAsync(string userName)
+    {
+        await using var scope = ServerServices.CreateAsyncScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var user = await userManager.FindByNameAsync(userName)
+            ?? throw new InvalidOperationException($"The user {userName} does not exist");
+
+        ThrowIfFailed(await userManager.AddPasswordAsync(user, Password), userName);
+        user.MustChangePassword = false;
+        user.AllowsEmptyPassword = false;
+        ThrowIfFailed(await userManager.UpdateSecurityStampAsync(user), userName);
+        await ServerServices.GetRequiredService<UserStore>().RefreshUserAsync(user.Id, CancellationToken.None);
+    }
+
+    private static void ThrowIfFailed(IdentityResult result, string userName)
+    {
+        if (!result.Succeeded)
+        {
+            throw new InvalidOperationException(
+                $"The password of {userName} could not be set: {string.Join(" ", result.Errors.Select(error => error.Description))}");
+        }
     }
 
     /// <summary>
@@ -413,12 +583,25 @@ public class PlaywrightFixture : IAsyncLifetime
     }
 
     /// <summary>
-    /// Creates a new browser context and page for isolated test execution.
+    /// Creates a new browser context and page for isolated test execution, signed in as the administrator when the fixture
+    /// claimed them (see <see cref="ClaimsAdministrator"/>), otherwise not signed in.
     /// Closes the previous test's context, so only one is ever open.
     /// </summary>
     /// <param name="contextOptions">The options of the browser context, such as a touch device, or null for the defaults.</param>
-    public async Task<IPage> CreatePageAsync(BrowserNewContextOptions? contextOptions = null)
+    public Task<IPage> CreatePageAsync(BrowserNewContextOptions? contextOptions = null)
+        => CreatePageAsync(_adminStorageState is null ? SignedInAs.None : SignedInAs.Admin, contextOptions);
+
+    /// <summary>
+    /// Creates a new browser context and page signed in as <paramref name="user"/>: the administrator with the cookies of
+    /// the fixture, a person through the sign-in dialog with <see cref="Password"/>, which leaves the page on the start page
+    /// of the app. Closes the previous test's context, so only one is ever open.
+    /// </summary>
+    /// <param name="user">Who the page is signed in as.</param>
+    /// <param name="contextOptions">The options of the browser context, such as a touch device, or null for the defaults.</param>
+    public async Task<IPage> CreatePageAsync(SignedInAs user, BrowserNewContextOptions? contextOptions = null)
     {
+        ArgumentNullException.ThrowIfNull(user);
+
         // An open context keeps its page's Blazor circuit alive, and the host renders every connected
         // circuit on each state change. Holding one per test for the whole run left the last tests
         // contending with two dozen idle circuits, which was enough on a two core runner for a freshly
@@ -429,10 +612,30 @@ public class PlaywrightFixture : IAsyncLifetime
             await _context.CloseAsync();
         }
 
+        var options = contextOptions is null ? new BrowserNewContextOptions() : new BrowserNewContextOptions(contextOptions);
+        options.ExtraHTTPHeaders = new Dictionary<string, string>(options.ExtraHTTPHeaders ?? new Dictionary<string, string>())
+        {
+            ["X-Forwarded-For"] = CreateClientAddress()
+        };
+        if (ReferenceEquals(user, SignedInAs.Admin))
+        {
+            options.StorageState = _adminStorageState
+                ?? throw new InvalidOperationException("This fixture did not sign in the administrator");
+        }
+
         _serverLogCountAtPage = ServerLog.Count;
-        _context = await Browser.NewContextAsync(contextOptions);
-        return await _context.NewPageAsync();
+        _context = await Browser.NewContextAsync(options);
+        var page = await _context.NewPageAsync();
+        if (user.UserName is { } userName && !ReferenceEquals(user, SignedInAs.Admin))
+        {
+            await SignInAsync(page, userName, Password);
+        }
+
+        return page;
     }
+
+    // A network of its own per browser context, as the rate limits count an IPv6 /64 network as one client.
+    private static string CreateClientAddress() => $"2001:db8:{Interlocked.Increment(ref _clientCount):x}::1";
 
     /// <summary>
     /// Waits until the app has navigated the page to a URL that <paramref name="isUrl"/> accepts. A timeout fails with what the
@@ -464,5 +667,22 @@ public class PlaywrightFixture : IAsyncLifetime
 /// </summary>
 [CollectionDefinition(nameof(PlaywrightCollection))]
 public class PlaywrightCollection : ICollectionFixture<PlaywrightFixture>
+{
+}
+
+/// <summary>
+/// A fixture with a server of its own whose seeded administrator keeps the empty password of seeding, and whose pages
+/// are not signed in by default.
+/// </summary>
+public sealed class UnclaimedAdministratorFixture : PlaywrightFixture
+{
+    protected override bool ClaimsAdministrator => false;
+}
+
+/// <summary>
+/// Collection definition for tests that need the seeded administrator as seeding leaves them.
+/// </summary>
+[CollectionDefinition(nameof(UnclaimedAdministratorCollection))]
+public class UnclaimedAdministratorCollection : ICollectionFixture<UnclaimedAdministratorFixture>
 {
 }

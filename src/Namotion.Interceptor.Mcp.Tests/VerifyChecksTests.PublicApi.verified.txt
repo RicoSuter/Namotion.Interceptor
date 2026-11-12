@@ -38,22 +38,18 @@ namespace Namotion.Interceptor.Mcp.Abstractions
         public System.Type Type { get; init; }
     }
 }
-namespace Namotion.Interceptor.Mcp.Extensions
-{
-    public static class ServiceCollectionExtensions
-    {
-        public static Microsoft.Extensions.DependencyInjection.IMcpServerBuilder WithSubjectRegistryTools(this Microsoft.Extensions.DependencyInjection.IMcpServerBuilder builder, System.Func<Namotion.Interceptor.IInterceptorSubject> rootSubjectProvider, Namotion.Interceptor.Mcp.McpServerConfiguration configuration) { }
-        public static Microsoft.Extensions.DependencyInjection.IMcpServerBuilder WithSubjectRegistryTools(this Microsoft.Extensions.DependencyInjection.IMcpServerBuilder builder, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> rootSubjectProvider, System.Func<System.IServiceProvider, Namotion.Interceptor.Mcp.McpServerConfiguration> configurationFactory) { }
-    }
-}
 namespace Namotion.Interceptor.Mcp
 {
+    public sealed class AllowAllMcpAccessPolicy : Namotion.Interceptor.Mcp.Abstractions.IMcpAccessPolicy
+    {
+        public static Namotion.Interceptor.Mcp.AllowAllMcpAccessPolicy Instance { get; }
+        public bool IsAllowed(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, string action) { }
+    }
     public class McpServerConfiguration
     {
         public McpServerConfiguration() { }
-        public Namotion.Interceptor.Mcp.Abstractions.IMcpAccessPolicy? AccessPolicy { get; init; }
+        public Namotion.Interceptor.Mcp.Abstractions.IMcpAccessPolicy AccessPolicy { get; init; }
         public System.Type[] ExcludeTypes { get; init; }
-        public bool IsReadOnly { get; init; }
         public int MaxDepth { get; init; }
         public int MaxSubjectsPerResponse { get; init; }
         public string PathPrefix { get; init; }
@@ -104,6 +100,19 @@ namespace Namotion.Interceptor.Mcp
     public static class McpToolInfoExtensions
     {
         public static Microsoft.Extensions.AI.AIFunction ToAIFunction(this Namotion.Interceptor.Mcp.McpToolInfo tool) { }
+    }
+    public sealed class ReadOnlyMcpAccessPolicy : Namotion.Interceptor.Mcp.Abstractions.IMcpAccessPolicy
+    {
+        public static Namotion.Interceptor.Mcp.ReadOnlyMcpAccessPolicy Instance { get; }
+        public bool IsAllowed(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, string action) { }
+    }
+}
+namespace Namotion.Interceptor.Mcp.Extensions
+{
+    public static class ServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IMcpServerBuilder WithSubjectRegistryTools(this Microsoft.Extensions.DependencyInjection.IMcpServerBuilder builder, System.Func<Namotion.Interceptor.IInterceptorSubject> rootSubjectProvider, Namotion.Interceptor.Mcp.McpServerConfiguration configuration) { }
+        public static Microsoft.Extensions.DependencyInjection.IMcpServerBuilder WithSubjectRegistryTools(this Microsoft.Extensions.DependencyInjection.IMcpServerBuilder builder, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> rootSubjectProvider, System.Func<System.IServiceProvider, Namotion.Interceptor.Mcp.McpServerConfiguration> configurationFactory) { }
     }
 }
 namespace Namotion.Interceptor.Mcp.Models

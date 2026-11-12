@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using MudBlazor;
 using Namotion.Interceptor.Authorization;
-using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace HomeBlaze.Authorization.Blazor.Tests;
@@ -17,9 +16,7 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
     public void WhenChipsAreShown_ThenEachHasARemoveButtonTheKeyboardReachesNamedAfterItsValue()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Includes = [BuiltInRoles.ReaderName];
-        role.Allow = [new PermissionRule { Members = ["TurnOn"], Tags = ["state"], Actions = [PermissionAction.Read, new PermissionAction("run")] }];
+        var role = Graph.SetRole("kitchen", includes: [BuiltInRoles.ReaderName], allow: [new PermissionRule { Members = ["TurnOn"], Tags = ["state"], Actions = [PermissionAction.Read, new PermissionAction("run")] }]);
 
         // Act
         var component = RenderEditor(role);
@@ -27,7 +24,7 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
         // Assert
         var removeButtons = component.FindAll(".mud-chip .mud-chip-close-button");
         Assert.Equal(
-            ["Remove Reader", "Remove TurnOn", "Remove state", "Remove run"],
+            ["Remove reader", "Remove TurnOn", "Remove state", "Remove run"],
             removeButtons.Select(button => button.GetAttribute("aria-label")));
         Assert.All(removeButtons, button => Assert.Null(button.GetAttribute("tabindex")));
     }
@@ -36,8 +33,7 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
     public async Task WhenTheRemoveButtonOfAChipIsPressed_ThenItsValueIsRemoved()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Members = ["TurnOn", "TurnOff"], Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Members = ["TurnOn", "TurnOff"], Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -53,8 +49,7 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
     public async Task WhenBackspaceIsPressedInTheEmptyField_ThenTheLastChipIsRemoved(string input)
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Types = ["TestRoot", "Role"], Members = ["TurnOn", "TurnOff"], Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Types = ["TestRoot", "Role"], Members = ["TurnOn", "TurnOff"], Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -71,8 +66,7 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
     public async Task WhenBackspaceIsPressedInAFieldWithText_ThenNoChipIsRemoved(string input)
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Types = ["TestRoot"], Members = ["TurnOn"], Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Types = ["TestRoot"], Members = ["TurnOn"], Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
         await FindInput(component, input).InputAsync(new ChangeEventArgs { Value = "Te" });
 
@@ -91,8 +85,7 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
     public async Task WhenBackspaceIsHeldDownInTheEmptyField_ThenOnlyTheLastChipIsRemoved(string input)
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Types = ["TestRoot", "Role", "TestDevice"], Members = ["TurnOn", "TurnOff", "Toggle"], Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Types = ["TestRoot", "Role", "TestDevice"], Members = ["TurnOn", "TurnOff", "Toggle"], Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -111,8 +104,7 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
     public async Task WhenTheRemoveButtonOfTheLastChipIsPressed_ThenTheFieldGetsTheFocus(string input)
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Types = ["TestRoot", "Role"], Members = ["TurnOn", "TurnOff"], Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Types = ["TestRoot", "Role"], Members = ["TurnOn", "TurnOff"], Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -127,8 +119,7 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
     public async Task WhenTheRemoveButtonOfAChipBeforeTheLastIsPressed_ThenTheFocusIsNotMoved()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Members = ["TurnOn", "TurnOff"], Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Members = ["TurnOn", "TurnOff"], Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -143,8 +134,7 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
     public void WhenAPathCanBePicked_ThenItsBrowseButtonIsNextToTheFieldWhereTheKeyboardReachesIt()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
 
         // Act
         var component = RenderEditor(role);
@@ -160,8 +150,7 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
     public async Task WhenKeysChangeNothingShown_ThenTheFieldDoesNotRenderAndATypedKeyRendersItAtMostOnce()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
         // The Add button renders again exactly when its field does.
         var field = component.FindComponents<ChipListInput>().Single(input => input.Instance.TestId == "rule-types");
@@ -177,7 +166,7 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
         var rendersOfFirstKey = addButton.RenderCount - renders;
         // The search the typed text starts after a delay renders the field on a timer thread with a new handler of input,
         // which an input dispatched meanwhile would no longer find; opening the suggestions renders no Add button.
-        await component.WaitForAssertionAsync(() => Assert.True(autocomplete.Instance.Open), TestTimeouts.Default);
+        await component.WaitForAssertionAsync(() => Assert.True(autocomplete.Instance.Open));
         await input.FocusInAsync(new FocusEventArgs());
         await input.KeyDownAsync(new KeyboardEventArgs { Key = "e" });
         await input.InputAsync(new ChangeEventArgs { Value = "Te" });
@@ -192,16 +181,15 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
     public async Task WhenEnterIsPressedOnTypedText_ThenTheTypedTextIsAddedRatherThanAMatchingSuggestion()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
-        await TypeUntilSuggestionsOpenAsync(component, "Rol");
+        await TypeUntilSuggestionsOpenAsync(component, "rol");
 
         // Act
         await PressAsync(component, "Enter");
 
         // Assert
-        Assert.Equal(["Rol"], component.Instance.GetEditedRole().Allow[0].Types.ToArray());
+        Assert.Equal(["rol"], component.Instance.GetEditedRole().Allow[0].Types.ToArray());
         Assert.True(string.IsNullOrEmpty(FindInput(component, "rule-types").GetAttribute("value")));
     }
 
@@ -209,10 +197,9 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
     public async Task WhenASuggestionIsChosenWithTheArrowKeysAndEnterIsPressed_ThenTheSuggestionIsAdded()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
-        await TypeUntilSuggestionsOpenAsync(component, "Rol");
+        await TypeUntilSuggestionsOpenAsync(component, "rol");
 
         // Act: the typed text is the first suggestion, the role type the second.
         await PressAsync(component, "ArrowDown");
@@ -226,10 +213,9 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
     public async Task WhenAChosenSuggestionIsDismissedWithEscape_ThenEnterAddsTheTypedText()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
-        await TypeUntilSuggestionsOpenAsync(component, "Rol");
+        await TypeUntilSuggestionsOpenAsync(component, "rol");
 
         // Act
         await PressAsync(component, "ArrowDown");
@@ -237,17 +223,16 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
         await PressAsync(component, "Enter");
 
         // Assert
-        Assert.Equal(["Rol"], component.Instance.GetEditedRole().Allow[0].Types.ToArray());
+        Assert.Equal(["rol"], component.Instance.GetEditedRole().Allow[0].Types.ToArray());
     }
 
     [Fact]
     public async Task WhenTheFieldIsLeftWithItsSuggestionsOpen_ThenTheTypedTextIsAddedOnceTheyClose()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
-        var autocomplete = await TypeUntilSuggestionsOpenAsync(component, "Rol");
+        var autocomplete = await TypeUntilSuggestionsOpenAsync(component, "rol");
         await FindInput(component, "rule-types").BlurAsync(new FocusEventArgs());
         var typesWhileOpen = component.Instance.GetEditedRole().Allow[0].Types.ToArray();
 
@@ -256,17 +241,16 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
 
         // Assert
         Assert.Empty(typesWhileOpen);
-        Assert.Equal(["Rol"], component.Instance.GetEditedRole().Allow[0].Types.ToArray());
+        Assert.Equal(["rol"], component.Instance.GetEditedRole().Allow[0].Types.ToArray());
     }
 
     [Fact]
     public async Task WhenSavedAfterTheFieldIsLeftWithItsSuggestionsOpen_ThenTheTypedTextIsSavedAndNotAddedAgainOnceTheyClose()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
-        var autocomplete = await TypeUntilSuggestionsOpenAsync(component, "Rol");
+        var autocomplete = await TypeUntilSuggestionsOpenAsync(component, "rol");
         await FindInput(component, "rule-types").BlurAsync(new FocusEventArgs());
 
         // Act
@@ -274,8 +258,8 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
         await component.InvokeAsync(autocomplete.Instance.CloseMenuAsync);
 
         // Assert
-        Assert.Equal(["Rol"], role.Allow[0].Types.ToArray());
-        Assert.Equal(["Rol"], component.Instance.GetEditedRole().Allow[0].Types.ToArray());
+        Assert.Equal(["rol"], Assert.Single(Graph.RoleStore.Saves).Role.Allow[0].Types.ToArray());
+        Assert.Equal(["rol"], component.Instance.GetEditedRole().Allow[0].Types.ToArray());
     }
 
     private static AngleSharp.Dom.IElement FindInput(IRenderedComponent<RoleEditComponent> component, string input) =>
@@ -288,7 +272,7 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
             .Single(input => input.Instance.TestId == "rule-types")
             .FindComponent<MudAutocomplete<string>>();
         await FindInput(component, "rule-types").InputAsync(new ChangeEventArgs { Value = text });
-        await component.WaitForAssertionAsync(() => Assert.True(autocomplete.Instance.Open), TestTimeouts.Default);
+        await component.WaitForAssertionAsync(() => Assert.True(autocomplete.Instance.Open));
         return autocomplete;
     }
 

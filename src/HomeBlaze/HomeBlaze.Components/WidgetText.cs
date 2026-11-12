@@ -1,8 +1,9 @@
 using HomeBlaze.Components.Abstractions.TimeZones;
 using HomeBlaze.Services;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services.Display;
-using Namotion.Interceptor.Expressions;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Expressions;
 
 namespace HomeBlaze.Components;
 
@@ -37,6 +38,7 @@ public sealed class WidgetText
     /// <param name="widget">The widget, which paths resolve from.</param>
     /// <param name="binding">The value and the subject of the <c>Path</c> of the widget, or an empty binding.</param>
     /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
+    /// <param name="permissions">The permissions of the viewer, for whom a property it may not read is missing.</param>
     /// <param name="error">The widget argument error, such as <c>Label: expected ')' at position 5</c>, or null.</param>
     /// <returns>The rendered text, the text as written when it has no expression, or null when it has an error.</returns>
     public string? Render(
@@ -45,6 +47,7 @@ public sealed class WidgetText
         IInterceptorSubject widget,
         in ValueBinding binding,
         ITimeZoneDisplay? timeZone,
+        IUserPermissions permissions,
         out string? error)
     {
         error = null;
@@ -60,7 +63,7 @@ public sealed class WidgetText
             return null;
         }
 
-        var context = new ValueBindingContext(resolver, widget, binding, timeZone);
+        var context = new ValueBindingContext(resolver, widget, binding, timeZone, permissions);
         return template.Render(ref context);
     }
 
@@ -73,6 +76,7 @@ public sealed class WidgetText
     /// <param name="widget">The widget, which paths resolve from.</param>
     /// <param name="path">The <c>Path</c> of the widget, or null.</param>
     /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
+    /// <param name="permissions">The permissions of the viewer, for whom a property it may not read is missing.</param>
     /// <param name="error">The widget argument error, or null.</param>
     /// <returns>The rendered text, the text as written when it has no expression, or null when it has an error.</returns>
     public string? Render(
@@ -81,6 +85,7 @@ public sealed class WidgetText
         IInterceptorSubject widget,
         string? path,
         ITimeZoneDisplay? timeZone,
+        IUserPermissions permissions,
         out string? error)
     {
         if (string.IsNullOrEmpty(text) || !text.Contains(ExpressionStart, StringComparison.Ordinal))
@@ -89,7 +94,7 @@ public sealed class WidgetText
             return text;
         }
 
-        return Render(text, resolver, widget, ValueBinding.FromPath(resolver, widget, path), timeZone, out error);
+        return Render(text, resolver, widget, ValueBinding.FromPath(resolver, widget, path, permissions), timeZone, permissions, out error);
     }
 
     private ParsedText GetParsed(string text)

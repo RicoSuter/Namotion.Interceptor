@@ -1,4 +1,5 @@
 @implements IDisposable
+@inject IUserPermissions Permissions
 @using System.Reactive.Concurrency
 @using System.Reactive.Linq
 @using HomeBlaze.Abstractions.Attributes
@@ -57,6 +58,16 @@ else
 
     [Parameter]
     public EventCallback<bool> IsValidChanged { get; set; }
+
+    /// <summary>Gets or sets whether the subject is being created, see <see cref="IsChecked"/>.</summary>
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    /// <summary>
+    /// Gets whether the members an edit of the subject changes are checked: always, except while the subject is created
+    /// and not part of the graph yet, where whoever attaches it checks that the viewer may create it.
+    /// </summary>
+    internal static bool IsChecked(IInterceptorSubject subject, bool isCreating) => !isCreating || subject.GetParents().Length > 0;
 
     /// <summary>
     /// Gets whether no field shows an error and every property that cannot hold null has a value.
@@ -223,7 +234,8 @@ else
     /// <summary>
     /// Applies the edited values to the subject as <see cref="EditedPropertyValues.Apply"/> does: nothing is set
     /// when one of them cannot be converted, and the values already set are set back when a setter rejects its
-    /// value. <see cref="HasErrors"/> is true in both cases.
+    /// value. Nothing is set either when the viewer may not administer one of the members whose value changes, see
+    /// <see cref="IsChecked"/>. <see cref="HasErrors"/> is true in these cases.
     /// </summary>
     /// <remarks>
     /// A value that cannot be set back stays changed on the subject, which is shown as an error of its own.
@@ -232,13 +244,24 @@ else
     {
         if (Subject == null) return;
 
+        // A secret is shown empty, so only one that the user entered is an edit.
+        var editedValues = _configurationProperties
+            .Where(property => property.GetConfigurationMetadata()?.IsSecret != true || _modifiedSecrets.Contains(property.Name))
+            .Select(property => KeyValuePair.Create(property, _editValues[property.Name]))
+            .ToList();
+
+        if (IsChecked(Subject, IsCreating) &&
+            !editedValues.Where(edit => !Equals(edit.Value, edit.Key.GetValue())).All(edit => Permissions.CanAdminister(edit.Key)))
+        {
+            _errors = [AccessDeniedTexts.Administer];
+            StateHasChanged();
+            return;
+        }
+
         _isSaving = true;
         try
         {
-            // A secret is shown empty, so only one that the user entered is an edit.
-            _errors = EditedPropertyValues.Apply(_configurationProperties
-                .Where(property => property.GetConfigurationMetadata()?.IsSecret != true || _modifiedSecrets.Contains(property.Name))
-                .Select(property => KeyValuePair.Create(property, _editValues[property.Name])));
+            _errors = EditedPropertyValues.Apply(editedValues);
         }
         finally
         {

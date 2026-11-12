@@ -84,7 +84,7 @@ public class MarkdownStorageFileTests
         // Assert
         Assert.Equal(200, response.Status);
         Assert.Equal("image/png", response.Headers["content-type"]);
-        Assert.Equal("no-cache", response.Headers["cache-control"]);
+        Assert.Equal("private, no-cache", response.Headers["cache-control"]);
         Assert.Equal("nosniff", response.Headers["x-content-type-options"]);
         Assert.Equal("sandbox", response.Headers["content-security-policy"]);
         Assert.StartsWith("W/\"", response.Headers["etag"]);

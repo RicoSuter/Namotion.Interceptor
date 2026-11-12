@@ -1,12 +1,24 @@
+@using HomeBlaze.Components.Controls
+@using HomeBlaze.Components.Operations
+@using HomeBlaze.Services
+@using HomeBlaze.Components.Abstractions.Access
+@using HomeBlaze.Authorization.Abstractions
+@using Namotion.Interceptor.Registry
 @attribute [SubjectComponent(SubjectComponentType.Page, typeof(ClaudeCliAgent))]
 @attribute [SubjectComponent(SubjectComponentType.Page, typeof(AnthropicAgent))]
 @implements ISubjectComponent
 @implements IDisposable
 @inject ITimeZoneDisplay TimeZone
 @inject IDialogService DialogService
+@inject IServiceProvider ServiceProvider
+@inject IUserPermissions Permissions
 
 @if (Agent is { } agent)
 {
+    @* Decided on every render, which a change of the person's roles or of the agent's roles causes. *@
+    var chatRefusal = AgentChatAccess.GetRefusal(Permissions, agent);
+    var isRunNowDenied = chatRefusal is not null || IsDenied(agent, RunNowMember);
+    var isNewConversationDenied = chatRefusal is not null || IsDenied(agent, NewConversationMember);
     @* Fills the viewport below the app bar, so the chat input stays in view and the tab content scrolls on its own.
        The max height caps it to the pane when the page is shown next to its editor. *@
     <div class="d-flex flex-column gap-2 pt-2 pt-sm-4 pb-2"
@@ -35,20 +47,22 @@
             </MudStack>
             @* Both variants render, so neither flashes in after prerendering; CSS shows one per breakpoint. *@
             <div class="d-flex d-sm-none gap-2">
-                <MudTooltip Text="Run now">
+                <MudTooltip Text="@(isRunNowDenied ? AccessDeniedTexts.Tooltip : "Run now")">
                     <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Variant="Variant.Outlined" aria-label="Run now"
-                                   OnClick="@agent.RunNow" Disabled="@agent.IsBusy" />
+                                   OnClick="RunNowAsync" Disabled="@(agent.IsBusy || isRunNowDenied)" data-testid="agent-run-now-icon" />
                 </MudTooltip>
-                <MudTooltip Text="New conversation">
+                <MudTooltip Text="@(isNewConversationDenied ? AccessDeniedTexts.Tooltip : "New conversation")">
                     <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Variant="Variant.Outlined" aria-label="New conversation"
-                                   OnClick="NewConversationAsync" Disabled="@agent.IsBusy" />
+                                   OnClick="NewConversationAsync" Disabled="@(agent.IsBusy || isNewConversationDenied)" data-testid="agent-new-conversation-icon" />
                 </MudTooltip>
             </div>
             <div class="d-none d-sm-flex gap-2 flex-shrink-0">
                 <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PlayArrow"
-                           OnClick="@agent.RunNow" Disabled="@agent.IsBusy">Run now</MudButton>
+                           OnClick="RunNowAsync" Disabled="@(agent.IsBusy || isRunNowDenied)"
+                           title="@(isRunNowDenied ? AccessDeniedTexts.Tooltip : null)" data-testid="agent-run-now">Run now</MudButton>
                 <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.RestartAlt"
-                           OnClick="NewConversationAsync" Disabled="@agent.IsBusy">New conversation</MudButton>
+                           OnClick="NewConversationAsync" Disabled="@(agent.IsBusy || isNewConversationDenied)"
+                           title="@(isNewConversationDenied ? AccessDeniedTexts.Tooltip : null)" data-testid="agent-new-conversation">New conversation</MudButton>
             </div>
         </MudStack>
         @* A plain underlined tab bar on the page background, with the content aligned to the title. *@
@@ -56,14 +70,38 @@
         <MudTabs Elevation="0" Border="true" MinimumTabWidth="0px" TabHeaderClass="mud-background" TabButtonsClass="px-2 px-sm-4"
                  Class="flex-grow-1 overflow-hidden" TabPanelsClass="flex-grow-1 pt-3 overflow-y-auto">
             <MudTabPanel Text="Chat" PanelClass="mud-height-full"><AgentChatTab Agent="agent" TimeZoneVersion="_timeZoneVersion" /></MudTabPanel>
-            <MudTabPanel Text="Activity"><AgentActivityTab Agent="agent" /></MudTabPanel>
-            <MudTabPanel Text="Memory"><AgentMemoryTab MemoryEditor="_memoryEditor!" /></MudTabPanel>
+            @* The activity and the memory show what the shared conversation produced, so they follow the chat rule. *@
+            <MudTabPanel Text="Activity">
+                @if (chatRefusal is null)
+                {
+                    <AgentActivityTab Agent="agent" />
+                }
+                else
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true" data-testid="agent-activity-refusal">@chatRefusal</MudAlert>
+                }
+            </MudTabPanel>
+            <MudTabPanel Text="Memory">
+                @if (chatRefusal is null)
+                {
+                    <AgentMemoryTab MemoryEditor="_memoryEditor!" />
+                }
+                else
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true" data-testid="agent-memory-tab-refusal">@chatRefusal</MudAlert>
+                }
+            </MudTabPanel>
             <MudTabPanel Text="Settings"><AgentSettingsTab Agent="agent" /></MudTabPanel>
         </MudTabs>
     </div>
 }
 
 @code {
+    private const string RunNowMember = nameof(LlmAgentBase.RunNow);
+
+    private const string NewConversationMember = LlmAgentBase.NewConversationMemberName;
+
+    private readonly CancellationTokenSource _lifetime = new();
     private LlmAgentBase? _subscribed;
     private AgentMemoryEditor? _memoryEditor;
     private int _isRenderPending;
@@ -76,6 +114,7 @@
     private volatile bool _renderedIsBusy;
     private volatile ServiceStatus _renderedStatus;
     private string? _renderedStatusMessage;
+    private IReadOnlyCollection<string>? _renderedScopeRoles;
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
@@ -85,7 +124,10 @@
     protected override void OnInitialized()
     {
         TimeZone.Changed += OnTimeZoneChanged;
+        Permissions.Changed += OnPermissionsChanged;
     }
+
+    private void OnPermissionsChanged() => _ = InvokeAsync(StateHasChanged);
 
     protected override void OnParametersSet()
     {
@@ -100,7 +142,9 @@
             _memoryEditor = null;
             if (_subscribed is { } agent)
             {
-                _memoryEditor = new AgentMemoryEditor(() => agent.IsStorageLoaded ? agent.Memory : null);
+                _memoryEditor = new AgentMemoryEditor(
+                    () => agent.IsStorageLoaded ? agent.Memory : null,
+                    () => AgentChatAccess.GetRefusal(Permissions, agent));
                 CaptureRenderedState(agent);
                 agent.StateChanged += OnStateChanged;
             }
@@ -114,7 +158,8 @@
              !ReferenceEquals(Volatile.Read(ref _renderedMemory), agent.Memory.GetSnapshot()) ||
              _renderedIsBusy != agent.IsBusy ||
              _renderedStatus != agent.Status ||
-             !string.Equals(Volatile.Read(ref _renderedStatusMessage), agent.StatusMessage, StringComparison.Ordinal)))
+             !string.Equals(Volatile.Read(ref _renderedStatusMessage), agent.StatusMessage, StringComparison.Ordinal) ||
+             !ReferenceEquals(Volatile.Read(ref _renderedScopeRoles), ((IRoleScopedSubject)agent).ScopeRoles)))
         {
             RequestRender();
         }
@@ -157,25 +202,27 @@
         _renderedIsBusy = agent.IsBusy;
         _renderedStatus = agent.Status;
         Volatile.Write(ref _renderedStatusMessage, agent.StatusMessage);
+        Volatile.Write(ref _renderedScopeRoles, ((IRoleScopedSubject)agent).ScopeRoles);
     }
 
-    private async Task NewConversationAsync()
+    // A person who may not chat with the agent may not start its turns or reset its conversation either.
+    private bool IsDenied(LlmAgentBase agent, string memberName) =>
+        agent.TryGetRegisteredProperty(memberName) is not { } member || !Permissions.CanInvoke(member);
+
+    private Task RunNowAsync() => InvokeOperationAsync(RunNowMember);
+
+    private Task NewConversationAsync() => InvokeOperationAsync(NewConversationMember);
+
+    private async Task InvokeOperationAsync(string memberName)
     {
-        if (Agent is not { } agent)
+        // Checked again, as the roles may have changed since the buttons rendered.
+        if (Agent is not { } agent || AgentChatAccess.GetRefusal(Permissions, agent) is not null ||
+            agent.TryGetRegisteredProperty(memberName) is not { } member || member.TryGetMethodMetadata() is null)
         {
             return;
         }
 
-        var confirmed = await DialogService.ShowMessageBoxAsync(
-            "New conversation",
-            "Discard the chat session? Memory and timeline stay.",
-            yesText: "New conversation",
-            cancelText: "Cancel");
-
-        if (confirmed == true)
-        {
-            await agent.NewConversationAsync(CancellationToken.None);
-        }
+        await OperationInvoker.InvokeAsync(DialogService, ServiceProvider, Permissions, member, _lifetime.Token);
     }
 
     private static string GetTurnState(string? statusMessage) => statusMessage switch
@@ -196,6 +243,9 @@
     public void Dispose()
     {
         TimeZone.Changed -= OnTimeZoneChanged;
+        Permissions.Changed -= OnPermissionsChanged;
+        _lifetime.Cancel();
+        _lifetime.Dispose();
         if (_subscribed is not null)
         {
             _subscribed.StateChanged -= OnStateChanged;

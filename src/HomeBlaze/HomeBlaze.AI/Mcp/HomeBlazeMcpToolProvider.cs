@@ -9,9 +9,8 @@ using Namotion.Interceptor.Mcp.Tools;
 namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
-/// Provides the list_methods, invoke_query and invoke_operation tools for HomeBlaze subjects. invoke_operation is
-/// only offered when the configuration is not read-only. list_methods lists only the methods the access policy allows
-/// to read.
+/// Provides the list_methods, invoke_query and invoke_operation tools for HomeBlaze subjects. list_methods lists only
+/// the methods the access policy allows to read.
 /// </summary>
 public class HomeBlazeMcpToolProvider : IMcpToolProvider
 {
@@ -25,17 +24,11 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
 
     private const string PathArgument = "path";
 
-    private const string ListMethodsDescriptionPrefix =
-        "List the methods of a subject, with each parameter's type, format and unit. Every method is either a query " +
-        $"(reads, no side effects; call it with {InvokeQueryToolName}) or an operation (changes devices or sends something";
-
     private const string ListMethodsDescription =
-        ListMethodsDescriptionPrefix + $"; call it with {InvokeOperationToolName}). The kind field of each method says which. " +
+        "List the methods of a subject, with each parameter's type, format and unit. Every method is either a query " +
+        $"(reads, no side effects; call it with {InvokeQueryToolName}) or an operation (changes devices or sends something; " +
+        $"call it with {InvokeOperationToolName} when that tool is offered). The kind field of each method says which. " +
         "Operations with requiresConfirmation set need a person's confirmation and cannot be called through MCP.";
-
-    private const string ReadOnlyListMethodsDescription =
-        ListMethodsDescriptionPrefix + "). The kind field of each method says which; operations are listed for information " +
-        "but cannot be called on this server.";
 
     private const string InvokeQueryDescription =
         "Call a query method of a subject: it reads and has no side effects, for example ReadEvaluatedContent on a " +
@@ -69,14 +62,11 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
     // Operations also reach systems outside the graph, such as notification services and media URLs.
     private static readonly McpToolAnnotations InvokeOperationAnnotations = McpToolAnnotations.Destructive with { OpenWorldHint = true };
 
-    private readonly bool _isReadOnly;
     private readonly McpMethodInvoker _invoker;
 
     /// <param name="invoker">Resolves the subjects and invokes their methods.</param>
-    /// <param name="isReadOnly">Whether invoke_operation is left out.</param>
-    internal HomeBlazeMcpToolProvider(McpMethodInvoker invoker, bool isReadOnly)
+    internal HomeBlazeMcpToolProvider(McpMethodInvoker invoker)
     {
-        _isReadOnly = isReadOnly;
         _invoker = invoker;
     }
 
@@ -85,7 +75,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         yield return new McpToolInfo
         {
             Name = ListMethodsToolName,
-            Description = _isReadOnly ? ReadOnlyListMethodsDescription : ListMethodsDescription,
+            Description = ListMethodsDescription,
             InputSchema = ListMethodsSchema,
             Handler = HandleListMethodsAsync,
             Annotations = McpToolAnnotations.ReadOnly
@@ -100,17 +90,14 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             Annotations = McpToolAnnotations.ReadOnly
         };
 
-        if (!_isReadOnly)
+        yield return new McpToolInfo
         {
-            yield return new McpToolInfo
-            {
-                Name = InvokeOperationToolName,
-                Description = InvokeOperationDescription,
-                InputSchema = InvokeMethodSchema,
-                Handler = (input, cancellationToken) => HandleInvokeAsync(input, MethodKind.Operation, cancellationToken),
-                Annotations = InvokeOperationAnnotations
-            };
-        }
+            Name = InvokeOperationToolName,
+            Description = InvokeOperationDescription,
+            InputSchema = InvokeMethodSchema,
+            Handler = (input, cancellationToken) => HandleInvokeAsync(input, MethodKind.Operation, cancellationToken),
+            Annotations = InvokeOperationAnnotations
+        };
     }
 
     private Task<object?> HandleListMethodsAsync(JsonElement input, CancellationToken cancellationToken)

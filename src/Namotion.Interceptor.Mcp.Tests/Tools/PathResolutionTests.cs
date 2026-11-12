@@ -22,7 +22,7 @@ public class PathResolutionTests
         var config = new McpServerConfiguration
         {
             PathProvider = DefaultPathProvider.Instance,
-            IsReadOnly = false
+            AccessPolicy = AllowAllMcpAccessPolicy.Instance
         };
         var tool = new McpToolFactory(root, config).CreateTools().First(t => t.Name == toolName);
         var input = JsonSerializer.SerializeToElement(new { path = "Children[Servers", value = "x" });
@@ -82,7 +82,7 @@ public class PathResolutionTests
         var config = new McpServerConfiguration
         {
             PathProvider = new ExcludingPathProvider(nameof(TestMixedGroup.Items)),
-            IsReadOnly = false
+            AccessPolicy = AllowAllMcpAccessPolicy.Instance
         };
         var tool = new McpToolFactory(root, config).CreateTools().First(t => t.Name == toolName);
 
@@ -251,7 +251,7 @@ public class PathResolutionTests
         var config = new McpServerConfiguration
         {
             PathProvider = DefaultPathProvider.Instance,
-            IsReadOnly = false
+            AccessPolicy = AllowAllMcpAccessPolicy.Instance
         };
         var factory = new McpToolFactory(root, config);
         var tool = factory.CreateTools().First(tool => tool.Name == "set_property");

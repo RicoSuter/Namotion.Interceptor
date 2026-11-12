@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions;
-using Namotion.Interceptor.Expressions;
+using HomeBlaze.Authorization.Abstractions;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Expressions;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Services.Display;
@@ -27,18 +28,25 @@ public readonly struct ValueBinding(RegisteredSubjectProperty? property, object?
     /// <summary>Whether the binding has no property, no value and no subject, as for a path that leads nowhere.</summary>
     public bool IsEmpty => Property is null && Value is null && Subject is null;
 
-    /// <summary>Binds the value of a property, or the subject it references.</summary>
-    public static ValueBinding FromProperty(RegisteredSubjectProperty property) =>
-        property.IsSubjectReference
-            ? new ValueBinding(property, null, property.GetValue() as IInterceptorSubject)
-            : new ValueBinding(property, property.GetValue(), property.Subject);
+    /// <summary>
+    /// Binds the value of a property as the viewer is shown it, see <see cref="IUserPermissions.GetValue"/>, or the subject
+    /// it references. Whether the viewer may read the property is checked by the caller.
+    /// </summary>
+    public static ValueBinding FromProperty(RegisteredSubjectProperty property, IUserPermissions permissions)
+    {
+        var value = permissions.GetValue(property);
+        return property.IsSubjectReference
+            ? new ValueBinding(property, null, value as IInterceptorSubject)
+            : new ValueBinding(property, value, property.Subject);
+    }
 
     /// <summary>
     /// Binds the path of a widget: the value of the property it ends at, or the subject it leads to when it ends at no
     /// property, such as the name of a block or an entry of a collection. A path that is null, empty, malformed or leads
-    /// nowhere gives an empty binding.
+    /// nowhere gives an empty binding, and so does a path that ends at a property the viewer may not read, at a property of
+    /// a subject the viewer is not shown, or at such a subject.
     /// </summary>
-    public static ValueBinding FromPath(SubjectPathResolver resolver, IInterceptorSubject from, string? path)
+    public static ValueBinding FromPath(SubjectPathResolver resolver, IInterceptorSubject from, string? path, IUserPermissions permissions)
     {
         if (string.IsNullOrEmpty(path))
         {
@@ -47,12 +55,13 @@ public readonly struct ValueBinding(RegisteredSubjectProperty? property, object?
 
         try
         {
-            if (resolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, from) is { } property)
+            if (resolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, from, permissions) is { } property)
             {
-                return FromProperty(property);
+                // Not resolved as a subject instead, which would follow a reference the viewer may not read.
+                return permissions.CanReadShown(property) ? FromProperty(property, permissions) : default;
             }
 
-            return resolver.ResolveScopedSubject(path, PathStyle.Canonical, from) is { } subject
+            return resolver.ResolveScopedSubject(path, PathStyle.Canonical, from, permissions) is { } subject && permissions.CanShow(subject)
                 ? new ValueBinding(null, null, subject)
                 : default;
         }

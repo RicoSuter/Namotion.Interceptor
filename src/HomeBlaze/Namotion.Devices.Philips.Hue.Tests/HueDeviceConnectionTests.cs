@@ -52,7 +52,7 @@ public class HueDeviceConnectionTests
         var device = TestHelpers.CreateHueDevice(ConnectivityStatus.connected);
 
         // Assert
-        Assert.Equal(HomeBlaze.Abstractions.ServiceStatus.Running, device.Status);
+        Assert.Equal(global::HomeBlaze.Abstractions.ServiceStatus.Running, device.Status);
     }
 
     [Fact]
@@ -62,6 +62,6 @@ public class HueDeviceConnectionTests
         var device = TestHelpers.CreateHueDevice(ConnectivityStatus.connectivity_issue);
 
         // Assert
-        Assert.Equal(HomeBlaze.Abstractions.ServiceStatus.Error, device.Status);
+        Assert.Equal(global::HomeBlaze.Abstractions.ServiceStatus.Error, device.Status);
     }
 }

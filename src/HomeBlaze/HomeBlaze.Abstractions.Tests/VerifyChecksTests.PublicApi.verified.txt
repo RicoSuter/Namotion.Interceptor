@@ -57,18 +57,22 @@ namespace HomeBlaze.Abstractions.Attributes
     {
         public OperationAttribute() { }
         public HomeBlaze.Abstractions.Attributes.OperationPurpose Purpose { get; set; }
+        public bool RequiresAdministration { get; set; }
         public bool RequiresConfirmation { get; set; }
     }
     [System.AttributeUsage(System.AttributeTargets.Parameter, Inherited=true)]
     public class OperationParameterAttribute : System.Attribute
     {
         public OperationParameterAttribute() { }
+        public string? Editor { get; set; }
+        public string? InitialValueProperty { get; set; }
         public HomeBlaze.Abstractions.Attributes.StateUnit Unit { get; set; }
     }
     public enum OperationPurpose
     {
         None = 0,
         Delete = 1,
+        Edit = 2,
     }
     [System.AttributeUsage(System.AttributeTargets.Class, Inherited=false)]
     public sealed class PageLayoutAttribute : System.Attribute
@@ -575,11 +579,21 @@ namespace HomeBlaze.Abstractions
     public static class KnownAttributes
     {
         public const string Configuration = "HomeBlaze:Configuration";
+        public const string DisabledReason = "DisabledReason";
         public const string IsEnabled = "IsEnabled";
         public const string Maximum = "Maximum";
         public const string Metadata = "HomeBlaze:Metadata";
         public const string Minimum = "Minimum";
         public const string State = "HomeBlaze:State";
+    }
+    public sealed class OneTimeSecret : System.IEquatable<HomeBlaze.Abstractions.OneTimeSecret>
+    {
+        public OneTimeSecret(string Title, string Message, string Secret, string? LinkPath = null) { }
+        public string? LinkPath { get; init; }
+        public string Message { get; init; }
+        public string Secret { get; init; }
+        public string Title { get; init; }
+        public override string ToString() { }
     }
     public enum PathStyle
     {
@@ -836,15 +850,19 @@ namespace HomeBlaze.Abstractions.Metadata
         public int Position { get; init; }
         public string PropertyName { get; init; }
         public HomeBlaze.Abstractions.Attributes.OperationPurpose Purpose { get; init; }
+        public bool RequiresAdministration { get; init; }
         public bool RequiresConfirmation { get; init; }
         public System.Type? ResultType { get; init; }
         public string Title { get; init; }
         public System.Threading.Tasks.Task<object?> InvokeAsync(object?[]? parameters, System.IServiceProvider? serviceProvider, System.Threading.CancellationToken cancellationToken) { }
         public bool IsExcludedFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget target) { }
+        public static string GetPropertyName(string methodName) { }
     }
     public class MethodParameter
     {
         public MethodParameter() { }
+        public string? Editor { get; init; }
+        public string? InitialValueProperty { get; init; }
         public bool IsFromServices { get; init; }
         public bool IsNullable { get; init; }
         public bool IsRuntimeProvided { get; init; }

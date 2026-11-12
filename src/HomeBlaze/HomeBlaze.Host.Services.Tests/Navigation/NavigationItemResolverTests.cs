@@ -2,8 +2,10 @@ using System.Collections.Immutable;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Components.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.Pages;
+using HomeBlaze.Components.Tests.Access;
 using HomeBlaze.Host.Services.Navigation;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Components;
@@ -68,7 +70,7 @@ public class NavigationItemResolverTests
         _root.Second = new NavigationTestPage(_context);
 
         // Act
-        var items = _resolver.GetChildItems(_root).ToList();
+        var items = _resolver.GetChildItems(_root, UnrestrictedPermissions.Instance).ToList();
 
         // Assert
         Assert.Equal(["/First", "/Second"], items.Select(item => item.Path).Order());
@@ -84,11 +86,92 @@ public class NavigationItemResolverTests
         _root.Second = page;
 
         // Act
-        var items = _resolver.GetChildItems(_root).ToList();
+        var items = _resolver.GetChildItems(_root, UnrestrictedPermissions.Instance).ToList();
 
         // Assert
         var item = Assert.Single(items);
         Assert.Same(page, item.Subject);
+    }
+
+    [Fact]
+    public void WhenTheViewerMayNotSeeASubject_ThenTheNavigationDoesNotListIt()
+    {
+        // Arrange
+        var kitchen = new NavigationTestPage(_context);
+        var garage = new NavigationTestPage(_context);
+        var devices = CreateFolder(new() { ["Kitchen"] = kitchen, ["Garage"] = garage });
+        _root.Folder = devices;
+        var viewer = new TestUserPermissions { CannotShow = { garage } };
+
+        // Act
+        var items = _resolver.GetChildItems(devices, viewer).ToList();
+
+        // Assert
+        Assert.DoesNotContain(items, item => ReferenceEquals(item.Subject, garage));
+        Assert.Contains(items, item => ReferenceEquals(item.Subject, kitchen));
+    }
+
+    [Fact]
+    public void WhenTheViewerMaySeeNoPageOfAFolder_ThenTheNavigationDoesNotListTheFolder()
+    {
+        // Arrange
+        var garage = new NavigationTestPage(_context);
+        var devices = CreateFolder(new() { ["Garage"] = garage });
+        _root.Folder = devices;
+        _root.First = new NavigationTestPage(_context);
+        var viewer = new TestUserPermissions { CannotShow = { garage } };
+
+        // Act
+        var hidden = _resolver.GetChildItems(_root, viewer).Select(item => item.Path).ToList();
+        var shown = _resolver.GetChildItems(_root, new TestUserPermissions()).Select(item => item.Path).Order().ToList();
+
+        // Assert
+        Assert.Equal(["/First"], hidden);
+        Assert.Equal(["/First", "/Folder"], shown);
+    }
+
+    [Fact]
+    public void WhenTheViewerMayNotSeeATopBarPage_ThenTheAppBarItemsDoNotContainIt()
+    {
+        // Arrange
+        var alpha = CreateTopBarPage();
+        var beta = CreateTopBarPage();
+        var root = CreateFolder(new() { ["Alpha"] = alpha, ["Beta"] = beta });
+        var resolver = CreateResolver(root);
+        var viewer = new TestUserPermissions { CannotShow = { beta } };
+
+        // Act
+        var items = resolver.GetAppBarItems(root, viewer);
+
+        // Assert
+        var item = Assert.Single(items);
+        Assert.Same(alpha, item.Subject);
+    }
+
+    [Fact]
+    public void WhenTwoViewersReadTheRecentAppBarItems_ThenEachSeesOnlyItsPagesFromOneWalk()
+    {
+        // Arrange
+        var maximumAge = TimeSpan.FromSeconds(5);
+        var alpha = CreateTopBarPage();
+        var beta = CreateTopBarPage();
+        var root = CreateFolder(new() { ["Alpha"] = alpha, ["Beta"] = beta });
+        var resolver = CreateResolver(root);
+        var everything = new TestUserPermissions();
+        var restricted = new TestUserPermissions { CannotShow = { beta } };
+
+        // Act
+        var all = resolver.GetRecentAppBarItems(root, maximumAge, everything);
+        var allAgain = resolver.GetRecentAppBarItems(root, maximumAge, everything);
+        var filtered = resolver.GetRecentAppBarItems(root, maximumAge, restricted);
+        var filteredAgain = resolver.GetRecentAppBarItems(root, maximumAge, restricted, filtered);
+
+        // Assert
+        Assert.Equal(["/Alpha", "/Beta"], all.Select(item => item.Path));
+        Assert.True(all == allAgain);
+        var item = Assert.Single(filtered);
+        Assert.Same(all[0], item);
+        Assert.True(filtered == filteredAgain);
     }
 
     [Fact]
@@ -108,7 +191,7 @@ public class NavigationItemResolverTests
         _root.Folder = folder;
 
         // Act
-        var items = _resolver.GetChildItems(folder).ToList();
+        var items = _resolver.GetChildItems(folder, UnrestrictedPermissions.Instance).ToList();
 
         // Assert
         Assert.Equal(["/Folder/c.md", "/Folder/a.md", "/Folder/b.md"], items.Select(item => item.Path));
@@ -127,7 +210,7 @@ public class NavigationItemResolverTests
         var resolver = CreateResolver(root);
 
         // Act
-        var items = resolver.GetAppBarItems(root);
+        var items = resolver.GetAppBarItems(root, UnrestrictedPermissions.Instance);
 
         // Assert
         var item = Assert.Single(items);
@@ -142,13 +225,13 @@ public class NavigationItemResolverTests
         var maximumAge = TimeSpan.FromSeconds(5);
         var root = CreateFolder(new() { ["Alpha"] = CreateTopBarPage() });
         var resolver = CreateResolver(root);
-        var first = resolver.GetRecentAppBarItems(root, maximumAge);
+        var first = resolver.GetRecentAppBarItems(root, maximumAge, UnrestrictedPermissions.Instance);
         root.Children = new() { ["Alpha"] = root.Children["Alpha"], ["Beta"] = CreateTopBarPage() };
 
         // Act
-        var withinMaximumAge = resolver.GetRecentAppBarItems(root, maximumAge);
+        var withinMaximumAge = resolver.GetRecentAppBarItems(root, maximumAge, UnrestrictedPermissions.Instance);
         _timeProvider.Advance(maximumAge);
-        var afterMaximumAge = resolver.GetRecentAppBarItems(root, maximumAge);
+        var afterMaximumAge = resolver.GetRecentAppBarItems(root, maximumAge, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(["/Alpha"], first.Select(item => item.Path));
@@ -163,14 +246,14 @@ public class NavigationItemResolverTests
         var maximumAge = TimeSpan.FromSeconds(5);
         var root = CreateFolder(new() { ["Alpha"] = CreateTopBarPage() });
         var resolver = CreateResolver(root);
-        var first = resolver.GetRecentAppBarItems(root, maximumAge);
+        var first = resolver.GetRecentAppBarItems(root, maximumAge, UnrestrictedPermissions.Instance);
         _timeProvider.Advance(maximumAge);
 
         // Act
-        var unchanged = resolver.GetRecentAppBarItems(root, maximumAge);
+        var unchanged = resolver.GetRecentAppBarItems(root, maximumAge, UnrestrictedPermissions.Instance);
         root.Children = new() { ["Alpha"] = root.Children["Alpha"], ["Beta"] = CreateTopBarPage() };
         _timeProvider.Advance(maximumAge);
-        var changed = resolver.GetRecentAppBarItems(root, maximumAge);
+        var changed = resolver.GetRecentAppBarItems(root, maximumAge, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.True(first == unchanged);
@@ -199,7 +282,7 @@ public class NavigationItemResolverTests
         var resolver = CreateResolver(root);
 
         // Act
-        var items = resolver.GetAppBarItems(root);
+        var items = resolver.GetAppBarItems(root, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(["/Zulu", "/Folder/Y", "/Folder/X", "/Alpha"], items.Select(item => item.Path));
@@ -226,7 +309,7 @@ public class NavigationItemResolverTests
         var resolver = CreateResolver(root);
 
         // Act
-        var items = resolver.GetAppBarItems(root);
+        var items = resolver.GetAppBarItems(root, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(
@@ -249,7 +332,7 @@ public class NavigationItemResolverTests
         var resolver = CreateResolver(root);
 
         // Act
-        var items = resolver.GetAppBarItems(root);
+        var items = resolver.GetAppBarItems(root, UnrestrictedPermissions.Instance);
 
         // Assert
         var item = Assert.Single(items);
@@ -272,7 +355,7 @@ public class NavigationItemResolverTests
         var resolver = CreateResolver(root);
 
         // Act
-        var items = resolver.GetAppBarItems(root);
+        var items = resolver.GetAppBarItems(root, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(2, items.Count);
@@ -292,7 +375,7 @@ public class NavigationItemResolverTests
         var resolver = CreateResolver(root);
 
         // Act
-        var items = resolver.GetChildItems(root).ToDictionary(item => item.Path);
+        var items = resolver.GetChildItems(root, UnrestrictedPermissions.Instance).ToDictionary(item => item.Path);
 
         // Assert
         Assert.True(items["/Agents"].IsFolder);
@@ -316,7 +399,7 @@ public class NavigationItemResolverTests
         var resolver = CreateResolver(root);
 
         // Act
-        var item = Assert.Single(resolver.GetChildItems(root));
+        var item = Assert.Single(resolver.GetChildItems(root, UnrestrictedPermissions.Instance));
 
         // Assert
         Assert.True(item.HasNavigationBarPages);
@@ -343,7 +426,7 @@ public class NavigationItemResolverTests
         var resolver = CreateResolver(root);
 
         // Act
-        var item = Assert.Single(resolver.GetChildItems(root));
+        var item = Assert.Single(resolver.GetChildItems(root, UnrestrictedPermissions.Instance));
 
         // Assert
         Assert.True(item.HasNavigationBarPages);
@@ -364,7 +447,7 @@ public class NavigationItemResolverTests
         var resolver = CreateResolver(root);
 
         // Act
-        var item = Assert.Single(resolver.GetChildItems(root));
+        var item = Assert.Single(resolver.GetChildItems(root, UnrestrictedPermissions.Instance));
 
         // Assert
         Assert.True(item.IsFolder);
@@ -384,7 +467,7 @@ public class NavigationItemResolverTests
         var resolver = CreateResolver(root);
 
         // Act
-        var items = resolver.GetChildItems(root);
+        var items = resolver.GetChildItems(root, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(["Shown"], items.Select(item => item.Title));
@@ -406,7 +489,7 @@ public class NavigationItemResolverTests
         var resolver = CreateResolver(root);
 
         // Act
-        var items = resolver.GetAppBarItems(root)
+        var items = resolver.GetAppBarItems(root, UnrestrictedPermissions.Instance)
             .Where(item => item.Alignment == AppBarAlignment.Menu)
             .ToList();
 

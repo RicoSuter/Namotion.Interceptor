@@ -1,5 +1,6 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Select))]
 @implements ISubjectComponent
+@inherits PermissionsComponentBase
 @inject SubjectPathResolver PathResolver
 
 @{
@@ -10,14 +11,14 @@
 {
     // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var path = select.Path;
-    var map = ValueReader.ResolveMap(PathResolver, select, select.Map, out var mapError);
+    var map = ValueReader.ResolveMap(PathResolver, select, select.Map, Permissions, out var mapError);
     if (mapError is not null)
     {
         <WidgetArgumentError Message="@mapError" />
     }
     else
     {
-        <SelectView Property="@ValueReader.ResolveProperty(PathResolver, select, path)"
+        <SelectView Property="@ValueReader.ResolveProperty(PathResolver, select, path, Permissions)"
                     Path="@path"
                     Label="@select.Label"
                     Map="@map" />

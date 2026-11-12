@@ -15,8 +15,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenAValidPatternIsEntered_ThenItIsAddedAsAChip()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -32,8 +31,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenAPathIsPicked_ThenItsPatternGoesIntoTheFieldAndTheAddButtonAddsItOnceEdited()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var dialogProvider = Render<MudDialogProvider>();
         var component = RenderEditor(role);
         var field = "[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths'] input";
@@ -41,6 +39,8 @@ public sealed class RuleCardTests : RoleEditorTestContext
         // Act: the click waits for the dialog to close.
         var browse = component.Find("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths'] button[aria-label='Browse Paths']")
             .ClickAsync(new MouseEventArgs());
+        // The dialog provider renders the dialog once the click handler yields, which can be after the click returned.
+        await dialogProvider.WaitForAssertionAsync(() => Assert.Single(dialogProvider.FindComponents<SubjectPathPickerDialog>()));
         var listsMembers = dialogProvider.FindComponent<SubjectPathPickerDialog>().Instance.ListsPropertiesWithoutState;
         await dialogProvider.Find("[data-testid='subject-path-picker'] input").InputAsync(new ChangeEventArgs { Value = "/Devices/Child" });
         await dialogProvider.FindAll("button").Single(button => button.TextContent.Trim() == "OK").ClickAsync(new MouseEventArgs());
@@ -65,8 +65,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenTextIsTypedIntoAFieldWithSuggestionsAndAddIsClicked_ThenItIsAdded()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
         await TypeTextAsync(component, "role-edit-allow-rule-0", "rule-types", "TestDevice");
 
@@ -81,8 +80,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenThePathFieldIsEmptyOrInvalid_ThenItsAddButtonIsDisabled()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
         var add = "[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths-add']";
         var isDisabledWhenEmpty = component.Find(add).HasAttribute("disabled");
@@ -102,8 +100,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenAnInvalidPatternIsEntered_ThenItsErrorIsShownOnTheFieldAndItIsNotAdded()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -120,8 +117,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public void WhenALoadedPatternIsInvalid_ThenItIsShownAsAnErrorChipAndTheRoleIsInvalid()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Paths = ["/Devices/**", "Garden"], Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Paths = ["/Devices/**", "garden"], Actions = [PermissionAction.Read] }]);
 
         // Act
         var component = RenderEditor(role);
@@ -131,7 +127,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
         Assert.DoesNotContain("mud-chip-color-error", chips[0].ClassName);
         Assert.Contains("mud-chip-color-error", chips[1].ClassName);
         var tooltip = Assert.Single(component.FindComponent<RuleCard>().FindComponents<MudTooltip>());
-        Assert.Equal("Path pattern 'Garden' must start with '/'.", tooltip.Instance.Text);
+        Assert.Equal("Path pattern 'garden' must start with '/'.", tooltip.Instance.Text);
         Assert.False(component.Instance.IsValid);
     }
 
@@ -139,8 +135,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenATagIsNotAMemberTag_ThenItIsRejected()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -148,7 +143,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
 
         // Assert
         Assert.Contains(
-            "Unknown tag; use one of state, configuration, secret, query, operation, requires-confirmation, subjects, attribute, metadata.",
+            "Unknown tag; use one of state, configuration, secret, query, operation, requires-confirmation, subjects, attribute, metadata, administration.",
             component.Find("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-tags']").TextContent);
         Assert.Empty(GetChips(GetCards(component, "allow")[0], "rule-tags"));
     }
@@ -157,8 +152,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenTheTypeFieldIsSearched_ThenItSuggestsTheKnownTypesAndTheTypedText()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
         var typeInput = component.FindComponents<ChipListInput>().Single(input => input.Instance.TestId == "rule-types");
         var search = typeInput.FindComponent<MudAutocomplete<string>>().Instance.SearchFunc!;
@@ -167,15 +161,14 @@ public sealed class RuleCardTests : RoleEditorTestContext
         var suggestions = await search("o", CancellationToken.None)!;
 
         // Assert
-        Assert.Equal(["o", nameof(HomeBlaze.Abstractions.IConfigurable), nameof(HomeBlaze.Abstractions.IIconProvider), nameof(HomeBlaze.Abstractions.ITitleProvider), "Role", "TestRoot"], suggestions);
+        Assert.Equal(["o", nameof(HomeBlaze.Abstractions.IIconProvider), nameof(HomeBlaze.Abstractions.ITitleProvider), "Role", "TestRoot"], suggestions);
     }
 
     [Fact]
     public async Task WhenATypeSuggestionIsPicked_ThenItIsAdded()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
         var typeInput = component.FindComponents<ChipListInput>().Single(input => input.Instance.TestId == "rule-types");
         var autocomplete = typeInput.FindComponent<MudAutocomplete<string>>();
@@ -191,8 +184,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenValidTextIsTypedAndTheFieldLosesFocus_ThenItIsAddedAsAChip()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
         var selector = "[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths'] input";
         await component.Find(selector).InputAsync(new ChangeEventArgs { Value = " /Devices/** " });
@@ -210,8 +202,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenValidTextIsTypedButNotAdded_ThenSavingIncludesIt()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
         await TypeTextAsync(component, "role-edit-allow-rule-0", "rule-paths", "/Devices/*");
         await TypeTextAsync(component, "role-edit-allow-rule-0", "rule-types", "TestDevice");
@@ -223,15 +214,14 @@ public sealed class RuleCardTests : RoleEditorTestContext
         // Assert
         Assert.Equal(
             [new PermissionRule { Paths = ["/Devices/*"], Types = ["TestDevice"], Members = ["Temperature"], Actions = [PermissionAction.Read] }],
-            role.Allow);
+            Graph.GetRole("kitchen").Allow);
     }
 
     [Fact]
     public async Task WhenInvalidTextIsTypedButNotAdded_ThenTheRoleIsInvalidUntilItIsCleared()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var oldAllow = role.Allow;
         var component = RenderEditor(role);
         var validity = new List<bool>();
@@ -260,8 +250,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenInvalidTextIsTypedIntoADenyRule_ThenOnlyTheDenyTabShowsTheErrorMarkerUntilItIsCleared()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Deny = [new PermissionRule { Actions = [PermissionAction.Write] }];
+        var role = Graph.SetRole("kitchen", deny: [new PermissionRule { Actions = [PermissionAction.Write] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -284,13 +273,11 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public void WhenEverySelectorOfARuleIsEmpty_ThenTheCardWarnsThatItAppliesToEveryMember()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow =
+        var role = Graph.SetRole("kitchen", allow: 
         [
             new PermissionRule { Actions = [PermissionAction.Read] },
             new PermissionRule { Tags = [MemberTags.State], Actions = [PermissionAction.Write] }
-        ];
-        role.Deny = [new PermissionRule { Actions = [PermissionAction.Write] }];
+        ], deny: [new PermissionRule { Actions = [PermissionAction.Write] }]);
 
         // Act
         var component = RenderEditor(role);
@@ -312,16 +299,16 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public void WhenADenyPathNamesAPropertyHoldingASubject_ThenTheCardHintsThatItMatchesOnlyThatMember()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Deny = [new PermissionRule { Paths = ["/Devices/Child", "/Devices/Temperature", "/Devices/*"], Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", deny: [new PermissionRule { Paths = ["/Devices/Child", "/Devices/Temperature", "/Devices/*"], Actions = [PermissionAction.Read] }]);
 
         // Act
         var component = RenderEditor(role);
 
         // Assert
-        Assert.Equal(
-            "'/Devices/Child' matches only that one member, not what is below it; add /** to deny everything below it as well.",
-            component.Find("[data-testid='role-edit-deny-rule-0'] [data-testid='rule-single-member-hint']").TextContent.Trim());
+        var hint = component.Find("[data-testid='role-edit-deny-rule-0'] [data-testid='rule-single-member-hint']");
+        Assert.Equal(Graph.Service.GetDenyPatternWarning("/Devices/Child"), hint.TextContent.Trim());
+        Assert.Contains("'/Devices/Child/**'", hint.TextContent);
+        Assert.Contains("mud-alert-text-warning", hint.ClassName);
     }
 
     [Theory]
@@ -336,15 +323,15 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public void WhenAPathHasNothingBelowItLeftOut_ThenTheCardHasNoHint(string section, string path)
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
+        Role role;
         var rules = new List<PermissionRule> { new() { Paths = [path], Actions = [PermissionAction.Read] } };
         if (section == "deny")
         {
-            role.Deny = rules;
+            role = Graph.SetRole("kitchen", deny: rules);
         }
         else
         {
-            role.Allow = rules;
+            role = Graph.SetRole("kitchen", allow: rules);
         }
 
         // Act
@@ -358,8 +345,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenATypedPathNamesAnEntry_ThenTheFieldWarnsAndTheAddedChipIsAWarningThatKeepsTheRoleValid()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -379,8 +365,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenATypedPathCoversTheEntry_ThenTheFieldDoesNotWarn()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -394,8 +379,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenALoadedSelectorListsAValueTwice_ThenTheLaterOneIsAnErrorChipUntilItIsRemoved()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Members = ["TurnOn", "TurnOn"], Tags = ["state", "STATE"], Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Members = ["TurnOn", "TurnOn"], Tags = ["state", "STATE"], Actions = [PermissionAction.Read] }]);
 
         // Act
         var component = RenderEditor(role);
@@ -427,8 +411,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenTextWithCommasIsEntered_ThenEachPartIsAddedAsAChip(string input, string text, string[] expectedChips)
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -443,8 +426,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenTextWithCommasHasAnInvalidPart_ThenNothingIsAddedAndThePartsErrorIsShown()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -461,8 +443,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenAPathWithACommaIsEntered_ThenItIsAddedAsOneChip()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -477,8 +458,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenPathsSeparatedByACommaAreTyped_ThenTheFieldWarnsToAddEachPathOnItsOwn()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -494,8 +474,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenPathsSeparatedByACommaAndASpaceAreEntered_ThenTheErrorSaysToAddEachPathOnItsOwn()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -512,8 +491,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenAPathWithACommaInANameIsTyped_ThenTheFieldDoesNotWarn()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -527,9 +505,9 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenALoadedPathHasAComma_ThenItIsValidAndSaved()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
+        Role role;
         var rule = new PermissionRule { Paths = ["/Devices/Living room, left/**"], Actions = [PermissionAction.Read] };
-        role.Allow = [rule];
+        role = Graph.SetRole("kitchen", allow: [rule]);
         var component = RenderEditor(role);
 
         // Act: saving throws for an invalid role.
@@ -548,8 +526,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenANameWithWhitespaceIsEntered_ThenItIsRejected(string input, string text, string expectedError)
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -572,15 +549,15 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public void WhenALoadedValueWouldBeRejected_ThenItIsAnErrorChipAndTheRoleIsInvalid(string selector, string value, string expectedError)
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
+        Role role;
         var rule = new PermissionRule { Actions = [PermissionAction.Read] };
-        role.Allow = [selector switch
+        role = Graph.SetRole("kitchen", allow: [selector switch
         {
             "Members" => rule with { Members = [value] },
             "Types" => rule with { Types = [value] },
             "Paths" => rule with { Paths = [value] },
             _ => rule with { Tags = [value] }
-        }];
+        }]);
 
         // Act
         var component = RenderEditor(role);
@@ -597,8 +574,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public void WhenATypeIsNotKnown_ThenItsChipWarnsWithoutMakingTheRoleInvalid()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Types = ["TestRoot", "HomeBlaze.Authorization.Role", "Testroot"], Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Types = ["TestRoot", "HomeBlaze.Authorization.Role", "Testroot"], Actions = [PermissionAction.Read] }]);
 
         // Act
         var component = RenderEditor(role);
@@ -617,8 +593,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public void WhenARuleCardIsShown_ThenTheTypesAndMembersSayTheyAreCaseSensitive()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
 
         // Act
         var component = RenderEditor(role);
@@ -634,8 +609,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public void WhenARuleCardIsShown_ThenThePathsFieldGivesMemberPathExamplesAndEachTabSaysOnceHowToAdd()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
 
         // Act
         var component = RenderEditor(role);
@@ -656,9 +630,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public void WhenRulesAreShown_ThenEachRemoveButtonNamesItsRule()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }, new PermissionRule { Actions = [PermissionAction.Write] }];
-        role.Deny = [new PermissionRule { Actions = [PermissionAction.Write] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }, new PermissionRule { Actions = [PermissionAction.Write] }], deny: [new PermissionRule { Actions = [PermissionAction.Write] }]);
 
         // Act
         var component = RenderEditor(role);
@@ -673,8 +645,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public async Task WhenALoadedRuleHasAnUnknownAction_ThenItIsAnErrorChipAndTheRoleIsInvalidUntilItIsRemoved()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read, new PermissionAction("run")] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read, new PermissionAction("run")] }]);
 
         // Act
         var component = RenderEditor(role);
@@ -699,8 +670,7 @@ public sealed class RuleCardTests : RoleEditorTestContext
     public void WhenLoadedTagsAreInAnotherCase_ThenTheyAreValid()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Tags = ["STATE", "Secret"], Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Tags = ["STATE", "Secret"], Actions = [PermissionAction.Read] }]);
 
         // Act
         var component = RenderEditor(role);

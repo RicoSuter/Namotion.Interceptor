@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Text.Json;
 using HomeBlaze.Abstractions.Metadata;
-using HomeBlaze.Storage;
 using HomeBlaze.Storage.Files;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp;
@@ -10,10 +9,8 @@ using Namotion.Interceptor.Mcp.Abstractions;
 namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
-/// Provides edit_markdown, write_markdown and create_markdown, which call the operations ReplaceText and ReplaceContent of
-/// a Markdown file and CreateMarkdownFile of a storage folder through the same path as invoke_operation, so its
-/// argument checks, operation filter and confirmation rule apply. The tools are only offered when the configuration is
-/// not read-only.
+/// Provides edit_markdown and write_markdown, which call the operations ReplaceText and ReplaceContent of a Markdown file
+/// through the same path as invoke_operation, so its argument checks, operation filter and confirmation rule apply.
 /// </summary>
 public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
 {
@@ -23,11 +20,8 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
     /// <summary>The name of the tool that replaces the whole source of a Markdown file.</summary>
     public const string WriteMarkdownToolName = "write_markdown";
 
-    /// <summary>The name of the tool that creates a Markdown file in a folder.</summary>
-    public const string CreateMarkdownToolName = "create_markdown";
-
     /// <summary>The names of the tools, all of which change pages and documents.</summary>
-    public static IReadOnlyList<string> ToolNames { get; } = [EditMarkdownToolName, WriteMarkdownToolName, CreateMarkdownToolName];
+    public static IReadOnlyList<string> ToolNames { get; } = [EditMarkdownToolName, WriteMarkdownToolName];
 
     private const string BlocksRule =
         "Blocks, which start with a line of two or more colons (::) and create widgets, layouts, slots, subjects and " +
@@ -49,12 +43,6 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
         $"Replace the whole Markdown source of a Markdown page or document (*.md) with content ({MaxContentSizeText}). Read the " +
         $"source first with {HomeBlazeMcpToolProvider.InvokeQueryToolName} method ReadRawContent and keep what should stay; for small changes use {EditMarkdownToolName}. " +
         $"{BlocksRule} {MarkdownFile.ActiveContent} cannot be added. " +
-        HomeBlazeMcpInstructions.PageChangeCaution;
-
-    private static readonly string CreateMarkdownDescription =
-        "Create a Markdown page or document: folder_path is the path of a storage folder or storage, name a plain " +
-        $"file name ending in .md that does not exist there yet, content the Markdown source ({MaxContentSizeText}) without " +
-        $"blocks (lines that start with two or more colons), {MarkdownFile.ActiveContent}. " +
         HomeBlazeMcpInstructions.PageChangeCaution;
 
     private static readonly MarkdownTool EditMarkdownTool = new(
@@ -80,38 +68,18 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
         [("content", "content")],
         GetMarkdownFileError);
 
-    private static readonly MarkdownTool CreateMarkdownTool = new(
-        CreateMarkdownToolName,
-        CreateMarkdownDescription,
-        CreateSchema(
-            ("folder_path", "Path of the folder to create the file in"),
-            ("name", "File name ending in .md, without folders"),
-            ("content", "The Markdown source of the new file")),
-        "folder_path",
-        "CreateMarkdownFile",
-        [("name", "name"), ("content", "content")],
-        GetFolderError);
+    private static readonly MarkdownTool[] Tools = [EditMarkdownTool, WriteMarkdownTool];
 
-    private static readonly MarkdownTool[] Tools = [EditMarkdownTool, WriteMarkdownTool, CreateMarkdownTool];
-
-    private readonly bool _isReadOnly;
     private readonly McpMethodInvoker _invoker;
 
     /// <param name="invoker">Resolves the subjects and invokes their operations, with the operation filter of invoke_operation.</param>
-    /// <param name="isReadOnly">Whether the tools are left out.</param>
-    internal HomeBlazeMarkdownToolProvider(McpMethodInvoker invoker, bool isReadOnly)
+    internal HomeBlazeMarkdownToolProvider(McpMethodInvoker invoker)
     {
-        _isReadOnly = isReadOnly;
         _invoker = invoker;
     }
 
     public IEnumerable<McpToolInfo> GetTools()
     {
-        if (_isReadOnly)
-        {
-            yield break;
-        }
-
         foreach (var tool in Tools)
         {
             yield return new McpToolInfo
@@ -165,9 +133,6 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
     // Only the type is checked here; the operations check the rest themselves, with a message that reaches the caller.
     private static string? GetMarkdownFileError(IInterceptorSubject subject, string path) =>
         subject is MarkdownFile ? null : $"'{path}' is not a Markdown file.";
-
-    private static string? GetFolderError(IInterceptorSubject subject, string path) =>
-        subject is VirtualFolder or FluentStorageContainer ? null : $"'{path}' is not a storage folder.";
 
     private static JsonElement CreateSchema(params (string Name, string Description)[] properties) =>
         JsonSerializer.SerializeToElement(new

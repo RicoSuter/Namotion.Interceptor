@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.Text.Json;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services.Metadata;
@@ -15,9 +14,9 @@ namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
 /// The order of the children of a folder or of the root of a storage that the tools let their clients read and change:
-/// GetOrder, the order in the metadata of the folder and its ChildOrder name only the children that the tools list,
-/// SetOrder needs write access to the metadata of the folder, and an order that names a child the tools do not list is
-/// refused as one naming a child that does not exist.
+/// the order in the metadata of the folder and its ChildOrder name only the children that the tools list, SetOrder needs
+/// write access to the metadata of the folder, and an order that names a child the tools do not list is refused as one
+/// naming a child that does not exist.
 /// </summary>
 internal static class AgentOrderAccess
 {
@@ -25,24 +24,8 @@ internal static class AgentOrderAccess
     internal const string SetOrderMethodName = "SetOrder";
 
     /// <summary>
-    /// Gets the names of the result of GetOrder of a folder or of the root of a storage that are children the tools
-    /// list, in their order; any other result is returned unchanged.
-    /// </summary>
-    public static object? FilterGetOrderResult(
-        RegisteredSubject subject, MethodMetadata method, object? result, McpServerConfiguration configuration, IInterceptorSubject root)
-    {
-        if (method.PropertyName != nameof(FluentStorageContainer.GetOrder) || subject.Subject is not IMetadataContainer || result is not string[] names)
-        {
-            return result;
-        }
-
-        var listedNames = GetListedChildNames(subject, configuration, root);
-        return names.Where(listedNames.Contains).ToArray();
-    }
-
-    /// <summary>
     /// Creates the value filter that leaves out of the order in the metadata of a folder or of the root of a storage, and
-    /// out of its ChildOrder, the names of the children that the tools do not list, as GetOrder does, so that the tools
+    /// out of its ChildOrder, the names of the children that the tools do not list, so that the tools
     /// and page expressions name no hidden child.
     /// </summary>
     public static IMcpValueFilter CreateOrderFilter(McpServerConfiguration configuration, Func<IInterceptorSubject> rootSubjectProvider)
@@ -105,22 +88,20 @@ internal static class AgentOrderAccess
     private static HashSet<string> GetListedChildNames(
         RegisteredSubject folder, McpServerConfiguration configuration, IInterceptorSubject root)
     {
-        var names = new HashSet<string>(StringComparer.Ordinal);
-        if (folder.TryGetProperty(IMetadataContainer.ChildrenPropertyName) is not { } childrenProperty ||
-            root.TryGetRegisteredSubject() is not { } registeredRoot)
+        if (root.TryGetRegisteredSubject() is not { } registeredRoot)
         {
-            return names;
+            return new HashSet<string>(StringComparer.Ordinal);
         }
 
-        foreach (var child in childrenProperty.Children)
-        {
-            if (child.Index is { } index && IsListed(child.Subject, childrenProperty.TryGetPath(configuration.PathProvider, root, index), folder, registeredRoot, configuration))
-            {
-                names.Add(index.ToString() ?? string.Empty);
-            }
-        }
-
-        return names;
+        return ChildOrdering.GetListedNames(
+            folder,
+            (Configuration: configuration, Root: root, RegisteredRoot: registeredRoot),
+            static (state, childrenProperty, child) => IsListed(
+                child.Subject,
+                childrenProperty.TryGetPath(state.Configuration.PathProvider, state.Root, child.Index),
+                childrenProperty.Parent,
+                state.RegisteredRoot,
+                state.Configuration));
     }
 
     private static bool IsListed(
@@ -128,7 +109,7 @@ internal static class AgentOrderAccess
         => path is not null &&
             configuration.TryGetReadableSubject(root, path) is { } listed &&
             ReferenceEquals(listed.Subject, child) &&
-            !AgentMetadataAccess.IsOfExcludedType(listed, folder.Subject, configuration.ExcludeTypes);
+            !McpPageReadAccess.IsOfExcludedType(listed, folder.Subject, configuration.ExcludeTypes);
 
     // The path that the tools build for the folder.
     private static string GetToolPath(RegisteredSubject folder, McpServerConfiguration configuration, IInterceptorSubject root)
@@ -136,31 +117,11 @@ internal static class AgentOrderAccess
 
     private sealed class OrderFilter(McpServerConfiguration configuration, Func<IInterceptorSubject> rootSubjectProvider) : IMcpValueFilter
     {
-        public object? Filter(RegisteredSubjectProperty member, object? value)
-        {
-            if (member.IsAttribute || member.Parent.Subject is not IMetadataContainer)
-            {
-                return value;
-            }
-
-            if (value is ImmutableArray<string> { IsDefaultOrEmpty: false } childOrder && member.Name == nameof(IMetadataContainer.ChildOrder))
-            {
-                var listedChildNames = GetListedChildNames(member.Parent, configuration, rootSubjectProvider());
-                return childOrder.RemoveAll(name => !listedChildNames.Contains(name));
-            }
-
-            if (value is not ImmutableDictionary<string, JsonElement> metadata || !member.IsMetadata() ||
-                !metadata.TryGetValue(MetadataKeys.Order, out var order) || order.ValueKind != JsonValueKind.Array)
-            {
-                return value;
-            }
-
-            var listedNames = GetListedChildNames(member.Parent, configuration, rootSubjectProvider());
-            var names = order.EnumerateArray()
-                .Where(item => item.ValueKind == JsonValueKind.String && listedNames.Contains(item.GetString()!))
-                .Select(item => item.GetString()!)
-                .ToArray();
-            return metadata.SetItem(MetadataKeys.Order, JsonSerializer.SerializeToElement(names));
-        }
+        public object? Filter(RegisteredSubjectProperty member, object? value) =>
+            ChildOrdering.FilterOrder(
+                member,
+                value,
+                (Configuration: configuration, RootSubjectProvider: rootSubjectProvider),
+                static (state, folder) => GetListedChildNames(folder, state.Configuration, state.RootSubjectProvider()));
     }
 }

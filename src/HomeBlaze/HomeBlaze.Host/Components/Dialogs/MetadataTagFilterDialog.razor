@@ -1,8 +1,10 @@
 @using HomeBlaze.Abstractions.Attributes
+@using HomeBlaze.Authorization.Abstractions
 @using HomeBlaze.Services.Metadata
 @using HomeBlaze.Storage
 @inject MetadataLinkResolver LinkResolver
 @inject RootManager RootManager
+@inject IUserPermissions Permissions
 
 <MudDialog data-testid="metadata-tag-filter">
     <DialogContent>
@@ -41,12 +43,16 @@
             return;
 
         // Once per dialog, as the search walks the whole tree.
-        foreach (var match in MetadataSearch.Search(root, tag: Tag, isExcluded: static subject => subject.IsExcludedFrom(ExclusionTarget.UserInterface)))
+        var matches = MetadataSearch.Search(
+            root, Permissions.CanRead, tag: Tag, isExcluded: static subject => subject.IsExcludedFrom(ExclusionTarget.UserInterface),
+            isPathMemberIncluded: Permissions.CanReadShown);
+        foreach (var match in matches)
         {
-            // A subject detached since the search, and a property that the browser does not show, are not listed.
+            // A subject detached since the search, a subject the viewer may not see, and a property that the browser does
+            // not show or the viewer may not read, are not listed.
             var subject = FluentStorageContainer.ResolveMetadataPath(root, match.Path);
-            if (subject is null ||
-                match.Property is not null && subject.TryGetRegisteredSubject()?.TryGetProperty(match.Property)?.IsShownAsValue() != true)
+            if (subject is null || !Permissions.CanShow(subject) ||
+                match.Property is not null && !IsListedProperty(subject.TryGetRegisteredSubject()?.TryGetProperty(match.Property)))
                 continue;
 
             // Built as the path of a link, the name of a property after the path of its subject.
@@ -55,6 +61,9 @@
             _items.Add((path, LinkResolver.Resolve(subject, match.Property)));
         }
     }
+
+    private bool IsListedProperty(RegisteredSubjectProperty? property) =>
+        property is not null && property.IsShownAsValue() && Permissions.CanRead(property);
 
     private void Close() => MudDialog?.Close();
 

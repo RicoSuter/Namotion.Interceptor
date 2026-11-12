@@ -59,39 +59,16 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
     }
 
     [Theory]
-    [InlineData(DocsPath, "Docs/New.md")]
-    [InlineData("/Storage", "New.md")]
-    public async Task WhenCreatingAMarkdownFile_ThenItIsWrittenAndAddedAsAPage(string folderPath, string expectedFile)
-    {
-        // Arrange
-        var (root, _, services) = await CreateGraphAsync();
-        var tools = CreateTools(services, root);
-
-        // Act
-        var result = await CallAsync(tools["create_markdown"], new { folder_path = folderPath, name = "New.md", content = "# New page" });
-        var readBack = await CallAsync(tools["invoke_query"], new { path = $"{folderPath}/New.md", method = "ReadRawContent" });
-
-        // Assert
-        Assert.True(result.GetProperty("success").GetBoolean());
-        Assert.Equal("# New page", ReadFile(expectedFile));
-        Assert.Equal("# New page", readBack.GetProperty("result").GetString());
-    }
-
-    [Theory]
     [InlineData("edit_markdown", "ReplaceText")]
     [InlineData("write_markdown", "ReplaceContent")]
-    [InlineData("create_markdown", "CreateMarkdownFile")]
     public async Task WhenAReaderUsesAMarkdownTool_ThenTheOperationIsRefusedAndNothingIsWritten(string toolName, string operationName)
     {
         // Arrange
         var (root, storage, services) = await CreateGraphAsync();
         var tools = CreateTools(services, root, accessPolicy: TestAccessPolicies.Create(BuiltInRoles.ReaderName));
-        object input = toolName switch
-        {
-            "edit_markdown" => new { path = NotesPath, old_text = "cold", new_text = "too warm" },
-            "write_markdown" => new { path = NotesPath, content = "# Rewritten" },
-            _ => new { folder_path = DocsPath, name = "New.md", content = "# New page" }
-        };
+        object input = toolName == "edit_markdown"
+            ? new { path = NotesPath, old_text = "cold", new_text = "too warm" }
+            : new { path = NotesPath, content = "# Rewritten" };
 
         // Act
         var result = await CallAsync(tools[toolName], input);
@@ -100,7 +77,6 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
         Assert.Equal($"Operation '{operationName}' is not permitted. The access policy does not allow it.", result.GetProperty("error").GetString());
         Assert.Equal("# Notes\n\nThe freezer is cold.", ReadFile("Notes.md"));
         Assert.Equal("# Notes\n\nThe freezer is cold.", GetNotes(storage).Content);
-        Assert.False(File.Exists(Path.Combine(_directory.FullName, "Docs", "New.md")));
     }
 
     [Theory]
@@ -117,21 +93,6 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
 
         // Assert
         Assert.Equal($"'{DocsPath}' is not a Markdown file.", result.GetProperty("error").GetString());
-    }
-
-    [Fact]
-    public async Task WhenTheTargetOfCreateMarkdownIsNotAFolder_ThenTheToolRefusesIt()
-    {
-        // Arrange
-        var (root, _, services) = await CreateGraphAsync();
-        var tools = CreateTools(services, root);
-
-        // Act
-        var result = await CallAsync(tools["create_markdown"], new { folder_path = NotesPath, name = "New.md", content = "# New" });
-
-        // Assert
-        Assert.Equal($"'{NotesPath}' is not a storage folder.", result.GetProperty("error").GetString());
-        Assert.False(File.Exists(Path.Combine(_directory.FullName, "New.md")));
     }
 
     [Fact]
@@ -174,12 +135,10 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
         // Act
         var edit = await CallAsync(tools["edit_markdown"], new { path = NotesPath, old_text = "is cold.", new_text = "is cold.\n\n:: HomeBlaze.Samples.Motor#other\n::" });
         var write = await CallAsync(tools["write_markdown"], new { path = NotesPath, content = "# Notes\n\nNo motor any more." });
-        var create = await CallAsync(tools["create_markdown"], new { folder_path = "/Storage", name = "New.md", content = ":: HomeBlaze.Components.Widget Path=/Storage\n::" });
 
         // Assert
         Assert.StartsWith("Blocks cannot be added, changed or removed", edit.GetProperty("error").GetString());
         Assert.StartsWith("Blocks cannot be added, changed or removed", write.GetProperty("error").GetString());
-        Assert.StartsWith("Blocks cannot be added, changed or removed", create.GetProperty("error").GetString());
         Assert.Equal("# Notes\n\n:: HomeBlaze.Samples.Motor#motor TargetSpeed=1000\n::\n\nThe freezer is cold.", ReadFile("Notes.md"));
         Assert.False(File.Exists(Path.Combine(_directory.FullName, "New.md")));
     }
@@ -193,14 +152,9 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
 
         // Act
         var edit = await CallAsync(tools["edit_markdown"], new { path = NotesPath, old_text = "hot", new_text = "warm" });
-        var create = await CallAsync(tools["create_markdown"], new { folder_path = "/Storage", name = "Notes.md", content = "# Other" });
-        var badName = await CallAsync(tools["create_markdown"], new { folder_path = "/Storage", name = "Notes.json", content = "{}" });
 
         // Assert
         Assert.StartsWith("The text to replace was not found in Notes.md.", edit.GetProperty("error").GetString());
-        Assert.StartsWith("'Notes.md' already exists in this folder.", create.GetProperty("error").GetString());
-        Assert.StartsWith("'Notes.json' is not a valid Markdown file name", badName.GetProperty("error").GetString());
-        Assert.False(File.Exists(Path.Combine(_directory.FullName, "Notes.json")));
     }
 
     [Fact]
@@ -209,40 +163,39 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
         // Arrange
         var (root, _, services) = await CreateGraphAsync();
         var invoker = new McpMethodInvoker(
-            () => root, new McpServerConfiguration { PathProvider = new StateAttributePathProvider() }, services, NullLogger.Instance,
-            isReadOnly: false, operationFilter: (_, method, _) => $"{method.PropertyName} is refused.");
-        var provider = new HomeBlazeMarkdownToolProvider(invoker, isReadOnly: false);
+            () => root,
+            new McpServerConfiguration { PathProvider = new StateAttributePathProvider(), AccessPolicy = AllowAllMcpAccessPolicy.Instance },
+            services, NullLogger.Instance, operationFilter: (_, method, _) => $"{method.PropertyName} is refused.");
+        var provider = new HomeBlazeMarkdownToolProvider(invoker);
         var tools = provider.GetTools().ToDictionary(tool => tool.Name);
 
         // Act
         var edit = await CallAsync(tools["edit_markdown"], new { path = NotesPath, old_text = "cold", new_text = "warm" });
         var write = await CallAsync(tools["write_markdown"], new { path = NotesPath, content = "# Rewritten" });
-        var create = await CallAsync(tools["create_markdown"], new { folder_path = DocsPath, name = "New.md", content = "# New" });
 
         // Assert
         Assert.Equal("ReplaceText is refused.", edit.GetProperty("error").GetString());
         Assert.Equal("ReplaceContent is refused.", write.GetProperty("error").GetString());
-        Assert.Equal("CreateMarkdownFile is refused.", create.GetProperty("error").GetString());
         Assert.Equal("# Notes\n\nThe freezer is cold.", ReadFile("Notes.md"));
-        Assert.False(File.Exists(Path.Combine(_directory.FullName, "Docs", "New.md")));
     }
 
     [Fact]
-    public async Task WhenTheConfigurationIsReadOnly_ThenTheMarkdownToolsAreNotOffered()
+    public async Task WhenAnAgentDoesNotAllowTheMarkdownTools_ThenItsToolSetLeavesThemOut()
     {
         // Arrange
         var (root, _, services) = await CreateGraphAsync();
-
-        // Act
-        var readOnlyTools = CreateTools(services, root, isReadOnly: true);
-        var writableTools = CreateTools(services, root, isReadOnly: false);
-        var externalTools = new McpToolFactory(root, HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly: false, TestAccessPolicies.Everything))
+        var agentTools = CreateTools(services, root);
+        var externalTools = new McpToolFactory(root, HomeBlazeMcpConfigurationFactory.Create(services, () => root, TestAccessPolicies.Everything))
             .CreateTools().ToDictionary(tool => tool.Name);
 
+        // Act
+        var toolSet = AgentToolSet.Create(
+            agentTools.Values.ToList(), AgentToolSet.DefaultAllowedTools, CreateMemoryTool(), maxToolCalls: 5, progress: null);
+
         // Assert
-        string[] markdownTools = ["edit_markdown", "write_markdown", "create_markdown"];
-        Assert.All(markdownTools, name => Assert.DoesNotContain(name, readOnlyTools.Keys));
-        Assert.All(markdownTools, name => Assert.Same(McpToolAnnotations.Destructive, writableTools[name].Annotations));
+        string[] markdownTools = ["edit_markdown", "write_markdown"];
+        Assert.All(markdownTools, name => Assert.DoesNotContain(name, toolSet.Tools.Select(tool => tool.Name)));
+        Assert.All(markdownTools, name => Assert.Same(McpToolAnnotations.Destructive, agentTools[name].Annotations));
         Assert.All(markdownTools, name => Assert.Contains(name, externalTools.Keys));
     }
 
@@ -251,7 +204,7 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
     {
         // Arrange
         var (root, _, services) = await CreateGraphAsync();
-        var available = CreateTools(services, root, isReadOnly: AgentToolSet.IsReadOnly(["edit_markdown"])).Values.ToList();
+        var available = CreateTools(services, root).Values.ToList();
         var toolSet = AgentToolSet.Create(available, ["edit_markdown"], CreateMemoryTool(), maxToolCalls: 1, progress: null);
         var edit = toolSet.Tools.Single(tool => tool.Name == "edit_markdown");
 
@@ -273,7 +226,7 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
     {
         // Arrange
         var (root, storage, services) = await CreateGraphAsync();
-        var available = CreateTools(services, root, isReadOnly: AgentToolSet.IsReadOnly(["invoke_operation"])).Values.ToList();
+        var available = CreateTools(services, root).Values.ToList();
         var toolSet = AgentToolSet.Create(available, ["invoke_operation"], CreateMemoryTool(), maxToolCalls: 5, progress: null);
         var invokeOperation = toolSet.Tools.Single(tool => tool.Name == "invoke_operation");
 
@@ -326,9 +279,9 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
     }
 
     private static Dictionary<string, McpToolInfo> CreateTools(
-        IServiceProvider services, AgentTestRoot root, bool isReadOnly = false, IMcpAccessPolicy? accessPolicy = null)
+        IServiceProvider services, AgentTestRoot root, IMcpAccessPolicy? accessPolicy = null)
     {
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly, accessPolicy ?? TestAccessPolicies.Operator);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => root, accessPolicy ?? TestAccessPolicies.Operator);
         return new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }
 

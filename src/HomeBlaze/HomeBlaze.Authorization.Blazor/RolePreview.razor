@@ -1,6 +1,8 @@
-@* Shows what a role allows on one subject: whether the subject is readable, and each member against each action with the
-   rule that decided it. Never writes anything. *@
-@using System.Text
+@* Shows what a role allows a kind of principal on one subject: whether the subject is readable, each member against each
+   action with the rule that decided it, and how many members each deny rule of the role matches. Never writes anything.
+   Shows nothing to a viewer who may not administer the roles of the authorization, as it lists the members of any
+   subject whatever the viewer may read. *@
+@using HomeBlaze.Authorization.Abstractions
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Metadata
 @using Namotion.Interceptor.Registry.Abstractions
@@ -8,17 +10,35 @@
 
 @inject AuthorizationService AuthorizationService
 @inject SubjectPathResolver PathResolver
+@inject IUserPermissions Permissions
 
 <div class="role-preview">
-    <div data-testid="role-preview-path">
-        <SubjectPathField Value="@_path" ValueChanged="@OnPathChanged" Label="Subject" Placeholder="/Devices/Kitchen"
-                          IsPropertyVisible="@IsSubjectProperty" CanSelectProperty="@IsSubjectReference" HasBrowseButton="true" />
-    </div>
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="8">
+            <div data-testid="role-preview-path">
+                <SubjectPathField Value="@_path" ValueChanged="@OnPathChanged" Label="Subject" Placeholder="/Devices/Kitchen"
+                                  IsPropertyVisible="@IsSubjectProperty" CanSelectProperty="@IsSubjectReference" HasBrowseButton="true" />
+            </div>
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudSelect T="PrincipalKind" Label="Preview as" Value="@Kind" ValueChanged="@OnKindChangedAsync" data-testid="role-preview-kind">
+                @foreach (var (kind, name) in KindNames)
+                {
+                    <MudSelectItem T="PrincipalKind" Value="@kind">@name</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+    </MudGrid>
     <MudText Typo="Typo.body2" Class="mud-text-secondary mt-1">
-        What the role allows on the chosen subject, its unsaved changes included, with the other roles it includes and the system rules.
+        What the role allows on the chosen subject, its unsaved changes included, with the other roles it includes and the
+        system rules of the chosen kind of principal.
     </MudText>
 
-    @if (_subject is null)
+    @if (_isRefused)
+    {
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mt-4" data-testid="role-preview-refusal">@NotAllowedMessage</MudAlert>
+    }
+    else if (_subject is null)
     {
         @if (Result.Error is null && !string.IsNullOrWhiteSpace(_path))
         {
@@ -84,6 +104,19 @@
                 <b>@_selectedMember, @_selectedAction?.Name:</b> @selected.Explanation
             </MudAlert>
         }
+
+        @if (_denyMatches.Count > 0)
+        {
+            <MudText Typo="Typo.subtitle2" Class="mt-4">Deny rules</MudText>
+            <MudStack Spacing="1" Class="mt-1">
+                @foreach (var match in _denyMatches)
+                {
+                    <MudAlert Severity="@(match.MatchesNothing ? Severity.Warning : Severity.Normal)" Dense="true"
+                              data-testid="@($"role-preview-deny-{match.Index}")" data-count="@match.Count"
+                              data-matches-nothing="@(match.MatchesNothing ? "true" : "false")">@match.Text</MudAlert>
+                }
+            </MudStack>
+        }
     }
 </div>
 
@@ -144,25 +177,53 @@
 </style>
 
 @code {
+    private static readonly (PrincipalKind Kind, string Name)[] KindNames =
+    [
+        (PrincipalKind.Person, "Person"),
+        (PrincipalKind.NonHuman, "Agent or MCP client"),
+        (PrincipalKind.Anonymous, "Anonymous")
+    ];
+
+    private const string NotAllowedMessage = "Only a full administrator can preview roles.";
+
     private string? _path;
     private AuthorizationResult _previewedResult;
+    private AuthorizationRole? _previewedRole;
+    private bool _isRefused;
     private IInterceptorSubject? _subject;
     private VisibilityDecision _subjectDecision;
     private string? _subjectText;
     private IReadOnlyList<MemberRow> _rows = [];
+    private IReadOnlyList<DenyMatch> _denyMatches = [];
     private string? _selectedMember;
     private PermissionAction? _selectedAction;
 
     /// <summary>
-    /// The preview of the role, see <see cref="AuthorizationService.PreviewPolicy"/>. While it has an error, which the editor
-    /// shows, no subject is shown.
+    /// The preview of the role, see <see cref="AuthorizationService.PreviewPolicy(AuthorizationRole, PrincipalKind)"/>. While
+    /// it has an error, which the editor shows, no subject is shown.
     /// </summary>
     [Parameter, EditorRequired]
     public AuthorizationResult Result { get; set; }
 
+    /// <summary>The role the preview was compiled from, whose deny rules are matched against the members of the subject.</summary>
+    [Parameter, EditorRequired]
+    public AuthorizationRole Role { get; set; } = null!;
+
+    /// <summary>The kind of principal whose system rules <see cref="Result"/> was compiled with.</summary>
+    [Parameter]
+    public PrincipalKind Kind { get; set; } = PrincipalKind.Person;
+
+    /// <summary>The authorization that holds the roles; the preview shows nothing unless the viewer may administer its roles.</summary>
+    [Parameter]
+    public Authorization? Authorization { get; set; }
+
+    /// <summary>Raised with the kind chosen in the preview, for which the parent passes the preview compiled with it.</summary>
+    [Parameter]
+    public EventCallback<PrincipalKind> KindChanged { get; set; }
+
     protected override void OnParametersSet()
     {
-        if (Result != _previewedResult)
+        if (Result != _previewedResult || !ReferenceEquals(Role, _previewedRole))
         {
             Update();
         }
@@ -177,6 +238,13 @@
     {
         _path = path;
         Update();
+    }
+
+    // Kept here as chosen, as the parameter is set again only once the parent rendered.
+    private async Task OnKindChangedAsync(PrincipalKind kind)
+    {
+        Kind = kind;
+        await KindChanged.InvokeAsync(kind);
     }
 
     private void Select(string member, PermissionAction action)
@@ -194,10 +262,15 @@
     private void Update()
     {
         _previewedResult = Result;
-        _subject = Result.Error is not null || string.IsNullOrWhiteSpace(_path)
+        _previewedRole = Role;
+        _rows = [];
+        _denyMatches = [];
+
+        // Checked on every update, as a path can still arrive from a page whose viewer lost the permission.
+        _isRefused = !Permissions.CanAdministerRoles(Authorization);
+        _subject = _isRefused || Result.Error is not null || string.IsNullOrWhiteSpace(_path)
             ? null
             : PathResolver.ResolveSubject(_path.Trim(), PathStyle.Canonical);
-        _rows = [];
 
         if (_subject?.TryGetRegisteredSubject() is not { } subject)
         {
@@ -205,9 +278,48 @@
         }
 
         var policy = Result.Policy;
+        var members = GetMembers(subject);
         _subjectDecision = policy.ExplainVisibility(subject);
         _subjectText = DescribeSubject(_subjectDecision);
-        _rows = CreateRows(subject, policy, AuthorizationService.PathProvider);
+        _rows = members.Select(member => CreateRow(member, policy, AuthorizationService.PathProvider)).ToList();
+        _denyMatches = MatchDenyRules(Role, members);
+    }
+
+    // The members a deny rule of the role matches among those of the subject; when none, whether it matches any member
+    // at all, which the service answers from its cache, as a deny rule that matches nothing denies nothing.
+    private List<DenyMatch> MatchDenyRules(AuthorizationRole role, List<MemberEntry> members)
+    {
+        var matches = new List<DenyMatch>();
+        for (var index = 0; index < role.Deny.Length; index++)
+        {
+            var rule = role.Deny[index];
+            if (DenyRuleMatcher.Create(rule, AuthorizationService.PathProvider) is not { } matcher)
+            {
+                continue;
+            }
+
+            var count = members.Count(member => matcher.Matches(member.Member));
+            var matchesNothing = count == 0 && AuthorizationService.DenyRuleMatchesAnyMember(rule) == false;
+            matches.Add(new DenyMatch(index, count, matchesNothing, DescribeDenyMatch(index, rule, count, matchesNothing)));
+        }
+
+        return matches;
+    }
+
+    private static string DescribeDenyMatch(int index, PermissionRule rule, int count, bool matchesNothing)
+    {
+        var name = $"Deny rule {index + 1} (deny {rule})";
+        if (matchesNothing)
+        {
+            return $"{name} matches nothing: no member of any subject, so it denies nothing.";
+        }
+
+        return count switch
+        {
+            0 => $"{name} matches no member of this subject.",
+            1 => $"{name} matches 1 member of this subject.",
+            _ => $"{name} matches {count} members of this subject."
+        };
     }
 
     private string DescribeSubject(VisibilityDecision decision)
@@ -232,7 +344,7 @@
     }
 
     // The properties, then the methods, then the attributes of each, as the policy names them.
-    private static List<MemberRow> CreateRows(RegisteredSubject subject, AuthorizationPolicy policy, PathProviderBase pathProvider)
+    private static List<MemberEntry> GetMembers(RegisteredSubject subject)
     {
         var properties = new List<RegisteredSubjectProperty>();
         var methods = new List<RegisteredSubjectProperty>();
@@ -245,19 +357,18 @@
             }
         }
 
-        var rows = new List<MemberRow>();
-        rows.AddRange(properties.Select(property => CreateRow(property, property.Name, isMethod: false, policy, pathProvider)));
-        rows.AddRange(methods.Select(method => CreateRow(method, method.Name, isMethod: true, policy, pathProvider)));
+        var members = new List<MemberEntry>();
+        members.AddRange(properties.Select(property => new MemberEntry(property, property.Name, IsMethod: false)));
+        members.AddRange(methods.Select(method => new MemberEntry(method, method.Name, IsMethod: true)));
         foreach (var property in properties.Concat(methods))
         {
-            AddAttributeRows(property, property.Name, policy, pathProvider, rows);
+            AddAttributes(property, property.Name, members);
         }
 
-        return rows;
+        return members;
     }
 
-    private static void AddAttributeRows(
-        RegisteredSubjectProperty property, string name, AuthorizationPolicy policy, PathProviderBase pathProvider, List<MemberRow> rows)
+    private static void AddAttributes(RegisteredSubjectProperty property, string name, List<MemberEntry> members)
     {
         foreach (var attribute in property.Attributes)
         {
@@ -267,21 +378,20 @@
             }
 
             var attributeName = $"{name}@{attribute.BrowseName}";
-            rows.Add(CreateRow(attribute, attributeName, isMethod: false, policy, pathProvider));
-            AddAttributeRows(attribute, attributeName, policy, pathProvider, rows);
+            members.Add(new MemberEntry(attribute, attributeName, IsMethod: false));
+            AddAttributes(attribute, attributeName, members);
         }
     }
 
-    // Methods are read and executed; values are read, written and have a history.
-    private static MemberRow CreateRow(
-        RegisteredSubjectProperty member, string name, bool isMethod, AuthorizationPolicy policy, PathProviderBase pathProvider)
+    // Only the actions that apply to the member get a cell, see AuthorizationActions.AppliesTo.
+    private static MemberRow CreateRow(MemberEntry entry, AuthorizationPolicy policy, PathProviderBase pathProvider)
     {
+        var (member, name, isMethod) = entry;
         var cells = new Cell?[AuthorizationActions.All.Length];
         for (var index = 0; index < cells.Length; index++)
         {
             var action = AuthorizationActions.All[index];
-            var applies = action == PermissionAction.Read || (isMethod ? action == AuthorizationActions.Execute : action != AuthorizationActions.Execute);
-            if (applies)
+            if (AuthorizationActions.AppliesTo(action, isMethod))
             {
                 var decision = policy.Explain(member, action);
                 cells[index] = new Cell(decision.IsAllowed, Explain(decision));
@@ -313,52 +423,33 @@
 
     /// <summary>
     /// Gets a decision as text, for example
-    /// <c>Denied by Kitchen: deny paths /Devices; actions write. It overrides Reader: allow any member; actions read, write.</c>
+    /// <c>Denied by Kitchen: deny write · paths: /Devices. It overrides Reader: allow read, write.</c>
     /// </summary>
     internal static string Explain(PermissionDecision decision)
     {
-        if (decision.DeniedBy is { } deniedBy && decision.DeniedByRule is { } deniedByRule)
+        if (decision.DeniedByRule is { } deniedByRule)
         {
-            var denier = deniedBy.Name == AuthorizationPolicy.SystemRoleName ? "a system rule" : deniedBy.Name;
-            var text = $"Denied by {denier}: {FormatRule("deny", deniedByRule)}.";
+            var denier = decision.IsDeniedBySystem ? "a system rule" : decision.DeniedBy?.Name;
+            var text = $"Denied by {denier}: deny {deniedByRule}.";
             return decision.AllowedBy is { } allowedBy && decision.AllowedByRule is { } allowedByRule
-                ? $"{text} It overrides {allowedBy.Name}: {FormatRule("allow", allowedByRule)}."
+                ? $"{text} It overrides {allowedBy.Name}: allow {allowedByRule}."
                 : text;
         }
 
         if (decision.AllowedBy is { } allower && decision.AllowedByRule is { } allowingRule)
         {
-            return $"Allowed by {allower.Name}: {FormatRule("allow", allowingRule)}.";
+            return $"Allowed by {allower.Name}: allow {allowingRule}.";
         }
 
         return "No role allows it.";
     }
 
-    /// <summary>Gets a rule as text, for example <c>deny paths /Devices/Bedroom; types ILight; actions write, execute</c>.</summary>
-    internal static string FormatRule(string kind, PermissionRule rule)
-    {
-        var builder = new StringBuilder(kind);
-        var hasSelector = false;
-        AppendSelector(builder, "paths", rule.Paths, ref hasSelector);
-        AppendSelector(builder, "types", rule.Types, ref hasSelector);
-        AppendSelector(builder, "members", rule.Members, ref hasSelector);
-        AppendSelector(builder, "tags", rule.Tags, ref hasSelector);
-        if (!hasSelector)
-        {
-            builder.Append(" any member;");
-        }
+    // A member as listed, by the name the matrix shows it with.
+    private sealed record MemberEntry(RegisteredSubjectProperty Member, string Name, bool IsMethod);
 
-        return builder.Append(" actions ").AppendJoin(", ", rule.Actions.Select(action => action.Name)).ToString();
-    }
-
-    private static void AppendSelector(StringBuilder builder, string name, IReadOnlyList<string> values, ref bool hasSelector)
-    {
-        if (values.Count > 0)
-        {
-            builder.Append(' ').Append(name).Append(' ').AppendJoin(", ", values).Append(';');
-            hasSelector = true;
-        }
-    }
+    // The members of the subject a deny rule of the role matches, at its index in the deny rules of the role, and
+    // whether it matches no member of any subject.
+    private sealed record DenyMatch(int Index, int Count, bool MatchesNothing, string Text);
 
     // The path is the member's path as path patterns spell it, or null when its subject has none.
     private sealed record MemberRow(string Name, string? Path, Cell?[] Cells);

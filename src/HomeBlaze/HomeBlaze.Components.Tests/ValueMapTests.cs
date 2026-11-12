@@ -1,4 +1,5 @@
 using HomeBlaze.Services;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services.Display;
 
 namespace HomeBlaze.Components.Tests;
@@ -9,7 +10,7 @@ public class ValueMapTests
     private static readonly SubjectPathResolver Resolver = new(() => null);
 
     private static ValueMapCase? Find(ValueMap map, object? value) =>
-        map.FindCase(new ValueBinding(null, value, null), Resolver);
+        map.FindCase(new ValueBinding(null, value, null), Resolver, UnrestrictedPermissions.Instance);
 
     [Theory]
     [InlineData(6000, "high")]
@@ -51,7 +52,7 @@ public class ValueMapTests
         };
 
         // Act
-        var matched = map.FindCase(new ValueBinding(null, state, null), Resolver);
+        var matched = map.FindCase(new ValueBinding(null, state, null), Resolver, UnrestrictedPermissions.Instance);
 
         // Assert: without a subject, subject/ChargingPower is missing and the condition is unknown
         Assert.Equal(expected, matched?.Text);
@@ -74,7 +75,7 @@ public class ValueMapTests
         };
 
         // Act
-        var matched = map.FindCase(new ValueBinding(null, state, null), Resolver);
+        var matched = map.FindCase(new ValueBinding(null, state, null), Resolver, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(expected, matched?.Text);
@@ -109,7 +110,7 @@ public class ValueMapTests
         var binding = new ValueBinding(null, 1234.567m, null);
 
         // Act
-        var text = map.GetText(binding, Resolver, null);
+        var text = map.GetText(binding, Resolver, null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal("Power: 1234.57 (1234.567)", text);
@@ -122,7 +123,7 @@ public class ValueMapTests
         var map = new ValueMap { Cases = [new ValueMapCase { Value = "True", Color = "Success" }] };
 
         // Act
-        var text = map.GetText(new ValueBinding(null, true, null), Resolver, null);
+        var text = map.GetText(new ValueBinding(null, true, null), Resolver, null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Null(text);
@@ -186,13 +187,13 @@ public class ValueMapTests
             Cases = [new ValueMapCase { When = "value > 5000", Text = "high" }, new ValueMapCase { When = "value > 1000", Text = "medium" }]
         };
         var binding = new ValueBinding(null, true, null);
-        map.FindCase(binding, Resolver);
+        map.FindCase(binding, Resolver, UnrestrictedPermissions.Instance);
 
         // Act
         var before = GC.GetAllocatedBytesForCurrentThread();
         for (var iteration = 0; iteration < 100; iteration++)
         {
-            map.FindCase(binding, Resolver);
+            map.FindCase(binding, Resolver, UnrestrictedPermissions.Instance);
         }
 
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
@@ -210,13 +211,13 @@ public class ValueMapTests
             Cases = [new ValueMapCase { When = "value > 5000", Text = "high" }, new ValueMapCase { When = "value > 1000", Text = "medium" }]
         };
         var binding = new ValueBinding(null, 7400m, null);
-        map.FindCase(binding, Resolver);
+        map.FindCase(binding, Resolver, UnrestrictedPermissions.Instance);
 
         // Act
         var before = GC.GetAllocatedBytesForCurrentThread();
         for (var iteration = 0; iteration < 100; iteration++)
         {
-            map.FindCase(binding, Resolver);
+            map.FindCase(binding, Resolver, UnrestrictedPermissions.Instance);
         }
 
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;

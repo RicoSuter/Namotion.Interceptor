@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Authorization.Internal;
 
@@ -50,6 +51,28 @@ public sealed record PermissionRule
             SequenceEquality.AreEqual(Members, other.Members, StringComparer.Ordinal) &&
             SequenceEquality.AreEqual(Tags, other.Tags, StringComparer.OrdinalIgnoreCase) &&
             SequenceEquality.AreEqual(Actions, other.Actions));
+
+    /// <summary>
+    /// Gets the actions followed by each selector that is not empty, such as <c>read, write · paths: /Devices/**</c>, or
+    /// the actions alone for a rule that applies everywhere.
+    /// </summary>
+    public override string ToString()
+    {
+        var builder = new StringBuilder(string.Join(", ", Actions));
+        AppendSelector(builder, "paths", Paths);
+        AppendSelector(builder, "types", Types);
+        AppendSelector(builder, "members", Members);
+        AppendSelector(builder, "tags", Tags);
+        return builder.ToString();
+    }
+
+    private static void AppendSelector(StringBuilder builder, string name, ImmutableArray<string> values)
+    {
+        if (!values.IsDefaultOrEmpty)
+        {
+            builder.Append(" · ").Append(name).Append(": ").AppendJoin(", ", values);
+        }
+    }
 
     public override int GetHashCode()
     {

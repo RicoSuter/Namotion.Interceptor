@@ -19,7 +19,7 @@ public class BrowseAccessTests
     private static McpServerConfiguration CreateConfiguration(IMcpAccessPolicy? policy) => new()
     {
         PathProvider = DefaultPathProvider.Instance,
-        AccessPolicy = policy
+        AccessPolicy = policy ?? ReadOnlyMcpAccessPolicy.Instance
     };
 
     private static Task<JsonElement> BrowseAsync(IInterceptorSubject root, IMcpAccessPolicy? policy, object input) =>

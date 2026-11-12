@@ -9,8 +9,8 @@ namespace HomeBlaze.AI.Agents;
 public interface IAgentToolSource
 {
     /// <summary>
-    /// Creates all graph tools; <paramref name="isReadOnly"/> blocks set_property and operations, and
-    /// <paramref name="accessPolicy"/> decides per member and action what is readable for the tools and what they may change.
+    /// Creates all graph tools; <paramref name="accessPolicy"/> decides per member and action what is readable for the
+    /// tools and what they may change.
     /// </summary>
-    IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly, IMcpAccessPolicy accessPolicy);
+    IReadOnlyList<McpToolInfo> CreateTools(IMcpAccessPolicy accessPolicy);
 }

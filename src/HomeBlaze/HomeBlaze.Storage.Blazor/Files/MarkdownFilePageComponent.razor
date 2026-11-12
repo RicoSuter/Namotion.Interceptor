@@ -1,3 +1,4 @@
+@using HomeBlaze.Authorization.Abstractions
 @using HomeBlaze.Components
 @using HomeBlaze.Components.Abstractions
 @using HomeBlaze.Components.Abstractions.Attributes
@@ -16,6 +17,7 @@
 @inject ISnackbar Snackbar
 @inject SubjectFactory SubjectFactory
 @inject ILogger<MarkdownPageStructureEditor> StructureEditorLogger
+@inject IUserPermissions Permissions
 
 @{
     var structureEditor = StructureEditor;
@@ -105,7 +107,7 @@
                 _structureEditor.PageComponent != pageComponent || _structureEditor.SourceEditor != SourceEditor)
             {
                 _structureEditor = new MarkdownPageStructureEditor(
-                    file, selection, pageComponent, SourceEditor, DialogService, Snackbar, SubjectFactory, StructureEditorLogger, () => IsDarkMode);
+                    file, selection, pageComponent, SourceEditor, DialogService, Snackbar, SubjectFactory, StructureEditorLogger, Permissions, () => IsDarkMode);
             }
 
             return _structureEditor;

@@ -130,13 +130,11 @@ public class AuthorizationDefinitionTests
     }
 
     [Fact]
-    public void WhenARoleIsNamedSystemOrDefinedTwice_ThenCreateThrows()
+    public void WhenARoleIsDefinedTwice_ThenCreateThrows()
     {
         // Act & Assert
-        var reserved = Assert.Throws<AuthorizationException>(() => Define([Role("Reader"), Role("system")]));
-        var duplicate = Assert.Throws<AuthorizationException>(() => Define([Role("Reader"), Role("reader")]));
-        Assert.Equal("Role name 'System' is reserved.", reserved.Message);
-        Assert.Equal("Role 'reader' is defined more than once.", duplicate.Message);
+        var exception = Assert.Throws<AuthorizationException>(() => Define([Role("Reader"), Role("Reader")]));
+        Assert.Equal("Role 'Reader' is defined more than once.", exception.Message);
     }
 
     [Fact]
@@ -145,7 +143,7 @@ public class AuthorizationDefinitionTests
         // Act & Assert
         var exception = Assert.Throws<AuthorizationException>(
             () => AuthorizationDefinition.Create([Role("Reader")], [Rule([], tags: ["secret"])], KnownActions, SlashPaths, TestTags.Default));
-        Assert.Equal("A rule of role 'System' has no actions.", exception.Message);
+        Assert.Equal("A rule of the system rules has no actions.", exception.Message);
     }
 
     [Fact]
@@ -257,7 +255,7 @@ public class AuthorizationDefinitionTests
         // Act & Assert
         var exception = Assert.Throws<AuthorizationException>(
             () => AuthorizationDefinition.Create([], [Rule(Read, tags: ["secret"])], KnownActions, SlashPaths));
-        Assert.Equal("A rule of role 'System' selects tags, but no tag provider is given.", exception.Message);
+        Assert.Equal("A rule of the system rules selects tags, but no tag provider is given.", exception.Message);
     }
 
     [Fact]

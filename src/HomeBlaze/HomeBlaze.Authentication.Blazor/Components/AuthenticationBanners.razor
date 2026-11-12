@@ -1,0 +1,36 @@
+@using HomeBlaze.Components.Abstractions
+@using HomeBlaze.Authorization.Abstractions
+
+@inherits PermissionsComponentBase
+
+@inject UserStore UserStore
+
+@* Acting through no roles is open exactly to a full administrator, a person, not anonymous, who holds everything and no role that denies administer. *@
+@if (UserStore.IsSeededAdministratorUnclaimed && Permissions.CanActThrough([]))
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4" data-testid="banner-unclaimed-administrator">
+        The administrator has no password yet: anyone who reaches this server can sign in as
+        @AdminSeeding.AdminUserName with an empty password until a password is set.
+    </MudAlert>
+}
+
+@code {
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        // The seeded administrator changes without a change of the permissions of the person.
+        UserStore.UserChanged += OnUserChanged;
+    }
+
+    private void OnUserChanged(string userId) => _ = InvokeAsync(StateHasChanged);
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            UserStore.UserChanged -= OnUserChanged;
+        }
+
+        base.Dispose(disposing);
+    }
+}

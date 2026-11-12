@@ -1,0 +1,114 @@
+@* A plain HTML form of an account dialog, which its script posts with fetch to an account endpoint: what is typed into its
+   inputs is never bound to the circuit. The submit button is enabled once the script is attached, so that the form is
+   never posted by the browser itself. *@
+@implements IAsyncDisposable
+
+@inject IJSRuntime JsRuntime
+
+<form @ref="_form" method="post" action="@Action" class="account-form" data-testid="@TestId">
+    <AntiforgeryToken />
+    @ChildContent
+    @if (_errors.Count > 0)
+    {
+        <div class="account-form-errors" role="alert" data-testid="account-form-errors">
+            @foreach (var error in _errors)
+            {
+                <MudText Typo="Typo.body2" Color="Color.Error">@error</MudText>
+            }
+        </div>
+    }
+    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Disabled="@(!_isReady)"
+               data-testid="account-form-submit">
+        @SubmitText
+    </MudButton>
+</form>
+
+@code {
+    private const string ModulePath = "./_content/HomeBlaze.Authentication.Blazor/Components/AccountForm.razor.js";
+
+    // Bounds what a misbehaving script of the page can make the circuit render.
+    private const int MaximumErrorCount = 10;
+    private const int MaximumErrorLength = 500;
+
+    private ElementReference _form;
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<AccountForm>? _dotNetReference;
+    private IReadOnlyList<string> _errors = [];
+    private bool _isReady;
+    private bool _isDisposed;
+
+    /// <summary>The path of the account endpoint, relative to the base of the app, such as <c>account/sign-in</c>.</summary>
+    [Parameter, EditorRequired]
+    public string Action { get; set; } = string.Empty;
+
+    /// <summary>The text of the submit button.</summary>
+    [Parameter, EditorRequired]
+    public string SubmitText { get; set; } = string.Empty;
+
+    /// <summary>The <c>data-testid</c> of the form.</summary>
+    [Parameter]
+    public string? TestId { get; set; }
+
+    /// <summary>The labels and inputs of the form, plain HTML elements with a <c>name</c> each.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Called by the script with the messages of a refused post, which are shown below the inputs.</summary>
+    [JSInvokable]
+    public void OnRefused(string[] messages)
+    {
+        ArgumentNullException.ThrowIfNull(messages);
+
+        _errors = [.. messages.Take(MaximumErrorCount).Select(message => message.Length > MaximumErrorLength ? message[..MaximumErrorLength] : message)];
+        StateHasChanged();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            _module = await JsRuntime.InvokeAsync<IJSObjectReference?>("import", ModulePath);
+            if (_module is null)
+            {
+                return;
+            }
+
+            if (_isDisposed)
+            {
+                await _module.DisposeAsync();
+                return;
+            }
+
+            _dotNetReference = DotNetObjectReference.Create(this);
+            await _module.InvokeVoidAsync("register", _form, _dotNetReference);
+            _isReady = true;
+            StateHasChanged();
+        }
+        catch (Exception exception) when (exception is JSDisconnectedException or OperationCanceledException or JSException)
+        {
+            // Without the script the form stays disabled, as the browser would post it to the endpoint itself.
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _isDisposed = true;
+        _dotNetReference?.Dispose();
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // The circuit is gone, and the module with it.
+            }
+        }
+    }
+}

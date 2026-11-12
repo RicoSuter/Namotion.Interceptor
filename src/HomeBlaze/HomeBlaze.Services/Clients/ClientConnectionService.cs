@@ -3,6 +3,7 @@ using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Services.Clients;
 
@@ -20,7 +21,7 @@ public sealed class ClientConnectionService
     private readonly ILogger _logger;
     private readonly Lock _lock = new();
     private ImmutableArray<ClientConnection> _connections = [];
-    private Func<ClientConnection, string, CancellationToken, Task>? _renameHandler;
+    private Func<ClientConnection, RegisteredSubjectProperty?>? _renameMemberResolver;
 
     public ClientConnectionService(TimeProvider timeProvider, ILogger<ClientConnectionService> logger)
     {
@@ -117,33 +118,32 @@ public sealed class ClientConnectionService
     }
 
     /// <summary>
-    /// Sets what renames the client of a connection, until the returned registration is disposed.
+    /// Sets what finds the member that holds the operation naming the client of a connection, until the returned
+    /// registration is disposed.
     /// </summary>
-    public IDisposable SetRenameHandler(Func<ClientConnection, string, CancellationToken, Task> handler)
+    public IDisposable SetRenameMemberResolver(Func<ClientConnection, RegisteredSubjectProperty?> resolver)
     {
         lock (_lock)
         {
-            _renameHandler = handler;
+            _renameMemberResolver = resolver;
         }
 
-        return new RenameHandlerRegistration(this, handler);
+        return new RenameMemberResolverRegistration(this, resolver);
     }
 
     /// <summary>
-    /// Names the client of the connection.
+    /// Gets the member that holds the operation naming the client of the connection, which a caller runs for the viewer
+    /// with <c>UserPermissionsExtensions</c>; null when no installation runs or the installation does not know the client yet.
     /// </summary>
-    /// <exception cref="InvalidOperationException">No installation runs that could name it.</exception>
-    public Task RenameAsync(ClientConnection connection, string name, CancellationToken cancellationToken)
+    public RegisteredSubjectProperty? TryGetRenameMember(ClientConnection connection)
     {
-        Func<ClientConnection, string, CancellationToken, Task>? handler;
+        Func<ClientConnection, RegisteredSubjectProperty?>? resolver;
         lock (_lock)
         {
-            handler = _renameHandler;
+            resolver = _renameMemberResolver;
         }
 
-        return handler is null
-            ? throw new InvalidOperationException("No installation runs that could name this browser.")
-            : handler(connection, name, cancellationToken);
+        return resolver?.Invoke(connection);
     }
 
     private void RaiseChanged()
@@ -163,19 +163,19 @@ public sealed class ClientConnectionService
         }
     }
 
-    private void ClearRenameHandler(Func<ClientConnection, string, CancellationToken, Task> handler)
+    private void ClearRenameMemberResolver(Func<ClientConnection, RegisteredSubjectProperty?> resolver)
     {
         lock (_lock)
         {
-            if (_renameHandler == handler)
+            if (_renameMemberResolver == resolver)
             {
-                _renameHandler = null;
+                _renameMemberResolver = null;
             }
         }
     }
 
-    private sealed class RenameHandlerRegistration(ClientConnectionService service, Func<ClientConnection, string, CancellationToken, Task> handler) : IDisposable
+    private sealed class RenameMemberResolverRegistration(ClientConnectionService service, Func<ClientConnection, RegisteredSubjectProperty?> resolver) : IDisposable
     {
-        public void Dispose() => service.ClearRenameHandler(handler);
+        public void Dispose() => service.ClearRenameMemberResolver(resolver);
     }
 }

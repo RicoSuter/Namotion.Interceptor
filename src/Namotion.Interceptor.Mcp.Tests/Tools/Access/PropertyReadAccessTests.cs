@@ -28,8 +28,7 @@ public class PropertyReadAccessTests
     private static McpServerConfiguration CreateConfiguration(IMcpAccessPolicy? policy) => new()
     {
         PathProvider = DefaultPathProvider.Instance,
-        AccessPolicy = policy,
-        IsReadOnly = false
+        AccessPolicy = policy ?? AllowAllMcpAccessPolicy.Instance
     };
 
     [Fact]
@@ -151,8 +150,7 @@ public class PropertyReadAccessTests
         var configuration = new McpServerConfiguration
         {
             PathProvider = new PropertiesWithoutAttributesPathProvider(),
-            AccessPolicy = new TestAccessPolicy((_, _) => true),
-            IsReadOnly = false
+            AccessPolicy = new TestAccessPolicy((_, _) => true)
         };
 
         // Act

@@ -53,7 +53,7 @@ namespace HomeBlaze.Host.Services.Navigation
     {
         public const string PropertyQueryParameter = "property";
         public MetadataLinkResolver(HomeBlaze.Services.SubjectPathResolver pathResolver, HomeBlaze.Services.Components.SubjectComponentRegistry componentRegistry) { }
-        public HomeBlaze.Host.Services.Navigation.ResolvedMetadataLink Resolve(HomeBlaze.Services.Metadata.MetadataLink link) { }
+        public HomeBlaze.Host.Services.Navigation.ResolvedMetadataLink Resolve(HomeBlaze.Services.Metadata.MetadataLink link, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions) { }
         public HomeBlaze.Host.Services.Navigation.ResolvedMetadataLink Resolve(Namotion.Interceptor.IInterceptorSubject subject, string? propertyName, string? title = null) { }
     }
     public class NavigationItem
@@ -74,9 +74,9 @@ namespace HomeBlaze.Host.Services.Navigation
     public class NavigationItemResolver
     {
         public NavigationItemResolver(HomeBlaze.Services.Components.SubjectComponentRegistry componentRegistry, HomeBlaze.Services.SubjectPathResolver pathResolver, System.TimeProvider timeProvider) { }
-        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Host.Services.Navigation.NavigationItem> GetAppBarItems(Namotion.Interceptor.IInterceptorSubject root) { }
-        public System.Collections.Generic.IEnumerable<HomeBlaze.Host.Services.Navigation.NavigationItem> GetChildItems(Namotion.Interceptor.IInterceptorSubject parent) { }
-        public System.Collections.Immutable.ImmutableArray<HomeBlaze.Host.Services.Navigation.NavigationItem> GetRecentAppBarItems(Namotion.Interceptor.IInterceptorSubject root, System.TimeSpan maximumAge) { }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Host.Services.Navigation.NavigationItem> GetAppBarItems(Namotion.Interceptor.IInterceptorSubject root, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions) { }
+        public System.Collections.Generic.IEnumerable<HomeBlaze.Host.Services.Navigation.NavigationItem> GetChildItems(Namotion.Interceptor.IInterceptorSubject parent, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions) { }
+        public System.Collections.Immutable.ImmutableArray<HomeBlaze.Host.Services.Navigation.NavigationItem> GetRecentAppBarItems(Namotion.Interceptor.IInterceptorSubject root, System.TimeSpan maximumAge, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, System.Collections.Immutable.ImmutableArray<HomeBlaze.Host.Services.Navigation.NavigationItem> previous = default) { }
     }
     public sealed class ResolvedMetadataLink : System.IEquatable<HomeBlaze.Host.Services.Navigation.ResolvedMetadataLink>
     {

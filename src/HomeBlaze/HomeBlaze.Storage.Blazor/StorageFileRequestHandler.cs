@@ -1,3 +1,4 @@
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using Microsoft.AspNetCore.Http;
@@ -25,14 +26,17 @@ internal static class StorageFileRequestHandler
     public static string GetSubjectPath(object? routeValue) =>
         (routeValue as string)?.TrimStart('/') ?? string.Empty;
 
-    /// <summary>Answers the request with the content of <paramref name="subject"/>, as <see cref="StorageFileEndpointRouteBuilderExtensions.MapStorageFiles"/> describes.</summary>
-    public static async Task HandleAsync(HttpContext context, IInterceptorSubject? subject)
+    /// <summary>
+    /// Answers the request with the content of <paramref name="subject"/> for a viewer with <paramref name="permissions"/>,
+    /// as <see cref="StorageFileEndpointRouteBuilderExtensions.MapStorageFiles"/> describes.
+    /// </summary>
+    public static async Task HandleAsync(HttpContext context, IInterceptorSubject? subject, IUserPermissions permissions)
     {
         var response = context.Response;
 
-        // A page or a configuration is answered as missing as well, so that a response does not tell that it exists: a
-        // JSON file can hold secrets.
-        if (subject is not GenericFile file)
+        // A page, a configuration and a file the viewer may not see are answered as missing as well, so that a response
+        // does not tell that they exist: a JSON file can hold secrets.
+        if (subject is not GenericFile file || !permissions.CanShow(file))
         {
             response.StatusCode = StatusCodes.Status404NotFound;
             return;
@@ -135,8 +139,9 @@ internal static class StorageFileRequestHandler
             headers.LastModified = new DateTimeOffset(DateTime.SpecifyKind(file.LastModified, DateTimeKind.Utc));
         }
 
-        // Revalidated on every view, so that a file that is replaced shows at once.
-        response.Headers.CacheControl = "no-cache";
+        // Revalidated on every view, so that a file that is replaced shows at once. Private, as whether the file is served
+        // depends on the user, so a shared cache must not keep it.
+        response.Headers.CacheControl = "private, no-cache";
 
         // A file opened on its own, such as an SVG with a script, must not run in the origin of the application.
         response.Headers.XContentTypeOptions = "nosniff";

@@ -8,7 +8,8 @@ namespace HomeBlaze.Authorization.Internal;
 
 /// <summary>
 /// Checks path patterns: whether one is valid, whether those of a role start with the separator as the application
-/// writes them, and whether one or those of a role name subjects instead of members.
+/// writes them, whether one or those of a role name subjects instead of members, and whether a deny pattern leaves
+/// what is below the member it names allowed.
 /// </summary>
 internal static class PathPatternChecks
 {
@@ -48,7 +49,7 @@ internal static class PathPatternChecks
 
     /// <summary>
     /// Gets the error of each of <paramref name="roles"/> with a path pattern that does not start with
-    /// <paramref name="separator"/> or is the separator alone, by role name ignoring case, or null when there is none.
+    /// <paramref name="separator"/> or is the separator alone, by role name, or null when there is none.
     /// </summary>
     /// <remarks>
     /// The policy also takes a pattern without a leading separator, and its hint for the separator alone names
@@ -62,7 +63,7 @@ internal static class PathPatternChecks
             if ((FindLeadingSeparatorError(role.Allow, role.Name, separator) ??
                  FindLeadingSeparatorError(role.Deny, role.Name, separator)) is { } error)
             {
-                (errors ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase))[role.Name] = error;
+                (errors ??= new Dictionary<string, string>(StringComparer.Ordinal))[role.Name] = error;
             }
         }
 
@@ -78,7 +79,7 @@ internal static class PathPatternChecks
         string[] roleNames, ImmutableArray<AuthorizationRole> roles, Dictionary<string, string> errors)
     {
         var pending = new Stack<string>(roleNames);
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var visited = new HashSet<string>(StringComparer.Ordinal);
         while (pending.TryPop(out var name))
         {
             if (string.IsNullOrEmpty(name) || !visited.Add(name))
@@ -130,17 +131,13 @@ internal static class PathPatternChecks
     }
 
     /// <summary>
-    /// Gets the warning of one valid path pattern that names an entry below one of <paramref name="roots"/>, as
+    /// Gets the warning of one valid path pattern without a wildcard that names an entry below one of
+    /// <paramref name="roots"/>, as
     /// <see cref="GetWarning(AuthorizationRole, IReadOnlyDictionary{IInterceptorSubject, RegisteredSubject}, PathProviderBase, ref List{RegisteredSubject}?)"/>
     /// gives it for a role, or null.
     /// </summary>
     public static string? GetWarning(string pattern, List<RegisteredSubject> roots, PathProviderBase pathProvider)
     {
-        if (pattern.Contains('*'))
-        {
-            return null;
-        }
-
         // Left out when resolving fails, as for a role.
         try
         {
@@ -148,6 +145,34 @@ internal static class PathPatternChecks
         }
         catch (Exception)
         {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gets the warning of one valid deny path pattern without a wildcard that names, below one of <paramref name="roots"/>,
+    /// a property that can hold subjects rather than an entry of it: the pattern matches that property alone, so the
+    /// members of the subjects it holds keep their access when reached by their own paths. Null otherwise, also when
+    /// resolving the pattern fails.
+    /// </summary>
+    public static string? GetDenyWarning(string pattern, List<RegisteredSubject> roots, PathProviderBase pathProvider)
+    {
+        try
+        {
+            foreach (var root in roots)
+            {
+                if (pathProvider.TryGetPropertyFromPath(root, pattern) is { Index: null, Property.CanContainSubjects: true })
+                {
+                    var separator = pathProvider.PathSeparator;
+                    return $"Path pattern '{pattern}' matches only that member, not what is below it: the members of the subjects it holds keep their access when reached by their own paths. Use '{pattern}{separator}**' to deny everything below it as well.";
+                }
+            }
+
+            return null;
+        }
+        catch (Exception)
+        {
+            // As for the warning of an entry: the graph can change while it is read and the getters on the path can throw.
             return null;
         }
     }
@@ -254,7 +279,7 @@ internal static class PathPatternChecks
     {
         foreach (var role in roles)
         {
-            if (string.Equals(role.Name, name, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(role.Name, name, StringComparison.Ordinal))
             {
                 return role.Includes.IsDefault ? [] : role.Includes;
             }

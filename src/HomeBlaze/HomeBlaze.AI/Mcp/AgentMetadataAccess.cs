@@ -1,11 +1,8 @@
-using System.Collections.Immutable;
 using System.Text.Json;
-using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Abstractions.Metadata;
-using HomeBlaze.Storage.Metadata;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
@@ -16,45 +13,11 @@ using Namotion.Interceptor.Registry.Paths;
 namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
-/// The metadata that the tools let their clients find and change: SearchMetadata of a storage finds only the subjects
-/// and properties that the tools list and whose metadata the access policy allows to read, and SetMetadata changes only
-/// metadata of a subject or property that the tools list and that the access policy allows to write.
+/// The metadata that the tools let their clients change: SetMetadata changes only metadata of a subject or property that
+/// the tools list and that the access policy allows to write.
 /// </summary>
 internal static class AgentMetadataAccess
 {
-    // The tools return at most this many matches of SearchMetadata, as its description says; the method itself returns
-    // every match.
-    private const int MaxSearchMetadataMatches = 100;
-
-    /// <summary>
-    /// Gets the first 100 matches of SearchMetadata of a storage that the tools list, whose metadata member the access
-    /// policy of <paramref name="configuration"/> allows to read at its path, as get_property reads it, and whose metadata
-    /// still matches the input arguments as the value filters of the configuration show it, and no match for a result of
-    /// SearchMetadata of a storage that is no array of matches; any other result is returned unchanged.
-    /// </summary>
-    public static object? FilterSearchMetadataResult(
-        RegisteredSubject subject, MethodMetadata method, object?[] arguments, object? result, McpServerConfiguration configuration)
-    {
-        if (method.PropertyName != nameof(FluentStorageContainer.SearchMetadata) || subject.Subject is not IMetadataStore)
-        {
-            return result;
-        }
-
-        if (result is not MetadataSearchMatch[] matches)
-        {
-            return Array.Empty<MetadataSearchMatch>();
-        }
-
-        // The input parameters in declaration order: tag, key, value and path.
-        var (tag, key, value) = arguments is [var tagArgument, var keyArgument, var valueArgument, ..]
-            ? (tagArgument as string, keyArgument as string, valueArgument as string)
-            : (null, null, null);
-        return matches
-            .Where(match => IsReadable(subject, match, configuration) && MatchesShownMetadata(subject, match, configuration, tag, key, value))
-            .Take(MaxSearchMetadataMatches)
-            .ToArray();
-    }
-
     /// <summary>
     /// Gets why a call of an operation of a storage or folder with the given input arguments is refused, or null when it
     /// is not: SetMetadata with arguments of another shape or for metadata that the tools do not let the caller change,
@@ -134,38 +97,6 @@ internal static class AgentMetadataAccess
             : GetNotWritableMessage(path, propertyName);
     }
 
-    // The match is listed by the tools, and its metadata member is readable at the path at which get_property resolves it.
-    private static bool IsReadable(RegisteredSubject storage, MetadataSearchMatch match, McpServerConfiguration configuration)
-    {
-        if (TryGetListedTarget(storage, match.Path, configuration) is not { } target ||
-            (match.Property is not null && IsPropertyChecked(target.Subject) && !IsPropertyReadable(target, match.Property, configuration)))
-        {
-            return false;
-        }
-
-        return configuration.AccessPolicy is null ||
-            IsMetadataReadable(configuration, storage, target, match.Path, match.Property);
-    }
-
-    // A value filter can leave out the part of the metadata that matched, such as a hidden child in the order of a folder,
-    // so the match must hold for the metadata as the tools show it, or it confirms what they hide.
-    private static bool MatchesShownMetadata(
-        RegisteredSubject storage, MetadataSearchMatch match, McpServerConfiguration configuration, string? tag, string? key, string? value)
-    {
-        var target = FluentStorageContainer.ResolveMetadataPath(storage.Subject, match.Path)?.TryGetRegisteredSubject();
-        var member = match.Property is null
-            ? target?.TryGetProperty(KnownAttributes.Metadata)
-            : target?.TryGetProperty(match.Property)?.TryGetAttribute(KnownAttributes.Metadata);
-        if (member?.GetValue() is not ImmutableDictionary<string, JsonElement> metadata)
-        {
-            return false;
-        }
-
-        var shown = configuration.ApplyValueFilters(member, metadata);
-        return ReferenceEquals(shown, metadata) ||
-            (shown is ImmutableDictionary<string, JsonElement> shownMetadata && MetadataSearch.IsMatch(shownMetadata, tag, key, value));
-    }
-
     /// <summary>
     /// Gets whether the metadata path of <paramref name="path"/> and <paramref name="propertyName"/>, see
     /// <see cref="HomeBlazeMarkdownSearchToolProvider.GetMetadataPath"/>, resolves from <paramref name="root"/>, as
@@ -184,35 +115,9 @@ internal static class AgentMetadataAccess
         var target = FluentStorageContainer.ResolveMetadataPath(storage.Subject, path);
         var trimmedPath = path.Trim();
         var listedTarget = trimmedPath.AsSpan().TrimStart('/').IsEmpty ? storage : configuration.TryGetReadableSubject(storage, trimmedPath);
-        return target is not null && ReferenceEquals(listedTarget?.Subject, target) && !IsOfExcludedType(listedTarget, storage.Subject, configuration.ExcludeTypes)
+        return target is not null && ReferenceEquals(listedTarget?.Subject, target) && !McpPageReadAccess.IsOfExcludedType(listedTarget, storage.Subject, configuration.ExcludeTypes)
             ? listedTarget
             : null;
-    }
-
-    /// <summary>
-    /// Gets whether the subject or one of the subjects that hold it below <paramref name="top"/>, through the first parent
-    /// of each, is of one of <paramref name="excludeTypes"/>.
-    /// </summary>
-    public static bool IsOfExcludedType(RegisteredSubject subject, IInterceptorSubject top, Type[] excludeTypes)
-    {
-        foreach (var current in new FirstParentChain(subject))
-        {
-            if (ReferenceEquals(current.Subject, top))
-            {
-                return false;
-            }
-
-            var type = current.Subject.GetType();
-            foreach (var excludedType in excludeTypes)
-            {
-                if (excludedType.IsAssignableFrom(type))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 
     // The method checks the property only of a subject that a store keeps the metadata of, and not of a folder or a storage.

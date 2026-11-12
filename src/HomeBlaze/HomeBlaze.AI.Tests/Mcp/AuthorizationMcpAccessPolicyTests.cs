@@ -84,7 +84,7 @@ public class AuthorizationMcpAccessPolicyTests
 
     private static RegisteredSubjectProperty GetStateMember()
     {
-        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
+        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup();
         return room.TryGetRegisteredSubject()!.TryGetProperty(nameof(TestThing.Temperature))!;
     }
 }

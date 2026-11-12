@@ -1,12 +1,14 @@
 @page "/pages/{*Path}"
 
 @using HomeBlaze.Abstractions
+@using HomeBlaze.Authorization.Abstractions
 @using HomeBlaze.Components.Abstractions
 @using HomeBlaze.Components.Abstractions.Attributes
 @using HomeBlaze.Components.Abstractions.TimeZones
 @using HomeBlaze.Components.Editors
 @using HomeBlaze.Services.Components
 @using HomeBlaze.Storage.Abstractions
+@using HomeBlaze.Storage.Blazor
 @using Microsoft.AspNetCore.Components.Sections
 @using Microsoft.JSInterop
 @using Namotion.Interceptor.Blazor
@@ -23,6 +25,7 @@
 @inject PageEditModeChoice EditModeChoice
 @inject ITimeZoneDisplay TimeZone
 @inject IDialogService DialogService
+@inject IUserPermissions Permissions
 
 <PageTitle>@_title - HomeBlaze</PageTitle>
 
@@ -254,7 +257,26 @@ else
     protected override void OnInitialized()
     {
         _clearSelectionCallback = EventCallback.Factory.Create<MouseEventArgs>(_widgetSelection, _widgetSelection.Clear);
+        Permissions.Changed += OnPermissionsChanged;
     }
+
+    // A viewer who may no longer see the page gets "not found", and one who may no longer edit it leaves its editing modes,
+    // whose unsaved text the save would refuse anyway.
+    private void OnPermissionsChanged() => _ = InvokeAsync(() =>
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        LoadSubject();
+        if (IsEditing && !CanEdit())
+        {
+            SetEditMode(PageEditMode.View);
+        }
+
+        StateHasChanged();
+    });
 
     /// <summary>
     /// Shows the block of the subject in the source editor of the Split mode and returns whether it found it. In Inline mode
@@ -364,8 +386,9 @@ else
         if (string.IsNullOrEmpty(path) || Root is null)
             return;
 
+        // A page the viewer may not see is not found, like a path that leads nowhere.
         var subject = PathResolver.ResolveSubject(path, PathStyle.Route);
-        if (subject != null)
+        if (subject != null && Permissions.CanShow(subject))
         {
             _title = GetTitle(subject);
             _subject = subject;
@@ -383,7 +406,7 @@ else
             _subject.GetType(),
             SubjectComponentType.Edit);
 
-        return hasEditComponent || _subject.HasConfigurationProperties();
+        return (hasEditComponent || _subject.HasConfigurationProperties()) && Permissions.CanEdit(_subject, hasEditComponent);
     }
 
     private PageEditMode GetStartMode() =>
@@ -391,6 +414,11 @@ else
 
     private async Task ChooseEditModeAsync(PageEditMode mode)
     {
+        if (mode != PageEditMode.View && !CanEdit())
+        {
+            return;
+        }
+
         if (mode == _editMode)
         {
             EditModeChoice.Mode = mode;
@@ -579,6 +607,7 @@ else
     public async ValueTask DisposeAsync()
     {
         _isDisposed = true;
+        Permissions.Changed -= OnPermissionsChanged;
         WatchEditComponent(null);
 
         if (_hotKeysContext != null)

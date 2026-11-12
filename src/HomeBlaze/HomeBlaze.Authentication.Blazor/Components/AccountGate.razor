@@ -1,0 +1,18 @@
+@using HomeBlaze.Components.Abstractions.Pages
+
+@switch (_outcome)
+{
+    case AccountGateOutcome.Allowed:
+        @ChildContent
+        break;
+    case AccountGateOutcome.Unknown:
+        break;
+    default:
+        <CascadingValue Name="@LayoutFrame.CascadingValueName" Value="true" IsFixed="true">
+            <LayoutView Layout="@ShellLayout">
+                <AccountGateDialog @key="_outcome" Outcome="@_outcome" ReturnUrl="@_returnUrl" SetupUserName="@_setupUserName"
+                                   SetupCode="@_setupCode" />
+            </LayoutView>
+        </CascadingValue>
+        break;
+}

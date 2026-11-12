@@ -23,11 +23,11 @@ internal sealed class PrincipalRoleNames
         }
     }
 
-    /// <summary>Counts the principals naming each role, ignoring case, a principal once per name.</summary>
+    /// <summary>Counts the principals naming each role, a principal once per name.</summary>
     public Dictionary<string, int> CountPerName()
     {
-        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var namesOfPrincipal = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        var namesOfPrincipal = new HashSet<string>(StringComparer.Ordinal);
         foreach (var (_, roleNames) in _principals)
         {
             namesOfPrincipal.Clear();

@@ -1,4 +1,5 @@
 @using HomeBlaze.Abstractions
+@using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Services
 
 @implements IAsyncDisposable
@@ -6,6 +7,7 @@
 @inject RootManager RootManager
 @inject SubjectComponentRegistry ComponentRegistry
 @inject ISnackbar Snackbar
+@inject IUserPermissions Permissions
 
 @if (Subject != null)
 {
@@ -31,6 +33,7 @@
             <ConfigurationPropertiesEditor @key="Subject"
                                            @ref="_propertiesEditor"
                                            Subject="@Subject"
+                                           IsCreating="@IsCreating"
                                            IsValidChanged="OnPropertiesEditorIsValidChanged" />
         }
     </div>
@@ -60,6 +63,11 @@
     private ISubjectComponent? _subjectComponent;
     private bool _isSubjectComponentRendered;
     private ISubjectEditComponent? _subscribedEditComponent;
+
+    // Read when the subject is set, as a save through the edit operation, also one of another subject, may replace the
+    // subject, which then has no registered members anymore.
+    private bool _hasEditOperation;
+    private bool _hasConfigurationMembers;
     private ConfigurationPropertiesEditor? _propertiesEditor;
     private bool? _reportedIsValid;
     private Func<Task> _refreshIsValid = () => Task.CompletedTask;
@@ -82,6 +90,10 @@
             return ComponentRegistry.HasComponent(subjectType, SubjectComponentType.Edit) ? SubjectComponentType.Edit : null;
         }
     }
+
+    // The hosted Edit component of a subject with an edit operation saves by invoking it, which stores the changes, so the
+    // host persists nothing afterwards.
+    private bool SavesThroughEditOperation => _hasEditOperation && HostedComponentType == SubjectComponentType.Edit;
 
     // A null instance cannot stand for "not reported yet": a registered component that is not an
     // ISubjectComponent is reported as null and has nothing to apply.
@@ -108,6 +120,8 @@
         if (!ReferenceEquals(Subject, _editedSubject))
         {
             _editedSubject = Subject;
+            _hasEditOperation = Subject?.TryGetRegisteredSubject()?.GetEditOperation(ExclusionTarget.UserInterface) is not null;
+            _hasConfigurationMembers = Subject?.HasConfigurationProperties() == true;
 
             // The editor of the previous subject is replaced with the next render, and must not answer for the new one until then.
             SubscribeTo(null);
@@ -186,12 +200,21 @@
     /// Applies the buffered edits to the subject and persists them.
     /// </summary>
     /// <returns>
-    /// True when the edits were applied and <see cref="PersistAsync"/> ran, which reports a failure of its own to
-    /// the user. False when the edits were not applied, which is reported to the user, and nothing was persisted:
-    /// either <see cref="ApplyChangesAsync"/> returned false, or the edit component failed while saving.
+    /// True when the edits were applied and <see cref="TryPersistAsync"/> ran, which reports a failure of its own to
+    /// the user, or the hosted Edit component saved through the edit operation of the subject, which persists the changes.
+    /// False when the edits were not applied, which is reported to the user, and nothing was persisted:
+    /// either the viewer may not save the editor, see <see cref="CanSave"/>, <see cref="ApplyChangesAsync"/> returned
+    /// false, or the edit component failed while saving. Also false when the roles changed between the apply and the
+    /// persist, so that <see cref="TryPersistAsync"/> refused.
     /// </returns>
     public async Task<bool> SaveAsync(CancellationToken cancellationToken)
     {
+        // Checked before anything is applied, so that no edit is applied that could not be persisted.
+        if (Subject is not { } subject || !CanSave(subject))
+        {
+            return Refuse();
+        }
+
         bool isApplied;
         try
         {
@@ -209,24 +232,41 @@
             return false;
         }
 
-        await PersistAsync(cancellationToken);
-        return true;
+        if (SavesThroughEditOperation)
+        {
+            Snackbar.Add("Configuration saved.", Severity.Info);
+            return true;
+        }
+
+        return await TryPersistAsync(cancellationToken);
     }
 
     /// <summary>
     /// Applies the buffered edits to the subject without persisting them.
     /// </summary>
     /// <returns>
-    /// False when there is no subject, the editor is not ready yet or not valid, or the generated properties
-    /// editor could not convert or set one of its values. The subject is unchanged then, except for a value that
-    /// could not be set back after a setter rejected a later one, see <see cref="EditedPropertyValues.Apply"/>.
+    /// False when there is no subject, the editor is not ready yet or not valid, the viewer may not save the editor or
+    /// administer a member the edits change, which is reported to the user, or the generated properties editor could not
+    /// convert or set one of its values. The subject is unchanged then, except for a value that could not be set back
+    /// after a setter rejected a later one, see <see cref="EditedPropertyValues.Apply"/>.
     /// </returns>
+    /// <remarks>
+    /// The generated properties editor asks for the members it changes, see <see cref="ConfigurationPropertiesEditor.ApplyChanges"/>.
+    /// A hosted edit component does not say which members it changes, so <see cref="CanSave"/> is asked. While creating,
+    /// the edits go to a subject that is not part of the graph yet and nothing is asked: whoever attaches it checks that
+    /// the viewer may create it.
+    /// </remarks>
     public async Task<bool> ApplyChangesAsync(CancellationToken cancellationToken)
     {
         if (Subject == null || IsSubjectComponentPending || !IsValid) return false;
 
         if (_subjectComponent is ISubjectEditComponent editComponent)
         {
+            if (ConfigurationPropertiesEditor.IsChecked(Subject, IsCreating) && !CanSave(Subject))
+            {
+                return Refuse();
+            }
+
             await editComponent.SaveAsync(cancellationToken);
         }
         else if (_propertiesEditor is { } propertiesEditor)
@@ -239,15 +279,48 @@
     }
 
     /// <summary>
+    /// Gets whether the viewer may save what the editor of the subject changes. The edit component of a subject without
+    /// configuration members may save through the edit operation of the subject, see
+    /// <see cref="RegisteredSubjectMethodExtensions.CanSaveThroughEditOperation"/>, which decides each save again, and a
+    /// hosted component of a file checks the content it writes itself. Otherwise the viewer needs to administer the
+    /// configuration of the subject, see <see cref="UserPermissionsExtensions.CanAdministerConfiguration"/>, which requires
+    /// at least one configuration member. A subject that was replaced since it was set, such as a role after a change of
+    /// any role, is left to its Edit component, which saves through the edit operation of the subject that replaced it, if
+    /// any, and reports why it does not.
+    /// </summary>
+    private bool CanSave(IInterceptorSubject subject) =>
+        (HostedComponentType is not null && subject is IStorageFile) ||
+        (HostedComponentType == SubjectComponentType.Edit &&
+         (Permissions.CanSaveThroughEditOperation(subject) || IsReplacedSubjectWithoutConfiguration(subject))) ||
+        Permissions.CanAdministerConfiguration(subject);
+
+    private bool IsReplacedSubjectWithoutConfiguration(IInterceptorSubject subject) =>
+        _hasEditOperation && !_hasConfigurationMembers && subject.TryGetRegisteredSubject() is null;
+
+    private bool Refuse()
+    {
+        Snackbar.Add(AccessDeniedTexts.Administer, Severity.Error);
+        return false;
+    }
+
+    /// <summary>
     /// Writes and applies the configuration that contains the subject, see
     /// <see cref="ConfigurationPersistence.PersistOwnerAsync"/>. Nothing is written for a subject that is part of no
     /// configuration, such as a file, which its edit component has saved. Warns when the writer wrote nothing,
-    /// in which case the edits are applied but not saved.
+    /// in which case the edits are applied but not saved. Refused, which is reported to the user, when the viewer may
+    /// not administer every configuration member of the subject.
     /// </summary>
-    public async Task PersistAsync(CancellationToken cancellationToken)
+    /// <returns>False when there is no subject or the persist was refused, and nothing was written; else true.</returns>
+    public async Task<bool> TryPersistAsync(CancellationToken cancellationToken)
     {
         var subject = Subject;
-        if (subject == null) return;
+        if (subject == null) return false;
+
+        // A subject without configuration members has none of its own in the configuration that is written.
+        if (subject.HasConfigurationProperties() && !Permissions.CanAdministerConfiguration(subject))
+        {
+            return Refuse();
+        }
 
         try
         {
@@ -266,6 +339,8 @@
         {
             Snackbar.AddConfigurationSaveError(ex.Message);
         }
+
+        return true;
     }
 
     public ValueTask DisposeAsync()

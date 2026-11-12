@@ -1,5 +1,6 @@
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(HueBridge))]
 @implements ISubjectEditComponent
+@inject IUserPermissions Permissions
 
 <MudForm>
     <MudTextField @bind-Value="_bridgeId" @bind-Value:after="OnFieldChanged"
@@ -32,9 +33,9 @@
             @(BridgeSubject?.IsConnected == true ? "Connected" : "Disconnected")
         </MudChip>
     </MudStack>
-    <MudText Class="mt-1">Lights: @(BridgeSubject?.Lights?.Count ?? 0)</MudText>
-    <MudText>Rooms: @(BridgeSubject?.Rooms?.Count ?? 0)</MudText>
-    <MudText>Zones: @(BridgeSubject?.Zones?.Count ?? 0)</MudText>
+    <MudText Class="mt-1">Lights: @CountShown(BridgeSubject?.Lights?.Values)</MudText>
+    <MudText>Rooms: @CountShown(BridgeSubject?.Rooms?.Values)</MudText>
+    <MudText>Zones: @CountShown(BridgeSubject?.Zones?.Values)</MudText>
 </MudForm>
 
 @code {
@@ -43,6 +44,10 @@
 
     [Parameter]
     public bool IsCreating { get; set; }
+
+    // A light or group the roles hide is not counted.
+    private int CountShown(IEnumerable<IInterceptorSubject>? subjects) =>
+        subjects?.Count(subject => Permissions.CanShow(subject)) ?? 0;
 
     private HueBridge? BridgeSubject => Subject as HueBridge;
 

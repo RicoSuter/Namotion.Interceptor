@@ -8,8 +8,13 @@ namespace HomeBlaze.Storage.Blazor
         public BlazorSubjectSetupService(MudBlazor.IDialogService dialogService) { }
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Abstractions.CreateSubjectResult?> CreateSubjectAsync(HomeBlaze.Storage.Abstractions.IStorageContainer target, System.Threading.CancellationToken cancellationToken) { }
     }
+    public static class EditPermissions
+    {
+        public static bool CanAdministerFileContent(this HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, Namotion.Interceptor.IInterceptorSubject file) { }
+        public static bool CanEdit(this HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, Namotion.Interceptor.IInterceptorSubject subject, bool hasEditComponent) { }
+    }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Storage.Internal.RenderExpression?))]
-    public class RenderExpressionComponent : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
+    public class RenderExpressionComponent : HomeBlaze.Components.Abstractions.PermissionsComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
     {
         public RenderExpressionComponent() { }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -49,7 +54,7 @@ namespace HomeBlaze.Storage.Blazor.Files
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
         public System.Threading.Tasks.Task SaveAsync(System.Threading.CancellationToken cancellationToken) { }
     }
-    public class MarkdownContentView : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    public class MarkdownContentView : HomeBlaze.Components.Abstractions.PermissionsComponentBase
     {
         public MarkdownContentView() { }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -65,7 +70,7 @@ namespace HomeBlaze.Storage.Blazor.Files
         [Microsoft.AspNetCore.Components.CascadingParameter]
         public HomeBlaze.Components.PageStructureEditor? StructureEditor { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        public void Dispose() { }
+        protected override void Dispose(bool disposing) { }
         protected override void OnParametersSet() { }
     }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Edit, typeof(HomeBlaze.Storage.Files.MarkdownFile))]
@@ -121,6 +126,8 @@ namespace HomeBlaze.Storage.Blazor.Files
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<HomeBlaze.Storage.Blazor.Models.DecorationRegion?> ActiveRegionChanged { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? AdministerMember { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public string? CssClass { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? EditorId { get; set; }
@@ -160,6 +167,8 @@ namespace HomeBlaze.Storage.Blazor.Files
     {
         public MarkdownTextDialog() { }
         [Microsoft.AspNetCore.Components.Parameter]
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? AdministerMember { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public bool IsDarkMode { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyCollection<string> ReservedNames { get; set; }
@@ -172,7 +181,7 @@ namespace HomeBlaze.Storage.Blazor.Files
         public System.Threading.Tasks.Task CancelByEscapeAsync() { }
         public System.Threading.Tasks.ValueTask DisposeAsync() { }
         protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
-        public static System.Threading.Tasks.Task ShowAsync(MudBlazor.IDialogService dialogService, string title, string text, bool isDarkMode, System.Collections.Generic.IReadOnlyCollection<string> reservedNames, System.Func<string, System.Threading.Tasks.Task<string?>> save) { }
+        public static System.Threading.Tasks.Task ShowAsync(MudBlazor.IDialogService dialogService, string title, string text, bool isDarkMode, System.Collections.Generic.IReadOnlyCollection<string> reservedNames, System.Func<string, System.Threading.Tasks.Task<string?>> save, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? administerMember) { }
     }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Storage.Internal.HtmlSegment?))]
     public class MarkdownTextWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, HomeBlaze.Components.ITextBlockWidget
