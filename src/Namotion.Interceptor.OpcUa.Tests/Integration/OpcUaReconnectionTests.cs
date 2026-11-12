@@ -170,8 +170,8 @@ public class OpcUaReconnectionTests
 
                 // Session swap visible to consumers. The reconnect cycle takes one of two paths
                 // depending on timing and server behavior:
-                //   A) SDK transfer succeeds → single (HadPrevious=true, HasCurrent=true) swap
-                //   B) SDK transfer fails / preserved session / stall reset →
+                //   A) SDK reconnect with a new session → single (HadPrevious=true, HasCurrent=true) swap
+                //   B) preserved session / stall reset →
                 //      (HadPrevious=true, HasCurrent=false) abandon + (HadPrevious=false, HasCurrent=true) recreate
                 // Either way, the consumer must see at least one transition releasing a previous
                 // session AND at least one transition with a current session — which together prove
@@ -310,8 +310,7 @@ public class OpcUaReconnectionTests
     public async Task WhenTheSdkTransfersTheSubscriptionsToANewSession_ThenNotificationsKeepArriving()
     {
         // A server that stays up while the client cannot reach it keeps its subscriptions, so the SDK
-        // moves the client's own subscription objects into the new session. A server restart cannot
-        // reach this path: the restarted server has no subscriptions, so the SDK creates fresh ones.
+        // moves the client's own subscription objects into the new session.
 
         var logger = new TestLogger(_output);
         OpcUaTestServer<TestRoot>? server = null;
@@ -324,7 +323,7 @@ public class OpcUaReconnectionTests
             // Arrange - the health check loop is suppressed, so it can neither resync the values after
             // the transfer nor replace the session; only notifications can deliver the change below.
             port = await OpcUaTestPortPool.AcquireAsync();
-            proxy = new OpcUaTestProxy("localhost", port.Port);
+            proxy = new OpcUaTestProxy(port.Port);
 
             server = new OpcUaTestServer<TestRoot>(logger);
             await server.StartAsync(
@@ -351,7 +350,7 @@ public class OpcUaReconnectionTests
 
                 // The blocked proxy swallows the keep-alive, which otherwise waits out the 30 s default.
                 config.OperationTimeout = TimeSpan.FromSeconds(5);
-            }, loadApplicationCertificate: true);
+            });
             await client.StartAsync(
                 context => new TestRoot(context),
                 isConnected: root => root.Connected,
@@ -366,14 +365,12 @@ public class OpcUaReconnectionTests
             var originalSessionId = source.Diagnostics.SessionId;
             var originalSubscription = Assert.Single(source.SessionManager!.SubscriptionManager.Subscriptions);
 
-            // Act - wait for the reconnect handler's first attempt to be rejected, after which it creates
-            // a new session instead of reactivating the old one.
+            // Act - unblock only after the handler's first attempt was rejected through the proxy
             proxy.Block();
             await AsyncTestHelpers.WaitUntilAsync(
                 () => source.Diagnostics.IsReconnecting && proxy.RejectedConnectionCount >= 1,
                 timeout: TimeSpan.FromSeconds(60),
                 message: "The reconnect handler should try to reconnect through the blocked proxy");
-            logger.Log($"Reconnect attempt rejected ({proxy.RejectedConnectionCount} connections)");
             proxy.Unblock();
 
             await AsyncTestHelpers.WaitUntilAsync(
@@ -394,10 +391,16 @@ public class OpcUaReconnectionTests
         }
         finally
         {
-            if (client != null) await client.DisposeAsync();
-            if (server != null) await server.DisposeAsync();
-            if (proxy != null) await proxy.DisposeAsync();
-            port?.Dispose();
+            try
+            {
+                if (client != null) await client.DisposeAsync();
+                if (server != null) await server.DisposeAsync();
+                if (proxy != null) await proxy.DisposeAsync();
+            }
+            finally
+            {
+                port?.Dispose();
+            }
         }
     }
 

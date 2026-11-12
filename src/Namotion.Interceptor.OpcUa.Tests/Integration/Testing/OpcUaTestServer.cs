@@ -45,11 +45,11 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
         string? alternateBaseAddress = null)
     {
         _createRoot = createRoot;
-        _alternateBaseAddress = alternateBaseAddress;
         _initializeDefaults = initializeDefaults;
         _baseAddress = baseAddress ?? DefaultBaseAddress;
         _certificateStoreBasePath = certificateStoreBasePath ?? "pki";
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(100);
+        _alternateBaseAddress = alternateBaseAddress;
 
         return StartInternalAsync();
     }
@@ -92,19 +92,19 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
                 var telemetryContext = DefaultTelemetry.Create(b =>
                     b.Services.AddSingleton(loggerFactory));
 
-                var configuration = _alternateBaseAddress is null
-                    ? new OpcUaServerConfiguration()
-                    : new AlternateBaseAddressServerConfiguration(_alternateBaseAddress);
+                return new TestServerConfiguration
+                {
+                    AlternateBaseAddress = _alternateBaseAddress,
+                    RootName = "Root",
+                    BaseAddress = _baseAddress,
+                    ValueConverter = new OpcUaValueConverter(),
+                    TelemetryContext = telemetryContext,
+                    CleanCertificateStore = false,
+                    AutoAcceptUntrustedCertificates = true,
+                    CertificateStoreBasePath = _certificateStoreBasePath,
 
-                configuration.RootName = "Root";
-                configuration.BaseAddress = _baseAddress;
-                configuration.ValueConverter = new OpcUaValueConverter();
-                configuration.TelemetryContext = telemetryContext;
-                configuration.CleanCertificateStore = false;
-                configuration.AutoAcceptUntrustedCertificates = true;
-                configuration.CertificateStoreBasePath = _certificateStoreBasePath;
-                configuration.BufferTime = _bufferTime;
-                return configuration;
+                    BufferTime = _bufferTime
+                };
             });
 
         _host = builder.Build();
@@ -176,15 +176,21 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
     }
 
     /// <summary>
-    /// Advertises an additional address to clients that connect through it, such as a proxy in front of
-    /// the server, so they keep using that address instead of switching to the address the server listens on.
+    /// Advertises an additional address to clients that connect through it, such as a proxy in front of the
+    /// server, so they keep using that address instead of switching to the address the server listens on.
     /// </summary>
-    private sealed class AlternateBaseAddressServerConfiguration(string alternateBaseAddress) : OpcUaServerConfiguration
+    private sealed class TestServerConfiguration : OpcUaServerConfiguration
     {
+        public string? AlternateBaseAddress { get; init; }
+
         public override async Task<ApplicationInstance> CreateApplicationInstanceAsync()
         {
             var application = await base.CreateApplicationInstanceAsync();
-            application.ApplicationConfiguration.ServerConfiguration.AlternateBaseAddresses.Add(alternateBaseAddress);
+            if (AlternateBaseAddress is not null)
+            {
+                application.ApplicationConfiguration.ServerConfiguration.AlternateBaseAddresses.Add(AlternateBaseAddress);
+            }
+
             return application;
         }
     }

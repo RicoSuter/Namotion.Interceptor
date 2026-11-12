@@ -100,8 +100,8 @@ public class OpcUaClientLivenessTests
     }
 
     /// <summary>
-    /// The SDK's own reconnect raises liveness the moment the subscription transfer completes, and
-    /// the full state sync that transfer schedules runs on the next health check tick. A sync that
+    /// The SDK's own reconnect raises liveness the moment it completes with a new session, and the
+    /// full state sync that reconnect schedules runs on the next health check tick. A sync that
     /// fails clears the session, so the tick running it owes the drop. The swallowed failure must
     /// remain visible after the next health tick reconnects successfully.
     /// </summary>
@@ -161,8 +161,8 @@ public class OpcUaClientLivenessTests
                 message: "The first health check tick should report the session as operational");
 
             // Act - a restart rather than a transport disconnect: a disconnect leaves the session
-            // valid on the server, so the SDK reactivates it instead of replacing it and carrying the
-            // subscriptions across.
+            // valid on the server, so the SDK reactivates it instead of replacing it with a new
+            // session and fresh subscriptions.
             converter.Arm();
             await server.RestartAsync();
 
@@ -171,12 +171,12 @@ public class OpcUaClientLivenessTests
                 timeout: TimeSpan.FromSeconds(30),
                 message: "The failing keep-alive should drop liveness");
 
-            // Assert - raised again by the completed transfer on the reconnect callback's own thread,
+            // Assert - raised again by the completed reconnect on the reconnect callback's own thread,
             // far inside the health check interval, so no tick can be what raised it.
             await AsyncTestHelpers.WaitUntilAsync(
                 () => source.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(30),
-                message: "The completed subscription transfer should raise liveness again");
+                message: "The completed SDK reconnect should raise liveness again");
 
             await AsyncTestHelpers.WaitUntilAsync(
                 () => source.Diagnostics.IsOperational == false,

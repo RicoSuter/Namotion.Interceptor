@@ -20,7 +20,6 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
 
     private readonly TestLogger _logger;
     private readonly Action<OpcUaClientConfiguration>? _configureClient;
-    private readonly bool _loadApplicationCertificate;
     private IHost? _host;
     private IInterceptorSubjectContext? _context;
     private int _disposed; // 0 = not disposed, 1 = disposed
@@ -31,18 +30,10 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
 
     public IOpcUaSubjectClientSource? Source { get; private set; }
 
-    /// <param name="logger">The shared test logger.</param>
-    /// <param name="configureClient">Overrides applied to the client configuration.</param>
-    /// <param name="loadApplicationCertificate">Creates and loads the client's application certificate, which
-    /// a signed or encrypted connection needs and the client does not do on its own.</param>
-    public OpcUaTestClient(
-        TestLogger logger,
-        Action<OpcUaClientConfiguration>? configureClient = null,
-        bool loadApplicationCertificate = false)
+    public OpcUaTestClient(TestLogger logger, Action<OpcUaClientConfiguration>? configureClient = null)
     {
         _logger = logger;
         _configureClient = configureClient;
-        _loadApplicationCertificate = loadApplicationCertificate;
     }
 
     public async Task StartAsync(
@@ -90,14 +81,29 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
                 var telemetryContext = DefaultTelemetry.Create(b =>
                     b.Services.AddSingleton(loggerFactory));
 
-                var config = _loadApplicationCertificate
-                    ? new CertificateLoadingClientConfiguration { ServerUrl = serverUrl }
-                    : new OpcUaClientConfiguration { ServerUrl = serverUrl };
+                var config = new TestClientConfiguration
+                {
+                    ServerUrl = serverUrl,
+                    RootPath = ["Root"],
+                    TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
+                    ValueConverter = new OpcUaValueConverter(),
+                    SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
+                    TelemetryContext = telemetryContext,
 
-                ApplyDefaults(config);
-                config.CertificateStoreBasePath = certificateStoreBasePath ?? "pki";
-                config.TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>());
-                config.TelemetryContext = telemetryContext;
+                    ReconnectInterval = TimeSpan.FromSeconds(5),
+                    ReconnectHandlerTimeout = TimeSpan.FromSeconds(5),
+                    MaxReconnectDuration = TimeSpan.FromSeconds(15),
+                    SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(5),
+
+                    // SessionTimeout must be >= server's MinSessionTimeout (10s), use 30s for margin
+                    SessionTimeout = TimeSpan.FromSeconds(30),
+                    KeepAliveInterval = TimeSpan.FromSeconds(5),
+                    OperationTimeout = TimeSpan.FromSeconds(30),
+
+                    BufferTime = TimeSpan.FromMilliseconds(100),
+
+                    CertificateStoreBasePath = certificateStoreBasePath ?? "pki"
+                };
 
                 // Allow tests to override configuration
                 _configureClient?.Invoke(config);
@@ -180,35 +186,19 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         }
     }
 
-    private static void ApplyDefaults(OpcUaClientConfiguration config)
-    {
-        config.RootPath = ["Root"];
-        config.ValueConverter = new OpcUaValueConverter();
-        config.SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance);
-
-        config.ReconnectInterval = TimeSpan.FromSeconds(5);
-        config.ReconnectHandlerTimeout = TimeSpan.FromSeconds(5);
-        config.MaxReconnectDuration = TimeSpan.FromSeconds(15);
-        config.SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(5);
-
-        // SessionTimeout must be >= server's MinSessionTimeout (10s), use 30s for margin
-        config.SessionTimeout = TimeSpan.FromSeconds(30);
-        config.KeepAliveInterval = TimeSpan.FromSeconds(5);
-        config.OperationTimeout = TimeSpan.FromSeconds(30);
-
-        config.BufferTime = TimeSpan.FromMilliseconds(100);
-    }
-
     /// <summary>
-    /// Creates the client's application certificate if missing and loads it with its private key, which
-    /// the SDK needs for a signed or encrypted channel and only finds once loaded.
+    /// Loads the application certificate when security is on, which the client does not do on its own.
     /// </summary>
-    private sealed class CertificateLoadingClientConfiguration : OpcUaClientConfiguration
+    private sealed class TestClientConfiguration : OpcUaClientConfiguration
     {
         public override async Task<ApplicationInstance> CreateApplicationInstanceAsync()
         {
             var application = await base.CreateApplicationInstanceAsync();
-            await application.CheckApplicationInstanceCertificatesAsync(true);
+            if (UseSecurity)
+            {
+                await application.CheckApplicationInstanceCertificatesAsync(silent: true);
+            }
+
             return application;
         }
     }

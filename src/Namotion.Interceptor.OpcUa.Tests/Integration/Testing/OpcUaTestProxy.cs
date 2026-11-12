@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 
@@ -16,31 +15,31 @@ public sealed class OpcUaTestProxy : IAsyncDisposable
     private const uint BadTcpServerTooBusy = 0x807D0000;
 
     private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
-    private readonly string _targetHost;
     private readonly int _targetPort;
     private readonly CancellationTokenSource _cancellation = new();
-    private readonly ConcurrentDictionary<Task, byte> _connections = new();
+
+    // Written only by the accept loop and read after it ends.
+    private readonly List<Task> _connections = [];
     private readonly Task _acceptLoop;
 
     private volatile bool _isBlocked;
+    private int _generation;
     private int _rejectedConnectionCount;
 
-    public OpcUaTestProxy(string targetHost, int targetPort)
+    /// <param name="targetPort">The port of the server on localhost.</param>
+    public OpcUaTestProxy(int targetPort)
     {
-        _targetHost = targetHost;
         _targetPort = targetPort;
         _listener.Start();
-        Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
+        Url = $"opc.tcp://127.0.0.1:{((IPEndPoint)_listener.LocalEndpoint).Port}";
         _acceptLoop = AcceptLoopAsync();
     }
-
-    public int Port { get; }
 
     /// <summary>
     /// Gets the URL clients connect to. Uses 127.0.0.1 rather than localhost, so a server listening on
     /// localhost matches it to an alternate base address and advertises the proxy back to the client.
     /// </summary>
-    public string Url => $"opc.tcp://127.0.0.1:{Port}";
+    public string Url { get; }
 
     /// <summary>
     /// Gets how many new connections were rejected while blocked.
@@ -50,9 +49,14 @@ public sealed class OpcUaTestProxy : IAsyncDisposable
     /// <summary>
     /// Drops all traffic on open connections without closing them, so the client detects the outage
     /// through its keep-alive rather than a socket error, and answers every new connection with an
-    /// OPC UA "too busy" error.
+    /// OPC UA "too busy" error. Connections open at that point never forward again, because resuming
+    /// them after <see cref="Unblock"/> would leave a gap in their byte stream.
     /// </summary>
-    public void Block() => _isBlocked = true;
+    public void Block()
+    {
+        Interlocked.Increment(ref _generation);
+        _isBlocked = true;
+    }
 
     public void Unblock() => _isBlocked = false;
 
@@ -65,22 +69,15 @@ public sealed class OpcUaTestProxy : IAsyncDisposable
             {
                 client = await _listener.AcceptTcpClientAsync(_cancellation.Token);
             }
-            catch (Exception) when (_cancellation.IsCancellationRequested)
+            catch (Exception)
             {
+                // Canceled on dispose. Any other failure also ends accepting, and the test then times
+                // out waiting for the client rather than failing inside the proxy.
                 return;
             }
 
-            Track(_isBlocked ? RejectAsync(client) : ForwardAsync(client));
+            _connections.Add(_isBlocked ? RejectAsync(client) : ForwardAsync(client));
         }
-    }
-
-    private void Track(Task connection)
-    {
-        _connections.TryAdd(connection, 0);
-        connection.ContinueWith(
-            static (task, state) => ((ConcurrentDictionary<Task, byte>)state!).TryRemove(task, out _),
-            _connections,
-            TaskScheduler.Default);
     }
 
     private async Task RejectAsync(TcpClient client)
@@ -94,7 +91,7 @@ public sealed class OpcUaTestProxy : IAsyncDisposable
                 // Read the client's Hello so the error answers it rather than racing it.
                 var header = new byte[8];
                 await stream.ReadExactlyAsync(header, _cancellation.Token);
-                var remaining = new byte[BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(4)) - 8];
+                var remaining = new byte[Math.Max(0, (int)BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(4)) - 8)];
                 await stream.ReadExactlyAsync(remaining, _cancellation.Token);
 
                 var error = new byte[16];
@@ -125,10 +122,11 @@ public sealed class OpcUaTestProxy : IAsyncDisposable
         {
             try
             {
-                await server.ConnectAsync(_targetHost, _targetPort, _cancellation.Token);
+                await server.ConnectAsync("localhost", _targetPort, _cancellation.Token);
                 using var connection = CancellationTokenSource.CreateLinkedTokenSource(_cancellation.Token);
-                var clientToServer = PumpAsync(client.GetStream(), server.GetStream(), connection.Token);
-                var serverToClient = PumpAsync(server.GetStream(), client.GetStream(), connection.Token);
+                var generation = Volatile.Read(ref _generation);
+                var clientToServer = PumpAsync(client.GetStream(), server.GetStream(), generation, connection.Token);
+                var serverToClient = PumpAsync(server.GetStream(), client.GetStream(), generation, connection.Token);
                 await Task.WhenAny(clientToServer, serverToClient);
                 await connection.CancelAsync();
                 await Task.WhenAll(clientToServer, serverToClient);
@@ -140,7 +138,7 @@ public sealed class OpcUaTestProxy : IAsyncDisposable
         }
     }
 
-    private async Task PumpAsync(NetworkStream source, NetworkStream destination, CancellationToken cancellationToken)
+    private async Task PumpAsync(NetworkStream source, NetworkStream destination, int generation, CancellationToken cancellationToken)
     {
         var buffer = new byte[16 * 1024];
         try
@@ -148,7 +146,7 @@ public sealed class OpcUaTestProxy : IAsyncDisposable
             int read;
             while ((read = await source.ReadAsync(buffer, cancellationToken)) > 0)
             {
-                if (!_isBlocked)
+                if (generation == Volatile.Read(ref _generation))
                 {
                     await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
                 }
@@ -165,7 +163,7 @@ public sealed class OpcUaTestProxy : IAsyncDisposable
         await _cancellation.CancelAsync();
         _listener.Stop();
         await _acceptLoop;
-        await Task.WhenAll(_connections.Keys);
+        await Task.WhenAll(_connections);
         _cancellation.Dispose();
     }
 }

@@ -103,7 +103,7 @@ Each connector implements `IFaultInjectable` (separate from the production `ISub
 
 - **Disconnect** (`FaultType.Disconnect`): Soft kill. Breaks the transport connection without stopping the connector. Lets the connector's built-in reconnection logic detect the failure and recover.
   - *OPC UA Server*: Delegates to Kill (no meaningful "soft disconnect" for a multi-connection server).
-  - *OPC UA Client*: Disposes the transport channel. Keep-alive failure triggers `SessionReconnectHandler.BeginReconnect`, exercising the session preservation/transfer path.
+  - *OPC UA Client*: Disposes the transport channel. Keep-alive failure triggers `SessionReconnectHandler.BeginReconnect`, which reactivates the session on a new channel; the client then abandons the preserved session and reconnects manually.
   - *MQTT Server*: Enumerates connected clients and disconnects each one individually.
   - *MQTT Client*: Calls `DisconnectAsync()` on the MQTT client for a graceful disconnect.
   - *WebSocket Server*: Closes all client connections via `CloseAllConnectionsAsync()`.

@@ -460,7 +460,9 @@ The client handles connection loss through two cooperating mechanisms: the OPC U
 
 **Flow A: SDK reconnection with a new session**
 
-When the connection drops, the OPC UA SDK's `SessionReconnectHandler` attempts to reconnect automatically. It first tries to reactivate the existing session (Flow B). When that fails, it creates a new session that carries the client's subscriptions: it transfers the ones the server still holds and creates the others fresh, for example after a server restart. If any of that fails, the whole attempt fails and the handler retries. A server keeps a subscription only for its lifetime without publish requests, and a server built on the OPC Foundation SDK transfers an anonymous user's subscriptions only over a signed channel, so with security off they are always recreated.
+When the connection drops, the OPC UA SDK's `SessionReconnectHandler` attempts to reconnect automatically. It first tries to reactivate the existing session, which leads to Flow B; on connection errors it keeps retrying that until its estimate of the session timeout runs out. When reactivation fails, it creates a new session and carries the client's subscriptions over, by transfer or by creating them fresh. If the session or a subscription cannot be created, the whole attempt fails and the handler retries.
+
+A transfer needs the server to still hold the subscription, which it does only until the subscription's lifetime expires without publish requests. A server built on the OPC Foundation SDK also transfers an anonymous user's subscriptions only over a signed channel, so with security off such a server always recreates them.
 
 1. Keep-alive detects dead connection and triggers the SDK reconnect handler
 2. SDK creates a new session, transfers the subscriptions the server still holds via `TransferSubscriptions` and recreates the others
@@ -714,7 +716,7 @@ if (source.CurrentSession is { } session)
 }
 ```
 
-**Lifecycle contract:** read `CurrentSession` immediately before each use. It may be `null` during reconnection and the instance changes after a manual reconnect (Flow C), a transferred-subscription failure (Flow B), or a stall reset. Never cache the reference. For long-running session-bound state (e.g. an A&C `Subscription`), subscribe to `CurrentSessionChanged` (below) or recreate on demand when calls fail with `BadSessionIdInvalid` / `BadSessionNotActivated`.
+**Lifecycle contract:** read `CurrentSession` immediately before each use. It may be `null` during reconnection and the instance changes after a manual reconnect (Flows B and C), an SDK reconnect with a new session (Flow A), or a stall reset. Never cache the reference. For long-running session-bound state (e.g. an A&C `Subscription`), subscribe to `CurrentSessionChanged` (below) or recreate on demand when calls fail with `BadSessionIdInvalid` / `BadSessionNotActivated`.
 
 ### Reacting to session swaps with `CurrentSessionChanged`
 
