@@ -51,18 +51,57 @@ public class OpcUaVariantExtensionsTests
     }
 
     [Theory]
-    [InlineData(0L)]
-    [InlineData(3155378975999999999L)]
-    public void WhenDateTimeIsMinimumOrMaximum_ThenItRoundTrips(long ticks)
+    [InlineData(0L, DateTimeKind.Utc)]
+    [InlineData(3155378975999999999L, DateTimeKind.Utc)]
+    [InlineData(0L, DateTimeKind.Unspecified)]
+    [InlineData(3155378975999999999L, DateTimeKind.Unspecified)]
+    public void WhenDateTimeIsMinimumOrMaximum_ThenItRoundTrips(long ticks, DateTimeKind kind)
     {
         // Arrange
-        var value = new DateTime(ticks, DateTimeKind.Utc);
+        var value = new DateTime(ticks, kind);
 
         // Act
         var roundTripped = OpcUaVariantExtensions.ToVariant(value).ToClrValue();
 
         // Assert
-        Assert.Equal(value, Assert.IsType<DateTime>(roundTripped));
+        Assert.Equal(value.Ticks, Assert.IsType<DateTime>(roundTripped).Ticks);
+    }
+
+    [Fact]
+    public void WhenDateTimeArrayContainsMaximum_ThenItRoundTrips()
+    {
+        // Arrange
+        var value = new[] { DateTime.MaxValue, new DateTime(2024, 1, 2, 3, 4, 5, DateTimeKind.Utc) };
+
+        // Act
+        var roundTripped = OpcUaVariantExtensions.ToVariant(value).ToClrValue();
+
+        // Assert
+        Assert.Equal(value, Assert.IsType<DateTime[]>(roundTripped));
+    }
+
+    [Fact]
+    public void WhenEnumValueIsOutsideInt32Range_ThenItHasNoOpcUaRepresentation()
+    {
+        // Act
+        var convertedLong = OpcUaVariantExtensions.TryToVariant(LongEnum.Large, out _);
+        var convertedUnsigned = OpcUaVariantExtensions.TryToVariant(UnsignedLongEnum.Large, out _);
+        var convertedArray = OpcUaVariantExtensions.TryToVariant(new[] { LongEnum.Small, LongEnum.Large }, out _);
+
+        // Assert
+        Assert.False(convertedLong);
+        Assert.False(convertedUnsigned);
+        Assert.False(convertedArray);
+    }
+
+    [Fact]
+    public void WhenEnumValueWithWideUnderlyingTypeFitsInt32_ThenVariantIsItsNumericValue()
+    {
+        // Act
+        var variant = OpcUaVariantExtensions.ToVariant(new[] { LongEnum.Small, LongEnum.Negative });
+
+        // Assert
+        Assert.Equal(new[] { 1, -1 }, Assert.IsType<int[]>(variant.ToClrValue()));
     }
 
     [Fact]
@@ -99,5 +138,17 @@ public class OpcUaVariantExtensionsTests
         // Assert
         Assert.True(converted);
         Assert.Null(variant.ToClrValue());
+    }
+
+    private enum LongEnum : long
+    {
+        Negative = -1,
+        Small = 1,
+        Large = 1L << 40
+    }
+
+    private enum UnsignedLongEnum : ulong
+    {
+        Large = ulong.MaxValue
     }
 }
