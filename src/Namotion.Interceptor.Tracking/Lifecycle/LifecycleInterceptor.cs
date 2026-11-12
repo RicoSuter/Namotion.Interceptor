@@ -147,7 +147,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         };
 
         var properties = subject.Properties.Keys;
-        InvokeAddedLifecycleHandlersOfAttachedSubject(subject, context, change);
+        InvokeAddedLifecycleHandlers(subject, context, change);
 
         SubjectAttached?.Invoke(change);
         foreach (var propertyName in properties)
@@ -182,14 +182,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         };
 
         var properties = subject.Properties.Keys;
-        if (isFirstAttach)
-        {
-            InvokeAddedLifecycleHandlersOfAttachedSubject(subject, context, change);
-        }
-        else
-        {
-            InvokeAddedLifecycleHandlers(subject, context, change);
-        }
+        InvokeAddedLifecycleHandlers(subject, context, change);
 
         if (isFirstAttach)
         {
@@ -202,32 +195,30 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
     }
     
-    // The subject counts as attached for the attach operation once its handlers have run, among them the one that
-    // gives it its context: a derived property registered by one of them may read it before it can be tracked.
-    private void InvokeAddedLifecycleHandlersOfAttachedSubject(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
+    private void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
     {
         try
         {
-            InvokeAddedLifecycleHandlers(subject, context, change);
+            var array = context.GetServices<ILifecycleHandler>();
+            for (var index = 0; index < array.Length; index++)
+            {
+                var handler = array[index];
+                handler.HandleLifecycleChange(change);
+            }
+
+            if (subject is ILifecycleHandler subjectHandler)
+            {
+                subjectHandler.HandleLifecycleChange(change);
+            }
         }
         finally
         {
-            _attachOperation.OnSubjectAttached();
-        }
-    }
-
-    private static void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
-    {
-        var array = context.GetServices<ILifecycleHandler>();
-        for (var index = 0; index < array.Length; index++)
-        {
-            var handler = array[index];
-            handler.HandleLifecycleChange(change);
-        }
-
-        if (subject is ILifecycleHandler subjectHandler)
-        {
-            subjectHandler.HandleLifecycleChange(change);
+            // The subject counts as attached for the operation once its handlers have run, among them the one that
+            // gives it its context: a derived property registered by one of them may read it before it can be tracked.
+            if (change.IsContextAttach)
+            {
+                _attachOperation.OnSubjectAttached();
+            }
         }
     }
 
