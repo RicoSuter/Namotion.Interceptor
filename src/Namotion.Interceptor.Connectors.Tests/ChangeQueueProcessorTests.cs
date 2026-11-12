@@ -1187,7 +1187,12 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.Zero,
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale)
+        {
+            // Never advanced: once the teardown bound elapses, ProcessAsync returns before the run
+            // clears the buffer, which a stalled runner can trigger on the wall clock.
+            TeardownTimeProvider = new ManualTeardownClock()
+        };
         using var cancellation = new CancellationTokenSource();
         var processing = processor.ProcessAsync(cancellation.Token);
         subject.FirstName = "retained";
