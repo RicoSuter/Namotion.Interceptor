@@ -44,6 +44,14 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     // Enqueued by SDK reconnection callbacks (sync), drained by health check loop via DisposePendingSessionsAsync (async).
     private readonly ConcurrentQueue<Session> _sessionsToDispose = new();
 
+    private ApplicationInstance? _application;
+
+    /// <summary>
+    /// Gets the application instance the current session was created with, so that a reconnect can
+    /// reuse it. It owns the certificate manager and is disposed with this manager.
+    /// </summary>
+    internal ApplicationInstance? Application => Volatile.Read(ref _application);
+
     /// <summary>
     /// Gets the current session. WARNING: Can change at any time due to reconnection. Never cache - read immediately before use.
     /// </summary>
@@ -252,6 +260,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     {
         var applicationConfiguration = application.ApplicationConfiguration
             ?? throw new InvalidOperationException("The OPC UA application instance has no application configuration.");
+        Volatile.Write(ref _application, application);
         var endpointConfiguration = EndpointConfiguration.Create(applicationConfiguration);
         var serverUri = new Uri(configuration.ServerUrl);
 
@@ -864,6 +873,13 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         }
 
         DrainPendingSessionTransitions();
+
+        var application = Interlocked.Exchange(ref _application, null);
+        if (application is not null)
+        {
+            try { await application.DisposeAsync().AsTask().WaitAsync(_configuration.SessionDisposalTimeout).ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Error disposing OPC UA application instance."); }
+        }
     }
 
     /// <summary>

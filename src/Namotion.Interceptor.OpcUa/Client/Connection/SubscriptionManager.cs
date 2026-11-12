@@ -223,7 +223,7 @@ internal class SubscriptionManager : IAsyncDisposable
                         monitoredItem,
                         _configuration.ValueConverter.ConvertToPropertyValue(
                             item.Value.WrappedValue.ToClrValue(), monitoredItem.Property),
-                        item.Value.SourceTimestamp.ToDateTimeOffset()));
+                        item.Value.SourceTimestamp.ToClrTimestamp()));
                 }
             }
         }

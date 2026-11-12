@@ -183,7 +183,6 @@ public class OpcUaServerConfiguration
                 MaxMessageQueueSize = 10_000,
                 MaxNotificationQueueSize = 10_000,
                 MaxNotificationsPerPublish = 10_000,
-                MinSupportedSamplingInterval = 1000,
                 MaxEventQueueSize = 10_000,
                 AuditingEnabled = true,
                 // From XML -> minimal operation limits relevant for typical interactions.

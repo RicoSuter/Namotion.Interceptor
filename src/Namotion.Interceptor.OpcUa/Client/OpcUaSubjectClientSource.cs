@@ -311,7 +311,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             {
                 var value = _configuration.ValueConverter.ConvertToPropertyValue(
                     dataValue.WrappedValue.ToClrValue(), property);
-                property.SetValueFromSource(this, dataValue.SourceTimestamp.ToDateTimeOffset(), null, value);
+                property.SetValueFromSource(this, dataValue.SourceTimestamp.ToClrTimestamp(), null, value);
             }
 
             _logger.LogInformation("Updated {Count} properties with OPC UA node values.", itemCount);
@@ -539,7 +539,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             propertyWriter.StartBuffering();
 
             // Create new session (CreateSessionAsync disposes old session internally)
-            var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
+            var application = sessionManager.Application
+                ?? await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
             var session = await sessionManager.CreateSessionAsync(application, _configuration, token).ConfigureAwait(false);
 
             // Clear all read-after-write state - new session means old pending reads and registrations are invalid
