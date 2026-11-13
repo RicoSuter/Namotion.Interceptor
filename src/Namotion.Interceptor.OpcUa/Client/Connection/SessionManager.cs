@@ -312,7 +312,10 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             throw new InvalidOperationException(
                 $"The OPC UA server certificate {GetThumbprint(endpointDescription, configuration.ResolvedTelemetryContext)} is not trusted. " +
                 $"Move it from '{Path.Combine(configuration.CertificateStoreBasePath, "rejected", "certs")}' to " +
-                $"'{Path.Combine(configuration.CertificateStoreBasePath, "trusted", "certs")}', or set " +
+                $"'{Path.Combine(configuration.CertificateStoreBasePath, "trusted", "certs")}'. For a certificate issued by a " +
+                $"certificate authority, add the authority's certificate to " +
+                $"'{Path.Combine(configuration.CertificateStoreBasePath, "issuer", "certs")}' and " +
+                $"'{Path.Combine(configuration.CertificateStoreBasePath, "trusted", "certs")}'. Or set " +
                 $"{nameof(OpcUaClientConfiguration.AutoAcceptUntrustedCertificates)} = true to accept any server certificate.",
                 error);
         }
@@ -729,10 +732,11 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         catch (Exception error) when (error is not OperationCanceledException)
         {
             var applicationConfiguration = application.ApplicationConfiguration;
+            var identifier = applicationConfiguration.SecurityConfiguration.ApplicationCertificate;
             throw new InvalidOperationException(
                 $"Failed to load the OPC UA client application certificate from " +
-                $"'{applicationConfiguration.SecurityConfiguration.ApplicationCertificate.StorePath}'. A provisioned certificate needs the " +
-                $"subject '{applicationConfiguration.SecurityConfiguration.ApplicationCertificate.SubjectName}' and the application URI " +
+                $"'{Path.Combine(identifier.StorePath ?? string.Empty, "certs")}'. A provisioned certificate needs the " +
+                $"subject '{identifier.SubjectName}' and the application URI " +
                 $"'{applicationConfiguration.ApplicationUri}'; set {nameof(OpcUaClientConfiguration.ApplicationUri)} to match it, or set " +
                 $"{nameof(OpcUaClientConfiguration.AutoCreateApplicationCertificate)} = true to create one.",
                 error);
