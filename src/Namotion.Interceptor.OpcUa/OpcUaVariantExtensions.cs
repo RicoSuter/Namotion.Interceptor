@@ -82,19 +82,51 @@ internal static class OpcUaVariantExtensions
         return value.Ticks == DateTime.MaxValue.Ticks ? DateTimeUtc.MaxValue : new DateTimeUtc(value);
     }
 
+    /// <summary>
+    /// Gets the Int32 an enumeration value is sent as. Unboxes to the underlying type instead of going
+    /// through <see cref="Convert"/>, which boxes again. A UInt32 value keeps its bits, as the SDK's
+    /// mapping from Int32 back to the enumeration expects; a 64-bit value must fit into Int32.
+    /// </summary>
     private static bool TryGetInt32(object? enumeration, out int value)
     {
-        // An unsigned underlying type above long.MaxValue throws in ToInt64 and is out of range anyway.
-        if (enumeration is Enum && Type.GetTypeCode(Enum.GetUnderlyingType(enumeration.GetType())) == TypeCode.UInt64)
+        if (enumeration is not Enum)
         {
-            var unsigned = Convert.ToUInt64(enumeration, System.Globalization.CultureInfo.InvariantCulture);
-            value = (int)unsigned;
-            return unsigned <= int.MaxValue;
+            value = 0;
+            return false;
         }
 
-        var signed = Convert.ToInt64(enumeration, System.Globalization.CultureInfo.InvariantCulture);
-        value = (int)signed;
-        return signed is >= int.MinValue and <= int.MaxValue;
+        switch (Type.GetTypeCode(Enum.GetUnderlyingType(enumeration.GetType())))
+        {
+            case TypeCode.SByte:
+                value = (sbyte)enumeration;
+                return true;
+            case TypeCode.Byte:
+                value = (byte)enumeration;
+                return true;
+            case TypeCode.Int16:
+                value = (short)enumeration;
+                return true;
+            case TypeCode.UInt16:
+                value = (ushort)enumeration;
+                return true;
+            case TypeCode.Int32:
+                value = (int)enumeration;
+                return true;
+            case TypeCode.UInt32:
+                value = unchecked((int)(uint)enumeration);
+                return true;
+            case TypeCode.Int64:
+                var signed = (long)enumeration;
+                value = unchecked((int)signed);
+                return signed is >= int.MinValue and <= int.MaxValue;
+            case TypeCode.UInt64:
+                var unsigned = (ulong)enumeration;
+                value = unchecked((int)unsigned);
+                return unsigned <= int.MaxValue;
+            default:
+                value = 0;
+                return false;
+        }
     }
 
     /// <summary>
