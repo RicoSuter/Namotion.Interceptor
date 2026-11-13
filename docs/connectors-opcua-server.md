@@ -95,6 +95,7 @@ await server.StartAsync(cancellationToken);
 |----------|------|---------|-------------|
 | `RootName` | `string?` | null | Optional folder name under ObjectsFolder to organize server nodes |
 | `ApplicationName` | `string` | "Namotion.Interceptor.Server" | Application name for identification and certificate generation |
+| `ApplicationUri` | `string?` | null | Application URI the server certificate carries (`urn:{host name}:Namotion.Interceptor:{ApplicationName}` when null), see [Certificates](#certificates) |
 | `BaseAddress` | `string` | "opc.tcp://localhost:4840/" | Server endpoint address |
 | `NamespaceUri` | `string` | "http://namotion.com/Interceptor/" | Primary namespace URI for custom nodes |
 | `ValueConverter` | `OpcUaValueConverter` | *required* | Converts between C# properties and OPC UA values |
@@ -102,10 +103,8 @@ await server.StartAsync(cancellationToken);
 | `BufferTime` | `TimeSpan?` | 8ms | Time window to buffer incoming property changes before publishing to clients |
 | `TelemetryContext` | `ITelemetryContext` | NullTelemetryContext | Telemetry integration for logging and diagnostics |
 | `AutoAcceptUntrustedCertificates` | `bool` | false | Accept untrusted client certificates (testing/development only) |
-| `CleanCertificateStore` | `bool` | false | Delete the whole application certificate store (`{CertificateStoreBasePath}/own`) on startup, so the server creates a new certificate on every start and clients have to trust the new certificate after every restart. A client sharing the same `CertificateStoreBasePath` (both default to "pki") loses its certificate too |
-| `CertificateStoreBasePath` | `string` | "pki" | Base directory for certificate stores. Change to isolate stores for parallel test execution |
-
-**Upgrading.** `CleanCertificateStore` used to default to true, so the server created a new certificate on every start. It now keeps its certificate across restarts; set `CleanCertificateStore = true` for the previous behavior.
+| `CleanCertificateStore` | `bool` | false | Empty `{CertificateStoreBasePath}/own` on every start, so the server creates a new certificate each time, see [Certificates](#certificates) |
+| `CertificateStoreBasePath` | `string` | "pki" | Base directory for certificate stores |
 
 Final outbound delivery on stop uses the internal five-second safety bound described in [Flushing On Stop](connectors.md#flushing-on-stop). It cannot be configured per connector.
 
@@ -121,6 +120,16 @@ The server supports multiple security policies out of the box:
 | Aes128_Sha256_RsaOaep | Sign, Sign & Encrypt |
 | Aes256_Sha256_RsaPss | Sign, Sign & Encrypt |
 | None | No security |
+
+### Certificates
+
+The server keeps its application certificate in `{CertificateStoreBasePath}/own` across restarts and creates a self-signed one there when none exists, valid for 12 months. Set `CleanCertificateStore = true` to create a new certificate on every start instead; clients then have to trust it again after each restart.
+
+On each start, the server logs a warning when its certificate expires within 30 days, and replaces an expired self-signed certificate with a warning; clients that trusted the old one have to trust the new one. A certificate issued by a certificate authority is never replaced, nor is any certificate when an override sets `DisableCertificateAutoCreation` or provides the certificate with its private key. A server running past the expiry keeps the expired certificate until its next start, and clients reject it.
+
+A kept certificate must match the server's application URI and the host of `BaseAddress`, where `localhost` stands for the host name. Both defaults contain the host name, so when it changes, as in a recreated container, the server rejects its own certificate and fails to start. Give the host a stable name, or set `ApplicationUri` together with an explicit host in `BaseAddress`. To start over, delete the certificate from `own/certs` and its key from `own/private`.
+
+To provision a certificate or let the server trust a client, use the folder layout described for the client in [Client Certificate](connectors-opcua-client.md#client-certificate) and [Trust](connectors-opcua-client.md#trust): with `AutoAcceptUntrustedCertificates = false`, the default, a rejected client certificate is written to `rejected/certs`, and moving it to `trusted/certs` lets the client connect. A client and a server in one process share their stores with the default base path, see [Certificate Stores](connectors-opcua-client.md#certificate-stores).
 
 ### User Authentication
 
