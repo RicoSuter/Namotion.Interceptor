@@ -139,9 +139,8 @@ public class OpcUaClientLivenessTests
             // reconnection stall detection (two ticks) cannot take the recovery away from the SDK.
             healthCheckInterval: TimeSpan.FromSeconds(60),
 
-            // The outage has to be detected while the server is still down, so the SDK's first
-            // reconnect attempt fails and every attempt after it recreates the session, which is what
-            // carries the subscriptions across.
+            // Detected quickly, so liveness drops before the reconnect completes. The restarted server
+            // rejects the old session id, so the SDK recreates the session with fresh subscriptions.
             keepAliveInterval: TimeSpan.FromSeconds(1));
 
         await using var source = new OpcUaSubjectClientSource(

@@ -171,7 +171,7 @@ public class OpcUaReconnectionTests
                 // Session swap visible to consumers. The reconnect cycle takes one of two paths
                 // depending on timing and server behavior:
                 //   A) SDK reconnect with a new session → single (HadPrevious=true, HasCurrent=true) swap
-                //   B) preserved session / stall reset →
+                //   B) stall reset →
                 //      (HadPrevious=true, HasCurrent=false) abandon + (HadPrevious=false, HasCurrent=true) recreate
                 // Either way, the consumer must see at least one transition releasing a previous
                 // session AND at least one transition with a current session — which together prove

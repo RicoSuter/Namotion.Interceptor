@@ -11,7 +11,8 @@ namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 public sealed class OpcUaTestProxy : IAsyncDisposable
 {
     // OPC UA TCP "too busy" status. The SDK reconnect handler does not retry reactivating the session on
-    // it, so a client that hits it while blocked recreates its session and transfers its subscriptions.
+    // it, so a client that hits it while blocked creates a new session, which transfers the subscriptions the
+    // server still holds and is allowed to transfer.
     private const uint BadTcpServerTooBusy = 0x807D0000;
 
     private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
@@ -25,6 +26,7 @@ public sealed class OpcUaTestProxy : IAsyncDisposable
     private volatile bool _isBlocked;
     private int _generation;
     private int _rejectedConnectionCount;
+    private int _disposed;
 
     /// <param name="targetPort">The port of the server on localhost.</param>
     public OpcUaTestProxy(int targetPort)
@@ -54,10 +56,15 @@ public sealed class OpcUaTestProxy : IAsyncDisposable
     /// </summary>
     public void Block()
     {
-        Interlocked.Increment(ref _generation);
+        // Blocked before the generation moves, so a connection accepted from here on is rejected rather than
+        // forwarded under the new generation.
         _isBlocked = true;
+        Interlocked.Increment(ref _generation);
     }
 
+    /// <summary>
+    /// Forwards new connections again. Connections that were open during the block stay silent.
+    /// </summary>
     public void Unblock() => _isBlocked = false;
 
     private async Task AcceptLoopAsync()
@@ -76,7 +83,10 @@ public sealed class OpcUaTestProxy : IAsyncDisposable
                 return;
             }
 
-            _connections.Add(_isBlocked ? RejectAsync(client) : ForwardAsync(client));
+            // The generation is read before the blocked flag, so a connection forwarded here cannot carry the
+            // generation of a block that started after it was accepted.
+            var generation = Volatile.Read(ref _generation);
+            _connections.Add(_isBlocked ? RejectAsync(client) : ForwardAsync(client, generation));
         }
     }
 
@@ -115,7 +125,7 @@ public sealed class OpcUaTestProxy : IAsyncDisposable
         }
     }
 
-    private async Task ForwardAsync(TcpClient client)
+    private async Task ForwardAsync(TcpClient client, int generation)
     {
         using (client)
         using (var server = new TcpClient())
@@ -124,7 +134,6 @@ public sealed class OpcUaTestProxy : IAsyncDisposable
             {
                 await server.ConnectAsync("localhost", _targetPort, _cancellation.Token);
                 using var connection = CancellationTokenSource.CreateLinkedTokenSource(_cancellation.Token);
-                var generation = Volatile.Read(ref _generation);
                 var clientToServer = PumpAsync(client.GetStream(), server.GetStream(), generation, connection.Token);
                 var serverToClient = PumpAsync(server.GetStream(), client.GetStream(), generation, connection.Token);
                 await Task.WhenAny(clientToServer, serverToClient);
@@ -160,6 +169,11 @@ public sealed class OpcUaTestProxy : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        {
+            return;
+        }
+
         await _cancellation.CancelAsync();
         _listener.Stop();
         await _acceptLoop;

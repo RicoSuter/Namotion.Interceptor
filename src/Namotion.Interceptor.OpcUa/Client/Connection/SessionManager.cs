@@ -503,8 +503,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                     else
                     {
                         // Only reached when the client had no subscriptions: the SDK carries every one over, by
-                        // transfer or recreation, or fails the reconnect. Reject it and abandon the old session so
-                        // the health check rebuilds both.
+                        // transfer or recreation, or fails the reconnect. Reject it and abandon the old session, so
+                        // the health check reconnects manually with a fresh session and subscriptions.
                         // The reconnected session has a live TCP connection so it must be disposed.
                         _logger.LogWarning(
                             "OPC UA session reconnected without subscriptions. " +
@@ -533,7 +533,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
                 Interlocked.Exchange(ref _isReconnecting, 0);
 
-                // Notifications resume as soon as the transfer succeeds, and the only other rise on
+                // Notifications resume as soon as the SDK reconnect completes with a new session, and the only other rise on
                 // this path is the health check loop's, so without this the connector reports itself
                 // down for seconds while values update. Must stay after the reconnecting flag was
                 // cleared above, and is guarded by IsConnected rather than the branch's own knowledge
