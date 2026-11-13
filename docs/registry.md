@@ -137,7 +137,7 @@ registered.AddDerivedProperty("Status", typeof(string),
 
 Derived properties automatically participate in change tracking and will update when their dependencies change.
 
-A dynamic derived property whose getter is evaluated again while it evaluates on the same thread, because it reads itself through other properties, gives the default of its type for that inner read and reports a trace warning once, so a cycle in such getters does not end the process. The same applies to a read that a side effect of the getter causes on the same thread. The dependencies the cycle records still form a cycle, which tracking does not handle yet (#971): a host that lets users define getters should reject the cycles it can see.
+A dynamic derived property, including one added with `AddDerivedAttribute`, whose getter is evaluated again while it evaluates on the same thread, because it reads itself through other properties, gives `default(T)` for that inner read. A trace warning is reported once, so a cycle in such getters does not end the process. The same applies to a read that a side effect of the getter causes on the same thread. The dependencies the cycle records still form a cycle, which tracking does not handle yet (#971): a host that lets users define getters should reject the cycles it can see.
 
 ### Lifecycle tracking for dynamic properties
 
@@ -174,7 +174,7 @@ pressureProperty.AddDerivedAttribute("DynamicMax", typeof(decimal),
     setValue: null);
 ```
 
-This pattern is useful for creating adaptive metadata that changes based on the current state of your properties.
+This pattern is useful for creating adaptive metadata that changes based on the current state of your properties. A derived attribute whose getter reads itself through other properties is handled as described under [Add properties](#add-properties).
 
 ## Custom property initializers
 
