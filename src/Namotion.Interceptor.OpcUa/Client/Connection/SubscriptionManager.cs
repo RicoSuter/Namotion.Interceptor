@@ -51,6 +51,7 @@ internal class SubscriptionManager : IAsyncDisposable
     // Keyed by object, not by the server-assigned id, which a subscription created again on the
     // server can reuse. Cleared when the server session is created again, see ResetNotificationRanking.
     private readonly ConditionalWeakTable<Subscription, SubscriptionApplyState> _applyStates = new();
+    private readonly ConditionalWeakTable<Subscription, Lock> _applyLocks = new();
     private readonly ConcurrentDictionary<Subscription, byte> _subscriptions = new();
     private readonly ConcurrentDictionary<uint, int> _healAttempts = new();
     private readonly Lock _trackingMutationLock = new();
@@ -273,7 +274,7 @@ internal class SubscriptionManager : IAsyncDisposable
         {
             _source.IncomingThroughput.Add(changes.Count);
 
-            var applyState = _applyStates.GetValue(subscription, static _ => new SubscriptionApplyState());
+            var applyState = GetApplyState(subscription);
 
             // Pool item returned inside callback. Safe because ApplyUpdate never throws:
             // It wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
@@ -341,6 +342,24 @@ internal class SubscriptionManager : IAsyncDisposable
         }
     }
 
+    private SubscriptionApplyState GetApplyState(Subscription subscription)
+    {
+        if (_applyStates.TryGetValue(subscription, out var applyState))
+        {
+            return applyState;
+        }
+
+        return _applyStates.GetValue(subscription, key => new SubscriptionApplyState(GetApplyLock(key)));
+    }
+
+    /// <summary>
+    /// Gets the lock under which the notifications of <paramref name="subscription"/> are applied. It
+    /// stays the same across <see cref="ResetNotificationRanking"/>, so a read-after-write registration
+    /// keeps applying under the lock the notifications take.
+    /// </summary>
+    internal Lock GetApplyLock(Subscription subscription) =>
+        _applyLocks.GetValue(subscription, static _ => new Lock());
+
     private void ReportErrorIfRunning(Exception error, CancellationToken cancellationToken = default)
     {
         if (!_shuttingDown && !cancellationToken.IsCancellationRequested)
@@ -352,7 +371,8 @@ internal class SubscriptionManager : IAsyncDisposable
     /// <summary>
     /// Starts a new ranking of notification messages for every subscription. Called when the server
     /// session was created again: the subscriptions are restored in place and number their messages
-    /// from the start again, which must not be ranked against the messages applied before.
+    /// from the start again, which must not be ranked against the messages applied before. The apply
+    /// locks are kept, see <see cref="GetApplyLock"/>.
     /// </summary>
     internal void ResetNotificationRanking() => _applyStates.Clear();
 
@@ -488,6 +508,9 @@ internal class SubscriptionManager : IAsyncDisposable
         foreach (var monitoredItem in toRemove)
         {
             subscription.RemoveItem(monitoredItem);
+
+            // Polled values are applied without the subscription's lock, so read-after-write cannot stay atomic.
+            _readAfterWriteManager?.UnregisterProperty(monitoredItem.StartNodeId);
         }
 
         try
@@ -592,8 +615,25 @@ internal class SubscriptionManager : IAsyncDisposable
     }
 
     /// <summary>
+    /// Registers the items of a tracked subscription with ReadAfterWriteManager after the health monitor
+    /// healed some of them. Does nothing for a subscription that is no longer tracked.
+    /// </summary>
+    internal void RegisterRecoveredItems(Subscription subscription)
+    {
+        // Checked and registered under the tracking lock: a recreate removes the replaced subscriptions under it
+        // before registering their replacements, so a heal of a replaced one cannot register its lock last.
+        lock (_trackingMutationLock)
+        {
+            if (_subscriptions.ContainsKey(subscription))
+            {
+                RegisterPropertiesWithReadAfterWriteManager(subscription);
+            }
+        }
+    }
+
+    /// <summary>
     /// Registers all successfully created monitored items with ReadAfterWriteManager.
-    /// Called after ApplyChangesAsync when we know the revised sampling intervals.
+    /// Called once the revised sampling intervals are known.
     /// </summary>
     private void RegisterPropertiesWithReadAfterWriteManager(Subscription subscription)
     {
@@ -602,13 +642,26 @@ internal class SubscriptionManager : IAsyncDisposable
             return;
         }
 
+        var applyLock = GetApplyLock(subscription);
         foreach (var item in subscription.MonitoredItems)
         {
-            if (item.Handle is RegisteredSubjectProperty property && item.Status?.Created == true)
+            // A released property's SDK item stays in the subscription; only the tracked ones are registered.
+            if (item.Handle is not RegisteredSubjectProperty property || !_monitoredItems.ContainsKey(item.ClientHandle))
+            {
+                continue;
+            }
+
+            if (item.Status?.Created == true)
             {
                 var requestedInterval = GetRequestedSamplingInterval(property);
                 var revisedInterval = TimeSpan.FromMilliseconds(item.Status.SamplingInterval);
-                _readAfterWriteManager.RegisterProperty(item.StartNodeId, property, requestedInterval, revisedInterval);
+                _readAfterWriteManager.RegisterProperty(item.StartNodeId, property, requestedInterval, revisedInterval, applyLock);
+            }
+            else
+            {
+                // Not created yet: an earlier registration moves to the lock this item's notifications will use
+                // rather than being dropped. The health monitor registers it again once it heals the item.
+                _readAfterWriteManager.UpdateApplyLock(item.StartNodeId, applyLock);
             }
         }
     }
@@ -627,7 +680,7 @@ internal class SubscriptionManager : IAsyncDisposable
         return _configuration.DefaultSamplingInterval;
     }
 
-    private bool TryAddSubscription(Subscription subscription)
+    internal bool TryAddSubscription(Subscription subscription)
     {
         lock (_trackingMutationLock)
         {
@@ -750,7 +803,7 @@ internal class SubscriptionManager : IAsyncDisposable
     /// identifies the object into the high bits and the message's sequence number, extended past the
     /// 32-bit wrap, into the low 40 bits, which last about 2^40 messages per subscription object.
     /// </summary>
-    private sealed class SubscriptionApplyState
+    private sealed class SubscriptionApplyState(Lock applyLock)
     {
         private const int SequenceBits = 40;
         private const ulong SequenceMask = (1UL << SequenceBits) - 1;
@@ -760,7 +813,7 @@ internal class SubscriptionManager : IAsyncDisposable
         private readonly ulong _epoch = ((ulong)(uint)Interlocked.Increment(ref _lastEpoch) & 0xFF_FFFF) << SequenceBits;
         private ulong _highestSequenceNumber;
 
-        public Lock Lock { get; } = new();
+        public Lock Lock { get; } = applyLock;
 
         /// <summary>
         /// Whether <paramref name="stamp"/> belongs to an older message of the same subscription object than

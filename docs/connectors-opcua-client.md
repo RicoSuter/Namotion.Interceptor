@@ -355,6 +355,7 @@ var config = new OpcUaClientConfiguration
 - Only triggers for properties where `SamplingInterval = 0` was revised to > 0
 - Multiple rapid writes are coalesced into a single read
 - Reads are batched for efficiency
+- A read value is skipped when the property already holds a value with the same or a newer source timestamp, checked and applied atomically with the notifications of the property's current subscription
 - Circuit breaker prevents repeated failures from overwhelming the server
 - Logged when activated so you can verify which properties need this fallback
 
@@ -485,7 +486,7 @@ When a subscription stops publishing while the session itself stays connected, t
 
 Between the managed session reporting itself connected (step 3) and the health check's full state read (step 4), there is a window of up to one health check interval (~5 seconds by default) where:
 
-- Subscription notifications may apply partially (some notifications may have been lost due to server-side queue overflow or subscription lifetime expiration)
+- Subscription notifications after the reconnect may apply partially (some notifications may have been lost due to server-side queue overflow or subscription lifetime expiration)
 - Property values may temporarily reflect incomplete state
 
 This window is bounded and self-correcting: the health check's full state read overwrites all values with the server's current state. For most industrial applications, this brief window is acceptable. If tighter consistency is required, reduce `SubscriptionHealthCheckInterval`.

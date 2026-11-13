@@ -422,6 +422,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
         await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(
             sessionManager.Subscriptions,
+            sessionManager.SubscriptionManager.RegisterRecoveredItems,
             cancellationToken).ConfigureAwait(false);
 
         await sessionManager.SubscriptionManager

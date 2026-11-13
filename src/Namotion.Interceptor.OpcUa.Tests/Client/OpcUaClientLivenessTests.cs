@@ -100,10 +100,10 @@ public class OpcUaClientLivenessTests
     }
 
     /// <summary>
-    /// The SDK's own reconnect raises liveness the moment the subscription transfer completes, and
-    /// the full state sync that transfer schedules runs on the next health check tick. A sync that
-    /// fails clears the session, so the tick running it owes the drop. The swallowed failure must
-    /// remain visible after the next health tick reconnects successfully.
+    /// The managed session raises liveness the moment it reports itself connected again, and the
+    /// full state sync that recovery schedules runs on the next health check tick. A sync that
+    /// fails is retried by a later tick on the same session. The swallowed failure must remain
+    /// visible after the retry succeeds.
     /// </summary>
     [Fact]
     public async Task WhenTheStateSyncAfterAReconnectFails_ThenItIsRetriedOnTheSameSessionAndTheFailureStaysVisible()
@@ -138,9 +138,9 @@ public class OpcUaClientLivenessTests
             // Wide enough that the rise asserted below cannot be a health check tick's.
             healthCheckInterval: TimeSpan.FromSeconds(60),
 
-            // The outage has to be detected while the server is still down, so the SDK's first
-            // reconnect attempt fails and every attempt after it recreates the session, which is what
-            // carries the subscriptions across.
+            // Detected quickly, so liveness drops before the reconnect completes. The restarted server
+            // rejects the old session id, so the managed session creates a new server session and
+            // restores the subscriptions onto it.
             keepAliveInterval: TimeSpan.FromSeconds(1));
 
         await using var source = new OpcUaSubjectClientSource(
@@ -160,8 +160,8 @@ public class OpcUaClientLivenessTests
                 message: "The first health check tick should report the session as operational");
 
             // Act - a restart rather than a transport disconnect: a disconnect leaves the session
-            // valid on the server, so the SDK reactivates it instead of replacing it and carrying the
-            // subscriptions across.
+            // valid on the server, so the managed session reactivates it instead of creating a new
+            // server session.
             converter.Arm();
             await server.RestartAsync();
 
