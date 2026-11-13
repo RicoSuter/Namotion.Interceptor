@@ -42,36 +42,55 @@ internal sealed class DerivedPropertyData
     internal long Version;
 
     /// <summary>
-    /// Reentrancy guard for RecalculateDerivedProperty.
-    /// Prevents infinite recursion when a derived-with-setter property's
-    /// PublishDerivedPropertyValue re-enters WriteProperty.
-    /// Only read/written inside lock(this), so no volatile needed.
+    /// The token of the evaluation that owns this derived property (a recalculation or an attach), or 0 when
+    /// nobody owns it. The owner evaluates, commits and publishes; a request that finds it owned sets
+    /// <see cref="RecalculationNeeded"/> instead. Only read/written inside lock(this).
     /// </summary>
-    internal bool IsRecalculating;
+    internal long OwnerToken;
 
     /// <summary>
-    /// Sequence counter incremented under lock(this) each time RecalculateDerivedProperty
-    /// computes a new value. Read via Volatile.Read outside the lock to detect stale
-    /// notifications — if the sequence has advanced, a newer recalculation is already completed
-    /// and the current notification should be skipped.
+    /// The token of the attach in progress, or 0. A newer attach or a detach replaces it, which tells the
+    /// attach that its result no longer counts. Only read/written inside lock(this).
+    /// </summary>
+    internal long AttachToken;
+
+    /// <summary>
+    /// Sequence counter incremented under lock(this) for every committed value and every detach. Read via
+    /// Volatile.Read outside the lock to detect stale notifications: if the sequence has advanced, a newer
+    /// commit or a detach happened and the current notification is skipped.
     /// </summary>
     internal long RecalculationSequence;
 
     /// <summary>
-    /// Set under lock(this) when a state change occurs while IsRecalculating is true:
-    /// concurrent RecalculateDerivedProperty (bails), DetachProperty, or AttachProperty.
-    /// Checked by RecalculateDerivedProperty before committing — if set, the evaluation
-    /// result is discarded and the getter is re-evaluated with a fresh state.
+    /// Set under lock(this) when a recalculation is requested while the property is owned or an attach is in
+    /// progress. The owner discards its evaluation and evaluates again before it commits, or after it
+    /// published; an attach in progress takes the request over when it completes.
     /// </summary>
     internal bool RecalculationNeeded;
 
     /// <summary>
-    /// Lifecycle flag cleared during DetachProperty under lock(this).
-    /// Checked by RecalculateDerivedProperty to prevent zombie used-by property resurrection.
-    /// Set by AttachProperty on every attach of a derived property. Not read for source properties.
-    /// Defaults to true because properties are assumed to be attached until explicitly detached.
+    /// The raw changed timestamp of the newest request that set <see cref="RecalculationNeeded"/>, or 0 when
+    /// none is pending. Only read/written inside lock(this).
     /// </summary>
-    internal bool IsAttached = true;
+    internal long PendingRawTimestamp;
+
+    /// <summary>
+    /// True while the derived property is attached: set by its attach, cleared by its detach under lock(this).
+    /// A request for a detached property is dropped. Not read for source properties.
+    /// </summary>
+    internal bool IsAttached;
+
+    /// <summary>
+    /// True when <see cref="LastKnownValue"/> holds a committed value of the current attachment. Only
+    /// read/written inside lock(this).
+    /// </summary>
+    internal bool HasValue;
+
+    /// <summary>
+    /// True when the last evaluation threw, so the first successful evaluation afterwards is published even
+    /// when there is no committed value to publish it from. Only read/written inside lock(this).
+    /// </summary>
+    internal bool IsFaulted;
 
     /// <summary>
     /// True if this data belongs to a derived property (vs. a source property whose data exists only
@@ -83,6 +102,11 @@ internal sealed class DerivedPropertyData
     /// WriteProperty. Write-once; never reset (metadata.IsDerived is immutable).
     /// </remarks>
     internal bool IsDerived;
+
+    private static long _lastToken;
+
+    /// <summary>Returns a new, process-wide unique, nonzero owner or attach token.</summary>
+    internal static long NewToken() => Interlocked.Increment(ref _lastToken);
 
     /// <summary>
     /// Read-only access to used-by properties for public API.

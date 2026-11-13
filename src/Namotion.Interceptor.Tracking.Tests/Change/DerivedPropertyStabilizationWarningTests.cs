@@ -4,6 +4,7 @@ using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
+[Collection(DerivedPropertyTraceCollection.Name)]
 public class DerivedPropertyStabilizationWarningTests
 {
     [Fact]
@@ -35,10 +36,11 @@ public class DerivedPropertyStabilizationWarningTests
                 await trigger.WaitAsync(TimeSpan.FromSeconds(10));
             }
 
-            // Assert: the evaluation the write starts, and one more because the dependency set changed
-            // from First to Second. The unrelated write was not recorded, so it adds no evaluation.
-            Assert.Equal(callsBefore + 2, subject.GetterCallCount);
-            Assert.DoesNotContain("during dependency stabilization", traceOutput.ToString());
+            // Assert: only the evaluation the write starts. A changed dependency set (First to Second) is no
+            // reason to evaluate again, and the unrelated write was not recorded, so it adds no evaluation.
+            Assert.Equal(callsBefore + 1, subject.GetterCallCount);
+            listener.Flush();
+            Assert.DoesNotContain("MaxStabilizationIterations", traceOutput.ToString());
         }
         finally
         {

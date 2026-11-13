@@ -360,7 +360,7 @@ public class DerivedPropertyReattachTests
         averagePressureProperty.GetDerivedPropertyData();
 
         // Act: a write that took its used-by snapshot before the detach recalculates afterwards.
-        DerivedPropertyChangeHandler.RecalculateDerivedProperty(ref averagePressureProperty, 0, 0);
+        DerivedPropertyChangeHandler.RequestRecalculation(averagePressureProperty, 0);
 
         // Assert
         Assert.DoesNotContain(averagePressureProperty, pressureProperty.GetUsedByProperties().Items.ToArray());
@@ -466,5 +466,48 @@ public class DerivedPropertyReattachTests
         }
 
         return new WeakReference(car);
+    }
+
+    [Fact]
+    public async Task WhenSubjectIsAttachedAgainWhileItsDerivedPropertyIsRecalculated_ThenChangeIsPublishedFromTheValueOfThatAttach()
+    {
+        // Arrange
+        var timeout = TimeSpan.FromSeconds(30);
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        using var recalculationIsEvaluating = new ManualResetEventSlim();
+        using var subjectIsAttachedAgain = new ManualResetEventSlim();
+        var pauseNextEvaluation = 0;
+        machine.Worker.Evaluator = _ =>
+        {
+            var anchor = root.Anchor;
+            if (Interlocked.Exchange(ref pauseNextEvaluation, 0) == 1)
+            {
+                recalculationIsEvaluating.Set();
+                subjectIsAttachedAgain.Wait(timeout);
+            }
+
+            return anchor;
+        };
+        root.Machine = machine;
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        Interlocked.Exchange(ref pauseNextEvaluation, 1);
+
+        // Act: the attach evaluates the value 1, and the write of 2 is left to the recalculation in flight.
+        var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = 1; });
+        var isEvaluating = recalculationIsEvaluating.Wait(timeout);
+        root.Machine = null;
+        root.Machine = machine;
+        root.Anchor = 2;
+        subjectIsAttachedAgain.Set();
+        await writer.WaitAsync(timeout);
+
+        // Assert
+        Assert.True(isEvaluating);
+        var change = Assert.Single(changes, c => c.Property.Name == nameof(EvaluatorWorker.Result));
+        Assert.Equal(1, change.GetOldValue<int>());
+        Assert.Equal(2, change.GetNewValue<int>());
     }
 }
