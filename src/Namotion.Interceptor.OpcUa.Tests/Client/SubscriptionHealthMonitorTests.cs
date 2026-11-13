@@ -126,7 +126,7 @@ public class SubscriptionHealthMonitorTests
             applyChangesAsync: (_, _) => Task.FromException(error));
 
         // Act
-        await monitor.CheckAndHealSubscriptionsAsync([subscription], CancellationToken.None);
+        await monitor.CheckAndHealSubscriptionsAsync([subscription], onItemsRecovered: null, CancellationToken.None);
 
         // Assert
         Assert.Equal(1, Volatile.Read(ref reportCount));
@@ -134,6 +134,50 @@ public class SubscriptionHealthMonitorTests
 
         source.NotifySessionHealthy();
         Assert.Same(error, source.Diagnostics.LastError);
+    }
+
+    [Fact]
+    public async Task WhenAnItemRecovers_ThenItsSubscriptionIsReported()
+    {
+        // Arrange - read-after-write registers an item only once it is created, so a healed item needs this.
+        var item = CreateMonitoredItem(StatusCodes.BadTimeout, created: false);
+        var subscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        subscription.AddItem(item);
+        var monitor = new SubscriptionHealthMonitor(
+            NullLogger.Instance,
+            static _ => { },
+            applyChangesAsync: (_, _) =>
+            {
+                item.ServerId = 1;
+                item.SetError(ServiceResult.Good);
+                return Task.CompletedTask;
+            });
+        var recovered = new List<Subscription>();
+
+        // Act
+        await monitor.CheckAndHealSubscriptionsAsync([subscription], recovered.Add, CancellationToken.None);
+
+        // Assert
+        Assert.Same(subscription, Assert.Single(recovered));
+    }
+
+    [Fact]
+    public async Task WhenNoItemRecovers_ThenNoSubscriptionIsReported()
+    {
+        // Arrange
+        var subscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        subscription.AddItem(CreateMonitoredItem(StatusCodes.BadTimeout, created: false));
+        var monitor = new SubscriptionHealthMonitor(
+            NullLogger.Instance,
+            static _ => { },
+            applyChangesAsync: static (_, _) => Task.CompletedTask);
+        var recovered = new List<Subscription>();
+
+        // Act
+        await monitor.CheckAndHealSubscriptionsAsync([subscription], recovered.Add, CancellationToken.None);
+
+        // Assert
+        Assert.Empty(recovered);
     }
 
     private static MonitoredItem CreateMonitoredItem(uint statusCode, bool created)
