@@ -458,12 +458,14 @@ The client handles connection loss through two cooperating mechanisms: the OPC U
 
 #### Reconnection Flows
 
-**Flow A: SDK reconnection with subscription transfer**
+**Flow A: SDK reconnection with a new session**
 
-When the connection drops, the OPC UA SDK's `SessionReconnectHandler` attempts to reconnect automatically. If it succeeds and transfers existing subscriptions to the new session:
+When the connection drops, the OPC UA SDK's `SessionReconnectHandler` attempts to reconnect automatically. It first tries to reactivate the existing session, which leads to Flow B; on connection errors it keeps retrying that until its estimate of the session timeout runs out. When reactivation fails, it creates a new session and carries the client's subscriptions over, by transfer or by creating them fresh. If the session or a subscription cannot be created, the whole attempt fails and the handler retries.
+
+A transfer needs the server to still hold the subscription, which it does only until the subscription's lifetime expires without publish requests. A server built on the OPC Foundation SDK also transfers an anonymous user's subscriptions only over a signed channel, so with security off such a server always recreates them.
 
 1. Keep-alive detects dead connection and triggers the SDK reconnect handler
-2. SDK creates a new session and transfers subscriptions via `TransferSubscriptions`
+2. SDK creates a new session, transfers the subscriptions the server still holds via `TransferSubscriptions` and recreates the others
 3. `OnReconnectComplete` accepts the new session and sets a `NeedsFullStateSync` flag
 4. The health check loop detects the flag on the next iteration:
    - Starts buffering incoming subscription notifications
@@ -471,9 +473,9 @@ When the connection drops, the OPC UA SDK's `SessionReconnectHandler` attempts t
    - Applies server values, replays the buffer, resumes normal operation
 5. Full consistency is restored
 
-**Flow B: SDK reconnection fails or returns a preserved session**
+**Flow B: SDK reconnection returns a preserved or unusable session**
 
-If the SDK handler cannot transfer subscriptions (e.g., server restarted and old subscriptions are gone), or if it returns the same session object ("preserved session"), the client abandons the session entirely:
+If the SDK handler reactivates the existing session and returns the same session object ("preserved session"), returns no session, or returns a new session without subscriptions (which happens when the client had none), the client abandons the session entirely:
 
 1. `OnReconnectComplete` calls `AbandonCurrentSession()` (session nulled, transport killed, and incoming notifications buffered so stale values from the abandoned subscription are not applied during the gap before manual reconnection)
 2. The health check loop detects the dead session and triggers manual reconnection
@@ -674,7 +676,7 @@ This built-in client registers the `ClaimedPropertyCount` gauge, so it reports t
 | `Reconnects.TotalAttempts` | Attempts started. Once all in-flight attempts resolve, this equals the three below summed. |
 | `Reconnects.TotalSucceeded` | Attempts that produced a usable session. |
 | `Reconnects.TotalFailed` | Attempts that ended with a genuine fault, meaning an exception raised while the attempt was still live. |
-| `Reconnects.TotalAbandoned` | Attempts that ended without a usable session and without a fault: a null session, a failed transfer, a preserved session after a server restart, a stall reset, or a cancellation from a kill or from the listen attempt being torn down, which happens both when the source stops and when the retry loop ends an attempt. |
+| `Reconnects.TotalAbandoned` | Attempts that ended without a usable session and without a fault: a null session, a new session without subscriptions, a preserved session, a stall reset, or a cancellation from a kill or from the listen attempt being torn down, which happens both when the source stops and when the retry loop ends an attempt. |
 
 `Polling` is `null` when the [polling fallback](#polling-fallback-for-unsupported-nodes) is off, no session has been set up yet, or the client is between connect attempts. That last case is not a startup-only condition: the block reads through the session manager and goes `null` as soon as that manager is disposed, which every way out of a connect attempt does, so it stays `null` for the whole retry delay. The totals underneath survive that and reappear at their previous values once a session exists again. Otherwise it reports:
 
@@ -714,7 +716,7 @@ if (source.CurrentSession is { } session)
 }
 ```
 
-**Lifecycle contract:** read `CurrentSession` immediately before each use. It may be `null` during reconnection and the instance changes after a manual reconnect (Flow C), a transferred-subscription failure (Flow B), or a stall reset. Never cache the reference. For long-running session-bound state (e.g. an A&C `Subscription`), subscribe to `CurrentSessionChanged` (below) or recreate on demand when calls fail with `BadSessionIdInvalid` / `BadSessionNotActivated`.
+**Lifecycle contract:** read `CurrentSession` immediately before each use. It may be `null` during reconnection and the instance changes after a manual reconnect (Flows B and C), an SDK reconnect with a new session (Flow A), or a stall reset. Never cache the reference. For long-running session-bound state (e.g. an A&C `Subscription`), subscribe to `CurrentSessionChanged` (below) or recreate on demand when calls fail with `BadSessionIdInvalid` / `BadSessionNotActivated`.
 
 ### Reacting to session swaps with `CurrentSessionChanged`
 

@@ -7,6 +7,7 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
 using Opc.Ua;
+using Opc.Ua.Configuration;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 
@@ -21,6 +22,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
     private Func<IInterceptorSubjectContext, TRoot>? _createRoot;
     private Action<IInterceptorSubjectContext, TRoot>? _initializeDefaults;
     private string _baseAddress = DefaultBaseAddress;
+    private string? _alternateBaseAddress;
     private string _certificateStoreBasePath = "pki";
     private TimeSpan _bufferTime = TimeSpan.FromMilliseconds(100);
     private int _disposed;
@@ -39,13 +41,15 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
         Action<IInterceptorSubjectContext, TRoot>? initializeDefaults = null,
         string? baseAddress = null,
         string? certificateStoreBasePath = null,
-        TimeSpan? bufferTime = null)
+        TimeSpan? bufferTime = null,
+        string? alternateBaseAddress = null)
     {
         _createRoot = createRoot;
         _initializeDefaults = initializeDefaults;
         _baseAddress = baseAddress ?? DefaultBaseAddress;
         _certificateStoreBasePath = certificateStoreBasePath ?? "pki";
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(100);
+        _alternateBaseAddress = alternateBaseAddress;
 
         return StartInternalAsync();
     }
@@ -88,8 +92,9 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
                 var telemetryContext = DefaultTelemetry.Create(b =>
                     b.Services.AddSingleton(loggerFactory));
 
-                return new OpcUaServerConfiguration
+                return new TestServerConfiguration
                 {
+                    AlternateBaseAddress = _alternateBaseAddress,
                     RootName = "Root",
                     BaseAddress = _baseAddress,
                     ValueConverter = new OpcUaValueConverter(),
@@ -167,6 +172,26 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
         catch (Exception ex)
         {
             _logger.Log($"Error disposing server: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Advertises an additional address to clients that connect through it, such as a proxy in front of the
+    /// server, so they keep using that address instead of switching to the address the server listens on.
+    /// </summary>
+    private sealed class TestServerConfiguration : OpcUaServerConfiguration
+    {
+        public string? AlternateBaseAddress { get; init; }
+
+        public override async Task<ApplicationInstance> CreateApplicationInstanceAsync()
+        {
+            var application = await base.CreateApplicationInstanceAsync();
+            if (AlternateBaseAddress is not null)
+            {
+                application.ApplicationConfiguration.ServerConfiguration.AlternateBaseAddresses.Add(AlternateBaseAddress);
+            }
+
+            return application;
         }
     }
 }
