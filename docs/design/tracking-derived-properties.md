@@ -252,7 +252,7 @@ Then the attach evaluates outside `lock(D)`. Before each evaluation it resolves 
 
 The attach evaluation is bounded like the owner loop: at the limit, the last evaluation is committed, a recalculation is requested after the attach, and a warning is traced outside the lock after that request, so a failing trace listener cannot lose it.
 
-An attach that fails outside the getter (a throwing time source or trace listener) clears its attach token and its ownership, marks D faulted when it has no value (so the first success afterwards is published), marks a request when it was still the current attach (its links may be missing), requests the recalculation when nobody owns D, and rethrows its own exception.
+An attach that fails outside the getter (a throwing time source) clears its attach token and its ownership, marks D faulted when it has no value (so the first success afterwards is published), marks a request when it was still the current attach (its links may be missing), and requests the recalculation when nobody owns D. The attach of a derived property never throws: its own exception, one from the recalculation it requests after the attach (an observer of that publication) and one from a trace listener are traced, so the remaining properties and lifecycle handlers of the subject still attach.
 
 An attach that finds D owned by another attach treats it like a recalculation in flight: it does not take ownership, and the attach token decides which commit counts. The attach never waits for another thread, and a change from before a detach is never published after one of the new attachment: the previous owner either finished publishing before it could commit again, or handed off to the attach.
 

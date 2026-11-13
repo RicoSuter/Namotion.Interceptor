@@ -155,6 +155,64 @@ public class DerivedPropertyProtocolTests
     }
 
     [Fact]
+    public async Task WhenObserverThrowsOnThePublicationAfterAnAttach_ThenTheAttachCompletesAndLaterDerivedPropertiesFollowTheirSources()
+    {
+        // Arrange: as in WhenAttachRunsWhileRecalculationEvaluates_..., the attach takes over the request of a
+        // recalculation from before the detach and publishes its answer on the attaching thread, where an observer
+        // throws. The worker's second derived property attaches after the first one.
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var external = 0;
+        var isThrowing = 1;
+        var recalculationGate = new EvaluationGate();
+        var attachGate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            var value = root.Anchor + Volatile.Read(ref external);
+            recalculationGate.PauseIfArmed();
+            attachGate.PauseIfArmed();
+            return value;
+        };
+        machine.Worker.ObjectEvaluator = _ => root.Data;
+        root.Machine = machine;
+        using var subscription = GetResult(machine).SubscribeInline((in SubjectPropertyChange _) =>
+        {
+            if (Volatile.Read(ref isThrowing) == 1)
+            {
+                throw new InvalidOperationException("Observer failed.");
+            }
+        });
+
+        // Act
+        recalculationGate.Arm();
+        var recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = 1; });
+        var isRecalculationPaused = recalculationGate.Paused.Wait(Timeout);
+        root.Machine = null;
+        root.Anchor = 2;
+        attachGate.Arm();
+        var attach = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Machine = machine; });
+        var isAttachPaused = attachGate.Paused.Wait(Timeout);
+        Volatile.Write(ref external, 100);
+        recalculationGate.Resume.Set();
+        var isRecalculationDone = await CompletesInTimeAsync(recalculation);
+        attachGate.Resume.Set();
+        var attachException = await Record.ExceptionAsync(() => attach.WaitAsync(Timeout));
+        Volatile.Write(ref isThrowing, 0);
+        var data = new byte[1];
+        root.Data = data;
+
+        // Assert
+        Assert.True(isRecalculationPaused);
+        Assert.True(isAttachPaused);
+        Assert.True(isRecalculationDone);
+        Assert.False(recalculationGate.HasTimedOut || attachGate.HasTimedOut);
+        Assert.Null(attachException);
+        Assert.Equal(102, GetResult(machine).TryGetDerivedPropertyData()?.LastKnownValue);
+        Assert.Same(data, new PropertyReference(machine.Worker, nameof(EvaluatorWorker.ObjectResult)).TryGetDerivedPropertyData()?.LastKnownValue);
+    }
+
+    [Fact]
     public async Task WhenAttachRunsWhileRecalculationPublishes_ThenPublicationsStayInCommitOrder()
     {
         // Arrange
