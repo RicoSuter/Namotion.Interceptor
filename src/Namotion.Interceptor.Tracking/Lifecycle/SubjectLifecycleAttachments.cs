@@ -47,7 +47,23 @@ internal static class SubjectLifecycleAttachments
 
         lock (attachments.Lock)
         {
-            Volatile.Write(ref attachments.Interceptors, attachments.Interceptors.Where(i => i != interceptor).ToArray());
+            var interceptors = attachments.Interceptors;
+            var index = Array.IndexOf(interceptors, interceptor);
+            if (index < 0)
+            {
+                return;
+            }
+
+            if (interceptors.Length == 1)
+            {
+                Volatile.Write(ref attachments.Interceptors, []);
+                return;
+            }
+
+            var remaining = new LifecycleInterceptor[interceptors.Length - 1];
+            Array.Copy(interceptors, remaining, index);
+            Array.Copy(interceptors, index + 1, remaining, index, remaining.Length - index);
+            Volatile.Write(ref attachments.Interceptors, remaining);
         }
     }
 

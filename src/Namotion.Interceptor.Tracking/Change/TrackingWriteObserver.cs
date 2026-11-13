@@ -32,25 +32,21 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
         // W4, then W5: the used-by set is read after the version moved.
         Interlocked.Increment(ref data.Version);
 
-        // A write without a context has no timestamp: resolved once, so every dependent shares it.
-        var rawTimestamp = write.RawTimestamp != 0
-            ? write.RawTimestamp
-            : SubjectChangeContext.Current.ResolveChangedTimestamp();
-
+        var rawTimestamp = write.RawTimestamp;
         try
         {
             if (!write.IsDerivedRecalculation &&
                 Volatile.Read(ref data.IsDerived) &&
                 property.Metadata.SetValue is not null)
             {
-                DerivedPropertyChangeHandler.RequestRecalculation(property, rawTimestamp);
+                DerivedPropertyChangeHandler.RequestRecalculation(property, ResolveTimestamp(ref rawTimestamp));
             }
 
             foreach (var dependent in data.GetUsedByProperties())
             {
                 if (dependent != property)
                 {
-                    DerivedPropertyChangeHandler.RequestRecalculation(dependent, rawTimestamp);
+                    DerivedPropertyChangeHandler.RequestRecalculation(dependent, ResolveTimestamp(ref rawTimestamp));
                 }
             }
         }
@@ -58,5 +54,16 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
         {
             // The write's own exception is in flight and wins; observers that also threw are dropped.
         }
+    }
+
+    // A write without a context has no timestamp: resolved at its first request, so every dependent shares it.
+    private static long ResolveTimestamp(ref long rawTimestamp)
+    {
+        if (rawTimestamp == 0)
+        {
+            rawTimestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
+        }
+
+        return rawTimestamp;
     }
 }
