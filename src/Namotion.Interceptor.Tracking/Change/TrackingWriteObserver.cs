@@ -199,8 +199,9 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
         firstException.Throw();
     }
 
-    // A write without a context has no timestamp: resolved at its first request, so every dependent shares it.
-    private static long ResolveTimestamp(ref long rawTimestamp)
+    // A write without a context has no timestamp: resolved at its first request, so every dependent shares it. A
+    // time source that throws leaves 0, which the next request resolves again.
+    internal static long ResolveTimestamp(ref long rawTimestamp)
     {
         if (rawTimestamp == 0)
         {
