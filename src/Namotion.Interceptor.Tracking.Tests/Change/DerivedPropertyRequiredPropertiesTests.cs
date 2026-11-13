@@ -1,5 +1,6 @@
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
@@ -26,6 +27,41 @@ public class DerivedPropertyRequiredPropertiesTests
         // Assert
         Assert.DoesNotContain(fullName, fullName.GetRequiredProperties().ToArray());
         Assert.DoesNotContain(fullNameWithPrefix, fullNameWithPrefix.GetRequiredProperties().ToArray());
+    }
+
+    [Fact]
+    public void WhenGetterAttachesASubjectAsASideEffect_ThenRequiredPropertiesContainOnlyTheGettersOwnReads()
+    {
+        // Arrange: each evaluation assigns a new machine, so the lifecycle, its handlers and the registry read
+        // properties of the assigned subjects on the evaluating thread, the assigned property included.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithParents()
+            .WithRegistry();
+
+        var root = new EvaluatorRoot(context);
+        var otherRoot = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var evaluations = 0;
+        machine.Worker.Evaluator = _ =>
+        {
+            var value = root.Anchor;
+            evaluations++;
+            otherRoot.Machine = new EvaluatorMachine();
+
+            return value;
+        };
+
+        // Act
+        root.Machine = machine;
+
+        // Assert
+        Assert.Equal(1, evaluations);
+        Assert.NotNull(otherRoot.Machine);
+        Assert.Equal(
+            [new PropertyReference(root, nameof(EvaluatorRoot.Anchor))],
+            new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)).GetRequiredProperties().ToArray());
     }
 
     [Fact]

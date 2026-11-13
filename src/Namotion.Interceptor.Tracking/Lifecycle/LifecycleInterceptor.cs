@@ -85,16 +85,24 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             lock (_attachedSubjects)
             {
-                FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
-
-                foreach (var child in collectedSubjects)
+                var isRecordingSuspended = SubjectLifecycleAttachments.SuspendDerivedRecording();
+                try
                 {
-                    AttachToProperty(child.subject, subject.Context, child.property, child.index);
+                    FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
+
+                    foreach (var child in collectedSubjects)
+                    {
+                        AttachToProperty(child.subject, subject.Context, child.property, child.index);
+                    }
+
+                    if (!_attachedSubjects.ContainsKey(subject))
+                    {
+                        AttachToContext(subject, subject.Context);
+                    }
                 }
-
-                if (!_attachedSubjects.ContainsKey(subject))
+                finally
                 {
-                    AttachToContext(subject, subject.Context);
+                    SubjectLifecycleAttachments.ResumeDerivedRecording(isRecordingSuspended);
                 }
             }
         }
@@ -111,14 +119,22 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             lock (_attachedSubjects)
             {
-                FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Use);
-
-                foreach (var child in collectedSubjects)
+                var isRecordingSuspended = SubjectLifecycleAttachments.SuspendDerivedRecording();
+                try
                 {
-                    DetachFromProperty(child.subject, subject.Context, child.property, child.index);
-                }
+                    FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Use);
 
-                DetachFromContext(subject, subject.Context);
+                    foreach (var child in collectedSubjects)
+                    {
+                        DetachFromProperty(child.subject, subject.Context, child.property, child.index);
+                    }
+
+                    DetachFromContext(subject, subject.Context);
+                }
+                finally
+                {
+                    SubjectLifecycleAttachments.ResumeDerivedRecording(isRecordingSuspended);
+                }
             }
         }
         finally
@@ -393,28 +409,42 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         lock (_attachedSubjects)
         {
-            var lastProcessed = _lastProcessedValues.GetValueOrDefault(context.Property);
-
-            // Read the actual backing store value to handle concurrent writes correctly.
-            // context.NewValue may differ from the backing store if another thread
-            // overwrote the property between our next() call and lock acquisition.
-            var getValue = metadata.GetValue;
-            var newValue = getValue is not null
-                ? getValue(context.Property.Subject)
-                : context.NewValue;
-
-            if (ReferenceEquals(lastProcessed, newValue))
+            var isRecordingSuspended = SubjectLifecycleAttachments.SuspendDerivedRecording();
+            try
             {
-                return;
+                ReconcileWrittenProperty(ref context, metadata);
             }
-
-            if (IsScalarValue(lastProcessed) && IsScalarValue(newValue))
+            finally
             {
-                return;
+                SubjectLifecycleAttachments.ResumeDerivedRecording(isRecordingSuspended);
             }
-
-            ReconcilePropertySubjects(ref context, lastProcessed, newValue);
         }
+    }
+
+    // Called under lock(_attachedSubjects).
+    private void ReconcileWrittenProperty<TProperty>(ref PropertyWriteContext<TProperty> context, SubjectPropertyMetadata metadata)
+    {
+        var lastProcessed = _lastProcessedValues.GetValueOrDefault(context.Property);
+
+        // Read the actual backing store value to handle concurrent writes correctly.
+        // context.NewValue may differ from the backing store if another thread
+        // overwrote the property between our next() call and lock acquisition.
+        var getValue = metadata.GetValue;
+        var newValue = getValue is not null
+            ? getValue(context.Property.Subject)
+            : context.NewValue;
+
+        if (ReferenceEquals(lastProcessed, newValue))
+        {
+            return;
+        }
+
+        if (IsScalarValue(lastProcessed) && IsScalarValue(newValue))
+        {
+            return;
+        }
+
+        ReconcilePropertySubjects(ref context, lastProcessed, newValue);
     }
 
     private static bool IsScalarValue(object? value)

@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
@@ -320,5 +321,92 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
         recorder.StartRecording(CreateSelf(person));
         var recorded = recorder.FinishRecording();
         Assert.Equal(0, recorded.Length);
+    }
+
+    [Fact]
+    public void WhenRecordingIsSuspended_ThenReadsAreNotRecordedUntilItResumes()
+    {
+        // Arrange
+        var person = new Person(InterceptorSubjectContext.Create());
+        var recorder = DerivedPropertyRecorder.Current;
+        recorder.StartRecording(CreateSelf(person));
+        _ = person.FirstName;
+
+        // Act
+        var isSuspended = DerivedPropertyRecorder.TrySuspend();
+        var isRecordingWhileSuspended = recorder.IsRecording;
+        var isEvaluatingWhileSuspended = DerivedPropertyRecorder.IsEvaluatingOnThisThread;
+        _ = person.LastName;
+        DerivedPropertyRecorder.Resume();
+        _ = person.Father;
+        var recorded = GetProperties(recorder.FinishRecording());
+        recorder.ClearLastRecording();
+
+        // Assert
+        Assert.True(isSuspended);
+        Assert.False(isRecordingWhileSuspended);
+        Assert.True(isEvaluatingWhileSuspended);
+        Assert.Equal(
+            [new PropertyReference(person, nameof(Person.FirstName)), new PropertyReference(person, nameof(Person.Father))],
+            recorded);
+        Assert.Null(PropertyAccessObservation.ReadObserver);
+    }
+
+    [Fact]
+    public void WhenRecordingStartsWhileSuspended_ThenItRecordsItsReads()
+    {
+        // Arrange
+        var person = new Person(InterceptorSubjectContext.Create());
+        var recorder = DerivedPropertyRecorder.Current;
+        recorder.StartRecording(new PropertyReference(person, "OuterDerived"));
+        var isSuspended = DerivedPropertyRecorder.TrySuspend();
+
+        // Act
+        recorder.StartRecording(new PropertyReference(person, "InnerDerived"));
+        _ = person.FirstName;
+        var innerRecorded = GetProperties(recorder.FinishRecording());
+        recorder.ClearLastRecording();
+        _ = person.LastName;
+        DerivedPropertyRecorder.Resume();
+        var outerRecorded = GetProperties(recorder.FinishRecording());
+        recorder.ClearLastRecording();
+
+        // Assert
+        Assert.True(isSuspended);
+        Assert.Equal([new PropertyReference(person, nameof(Person.FirstName))], innerRecorded);
+        Assert.Empty(outerRecorded);
+    }
+
+    [Fact]
+    public void WhenNothingIsRecorded_ThenSuspendingDoesNothing()
+    {
+        // Act
+        var isSuspended = DerivedPropertyRecorder.TrySuspend();
+
+        // Assert
+        Assert.False(isSuspended);
+        Assert.False(DerivedPropertyRecorder.IsEvaluatingOnThisThread);
+        Assert.Null(PropertyAccessObservation.ReadObserver);
+    }
+
+    [Fact]
+    public void WhenGetterThrows_ThenTheReadObserverIsCleared()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = _ => root.Anchor == int.MinValue ? 0 : throw new InvalidOperationException("Getter failed.");
+
+        // Act
+        root.Machine = machine;
+        var readObserverAfterAttach = PropertyAccessObservation.ReadObserver;
+        root.Anchor = 1;
+        var readObserverAfterRecalculation = PropertyAccessObservation.ReadObserver;
+
+        // Assert
+        Assert.Null(readObserverAfterAttach);
+        Assert.Null(readObserverAfterRecalculation);
+        Assert.False(DerivedPropertyRecorder.IsEvaluatingOnThisThread);
     }
 }
