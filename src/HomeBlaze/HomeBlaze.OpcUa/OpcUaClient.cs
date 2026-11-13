@@ -189,7 +189,7 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     public string? IconName => "Cable";
 
     [Derived]
-    public string? IconColor => Status == ServiceStatus.Running ? "Success" : null;
+    public string? IconColor => Status == ServiceStatus.Running && IsConnected == true ? "Success" : null;
 
     public OpcUaClient(ILogger<OpcUaClient> logger)
     {
