@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using Namotion.Interceptor.Interceptors;
 
@@ -68,36 +69,57 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
             DerivedPropertyRecorder.Current.OnOwnWrite(property, newVersion);
         }
 
-        var isSettableDerived = !write.IsDerivedRecalculation &&
-                                Volatile.Read(ref data.IsDerived) &&
-                                property.Metadata.SetValue is not null;
-        RequestNow(write, isSettableDerived, data.GetUsedByProperties());
+        // Every dependent is requested, also after one threw (an observer of its change). A request that throws ends
+        // this loop and RequestAfterException requests the remaining dependents, so the loop runs without a handler
+        // per request.
+        var dependents = data.GetUsedByProperties();
+        var rawTimestamp = write.RawTimestamp;
+        var next = 0;
+        try
+        {
+            if (!write.IsDerivedRecalculation &&
+                Volatile.Read(ref data.IsDerived) &&
+                property.Metadata.SetValue is not null)
+            {
+                DerivedPropertyOwnership.RequestRecalculation(property, ResolveTimestamp(ref rawTimestamp));
+            }
+
+            while (next < dependents.Length)
+            {
+                var dependent = dependents[next++];
+                if (dependent != property)
+                {
+                    DerivedPropertyOwnership.RequestRecalculation(dependent, ResolveTimestamp(ref rawTimestamp));
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            RequestAfterException(write, dependents[next..], rawTimestamp, exception);
+        }
     }
 
-    // Every dependent is requested, also after one threw (an observer of its change); the first exception is
-    // rethrown afterwards, unless the write itself failed: its own exception is in flight and wins, and the
-    // dependent's exception is traced.
-    private static void RequestNow(in PropertyWriteObservation write, bool isSettableDerived, ReadOnlySpan<PropertyReference> dependents)
+    // The first exception is rethrown after the remaining dependents were requested, unless the write itself failed:
+    // its own exception is in flight and wins, and the dependent's exception is traced.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void RequestAfterException(
+        in PropertyWriteObservation write, ReadOnlySpan<PropertyReference> remaining, long rawTimestamp, Exception exception)
     {
         var property = write.Property;
-        var rawTimestamp = write.RawTimestamp;
-        ExceptionDispatchInfo? firstException = null;
-        if (isSettableDerived)
-        {
-            Request(property, ref rawTimestamp, ref firstException);
-        }
-
-        foreach (var dependent in dependents)
+        var firstException = ExceptionDispatchInfo.Capture(exception);
+        foreach (var dependent in remaining)
         {
             if (dependent != property)
             {
-                Request(dependent, ref rawTimestamp, ref firstException);
+                try
+                {
+                    DerivedPropertyOwnership.RequestRecalculation(dependent, ResolveTimestamp(ref rawTimestamp));
+                }
+                catch (Exception)
+                {
+                    // Only the first exception is rethrown or traced.
+                }
             }
-        }
-
-        if (firstException is null)
-        {
-            return;
         }
 
         if (write.HasFailed)
@@ -107,18 +129,6 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
         }
 
         firstException.Throw();
-    }
-
-    private static void Request(PropertyReference property, ref long rawTimestamp, ref ExceptionDispatchInfo? firstException)
-    {
-        try
-        {
-            DerivedPropertyOwnership.RequestRecalculation(property, ResolveTimestamp(ref rawTimestamp));
-        }
-        catch (Exception exception)
-        {
-            firstException ??= ExceptionDispatchInfo.Capture(exception);
-        }
     }
 
     // A write without a context has no timestamp: resolved at its first request, so every dependent shares it.
