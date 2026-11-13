@@ -550,8 +550,9 @@ public partial class FluentStorageContainer :
 
                 var json = _serializer.Serialize(fileSubject);
                 var bytes = Encoding.UTF8.GetBytes(json);
+                // No applied keys: the instance holds what is written, and the serializer drops null and unknown keys.
                 if (ConfigurationUpdatePolicy.CanUpdateInPlace(
-                        fileSubject, fileSubject.GetType(), json, entry.AppliedConfiguration, null, ConfigurationNaming.JsonProperty))
+                        fileSubject, fileSubject.GetType(), json, entry.AppliedConfiguration, [], ConfigurationNaming.JsonProperty))
                 {
                     await WriteAndRecordAsync(connection, entry, bytes, token);
                 }

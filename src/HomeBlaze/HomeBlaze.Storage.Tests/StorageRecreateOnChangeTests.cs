@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Registry;
+
 namespace HomeBlaze.Storage.Tests;
 
 public class StorageRecreateOnChangeTests : StorageTestBase
@@ -73,6 +75,7 @@ public class StorageRecreateOnChangeTests : StorageTestBase
         var replaced = Assert.IsType<RecreatingTestLeaf>(storage.Children["Leaf"]);
         Assert.NotSame(leaf, replaced);
         Assert.Equal("square", replaced.Shape);
+        Assert.Null(leaf.TryGetRegisteredSubject());
     }
 
     [Fact]
@@ -89,5 +92,23 @@ public class StorageRecreateOnChangeTests : StorageTestBase
 
         // Assert
         Assert.Same(leaf, storage.Children["Leaf"]);
+        Assert.NotNull(leaf.TryGetRegisteredSubject());
+    }
+
+    [Fact]
+    public async Task WhenAHandWrittenFileHasAKeyTheSaveOmits_ThenSavingKeepsTheInstance()
+    {
+        // Arrange
+        WriteFile("Leaf.json", $$"""{ "$type": "{{LeafType}}", "name": "a", "shape": "round", "comment": "x" }""");
+        var storage = await ConnectAsync();
+        var leaf = Assert.IsType<RecreatingTestLeaf>(storage.Children["Leaf"]);
+        leaf.Name = "b";
+
+        // Act
+        await storage.WriteConfigurationAsync(leaf, CancellationToken.None);
+
+        // Assert
+        Assert.Same(leaf, storage.Children["Leaf"]);
+        Assert.DoesNotContain("comment", File.ReadAllText(Path.Combine(StorageDirectory.FullName, "Leaf.json")));
     }
 }
