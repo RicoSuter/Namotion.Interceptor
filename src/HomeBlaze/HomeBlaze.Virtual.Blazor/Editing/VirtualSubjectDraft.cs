@@ -121,8 +121,8 @@ internal sealed class VirtualSubjectDraft
         return null;
     }
 
-    // The nearest subject entry at or above the selection; null for the root.
-    private static VirtualEntryDraft? FindSubject(VirtualEntryDraft? selected)
+    /// <summary>Finds the subject entry that entries added with <paramref name="selected"/> go into; null for the root.</summary>
+    public static VirtualEntryDraft? FindSubject(VirtualEntryDraft? selected)
     {
         var current = selected;
         while (current is not null && current.Kind != VirtualEntryKind.Subject)

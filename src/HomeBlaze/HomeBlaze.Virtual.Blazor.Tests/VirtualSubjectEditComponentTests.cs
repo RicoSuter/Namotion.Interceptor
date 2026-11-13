@@ -89,6 +89,7 @@ public class VirtualSubjectEditComponentTests : IAsyncLifetime
             ["Group"] = new() { Properties = new Dictionary<string, VirtualProperty> { ["A"] = new() { Expression = "1", DataType = VirtualDataType.Number } } }
         };
         var editor = _context.Render<VirtualSubjectEditComponent>(parameters => parameters.Add(component => component.Subject, _subject));
+        await editor.Find("[data-testid=virtual-entry-Group] > .mud-treeview-item-content").ClickAsync();
         await editor.Find("[data-testid=virtual-entry-Group] .mud-treeview-item-arrow button").ClickAsync();
         var isCollapsed = !editor.Find("[data-testid=virtual-entry-Group] .mud-treeview-item-arrow button").ClassList.Contains("mud-transform");
 
@@ -99,6 +100,64 @@ public class VirtualSubjectEditComponentTests : IAsyncLifetime
         Assert.True(isCollapsed);
         Assert.Contains("mud-transform", editor.Find("[data-testid=virtual-entry-Group] .mud-treeview-item-arrow button").ClassList);
         Assert.Contains("mud-treeview-item-selected", editor.Find("[data-testid='virtual-entry-Group/Property'] > .mud-treeview-item-content").ClassList);
+    }
+
+    [Fact]
+    public async Task WhenTheRootIsSelected_ThenAPropertyIsAddedAtTheRoot()
+    {
+        // Arrange
+        _subject.Properties = new Dictionary<string, VirtualProperty>
+        {
+            ["Group"] = new() { Properties = new Dictionary<string, VirtualProperty> { ["A"] = new() { Expression = "1", DataType = VirtualDataType.Number } } }
+        };
+        var editor = _context.Render<VirtualSubjectEditComponent>(parameters => parameters.Add(component => component.Subject, _subject));
+        await editor.Find("[data-testid='virtual-entry-Group/A'] > .mud-treeview-item-content").ClickAsync();
+
+        // Act
+        await editor.Find("[data-testid=virtual-entry-root] > .mud-treeview-item-content").ClickAsync();
+        await editor.Find("[data-testid=virtual-add-property]").ClickAsync();
+
+        // Assert
+        Assert.Contains("mud-treeview-item-selected", editor.Find("[data-testid=virtual-entry-Property] > .mud-treeview-item-content").ClassList);
+        Assert.Empty(editor.FindAll("[data-testid='virtual-entry-Group/Property']"));
+    }
+
+    [Fact]
+    public async Task WhenTheSelectionChanges_ThenTheAddTargetNamesTheRootOrTheSubjectThatHoldsIt()
+    {
+        // Arrange
+        _subject.Title = "Pump overview";
+        _subject.Properties = new Dictionary<string, VirtualProperty>
+        {
+            ["Group"] = new() { Properties = new Dictionary<string, VirtualProperty> { ["A"] = new() { Expression = "1", DataType = VirtualDataType.Number } } }
+        };
+        var editor = _context.Render<VirtualSubjectEditComponent>(parameters => parameters.Add(component => component.Subject, _subject));
+        var initialTarget = editor.Find("[data-testid=virtual-add-target]").TextContent;
+        var isRootSelectedInitially = editor.Find("[data-testid=virtual-entry-root] > .mud-treeview-item-content").ClassList.Contains("mud-treeview-item-selected");
+
+        // Act
+        await editor.Find("[data-testid='virtual-entry-Group/A'] > .mud-treeview-item-content").ClickAsync();
+
+        // Assert
+        Assert.True(isRootSelectedInitially);
+        Assert.Equal("New entries go into Pump overview", initialTarget);
+        Assert.Equal("New entries go into Group", editor.Find("[data-testid=virtual-add-target]").TextContent);
+    }
+
+    [Fact]
+    public async Task WhenATopLevelEntryIsDeleted_ThenTheRootIsSelected()
+    {
+        // Arrange
+        _subject.Properties = new Dictionary<string, VirtualProperty> { ["A"] = new() { Expression = "1", DataType = VirtualDataType.Number } };
+        var editor = _context.Render<VirtualSubjectEditComponent>(parameters => parameters.Add(component => component.Subject, _subject));
+        await editor.Find("[data-testid=virtual-entry-A] > .mud-treeview-item-content").ClickAsync();
+
+        // Act
+        await editor.Find("[data-testid=virtual-delete]").ClickAsync();
+
+        // Assert
+        Assert.Contains("mud-treeview-item-selected", editor.Find("[data-testid=virtual-entry-root] > .mud-treeview-item-content").ClassList);
+        Assert.Contains("become properties of the subject", editor.Find("[data-testid=virtual-root-detail]").TextContent);
     }
 
     [Fact]
