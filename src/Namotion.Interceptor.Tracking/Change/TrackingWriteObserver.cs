@@ -35,8 +35,7 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
 
     public void OnPropertyWritten(in PropertyWriteObservation write)
     {
-        // Write depths start at 1, so no write matches when nothing is queued for an anchor write.
-        if (write.Depth == PostLockQueue.InnermostAnchorDepth)
+        if (PostLockQueue.IsAnchorWrite(write.Depth))
         {
             CompleteAnchorWrite(write);
             return;
@@ -54,7 +53,7 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void CompleteAnchorWrite(in PropertyWriteObservation write)
     {
-        var segment = PostLockQueue.TakeAnchorSegment();
+        var segment = PostLockQueue.Pop();
         var data = TryGetWrittenData(write);
         if (data is not null)
         {
