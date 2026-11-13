@@ -1,11 +1,10 @@
-using System.Reactive.Concurrency;
 using System.Runtime.CompilerServices;
-using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Tests.Models;
+using static Namotion.Interceptor.Tracking.Tests.Change.DerivedPropertyTestHelpers;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
@@ -305,41 +304,6 @@ public class DerivedPropertyAttachOrderTests
 
         // Assert
         AssertSingleChange(changes, machine.Worker, propertyName, 5);
-    }
-
-    private sealed class CallbackLifecycleHandler(Action<SubjectLifecycleChange> callback) : ILifecycleHandler
-    {
-        public void HandleLifecycleChange(SubjectLifecycleChange change)
-        {
-            callback(change);
-        }
-    }
-
-    [RunsAfter(typeof(SubjectRegistry))]
-    [RunsAfter(typeof(ContextInheritanceHandler))]
-    [RunsAfter(typeof(ParentTrackingHandler))]
-    private sealed class AfterRegistryLifecycleHandler(Action<SubjectLifecycleChange> callback) : ILifecycleHandler
-    {
-        public void HandleLifecycleChange(SubjectLifecycleChange change)
-        {
-            callback(change);
-        }
-    }
-
-    [RunsBefore(typeof(ContextInheritanceHandler))]
-    private sealed class BeforeContextInheritanceLifecycleHandler(Action<SubjectLifecycleChange> callback) : ILifecycleHandler
-    {
-        public void HandleLifecycleChange(SubjectLifecycleChange change)
-        {
-            callback(change);
-        }
-    }
-
-    private static List<SubjectPropertyChange> SubscribeToChanges(IInterceptorSubjectContext context)
-    {
-        var changes = new List<SubjectPropertyChange>();
-        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
-        return changes;
     }
 
     private static void AssertSingleChange<T>(List<SubjectPropertyChange> changes, IInterceptorSubject subject, string propertyName, T newValue)
