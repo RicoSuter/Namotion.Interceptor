@@ -247,107 +247,177 @@ public class DerivedPropertyOwnershipTests
     }
 
     [Fact]
-    public void WhenAttachFailsOutsideTheGetter_ThenThePropertyIsReleasedAndRecalculates()
+    public void WhenAttachFailsOutsideTheGetter_ThenThePropertyIsReleasedAndItsFirstSuccessIsPublished()
     {
-        // Arrange: the getter writes what it reads, so the attach reaches the iteration limit. The trace listener
-        // makes the getter stable, writes Anchor (a request the attach owns) and throws on that warning.
+        // Arrange: the time source fails when the attach commits its first value; before it throws, it writes
+        // Anchor on the attaching thread, a request the attach owns.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
-        var stableEvaluations = 0;
-        machine.Worker.Evaluator = _ => root.Anchor++;
-        var changes = new List<SubjectPropertyChange>();
-        using var listener = new ActionTraceListener("exhausted while attaching", () =>
+        var testThread = Environment.CurrentManagedThreadId;
+        var isArmed = false;
+        var evaluations = 0;
+        machine.Worker.Evaluator = _ =>
         {
-            machine.Worker.Evaluator = _ =>
+            evaluations++;
+            isArmed = evaluations == 1;
+            return root.Anchor;
+        };
+        var publishedValues = new List<(object? OldValue, object? NewValue)>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Subject == machine.Worker)
             {
-                stableEvaluations++;
-                return root.Anchor;
-            };
-            root.Anchor = 1000;
-            throw new InvalidOperationException("Trace failed.");
+                publishedValues.Add((change.GetOldValue<object?>(), change.GetNewValue<object?>()));
+            }
         });
-        Trace.Listeners.Add(listener);
+        var previousTimestampFunction = SubjectChangeContext.GetTimestampFunction;
+        SubjectChangeContext.GetTimestampFunction = () =>
+        {
+            if (!isArmed || Environment.CurrentManagedThreadId != testThread)
+            {
+                return DateTimeOffset.UtcNow;
+            }
+
+            isArmed = false;
+            root.Anchor = 1000;
+            throw new InvalidOperationException("Time source failed.");
+        };
 
         try
         {
             // Act
             var exception = Record.Exception(() => root.Machine = machine);
-            Trace.Listeners.Remove(listener);
-            var evaluationsAfterAttach = stableEvaluations;
-            context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+            SubjectChangeContext.GetTimestampFunction = previousTimestampFunction;
+            var evaluationsAfterAttach = evaluations;
             root.Anchor = 2000;
 
-            // Assert: the request the failed attach owned ran after the failure, and a later write publishes from its value.
-            Assert.Equal("Trace failed.", Assert.IsType<InvalidOperationException>(exception).Message);
-            Assert.Equal(1, evaluationsAfterAttach);
-            var change = Assert.Single(changes, c => c.Property.Subject == machine.Worker);
-            Assert.Equal(1000, change.GetOldValue<int>());
-            Assert.Equal(2000, change.GetNewValue<int>());
+            // Assert: the request the failed attach owned ran after the failure and published its value from the
+            // type's default, and a later write publishes from that value.
+            Assert.Equal("Time source failed.", Assert.IsType<InvalidOperationException>(exception).Message);
+            Assert.Equal(2, evaluationsAfterAttach);
+            Assert.Equal(new List<(object?, object?)> { (0, 1000), (1000, 2000) }, publishedValues);
         }
         finally
         {
-            Trace.Listeners.Remove(listener);
+            SubjectChangeContext.GetTimestampFunction = previousTimestampFunction;
         }
     }
 
     [Fact]
-    public void WhenWritesKeepArrivingAcrossIterationLimits_ThenOwnerLoopsRunWithoutNesting()
+    public async Task WhenAnotherThreadWritesDuringEveryEvaluationAcrossIterationLimits_ThenNoRequestIsLostAndLoopsDoNotNest()
     {
-        // Arrange: every publication writes Anchor again, so each owner loop reaches the iteration limit; the
-        // trace listener writes Anchor on that warning, so a request is pending when the loop releases ownership.
-        const int publicationCount = 2000;
+        // Arrange: during each evaluation, a dedicated thread writes Anchor and the getter waits until that write
+        // requested the recalculation, so every owner loop reaches the iteration limit with a foreign request.
+        const int writeCount = 250;
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
         machine.Worker.Evaluator = _ => root.Anchor;
         root.Machine = machine;
-        var publications = 0;
-        var lastValue = 0;
+        using var writeRequested = new SemaphoreSlim(0);
+        using var writeDone = new SemaphoreSlim(0);
+        var writes = 0;
         var firstHandlerFrames = 0;
         var maxHandlerFrames = 0;
+        machine.Worker.Evaluator = _ =>
+        {
+            var handlerFrames = CountHandlerFrames();
+            firstHandlerFrames = firstHandlerFrames == 0 ? handlerFrames : firstHandlerFrames;
+            maxHandlerFrames = Math.Max(maxHandlerFrames, handlerFrames);
+            var value = root.Anchor;
+            if (Volatile.Read(ref writes) < writeCount)
+            {
+                writeRequested.Release();
+                Assert.True(writeDone.Wait(Timeout));
+            }
+
+            return value;
+        };
+        var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+        {
+            while (Volatile.Read(ref writes) < writeCount && writeRequested.Wait(Timeout))
+            {
+                root.Anchor++;
+                Interlocked.Increment(ref writes);
+                writeDone.Release();
+            }
+        });
+        var lastValue = 0;
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
         {
-            if (change.Property.Subject != machine.Worker)
+            if (change.Property.Subject == machine.Worker)
             {
-                return;
-            }
-
-            var handlerFrames = CountHandlerFrames();
-            firstHandlerFrames = publications == 0 ? handlerFrames : firstHandlerFrames;
-            maxHandlerFrames = Math.Max(maxHandlerFrames, handlerFrames);
-            lastValue = change.GetNewValue<int>();
-            if (++publications < publicationCount)
-            {
-                root.Anchor++;
+                lastValue = change.GetNewValue<int>();
             }
         });
-        var limitsReached = 0;
-        using var listener = new ActionTraceListener("exhausted for", () =>
-        {
-            limitsReached++;
-            if (publications < publicationCount)
-            {
-                root.Anchor++;
-            }
-        });
-        Trace.Listeners.Add(listener);
 
-        try
-        {
-            // Act
-            root.Anchor = 1;
-        }
-        finally
-        {
-            Trace.Listeners.Remove(listener);
-        }
+        // Act
+        root.Anchor = 1;
+        await writer.WaitAsync(Timeout);
 
         // Assert: a loop after an iteration limit runs in the frame of the first one, not nested in it.
-        Assert.Equal(publicationCount, publications);
-        Assert.True(limitsReached >= 10, $"Iteration limits reached: {limitsReached}.");
-        Assert.True(maxHandlerFrames <= firstHandlerFrames, $"Handler frames: first {firstHandlerFrames}, max {maxHandlerFrames}.");
+        Assert.Equal(writeCount, writes);
         Assert.Equal(root.Anchor, lastValue);
+        Assert.True(maxHandlerFrames <= firstHandlerFrames, $"Handler frames: first {firstHandlerFrames}, max {maxHandlerFrames}.");
+    }
+
+    [Fact]
+    public void WhenObserverThrowsAgainWhileAnotherThreadsWriteIsPending_ThenThatWriteIsPublished()
+    {
+        // Arrange: the first publication writes Anchor on the owner's thread and throws, so one further loop
+        // runs. Its publication lets another thread write Anchor and throws as well.
+        var publications = 0;
+        var publishedValues = new List<object?>();
+        EvaluatorRoot? root = null;
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        context.AddService(new PublicationObserver((_, value) =>
+        {
+            publishedValues.Add(value);
+            publications++;
+            if (publications == 1)
+            {
+                root!.Anchor = 10;
+                throw new InvalidOperationException("Publication 1.");
+            }
+
+            if (publications == 2)
+            {
+                Assert.True(DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => root!.Anchor = 50).Wait(Timeout));
+                throw new InvalidOperationException("Publication 2.");
+            }
+        }));
+        root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = _ => root.Anchor;
+        root.Machine = machine;
+
+        // Act
+        var exception = Record.Exception(() => root.Anchor = 1);
+
+        // Assert
+        Assert.Equal("Publication 1.", Assert.IsType<InvalidOperationException>(exception).Message);
+        Assert.Equal(new object?[] { 1, 10, 50 }, publishedValues);
+    }
+
+    [Fact]
+    public void WhenPropertyLifecycleHandlerThrowsWhileSubjectLeavesItsLastGraph_ThenItsDerivedPropertiesDetach()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var root = new Person(context);
+        var person = new Person { FirstName = "a" };
+        root.Mother = person;
+        context.AddService(new ThrowingDetachHandler(person));
+
+        // Act
+        var exception = Record.Exception(() => root.Mother = null);
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(exception);
+        Assert.DoesNotContain(
+            new PropertyReference(person, nameof(Person.FullName)),
+            new PropertyReference(person, nameof(Person.FirstName)).GetUsedByProperties().Items.ToArray());
     }
 
     [Fact]
@@ -403,27 +473,19 @@ public class DerivedPropertyOwnershipTests
         }
     }
 
-    /// <summary>Runs an action for a trace message that contains a text, on the thread that created the listener.</summary>
-    private sealed class ActionTraceListener(string text, Action action) : TraceListener
+    private sealed class ThrowingDetachHandler(IInterceptorSubject subject) : IPropertyLifecycleHandler
     {
-        private readonly int _threadId = Environment.CurrentManagedThreadId;
-
-        public override void TraceEvent(TraceEventCache? eventCache, string source, TraceEventType eventType, int id, string? message)
+        public void AttachProperty(SubjectPropertyLifecycleChange change)
         {
-            if (message is not null && message.Contains(text) && Environment.CurrentManagedThreadId == _threadId)
+            // Only detaches fail.
+        }
+
+        public void DetachProperty(SubjectPropertyLifecycleChange change)
+        {
+            if (change.Subject == subject)
             {
-                action();
+                throw new InvalidOperationException("Detach handler failed.");
             }
-        }
-
-        public override void Write(string? message)
-        {
-            // Only trace events are inspected.
-        }
-
-        public override void WriteLine(string? message)
-        {
-            // Only trace events are inspected.
         }
     }
 }

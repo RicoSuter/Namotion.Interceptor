@@ -244,10 +244,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
         finally
         {
+            // Also when a handler threw: this interceptor removed the subject already.
             SubjectLifecycleAttachments.ExitLifecycleDetach();
+            SubjectLifecycleAttachments.DetachDerivedPropertiesIfDetached(subject);
         }
-
-        SubjectLifecycleAttachments.DetachDerivedPropertiesIfDetached(subject);
 
         var count = subject.GetReferenceCount();
         var change = new SubjectLifecycleChange
@@ -330,10 +330,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
         finally
         {
+            // Also when a handler threw: this interceptor removed the subject already.
             SubjectLifecycleAttachments.ExitLifecycleDetach();
+            SubjectLifecycleAttachments.DetachDerivedPropertiesIfDetached(subject);
         }
-
-        SubjectLifecycleAttachments.DetachDerivedPropertiesIfDetached(subject);
         return children;
     }
 
