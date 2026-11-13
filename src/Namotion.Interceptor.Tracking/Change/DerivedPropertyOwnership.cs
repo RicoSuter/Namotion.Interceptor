@@ -147,18 +147,19 @@ internal static class DerivedPropertyOwnership
     /// <summary>Traces an exception that is dropped because another one wins or nobody can receive it.</summary>
     internal static void TraceDropped(string reason, Exception exception)
     {
-        TraceWarning($"DerivedPropertyChangeHandler: {reason}: {exception}");
+        TraceWarning($"DerivedPropertyChangeHandler: {reason}", exception);
     }
 
-    private static void TraceWarning(string message)
+    private static void TraceWarning(string message, Exception? exception = null)
     {
         try
         {
-            Trace.TraceWarning(message);
+            Trace.TraceWarning(exception is null ? message : $"{message}: {exception}");
         }
         catch (Exception)
         {
-            // A failing trace listener must not replace an exception in flight or abort an attach.
+            // A failing trace listener, or an exception whose formatting throws, must not replace an exception in
+            // flight or abort an attach.
         }
     }
 
