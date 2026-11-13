@@ -75,6 +75,41 @@ public class PostLockQueueTests
     }
 
     [Fact]
+    public void WhenHandlerMakesStructuralWriteDuringAttach_ThenThatWriteIsAnnouncedBeforeTheWritesOfItsOwnHandlers()
+    {
+        // Arrange: attaching the mother assigns the father under the lock, and attaching the father writes its name.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new Person(context);
+        var mother = new Person();
+        var father = new Person();
+        context.WithService(() => new HandlerAction(change =>
+        {
+            if (change.IsContextAttach && change.Subject == mother)
+            {
+                root.Father = father;
+            }
+            else if (change.IsContextAttach && change.Subject == father)
+            {
+                father.FirstName = "f";
+            }
+        }));
+        var deliveries = new List<string>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Name is nameof(Person.Mother) or nameof(Person.Father) or nameof(Person.FirstName))
+            {
+                deliveries.Add($"{(change.Property.Subject == root ? "root" : "father")}.{change.Property.Name}");
+            }
+        });
+
+        // Act
+        root.Mother = mother;
+
+        // Assert
+        Assert.Equal(["root.Mother", "root.Father", "father.FirstName"], deliveries);
+    }
+
+    [Fact]
     public void WhenStructuralWriteRunsThroughTwoLifecycleInterceptors_ThenAllQueuedWorkDrainsWithTheWrite()
     {
         // Arrange

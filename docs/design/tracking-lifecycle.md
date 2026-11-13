@@ -206,7 +206,7 @@ Derived property tracking hooks into the lifecycle at two points: the lifecycle 
 
 **Queued work.** While the count is not 0:
 
-- `PropertyChangeInterceptor` builds the `SubjectPropertyChange` (final value, both timestamps, origin, revision) and resolves its listeners and channels at write time, exactly as for an immediate delivery, and queues only the delivery. A listener subscribed after the write is not owed it.
+- `PropertyChangeInterceptor` builds the `SubjectPropertyChange` (final value, both timestamps, origin, revision) and resolves its listeners and channels at write time, exactly as for an immediate delivery, and queues only the delivery. A listener subscribed after the write is not owed it. A structural write made under the lock reserves its place in the queue before its chain runs, so it is delivered before the writes that the handlers of its own reconciliation make; a slot whose write did not land, or had no consumers, stays empty and is skipped.
 - A recalculation request (from the write observer, from an attach that hands a pending request over, or from `RecalculateDerivedProperty`) is queued instead of running. A segment keeps one entry per derived property.
 
 **Segments.** Anchors nest: while the anchor write of a segment is announced, an observer can make another structural write or attach a subject, which is an anchor of its own. The queue is therefore a stack of segments, one per anchor that queued work, created when the first work is queued. Work goes to the innermost segment, and an anchor drains only its own. An anchor write's segment waits after its lock was released until the write completed, so the anchor write is announced first; a release anchor drains at the release. Because the count is 0 whenever an anchor completes, a segment always drains outside every lifecycle lock; were it ever completed while a lock is held, its work would move to the open segment instead of running.
@@ -217,7 +217,7 @@ Derived property tracking hooks into the lifecycle at two points: the lifecycle 
 
 **Exceptions.** Every entry runs, also after one threw. At an anchor write, the first exception is rethrown from the write after the drain, unless the write itself failed: its exception is in flight and wins, and the drained work's exception is traced. At a release anchor (context attach or detach, `TryRunWhileAttached`, including the context attach of `new Subject(context)`), the first exception is traced, since the operation's own exception may be in flight in the `finally` that drains.
 
-**Cost.** A write without queued work pays one thread-static read in the write observer, and a delivery with consumers one more in `PropertyChangeInterceptor`. A structural write pays the lock count. Segments are reused per thread.
+**Cost.** A write without queued work pays one thread-static read in the write observer, and a write with consumers one more in `PropertyChangeInterceptor`, before its chain runs. A structural write pays the lock count. Segments are reused per thread.
 
 ## Handler Order Around the Descent
 
