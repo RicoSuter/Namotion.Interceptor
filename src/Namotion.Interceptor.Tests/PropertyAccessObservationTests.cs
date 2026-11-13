@@ -75,6 +75,25 @@ public sealed class PropertyAccessObservationTests : IDisposable
     }
 
     [Fact]
+    public void WhenObserverIsInstalledDuringWriteWithoutContext_ThenWriteIsObserved()
+    {
+        // Arrange
+        PropertyAccessObservation.ReplaceWriteObserverForTests(null);
+        var subject = new ObservedSubject();
+
+        // Act
+        InterceptorExecutor.SetPropertyValueWithoutContext(
+            subject, nameof(ObservedSubject.Value), 5, (_, _) => PropertyAccessObservation.ReplaceWriteObserverForTests(_observer));
+
+        // Assert
+        var write = Assert.Single(_observer.Writes);
+        Assert.Equal(new PropertyReference(subject, nameof(ObservedSubject.Value)), write.Property);
+        Assert.True(write.IsWritten);
+        Assert.Equal(1, write.Depth);
+        Assert.False(write.HasFailed);
+    }
+
+    [Fact]
     public void WhenSubjectWithContextIsWritten_ThenWriteIsObservedAfterTheChainWithItsTimestamp()
     {
         // Arrange
