@@ -11,7 +11,7 @@ namespace Namotion.Interceptor.Tracking.Tests.Change;
 [Collection(DerivedPropertyTraceCollection.Name)]
 public class DerivedPropertyOwnershipTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan Timeout = TestTimeouts.Default;
 
     [Fact]
     public async Task WhenGetterTakesLockWhileItsDependencyIsWrittenDuringAttach_ThenBothComplete()

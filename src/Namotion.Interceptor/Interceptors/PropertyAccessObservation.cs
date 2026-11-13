@@ -1,4 +1,3 @@
-// src/Namotion.Interceptor/Interceptors/PropertyAccessObservation.cs
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
@@ -25,20 +24,49 @@ public interface IPropertyWriteObserver
     void OnPropertyWritten(in PropertyWriteObservation write);
 }
 
-/// <param name="Property">The written property.</param>
-/// <param name="IsWritten">Whether the value landed (false when an interceptor vetoed or captured it).</param>
-/// <param name="RawTimestamp">The write's raw timestamp (ticks, negated for an explicit null scope), 0 when it did not land or the subject has no context.</param>
-/// <param name="IsDerivedRecalculation">Whether the write publishes a derived recalculation.</param>
-/// <param name="Depth">The write's nesting depth on the thread, 1 for the outermost write.</param>
-/// <param name="HasFailed">Whether the chain threw.</param>
+/// <summary>
+/// A property write as reported to the <see cref="IPropertyWriteObserver"/>.
+/// </summary>
 [EditorBrowsable(EditorBrowsableState.Never)]
-public readonly record struct PropertyWriteObservation(
-    PropertyReference Property,
-    bool IsWritten,
-    long RawTimestamp,
-    bool IsDerivedRecalculation,
-    int Depth,
-    bool HasFailed);
+public readonly struct PropertyWriteObservation
+{
+    public PropertyWriteObservation(
+        PropertyReference property,
+        bool isWritten,
+        long rawTimestamp,
+        bool isDerivedRecalculation,
+        int depth,
+        bool hasFailed)
+    {
+        Property = property;
+        IsWritten = isWritten;
+        RawTimestamp = rawTimestamp;
+        IsDerivedRecalculation = isDerivedRecalculation;
+        Depth = depth;
+        HasFailed = hasFailed;
+    }
+
+    /// <summary>The written property.</summary>
+    public PropertyReference Property { get; }
+
+    /// <summary>Whether the value landed (false when an interceptor vetoed or captured it).</summary>
+    public bool IsWritten { get; }
+
+    /// <summary>
+    /// The write's raw timestamp (ticks, negated for an explicit null scope), 0 when it did not land or the subject
+    /// has no context.
+    /// </summary>
+    public long RawTimestamp { get; }
+
+    /// <summary>Whether the write publishes a derived recalculation.</summary>
+    public bool IsDerivedRecalculation { get; }
+
+    /// <summary>The write's nesting depth on the thread, 1 for the outermost write.</summary>
+    public int Depth { get; }
+
+    /// <summary>Whether the chain threw.</summary>
+    public bool HasFailed { get; }
+}
 
 /// <summary>
 /// The read observer of the current thread, the write depth of the current thread, and the
@@ -55,6 +83,10 @@ public static class PropertyAccessObservation
 
     private static IPropertyWriteObserver? _writeObserver;
 
+    /// <summary>
+    /// The read observer of the current thread. A single slot: whoever sets it replaces the previous observer, and
+    /// clearing it does not restore one.
+    /// </summary>
     public static IPropertyReadObserver? ReadObserver
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -71,7 +103,8 @@ public static class PropertyAccessObservation
     }
 
     /// <summary>
-    /// Installs the process-wide write observer once; later calls keep the first one.
+    /// Installs the process-wide write observer once; later calls keep the first one. The first caller wins, so
+    /// code that installs an observer before Tracking does pre-empts derived property tracking.
     /// </summary>
     public static void SetWriteObserver(IPropertyWriteObserver observer)
     {

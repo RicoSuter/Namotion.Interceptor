@@ -222,7 +222,7 @@ public class DerivedPropertyRequiredPropertiesTests
     public void WhenSourcePropertyHasDependents_ThenIsDerivedStaysFalse()
     {
         // A source property acquires DerivedPropertyData because a derived depends on it.
-        // Its IsDerived flag must stay false — otherwise WriteProperty would treat the source
+        // Its IsDerived flag must stay false, otherwise the write observer would treat the source
         // as derived-with-setter and trigger a spurious self-recalc on every write.
 
         // Arrange
@@ -278,7 +278,7 @@ public class DerivedPropertyRequiredPropertiesTests
     [Fact]
     public void WhenDynamicDerivedWithSetterShortCircuitsAtAttach_ThenSetterTriggeredRecalcDiscoversNewDependency()
     {
-        // Pins the IsDerived guard in WriteProperty: a short-circuiting getter records zero deps
+        // Pins the IsDerived guard of the write observer: a short-circuiting getter records zero deps
         // at attach, and the setter-triggered recalc must still run to surface new dependencies.
 
         // Arrange

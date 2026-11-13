@@ -48,7 +48,8 @@ public class DerivedPropertyInvalidationTests
         // Assert
         var change = Assert.Single(changes, c => c.Property.Subject == reader && c.Property.Name == nameof(FieldReadingSubject.SourceName));
         Assert.Equal("b", change.GetNewValue<string?>());
-        Assert.NotNull(root);
+        Assert.Same(reader, root.Reader);
+        Assert.True(SubjectLifecycleAttachments.IsAttached(reader));
     }
 
     [Fact]

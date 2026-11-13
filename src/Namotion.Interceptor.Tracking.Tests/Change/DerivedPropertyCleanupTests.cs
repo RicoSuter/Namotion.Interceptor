@@ -69,8 +69,8 @@ public class DerivedPropertyCleanupTests
     [Fact]
     public void WhenCrossSubjectSourceIsReplaced_ThenRequiredPropertiesIsCleanedViaRecalculation()
     {
-        // Write-triggered detach defers Case 2 removals. After recalculation (TryReplace),
-        // the deferred Remove() calls find nothing and exit cleanly (no allocation).
+        // The write detaches the old tire, and the recalculation it requests links the new tire's Pressure
+        // instead of the old one.
 
         // Arrange - Car.AveragePressure depends on each tire's Pressure
         var context = InterceptorSubjectContext
@@ -88,7 +88,7 @@ public class DerivedPropertyCleanupTests
         // AveragePressure depends on old tire's Pressure
         Assert.Contains(oldTirePressureProperty, averagePressureProperty.GetRequiredProperties().ToArray());
 
-        // Act - Replace tires: deferred Case 2 + recalculation + flush
+        // Act - Replace the first tire
         var newTires = new[] { new Tire(context), car.Tires[1], car.Tires[2], car.Tires[3] };
         car.Tires = newTires;
 
@@ -174,8 +174,8 @@ public class DerivedPropertyCleanupTests
     [Fact]
     public void WhenDerivedPropertyIsDetached_ThenItRemovesItselfFromDependenciesUsedByProperties()
     {
-        // This is Case 1: When a derived property is detached, it removes itself from
-        // all its dependencies' UsedByProperties to break backward references.
+        // When a derived property is detached, it removes itself from all its dependencies'
+        // UsedByProperties to break backward references.
 
         // Arrange
         var context = InterceptorSubjectContext
@@ -199,7 +199,7 @@ public class DerivedPropertyCleanupTests
         // Act - Detach just the AveragePressure property (simulates derived property detachment)
         car.DetachSubjectProperty(averagePressureProperty);
 
-        // Assert - AveragePressure should be removed from tire's UsedByProperties (Case 1)
+        // Assert - AveragePressure should be removed from tire's UsedByProperties
         Assert.DoesNotContain(averagePressureProperty, firstTirePressureProperty.GetUsedByProperties().Items.ToArray());
     }
 

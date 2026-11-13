@@ -37,6 +37,7 @@ public class DerivedPropertyRandomizedStressTests
                 })))
             .ToArray();
         var mismatches = new List<string>();
+        var roundsWithAttachedPeople = 0;
 
         try
         {
@@ -57,11 +58,15 @@ public class DerivedPropertyRandomizedStressTests
                             WriteRandomly(people, random);
                         }
                     }));
-                await Task.WhenAll(workers).WaitAsync(TimeSpan.FromSeconds(10));
-                VerifySettledState(round, people, lastPublished, mismatches);
+                await Task.WhenAll(workers).WaitAsync(TestTimeouts.Default);
+                if (VerifySettledState(round, people, lastPublished, mismatches) > 0)
+                {
+                    roundsWithAttachedPeople++;
+                }
             }
 
             // Assert
+            Assert.True(roundsWithAttachedPeople > 0);
             Assert.True(mismatches.Count == 0, string.Join(Environment.NewLine, mismatches.Take(30)));
         }
         finally
@@ -105,11 +110,16 @@ public class DerivedPropertyRandomizedStressTests
     }
 
     /// <summary>
-    /// Once the writes settled, compares every attached derived property's value with its getter, then gives every
-    /// attached person a new name and compares the last published values with the getters. Detached people keep no
-    /// links.
+    /// Once the writes settled, compares every attached derived property's committed value with its getter, then
+    /// gives every attached person a new name and compares the last published values with the getters. Detached
+    /// people keep no links. Returns the number of attached people.
     /// </summary>
-    private static void VerifySettledState(
+    /// <remarks>
+    /// The last publication of a round is not comparable by itself: an attach commits its first value without
+    /// publishing it, and a write that does not change a value publishes nothing. The committed value is compared
+    /// directly, and the publications only after the settle write, which changes every value it compares.
+    /// </remarks>
+    private static int VerifySettledState(
         int round, StressPerson[] people, Dictionary<PropertyReference, object?> lastPublished, List<string> mismatches)
     {
         var attached = people.Where(SubjectLifecycleAttachments.IsAttached).ToArray();
@@ -150,6 +160,8 @@ public class DerivedPropertyRandomizedStressTests
                 mismatches.Add($"Round {round}: {property.Name} of detached {property.Subject} keeps a link.");
             }
         }
+
+        return attached.Length;
     }
 
     private static IEnumerable<PropertyReference> GetDerivedProperties(StressPerson person)

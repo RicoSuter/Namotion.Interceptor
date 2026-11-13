@@ -134,7 +134,7 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
     [Fact]
     public void OnPropertyRead_SkipsSelfReference()
     {
-        // The derived property's outer interceptor-chain read fires ReadProperty on itself,
+        // The derived property's outer interceptor-chain read reports a read of the property itself,
         // which must not be recorded as a dependency.
 
         // Arrange
@@ -146,7 +146,7 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
 
         recorder.StartRecording(selfProperty);
 
-        // Act - touch both the self-ref and a real dependency
+        // Act - read both the property itself and a real dependency
         recorder.OnPropertyRead(in selfProperty);
         recorder.OnPropertyRead(in firstNameProperty);
         var recorded = recorder.FinishRecording();
@@ -170,7 +170,7 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
         var innerSelf = new PropertyReference(person, "InnerDerived");
         var firstNameProperty = new PropertyReference(person, nameof(Person.FirstName));
 
-        // Act: the outer frame touches the inner derived property, while the inner frame touches itself.
+        // Act: the outer frame reads the inner derived property, while the inner frame reads itself.
         recorder.StartRecording(outerSelf);
         recorder.OnPropertyRead(in innerSelf);
 
@@ -194,7 +194,7 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
     {
         // When a derived property's getter triggers recalculation of another derived property,
         // StartRecording() nests. Each frame must record only its own dependencies so that
-        // StoreRecordedTouchedProperties builds the correct RequiredProperties per property.
+        // each commit links its property to exactly what its getter read.
         // Without frame isolation, outer properties would incorrectly include inner dependencies.
 
         // Arrange
@@ -264,7 +264,7 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
 
         // Act - the first session is the one that rents the pooled buffer
         recorder.StartRecording(CreateSelf(person));
-        TouchProperties(recorder, person, count: 5);
+        ReadProperties(recorder, person, count: 5);
         var firstRecording = recorder.FinishRecording();
 
         // Identity of the backing storage is what proves reuse. Asserting on the recorded
@@ -278,7 +278,7 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
         for (var session = 1; session < 10; session++)
         {
             recorder.StartRecording(CreateSelf(person));
-            TouchProperties(recorder, person, count: 5);
+            ReadProperties(recorder, person, count: 5);
             var recording = recorder.FinishRecording();
 
             // Assert
@@ -292,7 +292,7 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
         Assert.False(recorder.IsRecording);
     }
 
-    private static void TouchProperties(DerivedPropertyRecorder recorder, IInterceptorSubject subject, int count)
+    private static void ReadProperties(DerivedPropertyRecorder recorder, IInterceptorSubject subject, int count)
     {
         for (var i = 0; i < count; i++)
         {
