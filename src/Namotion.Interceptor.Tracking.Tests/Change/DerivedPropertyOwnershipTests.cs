@@ -797,6 +797,33 @@ public class DerivedPropertyOwnershipTests
     }
 
     [Fact]
+    public void WhenDependentsExceptionCannotBeFormattedOnAFailedStructuralWrite_ThenHandlersExceptionPropagates()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        context.AddService(new PublicationObserver((_, _) => throw new UnformattableException()));
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = _ => root.Spare is null ? 0 : 1;
+        machine.Worker.ObjectEvaluator = _ => root.Spare;
+        root.Machine = machine;
+        var spare = new EvaluatorConfiguration();
+        context.AddService(new CallbackLifecycleHandler(change =>
+        {
+            if (change.IsContextAttach && change.Subject == spare)
+            {
+                throw new InvalidOperationException("Lifecycle handler failed.");
+            }
+        }));
+
+        // Act
+        var exception = Record.Exception(() => root.Spare = spare);
+
+        // Assert
+        Assert.Equal("Lifecycle handler failed.", Assert.IsType<InvalidOperationException>(exception).Message);
+    }
+
+    [Fact]
     public void WhenAPublicationPublishesAnotherDerivedPropertyBeforeItsObserverRuns_ThenEachVersionMovesOnceAndTheReaderFollowsBoth()
     {
         // Arrange: the publication of Upper writes LastName in its chain, which publishes Lower before the write
@@ -853,6 +880,12 @@ public class DerivedPropertyOwnershipTests
     }
 
     /// <summary>Runs an action after each publication of a derived property's recalculated value.</summary>
+    /// <summary>An exception whose message, and with it its default string, throws.</summary>
+    public sealed class UnformattableException : Exception
+    {
+        public override string Message => throw new InvalidOperationException("Message failed.");
+    }
+
     private sealed class PublicationObserver(Action<PropertyReference, object?> onPublished) : IWriteInterceptor
     {
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
