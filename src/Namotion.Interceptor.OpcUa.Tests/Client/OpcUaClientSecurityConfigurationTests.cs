@@ -1,5 +1,7 @@
 using Namotion.Interceptor.OpcUa.Client;
+using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Server;
+using Opc.Ua;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
@@ -127,4 +129,62 @@ public class OpcUaClientSecurityConfigurationTests
         var exception = Assert.Throws<ArgumentException>(() => configuration.Validate());
         Assert.Equal(nameof(OpcUaClientConfiguration.ApplicationUri), exception.ParamName);
     }
+
+    [Fact]
+    public async Task WhenSecurityIsRequiredAndOnlyUnsecuredEndpointsExist_ThenSelectionFails()
+    {
+        // Arrange
+        var application = await ClientSourceTestFactory.CreateConfiguration().CreateApplicationInstanceAsync();
+        var endpoints = new EndpointDescriptionCollection { CreateEndpoint(MessageSecurityMode.None, SecurityPolicies.None) };
+
+        // Act & Assert
+        var error = Assert.Throws<InvalidOperationException>(() => SessionManager.SelectEndpoint(
+            application.ApplicationConfiguration, new Uri("opc.tcp://localhost:4840"), endpoints,
+            requireSecurity: true, NullTelemetryContext.Instance));
+        Assert.Contains("RequireSecurity", error.Message);
+    }
+
+    [Fact]
+    public async Task WhenSecurityIsRequiredAndASecuredEndpointExists_ThenItIsSelected()
+    {
+        // Arrange
+        var application = await ClientSourceTestFactory.CreateConfiguration().CreateApplicationInstanceAsync();
+        var endpoints = new EndpointDescriptionCollection
+        {
+            CreateEndpoint(MessageSecurityMode.None, SecurityPolicies.None),
+            CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256)
+        };
+
+        // Act
+        var endpoint = SessionManager.SelectEndpoint(
+            application.ApplicationConfiguration, new Uri("opc.tcp://localhost:4840"), endpoints,
+            requireSecurity: true, NullTelemetryContext.Instance);
+
+        // Assert
+        Assert.Equal(MessageSecurityMode.SignAndEncrypt, endpoint.SecurityMode);
+    }
+
+    [Fact]
+    public async Task WhenSecurityIsOptionalAndOnlySecuredEndpointsExist_ThenASecuredOneIsSelected()
+    {
+        // Arrange
+        var application = await ClientSourceTestFactory.CreateConfiguration().CreateApplicationInstanceAsync();
+        var endpoints = new EndpointDescriptionCollection { CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256) };
+
+        // Act
+        var endpoint = SessionManager.SelectEndpoint(
+            application.ApplicationConfiguration, new Uri("opc.tcp://localhost:4840"), endpoints,
+            requireSecurity: false, NullTelemetryContext.Instance);
+
+        // Assert
+        Assert.Equal(MessageSecurityMode.SignAndEncrypt, endpoint.SecurityMode);
+    }
+
+    private static EndpointDescription CreateEndpoint(MessageSecurityMode securityMode, string securityPolicyUri) => new()
+    {
+        EndpointUrl = "opc.tcp://localhost:4840",
+        SecurityMode = securityMode,
+        SecurityPolicyUri = securityPolicyUri,
+        TransportProfileUri = Profiles.UaTcpTransport
+    };
 }

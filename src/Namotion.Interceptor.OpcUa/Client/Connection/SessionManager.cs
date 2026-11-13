@@ -19,6 +19,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private readonly OpcUaSubjectClientSource _source;
     private readonly SubjectPropertyWriter _propertyWriter;
     private readonly OpcUaClientConfiguration _configuration;
+    private readonly ApplicationCertificateLoader _certificateLoader;
     private readonly ILogger _logger;
 
     private volatile SessionReconnectHandler _reconnectHandler;
@@ -192,10 +193,12 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         OpcUaClientConfiguration configuration,
         PollingMetrics pollingMetrics,
         ReadAfterWriteMetrics readAfterWriteMetrics,
+        ApplicationCertificateLoader certificateLoader,
         ILogger logger)
     {
         _source = source;
         _propertyWriter = propertyWriter;
+        _certificateLoader = certificateLoader;
         _logger = logger;
         _configuration = configuration;
         _reconnectHandler = new SessionReconnectHandler(configuration.ResolvedTelemetryContext, false, (int)configuration.ReconnectHandlerTimeout.TotalMilliseconds);
@@ -272,28 +275,47 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 ex);
         }
 
-        var endpointDescription = CoreClientUtils.SelectEndpoint(
+        var endpointDescription = SelectEndpoint(
             application.ApplicationConfiguration,
             serverUri,
             endpoints,
-            useSecurity: configuration.RequireSecurity,
+            configuration.RequireSecurity,
             configuration.ResolvedTelemetryContext);
+
+        // Discovery needs no client certificate, and an unsecured endpoint never does.
+        if (endpointDescription.SecurityMode != MessageSecurityMode.None)
+        {
+            await LoadApplicationCertificateAsync(application, configuration, cancellationToken).ConfigureAwait(false);
+        }
 
         var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
         var oldSession = Volatile.Read(ref _session);
 
         var sessionFactory = configuration.ActualSessionFactory;
-        var sessionResult = await sessionFactory.CreateAsync(
-            application.ApplicationConfiguration,
-            endpoint,
-            updateBeforeConnect: false,
-            sessionName: application.ApplicationName,
-            sessionTimeout: (uint)configuration.SessionTimeout.TotalMilliseconds,
-            identity: configuration.CreateUserIdentity != null
-                ? await configuration.CreateUserIdentity(cancellationToken).ConfigureAwait(false)
-                : new UserIdentity(),
-            preferredLocales: null,
-            cancellationToken).ConfigureAwait(false);
+        ISession sessionResult;
+        try
+        {
+            sessionResult = await sessionFactory.CreateAsync(
+                application.ApplicationConfiguration,
+                endpoint,
+                updateBeforeConnect: false,
+                sessionName: application.ApplicationName,
+                sessionTimeout: (uint)configuration.SessionTimeout.TotalMilliseconds,
+                identity: configuration.CreateUserIdentity != null
+                    ? await configuration.CreateUserIdentity(cancellationToken).ConfigureAwait(false)
+                    : new UserIdentity(),
+                preferredLocales: null,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (ServiceResultException error) when (IsServerCertificateRejection(error.StatusCode))
+        {
+            throw new InvalidOperationException(
+                $"The OPC UA server certificate {GetThumbprint(endpointDescription, configuration.ResolvedTelemetryContext)} is not trusted. " +
+                $"Move it from '{Path.Combine(configuration.CertificateStoreBasePath, "rejected", "certs")}' to " +
+                $"'{Path.Combine(configuration.CertificateStoreBasePath, "trusted", "certs")}', or set " +
+                $"{nameof(OpcUaClientConfiguration.AutoAcceptUntrustedCertificates)} = true to accept any server certificate.",
+                error);
+        }
 
         var newSession = sessionResult as Session
             ?? throw new InvalidOperationException(
@@ -664,6 +686,80 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
             // Kill transport after close to ensure any remaining in-flight operations fail fast.
             KillTransportChannel(sessionToDispose);
+        }
+    }
+
+    /// <summary>
+    /// Selects the endpoint to connect to. With <paramref name="requireSecurity"/> only a signed or encrypted
+    /// endpoint is accepted; otherwise an unsecured one is preferred and a secured one used when it is all the
+    /// server offers.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No endpoint matches the scheme, or security is required and no secured endpoint exists.</exception>
+    internal static EndpointDescription SelectEndpoint(
+        ApplicationConfiguration applicationConfiguration,
+        Uri serverUri,
+        EndpointDescriptionCollection endpoints,
+        bool requireSecurity,
+        ITelemetryContext telemetryContext)
+    {
+        var endpoint = CoreClientUtils.SelectEndpoint(applicationConfiguration, serverUri, endpoints, requireSecurity, telemetryContext)
+            ?? throw new InvalidOperationException(
+                $"The OPC UA server at '{serverUri}' offers no endpoint for the '{serverUri.Scheme}' scheme.");
+
+        // The SDK falls back to any endpoint when none matches the requested security.
+        if (requireSecurity && endpoint.SecurityMode == MessageSecurityMode.None)
+        {
+            throw new InvalidOperationException(
+                $"The OPC UA server at '{serverUri}' offers no signed or encrypted endpoint, and " +
+                $"{nameof(OpcUaClientConfiguration.RequireSecurity)} is set.");
+        }
+
+        return endpoint;
+    }
+
+    private async Task LoadApplicationCertificateAsync(
+        ApplicationInstance application,
+        OpcUaClientConfiguration configuration,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _certificateLoader.EnsureLoadedAsync(application, configuration, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            var applicationConfiguration = application.ApplicationConfiguration;
+            throw new InvalidOperationException(
+                $"Failed to load the OPC UA client application certificate from " +
+                $"'{applicationConfiguration.SecurityConfiguration.ApplicationCertificate.StorePath}'. A provisioned certificate needs the " +
+                $"subject '{applicationConfiguration.SecurityConfiguration.ApplicationCertificate.SubjectName}' and the application URI " +
+                $"'{applicationConfiguration.ApplicationUri}'; set {nameof(OpcUaClientConfiguration.ApplicationUri)} to match it, or set " +
+                $"{nameof(OpcUaClientConfiguration.AutoCreateApplicationCertificate)} = true to create one.",
+                error);
+        }
+    }
+
+    private static bool IsServerCertificateRejection(StatusCode statusCode) =>
+        statusCode == StatusCodes.BadCertificateUntrusted ||
+        statusCode == StatusCodes.BadCertificateChainIncomplete;
+
+    // Called while wrapping a rejection, so it must not throw and hide that error.
+    private static string GetThumbprint(EndpointDescription endpoint, ITelemetryContext telemetryContext)
+    {
+        if (endpoint.ServerCertificate is not { Length: > 0 } data)
+        {
+            return "(unknown)";
+        }
+
+        try
+        {
+            // The server may send its whole chain; this parses the first certificate, which is its own.
+            using var certificate = Utils.ParseCertificateBlob(data, telemetryContext);
+            return certificate.Thumbprint;
+        }
+        catch (ServiceResultException)
+        {
+            return "(unknown)";
         }
     }
 

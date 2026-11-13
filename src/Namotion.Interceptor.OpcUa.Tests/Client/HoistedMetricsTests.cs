@@ -130,6 +130,7 @@ public class HoistedMetricsTests
             CreateConfiguration(),
             source.PollingMetrics,
             source.ReadAfterWriteMetrics,
+            new ApplicationCertificateLoader(NullLogger.Instance),
             NullLogger.Instance);
 
         // The polling loop is spawned by the constructor; wait for it so disposal has a task to join

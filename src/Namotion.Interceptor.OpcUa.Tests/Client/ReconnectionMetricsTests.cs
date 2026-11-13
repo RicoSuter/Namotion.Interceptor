@@ -167,6 +167,7 @@ public class ReconnectionMetricsTests
             configuration,
             source.PollingMetrics,
             source.ReadAfterWriteMetrics,
+            new ApplicationCertificateLoader(NullLogger.Instance),
             NullLogger.Instance);
     }
 
