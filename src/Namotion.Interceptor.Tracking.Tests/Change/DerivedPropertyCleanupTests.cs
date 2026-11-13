@@ -201,6 +201,7 @@ public class DerivedPropertyCleanupTests
 
         // Assert - AveragePressure should be removed from tire's UsedByProperties
         Assert.DoesNotContain(averagePressureProperty, firstTirePressureProperty.GetUsedByProperties().Items.ToArray());
+        Assert.Empty(averagePressureProperty.GetRequiredProperties().ToArray());
     }
 
     [Fact]

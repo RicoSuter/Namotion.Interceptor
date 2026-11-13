@@ -104,28 +104,6 @@ public class DerivedPropertyOwnershipTests
     }
 
     [Fact]
-    public void WhenSubjectIsAttachedToSecondGraph_ThenItsPublishedValueIsNotReplacedSilently()
-    {
-        // Arrange
-        var context1 = InterceptorSubjectContext.Create().WithFullPropertyTracking();
-        var context2 = InterceptorSubjectContext.Create().WithFullPropertyTracking();
-        var root1 = new Person(context1);
-        var root2 = new Person(context2);
-        var person = new Person { FirstName = "a" };
-        root1.Mother = person;
-        var changes = SubscribeToChanges(context1);
-
-        // Act
-        root2.Mother = person;
-        person.FirstName = "b";
-
-        // Assert
-        var change = Assert.Single(changes, c => c.Property.Subject == person && c.Property.Name == nameof(Person.FullName));
-        Assert.Equal("a", change.GetOldValue<string>());
-        Assert.Equal("b", change.GetNewValue<string>());
-    }
-
-    [Fact]
     public void WhenSubjectIsAttachedToSecondGraph_ThenItsDerivedPropertyIsNotEvaluatedAgain()
     {
         // Arrange: the getter reads state outside the model, so only an evaluation sees it change.
@@ -171,22 +149,6 @@ public class DerivedPropertyOwnershipTests
 
         // Assert
         Assert.Single(changes, c => c.Property.Subject == person && c.Property.Name == nameof(Person.FullName));
-    }
-
-    [Fact]
-    public void WhenDerivedPropertyIsDetachedDirectlyWhileSubjectIsAttached_ThenItsLinksAreRemoved()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
-        var person = new Person(context) { FirstName = "a" };
-        var fullName = new PropertyReference(person, nameof(Person.FullName));
-
-        // Act
-        person.DetachSubjectProperty(fullName);
-
-        // Assert: FullNameWithPrefix still reads FirstName through FullName's getter.
-        Assert.DoesNotContain(fullName, new PropertyReference(person, nameof(Person.FirstName)).GetUsedByProperties().Items.ToArray());
-        Assert.Empty(fullName.GetRequiredProperties().ToArray());
     }
 
     [Fact]

@@ -28,25 +28,13 @@ public sealed class PropertyAccessObservationTests : IDisposable
     // The read observer is thread-local, so it is installed on the thread that runs the test body.
     private void ObserveReads() => PropertyAccessObservation.ReadObserver = _observer;
 
-    [Fact]
-    public void WhenSubjectWithoutContextIsRead_ThenReadIsObserved()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenSubjectIsRead_ThenReadIsObserved(bool hasContext)
     {
         // Arrange
-        var subject = new ObservedSubject();
-        ObserveReads();
-
-        // Act
-        _ = subject.Value;
-
-        // Assert
-        Assert.Equal([new PropertyReference(subject, nameof(ObservedSubject.Value))], _observer.Reads);
-    }
-
-    [Fact]
-    public void WhenSubjectWithContextIsRead_ThenReadIsObserved()
-    {
-        // Arrange
-        var subject = new ObservedSubject(InterceptorSubjectContext.Create());
+        var subject = hasContext ? new ObservedSubject(InterceptorSubjectContext.Create()) : new ObservedSubject();
         ObserveReads();
 
         // Act
