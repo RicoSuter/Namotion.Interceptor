@@ -1,4 +1,5 @@
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Virtual.Blazor.Editing;
 
 namespace HomeBlaze.Virtual.Blazor.Tests.Editing;
@@ -112,5 +113,43 @@ public class VirtualSubjectDraftTests
 
         // Assert
         Assert.Single(issues, issue => issue.Path == "Property");
+    }
+
+    [Fact]
+    public void WhenAStateTargetIsTakenOver_ThenTheEntryBecomesStateWithItsTypeUnitAndTitle()
+    {
+        // Arrange
+        var draft = VirtualSubjectDraft.From(null, null);
+        var entry = draft.AddProperty(null);
+        entry.IsState = false;
+        entry.DataType = VirtualDataType.Text;
+        entry.Title = " ";
+
+        // Act
+        entry.TakeOver(typeof(int), new StateMetadata { Title = "Target speed", Unit = StateUnit.Hertz });
+
+        // Assert
+        Assert.True(entry.IsState);
+        Assert.Equal(VirtualDataType.Number, entry.DataType);
+        Assert.Equal(StateUnit.Hertz, entry.Unit);
+        Assert.Equal("Target speed", entry.Title);
+    }
+
+    [Fact]
+    public void WhenATargetWithoutStateIsTakenOver_ThenTheUnitIsClearedAndTheTitleKept()
+    {
+        // Arrange
+        var draft = VirtualSubjectDraft.From(null, null);
+        var entry = draft.AddProperty(null);
+        entry.Unit = StateUnit.Watt;
+        entry.Title = "Mine";
+
+        // Act
+        entry.TakeOver(typeof(bool), state: null);
+
+        // Assert
+        Assert.Equal(VirtualDataType.Boolean, entry.DataType);
+        Assert.Null(entry.Unit);
+        Assert.Equal("Mine", entry.Title);
     }
 }

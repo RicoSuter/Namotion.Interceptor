@@ -396,19 +396,8 @@
         return $"{state?.Title ?? target.Name}: {target.Type.Name}{unit}, {access}";
     }
 
-    private static void UseTarget(VirtualEntryDraft entry, RegisteredSubjectProperty target)
-    {
-        if (VirtualDataTypes.TryGetDataType(target.Type, out var dataType))
-        {
-            entry.DataType = dataType;
-        }
-
-        if (target.TryGetAttribute(KnownAttributes.State)?.GetValue() is StateMetadata state)
-        {
-            entry.Unit = state.Unit == StateUnit.Default ? null : state.Unit;
-            entry.Title ??= state.Title;
-        }
-    }
+    private static void UseTarget(VirtualEntryDraft entry, RegisteredSubjectProperty target) =>
+        entry.TakeOver(target.Type, target.TryGetAttribute(KnownAttributes.State)?.GetValue() as StateMetadata);
 
     private static bool CanBind(RegisteredSubjectProperty property) =>
         !property.CanContainSubjects && property.HasPublicSetter && property.IsDisplayable();

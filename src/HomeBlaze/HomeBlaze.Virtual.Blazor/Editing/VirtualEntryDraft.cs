@@ -1,4 +1,5 @@
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Metadata;
 
 namespace HomeBlaze.Virtual.Blazor.Editing;
 
@@ -107,6 +108,31 @@ internal sealed class VirtualEntryDraft
             State = IsState ? ToState() : null,
             Attributes = ToDictionary(Attributes)
         };
+    }
+
+    /// <summary>
+    /// Takes over the data type of a binding target, and its state with its unit and, unless the entry has one, its
+    /// title; a target without state clears the unit.
+    /// </summary>
+    public void TakeOver(Type targetType, StateMetadata? state)
+    {
+        if (VirtualDataTypes.TryGetDataType(targetType, out var dataType))
+        {
+            DataType = dataType;
+        }
+
+        if (state is null)
+        {
+            Unit = null;
+            return;
+        }
+
+        IsState = true;
+        Unit = state.Unit == StateUnit.Default ? null : state.Unit;
+        if (string.IsNullOrWhiteSpace(Title))
+        {
+            Title = state.Title;
+        }
     }
 
     // The first of entries with the same name wins; the draft reports the others.
