@@ -529,7 +529,16 @@ public partial class FluentStorageContainer :
     /// [Configuration] properties.
     /// </summary>
     /// <returns>False when no file in this storage contains the subject as configuration, such as a subject of a
-    /// document or of a file that is no configurable subject, or the storage is not connected.</returns>
+    /// document or of a file that is no configurable subject, when an edit of the file replaced the subject of the
+    /// file, or the storage is not connected.</returns>
+    /// <remarks>
+    /// When the file was edited since it was last loaded or written, the edit is applied to the subject of the file
+    /// first, as a reload does, and then written back. Configuration of that subject that was not saved yet is
+    /// replaced by the edit, which is logged as a warning, and a subject nested in its configuration can be replaced
+    /// by a new one. <see cref="IConfigurable.ApplyConfigurationAsync"/> of the subject of the file runs before this
+    /// method returns. An edit that cannot be applied, such as text that is no valid JSON or a configuration that
+    /// fails to apply, makes this method throw without writing.
+    /// </remarks>
     public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var connection = _connection;
@@ -546,6 +555,11 @@ public partial class FluentStorageContainer :
                 var fileSubject = subject.TryGetConfigurationOwner(candidate => connection.Index.TryGetEntry(candidate, out entry));
                 // Only configuration is written here. A document, such as a Markdown page, writes itself, under its own rules.
                 if (fileSubject is not IConfigurable || fileSubject is IStorageFile || entry is null)
+                    return;
+
+                // The file event of an edit reaches the pass only after a quiet period, so a save in between
+                // would overwrite the edit. Applied first, the edit is part of what is written.
+                if (await connection.Reconciler.RefreshChangedAsync(entry, token))
                     return;
 
                 await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_serializer.Serialize(fileSubject)), token);

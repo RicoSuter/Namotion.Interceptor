@@ -488,6 +488,40 @@ internal sealed class StorageReconciler
         return true;
     }
 
+    /// <summary>
+    /// Brings the subject of a file in line with the file when it changed since its version was recorded, so that
+    /// writing the subject does not overwrite an edit that no pass has applied yet. A subject that the content
+    /// replaces is placed in the tree.
+    /// </summary>
+    /// <returns>True when the content replaced the subject.</returns>
+    public async Task<bool> RefreshChangedAsync(StorageEntry entry, CancellationToken cancellationToken)
+    {
+        // A file that is gone has nothing to apply; the write creates it again.
+        var version = await GetVersionAsync(entry.Path, cancellationToken);
+        if (version == default || version == entry.Version)
+        {
+            return false;
+        }
+
+        var hash = entry.Hash;
+        var isReplaced = await RefreshAsync(entry, version, content: null, cancellationToken);
+        if (isReplaced || entry.Hash != hash)
+        {
+            // The log of the reload does not tell that configuration which was not saved yet is gone.
+            _logger?.LogWarning(
+                "Applied an edit of {Path} before saving it, which replaced configuration of its subject that was not saved yet",
+                entry.Path);
+        }
+
+        if (!isReplaced)
+        {
+            return false;
+        }
+
+        Apply();
+        return true;
+    }
+
     private static string GetChildKey(string path, IInterceptorSubject subject)
         => subject is IConfigurable && StoragePath.IsJson(path)
             ? Path.GetFileNameWithoutExtension(path)
