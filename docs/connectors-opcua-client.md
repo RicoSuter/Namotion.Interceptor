@@ -230,7 +230,7 @@ All stores live under `CertificateStoreBasePath`, which defaults to `pki` for th
 
 #### Errors
 
-A failed connection attempt is reported in `Diagnostics.LastError` (see [Diagnostics](#diagnostics)) and retried. A certificate error names the certificate's thumbprint, the folders involved and the option to change: an untrusted, expired or incomplete server certificate, a client certificate the server rejects, and a client certificate that cannot be loaded.
+A failed connection attempt is reported in `Diagnostics.LastError` (see [Diagnostics](#diagnostics)) and retried. A certificate error says which certificate is at fault and how to resolve it, naming the folders or the option involved. This covers a server certificate that is untrusted, expired or has an incomplete issuer chain, a client certificate the server rejects, and a client certificate that cannot be loaded.
 
 ### Authentication
 
