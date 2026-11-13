@@ -222,6 +222,21 @@ public class VirtualSubjectTests
     }
 
     [Fact]
+    public void WhenEntriesAreNested_ThenTheNestedSubjectIsTitledByTheNameOfItsEntry()
+    {
+        // Arrange
+        var graph = new VirtualTestGraph();
+        var solar = graph.CreateVirtualSubject(Entries(("Pv", new VirtualProperty { Properties = Entries(("Double", Expression("2"))) })));
+
+        // Act
+        graph.Add("Solar", solar);
+
+        // Assert
+        var node = graph.Resolver.ResolveSubject("/Solar/Pv", PathStyle.Canonical);
+        Assert.Equal("Pv", Assert.IsAssignableFrom<ITitleProvider>(node).Title);
+    }
+
+    [Fact]
     public void WhenAnEntryIsInvalid_ThenItIsSkippedAndTheStatusReportsIt()
     {
         // Arrange

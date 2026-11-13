@@ -52,7 +52,7 @@ internal sealed class VirtualPropertyMaterializer(VirtualRuntime runtime)
                     if (subject.TryGetProperty(name) is null)
                     {
                         // The node applies its entries when this assignment attaches it.
-                        var node = new VirtualNode(children, path, rejected, runtime);
+                        var node = new VirtualNode(name, children, path, rejected, runtime);
                         subject.AddProperty(name, typeof(VirtualNode), _ => node, null);
                     }
 

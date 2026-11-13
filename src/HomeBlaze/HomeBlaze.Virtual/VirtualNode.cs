@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using HomeBlaze.Abstractions;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -10,7 +11,7 @@ namespace HomeBlaze.Virtual;
 /// saved with the virtual subject it belongs to.
 /// </summary>
 [InterceptorSubject]
-public partial class VirtualNode : ILifecycleHandler
+public partial class VirtualNode : ITitleProvider, ILifecycleHandler
 {
     private readonly IReadOnlyDictionary<string, VirtualProperty> _entries;
     private readonly string _path;
@@ -18,14 +19,18 @@ public partial class VirtualNode : ILifecycleHandler
     private readonly VirtualLevel _level;
     private readonly ILogger _logger;
 
-    internal VirtualNode(IReadOnlyDictionary<string, VirtualProperty> entries, string path, ImmutableHashSet<string> rejected, VirtualRuntime runtime)
+    internal VirtualNode(string name, IReadOnlyDictionary<string, VirtualProperty> entries, string path, ImmutableHashSet<string> rejected, VirtualRuntime runtime)
     {
+        Title = name;
         _entries = entries;
         _path = path;
         _rejected = rejected;
         _level = new VirtualLevel(this, runtime, VirtualEntryPlace.Nested);
         _logger = runtime.Logger;
     }
+
+    /// <summary>The name of the entry the subject was created from.</summary>
+    public string Title { get; }
 
     void ILifecycleHandler.HandleLifecycleChange(SubjectLifecycleChange change)
     {
