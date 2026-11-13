@@ -192,8 +192,17 @@ public static class VirtualPropertyValidator
             return null;
         }
 
-        var prefix = ownPath.TrimEnd('/') + "/";
-        return path.StartsWith(prefix, StringComparison.Ordinal) ? AppendSegments([], path[prefix.Length..]) : null;
+        // Repeated separators lead where one does, as the runtime skips them.
+        var rest = path.TrimStart('/');
+        var ownSegments = ownPath.Trim('/');
+        if (ownSegments.Length == 0)
+        {
+            return AppendSegments([], rest);
+        }
+
+        return rest.Length > ownSegments.Length && rest[ownSegments.Length] == '/' && rest.StartsWith(ownSegments, StringComparison.Ordinal)
+            ? AppendSegments([], rest[(ownSegments.Length + 1)..])
+            : null;
     }
 
     private static string? AppendSegments(List<string> segments, string relativePath)

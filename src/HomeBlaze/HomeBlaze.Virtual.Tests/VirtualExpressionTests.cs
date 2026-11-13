@@ -1,4 +1,5 @@
 using HomeBlaze.Virtual.Tests.Testing;
+using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Virtual.Tests;
 
@@ -181,6 +182,34 @@ public class VirtualExpressionTests
         // Assert
         Assert.Null(property);
         Assert.Null(misses);
+    }
+
+    [Theory]
+    [InlineData("/Meter/Power")]
+    [InlineData("//Meter/Power")]
+    public void WhenASubjectOnAnAbsolutePathIsReplaced_ThenADerivedPropertyThatResolvesThePathIsRecalculated(string path)
+    {
+        // Arrange
+        var graph = new VirtualTestGraph();
+        graph.Add("Meter", new TestMeter { Power = 4 });
+        var registered = graph.Root.TryGetRegisteredSubject()!;
+
+        // The second property resolves the path after the first one, so the resolver's cache of absolute paths has it.
+        registered.AddDerivedProperty<decimal?>("First", subject =>
+            (decimal?)VirtualExpression.ResolveProperty(graph.Resolver, path, subject)?.GetValue());
+        var evaluations = 0;
+        registered.AddDerivedProperty<decimal?>("Second", subject =>
+        {
+            evaluations++;
+            return (decimal?)VirtualExpression.ResolveProperty(graph.Resolver, path, subject)?.GetValue();
+        });
+        var evaluationsBefore = evaluations;
+
+        // Act
+        graph.Add("Meter", new TestMeter { Power = 8 });
+
+        // Assert
+        Assert.True(evaluations > evaluationsBefore);
     }
 
     [Fact]

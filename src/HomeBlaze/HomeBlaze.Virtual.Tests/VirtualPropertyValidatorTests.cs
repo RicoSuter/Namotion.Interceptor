@@ -169,6 +169,7 @@ public class VirtualPropertyValidatorTests
 
     [Theory]
     [InlineData("/Solar/Pv/A")]
+    [InlineData("//Solar/Pv/A")]
     [InlineData("./A")]
     [InlineData("../Pv/A")]
     public void WhenANestedEntryReadsItselfThroughAnotherSpellingOfItsPath_ThenItIsAnIssue(string path)

@@ -115,7 +115,13 @@ public static class VirtualExpression
             return scope;
         }
 
+        // Every leading separator is skipped, as a part that starts with one would resolve as an absolute path again.
         walkStart = 1;
+        while (walkStart < path.Length && path[walkStart] == SubjectPathResolver.Separator)
+        {
+            walkStart++;
+        }
+
         return resolver.ResolveSubject("/", PathStyle.Canonical, scope);
     }
 
