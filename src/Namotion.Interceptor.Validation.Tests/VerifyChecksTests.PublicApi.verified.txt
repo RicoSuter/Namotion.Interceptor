@@ -36,7 +36,6 @@ namespace Namotion.Interceptor.Validation
     [Namotion.Interceptor.Attributes.RunsAfter(new System.Type[] {
             typeof(Namotion.Interceptor.Tracking.Transactions.SubjectTransactionInterceptor)})]
     [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
-            typeof(Namotion.Interceptor.Tracking.Change.DerivedPropertyChangeHandler),
             typeof(Namotion.Interceptor.Tracking.Change.PropertyChangeInterceptor),
             typeof(Namotion.Interceptor.Tracking.Lifecycle.LifecycleInterceptor)})]
     public sealed class ValidationInterceptor : Namotion.Interceptor.Interceptors.IWriteInterceptor, Namotion.Interceptor.Tracking.Transactions.ITransactionHandler

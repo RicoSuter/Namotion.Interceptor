@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
-using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -8,7 +7,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
 /// Handles derived property tracking and automatic recalculation using dependency recording.
-/// Requires LifecycleInterceptor to be added after this interceptor.
+/// A write requests the recalculation of its dependents once, after the whole write chain.
 /// </summary>
 /// <remarks>
 /// Deadlock safety: locks are acquired on per-property <see cref="DerivedPropertyData"/> objects.
@@ -17,13 +16,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// the used-by collection's leaf lock it may take acquires nothing further.
 /// See docs/design/tracking-derived-properties.md for full concurrency analysis.
 /// </remarks>
-[RunsBefore(typeof(LifecycleInterceptor))]
-// Outer of the change interceptor so the cascade recalculation runs after that interceptor has
-// dispatched: a triggering write is announced before the derived recalculations it causes. Only
-// load-bearing under aggregation, where instances would otherwise interleave and one context's
-// cascade could be announced before another's dispatch of the triggering write.
-[RunsBefore(typeof(PropertyChangeInterceptor))]
-public class DerivedPropertyChangeHandler : IWriteInterceptor, IPropertyLifecycleHandler
+public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
 {
     // Safety limit for stabilization loops. Prevents infinite loops from getters
     // with side effects that mutate the tracked state (a user error but shouldn't hang).
@@ -36,11 +29,10 @@ public class DerivedPropertyChangeHandler : IWriteInterceptor, IPropertyLifecycl
         get => DerivedPropertyRecorder.IsEvaluatingOnThisThread;
     }
 
-    // Global counter incremented on every write (Interlocked.Increment, full fence).
-    // Paired with Volatile.Read in AttachProperty/RecalculateDerivedProperty to detect
-    // concurrent writes during getter evaluation. Static so cross-context writes are visible.
-    // False positives only trigger re-evaluation when deps actually changed.
-    private static int _writeGeneration;
+    public DerivedPropertyChangeHandler()
+    {
+        TrackingWriteObserver.EnsureRegistered();
+    }
 
     /// <inheritdoc />
     public void AttachProperty(SubjectPropertyLifecycleChange change)
@@ -148,61 +140,19 @@ public class DerivedPropertyChangeHandler : IWriteInterceptor, IPropertyLifecycl
         return property.TryGetDerivedPropertyData()?.UsedByDependencies?.Contains(derivedProperty) is true;
     }
 
-    /// <inheritdoc />
-    public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+    /// <summary>
+    /// Recalculates a derived property after a write to one of its dependencies (or to the property itself, for a
+    /// derived property with a setter). A <paramref name="rawTimestamp"/> of 0 resolves the current changed timestamp.
+    /// </summary>
+    internal static void RequestRecalculation(PropertyReference property, long rawTimestamp)
     {
-        next(ref context);
-
-        if (!context.IsWritten)
+        if (rawTimestamp == 0)
         {
-            return;
+            rawTimestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
         }
 
-        // Signal landed writes before TryGet so writes to not-yet-tracked properties are also detected.
-        Interlocked.Increment(ref _writeGeneration);
-
-        var data = context.Property.TryGetDerivedPropertyData();
-        if (data is null)
-        {
-            return;
-        }
-
-        // Derived-with-setter: value comes from the getter, so setter changes require recalc
-        // even when the getter recorded zero deps (e.g. short-circuited at attach).
-        if (Volatile.Read(ref data.IsDerived) && context.Property.Metadata.SetValue is not null)
-        {
-            var rawTimestamp = context.WriteTimestampRaw;
-            var storageTimestamp = rawTimestamp > 0 ? rawTimestamp : 0L;
-            var property = context.Property;
-            RecalculateDerivedProperty(ref property, storageTimestamp, rawTimestamp);
-        }
-
-        var usedByProperties = data.GetUsedByProperties();
-        if (usedByProperties.Length > 0)
-        {
-            // Thread the trigger's resolved timestamp into each dependent's context, skipping a
-            // scope push. storageTimestamp=0 under a null scope preserves the never-written sentinel.
-            var rawTimestamp = context.WriteTimestampRaw;
-            var storageTimestamp = rawTimestamp > 0 ? rawTimestamp : 0L;
-            RecalculateDependents(usedByProperties, context.Property, storageTimestamp, rawTimestamp);
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void RecalculateDependents(ReadOnlySpan<PropertyReference> usedByProperties, PropertyReference triggerProperty, long storageTimestamp, long rawTimestamp)
-    {
-        for (var i = 0; i < usedByProperties.Length; i++)
-        {
-            var dependent = usedByProperties[i];
-            if (dependent == triggerProperty)
-            {
-                // Defensive: DerivedPropertyRecorder filters self-refs, so this is unreachable
-                // via the normal recorder path.
-                continue;
-            }
-
-            RecalculateDerivedProperty(ref dependent, storageTimestamp, rawTimestamp);
-        }
+        var storageTimestamp = rawTimestamp > 0 ? rawTimestamp : 0L;
+        RecalculateDerivedProperty(ref property, storageTimestamp, rawTimestamp);
     }
 
     /// <summary>
@@ -416,7 +366,7 @@ public class DerivedPropertyChangeHandler : IWriteInterceptor, IPropertyLifecycl
 
     /// <summary>
     /// Evaluates a derived property getter, records dependencies, and runs the stabilization
-    /// loop if concurrent writes changed the dependency set.
+    /// loop if the dependency set changed or a recorded dependency was written after it was read.
     /// When <paramref name="callerHoldsLock"/> is true (AttachProperty), the caller already holds
     /// lock(data) and lock(_attachedSubjects), so UpdateDependencies runs directly.
     /// When false (RecalculateDerivedProperty), the lock is acquired only briefly for
@@ -426,7 +376,6 @@ public class DerivedPropertyChangeHandler : IWriteInterceptor, IPropertyLifecycl
     private static object? EvaluateAndStabilize(
         DerivedPropertyData data, in PropertyReference property, bool callerHoldsLock)
     {
-        var generationBefore = Volatile.Read(ref _writeGeneration);
         var ownsActiveRecording = false;
 
         try
@@ -438,12 +387,12 @@ public class DerivedPropertyChangeHandler : IWriteInterceptor, IPropertyLifecycl
             ownsActiveRecording = false;
 
             var dependencyUpdate = ReconcileDependencies(data, property, recordedDependencies, callerHoldsLock);
-            if (dependencyUpdate != DependencyUpdate.Changed || Volatile.Read(ref _writeGeneration) == generationBefore)
+            if (dependencyUpdate != DependencyUpdate.Changed)
             {
                 return result;
             }
 
-            // Concurrent write detected while dependencies changed. Stabilize.
+            // The dependency set changed or a recorded source was written after it was read. Stabilize.
             for (var iteration = 0; iteration < MaxStabilizationIterations; iteration++)
             {
                 StartRecordingTouchedProperties(property);

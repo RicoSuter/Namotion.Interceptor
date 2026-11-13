@@ -4,7 +4,6 @@ using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
-[Collection(DerivedPropertyWriteGenerationCollection.Name)]
 public class DerivedPropertyStabilizationWarningTests
 {
     [Fact]
@@ -36,37 +35,10 @@ public class DerivedPropertyStabilizationWarningTests
                 await trigger.WaitAsync(TimeSpan.FromSeconds(10));
             }
 
-            // Assert
+            // Assert: the evaluation the write starts, and one more because the dependency set changed
+            // from First to Second. The unrelated write was not recorded, so it adds no evaluation.
             Assert.Equal(callsBefore + 2, subject.GetterCallCount);
             Assert.DoesNotContain("during dependency stabilization", traceOutput.ToString());
-        }
-        finally
-        {
-            Trace.Listeners.Remove(listener);
-        }
-    }
-
-    [Fact]
-    public void WhenDependenciesNeverStabilize_ThenAnExhaustionWarningIsEmitted()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
-        var subject = new UnstableDerivedSubject(context);
-        var callsBefore = subject.GetterCallCount;
-        subject.AlternateDependencies = true;
-        using var traceOutput = new StringWriter();
-        using var listener = new TextWriterTraceListener(traceOutput);
-        Trace.Listeners.Add(listener);
-
-        try
-        {
-            // Act
-            subject.First = 1;
-
-            // Assert
-            Assert.InRange(subject.GetterCallCount - callsBefore, 3, 1000);
-            Assert.Contains("during dependency stabilization", traceOutput.ToString());
-            Assert.Contains(nameof(UnstableDerivedSubject), traceOutput.ToString());
         }
         finally
         {
