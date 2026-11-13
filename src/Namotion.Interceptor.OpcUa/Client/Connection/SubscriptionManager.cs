@@ -597,9 +597,10 @@ internal class SubscriptionManager : IAsyncDisposable
 
     /// <summary>
     /// Registers all successfully created monitored items with ReadAfterWriteManager.
-    /// Called after ApplyChangesAsync when we know the revised sampling intervals.
+    /// Called once the revised sampling intervals are known: after a subscription is created or recreated,
+    /// and after the health monitor healed some of its items.
     /// </summary>
-    private void RegisterPropertiesWithReadAfterWriteManager(Subscription subscription)
+    internal void RegisterPropertiesWithReadAfterWriteManager(Subscription subscription)
     {
         if (_readAfterWriteManager is null)
         {
