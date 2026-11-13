@@ -26,6 +26,22 @@ internal static class SubjectLifecycleAttachments
 
     internal static void ExitLifecycleDetach() => _lifecycleDetachDepth--;
 
+    /// <summary>
+    /// Suspends the derived recording of this thread while a lifecycle interceptor reconciles under its lock: a
+    /// write in a derived getter reconciles on the evaluating thread, and the reads of the reconciliation and its
+    /// handlers are not dependencies of that getter. A derived attach inside records its own reads. Returns the
+    /// value to pass to <see cref="ResumeDerivedRecording"/>.
+    /// </summary>
+    internal static bool SuspendDerivedRecording() => DerivedPropertyRecorder.TrySuspend();
+
+    internal static void ResumeDerivedRecording(bool isSuspended)
+    {
+        if (isSuspended)
+        {
+            DerivedPropertyRecorder.Resume();
+        }
+    }
+
     internal static void Add(IInterceptorSubject subject, LifecycleInterceptor interceptor)
     {
         var attachments = (Attachments)subject.Data.GetOrAdd((null, Key), static _ => new Attachments())!;

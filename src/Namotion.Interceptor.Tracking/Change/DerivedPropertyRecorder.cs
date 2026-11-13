@@ -43,29 +43,28 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
         PushFrame(property, isSuspended: false);
     }
 
-    /// <summary>Records nothing until disposed; a recording started inside records normally.</summary>
-    internal static SuspendedRecording Suspend()
+    /// <summary>
+    /// Records nothing on this thread until <see cref="Resume"/>; a recording started inside records normally.
+    /// Returns false, and suspends nothing, when no recording runs on this thread.
+    /// </summary>
+    internal static bool TrySuspend()
     {
         var recorder = _current;
         if (recorder is null || recorder._depth == 0)
         {
-            return default;
+            return false;
         }
 
         recorder.PushFrame(default, isSuspended: true);
-        return new SuspendedRecording(recorder);
+        return true;
     }
 
-    internal readonly ref struct SuspendedRecording(DerivedPropertyRecorder? recorder)
+    /// <summary>Ends the suspension of a <see cref="TrySuspend"/> that returned true.</summary>
+    internal static void Resume()
     {
-        public void Dispose()
-        {
-            if (recorder is not null)
-            {
-                recorder.FinishRecording();
-                recorder.ClearLastRecording();
-            }
-        }
+        var recorder = _current!;
+        recorder.FinishRecording();
+        recorder.ClearLastRecording();
     }
 
     private void PushFrame(in PropertyReference property, bool isSuspended)
@@ -80,7 +79,11 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
         frame.Property = property;
         frame.IsSuspended = isSuspended;
         frame.HasOwnWriteAfterRead = false;
-        frame.Buffer ??= _pool.Rent(8);
+        if (!isSuspended)
+        {
+            frame.Buffer ??= _pool.Rent(8);
+        }
+
         PropertyAccessObservation.ReadObserver = this;
     }
 
