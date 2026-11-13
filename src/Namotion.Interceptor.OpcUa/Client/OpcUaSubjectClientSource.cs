@@ -422,8 +422,18 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
         _subscriptionHealthMonitor.CheckAndHealSubscriptions(sessionManager.Subscriptions, cancellationToken);
 
-        subscriptionManager.EscalatePersistentlyFailedItems();
-        subscriptionManager.RegisterCreatedItemsWithReadAfterWriteManager();
+        // Under the structure lock, so an item whose subject is being detached is not escalated or
+        // registered after the detach removed it.
+        await _structureLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            subscriptionManager.EscalatePersistentlyFailedItems();
+            subscriptionManager.RegisterCreatedItemsWithReadAfterWriteManager();
+        }
+        finally
+        {
+            _structureLock.Release();
+        }
     }
 
     /// <summary>
@@ -448,11 +458,9 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         await _structureLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            // Also without items, so the stopped subscriptions are disposed.
             var monitoredItems = CreateMonitoredItemsForReconnection();
-            if (monitoredItems.Count > 0)
-            {
-                await sessionManager.CreateSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
-            }
+            await sessionManager.CreateSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
         }
         finally
         {

@@ -342,6 +342,83 @@ public class SubscriptionManagerDiagnosticsTests
     }
 
     [Fact]
+    public async Task WhenAnItemIsCreatedBeforeItsRevisedIntervalIsKnown_ThenALaterHealthCheckRegistersItForReadAfterWrite()
+    {
+        // Arrange
+        var configuration = CreateConfiguration();
+        configuration.DefaultSamplingInterval = 0;
+        await using var source = CreateClientSource(configuration: configuration);
+        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
+        await using var readAfterWriteManager = new ReadAfterWriteManager(
+            () => null, source, configuration, new ReadAfterWriteMetrics(), _ => { }, NullLogger.Instance);
+        await using var manager = CreateManager(
+            source, propertyWriter, configuration, new ConcurrentQueue<Exception>(), readAfterWriteManager: readAfterWriteManager);
+
+        var monitoredItem = CreateMonitoredItem(created: false, error: StatusCodes.BadTimeout);
+        var request = CreateRequest(source, nameof(TestRoot.Name));
+        await manager.CreateBatchedSubscriptionsAsync([request], CreateSession(_ => monitoredItem), CancellationToken.None);
+
+        var item = Mock.Get(monitoredItem);
+        item.SetupGet(i => i.Created).Returns(true);
+        item.SetupGet(i => i.Error).Returns(ServiceResult.Good);
+        item.SetupGet(i => i.CurrentSamplingInterval).Returns(TimeSpan.Zero);
+        manager.RegisterCreatedItemsWithReadAfterWriteManager();
+        item.SetupGet(i => i.CurrentSamplingInterval).Returns(TimeSpan.FromMinutes(1));
+
+        // Act
+        manager.RegisterCreatedItemsWithReadAfterWriteManager();
+
+        // Assert
+        readAfterWriteManager.OnPropertyWritten(request.NodeId);
+        Assert.Equal(1, readAfterWriteManager.PendingReadCount);
+    }
+
+    [Fact]
+    public async Task WhenABatchFailsToBeApplied_ThenItsSubscriptionIsDisposed()
+    {
+        // Arrange
+        var configuration = CreateConfiguration();
+        configuration.OperationTimeout = TimeSpan.FromMilliseconds(100);
+        await using var source = CreateClientSource(configuration: configuration);
+        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
+        await using var manager = CreateManager(source, propertyWriter, configuration, new ConcurrentQueue<Exception>());
+
+        var subscription = CreateSubscription(created: false);
+        var session = CreateSession(createSubscription: () => subscription);
+
+        // Act
+        await Assert.ThrowsAsync<TimeoutException>(() => manager.CreateBatchedSubscriptionsAsync(
+            [CreateRequest(source, nameof(TestRoot.Name))], session, CancellationToken.None));
+
+        // Assert
+        Mock.Get(subscription).Verify(s => s.DisposeAsync(), Times.Once);
+    }
+
+    [Fact]
+    public async Task WhenSubscriptionsAreRecreatedWithoutItems_ThenThePreviousSubscriptionsAreDisposed()
+    {
+        // Arrange
+        var configuration = CreateConfiguration();
+        await using var source = CreateClientSource(configuration: configuration);
+        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
+        await using var manager = CreateManager(source, propertyWriter, configuration, new ConcurrentQueue<Exception>());
+
+        var subscription = CreateSubscription();
+        var session = CreateSession(createSubscription: () => subscription);
+        await manager.CreateBatchedSubscriptionsAsync(
+            [CreateRequest(source, nameof(TestRoot.Name))], session, CancellationToken.None);
+
+        // Act
+        await manager.CreateBatchedSubscriptionsAsync([], session, CancellationToken.None);
+
+        // Assert
+        Mock.Get(subscription).Verify(s => s.DisposeAsync(), Times.Once);
+        Assert.Equal(
+            (Subscriptions: 0, MonitoredItems: 0, NeedsRecreate: false),
+            (Subscriptions: manager.SubscriptionCount, MonitoredItems: manager.MonitoredItemCount, manager.NeedsRecreate));
+    }
+
+    [Fact]
     public async Task WhenSubscriptionsAreDisposed_ThenTheirDisposalsRunConcurrently()
     {
         // Arrange

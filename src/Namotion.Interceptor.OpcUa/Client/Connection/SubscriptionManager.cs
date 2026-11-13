@@ -154,6 +154,7 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
         var previousSubscriptions = _subscriptions.Keys.ToArray();
         ClearTrackedCollections();
         await DisposeSubscriptionsAsync(previousSubscriptions, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
 
         _healAttempts.Clear();
         // Re-attempt every owned property as a real subscription; failed nodes are re-added to
@@ -200,6 +201,11 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
                 }
 
                 await WaitUntilAppliedAsync(subscription, cancellationToken).ConfigureAwait(false);
+
+                FilterOutFailedMonitoredItems(subscription);
+
+                // Register properties with ReadAfterWriteManager now that we know revised sampling intervals
+                RegisterPropertiesWithReadAfterWriteManager(subscription);
             }
             catch
             {
@@ -211,11 +217,6 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
                 await DisposeSubscriptionsAsync([subscription], cancellationToken).ConfigureAwait(false);
                 throw;
             }
-
-            FilterOutFailedMonitoredItems(subscription);
-
-            // Register properties with ReadAfterWriteManager now that we know revised sampling intervals
-            RegisterPropertiesWithReadAfterWriteManager(subscription);
 
             // Add to collection AFTER initialization (temporal separation - health monitor never sees partial state)
             TryAddSubscription(subscription);
@@ -698,12 +699,16 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
 
         foreach (var item in subscription.MonitoredItems.Items)
         {
+            // The engine sets the revised interval after the item reports itself created, so an item
+            // without one yet is left unmarked for the next call instead of being skipped for good.
+            var revisedInterval = item.CurrentSamplingInterval;
             if (item.Created &&
+                revisedInterval > TimeSpan.Zero &&
                 _monitoredItems.TryGetValue(item.ClientHandle, out var state) &&
                 state.TryMarkRegisteredWithReadAfterWrite())
             {
                 var requestedInterval = GetRequestedSamplingInterval(state.Property);
-                _readAfterWriteManager.RegisterProperty(state.NodeId, state.Property, requestedInterval, item.CurrentSamplingInterval);
+                _readAfterWriteManager.RegisterProperty(state.NodeId, state.Property, requestedInterval, revisedInterval);
             }
         }
     }

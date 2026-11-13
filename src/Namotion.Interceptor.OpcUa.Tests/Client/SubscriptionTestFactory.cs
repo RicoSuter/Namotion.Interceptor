@@ -84,14 +84,16 @@ internal static class SubscriptionTestFactory
     /// </summary>
     /// <param name="createItem">Creates the item for added options, or <c>null</c> for an item the server created.</param>
     /// <param name="subscriptionsCreated">Whether the server creates the subscriptions.</param>
+    /// <param name="createSubscription">Creates each subscription instead, for a test that inspects it.</param>
     internal static ISession CreateSession(
         Func<MonitoredItemOptions, IMonitoredItem>? createItem = null,
-        bool subscriptionsCreated = true)
+        bool subscriptionsCreated = true,
+        Func<ISubscription>? createSubscription = null)
     {
         var subscriptionManager = new Mock<ISubscriptionManager>();
         subscriptionManager
             .Setup(m => m.Add(It.IsAny<ISubscriptionNotificationHandler>(), It.IsAny<IOptionsMonitor<SubscriptionOptions>>()))
-            .Returns(() => CreateSubscription(createItem: createItem, created: subscriptionsCreated));
+            .Returns(() => createSubscription?.Invoke() ?? CreateSubscription(createItem: createItem, created: subscriptionsCreated));
 
         var engine = subscriptionManager.Object;
         var session = new Mock<ISession>();
