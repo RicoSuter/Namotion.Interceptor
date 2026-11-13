@@ -270,7 +270,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
                 BufferTime = BufferTimeMs.HasValue ? TimeSpan.FromMilliseconds(BufferTimeMs.Value) : defaults.BufferTime,
             };
 
-            // Separate from the client store: the server cleans its own store on start.
+            // Separate from the client store, so trusting a certificate for one does not trust it for the other.
             if (OpcUaCertificateStoreLocation.Resolve(this, "Server") is { } certificateStorePath)
             {
                 configuration.CertificateStoreBasePath = certificateStorePath;
