@@ -40,7 +40,7 @@ public static class DerivedPropertyChangeHandlerExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void RecalculateDerivedProperty(this PropertyReference property)
     {
-        DerivedPropertyChangeHandler.RequestRecalculation(property, SubjectChangeContext.Current.ResolveChangedTimestamp());
+        DerivedPropertyOwnership.RequestRecalculation(property, SubjectChangeContext.Current.ResolveChangedTimestamp());
     }
 
     /// <summary>
