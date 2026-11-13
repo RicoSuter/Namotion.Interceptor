@@ -312,28 +312,18 @@ public class DerivedPropertyOwnershipTests
                 changes.Add(change);
             }
         });
-        using var traceOutput = new StringWriter();
-        using var listener = new TextWriterTraceListener(traceOutput);
-        Trace.Listeners.Add(listener);
+        using var traceCapture = new TraceCapture();
 
-        try
-        {
-            // Act
-            root.Machine = machine;
+        // Act
+        root.Machine = machine;
 
-            // Assert: the attach commits its last evaluation (99), which is not published, and the recalculation
-            // requested after the attach publishes the value of the last write (100).
-            Assert.True(areWritesCompleted);
-            var change = Assert.Single(changes);
-            Assert.Equal((attachIterationLimit - 1, attachIterationLimit), (change.GetOldValue<int>(), change.GetNewValue<int>()));
-            Assert.Equal(attachIterationLimit, machine.Worker.Result);
-            listener.Flush();
-            Assert.Contains("exhausted while attaching", traceOutput.ToString());
-        }
-        finally
-        {
-            Trace.Listeners.Remove(listener);
-        }
+        // Assert: the attach commits its last evaluation (99), which is not published, and the recalculation
+        // requested after the attach publishes the value of the last write (100).
+        Assert.True(areWritesCompleted);
+        var change = Assert.Single(changes);
+        Assert.Equal((attachIterationLimit - 1, attachIterationLimit), (change.GetOldValue<int>(), change.GetNewValue<int>()));
+        Assert.Equal(attachIterationLimit, machine.Worker.Result);
+        Assert.Contains("exhausted while attaching", traceCapture.Text);
     }
 
     [Fact]
