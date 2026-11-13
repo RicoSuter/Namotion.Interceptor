@@ -303,11 +303,13 @@ public class OpcUaClientConfiguration
     public TimeSpan ReconnectInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// Gets or sets whether the client requires a signed or encrypted endpoint. When true, connecting fails if the
-    /// server offers none. When false, an unsecured endpoint is preferred and a secured one is used when the server
-    /// offers nothing else. Default is false.
+    /// Gets or sets the minimum security mode of the endpoint the client connects to. With
+    /// <see cref="MessageSecurityMode.None"/>, the default, an unsecured endpoint is preferred and a secured one is used
+    /// when the server offers nothing else. With <see cref="MessageSecurityMode.Sign"/> only a signed or encrypted
+    /// endpoint is used, and with <see cref="MessageSecurityMode.SignAndEncrypt"/> only an encrypted one; connecting
+    /// fails when the server offers none. Among secured endpoints the most secure one is used.
     /// </summary>
-    public bool RequireSecurity { get; set; }
+    public MessageSecurityMode MinimumSecurityMode { get; set; } = MessageSecurityMode.None;
 
     /// <summary>
     /// Gets or sets whether server certificates that are not in the trusted store are accepted. The server
@@ -564,6 +566,13 @@ public class OpcUaClientConfiguration
             throw new ArgumentException(
                 $"ReadAfterWriteBuffer must be non-negative, got: {ReadAfterWriteBuffer}",
                 nameof(ReadAfterWriteBuffer));
+        }
+
+        if (MinimumSecurityMode is not (MessageSecurityMode.None or MessageSecurityMode.Sign or MessageSecurityMode.SignAndEncrypt))
+        {
+            throw new ArgumentException(
+                $"MinimumSecurityMode must be None, Sign or SignAndEncrypt, got: {MinimumSecurityMode}",
+                nameof(MinimumSecurityMode));
         }
 
         if (ApplicationCertificateLifetimeInMonths < 1)

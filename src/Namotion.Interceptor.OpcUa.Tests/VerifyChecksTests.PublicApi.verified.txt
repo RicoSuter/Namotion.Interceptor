@@ -105,6 +105,7 @@ namespace Namotion.Interceptor.OpcUa.Client
         public System.TimeSpan MaxReconnectDuration { get; set; }
         public uint MaxReferencesPerNode { get; set; }
         public int MinPublishRequestCount { get; set; }
+        public Opc.Ua.MessageSecurityMode MinimumSecurityMode { get; set; }
         public System.TimeSpan OperationTimeout { get; set; }
         public int PollingBatchSize { get; set; }
         public System.TimeSpan PollingCircuitBreakerCooldown { get; set; }
@@ -114,7 +115,6 @@ namespace Namotion.Interceptor.OpcUa.Client
         public System.TimeSpan ReadAfterWriteBuffer { get; set; }
         public System.TimeSpan ReconnectHandlerTimeout { get; set; }
         public System.TimeSpan ReconnectInterval { get; set; }
-        public bool RequireSecurity { get; set; }
         public Opc.Ua.ITelemetryContext ResolvedTelemetryContext { get; }
         public System.TimeSpan? RetryTime { get; set; }
         public string[]? RootPath { get; set; }

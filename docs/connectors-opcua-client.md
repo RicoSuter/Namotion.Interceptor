@@ -136,7 +136,7 @@ Beyond the settings shown above, the following properties are available on `OpcU
 | Property | Default | Description |
 |----------|---------|-------------|
 | `ApplicationName` | "Namotion.Interceptor.Client" | Application name for identification and certificate generation |
-| `RequireSecurity` | false | Require a signed or encrypted endpoint (see [Transport Security](#transport-security)) |
+| `MinimumSecurityMode` | None | Minimum security mode of the endpoint: `None`, `Sign` or `SignAndEncrypt` (see [Transport Security](#transport-security)) |
 | `AutoAcceptUntrustedCertificates` | false | Accept server certificates that are not in the trusted store |
 | `AutoCreateApplicationCertificate` | true | Create a self-signed client certificate for secured connections, and replace it once it has expired |
 | `ApplicationUri` | null | Application URI the client certificate carries (derived from host and application name when null) |
@@ -191,14 +191,14 @@ Beyond the settings shown above, the following properties are available on `OpcU
 var config = new OpcUaClientConfiguration
 {
     ServerUrl = "opc.tcp://plc.factory.com:4840",
-    RequireSecurity = true, // connect only to a signed or encrypted endpoint
+    MinimumSecurityMode = MessageSecurityMode.SignAndEncrypt, // connect only to an encrypted endpoint
     // ... other settings
 };
 ```
 
 #### Endpoint Selection
 
-With `RequireSecurity = true` the client connects only to a signed or encrypted endpoint whose security policy it supports, and fails if the server offers none. With `false`, the default, it prefers an unsecured endpoint; when the server offers none, it uses the best secured endpoint whose security policy it supports. With the default RSA certificate the client supports Basic256Sha256, Aes128_Sha256_RsaOaep and Aes256_Sha256_RsaPss. When a secured endpoint is needed and every secured endpoint the server offers uses a policy the client does not support, connecting fails with a message that lists the offered and the supported policies.
+With `MinimumSecurityMode = None`, the default, the client prefers an unsecured endpoint; when the server offers none, it uses the best secured endpoint whose security policy it supports. With `Sign` it connects only to a signed or encrypted endpoint, and with `SignAndEncrypt` only to an encrypted one, always the best one whose security policy it supports, and fails if the server offers none. With the default RSA certificate the client supports Basic256Sha256, Aes128_Sha256_RsaOaep and Aes256_Sha256_RsaPss. When no endpoint qualifies, connecting fails with a message that lists the security modes and policies the server offers and the policies the client supports.
 
 #### Client Certificate
 
@@ -228,7 +228,7 @@ A failed connection attempt is reported in `Diagnostics.LastError` (see [Diagnos
 
 #### Upgrading
 
-`UseSecurity` was renamed to `RequireSecurity`, and `true` now fails when the server offers no usable secured endpoint instead of connecting without security. Server certificates are now validated by default, which affects username and certificate logins over unsecured connections too: trust the server as above, or set `AutoAcceptUntrustedCertificates = true` for the previous behavior. The server of this library now keeps its certificate across restarts, see [Server Configuration](connectors-opcua-server.md#configuration).
+`UseSecurity` was replaced by `MinimumSecurityMode`; `Sign` and `SignAndEncrypt` fail when the server offers no usable endpoint with that security instead of connecting without security. Server certificates are now validated by default, which affects username and certificate logins over unsecured connections too: trust the server as above, or set `AutoAcceptUntrustedCertificates = true` for the previous behavior. The server of this library now keeps its certificate across restarts, see [Server Configuration](connectors-opcua-server.md#configuration).
 
 ### Authentication
 

@@ -99,7 +99,7 @@ public class OpcUaClientSecurityConfigurationTests
         var configuration = new OpcUaClientConfiguration { ServerUrl = "opc.tcp://localhost:4840" };
 
         // Assert
-        Assert.False(configuration.RequireSecurity);
+        Assert.Equal(MessageSecurityMode.None, configuration.MinimumSecurityMode);
         Assert.True(configuration.AutoCreateApplicationCertificate);
         Assert.Equal((ushort)12, configuration.ApplicationCertificateLifetimeInMonths);
         Assert.Null(configuration.ApplicationUri);
@@ -146,34 +146,107 @@ public class OpcUaClientSecurityConfigurationTests
     }
 
     [Fact]
-    public void WhenSecurityIsRequiredAndOnlyUnsecuredEndpointsExist_ThenSelectionFails()
+    public void WhenTheMinimumSecurityModeIsInvalid_ThenValidationFails()
+    {
+        // Arrange
+        var configuration = ClientSourceTestFactory.CreateConfiguration();
+        configuration.MinimumSecurityMode = MessageSecurityMode.Invalid;
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Equal(nameof(OpcUaClientConfiguration.MinimumSecurityMode), exception.ParamName);
+    }
+
+    [Theory]
+    [InlineData(MessageSecurityMode.Sign)]
+    [InlineData(MessageSecurityMode.SignAndEncrypt)]
+    public void WhenSecurityIsRequiredAndOnlyUnsecuredEndpointsExist_ThenSelectionFails(MessageSecurityMode minimumSecurityMode)
     {
         // Arrange
         var endpoints = new EndpointDescriptionCollection { CreateEndpoint(MessageSecurityMode.None, SecurityPolicies.None) };
 
         // Act & Assert
         var error = Assert.Throws<InvalidOperationException>(() => SessionManager.SelectEndpoint(
-            CreateApplicationConfiguration(), ServerUri, endpoints, requireSecurity: true, NullTelemetryContext.Instance));
-        Assert.Contains("offers no signed or encrypted endpoint", error.Message);
-        Assert.Contains(nameof(OpcUaClientConfiguration.RequireSecurity), error.Message);
+            CreateApplicationConfiguration(), ServerUri, endpoints, minimumSecurityMode, NullTelemetryContext.Instance));
+        Assert.Contains($"no endpoint with the security mode {minimumSecurityMode} or stronger", error.Message);
+        Assert.Contains(nameof(OpcUaClientConfiguration.MinimumSecurityMode), error.Message);
+        Assert.Contains($"{SecurityPolicies.None} (None)", error.Message);
     }
 
-    [Fact]
-    public void WhenSecurityIsRequiredAndASecuredEndpointExists_ThenItIsSelected()
+    [Theory]
+    [InlineData(MessageSecurityMode.Sign)]
+    [InlineData(MessageSecurityMode.SignAndEncrypt)]
+    public void WhenSecurityIsRequiredAndAnEncryptedEndpointExists_ThenItIsSelected(MessageSecurityMode minimumSecurityMode)
     {
         // Arrange
         var endpoints = new EndpointDescriptionCollection
         {
             CreateEndpoint(MessageSecurityMode.None, SecurityPolicies.None),
+            CreateEndpoint(MessageSecurityMode.Sign, SecurityPolicies.Basic256Sha256),
             CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256)
         };
 
         // Act
         var endpoint = SessionManager.SelectEndpoint(
-            CreateApplicationConfiguration(), ServerUri, endpoints, requireSecurity: true, NullTelemetryContext.Instance);
+            CreateApplicationConfiguration(), ServerUri, endpoints, minimumSecurityMode, NullTelemetryContext.Instance);
 
         // Assert
         Assert.Equal(MessageSecurityMode.SignAndEncrypt, endpoint.SecurityMode);
+    }
+
+    [Fact]
+    public void WhenSigningIsRequiredAndOnlyASignedEndpointExists_ThenItIsSelected()
+    {
+        // Arrange
+        var endpoints = new EndpointDescriptionCollection
+        {
+            CreateEndpoint(MessageSecurityMode.None, SecurityPolicies.None),
+            CreateEndpoint(MessageSecurityMode.Sign, SecurityPolicies.Basic256Sha256)
+        };
+
+        // Act
+        var endpoint = SessionManager.SelectEndpoint(
+            CreateApplicationConfiguration(), ServerUri, endpoints, MessageSecurityMode.Sign, NullTelemetryContext.Instance);
+
+        // Assert
+        Assert.Equal(MessageSecurityMode.Sign, endpoint.SecurityMode);
+    }
+
+    [Fact]
+    public void WhenEncryptionIsRequiredAndOnlyASignedEndpointExists_ThenSelectionFails()
+    {
+        // Arrange
+        var endpoints = new EndpointDescriptionCollection
+        {
+            CreateEndpoint(MessageSecurityMode.None, SecurityPolicies.None),
+            CreateEndpoint(MessageSecurityMode.Sign, SecurityPolicies.Basic256Sha256)
+        };
+
+        // Act & Assert
+        var error = Assert.Throws<InvalidOperationException>(() => SessionManager.SelectEndpoint(
+            CreateApplicationConfiguration(), ServerUri, endpoints, MessageSecurityMode.SignAndEncrypt, NullTelemetryContext.Instance));
+        Assert.Contains("no endpoint with the security mode SignAndEncrypt or stronger", error.Message);
+        Assert.Contains(nameof(OpcUaClientConfiguration.MinimumSecurityMode), error.Message);
+        Assert.Contains($"{SecurityPolicies.Basic256Sha256} (Sign)", error.Message);
+    }
+
+    [Fact]
+    public void WhenEncryptionIsRequiredAndOnlyTheSignedEndpointHasASupportedPolicy_ThenSelectionFails()
+    {
+        // Arrange
+        var endpoints = new EndpointDescriptionCollection
+        {
+            CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.ECC_nistP256),
+            CreateEndpoint(MessageSecurityMode.Sign, SecurityPolicies.Basic256Sha256)
+        };
+
+        // Act & Assert
+        var error = Assert.Throws<InvalidOperationException>(() => SessionManager.SelectEndpoint(
+            CreateApplicationConfiguration(), ServerUri, endpoints, MessageSecurityMode.SignAndEncrypt, NullTelemetryContext.Instance));
+        Assert.Contains("with a security policy this client supports", error.Message);
+        Assert.Contains(nameof(OpcUaClientConfiguration.MinimumSecurityMode), error.Message);
+        Assert.Contains($"{SecurityPolicies.ECC_nistP256} (SignAndEncrypt)", error.Message);
+        Assert.Contains($"{SecurityPolicies.Basic256Sha256} (Sign)", error.Message);
     }
 
     [Fact]
@@ -188,8 +261,8 @@ public class OpcUaClientSecurityConfigurationTests
 
         // Act & Assert
         var error = Assert.Throws<InvalidOperationException>(() => SessionManager.SelectEndpoint(
-            CreateApplicationConfiguration(), ServerUri, endpoints, requireSecurity: true, NullTelemetryContext.Instance));
-        Assert.Contains("security policies this client does not support", error.Message);
+            CreateApplicationConfiguration(), ServerUri, endpoints, MessageSecurityMode.Sign, NullTelemetryContext.Instance));
+        Assert.Contains("with a security policy this client supports", error.Message);
         Assert.Contains(SecurityPolicies.ECC_nistP256, error.Message);
         Assert.Contains(SecurityPolicies.Basic256Sha256, error.Message);
     }
@@ -206,7 +279,7 @@ public class OpcUaClientSecurityConfigurationTests
 
         // Act
         var endpoint = SessionManager.SelectEndpoint(
-            CreateApplicationConfiguration(), ServerUri, endpoints, requireSecurity: false, NullTelemetryContext.Instance);
+            CreateApplicationConfiguration(), ServerUri, endpoints, MessageSecurityMode.None, NullTelemetryContext.Instance);
 
         // Assert
         Assert.Equal(MessageSecurityMode.None, endpoint.SecurityMode);
@@ -220,7 +293,7 @@ public class OpcUaClientSecurityConfigurationTests
 
         // Act
         var endpoint = SessionManager.SelectEndpoint(
-            CreateApplicationConfiguration(), ServerUri, endpoints, requireSecurity: false, NullTelemetryContext.Instance);
+            CreateApplicationConfiguration(), ServerUri, endpoints, MessageSecurityMode.None, NullTelemetryContext.Instance);
 
         // Assert
         Assert.Equal(MessageSecurityMode.SignAndEncrypt, endpoint.SecurityMode);
@@ -238,7 +311,7 @@ public class OpcUaClientSecurityConfigurationTests
 
         // Act
         var endpoint = SessionManager.SelectEndpoint(
-            CreateApplicationConfiguration(), ServerUri, endpoints, requireSecurity: false, NullTelemetryContext.Instance);
+            CreateApplicationConfiguration(), ServerUri, endpoints, MessageSecurityMode.None, NullTelemetryContext.Instance);
 
         // Assert
         Assert.Equal(SecurityPolicies.Basic256Sha256, endpoint.SecurityPolicyUri);
@@ -252,7 +325,7 @@ public class OpcUaClientSecurityConfigurationTests
 
         // Act & Assert
         var error = Assert.Throws<InvalidOperationException>(() => SessionManager.SelectEndpoint(
-            CreateApplicationConfiguration(), ServerUri, endpoints, requireSecurity: false, NullTelemetryContext.Instance));
+            CreateApplicationConfiguration(), ServerUri, endpoints, MessageSecurityMode.None, NullTelemetryContext.Instance));
         Assert.Contains(SecurityPolicies.ECC_nistP256, error.Message);
         Assert.Contains(SecurityPolicies.Basic256Sha256, error.Message);
     }
@@ -268,7 +341,7 @@ public class OpcUaClientSecurityConfigurationTests
 
         // Act & Assert
         var error = Assert.Throws<InvalidOperationException>(() => SessionManager.SelectEndpoint(
-            CreateApplicationConfiguration(), ServerUri, endpoints, requireSecurity: false, NullTelemetryContext.Instance));
+            CreateApplicationConfiguration(), ServerUri, endpoints, MessageSecurityMode.None, NullTelemetryContext.Instance));
         Assert.Contains("'opc.tcp' scheme", error.Message);
     }
 

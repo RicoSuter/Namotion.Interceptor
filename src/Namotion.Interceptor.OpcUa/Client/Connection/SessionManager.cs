@@ -276,7 +276,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             application.ApplicationConfiguration,
             serverUri,
             endpoints,
-            configuration.RequireSecurity,
+            configuration.MinimumSecurityMode,
             configuration.ResolvedTelemetryContext);
 
         // Discovery needs no client certificate, and an unsecured endpoint never does.
@@ -684,55 +684,63 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Selects the endpoint to connect to. With <paramref name="requireSecurity"/> only a signed or encrypted
-    /// endpoint is accepted; otherwise an unsecured one is preferred and a secured one used when it is all the
-    /// server offers. A secured endpoint is only selected with a security policy the client supports.
+    /// Selects the endpoint to connect to among those with at least <paramref name="minimumSecurityMode"/>. With
+    /// <see cref="MessageSecurityMode.None"/> an unsecured endpoint is preferred; otherwise, or when the server offers
+    /// none, the most secure endpoint with a security policy the client supports is selected.
     /// </summary>
-    /// <exception cref="InvalidOperationException">No endpoint matches the scheme, security is required and no
-    /// secured endpoint exists, or the secured endpoints use only security policies the client does not support.</exception>
+    /// <exception cref="InvalidOperationException">No endpoint matches the scheme, none has the minimum security mode,
+    /// or those that have it use only security policies the client does not support.</exception>
     internal static EndpointDescription SelectEndpoint(
         ApplicationConfiguration applicationConfiguration,
         Uri serverUri,
         EndpointDescriptionCollection endpoints,
-        bool requireSecurity,
+        MessageSecurityMode minimumSecurityMode,
         ITelemetryContext telemetryContext)
     {
-        var endpoint = CoreClientUtils.SelectEndpoint(applicationConfiguration, serverUri, endpoints, requireSecurity, telemetryContext)
-            ?? throw new InvalidOperationException(
-                $"The OPC UA server at '{serverUri}' offers no endpoint for the '{serverUri.Scheme}' scheme.");
+        var schemeEndpoints = endpoints
+            .Where(endpoint => endpoint.EndpointUrl?.StartsWith(serverUri.Scheme, StringComparison.Ordinal) == true)
+            .ToArray();
 
-        // When nothing matches the requested security, the SDK falls back to the first endpoint of the scheme,
-        // whatever its mode and policy. Without an unsecured endpoint, select among the secured ones by the
-        // client's supported policies instead.
-        if (!requireSecurity && endpoint.SecurityMode != MessageSecurityMode.None)
+        if (schemeEndpoints.Length == 0)
         {
-            var securedEndpoint = CoreClientUtils.SelectEndpoint(applicationConfiguration, serverUri, endpoints, true, telemetryContext);
-            if (securedEndpoint is not null && securedEndpoint.SecurityMode != MessageSecurityMode.None)
-            {
-                endpoint = securedEndpoint;
-            }
+            throw new InvalidOperationException(
+                $"The OPC UA server at '{serverUri}' offers no endpoint for the '{serverUri.Scheme}' scheme.");
+        }
+
+        // The SDK falls back to the first endpoint whatever its mode and policy, so weaker ones are filtered out first.
+        var candidates = new EndpointDescriptionCollection(
+            schemeEndpoints.Where(endpoint => endpoint.SecurityMode >= minimumSecurityMode));
+
+        if (candidates.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"The OPC UA server at '{serverUri}' offers no endpoint with the security mode {minimumSecurityMode} or stronger, " +
+                $"which {nameof(OpcUaClientConfiguration.MinimumSecurityMode)} requires. " +
+                $"The server offers {DescribeEndpoints(schemeEndpoints)}.");
+        }
+
+        if (minimumSecurityMode == MessageSecurityMode.None &&
+            candidates.FirstOrDefault(endpoint => endpoint.SecurityMode == MessageSecurityMode.None) is { } unsecuredEndpoint)
+        {
+            return unsecuredEndpoint;
         }
 
         var supportedPolicies = applicationConfiguration.SecurityConfiguration.SupportedSecurityPolicies;
-        if (endpoint.SecurityMode == MessageSecurityMode.None)
+        var securedEndpoint = CoreClientUtils.SelectEndpoint(applicationConfiguration, serverUri, candidates, true, telemetryContext);
+        if (securedEndpoint is null || !supportedPolicies.Contains(securedEndpoint.SecurityPolicyUri))
         {
-            if (requireSecurity)
-            {
-                var offeredPolicies = GetOfferedSecurityPolicies(serverUri, endpoints);
-                throw new InvalidOperationException(offeredPolicies.Length == 0
-                    ? $"The OPC UA server at '{serverUri}' offers no signed or encrypted endpoint, and " +
-                      $"{nameof(OpcUaClientConfiguration.RequireSecurity)} is set."
-                    : CreateUnsupportedPoliciesMessage(serverUri, offeredPolicies, supportedPolicies) +
-                      $" {nameof(OpcUaClientConfiguration.RequireSecurity)} is set, so no unsecured endpoint is used.");
-            }
-        }
-        else if (!supportedPolicies.Contains(endpoint.SecurityPolicyUri))
-        {
+            var requirement = minimumSecurityMode == MessageSecurityMode.None
+                ? "no unsecured endpoint and no secured endpoint"
+                : $"no endpoint with the security mode {minimumSecurityMode} or stronger, which " +
+                  $"{nameof(OpcUaClientConfiguration.MinimumSecurityMode)} requires,";
+
             throw new InvalidOperationException(
-                CreateUnsupportedPoliciesMessage(serverUri, GetOfferedSecurityPolicies(serverUri, endpoints), supportedPolicies));
+                $"The OPC UA server at '{serverUri}' offers {requirement} with a security policy this client supports. " +
+                $"The server offers {DescribeEndpoints(schemeEndpoints)}; the client supports " +
+                $"{string.Join(", ", supportedPolicies.Where(policy => policy != SecurityPolicies.None))}.");
         }
 
-        return endpoint;
+        return securedEndpoint;
     }
 
     /// <summary>
@@ -803,18 +811,9 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         }
     }
 
-    private static string[] GetOfferedSecurityPolicies(Uri serverUri, EndpointDescriptionCollection endpoints) => endpoints
-        .Where(endpoint =>
-            endpoint.SecurityMode != MessageSecurityMode.None &&
-            endpoint.EndpointUrl?.StartsWith(serverUri.Scheme, StringComparison.Ordinal) == true)
-        .Select(endpoint => endpoint.SecurityPolicyUri)
-        .Distinct(StringComparer.Ordinal)
-        .ToArray();
-
-    private static string CreateUnsupportedPoliciesMessage(Uri serverUri, string[] offeredPolicies, StringCollection supportedPolicies) =>
-        $"The signed or encrypted endpoints of the OPC UA server at '{serverUri}' use only security policies this client " +
-        $"does not support. The server offers {string.Join(", ", offeredPolicies)}; the client supports " +
-        $"{string.Join(", ", supportedPolicies.Where(policy => policy != SecurityPolicies.None))}.";
+    private static string DescribeEndpoints(IEnumerable<EndpointDescription> endpoints) => string.Join(", ", endpoints
+        .Select(endpoint => $"{endpoint.SecurityPolicyUri} ({endpoint.SecurityMode})")
+        .Distinct(StringComparer.Ordinal));
 
     // A directory store keeps its certificates in a certs subfolder; other store types are named by their path.
     private static string GetCertificateFolder(string? storeType, string? storePath) =>

@@ -1,6 +1,7 @@
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Testing;
+using Opc.Ua;
 using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
@@ -342,7 +343,7 @@ public class OpcUaReconnectionTests
                 HealthCheckSuppressedConfig(config);
 
                 // The server only transfers an anonymous user's subscriptions over a signed channel.
-                config.RequireSecurity = true;
+                config.MinimumSecurityMode = MessageSecurityMode.Sign;
 
                 // This test is about transfers, not trust.
                 config.AutoAcceptUntrustedCertificates = true;
