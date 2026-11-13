@@ -628,6 +628,11 @@ public partial class FluentStorageContainer :
         await WriteAsync(connection, entry.Path, content, cancellationToken);
 
         entry.Hash = StorageHash.Compute(content);
+        if (entry.Subject is IConfigurable && StoragePath.IsJson(entry.Path))
+        {
+            entry.AppliedConfiguration = Encoding.UTF8.GetString(content);
+        }
+
         try
         {
             entry.Version = await connection.Reconciler.GetVersionAsync(entry.Path, cancellationToken);
