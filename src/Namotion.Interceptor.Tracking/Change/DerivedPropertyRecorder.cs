@@ -26,6 +26,7 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
         public bool IsSuspended;
         public RecordedDependency[]? Buffer;
         public int Count;
+        public bool HasOwnWriteAfterRead;
     }
 
     internal static DerivedPropertyRecorder Current => _current ??= new DerivedPropertyRecorder();
@@ -78,6 +79,7 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
         frame.Count = 0;
         frame.Property = property;
         frame.IsSuspended = isSuspended;
+        frame.HasOwnWriteAfterRead = false;
         frame.Buffer ??= _pool.Rent(8);
         PropertyAccessObservation.ReadObserver = this;
     }
@@ -122,8 +124,9 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
     /// <summary>
     /// Called after a write on this thread moved a property's version to <paramref name="newVersion"/>. A
     /// recording of this thread that read the property at the version just before takes the new version, so the
-    /// thread's own write does not fail the version check. A write of another thread in between moved the version
-    /// further: that recording keeps its version and still fails the check.
+    /// thread's own write does not fail the version check, and is marked (<see cref="LastRecordingHasOwnWriteAfterRead"/>):
+    /// its value may stem from before the write. A write of another thread in between moved the version further:
+    /// that recording keeps its version and still fails the check.
     /// </summary>
     internal void OnOwnWrite(in PropertyReference property, long newVersion)
     {
@@ -147,6 +150,7 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
                 if (buffer[i].Version == newVersion - 1)
                 {
                     buffer[i] = buffer[i] with { Version = newVersion };
+                    frame.HasOwnWriteAfterRead = true;
                 }
 
                 return;
@@ -172,6 +176,12 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
     /// </summary>
     internal ReadOnlySpan<RecordedDependency> LastRecording => new(_frames[_depth].Buffer, 0, _frames[_depth].Count);
 
+    /// <summary>
+    /// A write on this thread moved a property that the recording finished last had read before, without a write of
+    /// another thread in between; valid like <see cref="LastRecording"/>.
+    /// </summary>
+    internal bool LastRecordingHasOwnWriteAfterRead => _frames[_depth].HasOwnWriteAfterRead;
+
     public void ClearLastRecording()
     {
         // No recording finished at this depth yet (a failure before the first recording on this thread).
@@ -189,5 +199,6 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
 
         frame.Property = default;
         frame.IsSuspended = false;
+        frame.HasOwnWriteAfterRead = false;
     }
 }
