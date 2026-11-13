@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
@@ -226,6 +227,9 @@ public class RegisteredSubjectProperty
     {
         get
         {
+            // The children change with a write of this property, and are cleared when its subject detaches.
+            SubjectStructure.RecordPropertyRead(Reference);
+            SubjectStructure.RecordRead(Parent.Subject);
             lock (_children)
             {
                 if (_childrenCache.IsDefault)

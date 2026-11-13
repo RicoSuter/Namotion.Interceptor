@@ -2,6 +2,7 @@
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 
@@ -64,6 +65,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubject? TryGetRegisteredSubject(IInterceptorSubject subject)
     {
+        SubjectStructure.RecordRead(subject);
         lock (_knownSubjects)
         {
             return _knownSubjects.GetValueOrDefault(subject);
