@@ -339,14 +339,14 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         {
             try
             {
-                var readValues = new List<ReadValueId>(dueCount);
+                var readValues = new ReadValueId[dueCount];
                 for (var i = 0; i < dueCount; i++)
                 {
-                    readValues.Add(new ReadValueId
+                    readValues[i] = new ReadValueId
                     {
                         NodeId = _dueReadsList[i].NodeId,
                         AttributeId = Opc.Ua.Attributes.Value
-                    });
+                    };
                 }
 
                 ReadResponse response;

@@ -58,15 +58,11 @@ internal static class OpcUaVariantExtensions
                 variant = Variant.From(EnumValue.From(number, enumeration.GetType()));
                 return true;
 
-            case Array { Rank: 1 } array when array.GetType().GetElementType() is { IsEnum: true }:
-                var numbers = new int[array.Length];
-                for (var i = 0; i < numbers.Length; i++)
+            case Array { Rank: 1 } array when array.GetType().GetElementType() is { IsEnum: true } elementType:
+                if (!TryGetInt32Array(array, Type.GetTypeCode(elementType), out var numbers))
                 {
-                    if (!TryGetInt32(array.GetValue(i), out numbers[i]))
-                    {
-                        variant = default;
-                        return false;
-                    }
+                    variant = default;
+                    return false;
                 }
 
                 variant = Variant.From(numbers.ToArrayOf());
@@ -95,7 +91,7 @@ internal static class OpcUaVariantExtensions
             return false;
         }
 
-        switch (Type.GetTypeCode(Enum.GetUnderlyingType(enumeration.GetType())))
+        switch (Type.GetTypeCode(enumeration.GetType()))
         {
             case TypeCode.SByte:
                 value = (sbyte)enumeration;
@@ -125,6 +121,90 @@ internal static class OpcUaVariantExtensions
                 return unsigned <= int.MaxValue;
             default:
                 value = 0;
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Gets the Int32 array an enumeration array is sent as, with the same mapping as
+    /// <see cref="TryGetInt32"/>. Reads the array as its underlying type, which the runtime allows for
+    /// enumeration arrays, so no element is boxed.
+    /// </summary>
+    private static bool TryGetInt32Array(Array array, TypeCode underlyingType, out int[] numbers)
+    {
+        numbers = new int[array.Length];
+        switch (underlyingType)
+        {
+            case TypeCode.SByte:
+                var signedBytes = (sbyte[])array;
+                for (var i = 0; i < numbers.Length; i++)
+                {
+                    numbers[i] = signedBytes[i];
+                }
+
+                return true;
+            case TypeCode.Byte:
+                var bytes = (byte[])array;
+                for (var i = 0; i < numbers.Length; i++)
+                {
+                    numbers[i] = bytes[i];
+                }
+
+                return true;
+            case TypeCode.Int16:
+                var shorts = (short[])array;
+                for (var i = 0; i < numbers.Length; i++)
+                {
+                    numbers[i] = shorts[i];
+                }
+
+                return true;
+            case TypeCode.UInt16:
+                var unsignedShorts = (ushort[])array;
+                for (var i = 0; i < numbers.Length; i++)
+                {
+                    numbers[i] = unsignedShorts[i];
+                }
+
+                return true;
+            case TypeCode.Int32:
+                ((int[])array).CopyTo(numbers, 0);
+                return true;
+            case TypeCode.UInt32:
+                var unsignedInts = (uint[])array;
+                for (var i = 0; i < numbers.Length; i++)
+                {
+                    numbers[i] = unchecked((int)unsignedInts[i]);
+                }
+
+                return true;
+            case TypeCode.Int64:
+                var longs = (long[])array;
+                for (var i = 0; i < numbers.Length; i++)
+                {
+                    if (longs[i] is < int.MinValue or > int.MaxValue)
+                    {
+                        return false;
+                    }
+
+                    numbers[i] = (int)longs[i];
+                }
+
+                return true;
+            case TypeCode.UInt64:
+                var unsignedLongs = (ulong[])array;
+                for (var i = 0; i < numbers.Length; i++)
+                {
+                    if (unsignedLongs[i] > int.MaxValue)
+                    {
+                        return false;
+                    }
+
+                    numbers[i] = (int)unsignedLongs[i];
+                }
+
+                return true;
+            default:
                 return false;
         }
     }
