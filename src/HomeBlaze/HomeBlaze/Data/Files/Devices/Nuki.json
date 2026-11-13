@@ -1,0 +1,7 @@
+{
+  "$type": "Namotion.Devices.Nuki.NukiBridge",
+  "hostAddress": "192.168.1.x:8080",
+  "tokenMode": "Encrypted",
+  "pollingInterval": "00:00:10",
+  "retryInterval": "00:00:30"
+}

@@ -1,7 +1,6 @@
 ---
 title: Architecture Decisions
 navTitle: Decisions
-position: 3
 ---
 
 # Architecture Decisions

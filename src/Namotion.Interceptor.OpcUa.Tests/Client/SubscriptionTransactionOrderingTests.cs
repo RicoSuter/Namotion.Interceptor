@@ -3,6 +3,7 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
@@ -17,7 +18,7 @@ public class SubscriptionTransactionOrderingTests
     [Theory]
     [InlineData("Committed", 0, false)]
     // TODO #373: This older-notification case records a known consistency defect, not the intended contract.
-    // Update its timestamp and conflict expectations when inbound ordering is fixed.
+    // Update its timestamp and conflict expectations when notifications are ordered against local writes.
     [InlineData("Initial", -1, true)]
     [InlineData("External", 0, true)]
     [InlineData("External", 1, true)]
@@ -89,7 +90,7 @@ public class SubscriptionTransactionOrderingTests
         {
             callback = Task.Run(() => manager.OnFastDataChange(subscription, notification, []));
         }
-        await callback.WaitAsync(TimeSpan.FromSeconds(10));
+        await callback.WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.Empty(errors);

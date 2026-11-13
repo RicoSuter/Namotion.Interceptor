@@ -1,0 +1,20 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.Interceptor.Dynamic
+{
+    public class DynamicSubject : Namotion.Interceptor.IInterceptorSubject
+    {
+        public DynamicSubject() { }
+        public DynamicSubject(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        protected DynamicSubject(System.Collections.Generic.IEnumerable<Namotion.Interceptor.SubjectPropertyMetadata> properties) { }
+        public void AddProperties([System.Runtime.CompilerServices.ParamCollection] System.Collections.Generic.IEnumerable<Namotion.Interceptor.SubjectPropertyMetadata> properties) { }
+    }
+    public class DynamicSubjectFactory
+    {
+        public DynamicSubjectFactory() { }
+        public static Namotion.Interceptor.IInterceptorSubject CreateDynamicSubject(params System.Type[] interfaces) { }
+        public static Namotion.Interceptor.IInterceptorSubject CreateSubject(System.Type type, params System.Type[] interfaces) { }
+        public static TSubject CreateSubject<TSubject>(params System.Type[] interfaces)
+            where TSubject : Namotion.Interceptor.IInterceptorSubject { }
+    }
+}

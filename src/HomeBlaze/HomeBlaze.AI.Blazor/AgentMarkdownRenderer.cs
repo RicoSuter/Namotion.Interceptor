@@ -1,0 +1,233 @@
+using System.Net;
+using System.Text;
+using System.Text.RegularExpressions;
+using Markdig;
+using Markdig.Renderers.Html;
+using Markdig.Syntax;
+using Markdig.Syntax.Inlines;
+
+namespace HomeBlaze.AI.Blazor;
+
+/// <summary>
+/// Renders untrusted agent output from Markdown to HTML that is safe to insert into the page: raw HTML is escaped,
+/// links with a target other than an absolute http, https or mailto URL, which opens in a new tab, or a path of this
+/// application such as <c>/browser/Devices</c>, which opens in the same tab, are reduced to their text, and images are
+/// rendered as links so nothing loads without a click. A closed <c>mermaid</c> code block is rendered as a diagram
+/// unless its text could load something, such as a URL, an image or an escape that could spell one, which is shown as
+/// code. Markdown that Markdig refuses, such as elements nested beyond its depth limit, is shown as encoded text instead.
+/// </summary>
+internal static partial class AgentMarkdownRenderer
+{
+    private static readonly MarkdownPipeline Pipeline = CreatePipeline();
+
+    // A base that no address leaves unless it names a host of its own, which TryGetApplicationPath then rejects.
+    private static readonly Uri ApplicationRoot = new("https://application.invalid/");
+
+    private const string MermaidLanguage = "mermaid";
+
+    /// <summary>Converts Markdown to sanitized HTML, or to the encoded text with its line breaks kept when Markdig refuses it.</summary>
+    public static string ToHtml(string markdown)
+    {
+        try
+        {
+            return RenderHtml(markdown);
+        }
+        catch (ArgumentException)
+        {
+            // Thrown for input nested beyond the depth limit; escaping it would end the circuit of every page that shows it.
+            return "<p style=\"white-space: pre-wrap;\">" + WebUtility.HtmlEncode(markdown) + "</p>";
+        }
+    }
+
+    private static string RenderHtml(string markdown)
+    {
+        var document = Markdown.Parse(markdown, Pipeline);
+        foreach (var link in document.Descendants<LinkInline>().ToList())
+        {
+            SanitizeLink(link);
+        }
+
+        foreach (var autolink in document.Descendants<AutolinkInline>().ToList())
+        {
+            SanitizeAutolink(autolink);
+        }
+
+        // The parser turns the info string of a fenced code block into a class name. The diagrams extension renders a
+        // block whose info is a diagram language as <pre> with the class without its language- prefix, so only a closed
+        // mermaid block keeps a fixed info and class; an open one is still being streamed and stays code.
+        foreach (var codeBlock in document.Descendants<FencedCodeBlock>())
+        {
+            var isDiagram = codeBlock.ClosingFencedCharCount > 0 &&
+                string.Equals(codeBlock.Info, MermaidLanguage, StringComparison.OrdinalIgnoreCase) &&
+                !CouldLoadAnAddress().IsMatch(codeBlock.Lines.ToString());
+            codeBlock.TryGetAttributes()?.Classes?.Clear();
+            codeBlock.Info = isDiagram ? MermaidLanguage : null;
+            if (isDiagram)
+            {
+                codeBlock.GetAttributes().AddClass("language-" + MermaidLanguage);
+            }
+        }
+
+        return document.ToHtml(Pipeline);
+    }
+
+    // Mermaid lays a diagram out in the page, so a CSS function, an image shape, a link target or an escape that could
+    // spell one would load its address before the SVG can be cleaned. A %%{...}%% directive counts as such an escape:
+    // Mermaid removes it anywhere in a line before parsing, which joins the text around it, such as u%%{x}%%rl.
+    // A CSS function only loads when its name is directly followed by the parenthesis, so url and image match with it
+    // and words such as Curl or Imagery stay diagrams; the escapes are what keep url( from being spelled otherwise.
+    [GeneratedRegex(@"url\(|image(?:-set)?\(|img|src|href|@\{|%%\{|\\|#\w+;", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex CouldLoadAnAddress();
+
+    /// <summary>
+    /// Converts Markdown to plain text on one line: the text of the rendered elements without markup, link targets
+    /// or images, with line breaks and runs of whitespace collapsed to single spaces. Markdown that Markdig refuses is
+    /// returned as it is, with whitespace collapsed the same way.
+    /// </summary>
+    public static string ToPlainText(string markdown)
+    {
+        string text;
+        try
+        {
+            text = Markdown.ToPlainText(markdown, Pipeline);
+        }
+        catch (ArgumentException)
+        {
+            text = markdown;
+        }
+
+        var builder = new StringBuilder(text.Length);
+        var isSpacePending = false;
+        foreach (var character in text)
+        {
+            if (char.IsWhiteSpace(character))
+            {
+                isSpacePending = builder.Length > 0;
+                continue;
+            }
+
+            if (isSpacePending)
+            {
+                builder.Append(' ');
+                isSpacePending = false;
+            }
+
+            builder.Append(character);
+        }
+
+        return builder.ToString();
+    }
+
+    // An allow list: extensions that copy text into class, id or style attributes (custom containers, generic
+    // attributes, footnotes, heading identifiers) or embed content (media links) must stay out, because a class
+    // can apply page styles such as a full-viewport overlay and repeated ids collide across timeline entries. The
+    // remaining extensions only emit fixed attributes, such as a table column's text alignment or the mermaid class
+    // that RenderHtml sets.
+    private static MarkdownPipeline CreatePipeline() => new MarkdownPipelineBuilder()
+        .UsePipeTables()
+        .UseEmphasisExtras()
+        .UseAutoLinks()
+        .UseTaskLists()
+        .UseListExtras()
+        .UseDiagrams()
+        .DisableHtml()
+        .Build();
+
+    private static void SanitizeLink(LinkInline link)
+    {
+        // An image would load its URL without a click, which output steered by graph values could use to send
+        // data away, so it is shown as a link labelled with its alternative text instead.
+        if (link.IsImage)
+        {
+            link.IsImage = false;
+            if (link.FirstChild is null)
+            {
+                link.AppendChild(new LiteralInline(link.Url ?? string.Empty));
+            }
+        }
+
+        link.GetDynamicUrl = null;
+        if (TryGetApplicationPath(link.Url) is { } path)
+        {
+            link.Url = path;
+            return;
+        }
+
+        if (TryGetSafeUrl(link.Url) is not { } url)
+        {
+            UnwrapLink(link);
+            return;
+        }
+
+        link.Url = url;
+        AddExternalLinkAttributes(link);
+    }
+
+    private static void UnwrapLink(LinkInline link)
+    {
+        var child = link.FirstChild;
+        while (child is not null)
+        {
+            var next = child.NextSibling;
+            child.Remove();
+            link.InsertBefore(child);
+            child = next;
+        }
+
+        link.Remove();
+    }
+
+    private static void SanitizeAutolink(AutolinkInline autolink)
+    {
+        var url = autolink.IsEmail ? "mailto:" + autolink.Url : autolink.Url;
+        if (TryGetSafeUrl(url) is null)
+        {
+            autolink.ReplaceBy(new LiteralInline(autolink.Url));
+            return;
+        }
+
+        AddExternalLinkAttributes(autolink);
+    }
+
+    private static string? TryGetSafeUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url) ||
+            !Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri) ||
+            !IsAllowedScheme(uri))
+        {
+            return null;
+        }
+
+        // The normalized form is rendered, so a browser cannot read the original text as a different target.
+        return uri.AbsoluteUri;
+    }
+
+    /// <summary>
+    /// Gets a path of this application, such as <c>/browser/Devices?tab=1#top</c>, in its normalized form, or null for
+    /// anything else. Only a path from the root counts: <c>//host</c> and <c>/\host</c> lead to another site in a
+    /// browser, a relative path would depend on the address of the chat, and a control character could be dropped by the
+    /// browser into one of these.
+    /// </summary>
+    private static string? TryGetApplicationPath(string? url)
+    {
+        var path = url?.Trim();
+        if (path is not ['/', ..] || path is [_, '/' or '\\', ..] || path.Any(char.IsControl))
+        {
+            return null;
+        }
+
+        return Uri.TryCreate(ApplicationRoot, path, out var uri) && uri.Host == ApplicationRoot.Host
+            ? uri.PathAndQuery + uri.Fragment
+            : null;
+    }
+
+    private static bool IsAllowedScheme(Uri uri) =>
+        uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeMailto;
+
+    private static void AddExternalLinkAttributes(Inline link)
+    {
+        var attributes = link.GetAttributes();
+        attributes.AddPropertyIfNotExist("target", "_blank");
+        attributes.AddPropertyIfNotExist("rel", "noopener noreferrer nofollow");
+    }
+}

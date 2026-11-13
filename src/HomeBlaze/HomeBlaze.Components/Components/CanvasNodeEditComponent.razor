@@ -38,7 +38,7 @@
     @if (Node?.Child != null)
     {
         <MudAlert Severity="Severity.Info" Dense="true">
-            @Node.Child.GetType().Name
+            @(Node.Child is IConfigurable ? Node.Child.GetType().Name : "Page content")
         </MudAlert>
     }
     else

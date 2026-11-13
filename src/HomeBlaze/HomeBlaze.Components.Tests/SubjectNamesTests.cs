@@ -1,0 +1,178 @@
+using HomeBlaze.Components.Tests.Models;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
+using Xunit;
+
+namespace HomeBlaze.Components.Tests;
+
+public class SubjectNamesTests
+{
+    private readonly IInterceptorSubjectContext _context = InterceptorSubjectContext
+        .Create()
+        .WithRegistry();
+
+    [Theory]
+    [InlineData(typeof(Switch), nameof(Switch.Path))]
+    [InlineData(typeof(Select), nameof(Select.Path))]
+    [InlineData(typeof(SubjectTable), nameof(SubjectTable.Source))]
+    [InlineData(typeof(Card), null)]
+    public void WhenWidgetIsNamed_ThenItsPathPropertyIsItsFirstPathProperty(Type widgetType, string? expected)
+    {
+        // Arrange
+        var widget = (IInterceptorSubject)Activator.CreateInstance(widgetType, _context)!;
+
+        // Act
+        var property = SubjectNames.TryGetPathProperty(widget.TryGetRegisteredSubject());
+
+        // Assert
+        Assert.Equal(expected, property?.Name);
+    }
+
+    [Fact]
+    public void WhenTypeIsNotGeneric_ThenTypeNameIsTheFullName()
+    {
+        // Act
+        var name = SubjectNames.GetTypeName(typeof(Switch));
+
+        // Assert
+        Assert.Equal("HomeBlaze.Components.Switch", name);
+    }
+
+    [Fact]
+    public void WhenTypeIsGeneric_ThenTypeNameShowsItsArgumentsWithoutArity()
+    {
+        // Act
+        var name = SubjectNames.GetTypeName(typeof(Dictionary<string, List<int>>));
+
+        // Assert
+        Assert.Equal("System.Collections.Generic.Dictionary<System.String, System.Collections.Generic.List<System.Int32>>", name);
+    }
+
+    [Fact]
+    public void WhenTypeIsANestedGenericType_ThenTypeNameStartsWithTheDeclaringType()
+    {
+        // Act
+        var name = SubjectNames.GetTypeName(typeof(NestedGeneric<int>));
+
+        // Assert
+        Assert.Equal("HomeBlaze.Components.Tests.SubjectNamesTests+NestedGeneric<System.Int32>", name);
+    }
+
+    [Fact]
+    public void WhenTypeIsAnOpenGenericType_ThenTypeNameShowsItsParameters()
+    {
+        // Act
+        var name = SubjectNames.GetTypeName(typeof(List<>));
+
+        // Assert
+        Assert.Equal("System.Collections.Generic.List<T>", name);
+    }
+
+    [Fact]
+    public void WhenSubjectHasATitle_ThenTitleIsReturned()
+    {
+        // Arrange
+        var card = new Card(_context) { Title = "Overview" };
+
+        // Act
+        var title = SubjectNames.TryGetTitle(card);
+
+        // Assert
+        Assert.Equal("Overview", title);
+    }
+
+    [Fact]
+    public void WhenSubjectHasALabelButNoTitle_ThenLabelIsReturned()
+    {
+        // Arrange
+        var widget = new Switch(_context) { Label = "Fan" };
+
+        // Act
+        var title = SubjectNames.TryGetTitle(widget);
+
+        // Assert
+        Assert.Equal("Fan", title);
+    }
+
+    [Fact]
+    public void WhenSubjectHasNeitherTitleNorLabel_ThenNoTitleIsReturned()
+    {
+        // Arrange
+        var widget = new Switch(_context);
+        var layout = new FlowLayout(_context);
+
+        // Act
+        var widgetTitle = SubjectNames.TryGetTitle(widget);
+        var layoutTitle = SubjectNames.TryGetTitle(layout);
+
+        // Assert
+        Assert.Null(widgetTitle);
+        Assert.Null(layoutTitle);
+    }
+
+    [Fact]
+    public void WhenSubjectHasATitle_ThenContentTitleIsItsOwnTitle()
+    {
+        // Arrange
+        var card = new Card(_context) { Title = "Overview" };
+        var folder = new TestFolder(_context) { Label = "Folder" };
+        folder.Children = new Dictionary<string, IInterceptorSubject> { ["card"] = card };
+
+        // Act
+        var title = SubjectNames.TryGetContentTitle(folder);
+
+        // Assert
+        Assert.Equal("Folder", title);
+    }
+
+    [Fact]
+    public void WhenContentHasNoTitle_ThenContentTitleIsTheTitleOfTheFirstTitledChildInItsOrder()
+    {
+        // Arrange: the order of the dictionary, not of the keys.
+        var folder = new TestFolder(_context);
+        folder.Children = new Dictionary<string, IInterceptorSubject>
+        {
+            ["c"] = new Switch(_context),
+            ["b"] = new Card(_context) { Title = "First" },
+            ["a"] = new Card(_context) { Title = "Second" }
+        };
+
+        // Act
+        var title = SubjectNames.TryGetContentTitle(folder);
+
+        // Assert
+        Assert.Equal("First", title);
+    }
+
+    [Fact]
+    public void WhenContentIsAList_ThenContentTitleIsTheTitleOfTheFirstTitledItem()
+    {
+        // Arrange
+        var layout = new FlowLayout(_context)
+        {
+            Items = [new Switch(_context), new Switch(_context) { Label = "Fan" }]
+        };
+
+        // Act
+        var title = SubjectNames.TryGetContentTitle(layout);
+
+        // Assert
+        Assert.Equal("Fan", title);
+    }
+
+    [Fact]
+    public void WhenNeitherContentNorChildrenHaveATitle_ThenNoContentTitleIsReturned()
+    {
+        // Arrange
+        var folder = new TestFolder(_context);
+        folder.Children = new Dictionary<string, IInterceptorSubject> { ["switch"] = new Switch(_context) };
+
+        // Act
+        var title = SubjectNames.TryGetContentTitle(folder);
+
+        // Assert
+        Assert.Null(title);
+    }
+
+    private sealed class NestedGeneric<T>;
+}

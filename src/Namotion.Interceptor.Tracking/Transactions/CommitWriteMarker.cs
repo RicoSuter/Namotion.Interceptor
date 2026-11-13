@@ -1,0 +1,77 @@
+using System.Runtime.CompilerServices;
+
+namespace Namotion.Interceptor.Tracking.Transactions;
+
+/// <summary>
+/// Marks the write a commit is applying, or a rollback is restoring, for
+/// <see cref="SubjectTransaction.TryConsumeCommitWrite"/>. Nested writes (change handlers, derived recalculations)
+/// are not covered.
+/// </summary>
+internal static class CommitWriteMarker
+{
+    internal struct Frame
+    {
+        public PropertyReference Target;
+        public object? Value;
+        public SubjectTransaction? Transaction;
+    }
+
+    // Thread-static: the local apply and the rollback are synchronous, so a mark never crosses an await. A nested
+    // write of the same property with the same value can take the mark, the same limitation as PendingOrigin.
+    [ThreadStatic] private static Frame _frame;
+
+    internal static Scope Set(SubjectTransaction transaction, PropertyReference target, object? value)
+    {
+        var scope = new Scope(_frame);
+        _frame = new Frame
+        {
+            Target = target,
+            Value = value,
+            Transaction = transaction
+        };
+        return scope;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    internal static bool TryConsume<TProperty>(ITransactionHandler handler, PropertyReference property, TProperty value)
+    {
+        // A dispose mid-commit from another flow can clear the HasActiveTransaction gate of the caller while a mark is
+        // set; this rejects the mark of a disposed transaction too, so the handler checks the write either way.
+        var frame = _frame;
+        if (frame.Transaction is null ||
+            !frame.Target.Equals(property) ||
+            frame.Transaction.IsDisposed ||
+            !frame.Transaction.Handlers.Contains(handler))
+        {
+            return false;
+        }
+
+        // Equality, not identity: an interceptor ahead of the transaction interceptor can pass an equal new instance
+        // of the checked value at the apply.
+        var matches = frame.Value is null
+            ? value is null
+            : frame.Value is TProperty typedValue && EqualityComparer<TProperty>.Default.Equals(typedValue, value);
+
+        if (matches)
+        {
+            _frame = default;
+        }
+
+        return matches;
+    }
+
+    internal readonly ref struct Scope
+    {
+        private readonly Frame _previousFrame;
+
+        internal Scope(in Frame previousFrame)
+        {
+            _previousFrame = previousFrame;
+        }
+
+        public void Dispose()
+        {
+            _frame = _previousFrame;
+        }
+    }
+}

@@ -1,0 +1,36 @@
+@* A place between the blocks of a page that is edited inline, where a new block or new text goes. It takes no room, so that
+   the content does not move when lines show or hide with the selection; its bar is drawn over the gap above the block that
+   follows. A click on it must not reach the widget around it, which would take it for a click that selects the widget, nor
+   a double click, which would open the edit dialog of the widget. The menu opens in the provider of the popovers, outside
+   the widget. *@
+<div class="block-insert-line edit-mode-interactive" data-testid="block-insert-line" @onclick:stopPropagation="true" @ondblclick:stopPropagation="true">
+    <div class="block-insert-line-bar">
+        <MudMenu Icon="@Icons.Material.Filled.Add"
+                 Size="Size.Small"
+                 Variant="Variant.Outlined"
+                 Color="Color.Primary"
+                 Dense="true"
+                 AriaLabel="@Label"
+                 title="@Label">
+            <MudMenuItem OnClick="@(() => OnInsertWidget.InvokeAsync())" data-testid="insert-widget-item">Widget...</MudMenuItem>
+            @if (OnInsertText.HasDelegate)
+            {
+                <MudMenuItem OnClick="@(() => OnInsertText.InvokeAsync())" data-testid="insert-text-item">Text...</MudMenuItem>
+            }
+        </MudMenu>
+    </div>
+</div>
+
+@code {
+    /// <summary>Raised when a widget is to be inserted at the line.</summary>
+    [Parameter]
+    public EventCallback OnInsertWidget { get; set; }
+
+    /// <summary>Raised when text is to be inserted at the line. Without a delegate, the menu offers no text.</summary>
+    [Parameter]
+    public EventCallback OnInsertText { get; set; }
+
+    /// <summary>The accessible name of the line, which tells it apart from the other lines of the page.</summary>
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = string.Empty;
+}

@@ -44,6 +44,12 @@ internal static class SqliteValueRouting
     // under JsonNumberHandling.AllowNamedFloatingPointLiterals, so a later reader can parse it as one.
     private const string NotANumberJson = "\"NaN\"";
 
+    // The numeric value of a history row as REAL, the one SQL spelling of the folding rule.
+    public const string NumericValueSql = "CAST(COALESCE(value_double, value_long) AS REAL)";
+
+    // As NumericValueSql, also folding a ulong overflow stored as a JSON number (numeric text).
+    public const string UlongNumericValueSql = "CAST(COALESCE(value_double, value_long, CAST(value_json AS REAL)) AS REAL)";
+
     // Routes a value into a row exactly like InMemoryHistoryStore.CreateSample, but serializes the JSON
     // column to its raw text representation for storage. Returns whether the value was oversized so the
     // engine can increment its own oversize counter (this helper never mutates engine state).

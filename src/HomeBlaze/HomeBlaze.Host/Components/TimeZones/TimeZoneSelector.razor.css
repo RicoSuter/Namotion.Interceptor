@@ -1,0 +1,17 @@
+/* The entry of the submenu in the list of its parent menu: the icon, the title with the active zone below it, and the
+   arrow of a submenu, laid out like a MudMenuItem with an icon. */
+.time-zone-menu-activator {
+    display: flex;
+    align-items: center;
+}
+
+.time-zone-menu-activator ::deep .mud-icon-root {
+    color: var(--mud-palette-action-default);
+}
+
+.time-zone-menu-text {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-width: 0;
+}

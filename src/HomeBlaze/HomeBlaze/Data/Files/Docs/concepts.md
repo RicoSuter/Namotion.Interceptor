@@ -1,7 +1,6 @@
 ---
 title: Concepts
 navTitle: Concepts
-position: 1
 ---
 
 # Concepts

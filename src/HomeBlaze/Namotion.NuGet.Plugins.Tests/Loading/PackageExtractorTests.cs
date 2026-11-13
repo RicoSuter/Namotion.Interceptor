@@ -89,6 +89,32 @@ public class PackageExtractorTests : IDisposable
         Assert.Null(notCached);
     }
 
+    [Fact]
+    public async Task WhenSamePackageIsExtractedConcurrently_ThenEveryCallSeesAllFiles()
+    {
+        // Arrange
+        var package = CreateTestNupkgBytes(assemblyCount: 200);
+
+        // Act
+        var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+            _extractor.ExtractAndGetAssemblyPaths("TestPkg", "1.0.0", new MemoryStream(package)))));
+
+        // Assert
+        Assert.All(results, paths => Assert.Equal(200, paths.Count));
+    }
+
+    [Fact]
+    public void WhenExtractionFails_ThenNoPackageDirectoryIsLeftBehind()
+    {
+        // Arrange
+        var corruptPackage = new MemoryStream([1, 2, 3, 4]);
+
+        // Act & Assert
+        Assert.ThrowsAny<InvalidDataException>(() =>
+            _extractor.ExtractAndGetAssemblyPaths("TestPkg", "1.0.0", corruptPackage));
+        Assert.Empty(Directory.GetDirectories(_tempDir, "1.0.0*", SearchOption.AllDirectories));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempDir))
@@ -121,5 +147,21 @@ public class PackageExtractorTests : IDisposable
 
         memoryStream.Position = 0;
         return memoryStream;
+    }
+
+    private static byte[] CreateTestNupkgBytes(int assemblyCount)
+    {
+        using var stream = new MemoryStream();
+        using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            for (var index = 0; index < assemblyCount; index++)
+            {
+                var entry = archive.CreateEntry($"lib/net10.0/Assembly{index}.dll");
+                using var writer = new StreamWriter(entry.Open());
+                writer.Write(new string('x', 4096));
+            }
+        }
+
+        return stream.ToArray();
     }
 }

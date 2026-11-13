@@ -1,7 +1,6 @@
 ---
 title: Configuration
 navTitle: Configuration
-position: 2
 ---
 
 # Configuration
@@ -48,19 +47,26 @@ Restricts which `Host` header values the server will accept. `*` allows any host
 
 ---
 
-## Data folder {#data-folder}
+## Data folder
 
 HomeBlaze keeps everything it stores in one data folder: the folder that contains the root configuration file `Root.json`. Relative paths in the configuration resolve against this folder.
 
 ```
 Data/
-├── Root.json       root configuration
-├── Files/          devices, dashboards, pages, Plugins.json, docs
-├── History/Sqlite/ SQLite history
-└── OpcUa/          OPC UA certificates
+├── Root.json            root configuration
+├── Files/               devices, dashboards, pages, Plugins.json, docs
+├── Agents/              timeline, memory, chat session, run count and CLI working directory of AI agents
+├── AutomationState/     current state and last runs of automations, one checkpoint file each
+├── DataProtection-Keys/ ASP.NET Core keys that keep antiforgery tokens valid across restarts
+├── History/Sqlite/      SQLite history
+└── OpcUa/               OPC UA certificates
 ```
 
 When running from source, the data folder is `src/HomeBlaze/HomeBlaze/Data`. The container image uses `/data`; see [Installation](installation.md#data-folder).
+
+`DataProtection-Keys/` holds the secret keys that sign the browser's connection to the UI and any sign-in, so treat the folder and every backup of it like a password, or encrypt it with a certificate (see [HomeBlaze:DataProtection](#homeblazedataprotection)). To revoke the keys, for example after a backup leaked or in a copy of the data folder that runs as a second instance, stop HomeBlaze, delete the folder and start it again. Open browser tabs then need a reload.
+
+`AutomationState/` holds one checkpoint file per automation with its current state and last runs, described in [Automations: The checkpoint](automation.md#the-checkpoint).
 
 ---
 
@@ -90,6 +96,8 @@ The container image sets it to `/data/Root.json`.
 
 Folder that is copied into the data folder on the first start, when the root configuration file does not exist. Existing files are never overwritten, and the root configuration file is copied last, so an interrupted copy is completed on the next start.
 
+Its `Files/Docs` folder is the exception: it replaces `Files/Docs` in the data folder on every start. See [Installation](installation.md#data-folder).
+
 | Setting | Default |
 |---------|---------|
 | `HomeBlaze:SeedDirectory` | not set (nothing is copied) |
@@ -105,6 +113,44 @@ Override example:
 ```
 
 The container image sets it to `/app/Seed`, which holds the starting set described in [Installation](installation.md#data-folder).
+
+---
+
+## HomeBlaze:DataProtection
+
+Certificate that encrypts the keys in `DataProtection-Keys/`. Without it, the keys are stored unencrypted on Linux and macOS, readable only by the user HomeBlaze runs as, and encrypted with the Windows account (DPAPI) on Windows. With it, a copy of the data folder, such as a backup, is useless without the certificate.
+
+| Setting | Default |
+|---------|---------|
+| `HomeBlaze:DataProtection:CertificatePath` | not set (no certificate) |
+| `HomeBlaze:DataProtection:CertificatePassword` | not set (no password) |
+
+The certificate is a PKCS#12 file (`.pfx`) with its private key. A relative path resolves against the working directory. Keep it outside the data folder and out of its backups, otherwise it protects nothing. HomeBlaze does not start when the file is missing, has no private key or the password is wrong.
+
+Create one, for example valid for ten years:
+
+```bash
+openssl req -x509 -newkey rsa:3072 -nodes -days 3650 -subj "/CN=HomeBlaze Data Protection" -keyout key.pem -out cert.pem
+openssl pkcs12 -export -inkey key.pem -in cert.pem -out data-protection.pfx -passout pass:
+rm key.pem cert.pem
+```
+
+In the compose file, mount it as a secret:
+
+```yaml
+services:
+  homeblaze:
+    environment:
+      HomeBlaze__DataProtection__CertificatePath: /run/secrets/data-protection.pfx
+    secrets:
+      - data-protection.pfx
+
+secrets:
+  data-protection.pfx:
+    file: ./secrets/data-protection.pfx
+```
+
+Keys written before the certificate was set stay unencrypted and in use, and keys encrypted with a certificate cannot be read without it. So after setting, replacing or removing the certificate, stop HomeBlaze and delete `DataProtection-Keys/` before starting it again.
 
 ---
 
@@ -145,8 +191,8 @@ Controls the built-in Model Context Protocol server that exposes the knowledge g
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `McpServer:Enabled` | bool | `true` in Development, `false` otherwise | Registers the MCP server and maps the `/mcp` endpoint |
-| `McpServer:ReadOnly` | bool | `true` | Restricts MCP tools to read-only operations; set to `false` to allow property writes and operation invocations |
+| `McpServer:Enabled` | bool | `true` in Development, `false` otherwise | Registers the MCP server and maps the `/mcp` endpoint. The built-in agents do not need it |
+| `McpServer:ReadOnly` | bool | `true` | Restricts the tools of `/mcp` to read-only operations; `false` allows property writes and operation invocations. `set_property` never writes configuration properties either way. Built-in agents use their own `AllowedTools` instead. See [AI Agents](ai-agents.md#tools-and-permissions) |
 
 ### Example: Development override
 

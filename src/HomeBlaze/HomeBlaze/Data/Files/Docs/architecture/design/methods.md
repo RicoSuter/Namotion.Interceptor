@@ -18,7 +18,8 @@ Operations and queries are implemented in HomeBlaze today:
 - Method discovery via `MethodMetadata` registered as dynamic properties in the registry
 - `MethodPropertyInitializer` registers `MethodMetadata` (with `InvokeAsync` capability) as dynamic properties, enabling `[PropertyAttribute]` on operations (e.g., `IsEnabled` for conditional enable/disable)
 - Blazor UI renders operations as buttons with parameter dialogs, confirmation, and result display
-- MCP tools `list_methods` and `invoke_method` in `Namotion.Interceptor.Mcp` (in progress, [PR #158](https://github.com/RicoSuter/Namotion.Interceptor/pull/158))
+- MCP tools `list_methods`, `invoke_query` (queries) and `invoke_operation` (operations) in `HomeBlaze.AI`, see [AI](ai.md) for their parameter hints and argument handling
+- `[ExcludeFrom(ExclusionTarget)]` on `[Operation]` and `[Query]` decides where a method is offered, see [Excluding Subjects and Methods](../../development/building-subjects.md#excluding-subjects-and-methods)
 
 ## Migration to Namotion.Interceptor.Reflection [Planned]
 

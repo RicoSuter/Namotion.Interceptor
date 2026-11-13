@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.Services.Lifecycle;
@@ -80,6 +81,25 @@ public class HomeBlazeMcpSubjectEnricherTests
 
         // Assert
         Assert.False(enrichments.ContainsKey("$type"));
+    }
+
+    [Fact]
+    public void WhenTheSubjectHasAPage_ThenItsAddressIsEnriched()
+    {
+        // Arrange
+        var context = CreateContext();
+        var thing = new TestThing(context) { Name = "My Thing", Temperature = 20m };
+        var other = new TestThing(context) { Name = "Other", Temperature = 20m };
+        var enricher = new HomeBlazeMcpSubjectEnricher([], isReadOnly: false,
+            subject => ReferenceEquals(subject, thing) ? "/pages/House/Thing.md" : null);
+
+        // Act
+        var withPage = enricher.GetSubjectEnrichments(thing.TryGetRegisteredSubject()!);
+        var withoutPage = enricher.GetSubjectEnrichments(other.TryGetRegisteredSubject()!);
+
+        // Assert
+        Assert.Equal("/pages/House/Thing.md", withPage["$url"]);
+        Assert.False(withoutPage.ContainsKey("$url"));
     }
 
     [Fact]
@@ -186,6 +206,39 @@ public class HomeBlazeMcpSubjectEnricherTests
         var methods = (string[])enrichments["$methods"]!;
         Assert.Contains("Refresh", methods);
         Assert.DoesNotContain("Reset", methods);
+    }
+
+    [Fact]
+    public void WhenMethodIsExcludedFromAgents_ThenItIsNotInTheMethods()
+    {
+        // Arrange
+        var context = CreateContext();
+        var thing = new TestThing(context) { Name = "My Thing", Temperature = 20m };
+        var registered = thing.TryGetRegisteredSubject()!;
+
+        registered.AddProperty<MethodMetadata>("Open", _ => new MethodMetadata(_ => null)
+        {
+            Kind = MethodKind.Operation,
+            Title = "Open",
+            PropertyName = "Open",
+            ExcludedFrom = ExclusionTarget.Agents
+        });
+
+        registered.AddProperty<MethodMetadata>("GetOrder", _ => new MethodMetadata(_ => null)
+        {
+            Kind = MethodKind.Query,
+            Title = "Get Order",
+            PropertyName = "GetOrder",
+            ExcludedFrom = ExclusionTarget.UserInterface
+        });
+
+        var enricher = CreateEnricher();
+
+        // Act
+        var enrichments = enricher.GetSubjectEnrichments(registered);
+
+        // Assert
+        Assert.Equal(["GetOrder"], (string[])enrichments["$methods"]!);
     }
 
     [Fact]

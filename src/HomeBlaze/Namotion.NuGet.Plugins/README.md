@@ -414,7 +414,7 @@ foreach (var plugin in result.LoadedPlugins)
 ## Thread Safety
 
 - `LoadPluginsAsync` is not thread-safe and must not be called concurrently on the same loader instance.
-- Package extraction (`PackageExtractor`) is not thread-safe for the same cache directory.
+- Package extraction is safe when loaders or processes share a cache directory. A concurrent or interrupted extraction never leaves a partially extracted package in the cache.
 - `GetTypes<T>()` and `LoadedPlugins` are safe to call from any thread after loading completes.
 
 ## Architecture and Internals
@@ -445,7 +445,7 @@ flowchart TD
 
 The library is fully standalone with no application-specific dependencies. It uses the NuGet SDK (`NuGet.Protocol`, `NuGet.Frameworks`) for package resolution and download, and .NET's `AssemblyLoadContext` (collectible) for isolation and unloading.
 
-Transitive dependencies are resolved recursively using the NuGet V3 API. For each package, the loader reads its dependency groups, selects the group matching the host's target framework, and resolves each dependency to the highest version satisfying the declared version range. When multiple packages require the same transitive dependency, the highest resolved version is used.
+Transitive dependencies are resolved recursively using the NuGet V3 API. For each package, the loader reads its dependency groups, selects the group matching the host's target framework, and resolves each dependency to the highest version satisfying the declared version range that supports the host's target framework, so a dependency release for a newer framework only is skipped. When multiple packages require the same transitive dependency, the highest resolved version is used.
 
 ### Dependency Classification
 

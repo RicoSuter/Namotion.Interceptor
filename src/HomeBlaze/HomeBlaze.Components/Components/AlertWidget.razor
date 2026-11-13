@@ -1,0 +1,22 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Alert))]
+@implements ISubjectComponent
+
+@{
+    var alert = Subject as Alert;
+}
+
+@if (alert is not null)
+{
+    <MudAlert Severity="@alert.Severity"
+              Variant="@alert.Variant"
+              Icon="@MudBlazorIconResolver.ResolveOrNull(alert.Icon)"
+              Class="alert-widget"
+              data-testid="alert">
+        <SubjectComponent Subject="@alert.Content" Type="SubjectComponentType.Widget" />
+    </MudAlert>
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}

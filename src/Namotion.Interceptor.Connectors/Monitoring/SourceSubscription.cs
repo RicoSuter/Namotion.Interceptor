@@ -18,7 +18,7 @@ public sealed class SourceSubscription : IDisposable
     private readonly Action<SourceEvent> _handler;
     private readonly Action<SourceSubscription> _onDisposed;
     private readonly SourceMonitor _monitor;
-    private readonly Action _drain;
+    private readonly DrainWorkItem _drain;
 
     private int _draining;
     private volatile bool _disposed;
@@ -35,9 +35,8 @@ public sealed class SourceSubscription : IDisposable
         // The monitor, not a resolved ILogger: subscribing usually happens before the host is
         // built, so a logger captured here would be null for this subscription's lifetime.
         _monitor = monitor;
-        // Cached rather than a Task.Run(Drain) method-group conversion at each call site: that
-        // allocates a fresh Action delegate on every wakeup, and Drain is only ever run this way.
-        _drain = Drain;
+        // Cached so a wakeup allocates nothing; Drain is only ever run this way.
+        _drain = new DrainWorkItem(this);
     }
 
     /// <summary>
@@ -57,10 +56,13 @@ public sealed class SourceSubscription : IDisposable
         _queue.Enqueue(sourceEvent);
 
         // Single-flight: one drain at a time, and it exits when the queue is empty, so an idle
-        // subscription owns no task.
+        // subscription has no queued work item.
         if (Interlocked.CompareExchange(ref _draining, 1, 0) == 0)
         {
-            _ = Task.Run(_drain);
+            // Global, not Task.Run: from a pool worker that puts the drain on the worker's local
+            // queue, which other workers steal from only once the global queue is empty. A producer
+            // that then blocks or keeps its worker busy on a loaded pool strands the drain there.
+            ThreadPool.UnsafeQueueUserWorkItem(_drain, preferLocal: false);
         }
     }
 
@@ -141,5 +143,10 @@ public sealed class SourceSubscription : IDisposable
     {
         _disposed = true;
         _onDisposed(this);
+    }
+
+    private sealed class DrainWorkItem(SourceSubscription subscription) : IThreadPoolWorkItem
+    {
+        public void Execute() => subscription.Drain();
     }
 }

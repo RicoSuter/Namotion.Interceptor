@@ -1,0 +1,257 @@
+@attribute [SubjectComponent(SubjectComponentType.Page, typeof(Automation))]
+@implements ISubjectComponent
+@implements IDisposable
+@using global::HomeBlaze.Components.Dialogs
+@using global::HomeBlaze.Components.Metadata
+@using global::HomeBlaze.Services.Components
+@inject ITimeZoneDisplay TimeZone
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject SubjectComponentRegistry ComponentRegistry
+@inject SubjectPathResolver PathResolver
+@inject TimeProvider TimeProvider
+
+@if (Subject is Automation automation)
+{
+    @* Read in the render of the page itself, not in the content of a child component, so that a run renders the page and its runs are read again. *@
+    _renderedRunsKey = RecentRuns.GetKey(automation);
+    @* Fills the viewport below the app bar, so the header and the tabs stay in view and the tab content scrolls on its own.
+       The max height caps it to the pane when the page is shown next to its editor. *@
+    <div class="d-flex flex-column gap-2 pt-2 pt-sm-4 pb-2" data-testid="automation-page"
+         style="height: calc(100vh - var(--mud-appbar-height)); height: calc(100dvh - var(--mud-appbar-height)); max-height: 100%;">
+        @* The right padding keeps the buttons clear of the page's edit mode menu, which floats over the top right corner. *@
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="pr-12 flex-shrink-0">
+            <MudStack Row="true" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center" Spacing="2" Class="flex-grow-1" Style="min-width: 0;">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Style="min-width: 0;">
+                    <MudIcon Icon="@Icons.Material.Filled.AutoMode" />
+                    <MudText Typo="Typo.h5" Style="overflow-wrap: anywhere;">@automation.Title</MudText>
+                </MudStack>
+                <MudChip T="string" Size="Size.Small" Color="@AutomationColors.GetStatusColor(automation.Status)" Class="ma-0" data-testid="automation-status">@automation.Status</MudChip>
+                @if (automation.StatusMessage is { Length: > 0 } statusMessage)
+                {
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary" Style="overflow-wrap: anywhere;">@statusMessage</MudText>
+                }
+            </MudStack>
+            @* Both variants render, so neither flashes in after prerendering; CSS shows one per breakpoint. *@
+            <div class="d-flex d-sm-none gap-2">
+                <MudTooltip Text="Reset state">
+                    <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Variant="Variant.Outlined" aria-label="Reset state"
+                                   OnClick="@(() => ResetAsync(automation))" Style="width: 44px; height: 44px;" data-testid="automation-reset-icon" />
+                </MudTooltip>
+                <MudTooltip Text="Edit">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Variant="Variant.Outlined" Color="Color.Primary" aria-label="Edit"
+                                   OnClick="@(() => EditAsync(automation))" Style="width: 44px; height: 44px;" data-testid="automation-edit-icon" />
+                </MudTooltip>
+            </div>
+            <div class="d-none d-sm-flex gap-2 flex-shrink-0">
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="@(() => ResetAsync(automation))"
+                           data-testid="automation-reset">Reset state</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Edit" OnClick="@(() => EditAsync(automation))"
+                           data-testid="automation-edit">Edit</MudButton>
+            </div>
+        </MudStack>
+        @* A plain underlined tab bar on the page background, with the content aligned to the title. The gap below the tab
+           bar is a margin of the scrolling panel rather than its padding, so scrolled content keeps clear of the tab bar. *@
+        <MudTabs Elevation="0" Border="true" MinimumTabWidth="0px" TabHeaderClass="mud-background" TabButtonsClass="px-2 px-sm-4"
+                 Class="flex-grow-1 overflow-hidden" TabPanelsClass="flex-grow-1 mt-5 overflow-y-auto">
+            @* MudTabPanel does not pass its attributes to the tab, so the test ids are on its content. *@
+            <MudTabPanel Text="Overview">
+                <TabContent><span data-testid="automation-tab-overview">Overview</span></TabContent>
+                <ChildContent>
+                    <AutomationOverviewTab Automation="automation" Layout="@_layouts.Get(automation)" CurrentDetail="@GetCurrentDetail(automation)"
+                                           TestRequested="@(request => TestAsync(automation, request.Key, request.Rule))"
+                                           RuleOpened="@(ruleKey => OpenRuleAsync(automation, ruleKey))"
+                                           NotesEditRequested="@(() => EditNotesAsync(automation))" />
+                </ChildContent>
+            </MudTabPanel>
+            @* The count is inline, as the tab bar clips a badge above the text. *@
+            <MudTabPanel Text="Runs">
+                <TabContent>
+                    <span class="d-inline-flex align-center gap-2" data-testid="automation-tab-runs">
+                        Runs
+                        @if (_recentRuns is { Runs.Count: > 0 } recentRuns)
+                        {
+                            <span class="automation-tab-count" data-testid="automation-tab-runs-count">@RecentRuns.FormatCount(recentRuns)</span>
+                        }
+                    </span>
+                </TabContent>
+                <ChildContent>
+                    <AutomationRunsTab Automation="automation" RecentRuns="_recentRuns" @bind-SelectedRuleName="_selectedRunRuleName" />
+                </ChildContent>
+            </MudTabPanel>
+        </MudTabs>
+    </div>
+}
+
+@code {
+    private static readonly TimeSpan ReloadInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan RetryWindow = TimeSpan.FromSeconds(30);
+
+    private readonly CancellationTokenSource _disposal = new();
+    private readonly StateDiagramLayoutCache _layouts = new();
+    private RunReloadSchedule _reloads = new(ReloadInterval, RetryWindow);
+    private IInterceptorSubject? _runsSubject;
+    private RecentRunsResult? _recentRuns;
+    // Kept here, as the tabs render only the content of the selected tab.
+    private string? _selectedRunRuleName;
+    private int? _renderedRunsKey;
+    private int? _loadedRunsKey;
+    private int _loadVersion;
+
+    [Parameter] public IInterceptorSubject? Subject { get; set; }
+
+    // The host keeps this page and passes it the other automation when it navigates to one, so the runs, the pending
+    // reads and their schedule of the previous automation are dropped.
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(Subject, _runsSubject))
+        {
+            _runsSubject = Subject;
+            _recentRuns = null;
+            _selectedRunRuleName = null;
+            _loadedRunsKey = null;
+            _loadVersion++;
+            _reloads = new RunReloadSchedule(ReloadInterval, RetryWindow);
+        }
+    }
+
+    // The page reads the run counts in its render, so a run or a saved configuration renders it again. The runs are read
+    // at most once per interval, and once more after it while the history lags behind the counts, for a limited time after
+    // the last change of the counts.
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (Subject is Automation && _renderedRunsKey != _loadedRunsKey)
+        {
+            _loadedRunsKey = _renderedRunsKey;
+            var reloads = _reloads;
+            if (reloads.Request(TimeProvider.GetUtcNow()) is { } delay)
+            {
+                _ = LoadAfterAsync(reloads, delay);
+            }
+        }
+    }
+
+    // A read of a schedule that a change of the automation replaced does nothing.
+    private async Task LoadAfterAsync(RunReloadSchedule reloads, TimeSpan delay)
+    {
+        var cancellationToken = _disposal.Token;
+        try
+        {
+            if (delay > TimeSpan.Zero)
+            {
+                await Task.Delay(delay, TimeProvider, cancellationToken);
+            }
+
+            if (!ReferenceEquals(reloads, _reloads) || Subject is not Automation automation || cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            reloads.Start(TimeProvider.GetUtcNow());
+
+            // A load that a newer one or a change of the automation superseded leaves the runs alone, so a slow older query
+            // cannot replace newer runs or show the runs of another automation.
+            var version = ++_loadVersion;
+            var recentRuns = await RecentRuns.LoadAsync(automation, PathResolver, TimeProvider.GetUtcNow(), cancellationToken);
+            if (version != _loadVersion || cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            _recentRuns = recentRuns;
+            StateHasChanged();
+
+            if (recentRuns.IsBehind && reloads.Retry(TimeProvider.GetUtcNow()) is { } retryDelay)
+            {
+                _ = LoadAfterAsync(reloads, retryDelay);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The page was closed.
+        }
+    }
+
+    private async Task TestAsync(Automation automation, string key, AutomationRule rule)
+    {
+        var status = automation.Status;
+        var isRunningRules = automation.IsRunningRules;
+        AutomationRuleTestResult result;
+        try
+        {
+            result = rule.TestNow();
+        }
+        catch (Exception exception)
+        {
+            // A getter or a text of a device value that the test reads can throw, which must not end the circuit.
+            Snackbar.Add($"Test now failed: {exception.Message}", Severity.Error);
+            return;
+        }
+
+        var parameters = new DialogParameters<RuleTestDialog>
+        {
+            { dialog => dialog.Result, result },
+            { dialog => dialog.Rule, rule },
+            { dialog => dialog.Status, status },
+            { dialog => dialog.IsRunningRules, isRunningRules },
+            { dialog => dialog.EvaluatedAt, AutomationTime.Format(TimeZone, TimeProvider.GetUtcNow(), TimeProvider.GetUtcNow()) }
+        };
+
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
+        await DialogService.ShowAsync<RuleTestDialog>($"Test now: {rule.Name ?? key}", parameters, options);
+    }
+
+    private Task EditAsync(Automation automation) =>
+        SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, automation, $"Edit {automation.Title}");
+
+    private Task OpenRuleAsync(Automation automation, string ruleKey) =>
+        SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, automation, $"Edit {automation.Title}",
+            new Dictionary<string, object?> { [nameof(AutomationEditComponent.InitialRuleKey)] = ruleKey });
+
+    private async Task EditNotesAsync(Automation automation)
+    {
+        if (MetadataEditing.FindStore(automation) is not { } store)
+        {
+            return;
+        }
+
+        if (!MetadataEditing.IsConnected(store))
+        {
+            Snackbar.Add("The metadata cannot be edited while the storage is not connected.", Severity.Warning);
+            return;
+        }
+
+        await MetadataEditDialog.ShowAsync(DialogService, automation, $"Metadata of {automation.Title}");
+    }
+
+    private async Task ResetAsync(Automation automation)
+    {
+        var isConfirmed = await DialogService.ShowMessageBoxAsync(
+            "Reset state",
+            "Enter the initial state, clear the last trigger times and start every rule over?",
+            yesText: "Reset",
+            cancelText: "Cancel");
+        if (isConfirmed != true)
+        {
+            return;
+        }
+
+        try
+        {
+            automation.ResetState();
+        }
+        catch (InvalidOperationException exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private string GetCurrentDetail(Automation automation) =>
+        automation.StateEnteredAt is { } since ? $"Current, since {AutomationTime.Format(TimeZone, since, TimeProvider.GetUtcNow())}" : "Current";
+
+    public void Dispose()
+    {
+        _disposal.Cancel();
+        _disposal.Dispose();
+    }
+}

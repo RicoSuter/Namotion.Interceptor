@@ -1,7 +1,6 @@
 ---
 title: Installation Guide
 navTitle: Installation
-position: 1
 ---
 
 # Installation
@@ -17,7 +16,7 @@ HomeBlaze is published as a container image for amd64 and arm64 (Raspberry Pi 4 
 | `X.Y.Z` | Every release |
 | `X.Y`, `latest` | The repository's latest release |
 | `sha-<commit>` | Master builds that pass CI |
-| `edge` | The newest master commit |
+| `edge` | The newest master commit that passes CI |
 
 Pre-releases are only published with their exact version tag. Until the first release is published, use the `edge` tag by setting `image: ghcr.io/ricosuter/homeblaze:edge` in the compose file. Images are published from the upstream repository only; forks do not publish. GitHub Container Registry makes a new package private on its first push, so the maintainer makes it public once in the package settings.
 
@@ -33,15 +32,20 @@ HomeBlaze is then available at http://localhost:8080 and opens on its welcome pa
 
 Everything HomeBlaze keeps lives in the folder mounted at `/data` (`./data` in the compose file). See [Configuration](configuration.md#data-folder) for the folder layout and the settings that control it.
 
-On the first start, when `Root.json` does not exist, HomeBlaze copies a starting set into the folder: a welcome page, a help page, this documentation, an empty plugin list and a SQLite history store that records to `History/Sqlite`. Existing files are never overwritten. The demo devices and sample plugins are only available when running from source.
+On the first start, when `Root.json` does not exist, HomeBlaze copies a starting set into the folder: a welcome page, a help page, this documentation, an empty plugin list, a SQLite history store that records to `History/Sqlite`, a `Host system` subject in `Servers/HostSystem.json` and an `Installation` subject in `Servers/Installation.json` (see [Version and Updates](updates.md)). Existing files are never overwritten, except for the documentation described below. The demo devices and sample plugins are only available when running from source.
 
-Back up HomeBlaze by copying this folder. Stop HomeBlaze first (`docker compose stop`) so the SQLite history is copied in a consistent state. The container runs as root, so on Linux the files in `./data` belong to root and editing them on the host needs `sudo`.
+Back up HomeBlaze by copying this folder. Stop HomeBlaze first (`docker compose stop`) so the SQLite history is copied in a consistent state. The container runs as root, so on Linux the files in `./data` belong to root and editing them on the host needs `sudo`. A backup contains the secret keys in `DataProtection-Keys`, so store it as carefully as the installation itself; see [Configuration](configuration.md#data-folder) for how to revoke them.
 
-The documentation in `Files/Docs` is not updated by later image versions. To replace it with the documentation of the running image:
+The documentation in `Files/Docs` belongs to the image. On every start, HomeBlaze deletes the folder and copies the documentation of the running image into it, so keep your own pages outside `Files/Docs`: anything added or changed there is lost on the next start. If that fails, for example because the disk is full, HomeBlaze logs a warning and starts anyway.
 
-```bash
-docker compose exec homeblaze sh -c 'rm -rf /data/Files/Docs && cp -r /app/Seed/Files/Docs /data/Files/Docs'
+To keep `Files/Docs` as it is, set the seed directory to an empty string in the compose file after the first start. The quotes are required, because an entry without a value keeps the image's seed directory:
+
+```yaml
+    environment:
+      HomeBlaze__SeedDirectory: ""
 ```
+
+While the setting is empty, a new data folder is not filled with the starting set either.
 
 ### Optional services
 
@@ -70,7 +74,8 @@ HomeBlaze has no login. Keep it on a trusted network or put it behind a reverse 
 
 - Raspberry Pi 3 and 4 GPIO: uncomment the `/dev/gpiomem` device in the compose file. GPIO on Raspberry Pi 5 is not supported in the container yet: Pi 5 exposes `/dev/gpiochip*` instead of `/dev/gpiomem` and needs the `libgpiod` library, which the image does not include. See [GPIO](../devices/Gpio.md#linux-dependencies) for the library requirement.
 - The Hue bridge has no IP address setting. HomeBlaze discovers it by trying the Philips cloud discovery endpoint, mDNS, SSDP and a local network scan, in that order. In Docker's default network only the cloud endpoint works, and Philips rate-limits it. For reliable discovery, run HomeBlaze with `network_mode: host` on Linux instead.
-- Host networking bypasses the compose service names: remove the `ports` section, and set `ConnectionStrings__seq` to `http://localhost:5341` (Seq is published on the host at port 5341).
+- Sonos: in Docker's default network, multicast discovery does not find the speakers and the speakers cannot reach the container's own address to deliver events. Set `SeedHost` to a speaker IP and `EventCallbackHost` to the host IP, and publish the event port (`"6329:6329"`), or use host networking. See [Sonos](../devices/Sonos.md).
+- Host networking bypasses the compose service names: remove the `ports` section, and set `ConnectionStrings__seq` to `http://localhost:5341` (Seq is published on the host at port 5341). HomeBlaze then listens directly on host port 8080; if that port is taken, for example by another HomeBlaze instance, set `ASPNETCORE_HTTP_PORTS` to a free port such as `"8090"`.
 
 ## From source
 

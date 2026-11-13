@@ -39,19 +39,4 @@ public static class FrontmatterParser
             return null;
         }
     }
-
-    /// <summary>
-    /// Gets the content after the frontmatter section.
-    /// </summary>
-    public static string GetContentAfterFrontmatter(string content)
-    {
-        if (string.IsNullOrEmpty(content) || !content.StartsWith("---"))
-            return content;
-
-        var endIndex = content.IndexOf("---", 3, StringComparison.Ordinal);
-        if (endIndex < 0)
-            return content;
-
-        return content.Substring(endIndex + 3).TrimStart();
-    }
 }

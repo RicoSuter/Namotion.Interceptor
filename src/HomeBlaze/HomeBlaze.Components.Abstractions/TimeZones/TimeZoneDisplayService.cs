@@ -1,18 +1,26 @@
 using System.Globalization;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking;
 
 namespace HomeBlaze.Components.Abstractions.TimeZones;
 
 /// <inheritdoc />
 public sealed class TimeZoneDisplayService : ITimeZoneDisplay
 {
+    // In a context of its own, so that a change of the zone tells only the components whose render read it.
+    private readonly TimeZoneState _state = new(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithReadPropertyRecorder())
+    {
+        Preference = TimeZonePreference.Automatic
+    };
+
     /// <inheritdoc />
     public bool IsResolved => Zone is not null;
 
     /// <inheritdoc />
-    public TimeZoneInfo? Zone { get; private set; }
+    public TimeZoneInfo? Zone => _state.Zone;
 
     /// <inheritdoc />
-    public TimeZonePreference Preference { get; private set; } = TimeZonePreference.Automatic;
+    public TimeZonePreference Preference => _state.Preference;
 
     /// <inheritdoc />
     public string Placeholder => "…";
@@ -23,8 +31,9 @@ public sealed class TimeZoneDisplayService : ITimeZoneDisplay
     /// <inheritdoc />
     public void SetResolved(TimeZonePreference preference, TimeZoneInfo zone)
     {
-        Preference = preference;
-        Zone = zone ?? throw new ArgumentNullException(nameof(zone));
+        ArgumentNullException.ThrowIfNull(zone);
+        _state.Preference = preference;
+        _state.Zone = zone;
         Changed?.Invoke();
     }
 

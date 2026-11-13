@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Testing;
 
 namespace Namotion.Interceptor.Hosting.Tests;
 
@@ -27,7 +28,7 @@ public class HostedSubjectConfigurationTests
             var subject = provider.GetRequiredService<ConfiguredHostedSubject>();
 
             // Assert
-            Assert.Equal("configured", await subject.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Equal("configured", await subject.Started.Task.WaitAsync(TestTimeouts.Default));
         }
         finally
         {

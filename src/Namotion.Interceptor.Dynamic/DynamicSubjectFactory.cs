@@ -36,9 +36,7 @@ public class DynamicSubjectFactory
                 .Where(p => existingProperties.All(ep => ep.Name != p.Name))
                 .DistinctBy(p => p.Name)
                 .Select(property => new SubjectPropertyMetadata(
-                    property.Name,
-                    property.PropertyType,
-                    property.GetCustomAttributesIncludingInterfaces(),
+                    property,
                     property.CanRead ? property.GetValue : null,
                     property.CanWrite ? property.SetValue : null,
                     isIntercepted: true,

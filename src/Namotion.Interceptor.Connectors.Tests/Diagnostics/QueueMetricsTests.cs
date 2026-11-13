@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Connectors.Diagnostics;
+using Namotion.Interceptor.Testing;
 
 namespace Namotion.Interceptor.Connectors.Tests.Diagnostics;
 
@@ -397,8 +398,11 @@ public class QueueMetricsTests
         var registrations = new System.Collections.Concurrent.ConcurrentBag<IDisposable>();
         var failures = new System.Collections.Concurrent.ConcurrentBag<InvalidOperationException>();
 
+        // Dedicated threads, because every participant parks on the barrier until all of them run: on
+        // the pool they would hold its workers until it injected enough new ones, stalling every other
+        // test in the assembly for as long.
         var attempts = Enumerable.Range(0, registrationCount)
-            .Select(_ => Task.Run(() =>
+            .Select(_ => DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
             {
                 barrier.SignalAndWait();
 

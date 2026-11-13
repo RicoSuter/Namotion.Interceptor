@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Plugins.Models;
@@ -6,6 +7,11 @@ using Namotion.NuGet.Plugins;
 
 namespace HomeBlaze.Plugins;
 
+[Category("System")]
+[Description("Loads plugins from NuGet feeds")]
+[DisplayName("Plugin manager")]
+[SubjectIcon("Extension")]
+[SingleInstance]
 [InterceptorSubject]
 public partial class PluginManager : IConfigurable, ITitleProvider, IIconProvider
 {
@@ -96,7 +102,7 @@ public partial class PluginManager : IConfigurable, ITitleProvider, IIconProvide
     // after a restart. Runtime hot-reload of plugins is not supported.
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    [Operation(Title = "Add Plugin")]
+    [Operation(Title = "Add Plugin", RequiresConfirmation = true)]
     public void AddPlugin(string packageName, string version)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packageName);

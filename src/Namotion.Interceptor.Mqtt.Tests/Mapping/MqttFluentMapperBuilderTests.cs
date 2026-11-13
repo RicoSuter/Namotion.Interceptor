@@ -39,6 +39,31 @@ public class MqttFluentMapperBuilderTests
     }
 
     [Fact]
+    public async Task WhenHoldingPropertyIsUnmapped_ThenPropertyBelowItHasNoTopic()
+    {
+        // Arrange
+        var fluent = new MqttFluentMapperBuilder<MqttFluentRoot>();
+        fluent
+            .ForType<MqttFluentPump>()
+                .Map(p => p.Speed, b => b.WithSegment("speed"));
+        var mapper = CreateFluentMapper(fluent);
+
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var root = new MqttFluentRoot(context) { Pump = new MqttFluentPump() };
+        var speed = root.Pump.TryGetRegisteredSubject()!.TryGetProperty("Speed")!;
+
+        // Act
+        var found = mapper.TryGetMapping(speed, root, out var mapping);
+        var resolved = await mapper.TryGetPropertyAsync(
+            new MqttLookupKey("Pump/speed"), root.TryGetRegisteredSubject()!, CancellationToken.None);
+
+        // Assert
+        Assert.False(found);
+        Assert.Null(mapping);
+        Assert.Null(resolved);
+    }
+
+    [Fact]
     public void WhenTypeReusedAcrossLocations_ThenResolvesEverywhere()
     {
         // Arrange

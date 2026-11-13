@@ -28,15 +28,16 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       homeblaze: ${{ github.event_name != 'pull_request' || steps.filter.outputs.homeblaze == 'true' }}
+      automation: ${{ github.event_name != 'pull_request' || steps.filter.outputs.automation == 'true' }}
       nugetplugins: ${{ github.event_name != 'pull_request' || steps.filter.outputs.nugetplugins == 'true' }}
       opcua: ${{ github.event_name != 'pull_request' || steps.filter.outputs.opcua == 'true' }}
       websocket: ${{ github.event_name != 'pull_request' || steps.filter.outputs.websocket == 'true' }}
       mqtt: ${{ github.event_name != 'pull_request' || steps.filter.outputs.mqtt == 'true' }}
       modbus: ${{ github.event_name != 'pull_request' || steps.filter.outputs.modbus == 'true' }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
         if: github.event_name == 'pull_request'
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         if: github.event_name == 'pull_request'
         id: filter
         with:
@@ -55,9 +56,23 @@ jobs:
               - 'src/Namotion.Interceptor.AspNetCore/**'
             homeblaze:
               - 'src/HomeBlaze/**'
-              - 'src/Directory.Packages.props'
-              - 'src/Directory.Build.props'
-              - '.github/workflows/build.yml'
+              - 'src/Namotion.Interceptor.Expressions/**'
+              - &build-files
+                - 'src/Directory.Packages.props'
+                - 'src/Directory.Build.props'
+                - 'src/Directory.Build.targets'
+                - '.github/workflows/build.yml'
+            # Everything HomeBlaze.Automation.Tests builds from.
+            automation:
+              - *shared
+              - *build-files
+              - 'src/Namotion.Interceptor.Expressions/**'
+              - 'src/HomeBlaze/HomeBlaze.Automation/**'
+              - 'src/HomeBlaze/HomeBlaze.Automation.Tests/**'
+              - 'src/HomeBlaze/HomeBlaze.Services/**'
+              - 'src/HomeBlaze/HomeBlaze.*Abstractions/**'
+              - 'src/HomeBlaze/Directory.Build.props'
+              - 'src/.editorconfig'
             nugetplugins:
               - 'src/HomeBlaze/Namotion.NuGet.Plugins/**'
               - 'src/HomeBlaze/Namotion.NuGet.Plugins.Tests/**'
@@ -81,13 +96,17 @@ jobs:
               - 'src/HomeBlaze/Namotion.Devices.Luxtronik*/**'
 
   test:
-    timeout-minutes: 15
-    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -96,25 +115,55 @@ jobs:
 
       - name: Run tests (excluding integration tests)
         run: |
+          $coverageArguments = @()
+          if ('${{ runner.os }}' -eq 'Linux') {
+            $coverageArguments = @('--collect:XPlat Code Coverage', '--', 'DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura')
+          }
           dotnet test src/Namotion.Interceptor.slnx `
             --configuration Release `
             --no-build `
             --filter "Category!=Integration" `
+            --logger trx `
             --results-directory ./TestResults `
-            --collect:"XPlat Code Coverage" `
-            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+            --blame-hang-timeout 5m `
+            --blame-hang-dump-type mini `
+            @coverageArguments
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-${{ matrix.os }}
+          path: 'TestResults/**/*.trx'
+          if-no-files-found: warn
+
+      # A test that hangs for 5 minutes is dumped and named in the log, and the dump says where it waits. A job that hits its
+      # time limit while dumping counts as canceled, not failed.
+      - name: Upload hang dumps
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hang-dumps-${{ matrix.os }}
+          path: |
+            TestResults/**/*.dmp
+            TestResults/**/Sequence_*.xml
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload raw coverage file
-        uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
         with:
           name: cobertura-coverage
           path: '**/TestResults/**/coverage.cobertura.xml'
           if-no-files-found: error
 
       - name: Install ReportGenerator
+        if: runner.os == 'Linux'
         run: dotnet tool install --global dotnet-reportgenerator-globaltool
 
       - name: Generate HTML coverage report
+        if: runner.os == 'Linux'
         run: |
           reportgenerator `
             -reports:"**/TestResults/**/coverage.cobertura.xml" `
@@ -122,7 +171,8 @@ jobs:
             -reporttypes:Html
 
       - name: Upload HTML coverage report
-        uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
         with:
           name: html-coverage-report
           path: coverage-report
@@ -132,23 +182,102 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.homeblaze == 'true'
+    # Splits the E2E tests round-robin across the jobs; one more entry adds a job.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [ 0, 1, 2 ]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Build
-        run: dotnet build src/Namotion.Interceptor.slnx --configuration Release
+        run: dotnet build src/HomeBlaze/HomeBlaze.E2E.Tests --configuration Release
 
+      - name: Read Playwright version
+        id: playwright
+        run: |
+          $version = (Select-Xml -Path src/Directory.Packages.props -XPath "//PackageVersion[@Include='Microsoft.Playwright']").Node.Version
+          if (-not $version) { throw "Microsoft.Playwright is not in src/Directory.Packages.props" }
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.VERSION }}
+
+      # No --with-deps: the runner image has Chromium's libraries, and the apt mirror can take minutes.
       - name: Install Playwright browsers
-        run: pwsh src/HomeBlaze/HomeBlaze.E2E.Tests/bin/Release/net10.0/playwright.ps1 install --with-deps
+        run: pwsh src/HomeBlaze/HomeBlaze.E2E.Tests/bin/Release/net10.0/playwright.ps1 install chromium
+
+      # Theory rows are listed with their arguments; the part before "(" is the full name, so a theory stays in one job.
+      - name: Select the tests of this shard
+        id: shard
+        run: |
+          $listing = dotnet test src/HomeBlaze/HomeBlaze.E2E.Tests --configuration Release --no-build --list-tests --filter "Category=Integration"
+          $names = @($listing | Where-Object { $_ -match '^    \S' } | ForEach-Object { $_.Trim().Split('(')[0] } | Sort-Object -Unique -CaseSensitive)
+          if ($LASTEXITCODE -ne 0 -or $names.Count -eq 0) { $listing; throw "Listing the tests failed" }
+          $index = ${{ strategy.job-index }}
+          $count = ${{ strategy.job-total }}
+          $share = @(for ($position = $index; $position -lt $names.Count; $position += $count) { "FullyQualifiedName=$($names[$position])" })
+          Write-Host "Shard $index of $count runs $($share.Count) of $($names.Count) tests"
+          "filter=$($share -join '|')" >> $env:GITHUB_OUTPUT
 
       - name: Run HomeBlaze integration tests
+        if: steps.shard.outputs.filter != ''
         run: |
           dotnet test src/HomeBlaze/HomeBlaze.E2E.Tests `
+            --configuration Release `
+            --no-build `
+            --filter "${{ steps.shard.outputs.filter }}" `
+            --results-directory ./TestResults `
+            --blame-hang-timeout 5m `
+            --blame-hang-dump-type mini `
+            --collect:"XPlat Code Coverage" `
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+
+      - name: Upload HomeBlaze integration test coverage
+        uses: actions/upload-artifact@v7
+        with:
+          name: cobertura-coverage-homeblaze-integration-${{ strategy.job-index }}
+          path: '**/TestResults/**/coverage.cobertura.xml'
+          if-no-files-found: warn
+
+      - name: Upload HomeBlaze integration hang dumps
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hang-dumps-homeblaze-integration-${{ strategy.job-index }}
+          path: |
+            TestResults/**/*.dmp
+            TestResults/**/Sequence_*.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  test-automation-integration:
+    timeout-minutes: 40
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.automation == 'true'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build
+        run: dotnet build src/HomeBlaze/HomeBlaze.Automation.Tests --configuration Release
+
+      - name: Run automation integration tests
+        run: |
+          dotnet test src/HomeBlaze/HomeBlaze.Automation.Tests `
             --configuration Release `
             --no-build `
             --filter "Category=Integration" `
@@ -156,10 +285,10 @@ jobs:
             --collect:"XPlat Code Coverage" `
             -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
 
-      - name: Upload HomeBlaze integration test coverage
-        uses: actions/upload-artifact@v4
+      - name: Upload automation integration test coverage
+        uses: actions/upload-artifact@v7
         with:
-          name: cobertura-coverage-homeblaze-integration
+          name: cobertura-coverage-automation-integration
           path: '**/TestResults/**/coverage.cobertura.xml'
           if-no-files-found: warn
 
@@ -169,10 +298,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.nugetplugins == 'true'
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -190,7 +319,7 @@ jobs:
             -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
 
       - name: Upload NuGet plugins integration test coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cobertura-coverage-nugetplugins-integration
           path: '**/TestResults/**/coverage.cobertura.xml'
@@ -202,10 +331,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.opcua == 'true'
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -223,7 +352,7 @@ jobs:
             -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
 
       - name: Upload integration test coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cobertura-coverage-opcua-integration
           path: '**/TestResults/**/coverage.cobertura.xml'
@@ -235,10 +364,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.websocket == 'true'
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -256,7 +385,7 @@ jobs:
             -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
 
       - name: Upload integration test coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cobertura-coverage-websocket-integration
           path: '**/TestResults/**/coverage.cobertura.xml'
@@ -268,10 +397,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.mqtt == 'true'
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -289,7 +418,7 @@ jobs:
             -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
 
       - name: Upload MQTT integration test coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cobertura-coverage-mqtt-integration
           path: '**/TestResults/**/coverage.cobertura.xml'
@@ -301,10 +430,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.modbus == 'true'
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -332,7 +461,7 @@ jobs:
             -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
 
       - name: Upload Modbus and Luxtronik integration test coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cobertura-coverage-modbus-integration
           path: '**/TestResults/**/coverage.cobertura.xml'
@@ -344,10 +473,10 @@ jobs:
     if: needs.changes.outputs.homeblaze == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -355,7 +484,10 @@ jobs:
         run: |
           dotnet publish src/HomeBlaze/HomeBlaze/HomeBlaze.csproj -c Release -r linux-x64 /t:PublishContainer `
             -p:ContainerRuntimeIdentifiers= -p:ContainerImageTag=smoke `
-            -p:ContainerArchiveOutputPath=${{ runner.temp }}/homeblaze.tar.gz
+            -p:ContainerArchiveOutputPath=${{ runner.temp }}/homeblaze.tar.gz `
+            -p:LibraryPackageVersion=9.9.9 `
+            -p:InformationalVersion=edge -p:BuildTime=2000-01-01T00:00:00Z `
+            -p:ContinuousIntegrationBuild=true
 
       - name: Smoke test image
         run: |
@@ -369,6 +501,10 @@ jobs:
           }
           docker logs homeblaze
           if (-not $healthy) { throw "HomeBlaze did not become healthy" }
+          $deps = docker exec homeblaze cat /app/HomeBlaze.deps.json
+          if ($LASTEXITCODE -ne 0) { throw "Could not read deps.json from the container" }
+          if (-not ($deps -match '"Namotion.Interceptor/9\.9\.9"')) { throw "deps.json does not report the library package version" }
+          if (-not ($deps -match '"HomeBlaze.Abstractions/1\.0\.0"')) { throw "deps.json does not report the pinned HomeBlaze version" }
           foreach ($path in @("Root.json", "Files/Plugins.json", "Files/Servers/SqliteHistory.json", "Files/Docs")) {
             if (-not (Test-Path (Join-Path $data.FullName $path))) { throw "Missing seeded path $path" }
           }
@@ -379,35 +515,67 @@ jobs:
           }
           if (-not $historyCreated) { throw "SQLite history folder was not created" }
 
+      - name: Check build metadata
+        run: |
+          # The Installation subject reads its build from HomeBlaze.Installation.dll, not HomeBlaze.dll, so both carry the metadata.
+          foreach ($name in @("HomeBlaze.dll", "HomeBlaze.Installation.dll")) {
+            docker cp "homeblaze:/app/$name" "${{ runner.temp }}/$name"
+            if ($LASTEXITCODE -ne 0) { throw "Could not copy $name from the container" }
+            # Attribute arguments are UTF-8 strings in the metadata blob heap, so a text search finds them.
+            $text = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes("${{ runner.temp }}/$name"))
+            if (-not $text.Contains("Namotion.Build.Time")) { throw "$name has no build time" }
+            if (-not $text.Contains("2000-01-01T00:00:00Z")) { throw "$name has another build time" }
+            if ($text -notmatch 'edge\+[0-9a-f]{40}') { throw "$name's informational version has no commit" }
+            if ($text -match 'edge\+[0-9a-f]+\.[0-9a-f]') { throw "$name's informational version has a doubled commit" }
+          }
+          # The container-publish job reads this label to decide whether edge moves.
+          $revision = docker inspect homeblaze:smoke --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}'
+          if ($revision -ne (git rev-parse HEAD)) { throw "The image revision label '$revision' is not the built commit" }
+
       - name: Build arm64 image archive
         run: |
           dotnet publish src/HomeBlaze/HomeBlaze/HomeBlaze.csproj -c Release -r linux-arm64 /t:PublishContainer `
             -p:ContainerRuntimeIdentifiers= -p:ContainerImageTag=smoke-arm64 `
             -p:ContainerArchiveOutputPath=${{ runner.temp }}/homeblaze-arm64.tar.gz
 
+  # The one check that the branch rules require. A skipped job passes it, because a job is skipped when its files did not
+  # change, and a skipped matrix job reports under another name than one that runs, so a rule cannot name those jobs.
+  ci:
+    timeout-minutes: 5
+    if: always()
+    needs: [ changes, test, test-homeblaze-integration, test-automation-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration, test-modbus-integration, container-build ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail when a needed job failed or was canceled
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          Write-Output '${{ toJSON(needs) }}'
+          exit 1
+
   container-publish:
     timeout-minutes: 30
     # Forks cannot push to this package.
     if: github.repository_owner == 'RicoSuter' && (github.event_name == 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/master'))
-    # Serializes publishing per ref; the Compute tags step decides whether the moving edge and latest tags may move.
+    # Serializes publishing per ref, so the edge commit the Compute tags step reads cannot change before this run pushes.
+    # A newly queued run cancels the pending one, so a burst of merges can skip a commit until the next push.
     concurrency:
       group: container-publish-${{ github.ref }}
       cancel-in-progress: false
-    needs: [ container-build, test, test-homeblaze-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration, test-modbus-integration ]
+    needs: [ container-build, test, test-homeblaze-integration, test-automation-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration, test-modbus-integration ]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -420,10 +588,10 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
-          # Moving tags only follow the newest master commit or release, so re-running an older run cannot move them back.
+          # Moving tags never move back to an older commit or release, so re-running an older run is safe.
           if ($env:GITHUB_EVENT_NAME -eq "release") {
             $version = $env:RELEASE_TAG -replace '^v', ''
-            $tags = $version
+            $tags = $imageTag = $version
             # Pre-releases must not move latest or the minor tag.
             if ($env:RELEASE_PRERELEASE -ne "true") {
               $latestReleaseTag = gh release view --repo $env:GITHUB_REPOSITORY --json tagName -q .tagName
@@ -434,40 +602,95 @@ jobs:
               }
             }
             $informationalVersion = $version
+            $libraryVersion = $version
+            $buildTag = $env:RELEASE_TAG
+            $branch = ""
           } else {
             $short = $env:GITHUB_SHA.Substring(0, 7)
-            $tags = "sha-$short"
+            $tags = $imageTag = "sha-$short"
+            # Edge follows every newer green commit, so a failed run of a later commit does not hold it back.
             $masterHead = git ls-remote origin refs/heads/master
             if ($LASTEXITCODE -ne 0) { throw "Could not read the master head" }
-            if ($masterHead -and $masterHead.Split("`t")[0] -eq $env:GITHUB_SHA) {
-              $tags = "edge;$tags"
+            $moveEdge = $masterHead -like "$($env:GITHUB_SHA)*"
+            if (-not $moveEdge) {
+              # A missing tool, edge image or unknown commit keeps edge instead of failing the publish, with a warning.
+              $PSNativeCommandUseErrorActionPreference = $false
+              if (Get-Command skopeo -ErrorAction SilentlyContinue) {
+                $edgeCommit = (skopeo --command-timeout 1m inspect --no-tags docker://ghcr.io/ricosuter/homeblaze:edge | ConvertFrom-Json).Labels.'org.opencontainers.image.revision'
+              }
+              $comparison = if ($edgeCommit -match '^[0-9a-f]{40}$') { gh api "repos/$($env:GITHUB_REPOSITORY)/compare/$edgeCommit...$($env:GITHUB_SHA)" --jq .status }
+              $moveEdge = $comparison -in "ahead", "identical"
+              # Behind is an older run of a commit that edge has passed already.
+              if (-not $moveEdge -and $comparison -ne "behind") {
+                Write-Host "::warning::Edge stays: no comparison of the edge commit '$edgeCommit' with this commit, got '$comparison'"
+              }
             }
-            $informationalVersion = "edge+$short"
+            Write-Host "Move edge: $moveEdge, edge commit: '$edgeCommit', comparison: '$comparison'"
+            if ($moveEdge) { $tags = "edge;$tags" }
+            # The SDK appends +<commit> itself.
+            $informationalVersion = "edge"
+            $libraryVersion = (gh release view --repo $env:GITHUB_REPOSITORY --json tagName -q .tagName) -replace '^v', ''
+            if ($LASTEXITCODE -ne 0) { throw "Could not read the latest release" }
+            $buildTag = ""
+            $branch = $env:GITHUB_REF_NAME
           }
+          $commitDate = git log -1 --format=%cI
+          if ($LASTEXITCODE -ne 0) { throw "Could not read the commit date" }
           echo "TAGS=$tags" >> $env:GITHUB_OUTPUT
+          echo "IMAGE_TAG=$imageTag" >> $env:GITHUB_OUTPUT
           echo "INFORMATIONAL_VERSION=$informationalVersion" >> $env:GITHUB_OUTPUT
+          echo "LIBRARY_VERSION=$libraryVersion" >> $env:GITHUB_OUTPUT
+          echo "BUILD_TAG=$buildTag" >> $env:GITHUB_OUTPUT
+          echo "SOURCE_BRANCH=$branch" >> $env:GITHUB_OUTPUT
+          echo "SOURCE_COMMIT_DATE=$commitDate" >> $env:GITHUB_OUTPUT
+          echo "BUILD_TIME=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture))" >> $env:GITHUB_OUTPUT
+          echo "BUILD_RUN_URL=$($env:GITHUB_SERVER_URL)/$($env:GITHUB_REPOSITORY)/actions/runs/$($env:GITHUB_RUN_ID)" >> $env:GITHUB_OUTPUT
 
       # Tags go through an environment variable because MSBuild splits semicolons on the command line.
       # Version is not overridden: HomeBlaze pins it to 1.0.0 because plugins bind by assembly version.
+      # LibraryPackageVersion only sets the library versions in deps.json.
       - name: Publish multi-arch image
         env:
           ContainerImageTags: ${{ steps.tags.outputs.TAGS }}
         run: |
           dotnet publish src/HomeBlaze/HomeBlaze/HomeBlaze.csproj -c Release /t:PublishContainer `
             -p:ContainerRegistry=ghcr.io -p:ContainerRepository=ricosuter/homeblaze `
-            -p:InformationalVersion=${{ steps.tags.outputs.INFORMATIONAL_VERSION }}
+            -p:InformationalVersion=${{ steps.tags.outputs.INFORMATIONAL_VERSION }} `
+            -p:LibraryPackageVersion=${{ steps.tags.outputs.LIBRARY_VERSION }} `
+            -p:BuildTag=${{ steps.tags.outputs.BUILD_TAG }} `
+            -p:SourceBranch=${{ steps.tags.outputs.SOURCE_BRANCH }} `
+            -p:SourceCommitDate=${{ steps.tags.outputs.SOURCE_COMMIT_DATE }} `
+            -p:BuildTime=${{ steps.tags.outputs.BUILD_TIME }} `
+            -p:BuildRunUrl=${{ steps.tags.outputs.BUILD_RUN_URL }} `
+            -p:ContinuousIntegrationBuild=true
+
+      # The Compute tags step of a later run reads this label from edge, and without it keeps edge at the master head.
+      - name: Check the revision label of the published image
+        env:
+          IMAGE_TAG: ${{ steps.tags.outputs.IMAGE_TAG }}
+        run: |
+          if (-not (Get-Command skopeo -ErrorAction SilentlyContinue)) {
+            Write-Host "::warning::skopeo is missing, so the revision label of the published image is not checked"
+            exit 0
+          }
+          foreach ($arch in "amd64", "arm64") {
+            $image = skopeo --command-timeout 1m inspect --retry-times 3 --no-tags --override-os linux --override-arch $arch "docker://ghcr.io/ricosuter/homeblaze:$($env:IMAGE_TAG)"
+            if ($LASTEXITCODE -ne 0) { throw "Could not inspect the published $arch image" }
+            $revision = ($image | ConvertFrom-Json).Labels.'org.opencontainers.image.revision'
+            if ($revision -ne $env:GITHUB_SHA) { throw "The $arch image has the revision label '$revision' instead of $($env:GITHUB_SHA)" }
+          }
 
   pack:
     timeout-minutes: 15
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -477,14 +700,27 @@ jobs:
           $version = "${{ github.event.release.tag_name }}" -replace '^v', ''
           echo "VERSION=$version" >> $env:GITHUB_OUTPUT
 
-      - run: dotnet build src/Namotion.Interceptor.slnx --configuration Release
+      - name: Compute build metadata
+        id: build
+        run: |
+          $commitDate = git log -1 --format=%cI
+          if ($LASTEXITCODE -ne 0) { throw "Could not read the commit date" }
+          echo "SOURCE_COMMIT_DATE=$commitDate" >> $env:GITHUB_OUTPUT
 
-      - run: dotnet pack src/Namotion.Interceptor.slnx --configuration Release --no-build --output ${{ env.NUGET_DIRECTORY }} -p:PackageVersion=${{ steps.version.outputs.VERSION }}
+      # AssemblyVersion stays unchanged so binding is unaffected; only the informational version carries the release.
+      - run: |
+          dotnet build src/Namotion.Interceptor.slnx --configuration Release `
+            -p:InformationalVersion=${{ steps.version.outputs.VERSION }} `
+            -p:BuildTag=${{ github.event.release.tag_name }} `
+            -p:SourceCommitDate=${{ steps.build.outputs.SOURCE_COMMIT_DATE }} `
+            -p:ContinuousIntegrationBuild=true
+
+      - run: dotnet pack src/Namotion.Interceptor.slnx --configuration Release --no-build --output ${{ env.NUGET_DIRECTORY }} -p:PackageVersion=${{ steps.version.outputs.VERSION }} -p:BuildTag=${{ github.event.release.tag_name }}
 
       - name: Remove non-library packages
         run: Get-ChildItem "${{ env.NUGET_DIRECTORY }}" -Include *.nupkg -Recurse | Where-Object { $_.Name -notlike "Namotion.Interceptor*" } | Remove-Item -Force
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nuget
           if-no-files-found: error
@@ -498,11 +734,11 @@ jobs:
     needs: [ pack ]
     steps:
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: nuget
           path: ${{ env.NUGET_DIRECTORY }}
@@ -511,23 +747,34 @@ jobs:
         run: dotnet tool update Meziantou.Framework.NuGetPackageValidation.Tool --global --version 1.0.46
 
       - name: Validate package
-        run: meziantou.validate-nuget-package --excluded-rules IconMustBeSet,ReadmeMustBeSet,Symbols,ProjectUrlMustBeSet (Get-ChildItem "${{ env.NUGET_DIRECTORY }}/*.nupkg")
+        run: meziantou.validate-nuget-package --excluded-rules Symbols,ProjectUrlMustBeSet (Get-ChildItem "${{ env.NUGET_DIRECTORY }}/*.nupkg")
 
   deploy:
     timeout-minutes: 15
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
-    needs: [ validate, test, test-homeblaze-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration, test-modbus-integration ]
+    needs: [ validate, test, test-homeblaze-integration, test-automation-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration, test-modbus-integration ]
+    permissions:
+      contents: read
+      id-token: write # Required for NuGet trusted publishing (OIDC token exchange)
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: nuget
           path: ${{ env.NUGET_DIRECTORY }}
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Exchange the GitHub OIDC token for a short-lived (1 hour) NuGet API key via trusted publishing.
+      # Requires a matching trusted publishing policy on nuget.org (repository, workflow file build.yml).
+      - name: NuGet login
+        uses: NuGet/login@v1
+        id: nuget-login
+        with:
+          user: ${{ secrets.NUGET_USER }} # nuget.org profile name, not the email address
 
       # Publish all NuGet packages to NuGet.org
       # Use --skip-duplicate to prevent errors if a package with the same version already exists.
@@ -535,5 +782,5 @@ jobs:
       - name: Publish NuGet package
         run: |
           foreach($file in (Get-ChildItem "${{ env.NUGET_DIRECTORY }}" -Recurse -Include *.nupkg)) {
-              dotnet nuget push $file --api-key "${{ secrets.NUGET_APIKEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
+              dotnet nuget push $file --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
           }

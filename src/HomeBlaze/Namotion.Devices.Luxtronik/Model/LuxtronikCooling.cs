@@ -58,13 +58,13 @@ public partial class LuxtronikCooling
     /// Gets the electrical energy consumed for cooling.
     /// </summary>
     [LuxtronikInputRegister(10316, ModbusDataType.S32, Scale = 100)]
-    [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 5)]
+    [State(Unit = StateUnit.WattHour, IsCumulative = true, IsEstimated = true, Position = 5)]
     public partial decimal? TotalElectricalEnergy { get; internal set; }
 
     /// <summary>
     /// Gets the thermal energy produced for cooling.
     /// </summary>
     [LuxtronikInputRegister(10326, ModbusDataType.S32, Scale = 100, MinimumFirmware = "3.92.0")]
-    [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 6)]
+    [State(Unit = StateUnit.WattHour, IsCumulative = true, IsEstimated = true, Position = 6)]
     public partial decimal? TotalThermalEnergy { get; internal set; }
 }

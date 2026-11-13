@@ -110,7 +110,7 @@ Add optional indexes on the registry, maintained incrementally as subjects attac
 
 | Index | Use Case |
 |-------|----------|
-| By type/interface | `query` with type filter, `list_types` counts |
+| By type/interface | `search` with type filter, `list_types` counts |
 | By path prefix | Scoped queries, connector property selection |
 | By attribute | History collector selecting `[State]` properties, security checking `[SubjectAuthorize]` |
 

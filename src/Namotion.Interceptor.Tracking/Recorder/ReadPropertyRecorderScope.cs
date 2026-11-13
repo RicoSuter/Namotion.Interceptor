@@ -11,11 +11,15 @@ namespace Namotion.Interceptor.Tracking.Recorder;
 public sealed class ReadPropertyRecorderScope : IDisposable
 {
     private readonly ConcurrentDictionary<PropertyReference, bool> _properties;
+
+    // The list of the async context that started the scope, which Dispose must leave even when it runs in another one.
+    private readonly List<ReadPropertyRecorderScope> _scopes;
     private volatile int _disposed;
 
-    internal ReadPropertyRecorderScope(ConcurrentDictionary<PropertyReference, bool>? properties)
+    internal ReadPropertyRecorderScope(ConcurrentDictionary<PropertyReference, bool>? properties, List<ReadPropertyRecorderScope> scopes)
     {
         _properties = properties ?? [];
+        _scopes = scopes;
         // Note: Do NOT clear here - the caller (TrackingScope) manages clearing
     }
 
@@ -40,7 +44,10 @@ public sealed class ReadPropertyRecorderScope : IDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 0)
         {
-            ReadPropertyRecorder.RemoveScope(this);
+            lock (_scopes)
+            {
+                _scopes.Remove(this);
+            }
         }
     }
 }

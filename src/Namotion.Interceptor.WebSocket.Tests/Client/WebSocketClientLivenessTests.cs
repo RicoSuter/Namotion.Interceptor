@@ -152,7 +152,7 @@ public class WebSocketClientLivenessTests
             await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.IsOperational == false);
             reloadGate.Arm();
             server.Root!.Name = "Reload";
-            await reloadGate.ReloadStarted.WaitAsync(TimeSpan.FromSeconds(10));
+            await reloadGate.ReloadStarted.WaitAsync(TestTimeouts.Default);
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
             reloadGate.Release();
             server.Root.Name = "AfterKill";
@@ -161,7 +161,6 @@ public class WebSocketClientLivenessTests
             // connection can deliver the value staged after the kill.
             await AsyncTestHelpers.WaitUntilAsync(
                 () => clientRoot.Name == "AfterKill",
-                timeout: TimeSpan.FromSeconds(15),
                 message: "A force-kill during an ordinary reconnect's reload should start a working replacement attempt.");
         }
         finally
@@ -192,7 +191,7 @@ public class WebSocketClientLivenessTests
         try
         {
             server.Root!.Name = "Old";
-            await admissionGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
+            await admissionGate.Entered.WaitAsync(TestTimeouts.Default);
             server.Root.Name = "Recovered";
 
             // Act - the reconnect's join with the paused old loop genuinely times out here, which is
@@ -200,10 +199,9 @@ public class WebSocketClientLivenessTests
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
             await AsyncTestHelpers.WaitUntilAsync(
                 () => clientRoot.Name == "Recovered",
-                timeout: TimeSpan.FromSeconds(20),
                 message: "The replacement Welcome should load while the retired old loop is still paused.");
             admissionGate.Release();
-            await oldLoopCompletion.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await oldLoopCompletion.Task.WaitAsync(TestTimeouts.Default);
 
             // Assert
             Assert.Equal("Recovered", clientRoot.Name);
@@ -233,7 +231,7 @@ public class WebSocketClientLivenessTests
         try
         {
             server.Root!.Name = "Old";
-            await commitGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
+            await commitGate.Entered.WaitAsync(TestTimeouts.Default);
             server.Root.Name = "Recovered";
             await GetReceiveCancellation(source).CancelAsync();
 
@@ -263,12 +261,12 @@ public class WebSocketClientLivenessTests
             Assert.NotEqual("Recovered", clientRoot.Name);
 
             commitGate.Release();
-            await replacementTask.WaitAsync(TimeSpan.FromSeconds(15));
+            await replacementTask.WaitAsync(TestTimeouts.Default);
 
             // Assert - the reload applies the Welcome before the replacement task completes, so a
             // final value other than the Welcome's would mean the old commit landed after it.
             Assert.True(
-                await drainWaitedForCommit.Task.WaitAsync(TimeSpan.FromSeconds(10)),
+                await drainWaitedForCommit.Task.WaitAsync(TestTimeouts.Default),
                 "The replacement should stay in the drain until the admitted commit has been applied.");
             Assert.Equal("Recovered", clientRoot.Name);
         }
@@ -298,7 +296,7 @@ public class WebSocketClientLivenessTests
         source.BeforeUpdateCommitAdmission = admissionGate.Wait;
         admissionGate.Arm();
         server.Root!.Name = "Old";
-        await admissionGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
+        await admissionGate.Entered.WaitAsync(TestTimeouts.Default);
 
         Task? stopTask = null;
         try
@@ -306,9 +304,9 @@ public class WebSocketClientLivenessTests
             // Act - the stop's join with the paused old loop genuinely times out here, which is the
             // production path this scenario is about.
             stopTask = source.StopAsync(CancellationToken.None);
-            await stopTask.WaitAsync(TimeSpan.FromSeconds(20));
+            await stopTask.WaitAsync(TestTimeouts.Default);
             admissionGate.Release();
-            await oldLoopCompletion.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await oldLoopCompletion.Task.WaitAsync(TestTimeouts.Default);
 
             // Assert
             Assert.Equal("Initial", clientRoot.Name);
@@ -318,7 +316,7 @@ public class WebSocketClientLivenessTests
             admissionGate.Release();
             if (stopTask is not null)
             {
-                await stopTask.WaitAsync(TimeSpan.FromSeconds(20));
+                await stopTask.WaitAsync(TestTimeouts.Default);
             }
             source.BeforeUpdateCommitAdmission = null;
         }
@@ -339,7 +337,7 @@ public class WebSocketClientLivenessTests
             () => source.Diagnostics.IsOperational == true && clientRoot.Name == "Initial");
 
         server.Root!.Name = "Old";
-        await commitGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
+        await commitGate.Entered.WaitAsync(TestTimeouts.Default);
         await GetReceiveCancellation(source).CancelAsync();
         await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
 
@@ -365,11 +363,11 @@ public class WebSocketClientLivenessTests
             Assert.False(cleanupTask.IsCompleted);
 
             commitGate.Release();
-            await cleanupTask.WaitAsync(TimeSpan.FromSeconds(15));
+            await cleanupTask.WaitAsync(TestTimeouts.Default);
 
             // Assert
             Assert.True(
-                await drainWaitedForCommit.Task.WaitAsync(TimeSpan.FromSeconds(10)),
+                await drainWaitedForCommit.Task.WaitAsync(TestTimeouts.Default),
                 "The shutdown should stay in the drain until the admitted commit has been applied.");
             Assert.Equal("Old", clientRoot.Name);
         }
@@ -378,7 +376,7 @@ public class WebSocketClientLivenessTests
             commitGate.Release();
             if (cleanupTask is not null)
             {
-                await cleanupTask.WaitAsync(TimeSpan.FromSeconds(15));
+                await cleanupTask.WaitAsync(TestTimeouts.Default);
             }
             source.AfterReceiveLoopCommitDrain = null;
             await source.StopAsync(CancellationToken.None);
@@ -399,14 +397,14 @@ public class WebSocketClientLivenessTests
         try
         {
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
-            await server.ReplacementWaitingForWelcome.WaitAsync(TimeSpan.FromSeconds(10));
+            await server.ReplacementWaitingForWelcome.WaitAsync(TestTimeouts.Default);
 
             // Act
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
 
             // Assert - a further connection reaching the server is the observable form of another
             // replacement attempt.
-            await server.SecondReplacementConnected.WaitAsync(TimeSpan.FromSeconds(10));
+            await server.SecondReplacementConnected.WaitAsync(TestTimeouts.Default);
         }
         finally
         {
@@ -434,7 +432,7 @@ public class WebSocketClientLivenessTests
         {
             // Act
             await receiveCts.CancelAsync();
-            await oldCompletion.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await oldCompletion.Task.WaitAsync(TestTimeouts.Default);
 
             // Assert
             Assert.True(source.Diagnostics.IsOperational);
@@ -470,7 +468,6 @@ public class WebSocketClientLivenessTests
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(
                 () => source.Diagnostics.IsOperational == true,
-                timeout: TimeSpan.FromSeconds(15),
                 message: "The monitor should keep retrying failed replacement attempts until one succeeds.");
         }
         finally
@@ -506,17 +503,17 @@ public class WebSocketClientLivenessTests
         {
             // Act
             var cancellationTask = receiveCts.CancelAsync();
-            await oldLoopReachedLivenessTransition.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            var replacementPublicationTask = Task.Run(() =>
+            await oldLoopReachedLivenessTransition.Task.WaitAsync(TestTimeouts.Default);
+            var replacementPublicationTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
             {
                 SetReceiveLoopCompletion(source, replacementCompletion);
                 PublishReceiveLoopAndMarkOperational(source, replacementCompletion);
             });
-            await replacementPublicationStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await replacementPublicationStarted.Task.WaitAsync(TestTimeouts.Default);
             allowOldLoopToContinue.TrySetResult();
             await cancellationTask;
             await replacementPublicationTask;
-            await oldCompletion.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await oldCompletion.Task.WaitAsync(TestTimeouts.Default);
 
             // Assert
             Assert.True(source.Diagnostics.IsOperational);

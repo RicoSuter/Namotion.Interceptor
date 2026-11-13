@@ -8,35 +8,21 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 internal static class SubjectPropertyChangeOperations
 {
     /// <summary>
-    /// Applies all changes in the span except those whose <see cref="SubjectPropertyChange.Property"/>
-    /// matches a change in <paramref name="exclude"/> (matched via a <see cref="HashSet{T}"/> of excluded
-    /// properties). Inspect Failed.Count == 0 to detect full success. The Successful list is returned empty
-    /// only on the no-exclude full-success path, where the caller already holds the input span and does not
-    /// need the applied set; with exclusions, or on any failure, Successful is populated.
+    /// Applies the changes whose property is not in <paramref name="exclude"/>. Successful is empty on full success
+    /// without exclusions, where the caller already holds the applied set, and populated otherwise. With
+    /// <paramref name="markingTransaction"/>, each applied write carries that transaction's commit write mark, and
+    /// applying stops at the first failure, after which that transaction reverts the set.
     /// </summary>
     internal static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
-        ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange>? exclude)
+        ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange>? exclude, SubjectTransaction? markingTransaction = null)
     {
-        HashSet<PropertyReference>? excluded = null;
-        if (exclude is { Count: > 0 })
-        {
-            excluded = new HashSet<PropertyReference>(exclude.Count, PropertyReference.Comparer);
-            foreach (var change in exclude)
-            {
-                excluded.Add(change.Property);
-            }
-        }
-
-        return ApplyLocalChanges(changes, excluded);
+        return ApplyLocalChanges(changes, exclude is null ? null : CreatePropertySet(exclude), markingTransaction);
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1541", Justification = "Extracting this failure bookkeeping reproduced slower single-source commits despite unchanged allocations; keep it inline unless an alternative passes the same benchmark comparison.")]
     private static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
-        ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, HashSet<PropertyReference>? excluded)
+        ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, HashSet<PropertyReference>? excluded, SubjectTransaction? markingTransaction)
     {
-        // When excluded is null the applied set equals the input on success, so Successful stays null
-        // (returned empty) until the first failure. When excluded is set the applied set differs from the
-        // input, so Successful is materialized up front.
         List<SubjectPropertyChange>? successful = excluded is null ? null : new List<SubjectPropertyChange>(changes.Length);
         List<SubjectPropertyChange>? failed = null;
         List<Exception>? errors = null;
@@ -49,7 +35,7 @@ internal static class SubjectPropertyChangeOperations
                 continue;
             }
 
-            if (change.TryApplyLocalChange(out var error))
+            if (change.TryApplyLocalChange(markingTransaction, out var error))
             {
                 successful?.Add(change);
             }
@@ -63,9 +49,13 @@ internal static class SubjectPropertyChangeOperations
                 }
 
                 failed.Add(change);
-                if (error != null)
+                (errors ??= []).Add(error);
+
+                // The handlers checked the changes as a set, which no longer lands as checked, so the remaining
+                // changes would only run hooks and notifications against a half-applied model before the revert.
+                if (markingTransaction is not null)
                 {
-                    (errors ??= []).Add(error);
+                    break;
                 }
             }
         }
@@ -73,6 +63,34 @@ internal static class SubjectPropertyChangeOperations
         return failed is null
             ? (successful ?? (IReadOnlyList<SubjectPropertyChange>)[], [], [])
             : (successful!, failed, errors ?? []);
+    }
+
+    /// <summary>
+    /// Returns the properties of the changes in <paramref name="lists"/>, or null when there are none.
+    /// </summary>
+    internal static HashSet<PropertyReference>? CreatePropertySet(params ReadOnlySpan<IReadOnlyList<SubjectPropertyChange>> lists)
+    {
+        var capacity = 0;
+        foreach (var changes in lists)
+        {
+            capacity += changes.Count;
+        }
+
+        if (capacity == 0)
+        {
+            return null;
+        }
+
+        var properties = new HashSet<PropertyReference>(capacity, PropertyReference.Comparer);
+        foreach (var changes in lists)
+        {
+            foreach (var change in changes)
+            {
+                properties.Add(change.Property);
+            }
+        }
+
+        return properties;
     }
 
     private static List<SubjectPropertyChange> CopyAppliedChanges(ReadOnlySpan<SubjectPropertyChange> changes)
@@ -87,58 +105,50 @@ internal static class SubjectPropertyChangeOperations
     }
 
     /// <summary>
-    /// Reverts previously-applied local changes by applying their inverse values in reverse order.
-    /// On failure the reported change is the original forward change (not the inverted rollback record),
-    /// so <see cref="SubjectTransactionException.FailedChanges"/> always holds the change that was submitted,
-    /// consistent with the source-revert path. Returns any revert failures and errors so the caller can fold
-    /// them into the exception.
+    /// Reverts applied changes in reverse order and returns the failed reverts. A failed revert reports the original
+    /// change, not its rollback record, as the source-revert path does. With <paramref name="markingTransaction"/>,
+    /// each restoring write carries that transaction's commit write mark.
     /// </summary>
     internal static (IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors) RevertLocalChanges(
-        IReadOnlyList<SubjectPropertyChange> applied)
+        IReadOnlyList<SubjectPropertyChange> applied, SubjectTransaction? markingTransaction)
     {
         List<SubjectPropertyChange>? failed = null;
         List<Exception>? errors = null;
 
-        // Reverse order so dependent properties unwind in the opposite order they were applied.
         for (var i = applied.Count - 1; i >= 0; i--)
         {
             var original = applied[i];
             var rollback = original.ToRollbackChange();
 
-            if (!rollback.TryApplyLocalChange(out var error))
+            if (!rollback.TryApplyLocalChange(markingTransaction, out var error))
             {
                 (failed ??= []).Add(original);
-                if (error != null)
-                {
-                    (errors ??= []).Add(error);
-                }
+                (errors ??= []).Add(error);
             }
         }
 
         return (failed ?? (IReadOnlyList<SubjectPropertyChange>)[], errors ?? (IReadOnlyList<Exception>)[]);
     }
 
-    private static bool TryApplyLocalChange(this SubjectPropertyChange change, out Exception? error)
+    private static bool TryApplyLocalChange(
+        this SubjectPropertyChange change,
+        SubjectTransaction? markingTransaction,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out Exception? error)
     {
         try
         {
-            var metadata = change.Property.Metadata;
             var newValue = change.GetNewValue<object?>();
-            // Local origins arm no stamp: an absent stamp and a Local stamp both finalize to Local
-            // (FinalizeOrigin short-circuits on Local before reading the sent value), so skip
-            // PendingOrigin.Set on the Local replay/revert hot path. Non-Local origins (FromSource,
-            // Confirmed) still arm so echo suppression sees the source.
             using (SubjectChangeContext.WithTimestamps(change.ChangedTimestamp, change.ReceivedTimestamp))
             {
-                if (change.Origin.Kind == ChangeOriginKind.Local)
+                if (markingTransaction is null)
                 {
-                    metadata.SetValue?.Invoke(change.Property.Subject, newValue);
+                    SetLocalValue(change, newValue);
                 }
                 else
                 {
-                    using (PendingOrigin.Set(change.Property, change.Origin, newValue))
+                    using (CommitWriteMarker.Set(markingTransaction, change.Property, newValue))
                     {
-                        metadata.SetValue?.Invoke(change.Property.Subject, newValue);
+                        SetLocalValue(change, newValue);
                     }
                 }
             }
@@ -152,31 +162,51 @@ internal static class SubjectPropertyChangeOperations
         }
     }
 
-    /// <summary>
-    /// Returns the subset of <paramref name="written"/> whose property also appears in
-    /// <paramref name="failed"/> (matched by <see cref="SubjectPropertyChange.Property"/>).
-    /// </summary>
-    internal static IReadOnlyList<SubjectPropertyChange> IntersectByProperty(
-        IReadOnlyList<SubjectPropertyChange> failed,
-        IReadOnlyList<SubjectPropertyChange> written)
+    private static void SetLocalValue(SubjectPropertyChange change, object? newValue)
     {
-        if (failed.Count == 0 || written.Count == 0)
+        var metadata = change.Property.Metadata;
+        // An absent stamp finalizes to Local like a Local one (FinalizeOrigin returns early on Local), so the hot
+        // Local apply and revert skip PendingOrigin.Set. Other origins arm it so echo suppression sees the source.
+        if (change.Origin.Kind == ChangeOriginKind.Local)
         {
-            return [];
+            metadata.SetValue?.Invoke(change.Property.Subject, newValue);
+        }
+        else
+        {
+            using (PendingOrigin.Set(change.Property, change.Origin, newValue))
+            {
+                metadata.SetValue?.Invoke(change.Property.Subject, newValue);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns the changes in <paramref name="changes"/> whose property is in <paramref name="others"/> when
+    /// <paramref name="keepMatches"/> is true, or not in it otherwise (matched by
+    /// <see cref="SubjectPropertyChange.Property"/>).
+    /// </summary>
+    internal static IReadOnlyList<SubjectPropertyChange> FilterByProperty(
+        IReadOnlyList<SubjectPropertyChange> changes,
+        IReadOnlyList<SubjectPropertyChange> others,
+        bool keepMatches)
+    {
+        if (changes.Count == 0)
+        {
+            return changes;
         }
 
-        var failedProperties = new HashSet<PropertyReference>(failed.Count, PropertyReference.Comparer);
-        foreach (var change in failed)
+        var otherProperties = CreatePropertySet(others);
+        if (otherProperties is null)
         {
-            failedProperties.Add(change.Property);
+            return keepMatches ? [] : changes;
         }
 
         List<SubjectPropertyChange>? result = null;
-        foreach (var change in written)
+        foreach (var change in changes)
         {
-            if (failedProperties.Contains(change.Property))
+            if (otherProperties.Contains(change.Property) == keepMatches)
             {
-                (result ??= new List<SubjectPropertyChange>(failed.Count)).Add(change);
+                (result ??= []).Add(change);
             }
         }
 
@@ -184,31 +214,17 @@ internal static class SubjectPropertyChangeOperations
     }
 
     /// <summary>
-    /// Returns the changes in <paramref name="changes"/> whose property is in neither
-    /// <paramref name="excludeFirst"/> nor <paramref name="excludeSecond"/> (matched by
-    /// <see cref="SubjectPropertyChange.Property"/>). Used to collect the local (no-source) changes that
-    /// were neither written to a source nor failed at a source.
+    /// Returns the changes in <paramref name="changes"/> whose property is in none of <paramref name="excludedLists"/>
+    /// (matched by <see cref="SubjectPropertyChange.Property"/>), as a new list.
     /// </summary>
     internal static IReadOnlyList<SubjectPropertyChange> ExcludeByProperty(
         ReadOnlySpan<SubjectPropertyChange> changes,
-        IReadOnlyList<SubjectPropertyChange> excludeFirst,
-        IReadOnlyList<SubjectPropertyChange> excludeSecond)
+        params ReadOnlySpan<IReadOnlyList<SubjectPropertyChange>> excludedLists)
     {
-        if (excludeFirst.Count == 0 && excludeSecond.Count == 0)
+        var excluded = CreatePropertySet(excludedLists);
+        if (excluded is null)
         {
             return changes.ToArray();
-        }
-
-        var excluded = new HashSet<PropertyReference>(
-            excludeFirst.Count + excludeSecond.Count, PropertyReference.Comparer);
-
-        foreach (var change in excludeFirst)
-        {
-            excluded.Add(change.Property);
-        }
-        foreach (var change in excludeSecond)
-        {
-            excluded.Add(change.Property);
         }
 
         List<SubjectPropertyChange>? result = null;
@@ -221,6 +237,33 @@ internal static class SubjectPropertyChangeOperations
         }
 
         return result ?? (IReadOnlyList<SubjectPropertyChange>)[];
+    }
+
+    /// <summary>
+    /// Copies the changes in <paramref name="changes"/> whose property is not in <paramref name="excludedProperties"/>
+    /// to <paramref name="destination"/> in order, and returns their number.
+    /// </summary>
+    internal static int CopyExcludingProperties(
+        ReadOnlySpan<SubjectPropertyChange> changes,
+        HashSet<PropertyReference>? excludedProperties,
+        Span<SubjectPropertyChange> destination)
+    {
+        if (excludedProperties is null)
+        {
+            changes.CopyTo(destination);
+            return changes.Length;
+        }
+
+        var count = 0;
+        foreach (var change in changes)
+        {
+            if (!excludedProperties.Contains(change.Property))
+            {
+                destination[count++] = change;
+            }
+        }
+
+        return count;
     }
 
     internal static IReadOnlyList<T> Concat<T>(params ReadOnlySpan<IReadOnlyList<T>> lists)
@@ -248,12 +291,12 @@ internal static class SubjectPropertyChangeOperations
     }
 
     /// <summary>
-    /// Detects conflicts by comparing captured OldValue with current actual value.
+    /// Returns the properties whose landed value differs from the captured old value, or null when there are none.
     /// </summary>
-    internal static List<PropertyReference> DetectChangeConflicts(ReadOnlySpan<SubjectPropertyChange> changes)
+    internal static List<PropertyReference>? DetectChangeConflicts(ReadOnlySpan<SubjectPropertyChange> changes)
     {
         List<PropertyReference>? conflictingProperties = null;
-        foreach (var change in changes)
+        foreach (ref readonly var change in changes)
         {
             var currentValue = change.Property.Metadata.GetValue?.Invoke(change.Property.Subject);
             var capturedOldValue = change.GetOldValue<object?>();
@@ -264,6 +307,38 @@ internal static class SubjectPropertyChangeOperations
                 conflictingProperties.Add(change.Property);
             }
         }
-        return conflictingProperties ?? [];
+        return conflictingProperties;
+    }
+
+    /// <summary>
+    /// Detects the changes whose subject's context no longer resolves <paramref name="interceptor"/>. Returns their
+    /// properties, or null when there are none.
+    /// </summary>
+    internal static List<PropertyReference>? DetectSubjectsOutsideContext(
+        ReadOnlySpan<SubjectPropertyChange> changes,
+        SubjectTransactionInterceptor interceptor)
+    {
+        List<PropertyReference>? conflictingProperties = null;
+        IInterceptorSubjectContext? resolvingContext = null;
+        foreach (ref readonly var change in changes)
+        {
+            // A subject that left the context since the write would take the value without the context's handlers.
+            var subjectContext = change.Property.Subject.Context;
+            if (ReferenceEquals(subjectContext, resolvingContext))
+            {
+                continue;
+            }
+
+            if (SubjectTransactionInterceptor.ResolvesInterceptor(subjectContext.GetServices<SubjectTransactionInterceptor>(), interceptor))
+            {
+                resolvingContext = subjectContext;
+            }
+            else
+            {
+                conflictingProperties ??= [];
+                conflictingProperties.Add(change.Property);
+            }
+        }
+        return conflictingProperties;
     }
 }

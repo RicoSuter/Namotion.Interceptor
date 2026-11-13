@@ -1,0 +1,50 @@
+using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
+
+namespace HomeBlaze.Components;
+
+/// <summary>
+/// One row of a <see cref="ValueList"/>: an icon, a label, optional content and a value.
+/// </summary>
+[ExcludeFromCreation]
+[PageLayout]
+[InterceptorSubject]
+public partial class ValueRow : IConfigurable
+{
+    /// <summary>
+    /// Path of the property whose value the row shows, or with a <see cref="Map"/> of a subject whose states the cases of the map read. Optional when the row has content.
+    /// </summary>
+    [Configuration]
+    [SubjectPath]
+    public partial string? Path { get; set; }
+
+    /// <summary>
+    /// The label of the row. Defaults to the title the property declares, then to its name, and to the path when the path leads nowhere. It can show values with expressions between double braces, such as <c>{{ subject/Name }}</c>.
+    /// </summary>
+    [Configuration]
+    [TextTemplate]
+    public partial string? Label { get; set; }
+
+    /// <summary>
+    /// Name of the icon at the start of the row, for example "Bolt".
+    /// </summary>
+    [Configuration]
+    public partial string? Icon { get; set; }
+
+    /// <summary>
+    /// Name or path of the <see cref="ValueMap"/> that says what the value gets.
+    /// </summary>
+    [Configuration]
+    [SubjectPath(typeof(ValueMap))]
+    public partial string? Map { get; set; }
+
+    /// <summary>
+    /// Content shown between the label and the value.
+    /// </summary>
+    [Slot(IsDefault = true)]
+    public partial IInterceptorSubject? Content { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}

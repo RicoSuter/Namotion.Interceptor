@@ -9,8 +9,10 @@ using Namotion.Interceptor.Attributes;
 namespace MyCompany.SamplePlugin1;
 
 [InterceptorSubject]
-[Category("Devices")]
+[Category("Samples")]
 [Description("A sample temperature sensor plugin that simulates temperature, humidity, pressure and battery readings.")]
+[DisplayName("Sample device 1")]
+[SubjectIcon("Thermostat")]
 public partial class SampleDevice1 : BackgroundService, IConfigurable, ITitleProvider, IMyDevice
 {
     private readonly Faker _faker = new();

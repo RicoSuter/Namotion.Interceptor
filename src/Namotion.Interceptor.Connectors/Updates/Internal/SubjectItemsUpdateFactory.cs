@@ -1,4 +1,3 @@
-using System.Collections;
 using Namotion.Interceptor.Tracking.Performance;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
@@ -90,13 +89,13 @@ internal static class SubjectItemsUpdateFactory
             // Add Move operations for reordered items
             if (reorderedItems is not null)
             {
-                foreach (var (oldIndex, newIndex, _) in reorderedItems)
+                foreach (var (fromIndex, newIndex, _) in reorderedItems)
                 {
                     operations ??= [];
                     operations.Add(new SubjectCollectionOperation
                     {
                         Action = SubjectCollectionOperationType.Move,
-                        FromIndex = oldIndex,
+                        FromIndex = fromIndex,
                         Index = newIndex
                     });
                 }
@@ -145,18 +144,27 @@ internal static class SubjectItemsUpdateFactory
         var dictionary = SubjectValueConvert.ToSubjectDictionary(dictionaryValue);
         update.Items = new List<SubjectPropertyItemUpdate>(dictionary.Count);
 
-        foreach (DictionaryEntry entry in dictionary)
+        // Not foreach, which would box a DictionaryEntry per entry.
+        var enumerator = dictionary.GetEnumerator();
+        try
         {
-            if (entry.Value is not IInterceptorSubject subject) continue;
-
-            var itemId = builder.GetOrCreateId(subject);
-            SubjectUpdateFactory.ProcessSubjectComplete(subject, builder);
-
-            update.Items.Add(new SubjectPropertyItemUpdate
+            while (enumerator.MoveNext())
             {
-                Index = entry.Key,
-                Id = itemId
-            });
+                if (enumerator.Value is not IInterceptorSubject subject) continue;
+
+                var itemId = builder.GetOrCreateId(subject);
+                SubjectUpdateFactory.ProcessSubjectComplete(subject, builder);
+
+                update.Items.Add(new SubjectPropertyItemUpdate
+                {
+                    Index = enumerator.Key,
+                    Id = itemId
+                });
+            }
+        }
+        finally
+        {
+            (enumerator as IDisposable)?.Dispose();
         }
 
         update.Count = update.Items.Count;

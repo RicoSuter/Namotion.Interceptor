@@ -90,6 +90,30 @@ public class HostedServiceHandlerTests
         });
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenChildWithAttachedServiceLeavesGraph_ThenHostedServiceIsStopped(bool constructedWithContext)
+    {
+        await HostingTestHost.RunAsync(async context =>
+        {
+            // Arrange
+            var root = new Person(context);
+            var child = constructedWithContext ? new Person(context) : new Person();
+            root.Child = child;
+            var attachment = child.AttachHostedService(() => new PersonBackgroundService(child));
+            await AsyncTestHelpers.WaitUntilAsync(() => child.FirstName == "John");
+
+            // Act
+            root.Child = null;
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() => child.FirstName == "Disposed");
+            await attachment.DrainAsync();
+            Assert.Null(attachment.Current);
+        });
+    }
+
     [Fact]
     public async Task WhenTheFactoryIsHeld_ThenTheAttachmentReportsStartingUntilTheInstanceIsRecorded()
     {

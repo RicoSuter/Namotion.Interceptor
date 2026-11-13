@@ -471,12 +471,11 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                         reconnectedSession.SessionId,
                         reconnectedSession.Connected);
 
-                    // Check if subscriptions transferred BEFORE accepting the new session,
-                    // to avoid having two sessions that need disposal with only one pending slot.
+                    // Checked BEFORE accepting the new session, to avoid having two sessions that need
+                    // disposal with only one pending slot.
                     var transferredSubscriptions = reconnectedSession.Subscriptions.ToList();
                     if (transferredSubscriptions.Count > 0)
                     {
-                        // Transfer succeeded - accept new session, defer old session disposal
                         if (oldSession is not null)
                         {
                             oldSession.KeepAlive -= OnKeepAlive;
@@ -498,16 +497,17 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                         transferSucceeded = true;
 
                         _logger.LogInformation(
-                            "OPC UA session reconnected: Transferred {Count} subscriptions. Full state sync pending.",
+                            "OPC UA session reconnected with {Count} subscriptions. Full state sync pending.",
                             transferredSubscriptions.Count);
                     }
                     else
                     {
-                        // Transfer failed - reject new session, abandon old session.
+                        // Only reached when the client had no subscriptions: the SDK carries every one over, by
+                        // transfer or recreation, or fails the reconnect. Reject it and abandon the old session, so
+                        // the health check reconnects manually with a fresh session and subscriptions.
                         // The reconnected session has a live TCP connection so it must be disposed.
-                        // The old session's connection is already dead (server restarted) and will be GC'd.
                         _logger.LogWarning(
-                            "OPC UA session reconnected but subscription transfer failed (server restart). " +
+                            "OPC UA session reconnected without subscriptions. " +
                             "Clearing session to trigger full reconnection via health check.");
                         AbandonCurrentSession();
                         reconnectedSession.KeepAlive -= OnKeepAlive;
@@ -516,9 +516,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 }
                 else
                 {
-                    // Same Session object reference — SDK "preserved" the session.
-                    // After server restart, the SDK reconnects transport but may not create a new session.
-                    // The old session ID doesn't exist on the restarted server.
+                    // Same Session object reference: the SDK reactivated ("preserved") the session, which
+                    // happens when the server still held it, for example after a network partition.
 
                     // Preserved sessions are unreliable: subscriptions may have been silently
                     // deleted by the server (lifetime expired during disconnect), leaving no
@@ -534,7 +533,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
                 Interlocked.Exchange(ref _isReconnecting, 0);
 
-                // Notifications resume as soon as the transfer succeeds, and the only other rise on
+                // Notifications resume as soon as the SDK reconnect completes with a new session, and the only other rise on
                 // this path is the health check loop's, so without this the connector reports itself
                 // down for seconds while values update. Must stay after the reconnecting flag was
                 // cleared above, and is guarded by IsConnected rather than the branch's own knowledge
@@ -681,7 +680,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// <summary>
     /// Disposes the transport channel without clearing the session.
     /// This triggers keep-alive failure -> OnKeepAlive -> SessionReconnectHandler.BeginReconnect,
-    /// exercising the SDK's session preservation/transfer reconnection path.
+    /// which reactivates the session on a new channel (a preserved session, then a manual reconnect).
     /// </summary>
     internal async Task DisconnectTransportAsync(CancellationToken cancellationToken)
     {

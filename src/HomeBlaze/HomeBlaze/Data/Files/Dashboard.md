@@ -2,13 +2,17 @@
 title: Dashboard
 icon: Dashboard
 location: AppBar
-position: 10
 alignment: Left
 ---
 
 # Dashboard
 
 Welcome to your HomeBlaze dashboard.
+
+```mermaid
+graph LR
+    Pump --> Tank --> Heater
+```
 
 ## Motor Status
 

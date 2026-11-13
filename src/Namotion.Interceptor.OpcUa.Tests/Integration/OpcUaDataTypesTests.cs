@@ -39,7 +39,7 @@ public class OpcUaDataTypesTests : SharedServerTestBase
             },
             timeout: TimeSpan.FromSeconds(90),
             pollInterval: TimeSpan.FromMilliseconds(500),
-            message: $"Server should receive client's bool update (false). Current server value: {serverArea.BoolValue}");
+            message: () => $"Server should receive client's bool update (false). Current server value: {serverArea.BoolValue}");
 
         Logger.Log($"After first sync: server.BoolValue={serverArea.BoolValue}");
 
@@ -55,7 +55,7 @@ public class OpcUaDataTypesTests : SharedServerTestBase
             },
             timeout: TimeSpan.FromSeconds(90),
             pollInterval: TimeSpan.FromMilliseconds(500),
-            message: $"Server should receive client's bool update (true). Current server value: {serverArea.BoolValue}");
+            message: () => $"Server should receive client's bool update (true). Current server value: {serverArea.BoolValue}");
 
         Logger.Log($"After second sync: server.BoolValue={serverArea.BoolValue}");
         Logger.Log("Boolean client→server sync verified");
@@ -142,7 +142,7 @@ public class OpcUaDataTypesTests : SharedServerTestBase
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.GuidValue == clientGuid,
             timeout: TimeSpan.FromSeconds(90),
-            message: $"Server should receive client's Guid update. Expected: {clientGuid}, Actual: {serverArea.GuidValue}");
+            message: () => $"Server should receive client's Guid update. Expected: {clientGuid}, Actual: {serverArea.GuidValue}");
 
         // Server to client
         var serverGuid = Guid.NewGuid();
@@ -150,7 +150,7 @@ public class OpcUaDataTypesTests : SharedServerTestBase
         await AsyncTestHelpers.WaitUntilAsync(
             () => clientArea.GuidValue == serverGuid,
             timeout: TimeSpan.FromSeconds(90),
-            message: $"Client should receive server's Guid update. Expected: {serverGuid}, Actual: {clientArea.GuidValue}");
+            message: () => $"Client should receive server's Guid update. Expected: {serverGuid}, Actual: {clientArea.GuidValue}");
 
         Logger.Log("Guid bidirectional sync verified");
     }
@@ -167,7 +167,7 @@ public class OpcUaDataTypesTests : SharedServerTestBase
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.NullableGuidValue == clientGuid,
             timeout: TimeSpan.FromSeconds(90),
-            message: $"Server should receive client's nullable Guid update. Expected: {clientGuid}, Actual: {serverArea.NullableGuidValue}");
+            message: () => $"Server should receive client's nullable Guid update. Expected: {clientGuid}, Actual: {serverArea.NullableGuidValue}");
 
         // Server to client
         var serverGuid = Guid.NewGuid();
@@ -175,14 +175,14 @@ public class OpcUaDataTypesTests : SharedServerTestBase
         await AsyncTestHelpers.WaitUntilAsync(
             () => clientArea.NullableGuidValue == serverGuid,
             timeout: TimeSpan.FromSeconds(90),
-            message: $"Client should receive server's nullable Guid update. Expected: {serverGuid}, Actual: {clientArea.NullableGuidValue}");
+            message: () => $"Client should receive server's nullable Guid update. Expected: {serverGuid}, Actual: {clientArea.NullableGuidValue}");
 
         // Client sets null (OPC UA maps null to Guid.Empty since Guid is a value type)
         clientArea.NullableGuidValue = null;
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.NullableGuidValue == Guid.Empty,
             timeout: TimeSpan.FromSeconds(90),
-            message: $"Server should receive client's null→Empty Guid update. Actual: {serverArea.NullableGuidValue}");
+            message: () => $"Server should receive client's null→Empty Guid update. Actual: {serverArea.NullableGuidValue}");
 
         Logger.Log("Nullable Guid bidirectional sync verified");
     }

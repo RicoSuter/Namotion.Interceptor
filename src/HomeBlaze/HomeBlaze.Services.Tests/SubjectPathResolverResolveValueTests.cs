@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services.Tests.Models;
+using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Services.Tests;
 
@@ -155,5 +156,58 @@ public class SubjectPathResolverResolveValueTests : SubjectPathResolverTestBase
 
         // Assert
         Assert.Null(result);
+    }
+
+    [Fact]
+    public void WhenResolvingARelativePropertyPath_ThenThePropertyOfTheResolvedSubjectIsReturned()
+    {
+        // Arrange
+        var grandchild = new TestContainer(Context) { Name = "GrandchildValue" };
+        var child = new TestContainer(Context) { Name = "Child", Child = grandchild };
+        var root = new TestContainer(Context) { Name = "Root", Child = child };
+        RootManager.Root = root;
+
+        // Act
+        var property = Resolver.ResolveProperty("Child/Name", PathStyle.Canonical, child);
+
+        // Assert
+        Assert.NotNull(property);
+        Assert.Same(grandchild, property.Subject);
+        Assert.Equal("Name", property.Name);
+        Assert.Equal("GrandchildValue", property.GetValue());
+    }
+
+    [Fact]
+    public void WhenResolvingAPropertyPathThatDoesNotExist_ThenNullIsReturned()
+    {
+        // Arrange
+        var root = new TestContainer(Context) { Name = "Root" };
+        RootManager.Root = root;
+
+        // Act
+        var property = Resolver.ResolveProperty("/NonExistent/Name", PathStyle.Canonical);
+
+        // Assert
+        Assert.Null(property);
+    }
+
+    [Fact]
+    public void WhenAPathEndsAtAnAttribute_ThenItResolvesTheValueOfTheAttribute()
+    {
+        // Arrange
+        var child = new TestContainer(Context) { Name = "Motor" };
+        var root = new TestContainer(Context) { Name = "Root", Child = child };
+        RootManager.Root = root;
+        var attribute = child.TryGetRegisteredProperty(nameof(TestContainer.Name))!
+            .AddAttribute("Unit", typeof(string), _ => "rpm", null);
+
+        // Act
+        var value = Resolver.ResolveValue($"/Child/{attribute.Name}", PathStyle.Canonical);
+        var property = Resolver.ResolveScopedProperty($"/Child/{attribute.Name}", PathStyle.Canonical, root);
+
+        // Assert
+        Assert.Equal("Name@Unit", attribute.Name);
+        Assert.Equal("rpm", value);
+        Assert.Same(attribute, property);
     }
 }

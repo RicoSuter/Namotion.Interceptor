@@ -73,6 +73,12 @@ The tester hosts a server and one or more clients in a single process, connected
 
 - **BatchMutationEngine** (load profiles, `NumberOfBatches > 0`): Mutates `ValueMutationRate` nodes per second, spread across `NumberOfBatches` parallel batches within 1-second windows. Each participant mutates a single fixed property to avoid subscription coalescing. When `UseTransactions` is enabled, each batch is wrapped in a transaction and runs sequentially.
 
+Transactions commit with `BestEffort`. A failed commit is counted in one of three categories, logged once per category and set of exception types per cycle, and does not stop the engine:
+
+- **Conflict**: another participant changed a written property first. Expected under chaos.
+- **Source write failure**: only source writes failed, as when a connector is disconnected or faulted. Expected under chaos. A connector that throws while writing is reported the same way as a disconnect, so check the logged exception types.
+- **Unexpected**: anything else, such as a transaction writer that threw, a local apply or revert failure, or a validation rejection. Logged as an error, and fails the cycle even when it converges.
+
 ### Mutate/Converge Cycle
 
 Each test cycle has two phases:
@@ -97,7 +103,7 @@ Each connector implements `IFaultInjectable` (separate from the production `ISub
 
 - **Disconnect** (`FaultType.Disconnect`): Soft kill. Breaks the transport connection without stopping the connector. Lets the connector's built-in reconnection logic detect the failure and recover.
   - *OPC UA Server*: Delegates to Kill (no meaningful "soft disconnect" for a multi-connection server).
-  - *OPC UA Client*: Disposes the transport channel. Keep-alive failure triggers `SessionReconnectHandler.BeginReconnect`, exercising the session preservation/transfer path.
+  - *OPC UA Client*: Disposes the transport channel. Keep-alive failure triggers `SessionReconnectHandler.BeginReconnect`, which reactivates the session on a new channel; the client then abandons the preserved session and reconnects manually.
   - *MQTT Server*: Enumerates connected clients and disconnects each one individually.
   - *MQTT Client*: Calls `DisconnectAsync()` on the MQTT client for a graceful disconnect.
   - *WebSocket Server*: Closes all client connections via `CloseAllConnectionsAsync()`.
@@ -143,7 +149,7 @@ dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile o
 
 When `--participant` is specified, only the named participant starts and the verification engine is skipped. Mutations run continuously with performance metrics.
 
-This isolates each side's CPU and throughput and stops one shared heap hiding which side grew, but it is not the mode for measuring memory: without the verification engine there are no cycles and no `cycles.csv`, and `HeapMB` in `performance-{participant}.csv` is sampled without forcing a collection, so it is not leak evidence. Split the run for throughput and attribution, and use a single-process run for the post-GC heap trend.
+This isolates each side's CPU and throughput and stops one shared heap hiding which side grew, but it is not the mode for measuring memory: without the verification engine there are no cycles and no `cycles.csv`, and `HeapMB` in `performance-{participant}.csv` is the heap after the most recent collection of any kind, not a forced one, so it is not leak evidence. Split the run for throughput and attribution, and use a single-process run for the post-GC heap trend.
 
 ### What to Look For
 
@@ -153,14 +159,14 @@ This isolates each side's CPU and throughput and stops one shared heap hiding wh
 --- Cycle 1 Statistics ---
 Duration: 85s (converged in 5.1s)
 Total mutations: 17,200 | Total chaos events: 7
-  server: 11,300 value mutations, 0 structural mutations
-  client-a: 2,950 value mutations, 0 structural mutations
-  client-b: 2,950 value mutations, 0 structural mutations
+  server: 11,300 value mutations, 0 structural mutations, 0 commits (0 conflicts, 0 source write failures, 0 unexpected failures)
+  client-a: 2,950 value mutations, 0 structural mutations, 0 commits (0 conflicts, 0 source write failures, 0 unexpected failures)
+  client-b: 2,950 value mutations, 0 structural mutations, 0 commits (0 conflicts, 0 source write failures, 0 unexpected failures)
   client-b: disconnect at 21:08:37 (2.8s)
   server: kill at 21:08:38 (5.4s)
 ```
 
-**Failure**: Prints `FAIL`, runs failure diagnostics, then exits with code 1:
+**Failure**: Prints `FAIL`, runs failure diagnostics, then exits with code 1. A cycle that converged but had an unexpected commit failure prints `FAIL (N unexpected commit failures, see the logged errors)` instead and skips the diagnostics:
 
 ```
 === Cycle 3: FAIL (did not converge within 00:01:00) ===
@@ -214,11 +220,11 @@ Cycle log files are created as `pending` and renamed to `pass` or `FAIL` on comp
 
 ### Performance Logs
 
-Performance metrics are written to `performance-{participant}.csv` per participant. Each file has a header row and one data row per reporting interval. Columns: Timestamp, Participant, Cycle, Received/s, Received-Average, Received-P50, Received-P90, Received-P95, Received-P99, Received-P999, Received-Max, Received-Processing, Published, Received, CPU%, ProcessMB, HeapMB, AllocationMB/s. HeapMB in performance logs is sampled at reporting time without forcing GC, so it fluctuates with allocation patterns and is not suitable for leak detection.
+Performance metrics are written to `performance-{participant}.csv` per participant. Each file has a header row and one data row per reporting interval. Columns: Timestamp, Participant, Cycle, Received/s, Received-Average, Received-P50, Received-P90, Received-P95, Received-P99, Received-P999, Received-Max, Received-Processing, Published, Received, CPU%, ProcessMB, HeapMB, AllocationMB/s. HeapMB in performance logs is the live heap after the most recent collection of any kind, which the profiler does not force, so it lags behind allocations, repeats while no collection runs and is not suitable for leak detection.
 
 ### Cycle Logs
 
-`cycles.csv` records one row per verification cycle. Columns: Timestamp, Cycle, Result, Profile, MutateSeconds, ConvergeSeconds, CycleSeconds, ValueMutations, StructuralMutations, ChaosEvents, HeapMB, ProcessMB. HeapMB is measured after a full GC with LOH compaction, giving a stable post-GC baseline. Use this column for memory leak detection: a steady upward trend across cycles indicates a leak.
+`cycles.csv` records one row per verification cycle. Columns: Timestamp, Cycle, Result, Profile, MutateSeconds, ConvergeSeconds, CycleSeconds, ValueMutations, StructuralMutations, ChaosEvents, HeapMB, ProcessMB, Commits, ConflictCommits, SourceWriteFailedCommits, UnexpectedFailedCommits. The commit columns count transaction commits and their failures by category, see [Mutation Engines](#mutation-engines). HeapMB is measured after a full GC with LOH compaction, giving a stable post-GC baseline. Use this column for memory leak detection: a steady upward trend across cycles indicates a leak.
 
 ## Configuration
 
@@ -255,8 +261,8 @@ Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfigur
 |----------|------|------------|-------------------|
 | Abrupt server crash | Current attempt cancelled, TCP listeners closed (RST to clients) | Delegates to Kill | Background loop auto-restarts with exponential backoff (1s-30s + jitter) |
 | Abrupt client crash | Session disposed without CloseSession RPC | Transport channel disposed, session preserved | Health check detects missing session, triggers full reconnection |
-| Network partition | N/A | Client transport disposed, keep-alive detects within 5-10s | SDK `SessionReconnectHandler.BeginReconnect` with subscription transfer |
-| Server restart (clean state) | Full server restart, new node manager | N/A | Client subscription transfer fails, falls back to full state reload |
+| Network partition | N/A | Client transport disposed, keep-alive detects within 5-10s | SDK `SessionReconnectHandler` reactivates the session, the client abandons the preserved session and reconnects manually with a full state read |
+| Server restart (clean state) | Full server restart, new node manager | N/A | SDK recreates the session with fresh subscriptions, then a full state read |
 | Session stall / hung reconnect | N/A | N/A | Stall detection after 30s forces SDK handler reset, triggers manual reconnection |
 | Subscription creation failure | N/A | N/A | `SubscriptionHealthMonitor` retries failed items every 5s, falls back to polling |
 | Port already in use on restart | N/A | N/A | Retried with exponential backoff |
@@ -282,7 +288,7 @@ Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfigur
 | Partial network failure (slow/lossy connections) | Keep-alive uses binary pass/fail detection | Low - TCP keepalive settings at OS level handle this |
 | Certificate expiry mid-session | No certificate rotation mechanism | Low for tests, relevant for >6 month production deployments |
 | Server returning persistent error status codes | Polling ignores some error codes | Low - circuit breaker limits impact |
-| Out-of-order or duplicate notifications | No deduplication logic | Very low - OPC UA SDK handles within subscriptions |
+| Out-of-order or duplicate notifications | Not injected by the chaos profiles | Very low - the OPC UA client skips a value from an older notification message of the same subscription |
 | Notification duplication after subscription transfer | Full state read overwrites stale values | Low - brief inconsistency only |
 | Server overload / adaptive backpressure | No response-time-based throttling | Low - not a connectivity failure |
 | Flapping connections (rapid up/down cycles) | Backoff resets on each success | Low - stall detection provides upper bound |

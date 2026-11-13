@@ -1,6 +1,6 @@
 # Source Generator
 
-The `Namotion.Interceptor.Generator` package is a C# 13 source generator that transforms classes marked with `[InterceptorSubject]` into fully trackable interceptor subjects. All interception logic is generated at compile-time, resulting in zero runtime reflection overhead.
+The `Namotion.Interceptor.Generator` package is a C# 13 source generator that transforms classes marked with `[InterceptorSubject]` into fully trackable interceptor subjects. All interception logic is generated at compile-time, so property access involves no reflection.
 
 ## Getting Started
 
@@ -9,8 +9,7 @@ Add both packages to your project:
 ```xml
 <ItemGroup>
     <PackageReference Include="Namotion.Interceptor" Version="*" />
-    <PackageReference Include="Namotion.Interceptor.Generator" Version="*"
-                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <PackageReference Include="Namotion.Interceptor.Generator" Version="*" />
 </ItemGroup>
 ```
 
@@ -38,7 +37,7 @@ For each `[InterceptorSubject]` class, the generator creates a partial class imp
 
 ### Constructors
 
-If no constructors exist, the generator creates:
+If the class declares no constructor, the generator creates:
 
 ```csharp
 public Person() { }
@@ -49,7 +48,7 @@ public Person(IInterceptorSubjectContext context) : this()
 }
 ```
 
-If a parameterless constructor already exists, only the context constructor is generated.
+If the first instance constructor the class declares is parameterless, only the context constructor is generated. If it has parameters, no constructor is generated at all, even when a parameterless constructor is declared after it; declare the parameterless constructor first to get the context constructor.
 
 ### Property Implementations
 
@@ -59,6 +58,8 @@ For each partial property, the generator creates:
 - Getter that routes through the interception pipeline
 - Setter that routes through the interception pipeline, with hooks and change notification
 - Partial method hooks for customization
+
+The setter runs `OnXxxChanging` first, which can cancel the write or coerce the value. It then runs the `IWriteInterceptor` chain, whose innermost step writes the backing field, so interceptor code after `next` runs after the field is written. `OnXxxChanged` and `PropertyChanged` run outside the chain and only if the field was written; they are skipped when an interceptor does not call `next`, for example when the equality check drops an unchanged value.
 
 ### Static Metadata
 
@@ -685,7 +686,7 @@ The current design was kept with those numbers in hand. The cost would be paid b
 
 The generator is optimized for performance:
 
-- **Zero runtime reflection** - All metadata generated at compile-time
+- **No reflection on property access** - Accessors are generated at compile-time; the property metadata reads `PropertyInfo` and attributes once per type, when it is initialized
 - **Static lambdas** - No closure allocations in property accessors
 - **Fast-path optimization** - Direct field access when no context is set
 - **FrozenDictionary** - Thread-safe, read-optimized property lookup
@@ -696,10 +697,9 @@ The generator is optimized for performance:
 
 ### Generated code not appearing
 
-1. Ensure the generator is added as an analyzer:
+1. Ensure the generator package is referenced (the package ships the generator as an analyzer, so no extra metadata is needed):
    ```xml
-   <PackageReference Include="Namotion.Interceptor.Generator" Version="..."
-                     OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+   <PackageReference Include="Namotion.Interceptor.Generator" Version="..." />
    ```
 
 2. Rebuild the project completely

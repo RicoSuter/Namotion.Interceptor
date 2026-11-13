@@ -1,7 +1,6 @@
 ---
 title: Implementation State
 navTitle: State
-position: 1
 ---
 
 # HomeBlaze Implementation State
@@ -35,7 +34,7 @@ Tracks the implementation status of building blocks described in [Architecture O
 | Cross-instance operation proxying (RPC) | Planned | WebSocket message types 5-6 |
 | Time-series history | Implemented | InMemory and SQLite stores, cross-store merger, chart, and `get_property_history`; TimescaleDB planned |
 | Document store | Planned | Documents as subjects |
-| Dynamic metadata / annotations | Planned | User-created attributes stored in config JSON |
+| Dynamic metadata / annotations | Partial | Metadata of folders, subjects and properties in `.metadata.json` files, with notes, links, tags and their search; annotations planned, see [Metadata](design/metadata.md) |
 
 ## Events and Health
 
@@ -51,9 +50,16 @@ Tracks the implementation status of building blocks described in [Architecture O
 
 | Building Block | Status | Notes |
 |---|---|---|
-| MCP server (core tools) | Implemented | `Namotion.Interceptor.Mcp` — `query`, `get_property`, `set_property`, `list_types` |
-| MCP server (HomeBlaze extensions) | Implemented | Subject enrichment, type discovery, `list_methods`, `invoke_method` via `McpServerConfiguration` extension points |
-| Built-in agents | Planned | Agent subjects with LLM integration. See [AI Agents plan](../plans/ai-agents.md) |
+| MCP server (core tools) | Implemented | `Namotion.Interceptor.Mcp`: `browse`, `search`, `get_property`, `set_property`, `list_types` |
+| MCP server (HomeBlaze extensions) | Implemented | Subject enrichment, type discovery, `list_methods`, `invoke_query`, `invoke_operation` via `McpServerConfiguration` extension points |
+| Built-in agents | Implemented | `ClaudeCliAgent` (Claude subscription through the local CLI) and `AnthropicAgent` (API key) with triggers, chat, memory and per-agent tool permissions. See [AI Agents](../administration/ai-agents.md) and [AI Integration](design/ai.md) |
+
+## Automation
+
+| Building Block | Status | Notes |
+|---|---|---|
+| Automations | Implemented | `HomeBlaze.Automation` with rules on property conditions and events, named states, dry runs, Test now and a checkpoint, and `HomeBlaze.Automation.Blazor` with the page, the widget and the editor. See [Automations](../administration/automation.md) |
+| Authorization of automations | Planned | Roles and rules for the principal of an automation |
 
 ## Platform
 

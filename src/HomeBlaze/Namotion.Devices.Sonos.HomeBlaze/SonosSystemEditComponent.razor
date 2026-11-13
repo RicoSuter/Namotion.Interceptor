@@ -1,0 +1,130 @@
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(SonosSystem))]
+@implements ISubjectEditComponent
+
+<MudForm>
+    <MudTextField @bind-Value="_seedHost"
+                  Label="Seed host (any speaker IP, optional)"
+                  HelperText="Empty uses known speakers, then SSDP discovery."
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged" />
+
+    <MudTextField @bind-Value="_eventCallbackHost"
+                  Label="Event callback host (optional)"
+                  Placeholder="@(SystemSubject?.ActiveEventCallbackHost ?? "detected automatically")"
+                  HelperText="The address speakers send events to. Set it under Docker bridge networking."
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged"
+                  Class="mt-4" />
+
+    <MudNumericField @bind-Value="_eventPort" @bind-Value:after="OnFieldChanged"
+                     Label="Event port" Min="1" Max="65535" Class="mt-4" />
+
+    <MudNumericField @bind-Value="_pollingIntervalSeconds" @bind-Value:after="OnFieldChanged"
+                     Label="Polling interval (seconds)" Min="SonosSystem.MinimumIntervalSeconds" Max="SonosSystem.MaximumIntervalSeconds" Class="mt-4" />
+
+    <MudNumericField @bind-Value="_retryIntervalSeconds" @bind-Value:after="OnFieldChanged"
+                     Label="Retry interval (seconds)" Min="SonosSystem.MinimumIntervalSeconds" Max="SonosSystem.MaximumIntervalSeconds" Class="mt-4" />
+
+    @if (!IsCreating && SystemSubject is not null)
+    {
+        <MudDivider Class="my-4" />
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Current State</MudText>
+        <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                     Color="@(SystemSubject.IsConnected ? Color.Success : Color.Error)">
+                @(SystemSubject.IsConnected ? "Connected" : "Disconnected")
+            </MudChip>
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                     Color="@(SystemSubject.AreEventsActive ? Color.Success : Color.Warning)">
+                @(SystemSubject.AreEventsActive ? "Events: live" : "Events: polling only")
+            </MudChip>
+        </MudStack>
+        <MudText Class="mt-1">Rooms: @SystemSubject.Players.Count</MudText>
+        @if (SystemSubject.StatusMessage is not null)
+        {
+            <MudText Color="Color.Error">@SystemSubject.StatusMessage</MudText>
+        }
+    }
+</MudForm>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private SonosSystem? SystemSubject => Subject as SonosSystem;
+
+    private string? _seedHost;
+    private string? _eventCallbackHost;
+    private int _eventPort;
+    private int _pollingIntervalSeconds;
+    private int _retryIntervalSeconds;
+
+    private string? _originalSeedHost;
+    private string? _originalEventCallbackHost;
+    private int _originalEventPort;
+    private int _originalPollingIntervalSeconds;
+    private int _originalRetryIntervalSeconds;
+
+    public bool IsValid =>
+        _eventPort is >= 1 and <= 65535 &&
+        _pollingIntervalSeconds is >= SonosSystem.MinimumIntervalSeconds and <= SonosSystem.MaximumIntervalSeconds &&
+        _retryIntervalSeconds is >= SonosSystem.MinimumIntervalSeconds and <= SonosSystem.MaximumIntervalSeconds;
+
+    public bool IsDirty =>
+        NormalizeHost(_seedHost) != NormalizeHost(_originalSeedHost) ||
+        NormalizeHost(_eventCallbackHost) != NormalizeHost(_originalEventCallbackHost) ||
+        _eventPort != _originalEventPort ||
+        _pollingIntervalSeconds != _originalPollingIntervalSeconds ||
+        _retryIntervalSeconds != _originalRetryIntervalSeconds;
+
+    public event Action<bool>? IsValidChanged;
+
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnInitialized()
+    {
+        _seedHost = SystemSubject?.SeedHost;
+        _eventCallbackHost = SystemSubject?.EventCallbackHost;
+        _eventPort = SystemSubject?.EventPort ?? SonosSystem.DefaultEventPort;
+        _pollingIntervalSeconds = (int)(SystemSubject?.PollingInterval.TotalSeconds ?? SonosSystem.DefaultIntervalSeconds);
+        _retryIntervalSeconds = (int)(SystemSubject?.RetryInterval.TotalSeconds ?? SonosSystem.DefaultIntervalSeconds);
+        StoreOriginals();
+    }
+
+    private void OnFieldChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (SystemSubject is not null && IsValid)
+        {
+            SystemSubject.SeedHost = NormalizeHost(_seedHost);
+            SystemSubject.EventCallbackHost = NormalizeHost(_eventCallbackHost);
+            SystemSubject.EventPort = _eventPort;
+            SystemSubject.PollingInterval = TimeSpan.FromSeconds(_pollingIntervalSeconds);
+            SystemSubject.RetryInterval = TimeSpan.FromSeconds(_retryIntervalSeconds);
+            StoreOriginals();
+            IsDirtyChanged?.Invoke(false);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private static string? NormalizeHost(string? host) =>
+        string.IsNullOrWhiteSpace(host) ? null : host.Trim();
+
+    private void StoreOriginals()
+    {
+        _originalSeedHost = _seedHost;
+        _originalEventCallbackHost = _eventCallbackHost;
+        _originalEventPort = _eventPort;
+        _originalPollingIntervalSeconds = _pollingIntervalSeconds;
+        _originalRetryIntervalSeconds = _retryIntervalSeconds;
+    }
+}

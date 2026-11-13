@@ -102,8 +102,8 @@ public class WallboxChargerDerivedPropertyTests
         charger.IsLocked = false;
 
         // Act & Assert
-        Assert.True(charger.LockAsync_IsEnabled);
-        Assert.False(charger.UnlockAsync_IsEnabled);
+        Assert.True(charger.Lock_IsEnabled);
+        Assert.False(charger.Unlock_IsEnabled);
     }
 
     [Fact]
@@ -115,8 +115,8 @@ public class WallboxChargerDerivedPropertyTests
         charger.IsLocked = true;
 
         // Act & Assert
-        Assert.False(charger.LockAsync_IsEnabled);
-        Assert.True(charger.UnlockAsync_IsEnabled);
+        Assert.False(charger.Lock_IsEnabled);
+        Assert.True(charger.Unlock_IsEnabled);
     }
 
     [Fact]
@@ -127,10 +127,10 @@ public class WallboxChargerDerivedPropertyTests
         charger.IsConnected = false;
 
         // Act & Assert
-        Assert.False(charger.LockAsync_IsEnabled);
-        Assert.False(charger.UnlockAsync_IsEnabled);
-        Assert.False(charger.PauseChargingAsync_IsEnabled);
-        Assert.False(charger.ResumeChargingAsync_IsEnabled);
+        Assert.False(charger.Lock_IsEnabled);
+        Assert.False(charger.Unlock_IsEnabled);
+        Assert.False(charger.PauseCharging_IsEnabled);
+        Assert.False(charger.ResumeCharging_IsEnabled);
     }
 
     [Fact]
@@ -142,7 +142,7 @@ public class WallboxChargerDerivedPropertyTests
         charger.IsCharging = true;
 
         // Act & Assert
-        Assert.True(charger.PauseChargingAsync_IsEnabled);
+        Assert.True(charger.PauseCharging_IsEnabled);
     }
 
     [Fact]
@@ -154,7 +154,7 @@ public class WallboxChargerDerivedPropertyTests
         charger.ChargerStatus = WallboxChargerStatus.Paused;
 
         // Act & Assert
-        Assert.True(charger.ResumeChargingAsync_IsEnabled);
+        Assert.True(charger.ResumeCharging_IsEnabled);
     }
 
     // Manufacturer is always "Wallbox"

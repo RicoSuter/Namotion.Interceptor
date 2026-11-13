@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 
@@ -5,7 +6,7 @@ namespace Namotion.Interceptor.Registry.Paths;
 
 /// <summary>
 /// Path provider that uses [Path] attributes for custom segment mapping.
-/// Requires a name to filter attributes. Returns null for properties without matching [Path] attribute.
+/// Requires a name to filter attributes. Excludes properties without a matching [Path] attribute, except an [InlinePaths] property.
 /// </summary>
 public class AttributeBasedPathProvider : PathProviderBase
 {
@@ -33,19 +34,15 @@ public class AttributeBasedPathProvider : PathProviderBase
 
     /// <inheritdoc />
     /// <remarks>
-    /// Includes properties that have a [Path] attribute with matching name,
-    /// or properties marked with [InlinePaths] for path resolution.
+    /// Includes a property that has a [Path] attribute with a matching name, with the attribute's path as segment, and
+    /// an [InlinePaths] property without one, with its BrowseName as segment.
     /// </remarks>
-    public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
-        => FindPathAttribute(property.ReflectionAttributes, out var hasInlinePaths) is not null || hasInlinePaths;
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// Returns the [Path] attribute value matching the name, or null if no match.
-    /// Use <see cref="IsPropertyIncluded"/> to check if a property should be monitored/exposed.
-    /// </remarks>
-    public override string? TryGetPropertySegment(RegisteredSubjectProperty property)
-        => FindPathAttribute(property.ReflectionAttributes, out _)?.Path;
+    public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+    {
+        var attribute = FindPathAttribute(property.ReflectionAttributes, out var hasInlinePaths);
+        segment = attribute is not null ? attribute.Path ?? property.BrowseName : hasInlinePaths ? property.BrowseName : null;
+        return segment is not null;
+    }
 
     // Indexed rather than enumerated: this runs for every property of a subject on each segment lookup, and an
     // interface enumerator would allocate per call.

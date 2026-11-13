@@ -153,7 +153,7 @@ Beyond the settings shown above, the following properties are available on `OpcU
 | `SubscriptionPriority` | 0 | Subscription priority (0 = server default) |
 | `SubscriptionMaxNotificationsPerPublish` | 0 | Max notifications per publish (0 = server default) |
 | `MinPublishRequestCount` | 3 | Minimum outstanding publish requests |
-| `SubscriptionSequentialPublishing` | false | Process messages in order (reduces throughput) |
+| `SubscriptionSequentialPublishing` | false | Order messages across properties, at a throughput cost ([Thread Safety](#thread-safety)) |
 
 **Polling Fallback:**
 
@@ -355,6 +355,7 @@ var config = new OpcUaClientConfiguration
 - Only triggers for properties where `SamplingInterval = 0` was revised to > 0
 - Multiple rapid writes are coalesced into a single read
 - Reads are batched for efficiency
+- A read value is skipped when the property already holds a value with the same or a newer source timestamp, checked and applied atomically with the notifications of the property's current subscription
 - Circuit breaker prevents repeated failures from overwhelming the server
 - Logged when activated so you can verify which properties need this fallback
 
@@ -383,7 +384,7 @@ All settings can be overridden per-property using `[OpcUaNode]` attribute.
 
 ### Write Retry Queue During Disconnection
 
-Write retry queue behavior (ring buffer, reconcile by commit order on reconnection) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
+Write retry queue behavior (ring buffer, reconcile by commit order when the connection loop restarts) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
 
 ```csharp
 builder.Services.AddOpcUaSubjectClientSource(
@@ -454,16 +455,18 @@ builder.Services.AddOpcUaSubjectClientSource(
 
 The client handles connection loss through two cooperating mechanisms: the OPC UA SDK's built-in `SessionReconnectHandler` (automatic) and a health check loop that performs manual reconnection when the SDK handler fails or is insufficient.
 
-**All reconnection paths guarantee eventual consistency** through a full server state read. The client never relies solely on subscription notifications for state synchronization after a reconnection.
+**All reconnection paths reload the server state** with a full read, so server-to-client values are eventually consistent. The client never relies solely on subscription notifications for state synchronization after a reconnection. None of the reconnection flows below reconciles queued client-to-server writes, see **Eventual consistency for writes** below.
 
 #### Reconnection Flows
 
-**Flow A: SDK reconnection with subscription transfer**
+**Flow A: SDK reconnection with a new session**
 
-When the connection drops, the OPC UA SDK's `SessionReconnectHandler` attempts to reconnect automatically. If it succeeds and transfers existing subscriptions to the new session:
+When the connection drops, the OPC UA SDK's `SessionReconnectHandler` attempts to reconnect automatically. It first tries to reactivate the existing session, which leads to Flow B; on connection errors it keeps retrying that until its estimate of the session timeout runs out. When reactivation fails, it creates a new session and carries the client's subscriptions over, by transfer or by creating them fresh. If the session or a subscription cannot be created, the whole attempt fails and the handler retries.
+
+A transfer needs the server to still hold the subscription, which it does only until the subscription's lifetime expires without publish requests. A server built on the OPC Foundation SDK also transfers an anonymous user's subscriptions only over a signed channel, so with security off it refuses the transfer and the SDK recreates them. With this client's defaults, stall detection (`MaxReconnectDuration`, 30 s) resets the SDK handler long before its session timeout estimate (120 s) runs out, so after a plain network partition the new-session path is reached only when reactivation fails with a status the handler does not retry, such as `BadSessionIdInvalid` after a server restart.
 
 1. Keep-alive detects dead connection and triggers the SDK reconnect handler
-2. SDK creates a new session and transfers subscriptions via `TransferSubscriptions`
+2. SDK creates a new session, transfers the subscriptions the server still holds via `TransferSubscriptions` and recreates the others
 3. `OnReconnectComplete` accepts the new session and sets a `NeedsFullStateSync` flag
 4. The health check loop detects the flag on the next iteration:
    - Starts buffering incoming subscription notifications
@@ -471,9 +474,9 @@ When the connection drops, the OPC UA SDK's `SessionReconnectHandler` attempts t
    - Applies server values, replays the buffer, resumes normal operation
 5. Full consistency is restored
 
-**Flow B: SDK reconnection fails or returns a preserved session**
+**Flow B: SDK reconnection returns a preserved or unusable session**
 
-If the SDK handler cannot transfer subscriptions (e.g., server restarted and old subscriptions are gone), or if it returns the same session object ("preserved session"), the client abandons the session entirely:
+If the SDK handler reactivates the existing session and returns the same session object ("preserved session"), returns no session, or returns a new session without subscriptions (which happens when the client had none), the client abandons the session entirely:
 
 1. `OnReconnectComplete` calls `AbandonCurrentSession()` (session nulled, transport killed, and incoming notifications buffered so stale values from the abandoned subscription are not applied during the gap before manual reconnection)
 2. The health check loop detects the dead session and triggers manual reconnection
@@ -502,12 +505,12 @@ When the SDK's reconnection handler gets stuck (e.g., server never responds), th
 
 Between the SDK's `OnReconnectComplete` (step 3) and the health check's full state read (step 4), there is a window of up to one health check interval (~5 seconds by default) where:
 
-- Subscription notifications from the transfer may apply partially (some notifications may have been lost due to server-side queue overflow or subscription lifetime expiration)
+- Subscription notifications after the reconnect may apply partially (some notifications may have been lost due to server-side queue overflow or subscription lifetime expiration)
 - Property values may temporarily reflect incomplete state
 
 This window is bounded and self-correcting: the health check's full state read overwrites all values with the server's current state. For most industrial applications, this brief window is acceptable. If tighter consistency is required, reduce `SubscriptionHealthCheckInterval`.
 
-**Eventual consistency for writes**: Client-to-server writes during disconnection are buffered in the write retry queue (see above). On reconnection, after loading the server's current state, each queued change is sent unless a later local write superseded it, so a write that already committed is not discarded by the reload. Combined with the full state read for server-to-client values, this provides bidirectional eventual consistency.
+**Eventual consistency for writes**: Client-to-server writes during disconnection are buffered in the write retry queue (see above). The queue is reconciled only when the source restarts its connection loop, which for this client happens when the initial connection or initial load fails, not on a connection loss after startup: after loading the server's current state, each queued change is sent unless a later local write superseded it, so a write that already committed is not discarded by the reload. None of the reconnection flows above runs this reconcile. They reload the state, and queued writes stay in the retry queue until a local write to any property this source owns flushes it, or the connection loop restarts, see [Connectors: Known Limitations](connectors.md#known-limitations). Combined with the full state read for server-to-client values, writes are eventually consistent in both directions once one of those happens.
 
 ### Resilience Configuration
 
@@ -524,7 +527,7 @@ For 24/7 production use, the default configuration provides robust resilience:
 | `SubscriptionHealthCheckInterval` | 5s | Interval for health checks and post-reconnection state sync |
 | `WriteRetryQueueSize` | 1000 | Updates buffered during disconnection |
 | `SessionDisposalTimeout` | 5s | Max wait for graceful session close |
-| `SubscriptionSequentialPublishing` | false | Process subscription messages in order (see Thread Safety) |
+| `SubscriptionSequentialPublishing` | false | Order messages across properties, at a throughput cost (see Thread Safety) |
 
 Final outbound delivery on stop shares the internal five-second safety bound described in [Flushing On Stop](connectors.md#flushing-on-stop). It cannot be configured per connector.
 
@@ -651,7 +654,7 @@ When a batch write to the OPC UA server partially fails, the client throws an `O
 
 `OpcUaClientDiagnostics` derives from `SourceDiagnostics`, whose members, buffer semantics and read guarantees are described once in [Connector Diagnostics](connectors.md#connector-diagnostics). What follows is what is specific to this client.
 
-**`IsOperational` here means the client has a live session with its subscriptions set up.** This built-in client implements liveness monitoring, but `IsOperational` is `null` before its first protocol-specific observation. It then publishes false for the whole address space browse and subscription creation, which on a large server takes minutes. Which step raises it depends on how the session came about: the first health check tick on an initial connect, the completed subscription transfer on an SDK reconnect, and the completed state reload on a manual reconnect. It drops whenever the session is lost, killed or torn down, and whenever a connect attempt ends, so a client sitting in its retry delay reports an explicit false rather than serving.
+**`IsOperational` here means the client has a live session with its subscriptions set up.** This built-in client implements liveness monitoring, but `IsOperational` is `null` before its first protocol-specific observation. It then publishes false for the whole address space browse and subscription creation, which on a large server takes minutes. Which step raises it depends on how the session came about: the first health check tick on an initial connect, the SDK reconnect completing with a new session, and the completed state reload on a manual reconnect. It drops whenever the session is lost, killed or torn down, and whenever a connect attempt ends, so a client sitting in its retry delay reports an explicit false rather than serving.
 
 It is not a claim that the model is in sync, and the two are not ordered against each other: the initial value read can run either side of the rise on an initial connect, and on a manual reconnect the reload always finishes first. While that read runs, `ISubjectSource.State` is `Synchronizing`, so reading it together with `IsOperational` is how a dropped network is told apart from a connected client that is still loading. See [Diagnostics and State answer different questions](connectors-monitoring.md#diagnostics-and-state-answer-different-questions).
 
@@ -674,7 +677,7 @@ This built-in client registers the `ClaimedPropertyCount` gauge, so it reports t
 | `Reconnects.TotalAttempts` | Attempts started. Once all in-flight attempts resolve, this equals the three below summed. |
 | `Reconnects.TotalSucceeded` | Attempts that produced a usable session. |
 | `Reconnects.TotalFailed` | Attempts that ended with a genuine fault, meaning an exception raised while the attempt was still live. |
-| `Reconnects.TotalAbandoned` | Attempts that ended without a usable session and without a fault: a null session, a failed transfer, a preserved session after a server restart, a stall reset, or a cancellation from a kill or from the listen attempt being torn down, which happens both when the source stops and when the retry loop ends an attempt. |
+| `Reconnects.TotalAbandoned` | Attempts that ended without a usable session and without a fault: a null session, a new session without subscriptions, a preserved session, a stall reset, or a cancellation from a kill or from the listen attempt being torn down, which happens both when the source stops and when the retry loop ends an attempt. |
 
 `Polling` is `null` when the [polling fallback](#polling-fallback-for-unsupported-nodes) is off, no session has been set up yet, or the client is between connect attempts. That last case is not a startup-only condition: the block reads through the session manager and goes `null` as soon as that manager is disposed, which every way out of a connect attempt does, so it stays `null` for the whole retry delay. The totals underneath survive that and reappear at their previous values once a session exists again. Otherwise it reports:
 
@@ -714,7 +717,7 @@ if (source.CurrentSession is { } session)
 }
 ```
 
-**Lifecycle contract:** read `CurrentSession` immediately before each use. It may be `null` during reconnection and the instance changes after a manual reconnect (Flow C), a transferred-subscription failure (Flow B), or a stall reset. Never cache the reference. For long-running session-bound state (e.g. an A&C `Subscription`), subscribe to `CurrentSessionChanged` (below) or recreate on demand when calls fail with `BadSessionIdInvalid` / `BadSessionNotActivated`.
+**Lifecycle contract:** read `CurrentSession` immediately before each use. It may be `null` during reconnection and the instance changes after a manual reconnect (Flows B and C), an SDK reconnect with a new session (Flow A), or a stall reset. Never cache the reference. For long-running session-bound state (e.g. an A&C `Subscription`), subscribe to `CurrentSessionChanged` (below) or recreate on demand when calls fail with `BadSessionIdInvalid` / `BadSessionNotActivated`.
 
 ### Reacting to session swaps with `CurrentSessionChanged`
 
@@ -764,9 +767,9 @@ The library ensures thread-safe operations across all OPC UA interactions. Prope
 Write queue operations use `Interlocked` operations for thread-safe counter updates and flush operations are protected by semaphores to prevent concurrent flush issues.
 
 **Update ordering:**
-By default (`SubscriptionSequentialPublishing = false`), subscription callbacks may be processed in parallel for higher throughput. This means that for the same property, if two rapid updates arrive in different publish responses, they could theoretically be applied out of order. Each update carries a `SourceTimestamp` from the server, but the library does not enforce timestamp-based ordering.
+The SDK can deliver a subscription's notification messages out of order, for example a delayed or republished one after newer ones. The client skips a value from a message older than the last one applied to the same property, ranked by the server-assigned sequence number (logged at `Debug`). Not ranked against notifications: values that are read (initial and post-reconnect reads, polling, read-after-write) and late messages of a subscription replaced on reconnect.
 
-Set `SubscriptionSequentialPublishing = true` to order subscription messages at the cost of reduced throughput. This does not order them against local writes: a transaction commit does not wait for subscription echoes, and a delayed notification can overwrite newer local state or cause a transaction conflict.
+`SubscriptionSequentialPublishing = true` additionally applies a subscription's messages in order across its properties, at a throughput cost. Neither orders notifications against local writes: a notification sent before the server received a local write can overwrite it or cause a transaction conflict.
 
 To prevent feedback loops when external sources update properties, apply inbound values with the `SetValueFromSource()` extension method, which stamps the write with a `FromSource` origin (source marking is per write, not through an ambient scope):
 

@@ -15,7 +15,11 @@
     <PackageProjectUrl>https://github.com/RicoSuter/Namotion.Interceptor</PackageProjectUrl>
     <PackageTags>Interceptor</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    
+    <PackageIcon>NuGetIcon.png</PackageIcon>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+
     <Version>0.1.0</Version>
+    <!-- Library version reported in deps.json, which plugin loaders check plugins against. Pack overrides it globally. -->
+    <PackageVersion Condition="'$(LibraryPackageVersion)' != ''">$(LibraryPackageVersion)</PackageVersion>
   </PropertyGroup>
 </Project>

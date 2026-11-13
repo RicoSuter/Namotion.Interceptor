@@ -1,0 +1,6 @@
+{
+  "$type": "Namotion.Services.Pushover.PushoverService",
+  "name": "Pushover",
+  "applicationToken": null,
+  "targets": {}
+}

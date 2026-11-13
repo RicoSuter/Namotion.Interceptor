@@ -9,6 +9,7 @@ using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
 using Opc.Ua;
+using Opc.Ua.Configuration;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 
@@ -54,7 +55,10 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         {
             logging.ClearProviders();
             logging.SetMinimumLevel(LogLevel.Debug);
-            logging.AddXunit(_logger, "Client", LogLevel.Information);
+            // Debug only for the OPC UA client, which logs a skipped stale notification at that level.
+            logging.AddXunit(_logger, "Client", LogLevel.Debug);
+            logging.AddFilter<XunitLoggerProvider>(null, LogLevel.Information);
+            logging.AddFilter<XunitLoggerProvider>("Namotion.Interceptor.OpcUa.Client", LogLevel.Debug);
         });
 
         _context = InterceptorSubjectContext
@@ -77,7 +81,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
                 var telemetryContext = DefaultTelemetry.Create(b =>
                     b.Services.AddSingleton(loggerFactory));
 
-                var config = new OpcUaClientConfiguration
+                var config = new TestClientConfiguration
                 {
                     ServerUrl = serverUrl,
                     RootPath = ["Root"],
@@ -179,6 +183,23 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         catch (Exception ex)
         {
             _logger.Log($"Error disposing client: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Loads the application certificate when security is on, which the client does not do on its own.
+    /// </summary>
+    private sealed class TestClientConfiguration : OpcUaClientConfiguration
+    {
+        public override async Task<ApplicationInstance> CreateApplicationInstanceAsync()
+        {
+            var application = await base.CreateApplicationInstanceAsync();
+            if (UseSecurity)
+            {
+                await application.CheckApplicationInstanceCertificatesAsync(silent: true);
+            }
+
+            return application;
         }
     }
 }

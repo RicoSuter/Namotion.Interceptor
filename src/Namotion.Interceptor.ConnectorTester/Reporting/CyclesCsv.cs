@@ -17,7 +17,11 @@ public sealed record CycleCsvRow(
     long StructuralMutations,
     long ChaosEvents,
     double HeapMb,
-    double ProcessMb);
+    double ProcessMb,
+    long Commits,
+    long ConflictCommits,
+    long SourceWriteFailedCommits,
+    long UnexpectedFailedCommits);
 
 /// <summary>
 /// Column schema and factory for the cycles.csv report. Widths and formats are pinned to
@@ -39,7 +43,11 @@ public static class CyclesCsv
         new() { Name = "StructuralMutations", Width = 20,                                      Selector = row => row.StructuralMutations },
         new() { Name = "ChaosEvents",         Width = 12,                                      Selector = row => row.ChaosEvents },
         new() { Name = "HeapMB",              Width = 10, Format = "F1",                       Selector = row => row.HeapMb },
-        new() { Name = "ProcessMB",           Width = 10, Format = "F1",                       Selector = row => row.ProcessMb }
+        new() { Name = "ProcessMB",           Width = 10, Format = "F1",                       Selector = row => row.ProcessMb },
+        new() { Name = "Commits",             Width = 10,                                      Selector = row => row.Commits },
+        new() { Name = "ConflictCommits",     Width = 16,                                      Selector = row => row.ConflictCommits },
+        new() { Name = "SourceWriteFailedCommits", Width = 25,                                 Selector = row => row.SourceWriteFailedCommits },
+        new() { Name = "UnexpectedFailedCommits",  Width = 24,                                 Selector = row => row.UnexpectedFailedCommits }
     ];
 
     public static CsvFile<CycleCsvRow> Create(string filePath) => new(filePath, Columns);

@@ -1,0 +1,15 @@
+{
+  "$type": "HomeBlaze.Components.GridLayout",
+  "rows": 1,
+  "columns": 4,
+  "cells": [
+    {
+      "$type": "HomeBlaze.Components.GridCell",
+      "row": 0,
+      "column": 0,
+      "child": {
+        "$type": "HomeBlaze.Components.GridLayout"
+      }
+    }
+  ]
+}

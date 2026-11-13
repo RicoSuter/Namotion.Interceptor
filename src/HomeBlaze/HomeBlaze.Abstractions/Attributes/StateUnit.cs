@@ -6,7 +6,12 @@
 public enum StateUnit
 {
     Default,
+
+    /// <summary>
+    /// A fraction from 0 to 1, displayed and entered in the operation dialog as 0 to 100 %.
+    /// </summary>
     Percent,
+
     DegreeCelsius,
     Watt,
     Kilowatt,
@@ -41,5 +46,10 @@ public enum StateUnit
     VoltAmpereHour,
     VoltAmpereReactiveHour,
     AmpereHour,
-    WattPerSquareMeter
+    WattPerSquareMeter,
+
+    /// <summary>
+    /// A power level in decibels relative to one milliwatt, such as the received signal strength of a radio.
+    /// </summary>
+    DecibelMilliwatt
 }

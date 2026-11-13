@@ -1,0 +1,11 @@
+/* The label of an outlined Select stands on its top border and reaches 6 pixels above the box. The margin of MudBlazor
+   for it would collapse into the space between blocks, so it is kept inside the widget, without the one below the box.
+   See "Spacing" in the widget basics. */
+.select-widget {
+    display: flow-root;
+}
+
+.select-widget ::deep .mud-select > .mud-input-control {
+    margin-top: 6px;
+    margin-bottom: 0;
+}
