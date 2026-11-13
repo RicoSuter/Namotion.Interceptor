@@ -266,7 +266,7 @@ A request carries the raw changed timestamp of its trigger. A write with a conte
 
 **Detach of a source.** Nothing happens. A derived property keeps following a detached subject for as long as its getter reads it. If the getter reached the subject through a tracked property, the write of that property recalculates the derived property, and its commit drops the link. Links never outlive the attachment of the derived property that owns them.
 
-**Attachments.** A subject can be in several graphs, one per lifecycle interceptor. `LifecycleInterceptor` records, per subject, the interceptors the subject is attached to (`SubjectLifecycleAttachments`, internal subject data with its own lock): it adds itself before it attaches the subject's properties and removes itself before it detaches them. A property detach issued by a lifecycle interceptor is ignored by `DerivedPropertyChangeHandler`, since the subject may still be in another graph. Once the subject left its last lifecycle interceptor, that interceptor detaches all of the subject's derived properties directly, whether or not its context has derived change detection, also when a lifecycle handler threw. Each of those detaches checks again under `lock(D)` that the subject is still detached, because another interceptor may have attached it in between.
+**Attachments.** A subject can be in several graphs, one per lifecycle interceptor. `LifecycleInterceptor` records, per subject, the interceptors the subject is attached to (`SubjectLifecycleAttachments`, internal subject data that every change replaces by compare-and-swap): it adds itself before it attaches the subject's properties and removes itself before it detaches them. A property detach issued by a lifecycle interceptor is ignored by `DerivedPropertyChangeHandler`, since the subject may still be in another graph. Once the subject left its last lifecycle interceptor, that interceptor detaches all of the subject's derived properties directly, whether or not its context has derived change detection, also when a lifecycle handler threw. Each of those detaches checks again under `lock(D)` that the subject is still detached, because another interceptor may have attached it in between.
 
 A direct call of the public `DetachSubjectProperty` on a derived property detaches it, except one made on a thread on which a lifecycle interceptor is detaching a subject's properties (for example by a lifecycle handler): such a call is ignored, whichever subject it is for, and the property detaches with its subject if that leaves its last graph. A direct call on a source property does nothing, like a lifecycle detach of a source.
 
@@ -366,7 +366,7 @@ The first evaluation at attach runs under the lifecycle lock, because consumers 
 | `IsDerived` | `Volatile.Write` once at attach / `Volatile.Read` | attach, request, write observer |
 | Type gate | `Volatile.Write` and a full fence before the first data of the type is stored / `Volatile.Read` | data creation, write observer (W3), lifecycle detach |
 | Recorder frames | `[ThreadStatic]` (no sharing) | read tap, own writes, commit |
-| Subject attachments | per-subject lock (writes) / `Volatile.Read` of the published array | lifecycle attach and detach, derived detach |
+| Subject attachments | compare-and-swap of an immutable value in the subject's data (writes) / lock-free read of the value | lifecycle attach and detach, derived detach |
 
 ### Value correctness
 
