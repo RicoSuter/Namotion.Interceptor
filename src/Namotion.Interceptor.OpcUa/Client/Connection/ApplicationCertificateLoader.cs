@@ -23,7 +23,7 @@ internal sealed class ApplicationCertificateLoader
         new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
     private readonly ILogger _logger;
-    private LoadedCertificate? _loaded;
+    private X509Certificate2? _certificate;
 
     public ApplicationCertificateLoader(ILogger logger)
     {
@@ -33,7 +33,8 @@ internal sealed class ApplicationCertificateLoader
     /// <summary>
     /// Ensures the application certificate of <paramref name="application"/> is loaded with its private key.
     /// A certificate already set with its private key is left as is. Renewing a self-signed certificate deletes
-    /// the old certificate and its private key from the own store.
+    /// the old certificate and its private key from the own store. When loading or renewing fails while the
+    /// certificate loaded before has not expired, that certificate is kept and the error is logged.
     /// </summary>
     /// <exception cref="ServiceResultException">The SDK found no usable certificate and did not create one.</exception>
     /// <exception cref="InvalidOperationException">The store path is not set or no certificate with a private key was loaded.</exception>
@@ -59,34 +60,24 @@ internal sealed class ApplicationCertificateLoader
                 return;
             }
 
-            // Tells a certificate the check below creates apart from one already in the store. FindAsync keeps what
-            // it finds, without the private key, on the identifier, so it is cleared for the check to load the key.
-            var existed = await identifier.FindAsync(
-                false,
-                application.ApplicationConfiguration.ApplicationUri,
-                configuration.ResolvedTelemetryContext,
-                cancellationToken).ConfigureAwait(false) is not null;
-            identifier.Certificate = null;
-
-            var certificate = await LoadOrCreateAsync(application, configuration, cancellationToken).ConfigureAwait(false);
-            var isNew = !existed;
-            if (!isNew && NeedsRenewal(certificate, configuration))
+            var loaded = Volatile.Read(ref _certificate);
+            X509Certificate2 certificate;
+            try
             {
-                (certificate, isNew) = await RenewAsync(application, configuration, certificate, cancellationToken).ConfigureAwait(false);
+                certificate = await LoadOrCreateAsync(application, configuration, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException && loaded is not null && HasNotExpired(loaded))
+            {
+                KeepAfterFailure(identifier, loaded, exception);
+                return;
             }
 
-            // Renewing a certificate created in this call would create a new one on every connect.
-            var keepUntilExpiry = isNew && NeedsRenewal(certificate, configuration);
-            if (keepUntilExpiry)
+            if (NeedsRenewal(certificate, configuration))
             {
-                _logger.LogWarning(
-                    "The OPC UA client application certificate {Thumbprint} expires {NotAfter:u}, within the renewal window of {RenewalWindow} days, " +
-                    "right after its creation. The configured lifetime of {LifetimeInMonths} months is too short, so it is not renewed.",
-                    certificate.Thumbprint, certificate.NotAfter.ToUniversalTime(), RenewalWindow.TotalDays,
-                    configuration.ApplicationCertificateLifetimeInMonths);
+                certificate = await RenewAsync(application, configuration, certificate, cancellationToken).ConfigureAwait(false);
             }
 
-            Volatile.Write(ref _loaded, new LoadedCertificate(certificate, keepUntilExpiry));
+            Volatile.Write(ref _certificate, certificate);
         }
         finally
         {
@@ -105,17 +96,17 @@ internal sealed class ApplicationCertificateLoader
 
     private bool TryUseLoaded(CertificateIdentifier identifier, OpcUaClientConfiguration configuration)
     {
-        var loaded = Volatile.Read(ref _loaded);
-        if (loaded is null || (!loaded.KeepUntilExpiry && NeedsRenewal(loaded.Certificate, configuration)))
+        var loaded = Volatile.Read(ref _certificate);
+        if (loaded is null || NeedsRenewal(loaded, configuration))
         {
             return false;
         }
 
-        identifier.Certificate = loaded.Certificate;
+        identifier.Certificate = loaded;
         return true;
     }
 
-    private async Task<(X509Certificate2 Certificate, bool IsNew)> RenewAsync(
+    private async Task<X509Certificate2> RenewAsync(
         ApplicationInstance application,
         OpcUaClientConfiguration configuration,
         X509Certificate2 certificate,
@@ -140,20 +131,27 @@ internal sealed class ApplicationCertificateLoader
             }
 
             identifier.Certificate = null;
-            return (await LoadOrCreateAsync(application, configuration, cancellationToken).ConfigureAwait(false), true);
+            return await LoadOrCreateAsync(application, configuration, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException &&
-                                          certificate.NotAfter.ToUniversalTime() > DateTime.UtcNow)
+        catch (Exception exception) when (exception is not OperationCanceledException && HasNotExpired(certificate))
         {
-            // Still valid, so the connection keeps working; the next connect attempt retries the renewal.
-            _logger.LogError(exception,
-                "Renewing the OPC UA client application certificate {Thumbprint} failed. It is used until it expires {NotAfter:u}.",
-                certificate.Thumbprint, certificate.NotAfter.ToUniversalTime());
-
-            identifier.Certificate = certificate;
-            return (certificate, false);
+            KeepAfterFailure(identifier, certificate, exception);
+            return certificate;
         }
     }
+
+    // The certificate is still valid, so the connection keeps working; the next connect attempt retries.
+    private void KeepAfterFailure(CertificateIdentifier identifier, X509Certificate2 certificate, Exception exception)
+    {
+        _logger.LogError(exception,
+            "Loading or renewing the OPC UA client application certificate failed. The certificate {Thumbprint} is used until it expires {NotAfter:u}.",
+            certificate.Thumbprint, certificate.NotAfter.ToUniversalTime());
+
+        identifier.Certificate = certificate;
+    }
+
+    private static bool HasNotExpired(X509Certificate2 certificate) =>
+        certificate.NotAfter.ToUniversalTime() > DateTime.UtcNow;
 
     private static async Task<X509Certificate2> LoadOrCreateAsync(
         ApplicationInstance application,
@@ -187,6 +185,4 @@ internal sealed class ApplicationCertificateLoader
             ? Path.TrimEndingDirectorySeparator(Path.GetFullPath(storePath))
             : $"{identifier.StoreType}|{storePath}";
     }
-
-    private sealed record LoadedCertificate(X509Certificate2 Certificate, bool KeepUntilExpiry);
 }
