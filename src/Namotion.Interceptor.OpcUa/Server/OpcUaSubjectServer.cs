@@ -341,7 +341,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
     internal Task LoadApplicationCertificateAsync(ApplicationInstance application, CancellationToken cancellationToken) =>
         ApplicationCertificateLoader.EnsureLoadedAsync(
             application,
-            autoCreate: true,
+            autoCreate: !application.DisableCertificateAutoCreation,
             CertificateFactory.DefaultLifeTime,
             _configuration.ResolvedTelemetryContext,
             _logger,

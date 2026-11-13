@@ -80,18 +80,33 @@ public class OpcUaServerCertificateTests : IDisposable
         Assert.Contains(certificate.Thumbprint, warning);
     }
 
-    private OpcUaSubjectServer CreateServer(out OpcUaServerConfiguration configuration)
+    [Fact]
+    public async Task WhenAnOverrideDisablesCertificateCreation_ThenAnExpiredCertificateIsKeptWithAWarning()
+    {
+        // Arrange
+        using var server = CreateServer(out var configuration, new NoCertificateCreationConfiguration());
+        var application = await configuration.CreateApplicationInstanceAsync();
+        using var expired = await AddSelfSignedCertificateAsync(application, ageInDays: 400);
+
+        // Act
+        await server.LoadApplicationCertificateAsync(application, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(expired.Thumbprint, GetCertificate(application).Thumbprint);
+        Assert.Contains(expired.Thumbprint, Path.GetFileName(Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "certs")))));
+        Assert.Contains("not replaced", Assert.Single(_logger.Warnings));
+    }
+
+    private OpcUaSubjectServer CreateServer(out OpcUaServerConfiguration configuration, OpcUaServerConfiguration? baseConfiguration = null)
     {
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
             .WithRegistry();
 
-        configuration = new OpcUaServerConfiguration
-        {
-            ApplicationUri = "urn:test:server",
-            CertificateStoreBasePath = _storePath
-        };
+        configuration = baseConfiguration ?? new OpcUaServerConfiguration();
+        configuration.ApplicationUri = "urn:test:server";
+        configuration.CertificateStoreBasePath = _storePath;
 
         return new OpcUaSubjectServer(new DeliveryRuleTestRoot(context), configuration, _logger);
     }
@@ -119,5 +134,15 @@ public class OpcUaServerCertificateTests : IDisposable
             .OpenStore(NullTelemetryContext.Instance);
         await store.AddAsync(certificate);
         return certificate;
+    }
+
+    private sealed class NoCertificateCreationConfiguration : OpcUaServerConfiguration
+    {
+        public override async Task<ApplicationInstance> CreateApplicationInstanceAsync()
+        {
+            var application = await base.CreateApplicationInstanceAsync();
+            application.DisableCertificateAutoCreation = true;
+            return application;
+        }
     }
 }

@@ -175,22 +175,10 @@ public class ApplicationCertificateLoaderTests : IDisposable
     [Fact]
     public async Task WhenACaIssuedCertificateHasExpired_ThenItIsKeptWithAWarning()
     {
-        // Arrange - the issuer store completes the chain, otherwise the SDK rejects the certificate on load.
+        // Arrange
         var configuration = CreateConfiguration();
         configuration.ApplicationUri = "urn:test:client";
-        using var authority = CertificateBuilder.Create("CN=Test Authority")
-            .SetNotBefore(DateTime.UtcNow.AddDays(-500))
-            .SetLifeTime(TimeSpan.FromDays(1000))
-            .SetCAConstraint()
-            .CreateForRSA();
-        await AddToStoreAsync("issuer", authority);
-        using var issued = CertificateFactory
-            .CreateCertificate(configuration.ApplicationUri, configuration.ApplicationName, $"CN={configuration.ApplicationName}, O=Namotion", null)
-            .SetNotBefore(DateTime.UtcNow.AddDays(-400))
-            .SetLifeTime(TimeSpan.FromDays(365))
-            .SetIssuer(authority)
-            .CreateForRSA();
-        await AddToStoreAsync("own", issued);
+        using var issued = await AddCaIssuedCertificateAsync(configuration, ageInDays: 400);
         var application = await configuration.CreateApplicationInstanceAsync();
         var logger = new RecordingLogger();
 
@@ -203,6 +191,54 @@ public class ApplicationCertificateLoaderTests : IDisposable
         Assert.Contains("not replaced", Assert.Single(logger.Warnings));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenACertificateThatIsNotReplacedIsCloseToExpiry_ThenAWarningAsksForANewOne(bool isCaIssued)
+    {
+        // Arrange - a CA-issued certificate, or a self-signed one with automatic creation off.
+        var configuration = CreateConfiguration();
+        configuration.ApplicationUri = "urn:test:client";
+        configuration.AutoCreateApplicationCertificate = isCaIssued;
+        using var expiring = isCaIssued
+            ? await AddCaIssuedCertificateAsync(configuration, ageInDays: 355)
+            : await AddSelfSignedCertificateAsync(configuration, ageInDays: 355);
+        var application = await configuration.CreateApplicationInstanceAsync();
+        var logger = new RecordingLogger();
+
+        // Act
+        await LoadAsync(application, configuration, logger);
+
+        // Assert
+        Assert.Equal(expiring.Thumbprint, GetCertificate(application).Thumbprint);
+        Assert.Contains(expiring.Thumbprint, Path.GetFileName(Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "certs")))));
+        var warning = Assert.Single(logger.Warnings);
+        Assert.Contains(expiring.Thumbprint, warning);
+        Assert.Contains("Provide a new certificate before then", warning);
+    }
+
+    [Fact]
+    public async Task WhenTheStoreHoldsTwoExpiredSelfSignedCertificates_ThenBothAreReplacedByOne()
+    {
+        // Arrange
+        var configuration = CreateConfiguration();
+        configuration.ApplicationUri = "urn:test:client";
+        using var first = await AddSelfSignedCertificateAsync(configuration, ageInDays: 400);
+        using var second = await AddSelfSignedCertificateAsync(configuration, ageInDays: 380);
+        var application = await configuration.CreateApplicationInstanceAsync();
+        var logger = new RecordingLogger();
+
+        // Act
+        await LoadAsync(application, configuration, logger);
+
+        // Assert
+        var certificate = GetCertificate(application);
+        Assert.True(certificate.NotAfter.ToUniversalTime() > DateTime.UtcNow.AddMonths(11));
+        var file = Path.GetFileName(Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "certs"))));
+        Assert.Contains(certificate.Thumbprint, file);
+        Assert.Equal(2, logger.Warnings.Count);
+    }
+
     [Fact]
     public async Task WhenReplacingAnExpiredCertificateFails_ThenLoadingFails()
     {
@@ -212,12 +248,16 @@ public class ApplicationCertificateLoaderTests : IDisposable
         using var expired = await AddSelfSignedCertificateAsync(configuration, ageInDays: 400);
         var application = await configuration.CreateApplicationInstanceAsync();
 
-        // Act & Assert
-        if (!OperatingSystem.IsWindows())
+        // Act
+        Exception? exception = null;
+        if (OperatingSystem.IsWindows() || !await WithReadOnlyAsync(PrivatePath,
+            async () => exception = await Record.ExceptionAsync(() => LoadAsync(application, configuration))))
         {
-            await WithReadOnlyAsync(PrivatePath,
-                () => Assert.ThrowsAsync<UnauthorizedAccessException>(() => LoadAsync(application, configuration)));
+            return;
         }
+
+        // Assert
+        Assert.IsType<UnauthorizedAccessException>(exception);
     }
 
     [Fact]
@@ -330,6 +370,28 @@ public class ApplicationCertificateLoaderTests : IDisposable
             .CreateCertificate(configuration.ApplicationUri, configuration.ApplicationName, $"CN={configuration.ApplicationName}, O=Namotion", null)
             .SetNotBefore(DateTime.UtcNow.AddDays(-ageInDays))
             .SetLifeTime(TimeSpan.FromDays(365))
+            .CreateForRSA();
+        await AddToStoreAsync("own", certificate);
+        return certificate;
+    }
+
+    /// <summary>
+    /// Adds a certificate valid for 365 days, issued <paramref name="ageInDays"/> ago by an authority whose certificate
+    /// is in the issuer store, which completes the chain so the SDK accepts the certificate on load.
+    /// </summary>
+    private async Task<X509Certificate2> AddCaIssuedCertificateAsync(OpcUaClientConfiguration configuration, int ageInDays)
+    {
+        using var authority = CertificateBuilder.Create("CN=Test Authority")
+            .SetNotBefore(DateTime.UtcNow.AddDays(-500))
+            .SetLifeTime(TimeSpan.FromDays(1000))
+            .SetCAConstraint()
+            .CreateForRSA();
+        await AddToStoreAsync("issuer", authority);
+        var certificate = CertificateFactory
+            .CreateCertificate(configuration.ApplicationUri, configuration.ApplicationName, $"CN={configuration.ApplicationName}, O=Namotion", null)
+            .SetNotBefore(DateTime.UtcNow.AddDays(-ageInDays))
+            .SetLifeTime(TimeSpan.FromDays(365))
+            .SetIssuer(authority)
             .CreateForRSA();
         await AddToStoreAsync("own", certificate);
         return certificate;
