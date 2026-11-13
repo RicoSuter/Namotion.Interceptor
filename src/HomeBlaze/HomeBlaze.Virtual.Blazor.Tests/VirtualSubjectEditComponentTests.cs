@@ -81,6 +81,27 @@ public class VirtualSubjectEditComponentTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenAnEntryIsAddedToACollapsedSubject_ThenTheSubjectIsExpanded()
+    {
+        // Arrange
+        _subject.Properties = new Dictionary<string, VirtualProperty>
+        {
+            ["Group"] = new() { Properties = new Dictionary<string, VirtualProperty> { ["A"] = new() { Expression = "1", DataType = VirtualDataType.Number } } }
+        };
+        var editor = _context.Render<VirtualSubjectEditComponent>(parameters => parameters.Add(component => component.Subject, _subject));
+        await editor.Find("[data-testid=virtual-entry-Group] .mud-treeview-item-arrow button").ClickAsync();
+        var isCollapsed = !editor.Find("[data-testid=virtual-entry-Group] .mud-treeview-item-arrow button").ClassList.Contains("mud-transform");
+
+        // Act
+        await editor.Find("[data-testid=virtual-add-property]").ClickAsync();
+
+        // Assert
+        Assert.True(isCollapsed);
+        Assert.Contains("mud-transform", editor.Find("[data-testid=virtual-entry-Group] .mud-treeview-item-arrow button").ClassList);
+        Assert.Contains("mud-treeview-item-selected", editor.Find("[data-testid='virtual-entry-Group/Property'] > .mud-treeview-item-content").ClassList);
+    }
+
+    [Fact]
     public void WhenEntriesReadEachOther_ThenTheEditorReportsItAndIsInvalid()
     {
         // Arrange

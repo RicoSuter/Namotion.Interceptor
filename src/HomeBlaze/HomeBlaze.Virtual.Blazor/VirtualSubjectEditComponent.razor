@@ -247,7 +247,7 @@
     private void Add(VirtualEntryDraft entry)
     {
         _selected = entry;
-        Refresh();
+        Refresh(reveal: entry);
         SetDirty(true);
     }
 
@@ -266,7 +266,8 @@
         SetDirty(true);
     }
 
-    private void Refresh()
+    // Expands the entries above reveal, so that an entry added below a collapsed one is shown.
+    private void Refresh(VirtualEntryDraft? reveal = null)
     {
         if (_draft is not { } draft)
         {
@@ -274,7 +275,13 @@
         }
 
         _issues = draft.Validate(_ownPath);
-        _items = BuildItems(draft.Properties, CollectCollapsed(_items));
+        var collapsed = CollectCollapsed(_items);
+        for (var ancestor = reveal?.Parent; ancestor is not null; ancestor = ancestor.Parent)
+        {
+            collapsed.Remove(ancestor);
+        }
+
+        _items = BuildItems(draft.Properties, collapsed);
         ReportValidity();
     }
 
