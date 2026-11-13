@@ -32,22 +32,22 @@ internal static class PostLockQueue
     [ThreadStatic]
     private static int _lockAnchorDepth;
 
-    // The anchor depth of the innermost segment; 0 when there is none or it drains at a lock release. Read on every
-    // write, so it is a plain thread-static value.
+    // The innermost segment of the stack, read on every write; the others follow through Segment.Next.
     [ThreadStatic]
-    private static int _innermostAnchorDepth;
+    private static Segment? _innermost;
 
+    // The segments kept for reuse, linked through Segment.Next.
     [ThreadStatic]
-    private static List<Segment>? _segments;
-
-    [ThreadStatic]
-    private static Stack<Segment>? _pool;
+    private static Segment? _pool;
 
     /// <summary>The queued work of one anchor.</summary>
     internal sealed class Segment
     {
         /// <summary>The write depth of the anchor write, or 0 for a segment that drains at a lock release.</summary>
         public int AnchorDepth;
+
+        /// <summary>The enclosing segment on the stack, or the next segment in the pool.</summary>
+        public Segment? Next;
 
         // A null entry is a slot reserved for a delivery that was not filled (the write did not land, or had no
         // consumers); the drain skips it.
@@ -75,14 +75,11 @@ internal static class PostLockQueue
     }
 
     /// <summary>
-    /// The write depth of the anchor write whose segment is the innermost one, 0 when there is none. The write
-    /// observer completes the anchor write of this depth.
+    /// Whether the write of this depth is the anchor write of the innermost segment, which the write observer
+    /// completes. Write depths start at 1, so no write matches a segment that drains at a lock release.
     /// </summary>
-    internal static int InnermostAnchorDepth
-    {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => _innermostAnchorDepth;
-    }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool IsAnchorWrite(int depth) => _innermost is { } innermost && innermost.AnchorDepth == depth;
 
     /// <summary>
     /// Called by a lifecycle interceptor before it takes its lock. When the thread holds no lifecycle lock yet, a
@@ -110,14 +107,9 @@ internal static class PostLockQueue
     /// </summary>
     internal static void ExitLock()
     {
-        if (--_heldLocks != 0)
+        if (--_heldLocks == 0 && _innermost is { AnchorDepth: 0 })
         {
-            return;
-        }
-
-        if (_segments is { Count: > 0 } segments && segments[^1].AnchorDepth == 0)
-        {
-            Drain(Pop(segments), rawTimestamp: 0, rethrow: false);
+            Drain(Pop(), rawTimestamp: 0, rethrow: false);
         }
     }
 
@@ -135,16 +127,16 @@ internal static class PostLockQueue
 
         // A segment at the anchor depth of the locks held now belongs to them: a segment of another anchor at that
         // depth has completed and was removed, since anchors at one depth do not nest.
-        var segments = _segments ??= [];
-        if (segments.Count > 0 && segments[^1].AnchorDepth == _lockAnchorDepth)
+        if (_innermost is { } innermost && innermost.AnchorDepth == _lockAnchorDepth)
         {
-            return segments[^1];
+            return innermost;
         }
 
-        var segment = _pool is { Count: > 0 } pool ? pool.Pop() : new Segment();
+        var segment = _pool ?? new Segment();
+        _pool = segment.Next;
         segment.AnchorDepth = _lockAnchorDepth;
-        segments.Add(segment);
-        _innermostAnchorDepth = _lockAnchorDepth;
+        segment.Next = _innermost;
+        _innermost = segment;
         return segment;
     }
 
@@ -252,19 +244,16 @@ internal static class PostLockQueue
     }
 
     /// <summary>
-    /// Removes the segment of the anchor write at <see cref="InnermostAnchorDepth"/>, which the write observer
-    /// completes: it adds the write's own recalculation requests and then calls <see cref="CompleteAnchorWrite"/>.
+    /// Removes the innermost segment, which belongs to an anchor write (<see cref="IsAnchorWrite"/>) or a lock release.
+    /// The write observer completes an anchor write: it adds the write's own recalculation requests and then calls
+    /// <see cref="CompleteAnchorWrite"/>.
     /// </summary>
-    internal static Segment TakeAnchorSegment()
+    internal static Segment Pop()
     {
-        var segments = _segments;
-        if (segments is not { Count: > 0 } || segments[^1].AnchorDepth != _innermostAnchorDepth)
-        {
-            throw new InvalidOperationException(
-                "PostLockQueue: the innermost segment does not belong to the completed anchor write.");
-        }
-
-        return Pop(segments);
+        var segment = _innermost!;
+        _innermost = segment.Next;
+        segment.Next = null;
+        return segment;
     }
 
     /// <summary>
@@ -278,14 +267,6 @@ internal static class PostLockQueue
         // before the write observer runs.
         Debug.Assert(_heldLocks == 0, "An anchor write completes outside every lifecycle lock.");
         Drain(segment, rawTimestamp, rethrow: !hasWriteFailed);
-    }
-
-    private static Segment Pop(List<Segment> segments)
-    {
-        var segment = segments[^1];
-        segments.RemoveAt(segments.Count - 1);
-        _innermostAnchorDepth = segments.Count > 0 ? segments[^1].AnchorDepth : 0;
-        return segment;
     }
 
     /// <summary>
@@ -400,7 +381,8 @@ internal static class PostLockQueue
         segment.Deliveries.Clear();
         segment.Requests.Clear();
         segment.RequestIndex = null;
-        (_pool ??= new Stack<Segment>()).Push(segment);
+        segment.Next = _pool;
+        _pool = segment;
     }
 
     // Raw timestamps are ticks, negated for an explicit null scope; 0 means none.
