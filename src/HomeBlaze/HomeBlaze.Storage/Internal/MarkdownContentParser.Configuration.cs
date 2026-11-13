@@ -56,7 +56,7 @@ public sealed partial class MarkdownContentParser
         void RememberFirstSkipped(SkippedConfigurationProperty property) => skipped ??= property;
 
         IInterceptorSubject? subject;
-        if (CanUpdateInPlace(existing, type, configuration.Keys))
+        if (CanUpdateInPlace(existing, type, configuration))
         {
             // A block whose configuration did not change keeps the values of its subject. They can hold a change
             // that is about to be saved, which the reload inside the save of another block must not reset.
@@ -272,17 +272,18 @@ public sealed partial class MarkdownContentParser
             subject, new AppliedBlock(state.Source, start, length, innerSubjects.ToArray(), textSegments.ToArray()));
     }
 
-    // Updating in place only sets the keys that are present. A key that was removed from the page
-    // would keep its old value on the instance, unlike after a restart, so the subject is recreated then.
-    private bool CanUpdateInPlace([NotNullWhen(true)] IInterceptorSubject? existing, Type type, string[] keys)
+    // See ConfigurationUpdatePolicy: a removed key or a changed value that the subject cannot apply in place recreates it.
+    private bool CanUpdateInPlace([NotNullWhen(true)] IInterceptorSubject? existing, Type type, BlockConfiguration configuration)
     {
-        if (existing is null || existing.GetType() != type)
+        if (existing is null)
         {
             return false;
         }
 
-        return !_appliedConfigurationKeys.TryGetValue(existing, out var previousKeys)
-            || Array.TrueForAll(previousKeys, previousKey => Array.IndexOf(keys, previousKey) >= 0);
+        var appliedJson = _appliedConfigurationJson.TryGetValue(existing, out var json) ? json : null;
+        var appliedKeys = _appliedConfigurationKeys.TryGetValue(existing, out var keys) ? keys : null;
+        return ConfigurationUpdatePolicy.CanUpdateInPlace(
+            existing, type, configuration.Json, appliedJson, appliedKeys, ConfigurationNaming.CSharpProperty);
     }
 
     private bool TryBuildConfiguration(
