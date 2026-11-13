@@ -27,6 +27,10 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
     private readonly RootManager _rootManager;
     private readonly SubjectPathResolver _pathResolver;
     private readonly ILogger<OpcUaServer> _logger;
+
+    // Taken by UpdateDiagnostics and by the reset in StopServerAsync, so a stopped server is never given diagnostics again.
+    private readonly Lock _diagnosticsLock = new();
+
     private IOpcUaSubjectServer? _serverService;
 
     // Configuration properties (persisted to JSON)
@@ -223,23 +227,25 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
         if (_serverService is { } service)
         {
             var diagnostics = service.Diagnostics;
-
-            // A stop or restart that ran meanwhile has already reset these properties.
-            if (!ReferenceEquals(_serverService, service))
+            lock (_diagnosticsLock)
             {
-                return;
-            }
+                // A stop or restart that ran meanwhile has reset these properties and must not be overwritten.
+                if (!ReferenceEquals(_serverService, service))
+                {
+                    return;
+                }
 
-            // Without this, a server whose start keeps failing looks healthy while it never accepts connections.
-            IsAcceptingConnections = diagnostics.IsOperational;
-            if (Status == ServiceStatus.Running && diagnostics.IsOperational is { } isOperational)
-            {
-                StatusMessage = isOperational ? null : diagnostics.LastError?.Message;
-            }
+                // Without this, a server whose start keeps failing looks healthy while it never accepts connections.
+                IsAcceptingConnections = diagnostics.IsOperational;
+                if (Status == ServiceStatus.Running && diagnostics.IsOperational is { } isOperational)
+                {
+                    StatusMessage = isOperational ? null : diagnostics.LastError?.Message;
+                }
 
-            IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
-            OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;
-            ActiveSessionCount = diagnostics.ActiveSessionCount;
+                IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
+                OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;
+                ActiveSessionCount = diagnostics.ActiveSessionCount;
+            }
         }
     }
 
@@ -335,13 +341,16 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
             }
             finally
             {
-                _serverService = null;
-                Status = ServiceStatus.Stopped;
-                StatusMessage = null;
-                IsAcceptingConnections = null;
-                IncomingChangesPerSecond = null;
-                OutgoingChangesPerSecond = null;
-                ActiveSessionCount = null;
+                lock (_diagnosticsLock)
+                {
+                    _serverService = null;
+                    Status = ServiceStatus.Stopped;
+                    StatusMessage = null;
+                    IsAcceptingConnections = null;
+                    IncomingChangesPerSecond = null;
+                    OutgoingChangesPerSecond = null;
+                    ActiveSessionCount = null;
+                }
             }
         }
     }

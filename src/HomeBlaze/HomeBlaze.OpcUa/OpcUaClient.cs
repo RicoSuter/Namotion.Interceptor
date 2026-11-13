@@ -26,6 +26,10 @@ namespace HomeBlaze.OpcUa;
 public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvider, IIconProvider
 {
     private readonly ILogger<OpcUaClient> _logger;
+
+    // Taken by UpdateDiagnostics and by the reset in StopClientAsync, so a stopped client is never given diagnostics again.
+    private readonly Lock _diagnosticsLock = new();
+
     private IOpcUaSubjectClientSource? _clientSource;
 
     // Configuration properties
@@ -235,27 +239,29 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
         if (_clientSource is { } source)
         {
             var diagnostics = source.Diagnostics;
-
-            // A stop or restart that ran meanwhile has already reset these properties.
-            if (!ReferenceEquals(_clientSource, source))
+            lock (_diagnosticsLock)
             {
-                return;
+                // A stop or restart that ran meanwhile has reset these properties and must not be overwritten.
+                if (!ReferenceEquals(_clientSource, source))
+                {
+                    return;
+                }
+
+                IsConnected = diagnostics.IsOperational;
+
+                // Without this, a rejected server certificate leaves the client looking healthy while it never connects.
+                if (Status == ServiceStatus.Running && diagnostics.IsOperational is { } isOperational)
+                {
+                    StatusMessage = isOperational ? null : diagnostics.LastError?.Message;
+                }
+
+                IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
+                OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;
+                MonitoredItemCount = diagnostics.MonitoredItemCount;
+                PollingItemCount = diagnostics.Polling?.ItemCount ?? 0;
+                PendingWriteCount = diagnostics.OutboundRetries.Depth;
+                TotalReconnections = diagnostics.Reconnects.TotalAttempts;
             }
-
-            IsConnected = diagnostics.IsOperational;
-
-            // Without this, a rejected server certificate leaves the client looking healthy while it never connects.
-            if (Status == ServiceStatus.Running && diagnostics.IsOperational is { } isOperational)
-            {
-                StatusMessage = isOperational ? null : diagnostics.LastError?.Message;
-            }
-
-            IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
-            OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;
-            MonitoredItemCount = diagnostics.MonitoredItemCount;
-            PollingItemCount = diagnostics.Polling?.ItemCount ?? 0;
-            PendingWriteCount = diagnostics.OutboundRetries.Depth;
-            TotalReconnections = diagnostics.Reconnects.TotalAttempts;
         }
     }
 
@@ -343,17 +349,20 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
                     }
                 }
 
-                _clientSource = null;
                 Root = null;
-                Status = ServiceStatus.Stopped;
-                StatusMessage = null;
-                IsConnected = null;
-                MonitoredItemCount = null;
-                PollingItemCount = null;
-                PendingWriteCount = null;
-                TotalReconnections = null;
-                IncomingChangesPerSecond = null;
-                OutgoingChangesPerSecond = null;
+                lock (_diagnosticsLock)
+                {
+                    _clientSource = null;
+                    Status = ServiceStatus.Stopped;
+                    StatusMessage = null;
+                    IsConnected = null;
+                    MonitoredItemCount = null;
+                    PollingItemCount = null;
+                    PendingWriteCount = null;
+                    TotalReconnections = null;
+                    IncomingChangesPerSecond = null;
+                    OutgoingChangesPerSecond = null;
+                }
             }
         }
     }
