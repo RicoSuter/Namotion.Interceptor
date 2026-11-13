@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using Namotion.Interceptor.Interceptors;
@@ -204,27 +205,21 @@ internal static class PostLockQueue
     internal static void AddRequest(Segment segment, PropertyReference property, long rawTimestamp)
     {
         var attachCount = property.TryGetDerivedPropertyData() is { } data ? Volatile.Read(ref data.AttachCount) : 0;
-        Add(segment, new QueuedRequest(property, rawTimestamp, attachCount));
-    }
-
-    private static void Add(Segment segment, QueuedRequest request)
-    {
         var requests = segment.Requests;
-        var property = request.Property;
         var index = IndexOf(segment, property);
         if (index >= 0)
         {
             var queued = requests[index];
             requests[index] = queued with
             {
-                RawTimestamp = Newest(queued.RawTimestamp, request.RawTimestamp),
-                AttachCount = Math.Max(queued.AttachCount, request.AttachCount)
+                RawTimestamp = Newest(queued.RawTimestamp, rawTimestamp),
+                AttachCount = Math.Max(queued.AttachCount, attachCount)
             };
             return;
         }
 
         segment.RequestIndex?.Add(property, requests.Count);
-        requests.Add(request);
+        requests.Add(new QueuedRequest(property, rawTimestamp, attachCount));
         if (segment.RequestIndex is null && requests.Count > LinearSearchLimit)
         {
             var requestIndex = new Dictionary<PropertyReference, int>(requests.Count * 2, PropertyReference.Comparer);
@@ -279,27 +274,10 @@ internal static class PostLockQueue
     /// </summary>
     internal static void CompleteAnchorWrite(Segment segment, long rawTimestamp, bool hasWriteFailed)
     {
-        if (_heldLocks > 0)
-        {
-            // Not reached by the lifecycle, whose anchor writes complete after its locks are released; kept so
-            // that queued work is never lost: the enclosing segment takes it over.
-            MoveToOpenSegment(segment);
-            return;
-        }
-
+        // An anchor write took the thread's first lifecycle lock, and every lock taken in its chain is released
+        // before the write observer runs.
+        Debug.Assert(_heldLocks == 0, "An anchor write completes outside every lifecycle lock.");
         Drain(segment, rawTimestamp, rethrow: !hasWriteFailed);
-    }
-
-    private static void MoveToOpenSegment(Segment segment)
-    {
-        var target = TryGetOpenSegment()!;
-        target.Deliveries.AddRange(segment.Deliveries);
-        foreach (var request in segment.Requests)
-        {
-            Add(target, request);
-        }
-
-        Return(segment);
     }
 
     private static Segment Pop(List<Segment> segments)
