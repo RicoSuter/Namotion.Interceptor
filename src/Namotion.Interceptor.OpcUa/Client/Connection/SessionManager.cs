@@ -304,6 +304,11 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
         var oldSession = Volatile.Read(ref _session);
 
+        // Resolved before the try so a ServiceResultException from user code is not reported as a certificate error.
+        var identity = configuration.CreateUserIdentity != null
+            ? await configuration.CreateUserIdentity(cancellationToken).ConfigureAwait(false)
+            : new UserIdentity();
+
         var sessionFactory = configuration.ActualSessionFactory;
         ISession sessionResult;
         try
@@ -314,9 +319,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 updateBeforeConnect: false,
                 sessionName: application.ApplicationName,
                 sessionTimeout: (uint)configuration.SessionTimeout.TotalMilliseconds,
-                identity: configuration.CreateUserIdentity != null
-                    ? await configuration.CreateUserIdentity(cancellationToken).ConfigureAwait(false)
-                    : new UserIdentity(),
+                identity: identity,
                 preferredLocales: null,
                 cancellationToken).ConfigureAwait(false);
         }
@@ -745,12 +748,12 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         if (securedEndpoint is null || !supportedPolicies.Contains(securedEndpoint.SecurityPolicyUri))
         {
             var requirement = minimumSecurityMode == MessageSecurityMode.None
-                ? "no unsecured endpoint and no secured endpoint"
-                : $"no endpoint with the security mode {minimumSecurityMode} or stronger, which " +
-                  $"{nameof(OpcUaClientConfiguration.MinimumSecurityMode)} requires,";
+                ? "no unsecured endpoint and no secured endpoint with"
+                : $"no endpoint with the security mode {minimumSecurityMode} or stronger (required by " +
+                  $"{nameof(OpcUaClientConfiguration.MinimumSecurityMode)}) and";
 
             throw new InvalidOperationException(
-                $"The OPC UA server at '{serverUri}' offers {requirement} with a security policy this client supports. " +
+                $"The OPC UA server at '{serverUri}' offers {requirement} a security policy this client supports. " +
                 $"The server offers {DescribeEndpoints(schemeEndpoints)}; the client supports " +
                 $"{string.Join(", ", supportedPolicies.Where(policy => policy != SecurityPolicies.None))}.");
         }
@@ -784,17 +787,20 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         var rejectedFolder = GetCertificateFolder(security.RejectedCertificateStore);
         var trustedFolder = GetCertificateFolder(security.TrustedPeerCertificates);
 
-        // A server also reports an expired client certificate with BadCertificateTimeInvalid.
+        // A server also reports an expired client certificate with BadCertificateTimeInvalid, and one that is not yet
+        // valid when its clock is behind, so both certificates can be valid by this machine's clock.
+        var isClientCertificateSent = endpoint.SecurityMode != MessageSecurityMode.None && clientCertificate is not null;
+        var isServerCertificateTimeValid = serverCertificate is not null && IsTimeValid(serverCertificate);
         var isClientCertificateTimeInvalid =
-            endpoint.SecurityMode != MessageSecurityMode.None &&
-            clientCertificate is not null && !IsTimeValid(clientCertificate) &&
-            (serverCertificate is null || IsTimeValid(serverCertificate));
+            isClientCertificateSent && !IsTimeValid(clientCertificate!) && (serverCertificate is null || isServerCertificateTimeValid);
+        var areBothCertificatesTimeValid = isClientCertificateSent && IsTimeValid(clientCertificate!) && isServerCertificateTimeValid;
 
         // Auto-accept only covers an untrusted server certificate, so only that message suggests it.
         var message = error.StatusCode switch
         {
-            // Servers report an untrusted, incomplete, revoked or invalid client certificate with this code, which the
-            // client otherwise raises only for a rare transport failure.
+            // Servers report an untrusted, revoked or invalid client certificate, or one whose issuer chain is incomplete,
+            // with this code. The client otherwise raises it only for a failed message signature or decryption, or a
+            // mismatched endpoint list.
             StatusCodes.BadSecurityChecksFailed =>
                 $"The OPC UA server rejected the secure channel, most likely because it does not trust this client's certificate " +
                 $"{clientCertificate?.Thumbprint ?? "(unknown)"} in '{ownFolder}'. Trust it on the server; for a certificate issued " +
@@ -803,6 +809,11 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 $"The OPC UA server rejected this client's certificate {clientCertificate!.Thumbprint} in '{ownFolder}' because it " +
                 $"is expired or not yet valid{FormatValidity(clientCertificate)}. Provide a valid certificate there and trust it " +
                 $"on the server, and check that the clocks of the server and this client are correct.",
+            StatusCodes.BadCertificateTimeInvalid when areBothCertificatesTimeValid =>
+                $"The OPC UA server rejected a certificate as expired or not yet valid, but this client's certificate " +
+                $"{clientCertificate!.Thumbprint}{FormatValidity(clientCertificate)} and the server's certificate " +
+                $"{serverThumbprint}{FormatValidity(serverCertificate)} are both valid by this machine's clock. " +
+                $"Check that the clocks of the server and this client are correct.",
             StatusCodes.BadCertificateTimeInvalid =>
                 $"The OPC UA server certificate {serverThumbprint} is expired or not yet valid{FormatValidity(serverCertificate)}. " +
                 $"The server needs a valid certificate; also check that the clocks of the server and this client are correct.",
@@ -829,7 +840,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         var identifier = applicationConfiguration.SecurityConfiguration.ApplicationCertificate;
         return new InvalidOperationException(
             $"Failed to load the OPC UA client application certificate from " +
-            $"'{GetCertificateFolder(identifier?.StoreType, identifier?.StorePath)}': {error.Message.TrimEnd('.')}. " +
+            $"'{GetCertificateFolder(identifier?.StoreType, identifier?.StorePath)}': {error.Message.TrimEnd().TrimEnd('.')}. " +
             $"A provisioned certificate needs the subject '{identifier?.SubjectName}' and the application URI " +
             $"'{applicationConfiguration.ApplicationUri}'; set {nameof(OpcUaClientConfiguration.ApplicationUri)} to match it. " +
             (autoCreate

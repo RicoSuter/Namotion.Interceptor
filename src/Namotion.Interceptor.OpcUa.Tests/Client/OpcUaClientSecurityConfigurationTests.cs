@@ -222,8 +222,9 @@ public class OpcUaClientSecurityConfigurationTests
         // Act & Assert
         var error = Assert.Throws<InvalidOperationException>(() => SessionManager.SelectEndpoint(
             CreateApplicationConfiguration(), ServerUri, endpoints, MessageSecurityMode.SignAndEncrypt, NullTelemetryContext.Instance));
-        Assert.Contains("with a security policy this client supports", error.Message);
-        Assert.Contains(nameof(OpcUaClientConfiguration.MinimumSecurityMode), error.Message);
+        Assert.Contains(
+            $"no endpoint with the security mode SignAndEncrypt or stronger (required by {nameof(OpcUaClientConfiguration.MinimumSecurityMode)}) " +
+            "and a security policy this client supports", error.Message);
         Assert.Contains($"{SecurityPolicies.ECC_nistP256} (SignAndEncrypt)", error.Message);
         Assert.Contains($"{SecurityPolicies.Basic256Sha256} (Sign)", error.Message);
     }
@@ -241,7 +242,7 @@ public class OpcUaClientSecurityConfigurationTests
         // Act & Assert
         var error = Assert.Throws<InvalidOperationException>(() => SessionManager.SelectEndpoint(
             CreateApplicationConfiguration(), ServerUri, endpoints, MessageSecurityMode.Sign, NullTelemetryContext.Instance));
-        Assert.Contains("with a security policy this client supports", error.Message);
+        Assert.Contains("and a security policy this client supports", error.Message);
         Assert.Contains(SecurityPolicies.ECC_nistP256, error.Message);
         Assert.Contains(SecurityPolicies.Basic256Sha256, error.Message);
     }
@@ -280,6 +281,24 @@ public class OpcUaClientSecurityConfigurationTests
 
         // Assert
         Assert.Equal(SecurityPolicies.Basic256Sha256, endpoint.SecurityPolicyUri);
+    }
+
+    [Fact]
+    public void WhenSecurityIsOptionalAndOnlySignedAndEncryptedEndpointsExist_ThenTheEncryptedOneIsSelected()
+    {
+        // Arrange
+        var endpoints = new EndpointDescriptionCollection
+        {
+            CreateEndpoint(MessageSecurityMode.Sign, SecurityPolicies.Basic256Sha256),
+            CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256)
+        };
+
+        // Act
+        var endpoint = SessionManager.SelectEndpoint(
+            CreateApplicationConfiguration(), ServerUri, endpoints, MessageSecurityMode.None, NullTelemetryContext.Instance);
+
+        // Assert
+        Assert.Equal(MessageSecurityMode.SignAndEncrypt, endpoint.SecurityMode);
     }
 
     [Fact]
@@ -447,6 +466,86 @@ public class OpcUaClientSecurityConfigurationTests
         Assert.DoesNotContain(serverCertificate.Thumbprint, error.Message);
     }
 
+    [Fact]
+    public void WhenBothCertificatesAreValidButTheServerReportsAnInvalidTime_ThenTheMessageNamesBothAndTheClocks()
+    {
+        // Arrange
+        using var serverCertificate = CertificateBuilder.Create("CN=Server").CreateForRSA();
+        using var clientCertificate = CertificateBuilder.Create("CN=Client").CreateForRSA();
+        var endpoint = CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256);
+        endpoint.ServerCertificate = serverCertificate.RawData;
+        var applicationConfiguration = CreateApplicationConfiguration();
+        applicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate = clientCertificate;
+
+        // Act
+        var error = SessionManager.CreateCertificateErrorException(
+            new ServiceResultException(StatusCodes.BadCertificateTimeInvalid), endpoint,
+            applicationConfiguration, NullTelemetryContext.Instance);
+
+        // Assert
+        Assert.Contains("The OPC UA server rejected a certificate as expired or not yet valid", error.Message);
+        Assert.Contains(clientCertificate.Thumbprint, error.Message);
+        Assert.Contains(serverCertificate.Thumbprint, error.Message);
+        Assert.Contains(clientCertificate.NotAfter.ToUniversalTime().ToString("u"), error.Message);
+        Assert.Contains(serverCertificate.NotAfter.ToUniversalTime().ToString("u"), error.Message);
+        Assert.Contains("clocks", error.Message);
+    }
+
+    [Fact]
+    public void WhenTheClientCertificateHasExpiredOnAnUnsecuredEndpoint_ThenTheMessageNamesTheServerCertificate()
+    {
+        // Arrange
+        using var serverCertificate = CertificateBuilder.Create("CN=Server").CreateForRSA();
+        using var clientCertificate = CreateCertificate("CN=Client", notBefore: DateTime.UtcNow.AddDays(-30), notAfter: DateTime.UtcNow.AddDays(-1));
+        var endpoint = CreateEndpoint(MessageSecurityMode.None, SecurityPolicies.None);
+        endpoint.ServerCertificate = serverCertificate.RawData;
+        var applicationConfiguration = CreateApplicationConfiguration();
+        applicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate = clientCertificate;
+
+        // Act
+        var error = SessionManager.CreateCertificateErrorException(
+            new ServiceResultException(StatusCodes.BadCertificateTimeInvalid), endpoint,
+            applicationConfiguration, NullTelemetryContext.Instance);
+
+        // Assert
+        Assert.Contains($"The OPC UA server certificate {serverCertificate.Thumbprint} is expired or not yet valid", error.Message);
+        Assert.DoesNotContain(clientCertificate.Thumbprint, error.Message);
+    }
+
+    [Fact]
+    public void WhenBothCertificatesHaveExpired_ThenTheMessageNamesTheServerCertificate()
+    {
+        // Arrange
+        using var serverCertificate = CreateCertificate("CN=Server", notBefore: DateTime.UtcNow.AddDays(-30), notAfter: DateTime.UtcNow.AddDays(-1));
+        using var clientCertificate = CreateCertificate("CN=Client", notBefore: DateTime.UtcNow.AddDays(-30), notAfter: DateTime.UtcNow.AddDays(-1));
+        var endpoint = CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256);
+        endpoint.ServerCertificate = serverCertificate.RawData;
+        var applicationConfiguration = CreateApplicationConfiguration();
+        applicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate = clientCertificate;
+
+        // Act
+        var error = SessionManager.CreateCertificateErrorException(
+            new ServiceResultException(StatusCodes.BadCertificateTimeInvalid), endpoint,
+            applicationConfiguration, NullTelemetryContext.Instance);
+
+        // Assert
+        Assert.Contains($"The OPC UA server certificate {serverCertificate.Thumbprint} is expired or not yet valid", error.Message);
+        Assert.DoesNotContain(clientCertificate.Thumbprint, error.Message);
+    }
+
+    [Fact]
+    public void WhenTheServerRejectsTheSecureChannelAndNoClientCertificateIsLoaded_ThenTheThumbprintIsUnknown()
+    {
+        // Act
+        var error = SessionManager.CreateCertificateErrorException(
+            new ServiceResultException(StatusCodes.BadSecurityChecksFailed),
+            CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256),
+            CreateApplicationConfiguration(), NullTelemetryContext.Instance);
+
+        // Assert
+        Assert.Contains("this client's certificate (unknown)", error.Message);
+    }
+
     [Theory]
     [InlineData(StatusCodes.BadCertificateUntrusted, MessageSecurityMode.None, true)]
     [InlineData(StatusCodes.BadCertificateChainIncomplete, MessageSecurityMode.SignAndEncrypt, true)]
@@ -487,7 +586,7 @@ public class OpcUaClientSecurityConfigurationTests
         Assert.Contains(Path.Combine("store/own", "certs"), error.Message);
         Assert.Contains("'CN=Client, O=Namotion'", error.Message);
         Assert.Contains("'urn:test:client'", error.Message);
-        Assert.Equal(autoCreate, error.Message.Contains("delete"));
+        Assert.Equal(autoCreate, error.Message.Contains("deleted with its private key from 'store/own'"));
         Assert.Equal(!autoCreate, error.Message.Contains(nameof(OpcUaClientConfiguration.AutoCreateApplicationCertificate)));
     }
 
