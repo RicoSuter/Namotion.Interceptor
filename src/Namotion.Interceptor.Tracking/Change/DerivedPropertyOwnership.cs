@@ -50,8 +50,7 @@ internal static class DerivedPropertyOwnership
             {
                 // Requests on a detached property are dropped, so a flag left from before the detach is stale.
                 TakeOwnership(data, attachToken);
-                TakePendingRequest(data);
-                data.PendingRawTimestamp = 0;
+                TakePendingRequest(data, out _);
             }
             else
             {
@@ -183,11 +182,16 @@ internal static class DerivedPropertyOwnership
     }
 
     // Called under lock(data). Clears the pending request flags and returns whether a foreign request was among them.
-    private static bool TakePendingRequest(DerivedPropertyData data)
+    // The pending timestamp is zeroed when taken, so a flag set without a request (by an attach) does not carry an
+    // older write's timestamp; 0 is resolved to the current time outside the lock (by RequestRecalculation, or by the
+    // publication of the owner loop that takes it).
+    private static bool TakePendingRequest(DerivedPropertyData data, out long pendingTimestamp)
     {
         var isForeign = data.HasForeignRequest;
+        pendingTimestamp = data.PendingRawTimestamp;
         data.RecalculationNeeded = false;
         data.HasForeignRequest = false;
+        data.PendingRawTimestamp = 0;
         return isForeign;
     }
 
@@ -272,7 +276,7 @@ internal static class DerivedPropertyOwnership
                 {
                     // Superseded by a newer attach or a detach (also by the getter detaching its own subject).
                     DiscardRecording();
-                    if (ownsData && data.OwnerToken == attachToken)
+                    if (data.OwnerToken == attachToken)
                     {
                         data.OwnerToken = 0;
                     }
@@ -306,8 +310,7 @@ internal static class DerivedPropertyOwnership
         var isStable = IsStable(CommitLinks(data, property), ref hasEvaluatedAfterOwnWrite);
         if (ownsData && data.RecalculationNeeded)
         {
-            TakePendingRequest(data);
-            data.PendingRawTimestamp = 0;
+            TakePendingRequest(data, out _);
             isStable = false;
         }
 
@@ -335,7 +338,7 @@ internal static class DerivedPropertyOwnership
         }
 
         data.AttachToken = 0;
-        if (ownsData && data.OwnerToken == attachToken)
+        if (data.OwnerToken == attachToken)
         {
             data.OwnerToken = 0;
         }
@@ -379,19 +382,8 @@ internal static class DerivedPropertyOwnership
             return false;
         }
 
-        pendingTimestamp = TakePendingTimestamp(data);
-        TakePendingRequest(data);
+        TakePendingRequest(data, out pendingTimestamp);
         return true;
-    }
-
-    // Called under lock(data). Zeroed when taken, so a flag set without a request (by an attach) does not carry
-    // an older write's timestamp; 0 is resolved to the current time outside the lock (by RequestRecalculation, or
-    // by the publication of the owner loop that takes it).
-    private static long TakePendingTimestamp(DerivedPropertyData data)
-    {
-        var timestamp = data.PendingRawTimestamp;
-        data.PendingRawTimestamp = 0;
-        return timestamp;
     }
 
     // Called under lock(data). The first value is not published: consumers read it while the subject attaches.
@@ -490,7 +482,7 @@ internal static class DerivedPropertyOwnership
     {
         for (var iteration = 0; iteration < MaxStabilizationIterations; iteration++)
         {
-            if (RunOwnerIteration(data, property, token, ref state) == OwnerStep.Released)
+            if (RunOwnerIteration(data, property, token, ref state))
             {
                 return true;
             }
@@ -502,22 +494,16 @@ internal static class DerivedPropertyOwnership
         return false;
     }
 
-    private enum OwnerStep
-    {
-        Continue,
-        Released
-    }
-
     /// <summary>
     /// One evaluation of the owner loop: evaluates and commits, publishes outside the lock while still owning
-    /// the property, then continues with a pending request or releases ownership.
+    /// the property, then continues with a pending request or releases ownership. Returns true when it released.
     /// </summary>
-    private static OwnerStep RunOwnerIteration(DerivedPropertyData data, PropertyReference property, long token, ref OwnerLoopState state)
+    private static bool RunOwnerIteration(DerivedPropertyData data, PropertyReference property, long token, ref OwnerLoopState state)
     {
         var commit = EvaluateAndCommit(data, property, token, ref state);
         if (commit.Outcome != CommitOutcome.Committed)
         {
-            return commit.Outcome == CommitOutcome.EvaluateAgain ? OwnerStep.Continue : OwnerStep.Released;
+            return commit.Outcome != CommitOutcome.EvaluateAgain;
         }
 
         state.Unanswered = UnansweredRequest.None;
@@ -532,19 +518,18 @@ internal static class DerivedPropertyOwnership
         {
             if (data.OwnerToken != token)
             {
-                return OwnerStep.Released;
+                return true;
             }
 
             if (data.RecalculationNeeded && data.IsAttached && data.AttachToken == 0)
             {
-                state.Unanswered = Add(UnansweredRequest.None, TakePendingRequest(data));
-                state.RawTimestamp = TakePendingTimestamp(data);
-                return OwnerStep.Continue;
+                state.Unanswered = Add(UnansweredRequest.None, TakePendingRequest(data, out state.RawTimestamp));
+                return false;
             }
 
             // Detached, or an attach is in progress, which takes over a pending request (RecalculationNeeded stays).
             data.OwnerToken = 0;
-            return OwnerStep.Released;
+            return true;
         }
     }
 
@@ -561,35 +546,30 @@ internal static class DerivedPropertyOwnership
             }
 
             data.OwnerToken = 0;
-            if (!HasRequestToTakeOver(data, state.Unanswered))
+
+            // Nothing is pending, the property is detached, or an attach is in progress, which evaluates again and
+            // takes over a set flag.
+            var hasNewRequest = data.RecalculationNeeded;
+            if ((!hasNewRequest && state.Unanswered == UnansweredRequest.None) || !data.IsAttached || data.AttachToken != 0)
             {
                 return false;
             }
 
-            var hasNewRequest = data.RecalculationNeeded;
-            var isForeign = TakePendingRequest(data) || state.Unanswered == UnansweredRequest.Foreign;
+            var isForeign = TakePendingRequest(data, out var pendingTimestamp) || state.Unanswered == UnansweredRequest.Foreign;
             if (!isForeign && !isOwnRequestTakenOver)
             {
-                data.PendingRawTimestamp = 0;
                 return false;
             }
 
             // A request carried over from the failed loop keeps the timestamp it adopted; a newer one wins.
             if (hasNewRequest)
             {
-                state.RawTimestamp = TakePendingTimestamp(data);
+                state.RawTimestamp = pendingTimestamp;
             }
 
             token = TakeOwnership(data, DerivedPropertyData.NewToken());
             return true;
         }
-    }
-
-    // Called under lock(data). False when nothing is pending, when the property is detached, or when an attach is
-    // in progress, which evaluates again and takes over a set flag.
-    private static bool HasRequestToTakeOver(DerivedPropertyData data, UnansweredRequest unanswered)
-    {
-        return (data.RecalculationNeeded || unanswered != UnansweredRequest.None) && data.IsAttached && data.AttachToken == 0;
     }
 
     private enum CommitOutcome
@@ -625,8 +605,7 @@ internal static class DerivedPropertyOwnership
             if (data.RecalculationNeeded)
             {
                 DiscardRecording();
-                state.Unanswered = Add(state.Unanswered, TakePendingRequest(data));
-                state.RawTimestamp = TakePendingTimestamp(data);
+                state.Unanswered = Add(state.Unanswered, TakePendingRequest(data, out state.RawTimestamp));
                 return new Commit(CommitOutcome.EvaluateAgain);
             }
 
@@ -728,12 +707,7 @@ internal static class DerivedPropertyOwnership
         }
     }
 
-    private readonly struct Evaluation(object? value, bool hasThrown)
-    {
-        public object? Value { get; } = value;
-
-        public bool HasThrown { get; } = hasThrown;
-    }
+    private readonly record struct Evaluation(object? Value, bool HasThrown);
 
     /// <summary>
     /// Runs the getter outside every lock and records what it read; the recording stays on the
@@ -745,12 +719,12 @@ internal static class DerivedPropertyOwnership
         recorder.StartRecording(property, data.RequiredData);
         try
         {
-            return new Evaluation(property.Metadata.GetValue?.Invoke(property.Subject), hasThrown: false);
+            return new Evaluation(property.Metadata.GetValue?.Invoke(property.Subject), HasThrown: false);
         }
         catch (Exception)
         {
             // The reads before the throw are the ones that decided it; they are kept as dependencies.
-            return new Evaluation(null, hasThrown: true);
+            return new Evaluation(null, HasThrown: true);
         }
         finally
         {
