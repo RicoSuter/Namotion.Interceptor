@@ -298,6 +298,82 @@ public class PostLockQueueTests
             deliveries);
     }
 
+    [Fact]
+    public void WhenHandlerWritesDuringContextDetach_ThenChangesAreDeliveredOutsideTheLifecycleLock()
+    {
+        // Arrange: the leaving subject detaches from the context directly, so the release of the lock is the anchor.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var lifecycle = context.GetService<LifecycleInterceptor>();
+        var existing = new Person(context);
+        var leaving = new Person(context);
+        var isInHandler = false;
+        context.WithService(() => new HandlerAction(change =>
+        {
+            if (change.IsContextDetach && change.Subject == leaving)
+            {
+                isInHandler = true;
+                existing.FirstName = "f";
+                isInHandler = false;
+            }
+        }));
+        var deliveries = new List<(string Name, bool IsInHandler, bool IsLockFree)>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Subject == existing)
+            {
+                deliveries.Add((change.Property.Name, isInHandler, IsLockFreeForOtherThreads(lifecycle, existing)));
+            }
+        });
+
+        // Act
+        ((IInterceptorSubject)leaving).Context.RemoveFallbackContext(context);
+
+        // Assert
+        Assert.Equal(
+            [(nameof(Person.FirstName), false, true), (nameof(Person.FullName), false, true), (nameof(Person.FullNameWithPrefix), false, true)],
+            deliveries);
+    }
+
+    [Fact]
+    public void WhenDerivedPropertyIsRecalculatedUnderTheLifecycleLock_ThenItsChangeIsDeliveredAfterTheReleaseWithTheTimestampOfTheCall()
+    {
+        // Arrange: the getter reads state outside the model, so only the manual recalculation publishes it. The call's
+        // timestamp is newer than the one the release resolves, so the change keeps it.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var lifecycle = context.GetService<LifecycleInterceptor>();
+        var external = 1;
+        var worker = new EvaluatorWorker { Evaluator = _ => external };
+        var root = new EvaluatorRoot(context) { Machine = new EvaluatorMachine { Worker = worker } };
+        var callTimestamp = DateTimeOffset.UtcNow.AddDays(1);
+        var isInCallback = false;
+        var deliveries = new List<(int NewValue, bool IsInCallback, DateTimeOffset Timestamp)>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Subject == worker && change.Property.Name == nameof(EvaluatorWorker.Result))
+            {
+                deliveries.Add((change.GetNewValue<int>(), isInCallback, change.ChangedTimestamp));
+            }
+        });
+
+        // Act
+        var hasRun = lifecycle.TryRunWhileAttached(worker, () =>
+        {
+            isInCallback = true;
+            external = 2;
+            using (SubjectChangeContext.WithChangedTimestamp(callTimestamp))
+            {
+                new PropertyReference(worker, nameof(EvaluatorWorker.Result)).RecalculateDerivedProperty();
+            }
+
+            isInCallback = false;
+        });
+
+        // Assert
+        Assert.True(hasRun);
+        Assert.Same(worker, root.Machine.Worker);
+        Assert.Equal([(2, false, callTimestamp)], deliveries);
+    }
+
     // True when another thread takes the lifecycle lock, which it does only if this thread holds none.
     private static bool IsLockFreeForOtherThreads(LifecycleInterceptor lifecycle, IInterceptorSubject subject)
     {
