@@ -1,5 +1,4 @@
 using System.Reactive.Concurrency;
-using System.Reflection;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
@@ -391,26 +390,18 @@ public class PostLockQueueTests
         var trackingObserver = PropertyAccessObservation.WriteObserver;
 
         // Act
-        ReplaceWriteObserver(new IgnoringWriteObserver());
+        PropertyAccessObservation.ReplaceWriteObserverForTests(new IgnoringWriteObserver());
         try
         {
             root.Mother = mother;
         }
         finally
         {
-            ReplaceWriteObserver(trackingObserver);
+            PropertyAccessObservation.ReplaceWriteObserverForTests(trackingObserver);
         }
 
         // Assert
         Assert.Equal([nameof(Person.FirstName), nameof(Person.Mother)], deliveries);
-    }
-
-    // The process-wide observer is replaced through the test hook of the core library, which is internal to it.
-    private static void ReplaceWriteObserver(IPropertyWriteObserver? observer)
-    {
-        typeof(PropertyAccessObservation)
-            .GetMethod("ReplaceWriteObserverForTests", BindingFlags.NonPublic | BindingFlags.Static)!
-            .Invoke(null, [observer]);
     }
 
     private sealed class IgnoringWriteObserver : IPropertyWriteObserver
