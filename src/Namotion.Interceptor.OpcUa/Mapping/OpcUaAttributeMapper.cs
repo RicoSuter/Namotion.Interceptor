@@ -116,7 +116,7 @@ public class OpcUaAttributeMapper : IReversePropertyMapper<OpcUaPropertyMapping,
         var nodeReference = key.Reference;
         var session = key.Session;
 
-        var nodeIdString = nodeReference.NodeId.Identifier.ToString();
+        var nodeIdString = nodeReference.NodeId.IdentifierAsString;
         var nodeNamespaceUri = nodeReference.NodeId.NamespaceUri
             ?? session.NamespaceUris.GetString(nodeReference.NodeId.NamespaceIndex);
 

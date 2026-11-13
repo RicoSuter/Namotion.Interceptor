@@ -91,7 +91,7 @@ public class OpcUaServerConfiguration
     /// Override this method to customize application configuration, security settings, or certificate handling.
     /// </summary>
     /// <returns>A configured <see cref="ApplicationInstance"/> ready for hosting an OPC UA server.</returns>
-    public virtual async Task<ApplicationInstance> CreateApplicationInstanceAsync()
+    public virtual Task<ApplicationInstance> CreateApplicationInstanceAsync()
     {
         var application = new ApplicationInstance(ResolvedTelemetryContext)
         {
@@ -102,7 +102,7 @@ public class OpcUaServerConfiguration
         var host = System.Net.Dns.GetHostName();
         var applicationUri = $"urn:{host}:Namotion.Interceptor:{ApplicationName}";
 
-        var config = new ApplicationConfiguration
+        var config = new ApplicationConfiguration(ResolvedTelemetryContext)
         {
             ApplicationName = ApplicationName,
             ApplicationType = ApplicationType.Server,
@@ -151,7 +151,7 @@ public class OpcUaServerConfiguration
             ServerConfiguration = new ServerConfiguration
             {
                 // Base addresses kept minimal (tcp only). Add https if required later.
-                BaseAddresses = { BaseAddress },
+                BaseAddresses = [BaseAddress],
                 SecurityPolicies =
                 [
                     new ServerSecurityPolicy { SecurityMode = MessageSecurityMode.Sign, SecurityPolicyUri = SecurityPolicies.Basic256Sha256 },
@@ -183,7 +183,6 @@ public class OpcUaServerConfiguration
                 MaxMessageQueueSize = 10_000,
                 MaxNotificationQueueSize = 10_000,
                 MaxNotificationsPerPublish = 10_000,
-                MinMetadataSamplingInterval = 1000,
                 MaxEventQueueSize = 10_000,
                 AuditingEnabled = true,
                 // From XML -> minimal operation limits relevant for typical interactions.
@@ -204,15 +203,13 @@ public class OpcUaServerConfiguration
             {
                 OutputFilePath = "Logs/OpcUaServer.log",
                 DeleteOnLoad = true
-            },
-            CertificateValidator = new CertificateValidator(ResolvedTelemetryContext)
+            }
         };
 
-        // Register the certificate validator with the configuration.
-        await config.CertificateValidator.UpdateAsync(config).ConfigureAwait(false);
+        config.CertificateManager = CertificateManagerFactory.Create(config.SecurityConfiguration, ResolvedTelemetryContext);
 
         application.ApplicationConfiguration = config;
-        return application;
+        return Task.FromResult(application);
     }
 
     public virtual string[] GetNamespaceUris()
@@ -229,7 +226,6 @@ public class OpcUaServerConfiguration
 
     public virtual void LoadPredefinedNodes(NodeStateCollection collection, ISystemContext context)
     {
-        LoadNodeSetFromEmbeddedResource<OpcUaServerConfiguration>("NodeSets.Opc.Ua.NodeSet2.xml", collection, context);
         LoadNodeSetFromEmbeddedResource<OpcUaServerConfiguration>("NodeSets.Opc.Ua.Di.NodeSet2.xml", collection, context);
         LoadNodeSetFromEmbeddedResource<OpcUaServerConfiguration>("NodeSets.Opc.Ua.PADIM.NodeSet2.xml", collection, context);
         LoadNodeSetFromEmbeddedResource<OpcUaServerConfiguration>("NodeSets.Opc.Ua.Machinery.NodeSet2.xml", collection, context);
@@ -241,7 +237,8 @@ public class OpcUaServerConfiguration
         var assembly = typeof(TAssemblyType).Assembly;
         using var stream = assembly.GetManifestResourceStream($"{assembly.FullName!.Split(',')[0]}.{name}");
 
-        var nodeSet = UANodeSet.Read(stream ?? throw new ArgumentException("Embedded resource could not be found.", nameof(name)));
+        var nodeSet = UANodeSet.Read(stream ?? throw new ArgumentException("Embedded resource could not be found.", nameof(name)))
+            ?? throw new InvalidOperationException($"Embedded resource '{name}' is not a valid node set.");
         nodeSet.Import(context, nodes);
     }
 }

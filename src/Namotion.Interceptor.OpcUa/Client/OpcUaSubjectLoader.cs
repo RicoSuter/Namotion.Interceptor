@@ -73,7 +73,7 @@ internal class OpcUaSubjectLoader
             var property = await FindSubjectPropertyAsync(registeredSubject, nodeReference, session, cancellationToken).ConfigureAwait(false);
             if (property is null)
             {
-                var dynamicPropertyName = nodeReference.BrowseName.Name;
+                var dynamicPropertyName = nodeReference.BrowseName.Name ?? string.Empty;
 
                 var propertyExists = false;
                 foreach (var childProperty in registeredSubject.Properties)
@@ -178,7 +178,7 @@ internal class OpcUaSubjectLoader
                 continue;
 
             var attributeBrowseName = mapping.BrowseName ?? attribute.BrowseName;
-            NodeId? matchingNodeId = null;
+            var matchingNodeId = NodeId.Null;
             foreach (var (childNode, childNodeId) in childNodes)
             {
                 if (childNode.BrowseName.Name == attributeBrowseName)
@@ -188,7 +188,7 @@ internal class OpcUaSubjectLoader
                 }
             }
 
-            if (matchingNodeId is null)
+            if (matchingNodeId.IsNull)
                 continue;
 
             processedBrowseNames.Add(attributeBrowseName);
@@ -204,7 +204,7 @@ internal class OpcUaSubjectLoader
             if (childNode.NodeClass != NodeClass.Variable)
                 continue;
 
-            var browseName = childNode.BrowseName.Name;
+            var browseName = childNode.BrowseName.Name ?? string.Empty;
             if (!processedBrowseNames.Add(browseName))
                 continue;
 
@@ -357,7 +357,7 @@ internal class OpcUaSubjectLoader
 
         foreach (var (childNode, nodeId) in childNodes)
         {
-            var key = childNode.BrowseName.Name; // Use BrowseName as dictionary key
+            var key = childNode.BrowseName.Name ?? string.Empty; // Use BrowseName as dictionary key
             var childSubject = existingChildren.GetValueOrDefault(key);
 
             if (childSubject is null)
@@ -480,11 +480,11 @@ internal class OpcUaSubjectLoader
         foreach (var reference in references)
         {
             var nodeId = ExpandedNodeId.ToNodeId(reference.NodeId, session.NamespaceUris);
-            if (nodeId is null)
+            if (nodeId.IsNull)
             {
                 _logger.LogWarning(
                     "Skipping browse reference '{BrowseName}' with unresolvable NodeId '{NodeId}': namespace URI is not registered in the session's NamespaceTable.",
-                    reference.BrowseName?.Name, reference.NodeId);
+                    reference.BrowseName.Name, reference.NodeId);
                 continue;
             }
             if (!seen.Add(nodeId))
@@ -496,13 +496,13 @@ internal class OpcUaSubjectLoader
         return result;
     }
 
-    private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
+    private async Task<List<ReferenceDescription>> BrowseNodeAsync(
         NodeId nodeId,
         ISession session,
         CancellationToken cancellationToken)
     {
-        var browseDescriptions = new BrowseDescriptionCollection
-        {
+        ArrayOf<BrowseDescription> browseDescriptions =
+        [
             new BrowseDescription
             {
                 NodeId = nodeId,
@@ -512,9 +512,9 @@ internal class OpcUaSubjectLoader
                 NodeClassMask = NodeClassMask,
                 ResultMask = (uint)BrowseResultMask.All
             }
-        };
+        ];
 
-        var results = new ReferenceDescriptionCollection();
+        var results = new List<ReferenceDescription>();
 
         var response = await session.BrowseAsync(
             null,
@@ -525,7 +525,7 @@ internal class OpcUaSubjectLoader
 
         if (response.Results.Count > 0 && StatusCode.IsGood(response.Results[0].StatusCode))
         {
-            results.AddRange(response.Results[0].References);
+            results.AddRange(response.Results[0].References.ToList());
 
             var continuationPoint = response.Results[0].ContinuationPoint;
             while (continuationPoint is { Length: > 0 })

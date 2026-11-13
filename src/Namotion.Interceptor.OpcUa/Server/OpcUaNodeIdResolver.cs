@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Reflection;
 using Microsoft.Extensions.Logging;
 using Opc.Ua;
 
@@ -14,19 +13,6 @@ internal sealed class OpcUaNodeIdResolver
 {
     private readonly ILogger _logger;
     private readonly ConcurrentDictionary<(string Identifier, string? NamespaceUri, NodeIdCategory Category), NodeId?> _cache = new();
-
-    // Standard type lookups built via reflection from OPC UA SDK types
-    private static readonly Lazy<Dictionary<string, NodeId>> ObjectTypeLookup =
-        new(() => BuildNodeIdLookup(typeof(ObjectTypeIds)));
-
-    private static readonly Lazy<Dictionary<string, NodeId>> VariableTypeLookup =
-        new(() => BuildNodeIdLookup(typeof(VariableTypeIds)));
-
-    private static readonly Lazy<Dictionary<string, NodeId>> ReferenceTypeLookup =
-        new(() => BuildNodeIdLookup(typeof(ReferenceTypeIds)));
-
-    private static readonly Lazy<Dictionary<string, NodeId>> DataTypeLookup =
-        new(() => BuildNodeIdLookup(typeof(DataTypeIds)));
 
     public OpcUaNodeIdResolver(ILogger logger)
     {
@@ -92,7 +78,7 @@ internal sealed class OpcUaNodeIdResolver
             !string.IsNullOrEmpty(expandedNodeId.NamespaceUri))
         {
             var namespaceIndex = context.NamespaceUris.GetIndexOrAppend(expandedNodeId.NamespaceUri);
-            return new NodeId(expandedNodeId.Identifier, namespaceIndex);
+            return expandedNodeId.InnerNodeId.WithNamespaceIndex(namespaceIndex);
         }
 
         // Strategy 4: Standard type lookup by category
@@ -134,22 +120,17 @@ internal sealed class OpcUaNodeIdResolver
 
     private NodeId? ResolveStandardType(string identifier, NodeIdCategory category)
     {
-        var lookup = category switch
+        var nodeId = NodeId.Null;
+        var found = category switch
         {
-            NodeIdCategory.ObjectType => ObjectTypeLookup.Value,
-            NodeIdCategory.VariableType => VariableTypeLookup.Value,
-            NodeIdCategory.ReferenceType => ReferenceTypeLookup.Value,
-            NodeIdCategory.DataType => DataTypeLookup.Value,
-            NodeIdCategory.Node => null,
-            _ => null
+            NodeIdCategory.ObjectType => ObjectTypeIds.TryGetValue(identifier, out nodeId),
+            NodeIdCategory.VariableType => VariableTypeIds.TryGetValue(identifier, out nodeId),
+            NodeIdCategory.ReferenceType => ReferenceTypeIds.TryGetValue(identifier, out nodeId),
+            NodeIdCategory.DataType => DataTypeIds.TryGetValue(identifier, out nodeId),
+            _ => false
         };
 
-        if (lookup != null && lookup.TryGetValue(identifier, out var nodeId))
-        {
-            return nodeId;
-        }
-
-        return null;
+        return found ? nodeId : null;
     }
 
     private void LogResolutionFailure(string identifier, string? namespaceUri, NodeIdCategory category)
@@ -168,21 +149,5 @@ internal sealed class OpcUaNodeIdResolver
                 "NodeId string (ns=X;i=Y), or BrowseName with namespace.",
                 category, identifier);
         }
-    }
-
-    private static Dictionary<string, NodeId> BuildNodeIdLookup(Type typeIdsClass)
-    {
-        var lookup = new Dictionary<string, NodeId>(StringComparer.Ordinal);
-        var fields = typeIdsClass.GetFields(BindingFlags.Public | BindingFlags.Static);
-
-        foreach (var field in fields)
-        {
-            if (field.FieldType == typeof(NodeId) && field.GetValue(null) is NodeId nodeId)
-            {
-                lookup[field.Name] = nodeId;
-            }
-        }
-
-        return lookup;
     }
 }

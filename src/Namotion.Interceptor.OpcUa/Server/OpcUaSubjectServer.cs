@@ -48,7 +48,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
     // The SDK's own write service cannot do that, because it takes the node manager lock we hold for the
     // whole batch. This is what makes the identification exact rather than a guess about who else writes.
     [ThreadStatic]
-    internal static object? SelfWrittenNodeValue;
+    internal static Variant SelfWrittenNodeValue;
 
     /// <inheritdoc />
     public override IInterceptorSubject RootSubject => _subject;
@@ -171,9 +171,19 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                         var convertedValue = _configuration.ValueConverter
                             .ConvertToNodeValue(value, registeredProperty);
 
-                        node.Value = convertedValue;
+                        // A value without an OPC UA representation fails its own node, not the batch.
+                        var statusCode = OpcUaVariantExtensions.TryToVariant(convertedValue, out var nodeValue)
+                            ? StatusCodes.Good
+                            : StatusCodes.BadTypeMismatch;
+
+                        node.Value = nodeValue;
+                        if (node.StatusCode != statusCode)
+                        {
+                            node.StatusCode = statusCode;
+                        }
+
                         node.Timestamp = change.ChangedTimestamp.UtcDateTime;
-                        SelfWrittenNodeValue = convertedValue;
+                        SelfWrittenNodeValue = nodeValue;
                         node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
                         written++;
                     }
@@ -182,7 +192,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
             finally
             {
                 IsWritingOwnNodeValues = false;
-                SelfWrittenNodeValue = null;
+                SelfWrittenNodeValue = Variant.Null;
             }
         }
 
@@ -309,7 +319,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                             // an abrupt connection loss (realistic crash simulation).
                             if (application.Server is OpcUaStandardServer s)
                             {
-                                s.CloseTransportListeners();
+                                await s.CloseTransportListenersAsync().ConfigureAwait(false);
                             }
                         }
 
@@ -330,6 +340,11 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                     {
                         try { server.Dispose(); }
                         catch (Exception ex) { _logger.LogDebug(ex, "Error disposing OPC UA server."); }
+
+                        // The application instance owns the certificate manager, which keeps a timer
+                        // alive until it is disposed.
+                        try { await application.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false); }
+                        catch (Exception ex) { _logger.LogDebug(ex, "Error disposing OPC UA application instance."); }
                     }
                 }
             }).ConfigureAwait(false);
@@ -345,14 +360,14 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                 // Close transport listeners first to stop accepting new connections.
                 // Without this, clients reconnect during shutdown faster than sessions
                 // can be closed, causing StopAsync to hang indefinitely.
-                server.CloseTransportListeners();
+                await server.CloseTransportListenersAsync().ConfigureAwait(false);
 
                 if (server.CurrentInstance?.SessionManager is { } sessionManager)
                 {
                     var sessions = sessionManager.GetSessions();
                     foreach (var session in sessions)
                     {
-                        try { session.Close(); } catch (Exception ex) { _logger.LogDebug(ex, "Error closing session during shutdown."); }
+                        try { await session.CloseAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error closing session during shutdown."); }
                     }
                 }
             }
@@ -377,9 +392,9 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
     private void CleanCertificateStore(ApplicationInstance application)
     {
         var path = application
-            .ApplicationConfiguration
+            .ApplicationConfiguration?
             .SecurityConfiguration
-            .ApplicationCertificate
+            .ApplicationCertificate?
             .StorePath;
 
         if (string.IsNullOrEmpty(path))
@@ -402,9 +417,9 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         }
     }
 
-    internal void UpdateProperty(PropertyReference property, DateTimeOffset changedTimestamp, object? value)
+    internal void UpdateProperty(PropertyReference property, DateTimeOffset changedTimestamp, Variant value)
     {
-        if (IsWritingOwnNodeValues && Equals(value, SelfWrittenNodeValue))
+        if (IsWritingOwnNodeValues && value.Equals(SelfWrittenNodeValue))
         {
             // Our own node write, reflected back synchronously by ClearChangeMasks. Compared by value
             // rather than by the flag alone, for the reason on the field above.
@@ -417,7 +432,8 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         var registeredProperty = property.TryGetRegisteredProperty();
         if (registeredProperty is not null)
         {
-            var convertedValue = _configuration.ValueConverter.ConvertToPropertyValue(value, registeredProperty);
+            var convertedValue = _configuration.ValueConverter.ConvertToPropertyValue(
+                value.ToClrValue(), registeredProperty);
 
             try
             {

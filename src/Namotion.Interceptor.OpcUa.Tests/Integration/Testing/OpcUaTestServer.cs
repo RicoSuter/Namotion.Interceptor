@@ -188,7 +188,9 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
             var application = await base.CreateApplicationInstanceAsync();
             if (AlternateBaseAddress is not null)
             {
-                application.ApplicationConfiguration.ServerConfiguration.AlternateBaseAddresses.Add(AlternateBaseAddress);
+                var serverConfiguration = application.ApplicationConfiguration?.ServerConfiguration
+                    ?? throw new InvalidOperationException("The server application has no server configuration.");
+                serverConfiguration.AlternateBaseAddresses = serverConfiguration.AlternateBaseAddresses.AddItem(AlternateBaseAddress);
             }
 
             return application;

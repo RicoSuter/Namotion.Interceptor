@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.OpcUa.Client;
 public class OpcUaTypeResolver
 {
     private readonly ILogger _logger;
-    private readonly ConcurrentDictionary<(string NamespaceUri, object Identifier), Type?> _typeCache = new();
+    private readonly ConcurrentDictionary<(string NamespaceUri, IdType IdType, string Identifier), Type?> _typeCache = new();
 
     public OpcUaTypeResolver(ILogger logger)
     {
@@ -22,9 +22,9 @@ public class OpcUaTypeResolver
         var namespaceUri = reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex);
         return
         [
-            new OpcUaNodeAttribute(reference.BrowseName.Name, namespaceUri)
+            new OpcUaNodeAttribute(reference.BrowseName.Name ?? string.Empty, namespaceUri)
             {
-                NodeIdentifier = reference.NodeId.Identifier.ToString(),
+                NodeIdentifier = reference.NodeId.IdentifierAsString,
                 NodeNamespaceUri = namespaceUri
             }
         ];
@@ -33,7 +33,10 @@ public class OpcUaTypeResolver
     public virtual async Task<Type?> TryGetTypeForNodeAsync(ISession session, ReferenceDescription reference, CancellationToken cancellationToken)
     {
         // Check cache first
-        var cacheKey = (reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex), reference.NodeId.Identifier);
+        var cacheKey = (
+            reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex) ?? string.Empty,
+            reference.NodeId.IdType,
+            reference.NodeId.IdentifierAsString);
         if (_typeCache.TryGetValue(cacheKey, out var cachedType))
         {
             return cachedType;
@@ -50,18 +53,18 @@ public class OpcUaTypeResolver
 
         if (reference.NodeClass != NodeClass.Variable)
         {
-            var browseDescriptions = new BrowseDescriptionCollection
-            {
+            ArrayOf<BrowseDescription> browseDescriptions =
+            [
                 new BrowseDescription
                 {
-                    NodeId = nodeId!,
+                    NodeId = nodeId,
                     BrowseDirection = BrowseDirection.Forward,
                     ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
                     IncludeSubtypes = true,
                     NodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object,
                     ResultMask = (uint)(BrowseResultMask.BrowseName | BrowseResultMask.NodeClass)
                 }
-            };
+            ];
 
             // Browse only the first child: the [index] convention requires every collection/dictionary
             // element to follow the pattern, so the first reference is enough to classify the parent.
@@ -70,7 +73,7 @@ public class OpcUaTypeResolver
                 response.Results[0].References.Count > 0 &&
                 response.Results[0].References[0].NodeClass == NodeClass.Object)
             {
-                var name = response.Results[0].References[0].BrowseName?.Name;
+                var name = response.Results[0].References[0].BrowseName.Name;
                 if (name is not null)
                 {
                     var bracketStart = name.LastIndexOf('[');
@@ -92,29 +95,28 @@ public class OpcUaTypeResolver
 
         try
         {
-            if (nodeId is null)
+            if (nodeId.IsNull)
             {
                 return null;
             }
 
-            var nodesToRead = new ReadValueIdCollection(2)
-            {
+            ArrayOf<ReadValueId> nodesToRead =
+            [
                 new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.DataType },
                 new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.ValueRank }
-            };
+            ];
 
             var response = await session.ReadAsync(null, 0, TimestampsToReturn.Neither, nodesToRead, cancellationToken);
             if (response.Results.Count >= 2 && StatusCode.IsGood(response.Results[0].StatusCode))
             {
-                var dataTypeId = response.Results[0].Value as NodeId;
-                if (dataTypeId != null)
+                if (response.Results[0].WrappedValue.TryGetValue(out NodeId dataTypeId) && !dataTypeId.IsNull)
                 {
                     var builtIn = await TypeInfo.GetBuiltInTypeAsync(dataTypeId, session.TypeTree, cancellationToken);
                     var elementType = TryMapBuiltInType(builtIn);
                     if (elementType is not null)
                     {
                         // If ValueRank >= 0 we treat it as (at least) an array - simplification for multi-dim arrays.
-                        var valueRank = response.Results[1].Value is int vr ? vr : -1; // -1 => scalar
+                        var valueRank = response.Results[1].WrappedValue.TryGetValue(out int vr) ? vr : -1; // -1 => scalar
                         if (valueRank >= 0)
                         {
                             return elementType.MakeArrayType();

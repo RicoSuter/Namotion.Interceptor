@@ -31,7 +31,7 @@ public class OpcUaNodeIdResolverTests
 
         // Assert
         Assert.NotNull(result1);
-        Assert.Same(result1, result2);
+        Assert.Equal(result1, result2);
     }
 
     [Fact]
@@ -193,9 +193,7 @@ public class OpcUaNodeIdResolverTests
         var result = _resolver.Resolve(identifier, null, NodeIdCategory.Node, _context, _predefinedNodes);
 
         // Assert
-        Assert.NotNull(result);
-        Assert.Equal(2, result.NamespaceIndex);
-        Assert.Equal(1001u, result.Identifier);
+        Assert.Equal(new NodeId(1001u, 2), result);
     }
 
     [Fact]
@@ -208,9 +206,7 @@ public class OpcUaNodeIdResolverTests
         var result = _resolver.Resolve(identifier, null, NodeIdCategory.Node, _context, _predefinedNodes);
 
         // Assert
-        Assert.NotNull(result);
-        Assert.Equal(2, result.NamespaceIndex);
-        Assert.Equal("MyNode", result.Identifier);
+        Assert.Equal(new NodeId("MyNode", 2), result);
     }
 
     [Fact]
@@ -226,7 +222,8 @@ public class OpcUaNodeIdResolverTests
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal(1001u, result.Identifier);
+        Assert.True(result.Value.TryGetValue(out uint numericIdentifier));
+        Assert.Equal(1001u, numericIdentifier);
     }
 
     #endregion
@@ -367,7 +364,7 @@ public class OpcUaNodeIdResolverTests
         public NodeStateFactory NodeStateFactory => null!;
         public object? UserIdentity => null;
         public string UserId => "n/a";
-        public IList<string>? PreferredLocales => null;
+        public ArrayOf<string> PreferredLocales => default;
         public DiagnosticsMasks DiagnosticsMask => DiagnosticsMasks.None;
         public StringTable? StringTable => null;
         public uint? MaxStringLength => null;
@@ -378,6 +375,6 @@ public class OpcUaNodeIdResolverTests
         public TypeInfo TypeInfo { get; } = new TypeInfo(BuiltInType.Null, -1);
         public object? SystemHandle => null;
         public string? AuditEntryId => null;
-        public ITelemetryContext? Telemetry => null;
+        public ITelemetryContext Telemetry => NullTelemetryContext.Instance;
     }
 }

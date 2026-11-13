@@ -90,10 +90,10 @@ public class PollingManagerTests
                 It.IsAny<RequestHeader>(),
                 It.IsAny<double>(),
                 It.IsAny<TimestampsToReturn>(),
-                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
                 It.IsAny<CancellationToken>()))
-            .Returns((RequestHeader _, double _, TimestampsToReturn _, ReadValueIdCollection _, CancellationToken cancellationToken) =>
-                WaitForCancellationAsync(cancellationToken));
+            .Returns((RequestHeader _, double _, TimestampsToReturn _, ArrayOf<ReadValueId> _, CancellationToken cancellationToken) =>
+                new ValueTask<ReadResponse>(WaitForCancellationAsync(cancellationToken)));
 
         var configuration = CreateConfiguration();
         configuration.PollingInterval = TimeSpan.FromMilliseconds(1);
@@ -161,12 +161,7 @@ public class PollingManagerTests
             ResponseHeader = new ResponseHeader(),
             Results =
             [
-                new DataValue
-                {
-                    Value = "recovered",
-                    SourceTimestamp = DateTime.UtcNow,
-                    StatusCode = StatusCodes.Good
-                }
+                new DataValue("recovered", StatusCodes.Good, DateTime.UtcNow)
             ],
             DiagnosticInfos = []
         };
@@ -175,11 +170,11 @@ public class PollingManagerTests
                 It.IsAny<RequestHeader>(),
                 It.IsAny<double>(),
                 It.IsAny<TimestampsToReturn>(),
-                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
                 It.IsAny<CancellationToken>()))
             .Returns(() => Interlocked.Increment(ref readAttempts) == 1
-                ? Task.FromException<ReadResponse>(error)
-                : Task.FromResult(goodResponse));
+                ? ValueTask.FromException<ReadResponse>(error)
+                : ValueTask.FromResult(goodResponse));
 
         var configuration = CreateConfiguration();
         configuration.PollingInterval = TimeSpan.FromMilliseconds(100);

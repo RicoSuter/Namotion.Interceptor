@@ -297,6 +297,8 @@ public partial class DataTypesTestArea
     public DataTypesTestArea()
     {
         ByteArray = [];
+        SByteArray = [];
+        EnumArray = [];
     }
 
     [Path("opc", "BoolValue")]
@@ -319,6 +321,18 @@ public partial class DataTypesTestArea
 
     [Path("opc", "NullableGuidValue")]
     public partial Guid? NullableGuidValue { get; set; }
+
+    [Path("opc", "EnumValue")]
+    public partial DayOfWeek EnumValue { get; set; }
+
+    [Path("opc", "EnumArray")]
+    public partial DayOfWeek[] EnumArray { get; set; }
+
+    [Path("opc", "SByteArray")]
+    public partial sbyte[] SByteArray { get; set; }
+
+    [Path("opc", "DefaultDateTimeValue")]
+    public partial DateTime DefaultDateTimeValue { get; set; }
 }
 
 /// <summary>
