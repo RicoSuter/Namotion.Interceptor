@@ -195,32 +195,22 @@ public class DerivedPropertyOwnershipTests
             return value;
         };
         var changes = new List<SubjectPropertyChange>();
-        using var traceOutput = new StringWriter();
-        using var listener = new TextWriterTraceListener(traceOutput);
-        Trace.Listeners.Add(listener);
+        using var traceCapture = new TraceCapture();
 
-        try
-        {
-            // Act
-            root.Machine = machine;
-            context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
-            machine.Worker.Evaluator = _ => root.Anchor;
-            root.Anchor = 1000;
+        // Act
+        root.Machine = machine;
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        machine.Worker.Evaluator = _ => root.Anchor;
+        root.Anchor = 1000;
 
-            // Assert: the attach commits after its evaluation following the own write, since the requests of its
-            // own writes wait for the end of the lifecycle operation; the queued recalculation never stabilizes and
-            // ends at the limit, and a later write still recalculates.
-            Assert.True(isWrittenByOtherThread);
-            Assert.Contains(changes, c => c.Property.Subject == machine.Worker && c.GetNewValue<int>() == 1000);
-            listener.Flush();
-            var trace = traceOutput.ToString();
-            Assert.DoesNotContain("exhausted while attaching", trace);
-            Assert.Contains("exhausted for", trace);
-        }
-        finally
-        {
-            Trace.Listeners.Remove(listener);
-        }
+        // Assert: the attach commits after its evaluation following the own write, since the requests of its
+        // own writes wait for the end of the lifecycle operation; the queued recalculation never stabilizes and
+        // ends at the limit, and a later write still recalculates.
+        Assert.True(isWrittenByOtherThread);
+        Assert.Contains(changes, c => c.Property.Subject == machine.Worker && c.GetNewValue<int>() == 1000);
+        var trace = traceCapture.Text;
+        Assert.DoesNotContain("exhausted while attaching", trace);
+        Assert.Contains("exhausted for", trace);
     }
 
     [Fact]
@@ -255,28 +245,18 @@ public class DerivedPropertyOwnershipTests
                 changes.Add(change);
             }
         });
-        using var traceOutput = new StringWriter();
-        using var listener = new TextWriterTraceListener(traceOutput);
-        Trace.Listeners.Add(listener);
+        using var traceCapture = new TraceCapture();
 
-        try
-        {
-            // Act
-            root.Machine = machine;
+        // Act
+        root.Machine = machine;
 
-            // Assert: the attach commits its last evaluation (99), which is not published, and the recalculation
-            // requested after the attach publishes the value of the last write (100).
-            Assert.True(areWritesCompleted);
-            var change = Assert.Single(changes);
-            Assert.Equal((attachIterationLimit - 1, attachIterationLimit), (change.GetOldValue<int>(), change.GetNewValue<int>()));
-            Assert.Equal(attachIterationLimit, machine.Worker.Result);
-            listener.Flush();
-            Assert.Contains("exhausted while attaching", traceOutput.ToString());
-        }
-        finally
-        {
-            Trace.Listeners.Remove(listener);
-        }
+        // Assert: the attach commits its last evaluation (99), which is not published, and the recalculation
+        // requested after the attach publishes the value of the last write (100).
+        Assert.True(areWritesCompleted);
+        var change = Assert.Single(changes);
+        Assert.Equal((attachIterationLimit - 1, attachIterationLimit), (change.GetOldValue<int>(), change.GetNewValue<int>()));
+        Assert.Equal(attachIterationLimit, machine.Worker.Result);
+        Assert.Contains("exhausted while attaching", traceCapture.Text);
     }
 
     [Fact]
@@ -493,34 +473,24 @@ public class DerivedPropertyOwnershipTests
             throw new InvalidOperationException("Time source failed.");
         });
         machine.Worker.ObjectEvaluator = _ => root.Data;
-        using var traceOutput = new StringWriter();
-        using var listener = new TextWriterTraceListener(traceOutput);
-        Trace.Listeners.Add(listener);
+        using var traceCapture = new TraceCapture();
 
-        try
-        {
-            // Act
-            var exception = Record.Exception(() => root.Machine = machine);
-            timeSource.Dispose();
-            var evaluationsAfterAttach = evaluations;
-            root.Anchor = 2000;
-            var data = new byte[1];
-            root.Data = data;
+        // Act
+        var exception = Record.Exception(() => root.Machine = machine);
+        timeSource.Dispose();
+        var evaluationsAfterAttach = evaluations;
+        root.Anchor = 2000;
+        var data = new byte[1];
+        root.Data = data;
 
-            // Assert: the attach completes and traces the failure. The recalculation after the failed attach
-            // published its value from the type's default, and a later write publishes from that value.
-            Assert.Null(exception);
-            listener.Flush();
-            Assert.Contains("Time source failed.", traceOutput.ToString());
-            Assert.Equal(2, evaluationsAfterAttach);
-            Assert.Equal((0, 1000), publishedValues[0]);
-            Assert.Equal((1000, 2000), publishedValues[1]);
-            Assert.Equal((null, data), publishedValues[2]);
-        }
-        finally
-        {
-            Trace.Listeners.Remove(listener);
-        }
+        // Assert: the attach completes and traces the failure. The recalculation after the failed attach
+        // published its value from the type's default, and a later write publishes from that value.
+        Assert.Null(exception);
+        Assert.Contains("Time source failed.", traceCapture.Text);
+        Assert.Equal(2, evaluationsAfterAttach);
+        Assert.Equal((0, 1000), publishedValues[0]);
+        Assert.Equal((1000, 2000), publishedValues[1]);
+        Assert.Equal((null, data), publishedValues[2]);
     }
 
     [Fact]

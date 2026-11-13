@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reactive.Concurrency;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
@@ -42,5 +43,34 @@ internal sealed class BeforeContextInheritanceLifecycleHandler(Action<SubjectLif
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         callback(change);
+    }
+}
+
+/// <summary>Captures the trace output until it is disposed.</summary>
+internal sealed class TraceCapture : IDisposable
+{
+    private readonly StringWriter _output = new();
+    private readonly TextWriterTraceListener _listener;
+
+    public TraceCapture()
+    {
+        _listener = new TextWriterTraceListener(_output);
+        Trace.Listeners.Add(_listener);
+    }
+
+    public string Text
+    {
+        get
+        {
+            _listener.Flush();
+            return _output.ToString();
+        }
+    }
+
+    public void Dispose()
+    {
+        Trace.Listeners.Remove(_listener);
+        _listener.Dispose();
+        _output.Dispose();
     }
 }
