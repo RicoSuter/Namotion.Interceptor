@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
+using System.Runtime.InteropServices;
 using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Change;
@@ -20,9 +21,6 @@ internal static class PostLockQueue
 {
     // A segment that queued more than this is not kept for reuse, so a thread does not keep large buffers alive.
     private const int MaxPooledCapacity = 64;
-
-    // Above this many requests, a segment finds a queued property through a dictionary instead of a linear search.
-    private const int LinearSearchLimit = 8;
 
     [ThreadStatic]
     private static int _heldLocks;
@@ -55,7 +53,8 @@ internal static class PostLockQueue
 
         public readonly List<QueuedRequest> Requests = [];
 
-        public Dictionary<PropertyReference, int>? RequestIndex;
+        /// <summary>The index of each queued property's entry in <see cref="Requests"/>.</summary>
+        public readonly Dictionary<PropertyReference, int> RequestIndex = new(PropertyReference.Comparer);
     }
 
     /// <summary>
@@ -198,8 +197,8 @@ internal static class PostLockQueue
     {
         var attachCount = property.TryGetDerivedPropertyData() is { } data ? Volatile.Read(ref data.AttachCount) : 0;
         var requests = segment.Requests;
-        var index = IndexOf(segment, property);
-        if (index >= 0)
+        ref var index = ref CollectionsMarshal.GetValueRefOrAddDefault(segment.RequestIndex, property, out var exists);
+        if (exists)
         {
             var queued = requests[index];
             requests[index] = queued with
@@ -210,37 +209,8 @@ internal static class PostLockQueue
             return;
         }
 
-        segment.RequestIndex?.Add(property, requests.Count);
+        index = requests.Count;
         requests.Add(new QueuedRequest(property, rawTimestamp, attachCount));
-        if (segment.RequestIndex is null && requests.Count > LinearSearchLimit)
-        {
-            var requestIndex = new Dictionary<PropertyReference, int>(requests.Count * 2, PropertyReference.Comparer);
-            for (var i = 0; i < requests.Count; i++)
-            {
-                requestIndex.Add(requests[i].Property, i);
-            }
-
-            segment.RequestIndex = requestIndex;
-        }
-    }
-
-    private static int IndexOf(Segment segment, in PropertyReference property)
-    {
-        if (segment.RequestIndex is { } requestIndex)
-        {
-            return requestIndex.GetValueOrDefault(property, -1);
-        }
-
-        var requests = segment.Requests;
-        for (var i = 0; i < requests.Count; i++)
-        {
-            if (requests[i].Property == property)
-            {
-                return i;
-            }
-        }
-
-        return -1;
     }
 
     /// <summary>
@@ -380,7 +350,7 @@ internal static class PostLockQueue
 
         segment.Deliveries.Clear();
         segment.Requests.Clear();
-        segment.RequestIndex = null;
+        segment.RequestIndex.Clear();
         segment.Next = _pool;
         _pool = segment;
     }
