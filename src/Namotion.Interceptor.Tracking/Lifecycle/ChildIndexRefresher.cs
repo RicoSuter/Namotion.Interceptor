@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -48,6 +49,11 @@ internal static class ChildIndexRefresher
             for (var i = 0; i < handlers.Length; i++)
             {
                 handlers[i].HandleChildIndexChanges(property, span);
+            }
+
+            foreach (var child in span)
+            {
+                TrackingWriteObserver.OnStructureChanged(child.Subject);
             }
         }
         finally

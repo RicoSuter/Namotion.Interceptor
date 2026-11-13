@@ -63,6 +63,24 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
         PostLockQueue.CompleteAnchorWrite(segment, write.RawTimestamp, write.HasFailed);
     }
 
+    /// <summary>
+    /// W2 to W5 for a change of the structure of <paramref name="subject"/> (<see cref="SubjectStructure"/>). Called
+    /// after the structure changed.
+    /// </summary>
+    internal static void OnStructureChanged(IInterceptorSubject subject)
+    {
+        // W2: the structure changed before its data is looked up.
+        Interlocked.MemoryBarrier();
+        var structure = SubjectStructure.Of(subject);
+        var data = structure.TryGetDerivedPropertyData();
+        if (data is not null)
+        {
+            RequestRecalculations(
+                new PropertyWriteObservation(structure, isWritten: true, rawTimestamp: 0, isDerivedRecalculation: false, depth: 0, hasFailed: false),
+                data, segment: null);
+        }
+    }
+
     private static DerivedPropertyData? TryGetWrittenData(in PropertyWriteObservation write)
     {
         if (!write.IsWritten)

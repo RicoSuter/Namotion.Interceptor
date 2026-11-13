@@ -143,6 +143,258 @@ public class DerivedPropertyAttachOrderTests
     }
 
     [Fact]
+    public void WhenFirstEvaluationThrows_ThenDerivedPropertyFollowsSiblingAttachedAfterIt()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = worker =>
+        {
+            // Throws in the first evaluation: the configuration has no parent before it is attached.
+            var configuration = worker.TryGetFirstParent<EvaluatorMachine>()!.Configuration;
+            return configuration.TryGetFirstParent<EvaluatorMachine>() is not null
+                ? configuration.Value
+                : throw new InvalidOperationException();
+        };
+        machine.Configuration.Value = 3;
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        root.Machine = machine;
+        var changesOfAttach = changes.ToArray();
+        changes.Clear();
+        machine.Configuration.Value = 5;
+
+        // Assert: the evaluation that succeeds first after the throw is published.
+        AssertSingleChange([.. changesOfAttach], machine.Worker, nameof(EvaluatorWorker.Result), 3);
+        AssertSingleChange(changes, machine.Worker, nameof(EvaluatorWorker.Result), 5);
+    }
+
+    [Fact]
+    public void WhenGetterReadsParentOfLaterSibling_ThenAttachPublishesTheChange()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = worker =>
+        {
+            var configuration = worker.TryGetFirstParent<EvaluatorMachine>()!.Configuration;
+            return configuration.TryGetFirstParent<EvaluatorMachine>() is not null ? 1 : 0;
+        };
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        root.Machine = machine;
+
+        // Assert
+        Assert.Equal(1, machine.Worker.Result);
+        AssertSingleChange(changes, machine.Worker, nameof(EvaluatorWorker.Result), 1);
+    }
+
+    [Fact]
+    public void WhenChangedInstanceIsNotPublishedByTheAttach_ThenChangeBackToTheFirstInstanceIsPublished()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var first = new object();
+        var second = new object();
+        machine.Worker.ObjectEvaluator = worker =>
+        {
+            var anchor = root.Anchor;
+            var configuration = worker.TryGetFirstParent<EvaluatorMachine>()!.Configuration;
+            return anchor == 0 && configuration.TryGetFirstParent<EvaluatorMachine>() is not null ? second : first;
+        };
+        root.Machine = machine;
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        root.Anchor = 1;
+
+        // Assert
+        var change = Assert.Single(changes, c => c.Property.Name == nameof(EvaluatorWorker.ObjectResult));
+        Assert.Same(second, change.GetOldValue<object?>());
+        Assert.Same(first, change.GetNewValue<object?>());
+    }
+
+    [Fact]
+    public void WhenComparisonOfTheValuesThrows_ThenAttachCompletesAndOtherDerivedPropertiesFollowTheSibling()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var comparisons = 0;
+
+        // Recalculated when the configuration is attached, so that the values are compared.
+        machine.Worker.ObjectEvaluator = worker => new ValueThatCannotBeCompared(
+            EvaluatorWorker.ReadConfigurationOnceAttached(worker), () => comparisons++);
+        machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        var exception = Record.Exception(() => root.Machine = machine);
+
+        // Assert: the exception of the comparison propagates from the write after the queued work ran.
+        Assert.IsType<InvalidOperationException>(exception);
+        Assert.Same(machine, root.Machine);
+        Assert.True(comparisons > 0);
+        AssertSingleChange(changes, machine.Worker, nameof(EvaluatorWorker.Result), 1);
+    }
+
+    [Fact]
+    public void WhenGetterReadsTheSamePropertiesInAnotherOrder_ThenValueBuiltAnewIsPublishedOnce()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.ObjectEvaluator = worker =>
+        {
+            // The parent of the configuration switches the order of the two reads.
+            var configuration = worker.TryGetFirstParent<EvaluatorMachine>()!.Configuration;
+            if (configuration.TryGetFirstParent<EvaluatorMachine>() is null)
+            {
+                var anchor = root.Anchor;
+                return new List<object?> { anchor, root.Data };
+            }
+
+            var data = root.Data;
+            return new List<object?> { root.Anchor, data };
+        };
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        root.Machine = machine;
+
+        // Assert
+        Assert.Single(changes, change => change.Property.Name == nameof(EvaluatorWorker.ObjectResult));
+    }
+
+    [Fact]
+    public void WhenSubtreeIsAssignedWithinAWriteThatAttachesNoSubject_ThenChangedDerivedValueCarriesTheTimestampOfTheAssignment()
+    {
+        // Arrange
+        var timestamp = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
+        context.WithService(() => new AfterWriteInterceptor(property =>
+        {
+            if (property.Name == nameof(EvaluatorRoot.Data))
+            {
+                using (SubjectChangeContext.WithChangedTimestamp(timestamp))
+                {
+                    root.Machine = machine;
+                }
+            }
+        }));
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        root.Data = [1];
+
+        // Assert
+        var change = Assert.Single(changes, c => c.Property.Name == nameof(EvaluatorWorker.Result));
+        Assert.Equal(timestamp, change.ChangedTimestamp);
+    }
+
+    [Fact]
+    public async Task WhenSubtreeIsAttachedAgainOnAnotherThreadBeforeTheWriteReturns_ThenTheChangedDerivedValueIsPublishedOnce()
+    {
+        // Arrange
+        var timeout = TestTimeouts.Default;
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
+        using var secondAttachIsDone = new ManualResetEventSlim();
+        using var firstWriteHasReturned = new ManualResetEventSlim();
+        var secondWriter = Task.CompletedTask;
+        var machineWrites = 0;
+        var hasSecondAttachCompleted = false;
+        var hasFirstWriteReturned = false;
+        context.WithService(() => new AfterWriteInterceptor(property =>
+        {
+            var write = property.Name == nameof(EvaluatorRoot.Machine) ? Interlocked.Increment(ref machineWrites) : 0;
+            if (write == 1)
+            {
+                // The first write has attached the machine and has not published its derived value yet.
+                secondWriter = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+                {
+                    root.Machine = null;
+                    root.Machine = machine;
+                });
+                hasSecondAttachCompleted = secondAttachIsDone.Wait(timeout);
+            }
+            else if (write == 3)
+            {
+                // The second attach is done as well: the first write returns before this one publishes.
+                secondAttachIsDone.Set();
+                hasFirstWriteReturned = firstWriteHasReturned.Wait(timeout);
+            }
+        }));
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        root.Machine = machine;
+        firstWriteHasReturned.Set();
+        await secondWriter.WaitAsync(timeout);
+
+        // Assert: the work the first write queued runs first, after the second attach, and publishes the change of
+        // that attachment once.
+        Assert.True(hasSecondAttachCompleted);
+        Assert.True(hasFirstWriteReturned);
+        AssertSingleChange(changes, machine.Worker, nameof(EvaluatorWorker.Result), 1);
+        Assert.Equal(1, machine.Worker.Result);
+    }
+
+    [Fact]
+    public void WhenValueTypeThatEnumeratesSubjectsIsAssigned_ThenItIsAnnouncedBeforeItsChangedDerivedValue()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        root.MachineSet = EvaluatorMachineSet.Create(machine);
+
+        // Assert
+        Assert.Equal(2, changes.Count);
+        Assert.Equal(new PropertyReference(root, nameof(EvaluatorRoot.MachineSet)), changes[0].Property);
+        Assert.Equal(new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)), changes[1].Property);
+        Assert.Equal(changes[0].ChangedTimestamp, changes[1].ChangedTimestamp);
+    }
+
+    [Fact]
+    public void WhenSubtreeIsAssigned_ThenItIsAnnouncedBeforeItsChangedDerivedValue()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        root.Machine = machine;
+
+        // Assert
+        Assert.Equal(2, changes.Count);
+        Assert.Equal(new PropertyReference(root, nameof(EvaluatorRoot.Machine)), changes[0].Property);
+        Assert.Equal(new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)), changes[1].Property);
+        Assert.Equal(1, changes[1].GetNewValue<int>());
+        Assert.Equal(changes[0].ChangedTimestamp, changes[1].ChangedTimestamp);
+    }
+
+    [Fact]
     public void WhenFailedFirstEvaluationIsRecalculatedDuringTheAttach_ThenValueChangedAfterItIsPublished()
     {
         // Arrange
@@ -508,10 +760,129 @@ public class DerivedPropertyAttachOrderTests
         Assert.NotNull(root.Spare);
     }
 
+    [Fact]
+    public void WhenDetachHandlerAttachesAnotherRoot_ThenChangedDerivedValueIsPublishedOutsideTheLifecycleLock()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var outgoingRoot = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var incomingRoot = new EvaluatorRoot { Machine = machine };
+        machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
+
+        var interceptor = context.GetService<LifecycleInterceptor>();
+        interceptor.SubjectDetaching += change =>
+        {
+            if (ReferenceEquals(change.Subject, outgoingRoot))
+            {
+                ((IInterceptorSubject)incomingRoot).Context.AddFallbackContext(context);
+            }
+        };
+
+        var lifecycleLockWasFree = RecordWhetherLifecycleLocksAreFree(context, machine.Worker, incomingRoot, interceptor);
+
+        // Act
+        ((IInterceptorSubject)outgoingRoot).Context.RemoveFallbackContext(context);
+
+        // Assert
+        Assert.True(Assert.Single(lifecycleLockWasFree));
+    }
+
+    [Fact]
+    public void WhenRootIsInTwoContexts_ThenChangedDerivedValueIsPublishedOutsideBothLifecycleLocks()
+    {
+        // Arrange
+        var firstContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var secondContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot();
+        ((IInterceptorSubject)root).Context.AddFallbackContext(firstContext);
+        ((IInterceptorSubject)root).Context.AddFallbackContext(secondContext);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
+
+        var lifecycleLocksWereFree = RecordWhetherLifecycleLocksAreFree(
+            firstContext, machine.Worker, root, firstContext.GetService<LifecycleInterceptor>(), secondContext.GetService<LifecycleInterceptor>());
+
+        // Act
+        root.Machine = machine;
+
+        // Assert
+        Assert.NotEmpty(lifecycleLocksWereFree);
+        Assert.All(lifecycleLocksWereFree, Assert.True);
+    }
+
+    [Fact]
+    public void WhenGraphIsAttachedToTwoContextsAtOnce_ThenChangedDerivedValueIsPublishedOutsideBothLifecycleLocks()
+    {
+        // Arrange: outside a write, the attach of one interceptor is nested in the attach of the other.
+        var firstContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var secondContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var bothContexts = InterceptorSubjectContext.Create();
+        bothContexts.AddFallbackContext(firstContext);
+        bothContexts.AddFallbackContext(secondContext);
+        var machine = new EvaluatorMachine();
+        var root = new EvaluatorRoot { Machine = machine };
+        machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
+
+        var lifecycleLocksWereFree = RecordWhetherLifecycleLocksAreFree(
+            firstContext, machine.Worker, root, firstContext.GetService<LifecycleInterceptor>(), secondContext.GetService<LifecycleInterceptor>());
+
+        // Act
+        ((IInterceptorSubject)root).Context.AddFallbackContext(bothContexts);
+
+        // Assert
+        Assert.NotEmpty(lifecycleLocksWereFree);
+        Assert.All(lifecycleLocksWereFree, Assert.True);
+    }
+
     private static void AssertSingleChange<T>(List<SubjectPropertyChange> changes, IInterceptorSubject subject, string propertyName, T newValue)
     {
         var change = Assert.Single(changes, c => c.Property.Subject == subject && c.Property.Name == propertyName);
         Assert.Equal(newValue, change.GetNewValue<T>());
+    }
+
+    /// <summary>
+    /// Records, for every published change of the worker's result, whether another thread gets the lifecycle locks,
+    /// which it does only if the publishing thread holds none of them.
+    /// </summary>
+    private static List<bool> RecordWhetherLifecycleLocksAreFree(
+        IInterceptorSubjectContext context, EvaluatorWorker worker, IInterceptorSubject attachedSubject, params LifecycleInterceptor[] interceptors)
+    {
+        var lifecycleLocksWereFree = new List<bool>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (ReferenceEquals(change.Property.Subject, worker) && change.Property.Name == nameof(EvaluatorWorker.Result))
+            {
+                var otherThread = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+                {
+                    foreach (var interceptor in interceptors)
+                    {
+                        interceptor.TryRunWhileAttached(attachedSubject, () => { });
+                    }
+                });
+                lifecycleLocksWereFree.Add(otherThread.Wait(TestTimeouts.Default));
+            }
+        });
+
+        return lifecycleLocksWereFree;
+    }
+
+    private sealed class ValueThatCannotBeCompared(int value, Action onCompared)
+    {
+        public int Value { get; } = value;
+
+#pragma warning disable S3877 // An Equals that throws is what the test is about.
+        public override bool Equals(object? obj)
+        {
+            onCompared();
+            throw new InvalidOperationException();
+        }
+#pragma warning restore S3877
+
+        public override int GetHashCode()
+        {
+            return 0;
+        }
     }
 
     // Runs its callback after the lifecycle interceptor reconciled the write and released its lock.

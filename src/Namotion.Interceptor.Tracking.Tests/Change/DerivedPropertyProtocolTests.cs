@@ -61,6 +61,47 @@ public class DerivedPropertyProtocolTests
     }
 
     [Fact]
+    public async Task WhenStructureChangesBetweenReadAndLink_ThenEvaluationRunsAgain()
+    {
+        // Arrange: the getter reads the parents of the spare only once Data is set, so its structure is not linked
+        // when the spare is attached.
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var spare = new EvaluatorConfiguration();
+        var machine = new EvaluatorMachine();
+        var gate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            if (root.Data is null)
+            {
+                return -1;
+            }
+
+            var isAttached = spare.TryGetFirstParent<EvaluatorRoot>() is not null;
+            gate.PauseIfArmed();
+            return isAttached ? 1 : 0;
+        };
+        root.Machine = machine;
+        var result = GetResult(machine);
+        var published = new List<(int OldValue, int NewValue)>();
+        using var subscription = RecordPublications(result, published);
+
+        // Act
+        gate.Arm();
+        var recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Data = [1]; });
+        var isPaused = gate.Paused.Wait(Timeout);
+        root.Spare = spare;
+        gate.Resume.Set();
+        await recalculation.WaitAsync(Timeout);
+
+        // Assert
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.Equal([(-1, 1)], published);
+        Assert.Equal(1, machine.Worker.Result);
+    }
+
+    [Fact]
     public async Task WhenSourceIsDetachedWrittenAndAttachedAgainBetweenReadAndLink_ThenDerivedPropertyFollowsIt()
     {
         // Arrange: the getter reaches the spare configuration through a captured variable, not through Spare.

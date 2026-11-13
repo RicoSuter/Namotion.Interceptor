@@ -95,6 +95,12 @@ namespace Namotion.Interceptor.Tracking.Change
         public static bool operator !=(Namotion.Interceptor.Tracking.Change.SubjectPropertyChange left, Namotion.Interceptor.Tracking.Change.SubjectPropertyChange right) { }
         public static bool operator ==(Namotion.Interceptor.Tracking.Change.SubjectPropertyChange left, Namotion.Interceptor.Tracking.Change.SubjectPropertyChange right) { }
     }
+    public static class SubjectStructure
+    {
+        public static void Changed(Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static void RecordPropertyRead(Namotion.Interceptor.PropertyReference property) { }
+        public static void RecordRead(Namotion.Interceptor.IInterceptorSubject subject) { }
+    }
 }
 namespace Namotion.Interceptor.Tracking
 {
