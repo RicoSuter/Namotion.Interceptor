@@ -145,6 +145,19 @@ internal static class DerivedPropertyOwnership
         RunOwnerLoops(data, property, token, rawTimestamp);
     }
 
+    /// <summary>Traces an exception that is dropped because another one wins or nobody can receive it.</summary>
+    internal static void TraceDropped(string reason, Exception exception)
+    {
+        try
+        {
+            Trace.TraceWarning($"DerivedPropertyChangeHandler: {reason}: {exception}");
+        }
+        catch (Exception)
+        {
+            // A failing trace listener must not replace an exception in flight or abort an attach.
+        }
+    }
+
     // Called under lock(data).
     private static long TakeOwnership(DerivedPropertyData data, long token)
     {

@@ -153,7 +153,7 @@ For every landed write, in `TrackingWriteObserver`, after the whole chain:
 - **W2**: a full fence (`Interlocked.MemoryBarrier`).
 - **W3**: read the gate of the subject's type (`DerivedPropertyTypeGate`, a volatile read) and stop if it is not raised; otherwise look up the property's `DerivedPropertyData` without creating it, and stop if there is none. The publication of a recalculation does not look it up: the owner marks the data it publishes on its thread for the observer.
 - **W4**: `Interlocked.Increment` its `Version`.
-- **W5**: read its used-by collection and request a recalculation of each derived property in it, and of the property itself when it is a derived property with a setter and the write is not a recalculation's publication.
+- **W5**: read its used-by collection and request a recalculation of each derived property in it, and of the property itself when it is a derived property with a setter and the write is not a recalculation's publication. Every one is requested, also after a request threw (an observer of its publication); the first exception propagates afterwards.
 
 A write that did not land (vetoed, captured by a transaction, stopped by the equality check) is skipped entirely.
 
@@ -425,7 +425,7 @@ A write that `ValidationInterceptor` rejects does not land, so it requests no re
 
 ### Writes that never reached the model, and failed writes
 
-When `IsWritten` is false, the write observer returns before the version moves and before any request. When the chain threw after the value landed (for example a lifecycle handler threw), the write still requests the recalculations of its dependents, and an exception from those requests is dropped, since the write's own exception wins.
+When `IsWritten` is false, the write observer returns before the version moves and before any request. When the chain threw after the value landed (for example a lifecycle handler threw), the write still requests the recalculations of its dependents, and an exception from those requests is traced instead of propagated, since the write's own exception wins.
 
 ## Design Notes
 

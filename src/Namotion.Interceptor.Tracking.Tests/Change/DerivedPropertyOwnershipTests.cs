@@ -747,6 +747,70 @@ public class DerivedPropertyOwnershipTests
         Assert.Equal(100, publishedValues[^1]);
     }
 
+    [Fact]
+    public void WhenObserverThrowsOnThePublicationOfEveryDependent_ThenEveryDependentOfTheWriteIsRecalculated()
+    {
+        // Arrange
+        var isThrowing = false;
+        var publishedProperties = new List<string>();
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        context.AddService(new PublicationObserver((property, _) =>
+        {
+            if (isThrowing)
+            {
+                publishedProperties.Add(property.Metadata.Name);
+                throw new InvalidOperationException($"Publication of {property.Metadata.Name}.");
+            }
+        }));
+        var person = new Person(context) { FirstName = "a", LastName = "c" };
+        isThrowing = true;
+
+        // Act
+        var exception = Record.Exception(() => person.FirstName = "b");
+
+        // Assert: the first exception propagates after both dependents were requested.
+        Assert.StartsWith("Publication of ", Assert.IsType<InvalidOperationException>(exception).Message);
+        Assert.Equal([nameof(Person.FullName), nameof(Person.FullNameWithPrefix)], publishedProperties.Order());
+        Assert.Equal("b c", new PropertyReference(person, nameof(Person.FullName)).TryGetDerivedPropertyData()?.LastKnownValue);
+        Assert.Equal("Mr. b c", new PropertyReference(person, nameof(Person.FullNameWithPrefix)).TryGetDerivedPropertyData()?.LastKnownValue);
+    }
+
+    [Fact]
+    public void WhenLifecycleHandlerAndEveryDependentsObserverThrowOnAStructuralWrite_ThenHandlersExceptionPropagatesAndEveryDependentIsRecalculated()
+    {
+        // Arrange: both derived properties of the worker read Spare; the attach of the spare configuration fails
+        // after the value landed.
+        var publishedProperties = new List<string>();
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        context.AddService(new PublicationObserver((property, _) =>
+        {
+            publishedProperties.Add(property.Metadata.Name);
+            throw new InvalidOperationException("Publication failed.");
+        }));
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = _ => root.Spare is null ? 0 : 1;
+        machine.Worker.ObjectEvaluator = _ => root.Spare;
+        root.Machine = machine;
+        var spare = new EvaluatorConfiguration();
+        context.AddService(new CallbackLifecycleHandler(change =>
+        {
+            if (change.IsContextAttach && change.Subject == spare)
+            {
+                throw new InvalidOperationException("Lifecycle handler failed.");
+            }
+        }));
+
+        // Act
+        var exception = Record.Exception(() => root.Spare = spare);
+
+        // Assert
+        Assert.Equal("Lifecycle handler failed.", Assert.IsType<InvalidOperationException>(exception).Message);
+        Assert.Equal([nameof(EvaluatorWorker.ObjectResult), nameof(EvaluatorWorker.Result)], publishedProperties.Order());
+        Assert.Equal(1, new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)).TryGetDerivedPropertyData()?.LastKnownValue);
+        Assert.Same(spare, new PropertyReference(machine.Worker, nameof(EvaluatorWorker.ObjectResult)).TryGetDerivedPropertyData()?.LastKnownValue);
+    }
+
     private static TimeSource ReplaceTimeSource(Func<DateTimeOffset> timestampFunction)
     {
         var timeSource = new TimeSource(SubjectChangeContext.GetTimestampFunction);
