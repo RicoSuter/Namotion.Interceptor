@@ -276,7 +276,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             application.ApplicationConfiguration,
             serverUri,
             endpoints,
-            useSecurity: configuration.UseSecurity,
+            useSecurity: configuration.RequireSecurity,
             configuration.ResolvedTelemetryContext);
 
         var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);

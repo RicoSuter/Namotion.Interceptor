@@ -303,13 +303,37 @@ public class OpcUaClientConfiguration
     public TimeSpan ReconnectInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// Gets or sets whether to use security (signing and encryption) when connecting to the OPC UA server.
-    /// When true, the client will prefer secure endpoints with message signing and encryption.
-    /// When false, the client will prefer unsecured endpoints (faster, but no protection).
-    /// Default is false for development convenience. Set to true for production deployments
-    /// that require secure communication.
+    /// Gets or sets whether the client requires a signed or encrypted endpoint. When true, connecting fails if the
+    /// server offers none. When false, an unsecured endpoint is preferred and a secured one is used when the server
+    /// offers nothing else. Default is false.
     /// </summary>
-    public bool UseSecurity { get; set; } = false;
+    public bool RequireSecurity { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether server certificates that are not in the trusted store are accepted. The server
+    /// certificate is checked on secured connections and before an identity token is encrypted for it, which
+    /// includes username and certificate logins over unsecured connections. Default is false: trust a server by
+    /// moving its certificate from the rejected store to the trusted store, or by provisioning the trusted store.
+    /// </summary>
+    public bool AutoAcceptUntrustedCertificates { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the client creates a self-signed application certificate in its own store when none
+    /// exists for a secured connection, and renews a self-signed certificate before it expires. When false, a
+    /// secured connection requires a provisioned certificate and nothing is ever replaced. Default is true.
+    /// </summary>
+    public bool AutoCreateApplicationCertificate { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the application URI the client presents and its certificate must carry. When null,
+    /// "urn:{host name}:Namotion.Interceptor:{ApplicationName}" is used, which changes when the host name changes.
+    /// </summary>
+    public string? ApplicationUri { get; set; }
+
+    /// <summary>
+    /// Gets or sets the lifetime in months of an application certificate the client creates. Default is 12.
+    /// </summary>
+    public ushort ApplicationCertificateLifetimeInMonths { get; set; } = 12;
 
     /// <summary>
     /// Gets or sets an async factory for creating the user identity used when connecting to the OPC UA server.
@@ -357,8 +381,11 @@ public class OpcUaClientConfiguration
     public ITelemetryContext ResolvedTelemetryContext => TelemetryContext ?? NullTelemetryContext.Instance;
 
     /// <summary>
-    /// Creates and configures an OPC UA application instance for the client.
-    /// Override this method to customize application configuration, security settings, or certificate handling.
+    /// Creates and configures an OPC UA application instance for the client. Override this method to customize
+    /// application configuration, security settings, or certificate handling. An override that changes security
+    /// settings after calling the base must call <c>CertificateValidator.UpdateAsync</c> on the configuration
+    /// again, because the validator copies them only then. Set <c>SecurityConfiguration.ApplicationCertificate.Certificate</c>
+    /// with its private key to provide the client certificate yourself; it is then used as is.
     /// </summary>
     /// <returns>A configured <see cref="ApplicationInstance"/> ready for connecting to OPC UA servers.</returns>
     public virtual async Task<ApplicationInstance> CreateApplicationInstanceAsync()
@@ -369,8 +396,7 @@ public class OpcUaClientConfiguration
             ApplicationType = ApplicationType.Client
         };
 
-        var host = System.Net.Dns.GetHostName();
-        var applicationUri = $"urn:{host}:Namotion.Interceptor:{ApplicationName}";
+        var applicationUri = ApplicationUri ?? $"urn:{System.Net.Dns.GetHostName()}:Namotion.Interceptor:{ApplicationName}";
 
         var config = new ApplicationConfiguration
         {
@@ -391,13 +417,18 @@ public class OpcUaClientConfiguration
                     StoreType = "Directory",
                     StorePath = $"{CertificateStoreBasePath}/trusted"
                 },
+                TrustedIssuerCertificates = new CertificateTrustList
+                {
+                    StoreType = "Directory",
+                    StorePath = $"{CertificateStoreBasePath}/issuer"
+                },
                 RejectedCertificateStore = new CertificateTrustList
                 {
                     StoreType = "Directory",
                     StorePath = $"{CertificateStoreBasePath}/rejected"
                 },
-                AutoAcceptUntrustedCertificates = true,
-                AddAppCertToTrustedStore = true,
+                AutoAcceptUntrustedCertificates = AutoAcceptUntrustedCertificates,
+                AddAppCertToTrustedStore = false,
             },
             TransportQuotas = new TransportQuotas
             {

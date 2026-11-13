@@ -342,7 +342,7 @@ public class OpcUaReconnectionTests
                 HealthCheckSuppressedConfig(config);
 
                 // The server only transfers an anonymous user's subscriptions over a signed channel.
-                config.UseSecurity = true;
+                config.RequireSecurity = true;
 
                 // A nonzero interval lets the client's 60 s minimum subscription lifetime apply. With the
                 // default of 0 the server deletes the subscription seconds into the outage.

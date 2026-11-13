@@ -194,7 +194,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         public override async Task<ApplicationInstance> CreateApplicationInstanceAsync()
         {
             var application = await base.CreateApplicationInstanceAsync();
-            if (UseSecurity)
+            if (RequireSecurity)
             {
                 await application.CheckApplicationInstanceCertificatesAsync(silent: true);
             }
