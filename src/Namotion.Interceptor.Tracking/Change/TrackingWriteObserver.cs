@@ -10,7 +10,25 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
 {
     internal static readonly TrackingWriteObserver Instance = new();
 
+    // The data of the derived property whose recalculation this thread publishes, so its publication finds the data
+    // without a lookup.
+    [ThreadStatic]
+    private static DerivedPropertyData? _publication;
+
     internal static void EnsureRegistered() => PropertyAccessObservation.SetWriteObserver(Instance);
+
+    /// <summary>
+    /// Marks <paramref name="data"/> as published on this thread until <see cref="ExitPublication"/>, which takes the
+    /// returned value.
+    /// </summary>
+    internal static DerivedPropertyData? EnterPublication(DerivedPropertyData data)
+    {
+        var previous = _publication;
+        _publication = data;
+        return previous;
+    }
+
+    internal static void ExitPublication(DerivedPropertyData? previous) => _publication = previous;
 
     public void OnPropertyWritten(in PropertyWriteObservation write)
     {
@@ -30,7 +48,9 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
             return;
         }
 
-        var data = property.TryGetDerivedPropertyData();
+        var data = write.IsDerivedRecalculation && _publication is { } publication && publication.Property == property
+            ? publication
+            : property.TryGetDerivedPropertyData();
         if (data is not null)
         {
             RequestRecalculations(write, property, data);

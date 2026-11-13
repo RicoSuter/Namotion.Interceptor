@@ -690,7 +690,15 @@ internal static class DerivedPropertyOwnership
         // newValue is the value the owner committed and the value paired with oldValue by the
         // guards above, so finalValueIsNewValue publishes it rather than re-invoking the getter
         // (see PropertyWriteContext.FinalValueIsNewValue).
-        derivedProperty.PublishDerivedPropertyValue(newValue, oldValue, rawTimestamp, finalValueIsNewValue: true);
+        var previousPublication = TrackingWriteObserver.EnterPublication(data);
+        try
+        {
+            derivedProperty.PublishDerivedPropertyValue(newValue, oldValue, rawTimestamp, finalValueIsNewValue: true);
+        }
+        finally
+        {
+            TrackingWriteObserver.ExitPublication(previousPublication);
+        }
 
         if (derivedProperty.Subject is IRaisePropertyChanged raiser)
         {
