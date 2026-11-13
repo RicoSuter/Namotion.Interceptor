@@ -136,7 +136,11 @@ Beyond the settings shown above, the following properties are available on `OpcU
 | Property | Default | Description |
 |----------|---------|-------------|
 | `ApplicationName` | "Namotion.Interceptor.Client" | Application name for identification and certificate generation |
-| `UseSecurity` | false | Enable signing and encryption (see [Transport Security](#transport-security)) |
+| `RequireSecurity` | false | Require a signed or encrypted endpoint (see [Transport Security](#transport-security)) |
+| `AutoAcceptUntrustedCertificates` | false | Accept server certificates that are not in the trusted store |
+| `AutoCreateApplicationCertificate` | true | Create and renew a self-signed client certificate for secured connections |
+| `ApplicationUri` | null | Application URI the client certificate carries (derived from host and application name when null) |
+| `ApplicationCertificateLifetimeInMonths` | 12 | Lifetime of a certificate the client creates, at least 2 |
 | `CreateUserIdentity` | null | Async factory for user credentials (see [Authentication](#authentication)) |
 | `CertificateStoreBasePath` | "pki" | Base directory for certificate stores |
 | `SessionFactory` | null | Custom session factory (uses `DefaultSessionFactory` when null) |
@@ -187,12 +191,24 @@ Beyond the settings shown above, the following properties are available on `OpcU
 var config = new OpcUaClientConfiguration
 {
     ServerUrl = "opc.tcp://plc.factory.com:4840",
-    UseSecurity = true,  // Enable signing and encryption (recommended for production)
+    RequireSecurity = true, // connect only to a signed or encrypted endpoint
     // ... other settings
 };
 ```
 
-When `UseSecurity = true`, the client prefers secure endpoints with message signing and encryption. The default is `false` for development convenience.
+**Endpoint selection.** With `RequireSecurity = true` the client connects only to a signed or encrypted endpoint whose security policy it supports, and fails if the server offers none. With `false`, the default, it prefers an unsecured endpoint; when the server offers none, it uses the best secured endpoint whose security policy it supports. With the default RSA certificate the client supports Basic256Sha256, Aes128_Sha256_RsaOaep and Aes256_Sha256_RsaPss. In both modes, a server whose secured endpoints use only other policies makes connecting fail with a message that lists the offered and the supported policies.
+
+**Client certificate.** A secured connection needs a client certificate with its private key; an unsecured connection needs none. The client looks for it in `{CertificateStoreBasePath}/own`. With `AutoCreateApplicationCertificate = true`, the default, it creates a self-signed certificate there the first time, valid for `ApplicationCertificateLifetimeInMonths` (default 12, at least 2). With `AutoCreateApplicationCertificate = false` a missing certificate fails the connection. A provisioned certificate needs the subject `CN={ApplicationName}, O=Namotion` and the application URI `urn:{host name}:Namotion.Interceptor:{ApplicationName}`, or the value of `ApplicationUri`. Set `ApplicationUri` when the host name changes, for example in containers, because a certificate with a stale URI is rejected. Several processes sharing one certificate store should provision the certificate up front or use different application names or store paths.
+
+**Certificate renewal.** With `AutoCreateApplicationCertificate = true` the client replaces any self-signed certificate in the own store 30 days before it expires, including a provisioned one: it deletes the old certificate with its private key, creates a new one and logs a warning, because servers that trust the client have to trust the new certificate. A certificate that is not self-signed, such as one issued by a certificate authority, is never replaced, and with `AutoCreateApplicationCertificate = false` nothing is ever replaced. If loading or renewing fails while the current certificate has not expired, the client keeps using it, logs the error and retries on the next connect. Once the certificate has expired, the connection fails.
+
+**Trusting the server.** The client checks the server certificate on secured connections, and on unsecured connections before it encrypts a username or certificate login for the server. With `AutoAcceptUntrustedCertificates = false`, the default, an unknown server certificate is rejected and written to `{CertificateStoreBasePath}/rejected/certs`. Move it to `{CertificateStoreBasePath}/trusted/certs` to trust the server, or provision that folder up front. For a server certificate issued by a certificate authority, put the certificates of the issuing authorities in `{CertificateStoreBasePath}/issuer/certs` and the root authority's certificate in `trusted/certs`. The check repeats whenever the secure channel renews, about hourly, so removing a trusted certificate drops a live connection.
+
+**Trusting the client.** The server has to trust the client certificate in the same way, through its own trusted store. The server of this library uses the same folder layout under its own `CertificateStoreBasePath` (see [Server Configuration](connectors-opcua-server.md#configuration)).
+
+**Errors.** A failed connection attempt is reported in `Diagnostics.LastError` (see [Diagnostics](#diagnostics)) and retried. When the client rejects the server certificate, the message names its thumbprint and the folders to move it between; for an incomplete issuer chain it names the issuer folder instead and does not suggest auto-accepting. On secured endpoints the message also notes that the server may instead have rejected the client's certificate, since servers report that with the same status codes. When the client certificate cannot be loaded, the message names the own folder and the subject and application URI a provisioned certificate needs.
+
+**Upgrading.** `UseSecurity` was renamed to `RequireSecurity`, and `true` now fails when the server offers no usable secured endpoint instead of connecting without security. Server certificates are now validated by default, which affects username and certificate logins over unsecured connections too: trust the server as above, or set `AutoAcceptUntrustedCertificates = true` for the previous behavior. The server of this library now keeps its certificate across restarts, see [Server Configuration](connectors-opcua-server.md#configuration).
 
 ### Authentication
 
@@ -237,21 +253,31 @@ CreateUserIdentity = _ =>
 Override `CreateApplicationInstanceAsync()` in a derived configuration class for full control over OPC UA application settings (certificates, transport quotas, security policies):
 
 ```csharp
+using System.Text;
+
 public class MyOpcUaClientConfiguration : OpcUaClientConfiguration
 {
+    public required string CertificatePassword { get; init; }
+
     public override async Task<ApplicationInstance> CreateApplicationInstanceAsync()
     {
         var application = await base.CreateApplicationInstanceAsync();
 
         // Customize the application configuration
         var config = application.ApplicationConfiguration;
-        config.SecurityConfiguration.AutoAcceptUntrustedCertificates = false;
+        config.SecurityConfiguration.RejectSHA1SignedCertificates = true;
+        config.SecurityConfiguration.CertificatePasswordProvider = new CertificatePasswordProvider(Encoding.UTF8.GetBytes(CertificatePassword));
         config.TransportQuotas.MaxMessageSize = 64_000_000;
+
+        // The validator copies security settings only here.
+        await config.CertificateValidator.UpdateAsync(config);
 
         return application;
     }
 }
 ```
+
+To provide the client certificate yourself, for example from a hardware security module or the Windows certificate store, set `config.SecurityConfiguration.ApplicationCertificate.Certificate` with its private key; the client then uses it as is. The same applies when an override switches the application certificate to another store type, such as the Windows certificate store, and calls `CertificateValidator.UpdateAsync` again: the SDK loads that certificate with its private key during the update, so the client uses it as provided, without its own validation or renewal.
 
 ## Monitoring & Subscriptions
 

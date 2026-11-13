@@ -102,8 +102,10 @@ await server.StartAsync(cancellationToken);
 | `BufferTime` | `TimeSpan?` | 8ms | Time window to buffer incoming property changes before publishing to clients |
 | `TelemetryContext` | `ITelemetryContext` | NullTelemetryContext | Telemetry integration for logging and diagnostics |
 | `AutoAcceptUntrustedCertificates` | `bool` | false | Accept untrusted client certificates (testing/development only) |
-| `CleanCertificateStore` | `bool` | true | Remove old certificates from the application certificate store on startup |
+| `CleanCertificateStore` | `bool` | false | Empty the application certificate store on startup, which creates a new certificate on every start and makes clients trust the server again |
 | `CertificateStoreBasePath` | `string` | "pki" | Base directory for certificate stores. Change to isolate stores for parallel test execution |
+
+**Upgrading.** `CleanCertificateStore` used to default to true, so the server created a new certificate on every start. It now keeps its certificate across restarts; set `CleanCertificateStore = true` for the previous behavior.
 
 Final outbound delivery on stop uses the internal five-second safety bound described in [Flushing On Stop](connectors.md#flushing-on-stop). It cannot be configured per connector.
 
