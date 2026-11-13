@@ -23,20 +23,17 @@ namespace Namotion.Interceptor.Tracking.Change;
 // load-bearing under aggregation, where instances would otherwise interleave and one context's
 // cascade could be announced before another's dispatch of the triggering write.
 [RunsBefore(typeof(PropertyChangeInterceptor))]
-public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler
+public class DerivedPropertyChangeHandler : IWriteInterceptor, IPropertyLifecycleHandler
 {
     // Safety limit for stabilization loops. Prevents infinite loops from getters
     // with side effects that mutate the tracked state (a user error but shouldn't hang).
     // In correct code, the loop runs 1-2 iterations max.
     private const int MaxStabilizationIterations = 100;
 
-    [ThreadStatic]
-    private static DerivedPropertyRecorder? _recorder;
-
     internal static bool IsRecordingDerivedProperty
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => _recorder?.IsRecording == true;
+        get => DerivedPropertyRecorder.IsEvaluatingOnThisThread;
     }
 
     // Global counter incremented on every write (Interlocked.Increment, full fence).
@@ -149,20 +146,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     private static bool IsUsedByCurrentData(in PropertyReference property, in PropertyReference derivedProperty)
     {
         return property.TryGetDerivedPropertyData()?.UsedByDependencies?.Contains(derivedProperty) is true;
-    }
-
-    /// <inheritdoc />
-    public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
-    {
-        var result = next(ref context);
-
-        if (_recorder?.IsRecording == true)
-        {
-            var property = context.Property;
-            _recorder.TouchProperty(ref property);
-        }
-
-        return result;
     }
 
     /// <inheritdoc />
@@ -451,7 +434,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             StartRecordingTouchedProperties(property);
             ownsActiveRecording = true;
             var result = property.Metadata.GetValue?.Invoke(property.Subject);
-            var recordedDependencies = _recorder!.FinishRecording();
+            var recordedDependencies = DerivedPropertyRecorder.Current.FinishRecording();
             ownsActiveRecording = false;
 
             var dependencyUpdate = ReconcileDependencies(data, property, recordedDependencies, callerHoldsLock);
@@ -466,7 +449,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 StartRecordingTouchedProperties(property);
                 ownsActiveRecording = true;
                 result = property.Metadata.GetValue?.Invoke(property.Subject);
-                recordedDependencies = _recorder.FinishRecording();
+                recordedDependencies = DerivedPropertyRecorder.Current.FinishRecording();
                 ownsActiveRecording = false;
 
                 dependencyUpdate = ReconcileDependencies(data, property, recordedDependencies, callerHoldsLock);
@@ -503,38 +486,62 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// <summary>
     /// Reconciles dependencies under the caller's lock or a brief lock acquired here, then clears the recording.
     /// When acquiring the lock, abandons the recording if attachment or recalculation state changed.
+    /// Returns <see cref="DependencyUpdate.Changed"/> when the dependency set changed or a recorded
+    /// source was written after it was read.
     /// </summary>
     private static DependencyUpdate ReconcileDependencies(
         DerivedPropertyData data,
         in PropertyReference property,
-        ReadOnlySpan<PropertyReference> recordedDependencies,
+        ReadOnlySpan<RecordedDependency> recordedDependencies,
         bool callerHoldsLock)
     {
         if (callerHoldsLock)
         {
-            return data.UpdateDependencies(property, recordedDependencies, _recorder!)
-                ? DependencyUpdate.Changed
-                : DependencyUpdate.Unchanged;
+            return UpdateDependenciesAndCheckVersions(data, property, recordedDependencies);
         }
 
         lock (data)
         {
             if (!data.IsAttached || data.RecalculationNeeded)
             {
-                _recorder!.ClearLastRecording();
+                DerivedPropertyRecorder.Current.ClearLastRecording();
                 return DependencyUpdate.Abandoned;
             }
 
-            return data.UpdateDependencies(property, recordedDependencies, _recorder!)
-                ? DependencyUpdate.Changed
-                : DependencyUpdate.Unchanged;
+            return UpdateDependenciesAndCheckVersions(data, property, recordedDependencies);
         }
+    }
+
+    private static DependencyUpdate UpdateDependenciesAndCheckVersions(
+        DerivedPropertyData data,
+        in PropertyReference property,
+        ReadOnlySpan<RecordedDependency> recordedDependencies)
+    {
+        var isMembershipChanged = data.UpdateDependencies(property, recordedDependencies);
+        var hasVersionChanged = HasVersionChanged(recordedDependencies);
+        DerivedPropertyRecorder.Current.ClearLastRecording();
+        return isMembershipChanged || hasVersionChanged
+            ? DependencyUpdate.Changed
+            : DependencyUpdate.Unchanged;
+    }
+
+    private static bool HasVersionChanged(ReadOnlySpan<RecordedDependency> recorded)
+    {
+        foreach (ref readonly var dependency in recorded)
+        {
+            // R5: a full fence, paired with the writer's Interlocked increment before it reads the used-by set.
+            if (Interlocked.Read(ref dependency.Data.Version) != dependency.Version)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void StartRecordingTouchedProperties(in PropertyReference property)
     {
-        _recorder ??= new DerivedPropertyRecorder();
-        _recorder.StartRecording(property);
+        DerivedPropertyRecorder.Current.StartRecording(property);
     }
 
     /// <summary>
@@ -544,17 +551,13 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void DiscardActiveRecording(bool ownsActiveRecording)
     {
-        if (_recorder is null)
-        {
-            return;
-        }
-
+        var recorder = DerivedPropertyRecorder.Current;
         if (ownsActiveRecording)
         {
-            _recorder.FinishRecording();
+            recorder.FinishRecording();
         }
 
         // Always clear to prevent thread-static from holding refs to detached subjects.
-        _recorder.ClearLastRecording();
+        recorder.ClearLastRecording();
     }
 }
