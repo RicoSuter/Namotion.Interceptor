@@ -9,7 +9,6 @@ using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
 using Opc.Ua;
-using Opc.Ua.Configuration;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 
@@ -40,7 +39,8 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         Func<IInterceptorSubjectContext, TRoot> createRoot,
         Func<TRoot, bool> isConnected,
         string serverUrl = DefaultServerUrl,
-        string? certificateStoreBasePath = null)
+        string? certificateStoreBasePath = null,
+        bool waitUntilConnected = true)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var builder = Host.CreateApplicationBuilder();
@@ -81,7 +81,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
                 var telemetryContext = DefaultTelemetry.Create(b =>
                     b.Services.AddSingleton(loggerFactory));
 
-                var config = new TestClientConfiguration
+                var config = new OpcUaClientConfiguration
                 {
                     ServerUrl = serverUrl,
                     RootPath = ["Root"],
@@ -117,6 +117,11 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
 
         await _host.StartAsync();
         _logger.Log($"Client host started in {sw.ElapsedMilliseconds}ms");
+
+        if (!waitUntilConnected)
+        {
+            return;
+        }
 
         // First wait for OPC UA infrastructure (subscriptions set up) - this is reliable
         // because it's based on actual OPC UA state, not property propagation
@@ -183,23 +188,6 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         catch (Exception ex)
         {
             _logger.Log($"Error disposing client: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Loads the application certificate when security is on, which the client does not do on its own.
-    /// </summary>
-    private sealed class TestClientConfiguration : OpcUaClientConfiguration
-    {
-        public override async Task<ApplicationInstance> CreateApplicationInstanceAsync()
-        {
-            var application = await base.CreateApplicationInstanceAsync();
-            if (RequireSecurity)
-            {
-                await application.CheckApplicationInstanceCertificatesAsync(silent: true);
-            }
-
-            return application;
         }
     }
 }

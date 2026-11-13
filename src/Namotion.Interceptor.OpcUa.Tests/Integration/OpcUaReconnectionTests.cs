@@ -344,6 +344,9 @@ public class OpcUaReconnectionTests
                 // The server only transfers an anonymous user's subscriptions over a signed channel.
                 config.RequireSecurity = true;
 
+                // This test is about transfers, not trust.
+                config.AutoAcceptUntrustedCertificates = true;
+
                 // A nonzero interval lets the client's 60 s minimum subscription lifetime apply. With the
                 // default of 0 the server deletes the subscription seconds into the outage.
                 config.DefaultPublishingInterval = 100;

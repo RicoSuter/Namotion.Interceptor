@@ -23,6 +23,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
     private Action<IInterceptorSubjectContext, TRoot>? _initializeDefaults;
     private string _baseAddress = DefaultBaseAddress;
     private string? _alternateBaseAddress;
+    private Action<ApplicationConfiguration>? _configureApplication;
     private string _certificateStoreBasePath = "pki";
     private TimeSpan _bufferTime = TimeSpan.FromMilliseconds(100);
     private int _disposed;
@@ -42,7 +43,8 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
         string? baseAddress = null,
         string? certificateStoreBasePath = null,
         TimeSpan? bufferTime = null,
-        string? alternateBaseAddress = null)
+        string? alternateBaseAddress = null,
+        Action<ApplicationConfiguration>? configureApplication = null)
     {
         _createRoot = createRoot;
         _initializeDefaults = initializeDefaults;
@@ -50,6 +52,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
         _certificateStoreBasePath = certificateStoreBasePath ?? "pki";
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(100);
         _alternateBaseAddress = alternateBaseAddress;
+        _configureApplication = configureApplication;
 
         return StartInternalAsync();
     }
@@ -95,6 +98,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
                 return new TestServerConfiguration
                 {
                     AlternateBaseAddress = _alternateBaseAddress,
+                    ConfigureApplication = _configureApplication,
                     RootName = "Root",
                     BaseAddress = _baseAddress,
                     ValueConverter = new OpcUaValueConverter(),
@@ -183,6 +187,8 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
     {
         public string? AlternateBaseAddress { get; init; }
 
+        public Action<ApplicationConfiguration>? ConfigureApplication { get; init; }
+
         public override async Task<ApplicationInstance> CreateApplicationInstanceAsync()
         {
             var application = await base.CreateApplicationInstanceAsync();
@@ -190,6 +196,8 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
             {
                 application.ApplicationConfiguration.ServerConfiguration.AlternateBaseAddresses.Add(AlternateBaseAddress);
             }
+
+            ConfigureApplication?.Invoke(application.ApplicationConfiguration);
 
             return application;
         }
