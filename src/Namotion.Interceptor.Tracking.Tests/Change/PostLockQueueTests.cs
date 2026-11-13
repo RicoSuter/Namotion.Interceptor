@@ -24,7 +24,7 @@ public class PostLockQueueTests
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new Person(context) { FirstName = "r" };
         var mother = new Person();
-        context.WithService(() => new HandlerAction(change =>
+        context.WithService(() => new CallbackLifecycleHandler(change =>
         {
             if (change.IsContextAttach && change.Subject == mother)
             {
@@ -55,7 +55,7 @@ public class PostLockQueueTests
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new Person(context) { FirstName = "r" };
         var mother = new Person();
-        context.WithService(() => new HandlerAction(change =>
+        context.WithService(() => new CallbackLifecycleHandler(change =>
         {
             if (change.IsContextAttach && change.Subject == mother)
             {
@@ -83,7 +83,7 @@ public class PostLockQueueTests
         var root = new Person(context);
         var mother = new Person();
         var father = new Person();
-        context.WithService(() => new HandlerAction(change =>
+        context.WithService(() => new CallbackLifecycleHandler(change =>
         {
             if (change.IsContextAttach && change.Subject == mother)
             {
@@ -122,7 +122,7 @@ public class PostLockQueueTests
         child.AddFallbackContext(parent);
         var root = new Person(child) { FirstName = "r" };
         var mother = new Person();
-        child.WithService(() => new HandlerAction(change =>
+        child.WithService(() => new CallbackLifecycleHandler(change =>
         {
             if (change.IsContextAttach && change.Subject == mother)
             {
@@ -155,7 +155,7 @@ public class PostLockQueueTests
         using var handlerReached = new ManualResetEventSlim();
         var handlerSawObserver = false;
         var observerSawHandler = false;
-        context.WithService(() => new HandlerAction(change =>
+        context.WithService(() => new CallbackLifecycleHandler(change =>
         {
             if (change.IsContextAttach && change.Subject == attached)
             {
@@ -193,7 +193,7 @@ public class PostLockQueueTests
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new Person(context);
         var mother = new Person();
-        context.WithService(() => new HandlerAction(change =>
+        context.WithService(() => new CallbackLifecycleHandler(change =>
         {
             if (change.IsContextAttach && change.Subject == mother)
             {
@@ -237,7 +237,7 @@ public class PostLockQueueTests
         var lifecycle = context.GetService<LifecycleInterceptor>();
         var existing = new Person(context);
         var isInHandler = false;
-        context.WithService(() => new HandlerAction(change =>
+        context.WithService(() => new CallbackLifecycleHandler(change =>
         {
             if (change.IsContextAttach && change.Subject != existing)
             {
@@ -270,7 +270,7 @@ public class PostLockQueueTests
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var existing = new Person(context);
-        context.WithService(() => new HandlerAction(change =>
+        context.WithService(() => new CallbackLifecycleHandler(change =>
         {
             if (change.IsContextAttach && change.Subject != existing)
             {
@@ -357,7 +357,7 @@ public class PostLockQueueTests
         var existing = new Person(context);
         var leaving = new Person(context);
         var isInHandler = false;
-        context.WithService(() => new HandlerAction(change =>
+        context.WithService(() => new CallbackLifecycleHandler(change =>
         {
             if (change.IsContextDetach && change.Subject == leaving)
             {
@@ -432,7 +432,7 @@ public class PostLockQueueTests
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new Person(context);
         var mother = new Person();
-        context.WithService(() => new HandlerAction(change =>
+        context.WithService(() => new CallbackLifecycleHandler(change =>
         {
             if (change.IsContextAttach && change.Subject == mother)
             {
@@ -486,10 +486,5 @@ public class PostLockQueueTests
         return DedicatedThreadTestHelpers
             .RunOnDedicatedThreadAsync(() => lifecycle.TryRunWhileAttached(subject, () => { }))
             .Wait(Timeout);
-    }
-
-    private sealed class HandlerAction(Action<SubjectLifecycleChange> action) : ILifecycleHandler
-    {
-        public void HandleLifecycleChange(SubjectLifecycleChange change) => action(change);
     }
 }
