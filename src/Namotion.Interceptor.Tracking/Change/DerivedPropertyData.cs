@@ -36,6 +36,12 @@ internal sealed class DerivedPropertyData
     internal object? LastKnownValue;
 
     /// <summary>
+    /// Incremented by every landed write of this property (source role), after the value landed and a full fence;
+    /// read by evaluations to detect a write between a read and its link.
+    /// </summary>
+    internal long Version;
+
+    /// <summary>
     /// Reentrancy guard for RecalculateDerivedProperty.
     /// Prevents infinite recursion when a derived-with-setter property's
     /// PublishDerivedPropertyValue re-enters WriteProperty.
@@ -156,64 +162,64 @@ internal sealed class DerivedPropertyData
     }
 
     /// <summary>
-    /// Updates dependencies (RequiredProperties) and used-by properties (UsedByProperties).
-    /// Called under lock(this). Returns true if dependency set changed (caller should re-evaluate).
+    /// Updates dependencies (RequiredProperties) and used-by properties (UsedByProperties) to the recorded set.
+    /// Called under lock(this). Returns true if a dependency was added or removed.
     /// </summary>
-    internal bool UpdateDependencies(
-        in PropertyReference derivedProperty,
-        ReadOnlySpan<PropertyReference> recordedDependencies,
-        DerivedPropertyRecorder recorder)
+    internal bool UpdateDependencies(in PropertyReference derivedProperty, ReadOnlySpan<RecordedDependency> recorded)
     {
-        var previousRequiredProperties = RequiredPropertiesSpan;
-
-        // Fast path: deps unchanged — no allocation.
-        if (previousRequiredProperties.SequenceEqual(recordedDependencies))
+        var previous = RequiredPropertiesSpan;
+        if (previous.Length == recorded.Length && IsSameOrder(previous, recorded))
         {
-            recorder.ClearLastRecording();
             return false;
         }
 
-        RemoveStaleUsedByProperties(derivedProperty, previousRequiredProperties, recordedDependencies);
-        AddNewUsedByProperties(derivedProperty, previousRequiredProperties, recordedDependencies);
-        SetRequiredProperties(recordedDependencies);
-        recorder.ClearLastRecording();
+        var isChanged = false;
+        foreach (ref readonly var old in previous)
+        {
+            if (IndexOf(recorded, old) < 0)
+            {
+                old.TryGetDerivedPropertyData()?.RemoveUsedByProperty(derivedProperty);
+                isChanged = true;
+            }
+        }
+
+        foreach (ref readonly var dependency in recorded)
+        {
+            if (previous.IndexOf(dependency.Property) < 0)
+            {
+                AddUsedByPropertyToCurrentData(dependency.Property, derivedProperty);
+                isChanged = true;
+            }
+        }
+
+        SetRequiredProperties(recorded);
+        return isChanged;
+    }
+
+    private static bool IsSameOrder(ReadOnlySpan<PropertyReference> previous, ReadOnlySpan<RecordedDependency> recorded)
+    {
+        for (var i = 0; i < previous.Length; i++)
+        {
+            if (previous[i] != recorded[i].Property)
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 
-    /// <summary>
-    /// Removes used-by properties for dependencies that are no longer in the recorded set.
-    /// Called under lock(this). Both spans must be valid (array not yet modified, recorder not yet cleared).
-    /// </summary>
-    private static void RemoveStaleUsedByProperties(
-        in PropertyReference derivedProperty,
-        ReadOnlySpan<PropertyReference> previousRequiredProperties,
-        ReadOnlySpan<PropertyReference> recordedDependencies)
+    private static int IndexOf(ReadOnlySpan<RecordedDependency> recorded, in PropertyReference property)
     {
-        foreach (ref readonly var oldDependency in previousRequiredProperties)
+        for (var i = 0; i < recorded.Length; i++)
         {
-            if (!recordedDependencies.Contains(oldDependency))
+            if (recorded[i].Property == property)
             {
-                oldDependency.TryGetDerivedPropertyData()?.RemoveUsedByProperty(derivedProperty);
+                return i;
             }
         }
-    }
 
-    /// <summary>
-    /// Adds used-by properties for newly recorded dependencies. Locks each dependency's data
-    /// to serialize with DetachProperty's used-by snapshot. Called under lock(this).
-    /// </summary>
-    private static void AddNewUsedByProperties(
-        in PropertyReference derivedProperty,
-        ReadOnlySpan<PropertyReference> previousRequiredProperties,
-        ReadOnlySpan<PropertyReference> recordedDependencies)
-    {
-        foreach (ref readonly var newDependency in recordedDependencies)
-        {
-            if (!previousRequiredProperties.Contains(newDependency))
-            {
-                AddUsedByPropertyToCurrentData(newDependency, derivedProperty);
-            }
-        }
+        return -1;
     }
 
     private static void AddUsedByPropertyToCurrentData(in PropertyReference dependency, in PropertyReference derivedProperty)
@@ -239,23 +245,24 @@ internal sealed class DerivedPropertyData
     /// Reuses existing array if capacity is sufficient; allocates only when growing.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void SetRequiredProperties(ReadOnlySpan<PropertyReference> properties)
+    private void SetRequiredProperties(ReadOnlySpan<RecordedDependency> recorded)
     {
-        var newCount = properties.Length;
+        var newCount = recorded.Length;
         var currentArray = _requiredProperties;
-        if (currentArray is not null && currentArray.Length >= newCount)
+        if (currentArray is null || currentArray.Length < newCount)
         {
-            // Reuse existing buffer — zero allocation.
-            properties.CopyTo(currentArray);
-            if (currentArray.Length > newCount)
-            {
-                currentArray.AsSpan(newCount).Clear();
-            }
+            currentArray = new PropertyReference[newCount];
+            _requiredProperties = currentArray;
         }
-        else
+
+        for (var i = 0; i < newCount; i++)
         {
-            // Must grow: allocate new array.
-            _requiredProperties = properties.ToArray();
+            currentArray[i] = recorded[i].Property;
+        }
+
+        if (currentArray.Length > newCount)
+        {
+            currentArray.AsSpan(newCount).Clear();
         }
 
         _requiredPropertyCount = newCount;
@@ -315,7 +322,7 @@ internal sealed class DerivedPropertyData
     /// with the item pre-populated, avoiding a separate Add.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AddUsedByProperty(in PropertyReference dependentProperty)
+    internal void AddUsedByProperty(in PropertyReference dependentProperty)
     {
         var usedByProperty = Volatile.Read(ref _usedByProperties);
         if (usedByProperty is not null)
@@ -336,7 +343,7 @@ internal sealed class DerivedPropertyData
     /// Removes a used-by property if the collection exists.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void RemoveUsedByProperty(in PropertyReference dependent)
+    internal void RemoveUsedByProperty(in PropertyReference dependent)
     {
         _usedByProperties?.Remove(dependent);
     }
