@@ -191,7 +191,37 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             context.GetFinalValue(),
             context.Revision);
 
+        DispatchOrQueueChange(subscriptions, syncSubject, listeners, in change);
+    }
+
+    /// <summary>
+    /// Delivers the change, or, for a write under a lifecycle lock, queues its delivery until the lifecycle operation
+    /// completed, outside the lock. The change and its listeners are resolved at write time either way.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void DispatchOrQueueChange(
+        PropertyChangeQueueSubscription[] subscriptions,
+        ISubject<SubjectPropertyChange>? syncSubject,
+        PropertyChangeSubscription[]? listeners,
+        in SubjectPropertyChange change)
+    {
+        if (PostLockQueue.IsLockHeld)
+        {
+            QueueChange(subscriptions, syncSubject, listeners, change);
+            return;
+        }
+
         DispatchChange(subscriptions, syncSubject, listeners, in change);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void QueueChange(
+        PropertyChangeQueueSubscription[] subscriptions,
+        ISubject<SubjectPropertyChange>? syncSubject,
+        PropertyChangeSubscription[]? listeners,
+        SubjectPropertyChange change)
+    {
+        PostLockQueue.TryEnqueueDelivery(() => DispatchChange(subscriptions, syncSubject, listeners, in change));
     }
 
     private static void DispatchChange(
@@ -245,21 +275,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             finalValue,
             context.Revision);
 
-        if (state is not null)
-        {
-            var subscriptions = state.QueueSubscriptions;
-            for (var i = 0; i < subscriptions.Length; i++)
-            {
-                subscriptions[i].Enqueue(in change);
-            }
-
-            state.SyncSubject?.OnNext(change);
-        }
-
-        if (listeners is not null)
-        {
-            PropertyChangeSubscription.Dispatch(listeners, in change);
-        }
+        DispatchOrQueueChange(state?.QueueSubscriptions ?? [], state?.SyncSubject, listeners, in change);
     }
 
     // Post-commit listener resolution, shared by both entry paths and performed once per write:

@@ -159,7 +159,9 @@ public class DerivedPropertyProtocolTests
     {
         // Arrange: as in WhenAttachRunsWhileRecalculationEvaluates_..., the attach takes over the request of a
         // recalculation from before the detach and publishes its answer on the attaching thread, where an observer
-        // throws. The worker's second derived property attaches after the first one.
+        // throws. The worker's second derived property attaches after the first one. The recalculation is queued
+        // under the lifecycle lock, so it publishes after the attach completed, and the observer's exception
+        // propagates from the structural write.
         var context = CreateContext();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
@@ -207,7 +209,7 @@ public class DerivedPropertyProtocolTests
         Assert.True(isAttachPaused);
         Assert.True(isRecalculationDone);
         Assert.False(recalculationGate.HasTimedOut || attachGate.HasTimedOut);
-        Assert.Null(attachException);
+        Assert.IsType<InvalidOperationException>(attachException);
         Assert.Equal(102, GetResult(machine).TryGetDerivedPropertyData()?.LastKnownValue);
         Assert.Same(data, new PropertyReference(machine.Worker, nameof(EvaluatorWorker.ObjectResult)).TryGetDerivedPropertyData()?.LastKnownValue);
     }
