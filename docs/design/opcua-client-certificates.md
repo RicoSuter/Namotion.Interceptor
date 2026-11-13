@@ -1,67 +1,94 @@
 # OPC UA client certificates and server trust
 
-Design for issue #968. The OPC UA client cannot connect with `UseSecurity = true`, and once it can, it must not trust every server.
+Design for issue #968. The OPC UA client cannot connect with security, and once it can, it must not trust every server. All references to the OPC Foundation SDK are to version 1.5.378.145.
 
 ## Problem
 
-1. **The client never loads its own application certificate.** With security off none is needed. With security on, the SDK looks up the client certificate with its private key through `SecurityConfiguration.FindApplicationCertificateAsync`, finds none, and every connect attempt fails with "ApplicationCertificate for the security profile ... cannot be found". A certificate file in `{CertificateStoreBasePath}/own` does not help: the SDK's directory store enumerates certificates without private keys, so only a certificate the application loaded itself is found. The server loads its certificate through `ApplicationInstance.CheckApplicationInstanceCertificatesAsync`; the client never calls an equivalent.
-2. **The client accepts every server certificate.** `OpcUaClientConfiguration.CreateApplicationInstanceAsync` hardcodes `AutoAcceptUntrustedCertificates = true` with no option, while the server exposes the same setting with a default of false. A secured client connection would be encrypted without authenticating the server.
-3. **The docs say nothing about certificates.** They recommend `UseSecurity = true` for production without describing where the client certificate lives or how either side comes to trust the other.
-
-Username identities from `CreateUserIdentity` do not need a client certificate; they encrypt the token with the server's certificate.
+1. **The client never loads its own application certificate.** The SDK looks up the client certificate with its private key through `SecurityConfiguration.FindApplicationCertificateAsync`, finds none, and every connect to a secured endpoint fails with "ApplicationCertificate for the security profile ... cannot be found" (`DefaultSessionFactory.cs:255`, `Session.cs:4566`). A certificate file in the store does not help: the directory store enumerates certificates without private keys (`DirectoryCertificateStore.cs:189-198`), so only a certificate the application loaded itself is found. The server loads its certificate through `ApplicationInstance.CheckApplicationInstanceCertificatesAsync`; the client never calls an equivalent.
+2. **The client accepts every server certificate.** `CreateApplicationInstanceAsync` hardcodes `AutoAcceptUntrustedCertificates = true`, while the server exposes the setting with a default of false. A secured connection would be encrypted without authenticating the server.
+3. **`UseSecurity = true` silently downgrades.** Endpoint selection falls back to the first endpoint with a matching scheme, whatever its security (`CoreClientUtils.cs:338-342`), so against a server without secured endpoints the client connects without security.
+4. **The server regenerates its certificate on every start.** `CleanCertificateStore` defaults to true and deletes the server's own store at startup, so a client that trusts the server loses that trust on every restart. When client and server share a store path, it also deletes the client's private key.
+5. **The docs say nothing about certificates,** and their example for tightening trust in an override has no effect: the validator copies `AutoAcceptUntrustedCertificates` only during `CertificateValidator.UpdateAsync` (`CertificateValidator.cs:221-224`), which the base method has already called.
 
 ## Decisions
 
+### Security requirement: `RequireSecurity`
+
+- `UseSecurity` is renamed to `RequireSecurity`, default `false`.
+- `true`: the client connects only to a signed or encrypted endpoint and fails with a clear message when the server offers none. No downgrade.
+- `false`: an unsecured endpoint is preferred, and a secured one is used when the server offers nothing else.
+
 ### Server trust: strict by default
 
-- `OpcUaClientConfiguration.AutoAcceptUntrustedCertificates`, default `false`, replaces the hardcoded `true` and is passed to `SecurityConfiguration.AutoAcceptUntrustedCertificates`. Name and meaning mirror `OpcUaServerConfiguration.AutoAcceptUntrustedCertificates`.
-- It governs every server certificate check the SDK makes: on secured channels, and before encrypting a username token over an unsecured channel (`Session.cs`, `requireEncryption` for the identity policy). Anonymous clients on unsecured channels are not checked by the SDK and are unaffected.
-- A rejected server certificate is written to `{CertificateStoreBasePath}/rejected` by the SDK. Moving it to `{CertificateStoreBasePath}/trusted`, or provisioning that store up front, makes the client trust the server.
+- `OpcUaClientConfiguration.AutoAcceptUntrustedCertificates`, default `false`, replaces the hardcoded `true`. Name and meaning mirror `OpcUaServerConfiguration.AutoAcceptUntrustedCertificates`.
+- The SDK checks the server certificate when it opens a secured channel and on every renewal of it (`UaSCBinaryChannel.Asymmetric.cs:1013-1025`), when it opens a session whose channel or identity policy requires encryption (`Session.cs:1097-1131`, `3817-3824`), and before encrypting a non-anonymous identity token (`Session.cs:1457-1467`). Affected: every secured connection, username and certificate identities over unsecured channels, and anonymous clients whose server names a security policy on its anonymous token policy. Because channels renew about hourly, untrusting a server or the expiry of its certificate drops a live connection.
+- A rejected server certificate is written to `{CertificateStoreBasePath}/rejected/certs` (the SDK keeps the last five). Moving it to `{CertificateStoreBasePath}/trusted/certs`, or provisioning that store up front, makes the client trust the server.
+- The client gets an issuer store, `{CertificateStoreBasePath}/issuer`, so a server certificate issued by a CA can be trusted through its CA certificate.
+- `AddAppCertToTrustedStore` becomes `false` on the client, as on the server. The client has no reason to trust its own certificate, and with a shared store it would make an in-process server trust the client implicitly.
 
-### Client certificate: created on first use, configurable
+### Client certificate
 
-- `OpcUaClientConfiguration.AutoCreateApplicationCertificate`, default `true`, only matters when `UseSecurity` is on.
-  - On: the client calls `ApplicationInstance.CheckApplicationInstanceCertificatesAsync(silent: true)`, which loads the certificate from `{CertificateStoreBasePath}/own` or creates a self-signed one there.
-  - Off: the client calls `ApplicationCertificate.LoadPrivateKeyExAsync` and fails when no certificate is found, with a message naming the store path and this option.
-- Default on because creating a certificate grants nothing: the server still has to trust it, and the server already creates its own certificate the same way. Off suits managed PKI, where a missing certificate must fail loudly, and containers without a persistent certificate store, where each restart would create a new certificate the server has to trust again.
-- With `UseSecurity` off, no certificate is created, loaded or written.
+- The certificate step runs after endpoint selection, whenever the selected endpoint is signed or encrypted. Discovery needs no client certificate. With an unsecured endpoint nothing is created, loaded or written.
+- `AutoCreateApplicationCertificate`, default `true`. Both modes call `ApplicationInstance.CheckApplicationInstanceCertificatesAsync(silent: true)`, which loads the certificate from `{CertificateStoreBasePath}/own` and validates its application URI and key size.
+  - On: a missing certificate is created, self-signed.
+  - Off: `ApplicationInstance.DisableCertificateAutoCreation` is set, so a missing certificate fails with an SDK error naming the store. An existing certificate whose key cannot be read fails with "Cannot access private key", distinct from a missing one.
+- `ApplicationUri`, default `null`, which keeps today's `urn:{host}:Namotion.Interceptor:{ApplicationName}`. A host name change, for example on every recreate of a container, otherwise makes the SDK reject the existing certificate on every attempt without replacing it (`ApplicationInstance.cs:684-708`). A provisioned certificate must carry this URI and the subject `CN={ApplicationName}, O=Namotion`; the docs state both.
+- `ApplicationCertificateLifetimeInMonths`, default `12`, passed to the certificate creation.
+- Renewal: when `AutoCreateApplicationCertificate` is on and the loaded certificate is self-signed, a certificate with fewer than 30 days left or already expired is replaced by a new one, logged as a warning because the server has to trust the new certificate. A CA-issued certificate is never renewed, and with auto-creation off nothing is ever replaced. Without renewal the SDK keeps loading an expired certificate and only logs a warning (`ApplicationInstance.cs:600-617`).
+- A certificate that is already loaded with its private key, for example set by a `CreateApplicationInstanceAsync` override, is not loaded, renewed or replaced. This guard is load-bearing: loading overwrites the in-memory certificate, even with null (`CertificateIdentifier.cs:211-217`).
+
+### Loading once, serialized
+
+- Each client source loads the certificate on its first secured connect and keeps it. Later connect attempts and manual reconnects set it on the new application instance, so the guard applies and the store is not read again. The renewal check runs on each attempt against the kept certificate, without disk access. A certificate replaced on disk by someone else is picked up after a restart of the source.
+- Loading, creating and renewing run under a process-wide lock keyed by the full path of the own store, so two sources sharing a store and an application name cannot create, and then delete, each other's certificates on first run. Separate processes sharing a store should provision the certificate up front or use distinct names or paths; the docs say so.
+- SDK reconnects reuse the session's loaded certificate and never run the step.
 
 ### Customization
 
-- `CreateApplicationInstanceAsync` stays virtual for full control over the SDK configuration.
-- New virtual method `OpcUaClientConfiguration.LoadApplicationCertificateAsync(ApplicationInstance application, CancellationToken cancellationToken)`. Contract: on return, the application certificate is loaded with its private key. The default implementation does what `AutoCreateApplicationCertificate` selects. Override it to load with a password provider, from another store type or from a hardware security module.
-- The default implementation does nothing when the configured application certificate is already loaded with its private key, so an override of `CreateApplicationInstanceAsync` that sets it is not replaced.
+- `CreateApplicationInstanceAsync` stays virtual and is the one extension point.
+  - Password-protected keys: set `SecurityConfiguration.CertificatePasswordProvider`.
+  - Other store types such as the Windows certificate store: set the store type of the application certificate identifier.
+  - Hardware security modules or any external source: set `ApplicationCertificate.Certificate` with its private key; the guard then leaves it alone.
+- An override that changes security settings after calling the base must call `config.CertificateValidator.UpdateAsync(config)` again; the docs example is fixed accordingly.
 
-### Where the step runs
+### Server
 
-- In `SessionManager.CreateSessionAsync`, before endpoint discovery, when `UseSecurity` is on. That method receives the application instance and the configuration for the initial connect and for every manual reconnect.
-- Not inside `CreateApplicationInstanceAsync`, so overriding that method does not silently drop the certificate step.
-- SDK reconnects reuse the session's already loaded certificate and do not run the step.
-- A failure goes through the existing connect failure path: logged, reported in `Diagnostics.LastError`, retried after `ReconnectInterval`.
+- `OpcUaServerConfiguration.CleanCertificateStore` defaults to `false`, so a restart keeps the server certificate and clients keep trusting it.
 
-## Breaking change
+### Errors
 
-Clients with security off that log in with a username now validate the server certificate before sending the token. Migration: add the server certificate to `{CertificateStoreBasePath}/trusted`, or set `AutoAcceptUntrustedCertificates = true` to keep the previous behavior. Clients with `UseSecurity = true` could not connect before, so nothing relying on them changes.
+- A certificate step failure and a rejected server certificate are wrapped in a message naming the store paths (with `certs/`), the thumbprint and the option to change, like the existing discovery wrapper in `SessionManager.CreateSessionAsync`.
+- They go through the existing failure paths: a failed initial connect retries after `RetryTime`, a failed manual reconnect on the next health check tick, and both are reported in `Diagnostics.LastError`.
 
-## HomeBlaze
+## Breaking changes
 
-The HomeBlaze OPC UA client builds `CreateUserIdentity` from a configured username and password over an unsecured channel, so it is affected. It gets a new `[Configuration]` property `AcceptUntrustedServerCertificates`, default `false`, passed to `AutoAcceptUntrustedCertificates`. Users with a login either trust the server certificate in the client's certificate store or enable the setting.
+- `UseSecurity` is renamed to `RequireSecurity`, and `true` now fails instead of downgrading when the server has no secured endpoint. Migration: rename the property. `UseSecurity = true` could not connect before, so no working setup relied on it.
+- The client validates server certificates by default. Migration: trust the server certificate through `{CertificateStoreBasePath}/trusted/certs`, or set `AutoAcceptUntrustedCertificates = true` for the previous behavior.
+- The server keeps its certificate across restarts. Migration: set `CleanCertificateStore = true` for the previous behavior.
 
 ## Tests
 
 - Unit, against a temporary certificate store:
-  - `AutoAcceptUntrustedCertificates` reaches the SDK security configuration.
-  - With auto-create on, the first call creates a certificate and loads it with its private key; a second call reuses it.
-  - With auto-create off and no certificate, the step fails with the message naming the store path and the option.
-  - A certificate already loaded with its private key is not replaced.
-  - With `UseSecurity` off, nothing is written to the store.
+  - `AutoAcceptUntrustedCertificates` reaches `CertificateValidator.AutoAcceptUntrustedCertificates`.
+  - Auto-create on: the first load creates a certificate with the configured lifetime and loads it with its private key; a second source reuses it.
+  - Auto-create off: a missing certificate fails with the store named; an unreadable key fails differently.
+  - A certificate with another application URI fails as described, and passes once `ApplicationUri` matches.
+  - A self-signed certificate close to expiry is renewed; a CA-issued one is not; with auto-creation off nothing is renewed.
+  - An already loaded certificate is not replaced, on the first connect and on a manual reconnect.
+  - Two sources creating concurrently end with one certificate.
+  - A password-protected certificate loads through `CertificatePasswordProvider`.
+  - With an unsecured endpoint, nothing is written to the store.
 - Integration:
-  - A secure connection works with the library's own certificate step. The test client's certificate-loading subclass is removed.
-  - With strict trust, an untrusted server is rejected: the failure shows in `Diagnostics.LastError` and the server certificate lands in `rejected`; after it is moved to `trusted`, the client connects.
+  - A secured connection works with the library's own certificate step; the test client's certificate-loading subclass is removed.
+  - With strict trust, an untrusted server is rejected, the failure shows in `Diagnostics.LastError` and the certificate appears in `rejected/certs` (polled, the write is asynchronous); after moving it to `trusted/certs`, the client connects. The test uses a short `RetryTime`.
+  - A username login over an unsecured channel is rejected with strict trust and works once the server is trusted. The server advertises a username policy, and the client checks the certificate before sending the token.
+  - `RequireSecurity = true` against a server with only unsecured endpoints fails; `false` against a server with only secured endpoints connects.
+  - A server restart keeps its certificate, and a strict client reconnects without trusting it again.
   - The subscription transfer test sets `AutoAcceptUntrustedCertificates = true`, since it tests transfers, not trust.
-- Not covered by a test: username logins over unsecured channels, because the test server does not validate usernames. Covered by reading the SDK's `Session` code.
+- The public API snapshot is updated.
 
 ## Docs
 
-- `docs/connectors-opcua-client.md`, Transport Security: where the client certificate lives and when it is created, the trust workflow on both sides through the `rejected` and `trusted` stores, both options, both virtual methods, and the migration note.
-- The client configuration table: the two new options.
+- `docs/connectors-opcua-client.md`, Transport Security: `RequireSecurity`, where the client certificate lives, its subject and application URI, creation and renewal, the trust workflow on both sides through the `rejected`, `trusted` and `issuer` stores, the customization recipes, separate processes sharing a store, and the migration notes.
+- The client configuration table: the new and renamed options.
+- `docs/connectors-opcua-server.md`: the new `CleanCertificateStore` default.
