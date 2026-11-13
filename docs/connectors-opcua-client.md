@@ -196,41 +196,44 @@ var config = new OpcUaClientConfiguration
 };
 ```
 
-#### Endpoint Selection
-
-With `MinimumSecurityMode = None`, the default, the client prefers an unsecured endpoint and uses a secured one only when the server offers nothing else. With `Sign` it connects only to a signed or encrypted endpoint, and with `SignAndEncrypt` only to an encrypted one. Among secured endpoints it picks the most secure one whose security policy it supports: Basic256Sha256, Aes128_Sha256_RsaOaep and Aes256_Sha256_RsaPss with the default RSA certificate. When no endpoint qualifies, connecting fails with a message that lists the security modes and policies the server offers.
-
-#### Client Certificate
-
-A secured connection needs a client certificate with its private key in `{CertificateStoreBasePath}/own`; an unsecured connection needs none and writes nothing to the stores. With `AutoCreateApplicationCertificate = true`, the default, the client creates a self-signed certificate there on its first secured connect, valid for `ApplicationCertificateLifetimeInMonths`. With `false` a missing certificate fails the connection.
-
-To provision a certificate:
-
-- Put the certificate in `own/certs/{name}.der` and its private key in `own/private/{name}.pfx` (or `.pem`), with the same base name. A password-protected key needs `CertificatePasswordProvider`, see [Custom Application Configuration](#custom-application-configuration).
-- The certificate needs the subject `CN={ApplicationName}, O=Namotion` and the application URI `urn:{host name}:Namotion.Interceptor:{ApplicationName}`, or the value of `ApplicationUri`.
-- For a certificate issued by a certificate authority, put the authority's certificates in `{CertificateStoreBasePath}/issuer/certs`, otherwise loading fails because the chain is incomplete.
-
-The default application URI contains the host name, so a certificate created on a host that is later renamed, such as a recreated container, is rejected on every connect. Set `ApplicationUri` to a fixed value where the host name changes.
-
-#### Certificate Renewal
-
-Within 30 days of expiry, each secured connect logs a warning with the certificate's thumbprint, expiry and store. Once a self-signed certificate has expired and `AutoCreateApplicationCertificate` is on, the client deletes it with its private key, creates a new one and logs a warning, because servers that trusted the old certificate have to trust the new one. This includes a provisioned self-signed certificate. A certificate issued by a certificate authority, any certificate with `AutoCreateApplicationCertificate = false`, and a certificate the configuration provides itself (see [Custom Application Configuration](#custom-application-configuration)) are never replaced.
-
-The check runs when the client creates a session itself, on the initial connect and on its manual reconnects (see [Connection Loss Recovery](#connection-loss-recovery)), not on a timer. A connection that outlives the certificate fails once the server rejects it, and the next connect replaces it. A failed load or replacement fails the connection attempt, which is retried.
-
-#### Trust
-
-**Trusting the server.** The client checks the server certificate on secured connections, before it encrypts a username or certificate login on an unsecured connection, and for an anonymous login when the server's anonymous token policy names a security policy. With `AutoAcceptUntrustedCertificates = false`, the default, an unknown server certificate is rejected and written to `{CertificateStoreBasePath}/rejected/certs`; move it to `trusted/certs` to trust the server, or provision that folder up front. For a server certificate issued by a certificate authority, put the issuing authorities' certificates in `issuer/certs` and the root authority's certificate in `trusted/certs`. The check repeats whenever the secure channel renews, about hourly, so removing a trusted certificate or an expiring server certificate drops a live connection.
-
-**Trusting the client.** The server has to trust the client certificate in the same way, through its own trusted store. The [server of this library](connectors-opcua-server.md#certificates) uses the same folder layout under its own `CertificateStoreBasePath`.
+With `MinimumSecurityMode = None`, the default, the client prefers an unsecured endpoint and uses a secured one only when the server offers nothing else; `Sign` requires signing and `SignAndEncrypt` encryption. Among secured endpoints it picks the most secure one with a supported policy (Basic256Sha256, Aes128_Sha256_RsaOaep or Aes256_Sha256_RsaPss with the default RSA certificate). If none qualifies, connecting fails and the error lists the server's endpoints.
 
 #### Certificate Stores
 
-All stores live under `CertificateStoreBasePath`, which defaults to `pki` for the client and the server alike. A client and a server in one process then share the `own`, `trusted`, `issuer` and `rejected` folders, so a certificate trusted for one is trusted for the other, and the server's `CleanCertificateStore` deletes the client's certificate too. Give each its own base path. Several processes sharing one store should use certificates that are never replaced, or different application names or base paths, because the client serializes access to a store only within one process.
+The client and the [server](connectors-opcua-server.md#certificates) use these folders under `CertificateStoreBasePath`:
+
+| Folder | Content |
+|---|---|
+| `own` | Certificate in `certs/{name}.der`, private key in `private/{name}.pfx` or `.pem`, same base name |
+| `trusted/certs` | Trusted peer certificates, and the root authority certificate of a CA-issued peer |
+| `issuer/certs` | Issuing authorities of a CA-issued certificate, own or peer; without them its chain is incomplete |
+| `rejected/certs` | Untrusted peer certificates |
+
+Both default to `pki`, so a client and a server in one process share their stores: a certificate trusted for one is trusted for the other, and the server's `CleanCertificateStore` deletes the client's certificate. Give each its own base path. Processes sharing a store need different application names or certificates that are never replaced.
+
+#### Client Certificate
+
+Only secured connections need one. With `AutoCreateApplicationCertificate = true`, the default, the client creates a self-signed certificate on its first secured connect; otherwise a missing certificate fails the connection. A provisioned certificate must carry the application URI `urn:{host name}:Namotion.Interceptor:{ApplicationName}` or the value of `ApplicationUri`, and should have the subject `CN={ApplicationName}, O=Namotion`. A password-protected key needs a `CertificatePasswordProvider` (see [Custom Application Configuration](#custom-application-configuration)).
+
+The default application URI contains the host name, so after a rename, such as a recreated container, the stored certificate fails every connect. Set `ApplicationUri` where the host name can change.
+
+#### Certificate Expiry
+
+When the client or the server loads its certificate:
+
+- within 30 days of expiry, it logs a warning;
+- an expired self-signed certificate, created or provisioned, is replaced with a warning, and peers have to trust the new one;
+- a CA-issued certificate, any certificate while automatic creation is off, and one an override provides (see [Custom Application Configuration](#custom-application-configuration)) are never replaced.
+
+The client loads it each time it creates a secured session itself, on the initial connect and on manual reconnects (see [Connection Loss Recovery](#connection-loss-recovery)). A session that outlives the certificate fails once the server rejects it, and the next connect replaces it.
+
+#### Trust
+
+With `AutoAcceptUntrustedCertificates = false`, the default, an unknown server certificate is rejected and written to `rejected/certs`; move it to `trusted/certs`, or provision it there. The check runs on secured connections, and on unsecured ones before a login is encrypted: always for username and certificate logins, and for anonymous logins when the server's anonymous token policy names a security policy. The server trusts the client certificate the same way through its own stores.
 
 #### Errors
 
-A failed connection attempt is reported in `Diagnostics.LastError` (see [Diagnostics](#diagnostics)) and retried. A certificate error says which certificate is at fault and how to resolve it, naming the folders or the option involved. This covers a server certificate that is untrusted, expired or has an incomplete issuer chain, a client certificate the server rejects, and a client certificate that cannot be loaded.
+A failed connection attempt, including a failed certificate load, is reported in `Diagnostics.LastError` (see [Diagnostics](#diagnostics)) and retried. Certificate errors name the certificate at fault and the folder or option that resolves it.
 
 ### Authentication
 
@@ -294,7 +297,7 @@ public class MyOpcUaClientConfiguration : OpcUaClientConfiguration
         config.SecurityConfiguration.CertificatePasswordProvider = new CertificatePasswordProvider(Encoding.UTF8.GetBytes(CertificatePassword));
         config.TransportQuotas.MaxMessageSize = 64_000_000;
 
-        // The validator reads security settings only when UpdateAsync runs, so call it again after changing them.
+        // Changed security settings take effect only through UpdateAsync.
         await config.CertificateValidator.UpdateAsync(config);
 
         return application;
@@ -302,7 +305,7 @@ public class MyOpcUaClientConfiguration : OpcUaClientConfiguration
 }
 ```
 
-To provide the client certificate yourself, for example from a hardware security module, set `config.SecurityConfiguration.ApplicationCertificate.Certificate` with its private key. Switching the application certificate to another store type, such as the Windows certificate store, and calling `CertificateValidator.UpdateAsync` again has the same effect, because the SDK then loads the certificate with its private key. The client uses a provided certificate as is and never validates, renews or replaces it.
+A certificate the override sets on `SecurityConfiguration.ApplicationCertificate.Certificate` with its private key, for example from a hardware security module, is used as is and never validated or replaced. So is one that `UpdateAsync` loads with its key from another store type, such as the Windows certificate store.
 
 ## Monitoring & Subscriptions
 

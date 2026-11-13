@@ -123,13 +123,13 @@ The server supports multiple security policies out of the box:
 
 ### Certificates
 
-The server keeps its application certificate in `{CertificateStoreBasePath}/own` across restarts and creates a self-signed one there when none exists, valid for 12 months. Set `CleanCertificateStore = true` to create a new certificate on every start instead; clients then have to trust it again after each restart.
+The server follows the client's [store layout](connectors-opcua-client.md#certificate-stores) and [expiry rules](connectors-opcua-client.md#certificate-expiry), with these differences:
 
-On each start, the server logs a warning when its certificate expires within 30 days, and replaces an expired self-signed certificate with a warning; clients that trusted the old one have to trust the new one. A certificate issued by a certificate authority is never replaced, nor is any certificate when an override sets `DisableCertificateAutoCreation` or provides the certificate with its private key. A server running past the expiry keeps the expired certificate until its next start, and clients reject it.
-
-A kept certificate must match the server's application URI and the host of `BaseAddress`, where `localhost` stands for the host name. Both defaults contain the host name, so when it changes, as in a recreated container, the server rejects its own certificate and fails to start. Give the host a stable name, or set `ApplicationUri` together with an explicit host in `BaseAddress`. To start over, delete the certificate from `own/certs` and its key from `own/private`.
-
-To provision a certificate or let the server trust a client, use the folder layout described for the client in [Client Certificate](connectors-opcua-client.md#client-certificate) and [Trust](connectors-opcua-client.md#trust): with `AutoAcceptUntrustedCertificates = false`, the default, a rejected client certificate is written to `rejected/certs`, and moving it to `trusted/certs` lets the client connect. A client and a server in one process share their stores with the default base path, see [Certificate Stores](connectors-opcua-client.md#certificate-stores).
+- On each start it loads its certificate from `own`, or creates a self-signed one valid for 12 months. It keeps it across restarts unless `CleanCertificateStore` is set, and clients have to trust each new one.
+- An expired certificate is replaced only at the next start; until then clients reject it. An override that sets `DisableCertificateAutoCreation` turns off creation and replacement.
+- A stored certificate must match the application URI and the host of `BaseAddress`, where `localhost` stands for the host name. Both defaults contain the host name, so after a rename, such as a recreated container, the server fails to start. Keep the host name stable, or set `ApplicationUri` and an explicit host in `BaseAddress`. To start over, delete the certificate from `own/certs` and its key from `own/private`.
+- With `AutoAcceptUntrustedCertificates = false`, the default, an untrusted client certificate on a secured connection is written to `rejected/certs`; moving it to `trusted/certs` lets the client connect.
+- A failed start is logged, reported in `Diagnostics.LastError` and retried.
 
 ### User Authentication
 
@@ -156,11 +156,10 @@ public class MyServerConfiguration : OpcUaServerConfiguration
 
         var config = application.ApplicationConfiguration;
 
-        // Tighten security
-        // Also applies to the server's own certificate: delete a smaller existing one from {CertificateStoreBasePath}/own once.
+        // Tighten security; a smaller existing certificate in {CertificateStoreBasePath}/own then fails the start until deleted.
         config.SecurityConfiguration.MinimumCertificateKeySize = 4096;
 
-        // The validator reads security settings only when UpdateAsync runs, so call it again after changing them.
+        // Changed security settings take effect only through UpdateAsync.
         await config.CertificateValidator.UpdateAsync(config);
 
         // Adjust transport limits
