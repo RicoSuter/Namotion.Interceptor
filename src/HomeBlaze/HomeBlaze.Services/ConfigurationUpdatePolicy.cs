@@ -1,7 +1,8 @@
+using System.Collections.Concurrent;
+using System.Reflection;
 using System.Text.Json;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Services;
 
@@ -10,6 +11,8 @@ namespace HomeBlaze.Services;
 /// </summary>
 public static class ConfigurationUpdatePolicy
 {
+    private static readonly ConcurrentDictionary<Type, string[]> RecreateOnChangeNames = new();
+
     /// <summary>
     /// Gets whether <paramref name="existing"/> can take <paramref name="json"/> in place: it has the type
     /// <paramref name="type"/>, no key of the configuration applied last is missing from <paramref name="json"/>, and
@@ -18,7 +21,10 @@ public static class ConfigurationUpdatePolicy
     /// <param name="existing">The subject that took the configuration applied last, or null.</param>
     /// <param name="type">The type that <paramref name="json"/> describes.</param>
     /// <param name="json">The new configuration, a JSON object.</param>
-    /// <param name="appliedJson">The configuration applied last, or null when it is not known.</param>
+    /// <param name="appliedJson">
+    /// The configuration applied last, or null when it is not known. The <see cref="ConfigurationAttribute.RecreateOnChange"/>
+    /// comparison needs it: without it only the keys are checked.
+    /// </param>
     /// <param name="appliedKeys">The top-level keys applied last, or null to take those of <paramref name="appliedJson"/>.</param>
     /// <param name="naming">The naming of the keys of both configurations.</param>
     /// <exception cref="JsonException">A configuration is not valid JSON.</exception>
@@ -64,8 +70,9 @@ public static class ConfigurationUpdatePolicy
             return true;
         }
 
-        foreach (var name in GetRecreateOnChangeNames(existing, naming))
+        foreach (var declaredName in GetRecreateOnChangeNames(type))
         {
+            var name = ConfigurableSubjectSerializer.GetJsonName(declaredName, naming);
             var hasValue = root.TryGetProperty(name, out var value);
             var hadValue = appliedRoot.TryGetProperty(name, out var appliedValue);
             if (hasValue != hadValue || (hasValue && !JsonElement.DeepEquals(value, appliedValue)))
@@ -84,12 +91,11 @@ public static class ConfigurationUpdatePolicy
                 .Where(name => name != ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName)
             : [];
 
-    // Read from the registry, which holds the attributes of every property of an attached subject without reflection.
-    private static IEnumerable<string> GetRecreateOnChangeNames(IInterceptorSubject subject, ConfigurationNaming naming) =>
-        subject.TryGetRegisteredSubject() is { } registered
-            ? registered.Properties
-                .Where(property => !property.IsAttribute &&
-                    property.ReflectionAttributes.OfType<ConfigurationAttribute>().Any(attribute => attribute.RecreateOnChange))
-                .Select(property => naming == ConfigurationNaming.JsonProperty ? JsonNamingPolicy.CamelCase.ConvertName(property.Name) : property.Name)
-            : [];
+    // Read from the type and not the registry, so the answer does not depend on whether the subject is attached.
+    private static string[] GetRecreateOnChangeNames(Type type) =>
+        RecreateOnChangeNames.GetOrAdd(type, static type => type
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(property => property.GetCustomAttribute<ConfigurationAttribute>(true)?.RecreateOnChange == true)
+            .Select(property => property.Name)
+            .ToArray());
 }

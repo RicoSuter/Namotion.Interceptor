@@ -1,11 +1,8 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services.Tests;
 
@@ -20,7 +17,7 @@ public class ConfigurationUpdatePolicyTests
         var subject = CreateAttachedSubject();
 
         // Act
-        var result = ConfigurationUpdatePolicy.CanUpdateInPlace(subject, typeof(string), Json("a", "round"), Json("a", "round"), null, ConfigurationNaming.JsonProperty);
+        var result = ConfigurationUpdatePolicy.CanUpdateInPlace(subject, typeof(string), Json("a", "opcua"), Json("a", "opcua"), null, ConfigurationNaming.JsonProperty);
 
         // Assert
         Assert.False(result);
@@ -33,7 +30,7 @@ public class ConfigurationUpdatePolicyTests
         var subject = CreateAttachedSubject();
 
         // Act
-        var result = ConfigurationUpdatePolicy.CanUpdateInPlace(subject, typeof(PolicyTestSubject), Json("a", "square"), null, null, ConfigurationNaming.JsonProperty);
+        var result = ConfigurationUpdatePolicy.CanUpdateInPlace(subject, typeof(PolicyTestSubject), Json("a", "modbus"), null, null, ConfigurationNaming.JsonProperty);
 
         // Assert
         Assert.True(result);
@@ -46,7 +43,7 @@ public class ConfigurationUpdatePolicyTests
         var subject = CreateAttachedSubject();
 
         // Act
-        var result = ConfigurationUpdatePolicy.CanUpdateInPlace(subject, typeof(PolicyTestSubject), $$"""{ "$type": "{{Type}}", "shape": "round" }""", Json("a", "round"), null, ConfigurationNaming.JsonProperty);
+        var result = ConfigurationUpdatePolicy.CanUpdateInPlace(subject, typeof(PolicyTestSubject), $$"""{ "$type": "{{Type}}", "connectionMode": "opcua" }""", Json("a", "opcua"), null, ConfigurationNaming.JsonProperty);
 
         // Assert
         Assert.False(result);
@@ -59,7 +56,7 @@ public class ConfigurationUpdatePolicyTests
         var subject = CreateAttachedSubject();
 
         // Act
-        var result = ConfigurationUpdatePolicy.CanUpdateInPlace(subject, typeof(PolicyTestSubject), Json("b", "round"), Json("a", "round"), null, ConfigurationNaming.JsonProperty);
+        var result = ConfigurationUpdatePolicy.CanUpdateInPlace(subject, typeof(PolicyTestSubject), Json("b", "opcua"), Json("a", "opcua"), null, ConfigurationNaming.JsonProperty);
 
         // Assert
         Assert.True(result);
@@ -72,7 +69,7 @@ public class ConfigurationUpdatePolicyTests
         var subject = CreateAttachedSubject();
 
         // Act
-        var result = ConfigurationUpdatePolicy.CanUpdateInPlace(subject, typeof(PolicyTestSubject), Json("a", "square"), Json("a", "round"), null, ConfigurationNaming.JsonProperty);
+        var result = ConfigurationUpdatePolicy.CanUpdateInPlace(subject, typeof(PolicyTestSubject), Json("a", "modbus"), Json("a", "opcua"), null, ConfigurationNaming.JsonProperty);
 
         // Assert
         Assert.False(result);
@@ -85,7 +82,7 @@ public class ConfigurationUpdatePolicyTests
         var subject = CreateAttachedSubject();
 
         // Act
-        var result = ConfigurationUpdatePolicy.CanUpdateInPlace(subject, typeof(PolicyTestSubject), $$"""{ "$type": "{{Type}}", "shape": "round" }""", Json("a", "round"), ["shape"], ConfigurationNaming.JsonProperty);
+        var result = ConfigurationUpdatePolicy.CanUpdateInPlace(subject, typeof(PolicyTestSubject), $$"""{ "$type": "{{Type}}", "connectionMode": "opcua" }""", Json("a", "opcua"), ["connectionMode"], ConfigurationNaming.JsonProperty);
 
         // Assert
         Assert.True(result);
@@ -99,21 +96,67 @@ public class ConfigurationUpdatePolicyTests
 
         // Act
         var result = ConfigurationUpdatePolicy.CanUpdateInPlace(subject, typeof(PolicyTestSubject),
-            $$"""{ "$type": "{{Type}}", "Name": "a", "Shape": "square" }""", $$"""{ "$type": "{{Type}}", "Name": "a", "Shape": "round" }""", null, ConfigurationNaming.CSharpProperty);
+            $$"""{ "$type": "{{Type}}", "Name": "a", "ConnectionMode": "modbus" }""", $$"""{ "$type": "{{Type}}", "Name": "a", "ConnectionMode": "opcua" }""", null, ConfigurationNaming.CSharpProperty);
 
         // Assert
         Assert.False(result);
     }
 
-    private static string Json(string name, string shape) => $$"""{ "$type": "{{Type}}", "name": "{{name}}", "shape": "{{shape}}" }""";
+    [Fact]
+    public void WhenTheSubjectIsNotRegistered_ThenARecreateOnChangeValueStillRecreatesIt()
+    {
+        // Arrange
+        var subject = new PolicyTestSubject();
+
+        // Act
+        var result = ConfigurationUpdatePolicy.CanUpdateInPlace(subject, typeof(PolicyTestSubject), Json("a", "modbus"), Json("a", "opcua"), null, ConfigurationNaming.JsonProperty);
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Fact]
+    public void WhenNoSubjectExists_ThenItIsNotUpdatedInPlace()
+    {
+        // Act
+        var result = ConfigurationUpdatePolicy.CanUpdateInPlace(null, typeof(PolicyTestSubject), Json("a", "opcua"), Json("a", "opcua"), null, ConfigurationNaming.JsonProperty);
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Fact]
+    public void WhenARecreateOnChangeValueIsAdded_ThenTheSubjectIsRecreated()
+    {
+        // Arrange
+        var subject = new PolicyTestSubject();
+
+        // Act
+        var result = ConfigurationUpdatePolicy.CanUpdateInPlace(subject, typeof(PolicyTestSubject), Json("a", "opcua"), $$"""{ "$type": "{{Type}}", "name": "a" }""", null, ConfigurationNaming.JsonProperty);
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Fact]
+    public void WhenOnlyAppliedKeysAreKnown_ThenOnlyTheKeysAreChecked()
+    {
+        // Arrange
+        var subject = new PolicyTestSubject();
+
+        // Act
+        var result = ConfigurationUpdatePolicy.CanUpdateInPlace(subject, typeof(PolicyTestSubject), Json("a", "modbus"), null, ["name", "connectionMode"], ConfigurationNaming.JsonProperty);
+
+        // Assert
+        Assert.True(result);
+    }
+
+    private static string Json(string name, string connectionMode) => $$"""{ "$type": "{{Type}}", "name": "{{name}}", "connectionMode": "{{connectionMode}}" }""";
 
     private static PolicyTestSubject CreateAttachedSubject()
     {
         var context = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithRegistry()
-            .WithLifecycle()
-            .WithService<IPropertyLifecycleHandler>(() => new PropertyAttributeInitializer(), handler => handler is PropertyAttributeInitializer);
+            .WithRegistry();
         return new PolicyTestSubject(context);
     }
 }
@@ -130,7 +173,7 @@ public partial class PolicyTestSubject : IConfigurable
     public partial string Name { get; set; }
 
     [Configuration(RecreateOnChange = true)]
-    public partial string? Shape { get; set; }
+    public partial string? ConnectionMode { get; set; }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
