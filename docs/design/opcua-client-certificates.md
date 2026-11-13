@@ -39,8 +39,9 @@ Design for issue #968. The OPC UA client cannot connect with security, and once 
 
 ### Loading once, serialized
 
-- Each client source loads the certificate on its first secured connect and keeps it. Later connect attempts and manual reconnects set it on the new application instance, so the guard applies and the store is not read again. The renewal check runs on each attempt against the kept certificate, without disk access. A certificate replaced on disk by someone else is picked up after a restart of the source.
+- Each client source loads the certificate on its first secured connect and keeps it. Later connect attempts and manual reconnects set it on the new application instance, so the guard applies and the store is not read again. The renewal check runs on each attempt against the kept certificate, without disk access while the certificate is outside the renewal window; inside it, each attempt retries the renewal under the lock. A certificate replaced on disk by someone else is picked up after a restart of the source.
 - Loading, creating and renewing run under a process-wide lock keyed by the full path of the own store, so two sources sharing a store and an application name cannot create, and then delete, each other's certificates on first run. Separate processes sharing a store should provision the certificate up front or use distinct names or paths; the docs say so.
+- When loading or renewing fails while the current certificate has not expired, it stays in use, the error is logged and the next connect retries; once the certificate has expired, the failure propagates.
 - SDK reconnects reuse the session's loaded certificate and never run the step.
 
 ### Customization
@@ -74,6 +75,9 @@ Design for issue #968. The OPC UA client cannot connect with security, and once 
   - Auto-create off: a missing certificate fails with the store named; an unreadable key fails differently.
   - A certificate with another application URI fails as described, and passes once `ApplicationUri` matches.
   - A self-signed certificate close to expiry is renewed; a CA-issued one is not; with auto-creation off nothing is renewed.
+  - A failed renewal keeps the valid certificate, and the next attempt renews it.
+  - A damaged store keeps the loaded valid certificate.
+  - A failed renewal of an expired certificate fails.
   - An already loaded certificate is not replaced, on the first connect and on a manual reconnect.
   - Two sources creating concurrently end with one certificate.
   - A password-protected certificate loads through `CertificatePasswordProvider`.

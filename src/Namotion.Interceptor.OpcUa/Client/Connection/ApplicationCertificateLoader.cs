@@ -33,8 +33,8 @@ internal sealed class ApplicationCertificateLoader
     /// <summary>
     /// Ensures the application certificate of <paramref name="application"/> is loaded with its private key.
     /// A certificate already set with its private key is left as is. Renewing a self-signed certificate deletes
-    /// the old certificate and its private key from the own store. When loading or renewing fails while the
-    /// certificate loaded before has not expired, that certificate is kept and the error is logged.
+    /// the old certificate and its private key from the own store. When loading or renewing fails while the current
+    /// certificate has not expired, it stays in use, the error is logged and the next call retries.
     /// </summary>
     /// <exception cref="ServiceResultException">The SDK found no usable certificate and did not create one.</exception>
     /// <exception cref="InvalidOperationException">The store path is not set or no certificate with a private key was loaded.</exception>
@@ -66,7 +66,7 @@ internal sealed class ApplicationCertificateLoader
             {
                 certificate = await LoadOrCreateAsync(application, configuration, cancellationToken).ConfigureAwait(false);
             }
-            catch (Exception exception) when (exception is not OperationCanceledException && loaded is not null && HasNotExpired(loaded))
+            catch (Exception exception) when (loaded is not null && CanKeep(loaded, exception, cancellationToken))
             {
                 KeepAfterFailure(identifier, loaded, exception);
                 return;
@@ -133,7 +133,7 @@ internal sealed class ApplicationCertificateLoader
             identifier.Certificate = null;
             return await LoadOrCreateAsync(application, configuration, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException && HasNotExpired(certificate))
+        catch (Exception exception) when (CanKeep(certificate, exception, cancellationToken))
         {
             KeepAfterFailure(identifier, certificate, exception);
             return certificate;
@@ -149,6 +149,12 @@ internal sealed class ApplicationCertificateLoader
 
         identifier.Certificate = certificate;
     }
+
+    // The SDK can report a cancellation as another exception type, so the token is checked too.
+    private static bool CanKeep(X509Certificate2 certificate, Exception exception, CancellationToken cancellationToken) =>
+        exception is not OperationCanceledException &&
+        !cancellationToken.IsCancellationRequested &&
+        HasNotExpired(certificate);
 
     private static bool HasNotExpired(X509Certificate2 certificate) =>
         certificate.NotAfter.ToUniversalTime() > DateTime.UtcNow;

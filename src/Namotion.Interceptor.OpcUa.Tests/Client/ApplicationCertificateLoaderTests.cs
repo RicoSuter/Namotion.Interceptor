@@ -100,12 +100,7 @@ public class ApplicationCertificateLoaderTests : IDisposable
         // Arrange
         var configuration = CreateConfiguration();
         configuration.ApplicationUri = "urn:test:client";
-        var expiring = CertificateFactory
-            .CreateCertificate("urn:test:client", configuration.ApplicationName, $"CN={configuration.ApplicationName}, O=Namotion", null)
-            .SetNotBefore(DateTime.UtcNow.AddDays(-355))
-            .SetLifeTime(TimeSpan.FromDays(365))
-            .CreateForRSA();
-        await AddToOwnStoreAsync(expiring);
+        using var expiring = await AddExpiringCertificateAsync(configuration);
         var application = await configuration.CreateApplicationInstanceAsync();
 
         // Act
@@ -123,33 +118,18 @@ public class ApplicationCertificateLoaderTests : IDisposable
     [Fact]
     public async Task WhenRenewalFails_ThenTheValidCertificateIsKeptAndRenewedOnTheNextAttempt()
     {
-        // Permission bits are Unix only, and xUnit 2 has no dynamic skip.
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
         // Arrange - a private key folder that cannot be written makes deleting the old key fail.
         var configuration = CreateConfiguration();
         configuration.ApplicationUri = "urn:test:client";
-        var expiring = await AddExpiringCertificateAsync(configuration);
+        using var expiring = await AddExpiringCertificateAsync(configuration);
         var loader = new ApplicationCertificateLoader(NullLogger.Instance);
         var first = await configuration.CreateApplicationInstanceAsync();
-        var privatePath = Path.Combine(_storePath, "own", "private");
 
-        try
+        // Act
+        if (OperatingSystem.IsWindows() || !await WithReadOnlyAsync(PrivatePath,
+            () => loader.EnsureLoadedAsync(first, configuration, CancellationToken.None)))
         {
-            if (!MakeReadOnly(privatePath))
-            {
-                return; // Running as root, which ignores permission bits.
-            }
-
-            // Act
-            await loader.EnsureLoadedAsync(first, configuration, CancellationToken.None);
-        }
-        finally
-        {
-            File.SetUnixFileMode(privatePath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            return;
         }
 
         var second = await configuration.CreateApplicationInstanceAsync();
@@ -165,36 +145,39 @@ public class ApplicationCertificateLoaderTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenRenewalFailsForAnExpiredCertificate_ThenLoadingFails()
+    {
+        // Arrange - the SDK loads its own expired certificate, so it reaches the renewal, whose delete fails.
+        var configuration = CreateConfiguration();
+        configuration.ApplicationUri = "urn:test:client";
+        using var expired = await AddExpiringCertificateAsync(configuration, ageInDays: 400);
+        var application = await configuration.CreateApplicationInstanceAsync();
+        var loader = new ApplicationCertificateLoader(NullLogger.Instance);
+
+        // Act & Assert
+        if (!OperatingSystem.IsWindows())
+        {
+            await WithReadOnlyAsync(PrivatePath,
+                () => Assert.ThrowsAsync<UnauthorizedAccessException>(() => loader.EnsureLoadedAsync(application, configuration, CancellationToken.None)));
+        }
+    }
+
+    [Fact]
     public async Task WhenTheStoreBreaksWhileTheLoadedCertificateIsValid_ThenTheLoadedCertificateIsKept()
     {
-        // Permission bits are Unix only, and xUnit 2 has no dynamic skip.
-        if (OperatingSystem.IsWindows())
+        // Arrange - a failed renewal keeps the expiring certificate loaded, then its private key disappears.
+        var configuration = CreateConfiguration();
+        configuration.ApplicationUri = "urn:test:client";
+        using var expiring = await AddExpiringCertificateAsync(configuration);
+        var loader = new ApplicationCertificateLoader(NullLogger.Instance);
+        var initial = await configuration.CreateApplicationInstanceAsync();
+        if (OperatingSystem.IsWindows() || !await WithReadOnlyAsync(PrivatePath,
+            () => loader.EnsureLoadedAsync(initial, configuration, CancellationToken.None)))
         {
             return;
         }
 
-        // Arrange - a failed renewal keeps the expiring certificate loaded, then its private key disappears.
-        var configuration = CreateConfiguration();
-        configuration.ApplicationUri = "urn:test:client";
-        var expiring = await AddExpiringCertificateAsync(configuration);
-        var loader = new ApplicationCertificateLoader(NullLogger.Instance);
-        var privatePath = Path.Combine(_storePath, "own", "private");
-
-        try
-        {
-            if (!MakeReadOnly(privatePath))
-            {
-                return; // Running as root, which ignores permission bits.
-            }
-
-            await loader.EnsureLoadedAsync(await configuration.CreateApplicationInstanceAsync(), configuration, CancellationToken.None);
-        }
-        finally
-        {
-            File.SetUnixFileMode(privatePath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
-
-        File.Delete(Assert.Single(Directory.GetFiles(privatePath)));
+        File.Delete(Assert.Single(Directory.GetFiles(PrivatePath)));
         var application = await configuration.CreateApplicationInstanceAsync();
 
         // Act
@@ -327,32 +310,49 @@ public class ApplicationCertificateLoaderTests : IDisposable
     private OpcUaClientConfiguration CreateConfiguration() =>
         ClientSourceTestFactory.CreateConfiguration(certificateStoreBasePath: _storePath);
 
-    private async Task<X509Certificate2> AddExpiringCertificateAsync(OpcUaClientConfiguration configuration)
+    private string PrivatePath => Path.Combine(_storePath, "own", "private");
+
+    private async Task<X509Certificate2> AddExpiringCertificateAsync(OpcUaClientConfiguration configuration, int ageInDays = 355)
     {
-        var expiring = CertificateFactory
+        var certificate = CertificateFactory
             .CreateCertificate(configuration.ApplicationUri, configuration.ApplicationName, $"CN={configuration.ApplicationName}, O=Namotion", null)
-            .SetNotBefore(DateTime.UtcNow.AddDays(-355))
+            .SetNotBefore(DateTime.UtcNow.AddDays(-ageInDays))
             .SetLifeTime(TimeSpan.FromDays(365))
             .CreateForRSA();
-        await AddToOwnStoreAsync(expiring);
-        return expiring;
+        await AddToOwnStoreAsync(certificate);
+        return certificate;
     }
 
+    /// <summary>
+    /// Runs <paramref name="action"/> while <paramref name="path"/> cannot be written, and restores write access afterwards.
+    /// Returns false without running it when the process can still write, for example as root. Permission bits are
+    /// Unix only and xUnit 2 has no dynamic skip, so callers return early on Windows or when this returns false.
+    /// </summary>
     [UnsupportedOSPlatform("windows")]
-    private static bool MakeReadOnly(string path)
+    private static async Task<bool> WithReadOnlyAsync(string path, Func<Task> action)
     {
         File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserExecute);
         try
         {
-            File.WriteAllText(Path.Combine(path, "probe"), string.Empty);
-        }
-        catch (UnauthorizedAccessException)
-        {
+            var probe = Path.Combine(path, "probe");
+            try
+            {
+                await File.WriteAllTextAsync(probe, string.Empty);
+                File.Delete(probe);
+                return false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Expected: the folder is read-only.
+            }
+
+            await action();
             return true;
         }
-
-        File.Delete(Path.Combine(path, "probe"));
-        return false;
+        finally
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
     }
 
     private async Task AddToOwnStoreAsync(X509Certificate2 certificate, char[]? password = null)
