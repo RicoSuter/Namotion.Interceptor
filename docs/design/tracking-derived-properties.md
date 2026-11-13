@@ -133,7 +133,7 @@ The version protocol guarantees that a write of a property an evaluation read is
 
 For every property E reads, before the value is read (the read tap runs first):
 
-- **R1**: get or create the property's `DerivedPropertyData`, followed by a full fence (`Interlocked.MemoryBarrier`) whether or not this call created it. Recording is not a hot path, and the unconditional fence keeps the proof independent of multi-copy atomicity (another evaluation may have created the data after a writer's W3).
+- **R1**: get or create the property's `DerivedPropertyData`, followed by a full fence (`Interlocked.MemoryBarrier`) whether or not this call created it. Recording is not a hot path, and the unconditional fence keeps the proof independent of multi-copy atomicity (another evaluation may have created the data after a writer's W3). A recalculation gets the data from D's last committed links when the read at the same position is of the same property, instead of looking it up: data is never replaced, so that is the stored data, as a lookup would have found it.
 - **R2**: read its `Version` with acquire semantics (`Volatile.Read`), so R3 cannot move before it.
 - **R3**: read the value (the getter continues).
 
@@ -387,7 +387,7 @@ Every link belongs to an attached derived property: D's detach removes all of D'
 | Scenario | Allocations | Cost |
 |----------|-------------|------|
 | Read outside an evaluation | Zero | One thread-static load and a null check (read tap) |
-| Read during an evaluation | Zero in steady state (pooled buffers) | Data lookup or creation, a full fence, a volatile read, and a scan of the frame for duplicates |
+| Read during an evaluation | Zero in steady state (pooled buffers) | Data lookup or creation (none when the read repeats the last committed links at its position), a full fence, a volatile read, and a scan of the frame for duplicates |
 | Write to a subject of a type without derived property data | Zero | Write depth increment and decrement, the observer call, a full fence (W2), the type gate (W3): a thread-static load, a type comparison and a volatile read |
 | Write of a property nobody read, on a type with derived property data | Zero | Above, plus one data lookup (W3) |
 | Write of a property with dependents | Zero | Above, plus `Interlocked.Increment` (W4), a used-by snapshot read, and a request per dependent |

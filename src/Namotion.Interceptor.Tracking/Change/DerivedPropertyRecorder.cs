@@ -25,6 +25,7 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
         public PropertyReference Property;
         public bool IsSuspended;
         public RecordedDependency[]? Buffer;
+        public DerivedPropertyData?[]? PreviousReads;
         public int Count;
         public bool HasOwnWriteAfterRead;
     }
@@ -42,10 +43,12 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
     /// Starts a recording frame for the getter of <paramref name="property"/> (reuses a pooled buffer; allocation-free in
     /// steady state). Reads of <paramref name="property"/> itself are filtered so a derived property never depends on
     /// itself: a dynamic derived getter reads its own property again through the interceptor chain.
+    /// <paramref name="previousReads"/> is the dependency data of the property's last committed links in read order:
+    /// a read at the same position of the same property takes its data from there instead of looking it up.
     /// </summary>
-    public void StartRecording(in PropertyReference property)
+    public void StartRecording(in PropertyReference property, DerivedPropertyData?[]? previousReads = null)
     {
-        PushFrame(property, isSuspended: false);
+        PushFrame(property, isSuspended: false, previousReads);
     }
 
     /// <summary>
@@ -60,7 +63,7 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
             return false;
         }
 
-        recorder.PushFrame(default, isSuspended: true);
+        recorder.PushFrame(default, isSuspended: true, previousReads: null);
         return true;
     }
 
@@ -72,7 +75,7 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
         recorder.ClearLastRecording();
     }
 
-    private void PushFrame(in PropertyReference property, bool isSuspended)
+    private void PushFrame(in PropertyReference property, bool isSuspended, DerivedPropertyData?[]? previousReads)
     {
         if (_depth == _frames.Length)
         {
@@ -84,6 +87,7 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
         frame.Property = property;
         frame.IsSuspended = isSuspended;
         frame.HasOwnWriteAfterRead = false;
+        frame.PreviousReads = previousReads;
         if (!isSuspended)
         {
             frame.Buffer ??= _pool.Rent(8);
@@ -114,8 +118,9 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
         }
 
         // R1 and R2 of the protocol: the data exists and is fenced before its version is read with
-        // acquire semantics, and the version is read before the value.
-        var data = property.GetDerivedPropertyData();
+        // acquire semantics, and the version is read before the value. Data is never replaced, so the data of the
+        // previous evaluation's read at this position is current when it belongs to the same property.
+        var data = GetPreviousRead(frame.PreviousReads, frame.Count, property) ?? property.GetDerivedPropertyData();
         Interlocked.MemoryBarrier();
         var version = Volatile.Read(ref data.Version);
 
@@ -129,6 +134,18 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
         }
 
         buffer[frame.Count++] = new RecordedDependency(property, data, version);
+    }
+
+    // The array can change while it is read: an entry counts only for the property it belongs to.
+    private static DerivedPropertyData? GetPreviousRead(DerivedPropertyData?[]? previousReads, int index, in PropertyReference property)
+    {
+        if (previousReads is null || index >= previousReads.Length)
+        {
+            return null;
+        }
+
+        var previous = previousReads[index];
+        return previous is not null && previous.Property == property ? previous : null;
     }
 
     /// <summary>
@@ -182,6 +199,7 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
         }
 
         ref var frame = ref _frames[_depth];
+        frame.PreviousReads = null;
         return new ReadOnlySpan<RecordedDependency>(frame.Buffer, 0, frame.Count);
     }
 

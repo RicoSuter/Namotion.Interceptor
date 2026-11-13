@@ -24,6 +24,13 @@ internal sealed class DerivedPropertyData
     private int _requiredPropertyCount;
 
     /// <summary>
+    /// The data of each dependency, at the index of its <see cref="_requiredProperties"/> entry. Written under
+    /// lock(this); read without the lock by an evaluation of this property (<see cref="RequiredData"/>), which
+    /// checks each entry's <see cref="Property"/> before it uses it.
+    /// </summary>
+    private DerivedPropertyData?[]? _requiredData;
+
+    /// <summary>
     /// Used-by properties: Which derived properties depend on this property.
     /// Initialized lazily via Interlocked.CompareExchange for thread safety.
     /// </summary>
@@ -117,18 +124,22 @@ internal sealed class DerivedPropertyData
 
     private static long _lastToken;
 
-    private DerivedPropertyData()
+    private DerivedPropertyData(PropertyReference property)
     {
+        Property = property;
     }
 
+    /// <summary>The property this data belongs to.</summary>
+    internal PropertyReference Property { get; }
+
     /// <summary>
-    /// Creates the data of a property of <paramref name="subject"/> and raises the gate of the subject's type
-    /// first, so the gate is raised before the data can be found.
+    /// Creates the data of <paramref name="property"/> and raises the gate of its subject's type first, so the
+    /// gate is raised before the data can be found.
     /// </summary>
-    internal static DerivedPropertyData Create(IInterceptorSubject subject)
+    internal static DerivedPropertyData Create(PropertyReference property)
     {
-        DerivedPropertyTypeGate.Of(subject).Raise();
-        return new DerivedPropertyData();
+        DerivedPropertyTypeGate.Of(property.Subject).Raise();
+        return new DerivedPropertyData(property);
     }
 
     /// <summary>Returns a new, process-wide unique, nonzero owner or attach token.</summary>
@@ -161,6 +172,16 @@ internal sealed class DerivedPropertyData
 
             return array.AsSpan(0, Math.Min(_requiredPropertyCount, array.Length));
         }
+    }
+
+    /// <summary>
+    /// The dependency data of the last committed links, in read order, or null. Read without the lock: the array
+    /// can change while it is read, so an entry is only valid for the property it names.
+    /// </summary>
+    internal DerivedPropertyData?[]? RequiredData
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Volatile.Read(ref _requiredData);
     }
 
     /// <summary>
@@ -268,20 +289,25 @@ internal sealed class DerivedPropertyData
     {
         var newCount = recorded.Length;
         var currentArray = _requiredProperties;
-        if (currentArray is null || currentArray.Length < newCount)
+        var currentData = _requiredData;
+        if (currentArray is null || currentData is null || currentArray.Length < newCount)
         {
             currentArray = new PropertyReference[newCount];
+            currentData = new DerivedPropertyData?[newCount];
             _requiredProperties = currentArray;
+            Volatile.Write(ref _requiredData, currentData);
         }
 
         for (var i = 0; i < newCount; i++)
         {
             currentArray[i] = recorded[i].Property;
+            currentData[i] = recorded[i].Data;
         }
 
         if (currentArray.Length > newCount)
         {
             currentArray.AsSpan(newCount).Clear();
+            currentData.AsSpan(newCount).Clear();
         }
 
         _requiredPropertyCount = newCount;
@@ -294,6 +320,7 @@ internal sealed class DerivedPropertyData
     private void ClearRequiredProperties()
     {
         _requiredProperties = null;
+        _requiredData = null;
         _requiredPropertyCount = 0;
     }
 

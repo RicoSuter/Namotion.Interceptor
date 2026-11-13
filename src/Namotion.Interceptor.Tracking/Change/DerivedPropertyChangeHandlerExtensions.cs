@@ -50,7 +50,7 @@ public static class DerivedPropertyChangeHandlerExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static DerivedPropertyData GetDerivedPropertyData(this PropertyReference property) =>
         (DerivedPropertyData)property.Subject.Data.GetOrAdd(
-            (property.Name, DataKey), static (_, subject) => DerivedPropertyData.Create(subject), property.Subject)!;
+            (property.Name, DataKey), static (key, subject) => DerivedPropertyData.Create(new PropertyReference(subject, key.Item1!)), property.Subject)!;
 
     /// <summary>
     /// Tries to get the consolidated tracking data without allocating if not present.
