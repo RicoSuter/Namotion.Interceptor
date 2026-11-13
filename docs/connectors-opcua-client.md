@@ -443,7 +443,7 @@ builder.Services.AddOpcUaSubjectClientSource(
 - With polling disabled there is nothing better to escalate to, so the item keeps being retried and recovers on its own once the node returns; it is never dropped.
 - Nodes that do not support subscriptions (`BadNotSupported`, `BadMonitoredItemFilterUnsupported`) fall back to polling immediately when enabled.
 - Skips permanent design-time errors (`BadNodeIdUnknown`, `BadAttributeIdInvalid`, `BadIndexRangeInvalid`).
-- Reconnect re-attempts a real subscription for every item, so escalation to polling is not permanent.
+- Recreating the subscriptions re-attempts a real subscription for every item. A reconnect alone keeps an escalated item on polling.
 - Health checks run at configurable intervals (minimum: 1 second, default: 5 seconds).
 
 **Configuration validation:**
@@ -453,64 +453,45 @@ builder.Services.AddOpcUaSubjectClientSource(
 
 ### Connection Loss Recovery
 
-The client handles connection loss through two cooperating mechanisms: the OPC UA SDK's built-in `SessionReconnectHandler` (automatic) and a health check loop that performs manual reconnection when the SDK handler fails or is insufficient.
+The client's session is the OPC UA SDK's `ManagedSession`, which owns reconnection: it detects the loss, retries, reactivates the server session when the server still has it, creates a new one when it does not, and restores the subscriptions. The client observes its state transitions and adds what the SDK does not know about: liveness, the reconnection counters and reloading the server state.
 
-**All reconnection paths reload the server state** with a full read, so server-to-client values are eventually consistent. The client never relies solely on subscription notifications for state synchronization after a reconnection. None of the reconnection flows below reconciles queued client-to-server writes, see **Eventual consistency for writes** below.
+**Every recovery reloads the server state** with a full read, so server-to-client values are eventually consistent. The client never relies solely on subscription notifications for state synchronization after a reconnection. The reconnection flow below does not reconcile queued client-to-server writes, see **Eventual consistency for writes** below.
 
-#### Reconnection Flows
+#### Reconnection Flow
 
-**Flow A: SDK reconnection with a new session**
-
-When the connection drops, the OPC UA SDK's `SessionReconnectHandler` attempts to reconnect automatically. It first tries to reactivate the existing session, which leads to Flow B; on connection errors it keeps retrying that until its estimate of the session timeout runs out. When reactivation fails, it creates a new session and carries the client's subscriptions over, by transfer or by creating them fresh. If the session or a subscription cannot be created, the whole attempt fails and the handler retries.
-
-A transfer needs the server to still hold the subscription, which it does only until the subscription's lifetime expires without publish requests. A server built on the OPC Foundation SDK also transfers an anonymous user's subscriptions only over a signed channel, so with security off it refuses the transfer and the SDK recreates them. With this client's defaults, stall detection (`MaxReconnectDuration`, 30 s) resets the SDK handler long before its session timeout estimate (120 s) runs out, so after a plain network partition the new-session path is reached only when reactivation fails with a status the handler does not retry, such as `BadSessionIdInvalid` after a server restart.
-
-1. Keep-alive detects dead connection and triggers the SDK reconnect handler
-2. SDK creates a new session, transfers the subscriptions the server still holds via `TransferSubscriptions` and recreates the others
-3. `OnReconnectComplete` accepts the new session and sets a `NeedsFullStateSync` flag
-4. The health check loop detects the flag on the next iteration:
+1. Keep-alive detects the dead connection and the managed session starts reconnecting. The client reports the connection as lost: `IsOperational` is false, `IsReconnecting` is true and `ISubjectSource.State` is `Synchronizing`.
+2. The managed session retries every `ReconnectInterval`. It reactivates the existing server session on a new channel when the server still knows it, for example after a network interruption. Otherwise, for example after a server restart, it creates a new server session and restores the subscriptions onto it.
+3. Once the managed session is connected again, `IsOperational` rises and a full state sync is scheduled.
+4. The health check loop runs the sync on its next iteration:
    - Starts buffering incoming subscription notifications
    - Reads ALL property values from the server
    - Applies server values, replays the buffer, resumes normal operation
-5. Full consistency is restored
+5. Full consistency is restored. When the read fails, the error is reported and the next health check retries it on the same session.
 
-**Flow B: SDK reconnection returns a preserved or unusable session**
+The session object stays the same across all of this, so `CurrentSession` keeps returning the same instance and `CurrentSessionChanged` does not fire, see [Reacting to session swaps](#reacting-to-session-swaps-with-currentsessionchanged).
 
-If the SDK handler reactivates the existing session and returns the same session object ("preserved session"), returns no session, or returns a new session without subscriptions (which happens when the client had none), the client abandons the session entirely:
+#### When the Server Stays Away
 
-1. `OnReconnectComplete` calls `AbandonCurrentSession()` (session nulled, transport killed, and incoming notifications buffered so stale values from the abandoned subscription are not applied during the gap before manual reconnection)
-2. The health check loop detects the dead session and triggers manual reconnection
-3. Manual reconnection creates a fresh session, new subscriptions, and performs a full state read
-4. Full consistency is restored
+Reconnection runs in cycles bounded by `MaxReconnectDuration` (default: 30 seconds), which has to be at least twice `ReconnectInterval`. A cycle that ends without a connection counts as one failed reconnect attempt in `Reconnects`, the error of its last connect attempt is reported, and after a pause of one `ReconnectInterval` the managed session starts the next cycle. `IsReconnecting` stays true and `IsOperational` false through the pause. This continues until the server returns or the source stops, so an outage of any length recovers without a restart, and a long one is visible as `Reconnects.TotalAttempts` climbing without `Reconnects.TotalSucceeded` keeping up.
 
-Preserved sessions are always abandoned because subscriptions may have been silently deleted by the server (subscription lifetime expired during the disconnect period), leaving no mechanism for future data change notifications.
+#### Subscriptions That Stop Publishing
 
-**Flow C: No SDK handler active (session dead without reconnection in progress)**
-
-If the session dies without the SDK handler being active (e.g., after `KillAsync`, `ClearSessionAsync`, or a previous failed reconnection):
-
-1. The health check loop detects the dead session
-2. Triggers manual reconnection: fresh session, new subscriptions, full state read
-3. Full consistency is restored
-
-#### Stall Detection
-
-When the SDK's reconnection handler gets stuck (e.g., server never responds), the client automatically detects the stall and forces a reconnection reset. Configure via `MaxReconnectDuration` (default: 30 seconds). If the SDK reconnection hasn't succeeded within this duration, a full session reset and manual reconnection is triggered.
+When a subscription stops publishing while the session itself stays connected, the health check loop removes the subscriptions, creates them again on the same session and reloads the server state. When that fails part way, the next health check runs it again.
 
 #### Consistency Guarantees and Trade-offs
 
-**Guarantee**: After any reconnection completes, all client property values will match the server's current state. The full state read (buffer + read all values + replay + resume pattern) ensures no property is left stale, regardless of what happened to subscription notifications during the disconnect.
+**Guarantee**: After a reconnection completes, all client property values will match the server's current state. The full state read (buffer + read all values + replay + resume pattern) ensures no property is left stale, regardless of what happened to subscription notifications during the disconnect.
 
-**Trade-off: brief stale data window after SDK reconnection (Flow A)**
+**Trade-off: brief stale data window after a reconnection**
 
-Between the SDK's `OnReconnectComplete` (step 3) and the health check's full state read (step 4), there is a window of up to one health check interval (~5 seconds by default) where:
+Between the managed session reporting itself connected (step 3) and the health check's full state read (step 4), there is a window of up to one health check interval (~5 seconds by default) where:
 
 - Subscription notifications after the reconnect may apply partially (some notifications may have been lost due to server-side queue overflow or subscription lifetime expiration)
 - Property values may temporarily reflect incomplete state
 
 This window is bounded and self-correcting: the health check's full state read overwrites all values with the server's current state. For most industrial applications, this brief window is acceptable. If tighter consistency is required, reduce `SubscriptionHealthCheckInterval`.
 
-**Eventual consistency for writes**: Client-to-server writes during disconnection are buffered in the write retry queue (see above). The queue is reconciled only when the source restarts its connection loop, which for this client happens when the initial connection or initial load fails, not on a connection loss after startup: after loading the server's current state, each queued change is sent unless a later local write superseded it, so a write that already committed is not discarded by the reload. None of the reconnection flows above runs this reconcile. They reload the state, and queued writes stay in the retry queue until a local write to any property this source owns flushes it, or the connection loop restarts, see [Connectors: Known Limitations](connectors.md#known-limitations). Combined with the full state read for server-to-client values, writes are eventually consistent in both directions once one of those happens.
+**Eventual consistency for writes**: Client-to-server writes during disconnection are buffered in the write retry queue (see above). The queue is reconciled only when the source restarts its connection loop, which for this client happens when the initial connection or initial load fails, not on a connection loss after startup: after loading the server's current state, each queued change is sent unless a later local write superseded it, so a write that already committed is not discarded by the reload. While the managed session is reconnecting, writes are not sent: they fail immediately and are queued. The reconnection flow above does not run this reconcile. It reloads the state, and queued writes stay in the retry queue until a local write to any property this source owns flushes it, or the connection loop restarts, see [Connectors: Known Limitations](connectors.md#known-limitations). Combined with the full state read for server-to-client values, writes are eventually consistent in both directions once one of those happens.
 
 ### Resilience Configuration
 
@@ -519,9 +500,8 @@ For 24/7 production use, the default configuration provides robust resilience:
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `KeepAliveInterval` | 5s | How quickly disconnections are detected |
-| `ReconnectInterval` | 5s | Time between SDK reconnection attempts |
-| `ReconnectHandlerTimeout` | 60s | Max time the reconnect handler attempts before giving up |
-| `MaxReconnectDuration` | 30s | Max time for SDK reconnection before forcing manual reset |
+| `ReconnectInterval` | 5s | Delay between the managed session's reconnection attempts |
+| `MaxReconnectDuration` | 30s | Budget of one reconnection cycle. An exhausted cycle counts as a failed attempt and the next one starts |
 | `SessionTimeout` | 120s | Server-side session lifetime (should be > OperationTimeout) |
 | `OperationTimeout` | 30s | Timeout for individual OPC UA operations |
 | `SubscriptionHealthCheckInterval` | 5s | Interval for health checks and post-reconnection state sync |
@@ -654,9 +634,9 @@ When a batch write to the OPC UA server partially fails, the client throws an `O
 
 `OpcUaClientDiagnostics` derives from `SourceDiagnostics`, whose members, buffer semantics and read guarantees are described once in [Connector Diagnostics](connectors.md#connector-diagnostics). What follows is what is specific to this client.
 
-**`IsOperational` here means the client has a live session with its subscriptions set up.** This built-in client implements liveness monitoring, but `IsOperational` is `null` before its first protocol-specific observation. It then publishes false for the whole address space browse and subscription creation, which on a large server takes minutes. Which step raises it depends on how the session came about: the first health check tick on an initial connect, the SDK reconnect completing with a new session, and the completed state reload on a manual reconnect. It drops whenever the session is lost, killed or torn down, and whenever a connect attempt ends, so a client sitting in its retry delay reports an explicit false rather than serving.
+**`IsOperational` here means the client has a live session with its subscriptions set up.** This built-in client implements liveness monitoring, but `IsOperational` is `null` before its first protocol-specific observation. It then publishes false for the whole address space browse and subscription creation, which on a large server takes minutes. Which step raises it depends on how the session came about: the first health check tick on an initial connect, and the managed session reporting itself connected again on a reconnect. It drops whenever the session is lost, killed or torn down, and whenever a connect attempt ends, so a client sitting in its retry delay reports an explicit false rather than serving.
 
-It is not a claim that the model is in sync, and the two are not ordered against each other: the initial value read can run either side of the rise on an initial connect, and on a manual reconnect the reload always finishes first. While that read runs, `ISubjectSource.State` is `Synchronizing`, so reading it together with `IsOperational` is how a dropped network is told apart from a connected client that is still loading. See [Diagnostics and State answer different questions](connectors-monitoring.md#diagnostics-and-state-answer-different-questions).
+It is not a claim that the model is in sync, and the two are not ordered against each other: the initial value read can run either side of the rise on an initial connect, and on a reconnect the rise comes first and the reload follows on the next health check. While that read runs, `ISubjectSource.State` is `Synchronizing`, so reading it together with `IsOperational` is how a dropped network is told apart from a connected client that is still loading. See [Diagnostics and State answer different questions](connectors-monitoring.md#diagnostics-and-state-answer-different-questions).
 
 This client measures both throughput directions, so `Throughput.IncomingPerSecond` and `Throughput.OutgoingPerSecond` are never `null` here.
 
@@ -664,7 +644,7 @@ This built-in client registers the `ClaimedPropertyCount` gauge, so it reports t
 
 | Member | Meaning |
 |---|---|
-| `IsReconnecting` | A reconnection attempt is in flight. A distinct sub-state of not being operational, not a second spelling of it. |
+| `IsReconnecting` | The managed session is recovering the connection, including the pause between two reconnection cycles. A distinct sub-state of not being operational, not a second spelling of it. |
 | `SessionId` | The current session identifier, `null` when there is no session. |
 | `SubscriptionCount` | Active OPC UA subscriptions. |
 | `MonitoredItemCount` | Monitored items across all subscriptions. |
@@ -674,10 +654,10 @@ This built-in client registers the `ClaimedPropertyCount` gauge, so it reports t
 | Member | Meaning |
 |---|---|
 | `Reconnects.LastConnectionTime` | When a session was last established, `null` if never. Records a past event and survives the disconnection that follows it. |
-| `Reconnects.TotalAttempts` | Attempts started. Once all in-flight attempts resolve, this equals the three below summed. |
-| `Reconnects.TotalSucceeded` | Attempts that produced a usable session. |
-| `Reconnects.TotalFailed` | Attempts that ended with a genuine fault, meaning an exception raised while the attempt was still live. |
-| `Reconnects.TotalAbandoned` | Attempts that ended without a usable session and without a fault: a null session, a new session without subscriptions, a preserved session, a stall reset, or a cancellation from a kill or from the listen attempt being torn down, which happens both when the source stops and when the retry loop ends an attempt. |
+| `Reconnects.TotalAttempts` | Attempts started. One attempt is one reconnection cycle of the managed session, bounded by `MaxReconnectDuration`. Once all in-flight attempts resolve, this equals the three below summed. |
+| `Reconnects.TotalSucceeded` | Attempts that ended with the session connected again. |
+| `Reconnects.TotalFailed` | Attempts whose cycle was exhausted without a connection. The managed session starts the next one. |
+| `Reconnects.TotalAbandoned` | Attempts still in flight when the listen attempt was torn down, which happens both when the source stops and when the retry loop ends an attempt. |
 
 `Polling` is `null` when the [polling fallback](#polling-fallback-for-unsupported-nodes) is off, no session has been set up yet, or the client is between connect attempts. That last case is not a startup-only condition: the block reads through the session manager and goes `null` as soon as that manager is disposed, which every way out of a connect attempt does, so it stays `null` for the whole retry delay. The totals underneath survive that and reappear at their previous values once a session exists again. Otherwise it reports:
 
@@ -717,11 +697,11 @@ if (source.CurrentSession is { } session)
 }
 ```
 
-**Lifecycle contract:** read `CurrentSession` immediately before each use. It may be `null` during reconnection and the instance changes after a manual reconnect (Flows B and C), an SDK reconnect with a new session (Flow A), or a stall reset. Never cache the reference. For long-running session-bound state (e.g. an A&C `Subscription`), subscribe to `CurrentSessionChanged` (below) or recreate on demand when calls fail with `BadSessionIdInvalid` / `BadSessionNotActivated`.
+**Lifecycle contract:** read `CurrentSession` immediately before each use. It is `null` before the first connection and between connect attempts, and the instance is replaced when the source restarts its connection, which happens when the initial connection or initial load fails. It is the SDK's `ManagedSession`, so the same instance survives reconnects, including those that create a new server session. Calls made while it reconnects wait until it has recovered, and fail in the pause between two reconnection cycles. For long-running session-bound state (e.g. an A&C `Subscription`), subscribe to `CurrentSessionChanged` (below).
 
 ### Reacting to session swaps with `CurrentSessionChanged`
 
-For consumers holding session-bound state (typically A&C subscriptions), `CurrentSessionChanged` fires on every transition (including to/from `null`). Method-call consumers usually do not need it: they re-read `CurrentSession` per call and surface a stale session as a failure on the next call. The event is for consumers that have no such inbound traffic.
+For consumers holding session-bound state (typically A&C subscriptions), `CurrentSessionChanged` fires whenever `CurrentSession` changes (including to/from `null`), that is when the source connects, stops or restarts its connection. It does not fire on a reconnect, because the managed session instance and the classic subscriptions registered on it survive one. Method-call consumers usually do not need it: they re-read `CurrentSession` per call and surface a stale session as a failure on the next call. The event is for consumers that have no such inbound traffic.
 
 ```csharp
 opcUaSource.CurrentSessionChanged += (_, args) =>
@@ -745,7 +725,7 @@ opcUaSource.CurrentSessionChanged += (_, args) =>
 };
 ```
 
-The event fires on the connector's own thread but **outside** the reconnection lock, in transition order, so a slow handler will not stall reconnection. Use `PreviousSession` only for synchronous local cleanup (its transport may already be closed). For async work on `CurrentSession` use fire-and-forget (`_ = Task.Run(...)`) and tolerate the session being swapped again before the task completes; the next `CurrentSessionChanged` event will surface the new state. Handler exceptions are caught and logged, but per standard event semantics a throwing subscriber skips later subscribers, so isolate exceptions in your own handler if multiple must run.
+The event fires on the connector's own thread, outside its locks and in transition order. Use `PreviousSession` only for synchronous local cleanup (its transport may already be closed). For async work on `CurrentSession` use fire-and-forget (`_ = Task.Run(...)`) and tolerate the session being swapped again before the task completes; the next `CurrentSessionChanged` event will surface the new state. Handler exceptions are caught and logged, but per standard event semantics a throwing subscriber skips later subscribers, so isolate exceptions in your own handler if multiple must run.
 
 ## Node ID Resolution
 
@@ -789,7 +769,6 @@ The OPC UA client hooks into the interceptor lifecycle system (see [Subject Life
 - Polling items in `PollingManager._pollingItems` are also cleaned up
 - Property data (OPC UA node IDs) associated with the subject is cleared
 - OPC UA subscription items remain on the server until session ends
-- Cleanup is skipped during reconnection to avoid interfering with subscription transfer
 
 See also [Lifecycle Limitations](connectors-opcua.md#lifecycle-limitations) that apply to both client and server.
 
@@ -824,7 +803,7 @@ OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
 | Class | Role |
 |-------|------|
 | `OpcUaSubjectClientSource` | Orchestrator. Inherits `SubjectSourceBase` (which owns the pump skeleton: buffer, listen, load initial state, run change queue, retry on failure). Adds the OPC UA-specific health check loop, reconnection logic, and the `ISubjectSource` contract. |
-| `SessionManager` | Manages the OPC UA session lifecycle (create, reconnect, dispose). Owns `SubscriptionManager`, `PollingManager`, and `ReadAfterWriteManager`. |
+| `SessionManager` | Creates and disposes the SDK's `ManagedSession`, which owns reconnection, and maps its state transitions onto liveness, the reconnection counters and the full state sync. Owns `SubscriptionManager`, `PollingManager`, and `ReadAfterWriteManager`. |
 | `SubscriptionManager` | Creates and manages OPC UA subscriptions and monitored items. Routes incoming data change notifications. |
 | `OutboundWriter` | Writes property changes to the OPC UA server. Tracks outgoing throughput. |
 | `PollingManager` | Polling fallback for nodes that don't support subscriptions. Includes a circuit breaker. |
@@ -838,7 +817,7 @@ OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
 
 ### Key Design Decisions
 
-**Single-threaded health loop.** `OpcUaSubjectClientSource` runs a single `RunHealthCheckLoopAsync` task that checks session health, triggers reconnection, and detects stalls. The loop is spawned from `StartListeningAsync` via `BackgroundTaskLifetime.Start`, so it is started and stopped together with the listener. The pump skeleton itself lives in `SubjectSourceBase`. All reconnection coordination flows through this loop.
+**Single-threaded health loop.** `OpcUaSubjectClientSource` runs a single `RunHealthCheckLoopAsync` task that reports liveness, runs the full state sync after a reconnect and heals subscriptions. The loop is spawned from `StartListeningAsync` via `BackgroundTaskLifetime.Start`, so it is started and stopped together with the listener. The pump skeleton itself lives in `SubjectSourceBase`. Reconnection itself is not driven by this loop but by the managed session.
 
 **Back-reference pattern.** Several classes (`SessionManager`, `SubscriptionManager`, `PollingManager`) receive a reference to `OpcUaSubjectClientSource` to access shared state (metrics, throughput counters, error tracking). `OutboundWriter` demonstrates the preferred alternative: receiving only the specific dependencies it needs via constructor parameters.
 

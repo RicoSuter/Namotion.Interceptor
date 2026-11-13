@@ -48,10 +48,10 @@ internal class SubscriptionManager : IAsyncDisposable
     private readonly Func<Subscription, CancellationToken, Task> _applyChangesAsync;
 
     private readonly ConcurrentDictionary<uint, MonitoredItemState> _monitoredItems = new();
-    // Keyed by object, not by the server-assigned id: a subscription recreated after a failed transfer
-    // is a new object numbering from 1 again, possibly under the same id, while a transferred one keeps
-    // its object and its numbering.
+    // Keyed by object, not by the server-assigned id, which a subscription created again on the
+    // server can reuse. Cleared when the server session is created again, see ResetNotificationRanking.
     private readonly ConditionalWeakTable<Subscription, SubscriptionApplyState> _applyStates = new();
+    private readonly ConditionalWeakTable<Subscription, Lock> _applyLocks = new();
     private readonly ConcurrentDictionary<Subscription, byte> _subscriptions = new();
     private readonly ConcurrentDictionary<uint, int> _healAttempts = new();
     private readonly Lock _trackingMutationLock = new();
@@ -65,6 +65,13 @@ internal class SubscriptionManager : IAsyncDisposable
     internal const int MaxHealAttemptsBeforeEscalation = 3;
 
     private volatile bool _shuttingDown; // Prevents new callbacks during cleanup
+    private volatile bool _subscriptionsIncomplete;
+
+    /// <summary>
+    /// Gets whether the last attempt to create the subscriptions did not finish, so that only some or
+    /// none of the items are monitored and the subscriptions have to be created again.
+    /// </summary>
+    public bool NeedsRecreate => _subscriptionsIncomplete;
 
     /// <summary>
     /// Gets the current list of subscriptions (thread-safe collection).
@@ -124,19 +131,21 @@ internal class SubscriptionManager : IAsyncDisposable
 
     public async Task CreateBatchedSubscriptionsAsync(
         IReadOnlyList<MonitoredItem> monitoredItems,
-        Session session,
+        ISession session,
         CancellationToken cancellationToken)
     {
-        // Clear any existing subscriptions and monitored items from previous session (reconnection scenario).
-        // Old subscriptions are orphaned (belong to dead session), so we just need to remove our references.
+        _subscriptionsIncomplete = true;
+
+        // Drop the references to the subscriptions of a previous call; the caller removes them from
+        // the session.
         foreach (var oldSubscription in _subscriptions.Keys)
         {
             oldSubscription.FastDataChangeCallback -= OnFastDataChange;
         }
         ClearTrackedCollections();
         _healAttempts.Clear();
-        // On reconnect, re-attempt every owned property as a real subscription; failed nodes are
-        // re-added to polling. Prevents double delivery of an escalated item that later recovers.
+        // Re-attempt every owned property as a real subscription; failed nodes are re-added to
+        // polling. Prevents double delivery of an escalated item that later recovers.
         _pollingManager?.Clear();
 
         // Reset shutdown flag AFTER clearing collections - prevents old callbacks from processing
@@ -167,24 +176,49 @@ internal class SubscriptionManager : IAsyncDisposable
             }
 
             subscription.FastDataChangeCallback += OnFastDataChange;
-            await subscription.CreateAsync(cancellationToken).ConfigureAwait(false);
-
-            var batchEnd = Math.Min(i + maxItemsPerSubscription, itemCount);
-            for (var j = i; j < batchEnd; j++)
+            try
             {
-                var item = monitoredItems[j];
-                subscription.AddItem(item);
+                await subscription.CreateAsync(cancellationToken).ConfigureAwait(false);
 
-                TrackMonitoredItem(item);
+                var batchEnd = Math.Min(i + maxItemsPerSubscription, itemCount);
+                for (var j = i; j < batchEnd; j++)
+                {
+                    var item = monitoredItems[j];
+                    subscription.AddItem(item);
+
+                    TrackMonitoredItem(item);
+                }
+
+                await ApplyChangesAndFilterFailedMonitoredItemsAsync(subscription, cancellationToken).ConfigureAwait(false);
             }
-
-            await ApplyChangesAndFilterFailedMonitoredItemsAsync(subscription, cancellationToken).ConfigureAwait(false);
+            catch
+            {
+                // Not tracked yet, so a later recreate would not remove it: it would stay on the
+                // session, keep publishing and be restored by the managed session after a reconnect.
+                subscription.FastDataChangeCallback -= OnFastDataChange;
+                await TryRemoveUntrackedSubscriptionAsync(session, subscription, cancellationToken).ConfigureAwait(false);
+                throw;
+            }
 
             // Register properties with ReadAfterWriteManager now that we know revised sampling intervals
             RegisterPropertiesWithReadAfterWriteManager(subscription);
 
             // Add to collection AFTER initialization (temporal separation - health monitor never sees partial state)
             TryAddSubscription(subscription);
+        }
+
+        _subscriptionsIncomplete = false;
+    }
+
+    private async Task TryRemoveUntrackedSubscriptionAsync(ISession session, Subscription subscription, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await session.RemoveSubscriptionsAsync([subscription], cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to remove a partially created OPC UA subscription.");
         }
     }
 
@@ -308,13 +342,23 @@ internal class SubscriptionManager : IAsyncDisposable
         }
     }
 
-    private SubscriptionApplyState GetApplyState(Subscription subscription) =>
-        _applyStates.GetValue(subscription, static _ => new SubscriptionApplyState());
+    private SubscriptionApplyState GetApplyState(Subscription subscription)
+    {
+        if (_applyStates.TryGetValue(subscription, out var applyState))
+        {
+            return applyState;
+        }
+
+        return _applyStates.GetValue(subscription, key => new SubscriptionApplyState(GetApplyLock(key)));
+    }
 
     /// <summary>
-    /// Gets the lock under which the notifications of <paramref name="subscription"/> are applied.
+    /// Gets the lock under which the notifications of <paramref name="subscription"/> are applied. It
+    /// stays the same across <see cref="ResetNotificationRanking"/>, so a read-after-write registration
+    /// keeps applying under the lock the notifications take.
     /// </summary>
-    internal Lock GetApplyLock(Subscription subscription) => GetApplyState(subscription).Lock;
+    internal Lock GetApplyLock(Subscription subscription) =>
+        _applyLocks.GetValue(subscription, static _ => new Lock());
 
     private void ReportErrorIfRunning(Exception error, CancellationToken cancellationToken = default)
     {
@@ -325,56 +369,12 @@ internal class SubscriptionManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Replaces the tracked subscriptions with the ones the reconnected session holds. Subscriptions
-    /// already tracked are left as they are, new ones are hooked exactly once, and the ones missing
-    /// from the new set are unhooked and dropped.
+    /// Starts a new ranking of notification messages for every subscription. Called when the server
+    /// session was created again: the subscriptions are restored in place and number their messages
+    /// from the start again, which must not be ranked against the messages applied before. The apply
+    /// locks are kept, see <see cref="GetApplyLock"/>.
     /// </summary>
-    public void UpdateTransferredSubscriptions(IReadOnlyCollection<Subscription> transferredSubscriptions)
-    {
-        var oldSubscriptions = _subscriptions.Keys;
-        List<Subscription>? addedSubscriptions = null;
-        foreach (var subscription in transferredSubscriptions)
-        {
-            if (TryAddSubscription(subscription))
-            {
-                (addedSubscriptions ??= []).Add(subscription);
-
-                // A subscription the SDK recreated is a clone that already carries the original's
-                // callback and may be publishing. Replace it in one write: a plain += would deliver
-                // twice, and a -= followed by += leaves the callback null in between, which drops a batch.
-                FastDataChangeNotificationEventHandler handler = OnFastDataChange;
-                subscription.FastDataChangeCallback = (FastDataChangeNotificationEventHandler?)Delegate.Combine(
-                    Delegate.Remove(subscription.FastDataChangeCallback, handler), handler);
-            }
-        }
-
-        var removedCount = 0;
-        foreach (var oldSubscription in oldSubscriptions)
-        {
-            if (transferredSubscriptions.Contains(oldSubscription))
-            {
-                continue;
-            }
-
-            TryRemoveSubscription(oldSubscription);
-            oldSubscription.FastDataChangeCallback -= OnFastDataChange;
-            removedCount++;
-        }
-
-        // Each added subscription applies its notifications under its own lock, so read-after-write has to take
-        // that one. Registered only after the replaced subscriptions are removed, so a heal of a replaced
-        // subscription racing this cannot be the last to register (see RegisterRecoveredItems).
-        if (addedSubscriptions is not null)
-        {
-            foreach (var subscription in addedSubscriptions)
-            {
-                RegisterPropertiesWithReadAfterWriteManager(subscription);
-            }
-        }
-
-        _logger.LogInformation("Reconnected session holds {Count} subscriptions, dropped {RemovedCount} previous ones.",
-            transferredSubscriptions.Count, removedCount);
-    }
+    internal void ResetNotificationRanking() => _applyStates.Clear();
 
     internal async Task ApplyChangesAndFilterFailedMonitoredItemsAsync(
         Subscription subscription,
@@ -534,8 +534,8 @@ internal class SubscriptionManager : IAsyncDisposable
 
     /// <summary>
     /// Escalates a retryable item that keeps failing past <see cref="MaxHealAttemptsBeforeEscalation"/>
-    /// to polling instead of retrying forever. Runs only when polling is enabled; reconnect clears the
-    /// polling set and re-attempts every item, so escalation is not permanent.
+    /// to polling instead of retrying forever. Runs only when polling is enabled; recreating the
+    /// subscriptions clears the polling set and re-attempts every item.
     /// </summary>
     public async Task EscalatePersistentlyFailedItemsAsync(CancellationToken cancellationToken)
     {
@@ -620,8 +620,8 @@ internal class SubscriptionManager : IAsyncDisposable
     /// </summary>
     internal void RegisterRecoveredItems(Subscription subscription)
     {
-        // Checked and registered under the tracking lock: a reconnect removes a replaced subscription under it
-        // before registering its replacement, so a heal of the replaced one cannot register its lock last.
+        // Checked and registered under the tracking lock: a recreate removes the replaced subscriptions under it
+        // before registering their replacements, so a heal of a replaced one cannot register its lock last.
         lock (_trackingMutationLock)
         {
             if (_subscriptions.ContainsKey(subscription))
@@ -680,7 +680,7 @@ internal class SubscriptionManager : IAsyncDisposable
         return _configuration.DefaultSamplingInterval;
     }
 
-    private bool TryAddSubscription(Subscription subscription)
+    internal bool TryAddSubscription(Subscription subscription)
     {
         lock (_trackingMutationLock)
         {
@@ -803,7 +803,7 @@ internal class SubscriptionManager : IAsyncDisposable
     /// identifies the object into the high bits and the message's sequence number, extended past the
     /// 32-bit wrap, into the low 40 bits, which last about 2^40 messages per subscription object.
     /// </summary>
-    private sealed class SubscriptionApplyState
+    private sealed class SubscriptionApplyState(Lock applyLock)
     {
         private const int SequenceBits = 40;
         private const ulong SequenceMask = (1UL << SequenceBits) - 1;
@@ -813,7 +813,7 @@ internal class SubscriptionManager : IAsyncDisposable
         private readonly ulong _epoch = ((ulong)(uint)Interlocked.Increment(ref _lastEpoch) & 0xFF_FFFF) << SequenceBits;
         private ulong _highestSequenceNumber;
 
-        public Lock Lock { get; } = new();
+        public Lock Lock { get; } = applyLock;
 
         /// <summary>
         /// Whether <paramref name="stamp"/> belongs to an older message of the same subscription object than

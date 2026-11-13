@@ -12,8 +12,7 @@ using Xunit.Abstractions;
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
 /// <summary>
-/// Verifies that an outage during the SDK's own auto-reconnect window (triggered from
-/// SessionManager.OnKeepAlive, before any manual reconnection takes over) is visible on
+/// Verifies that an outage while the managed session reconnects is visible on
 /// <see cref="ISubjectSource.State"/> instead of leaving the source reporting Synchronized
 /// throughout the whole outage.
 /// </summary>
@@ -71,12 +70,9 @@ public class OutageStateTests
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
 
             // Fast detection/recovery so the test observes the outage window without waiting minutes.
-            // SubscriptionHealthCheckInterval is set well above KeepAliveInterval on purpose: the health
-            // check loop has its own independent dead-session detection (HandleDeadSessionAsync), and a
-            // wide margin makes it overwhelmingly unlikely for that path to race ahead of OnKeepAlive and
-            // win, which would leave the SDK auto-reconnect window this test exists to cover unexercised.
+            // SubscriptionHealthCheckInterval is set well above KeepAliveInterval, so the managed session's
+            // keep-alive detects the loss before a health check runs.
             ReconnectInterval = TimeSpan.FromSeconds(1),
-            ReconnectHandlerTimeout = TimeSpan.FromSeconds(5),
             MaxReconnectDuration = TimeSpan.FromSeconds(20),
             SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(10),
 
@@ -122,10 +118,9 @@ public class OutageStateTests
                 SourceState.Synchronized);
 
             // Act - Disconnect is the soft fault: it breaks the transport without stopping the
-            // connector, which is exactly what a real network blip does. It kills the transport
-            // channel while the session stays assigned, so OnKeepAlive sees the bad status and
-            // hands off to the SDK's SessionReconnectHandler.BeginReconnect - the code path this
-            // test exists to cover.
+            // connector, which is exactly what a real network blip does. It closes the transport
+            // channel while the session stays assigned, so the managed session detects the loss and
+            // reconnects, the code path this test exists to cover.
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
 
             // Assert
@@ -137,7 +132,7 @@ public class OutageStateTests
             // Without this, the pair of waits would pass vacuously even without the fix:
             // PerformFullStateSyncIfNeededAsync buffers briefly once the SDK has finished reconnecting on
             // its own, so Synchronizing would flash by right before Synchronized whether or not
-            // OnKeepAlive reported the loss up front. Only the report made at detection happens while no
+            // the connection state change reported the loss up front. Only the report made at detection happens while no
             // reconnection has completed yet.
             var reconnectsCompleted = Volatile.Read(ref reconnectsCompletedWhenOutageReported);
             Assert.True(reconnectsCompleted == 0,

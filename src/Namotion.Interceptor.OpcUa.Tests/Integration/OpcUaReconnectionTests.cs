@@ -123,6 +123,7 @@ public class OpcUaReconnectionTests
                 Assert.Same(errorAfterConnecting, client.Source!.Diagnostics.LastError);
 
                 var initialAttempts = client.Source!.Diagnostics.Reconnects.TotalAttempts;
+                var sessionBeforeRestart = client.Source.CurrentSession;
 
                 // Stop server and wait for client to detect disconnection
                 logger.Log("Stopping server...");
@@ -168,18 +169,12 @@ public class OpcUaReconnectionTests
                     message: "Client should report itself operational again after reconnecting");
                 Assert.NotNull(client.Source.CurrentSession);
 
-                // Session swap visible to consumers. The reconnect cycle takes one of two paths
-                // depending on timing and server behavior:
-                //   A) SDK reconnect with a new session → single (HadPrevious=true, HasCurrent=true) swap
-                //   B) stall reset →
-                //      (HadPrevious=true, HasCurrent=false) abandon + (HadPrevious=false, HasCurrent=true) recreate
-                // Either way, the consumer must see at least one transition releasing a previous
-                // session AND at least one transition with a current session — which together prove
-                // the connector raises events for both sides of the swap, including null transitions.
+                // The managed session recovers in place, so consumers keep the same session object and
+                // see no session change across the restart.
+                Assert.Same(sessionBeforeRestart, client.Source.CurrentSession);
                 lock (transitionsLock)
                 {
-                    Assert.Contains(sessionTransitions, t => t.HadPrevious);
-                    Assert.Contains(sessionTransitions, t => t.HasCurrent);
+                    Assert.Empty(sessionTransitions);
                 }
 
                 // Reconnection counter invariant: once all in-flight attempts have resolved,
@@ -256,11 +251,11 @@ public class OpcUaReconnectionTests
     }
 
     [Fact]
-    public async Task WhenTheSdkRecreatesTheSessionAfterAServerRestart_ThenLivenessRisesWithoutWaitingForTheNextHealthCheck()
+    public async Task WhenTheSdkRecreatesTheSessionAfterAServerRestart_ThenLivenessRisesAndNotificationsArriveWithoutAHealthCheck()
     {
-        // A server restart makes the SDK recreate the session with fresh subscriptions, so reporting the
-        // connector as down until the next health check would show an operator "disconnected" while
-        // values update.
+        // A server restart makes the managed session create a new server session and restore the
+        // subscriptions onto it, so reporting the connector as down until the next health check would
+        // show an operator "disconnected" while values update.
 
         OpcUaTestServer<TestRoot>? server = null;
         OpcUaTestClient<TestRoot>? client = null;
@@ -276,6 +271,9 @@ public class OpcUaReconnectionTests
                 () => client.Source!.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(60),
                 message: "Client should report operational after the initial connect");
+            var source = (OpcUaSubjectClientSource)client.Source!;
+            var originalSessionId = source.Diagnostics.SessionId;
+            var originalSubscription = Assert.Single(source.SessionManager!.SubscriptionManager.Subscriptions);
 
             // Act
             await server.StopAsync();
@@ -293,10 +291,21 @@ public class OpcUaReconnectionTests
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Source!.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(30),
-                message: "Client should report operational as soon as the reconnect recreated its subscriptions");
+                message: "Client should report operational as soon as the reconnect restored its subscriptions");
 
             Assert.True(client.Source!.Diagnostics.Reconnects.TotalSucceeded >= 1,
                 "The rise should follow a completed reconnect rather than an outage that never happened");
+
+            // A new server session with the client's own subscription objects restored onto it. With the
+            // health check suppressed, only a notification through them can deliver this change.
+            Assert.NotEqual(originalSessionId, source.Diagnostics.SessionId);
+            Assert.Same(originalSubscription, Assert.Single(source.SessionManager!.SubscriptionManager.Subscriptions));
+
+            server.Root!.Name = "AfterRestart";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root!.Name == "AfterRestart",
+                timeout: TimeSpan.FromSeconds(30),
+                message: "A change after the restart should reach the client through its restored subscription");
         }
         finally
         {
@@ -307,10 +316,11 @@ public class OpcUaReconnectionTests
     }
 
     [Fact]
-    public async Task WhenTheSdkTransfersTheSubscriptionsToANewSession_ThenNotificationsKeepArriving()
+    public async Task WhenTheServerKeepsTheSessionThroughAnOutage_ThenItIsReactivatedAndNotificationsKeepArriving()
     {
-        // A server that stays up while the client cannot reach it keeps its subscriptions, so the SDK
-        // moves the client's own subscription objects into the new session.
+        // A server that stays up while the client cannot reach it keeps the session and its subscriptions,
+        // so the managed session reactivates that session on a new channel and the client's own
+        // subscription objects keep publishing.
 
         var logger = new TestLogger(_output);
         OpcUaTestServer<TestRoot>? server = null;
@@ -321,7 +331,7 @@ public class OpcUaReconnectionTests
         try
         {
             // Arrange - the health check loop is suppressed, so it can neither resync the values after
-            // the transfer nor replace the session; only notifications can deliver the change below.
+            // the reconnect nor recreate the subscriptions; only notifications can deliver the change below.
             port = await OpcUaTestPortPool.AcquireAsync();
             proxy = new OpcUaTestProxy(port.Port);
 
@@ -340,9 +350,6 @@ public class OpcUaReconnectionTests
             client = new OpcUaTestClient<TestRoot>(logger, config =>
             {
                 HealthCheckSuppressedConfig(config);
-
-                // The server only transfers an anonymous user's subscriptions over a signed channel.
-                config.UseSecurity = true;
 
                 // A nonzero interval lets the client's 60 s minimum subscription lifetime apply. With the
                 // default of 0 the server deletes the subscription seconds into the outage.
@@ -365,29 +372,29 @@ public class OpcUaReconnectionTests
             var originalSessionId = source.Diagnostics.SessionId;
             var originalSubscription = Assert.Single(source.SessionManager!.SubscriptionManager.Subscriptions);
 
-            // Act - unblock only after the handler's first attempt was rejected through the proxy
+            // Act - unblock only after a reconnect attempt was rejected through the proxy
             proxy.Block();
             await AsyncTestHelpers.WaitUntilAsync(
                 () => source.Diagnostics.IsReconnecting && proxy.RejectedConnectionCount >= 1,
                 timeout: TimeSpan.FromSeconds(60),
-                message: "The reconnect handler should try to reconnect through the blocked proxy");
+                message: "The managed session should try to reconnect through the blocked proxy");
             proxy.Unblock();
 
             await AsyncTestHelpers.WaitUntilAsync(
                 () => !source.Diagnostics.IsReconnecting &&
-                      source.Diagnostics.SessionId is { } sessionId && !sessionId.Equals(originalSessionId) &&
                       source.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(60),
-                message: "Client should accept a new session from the reconnect handler");
+                message: "Client should recover once the proxy lets it through again");
 
-            // Assert - the same subscription object proves the transfer path rather than a recreation.
+            // Assert - the same session and subscription objects prove the reactivation rather than a recreation.
+            Assert.Equal(originalSessionId, source.Diagnostics.SessionId);
             Assert.Same(originalSubscription, Assert.Single(source.SessionManager!.SubscriptionManager.Subscriptions));
 
-            server.Root!.Name = "AfterTransfer";
+            server.Root!.Name = "AfterReconnect";
             await AsyncTestHelpers.WaitUntilAsync(
-                () => client.Root!.Name == "AfterTransfer",
+                () => client.Root!.Name == "AfterReconnect",
                 timeout: TimeSpan.FromSeconds(30),
-                message: "A change after the transfer should reach the client through its transferred subscription");
+                message: "A change after the reconnect should reach the client through its reactivated subscription");
         }
         finally
         {
