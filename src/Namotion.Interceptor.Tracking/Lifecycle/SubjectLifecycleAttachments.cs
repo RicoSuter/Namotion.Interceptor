@@ -36,14 +36,16 @@ internal static class SubjectLifecycleAttachments
         }
     }
 
-    // The value under the key is null (attached to no interceptor), the one interceptor the subject is attached
-    // to, or an array of two or more. A value is never changed in place: each change replaces it by a
-    // compare-and-swap, so a lock-free reader sees either the old or the new set.
+    // The value under the key is null (attached to no interceptor) or an array of the interceptors the subject is
+    // attached to; a subject in one graph holds that interceptor's own one-element array. A value is never changed
+    // in place: each change replaces it by a compare-and-swap, so a lock-free reader sees either the old or the new
+    // set. Arrays do not override Equals, so the compare-and-swap compares by reference.
     internal static void Add(IInterceptorSubject subject, LifecycleInterceptor interceptor)
     {
         // The common cases first: the subject's first graph, or a graph again after it left all of them.
         var data = subject.Data;
-        if (data.TryAdd((null, Key), interceptor) || data.TryUpdate((null, Key), interceptor, null))
+        var single = interceptor.SingleAttachment;
+        if (data.TryAdd((null, Key), single) || data.TryUpdate((null, Key), single, null))
         {
             return;
         }
@@ -52,7 +54,7 @@ internal static class SubjectLifecycleAttachments
         {
             if (!data.TryGetValue((null, Key), out var current))
             {
-                if (data.TryAdd((null, Key), interceptor))
+                if (data.TryAdd((null, Key), single))
                 {
                     return;
                 }
@@ -60,8 +62,9 @@ internal static class SubjectLifecycleAttachments
                 continue;
             }
 
-            if (Contains(current, interceptor) ||
-                data.TryUpdate((null, Key), With(current, interceptor), current))
+            var interceptors = (LifecycleInterceptor[]?)current;
+            if (IndexOf(interceptors, interceptor) >= 0 ||
+                data.TryUpdate((null, Key), With(interceptors, interceptor), current))
             {
                 return;
             }
@@ -72,15 +75,17 @@ internal static class SubjectLifecycleAttachments
     {
         // The common case first: the subject leaves its only graph.
         var data = subject.Data;
-        if (data.TryUpdate((null, Key), null, interceptor))
+        if (data.TryUpdate((null, Key), null, interceptor.SingleAttachment))
         {
             return;
         }
 
         while (true)
         {
-            if (!data.TryGetValue((null, Key), out var current) || !Contains(current, interceptor) ||
-                data.TryUpdate((null, Key), Without(current, interceptor), current))
+            if (!data.TryGetValue((null, Key), out var current) ||
+                current is not LifecycleInterceptor[] interceptors ||
+                IndexOf(interceptors, interceptor) < 0 ||
+                data.TryUpdate((null, Key), Without(interceptors, interceptor), current))
             {
                 return;
             }
@@ -92,37 +97,42 @@ internal static class SubjectLifecycleAttachments
         return subject.Data.TryGetValue((null, Key), out var value) && value is not null;
     }
 
-    private static bool Contains(object? attachments, LifecycleInterceptor interceptor)
+    // By reference: a subclass of LifecycleInterceptor may override Equals.
+    private static int IndexOf(LifecycleInterceptor[]? interceptors, LifecycleInterceptor interceptor)
     {
-        return attachments is LifecycleInterceptor[] interceptors
-            ? Array.IndexOf(interceptors, interceptor) >= 0
-            : ReferenceEquals(attachments, interceptor);
+        if (interceptors is not null)
+        {
+            for (var i = 0; i < interceptors.Length; i++)
+            {
+                if (ReferenceEquals(interceptors[i], interceptor))
+                {
+                    return i;
+                }
+            }
+        }
+
+        return -1;
     }
 
-    private static object With(object? attachments, LifecycleInterceptor interceptor)
+    private static LifecycleInterceptor[] With(LifecycleInterceptor[]? interceptors, LifecycleInterceptor interceptor)
     {
-        return attachments switch
-        {
-            null => interceptor,
-            LifecycleInterceptor[] interceptors => (LifecycleInterceptor[])[.. interceptors, interceptor],
-            _ => new[] { (LifecycleInterceptor)attachments, interceptor }
-        };
+        return interceptors is null ? interceptor.SingleAttachment : [.. interceptors, interceptor];
     }
 
     // Called only when the attachments contain the interceptor.
-    private static object? Without(object? attachments, LifecycleInterceptor interceptor)
+    private static LifecycleInterceptor[]? Without(LifecycleInterceptor[] interceptors, LifecycleInterceptor interceptor)
     {
-        if (attachments is not LifecycleInterceptor[] interceptors)
+        if (interceptors.Length == 1)
         {
             return null;
         }
 
+        var index = IndexOf(interceptors, interceptor);
         if (interceptors.Length == 2)
         {
-            return ReferenceEquals(interceptors[0], interceptor) ? interceptors[1] : interceptors[0];
+            return interceptors[1 - index].SingleAttachment;
         }
 
-        var index = Array.IndexOf(interceptors, interceptor);
         var remaining = new LifecycleInterceptor[interceptors.Length - 1];
         Array.Copy(interceptors, remaining, index);
         Array.Copy(interceptors, index + 1, remaining, index, remaining.Length - index);
