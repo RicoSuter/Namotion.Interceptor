@@ -286,7 +286,7 @@ Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfigur
 | Scenario | Why Not Covered | Production Impact |
 |----------|-----------------|-------------------|
 | Partial network failure (slow/lossy connections) | Keep-alive uses binary pass/fail detection | Low - TCP keepalive settings at OS level handle this |
-| Certificate expiry mid-session | The OPC UA client renews self-signed certificates only when it connects, and the server has no rotation | Low for tests, relevant for >6 month production deployments |
+| Certificate expiry mid-session | The OPC UA client and server replace an expired self-signed certificate only when they connect or start | Low for tests, relevant for >6 month production deployments |
 | Server returning persistent error status codes | Polling ignores some error codes | Low - circuit breaker limits impact |
 | Out-of-order or duplicate notifications | Not injected by the chaos profiles | Very low - the OPC UA client skips a value from an older notification message of the same subscription |
 | Notification duplication after subscription transfer | Full state read overwrites stale values | Low - brief inconsistency only |

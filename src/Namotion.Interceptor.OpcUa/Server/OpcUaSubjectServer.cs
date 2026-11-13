@@ -252,7 +252,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                         using var outboundRegistration = Metrics.OutboundChanges.Register(
                             () => changeQueueProcessor.QueueDepth, capacity: null);
 
-                        await application.CheckApplicationInstanceCertificatesAsync(true, ct: linkedToken).ConfigureAwait(false);
+                        await LoadApplicationCertificateAsync(application, linkedToken).ConfigureAwait(false);
                         await application.StartAsync(server).ConfigureAwait(false);
 
                         ResetConsecutiveFailures();
@@ -337,6 +337,15 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
             }).ConfigureAwait(false);
         }
     }
+
+    internal Task LoadApplicationCertificateAsync(ApplicationInstance application, CancellationToken cancellationToken) =>
+        ApplicationCertificateLoader.EnsureLoadedAsync(
+            application,
+            autoCreate: true,
+            CertificateFactory.DefaultLifeTime,
+            _configuration.ResolvedTelemetryContext,
+            _logger,
+            cancellationToken);
 
     private async Task ShutdownServerAsync(ApplicationInstance application)
     {

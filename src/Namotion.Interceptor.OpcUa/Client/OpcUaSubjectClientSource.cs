@@ -26,9 +26,6 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     private readonly OpcUaSubjectLoader _subjectLoader;
     private readonly SubscriptionHealthMonitor _subscriptionHealthMonitor;
 
-    // Kept across connect attempts, so the client certificate is read from the store once per source.
-    private readonly ApplicationCertificateLoader _certificateLoader;
-
     private volatile SessionManager? _sessionManager;
     private volatile SubjectPropertyWriter? _propertyWriter;
     private OutboundWriter? _writer;
@@ -149,7 +146,6 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
         _subjectLoader = new OpcUaSubjectLoader(subject, configuration, _ownership, this, logger);
         _subscriptionHealthMonitor = new SubscriptionHealthMonitor(logger, ReportBackgroundError);
-        _certificateLoader = new ApplicationCertificateLoader(logger);
 
         Metrics.RegisterClaimedProperties(() => _ownership.Count);
         Metrics.RegisterResettable(ReconnectionMetrics);
@@ -179,7 +175,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
 
         _sessionManager = new SessionManager(
-            this, propertyWriter, _configuration, PollingMetrics, ReadAfterWriteMetrics, _certificateLoader, _logger);
+            this, propertyWriter, _configuration, PollingMetrics, ReadAfterWriteMetrics, _logger);
         _writer = new OutboundWriter(_sessionManager, _configuration, OpcUaNodeIdKey, OutgoingThroughput, _logger);
 
         try

@@ -1,14 +1,16 @@
 using System.Runtime.Versioning;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.OpcUa.Client;
-using Namotion.Interceptor.OpcUa.Client.Connection;
+using Namotion.Interceptor.OpcUa.Tests.Client;
+using Namotion.Interceptor.Testing;
 using Opc.Ua;
 using Opc.Ua.Configuration;
 using Opc.Ua.Security.Certificates;
 
-namespace Namotion.Interceptor.OpcUa.Tests.Client;
+namespace Namotion.Interceptor.OpcUa.Tests;
 
 public class ApplicationCertificateLoaderTests : IDisposable
 {
@@ -28,10 +30,9 @@ public class ApplicationCertificateLoaderTests : IDisposable
         // Arrange
         var configuration = CreateConfiguration();
         var application = await configuration.CreateApplicationInstanceAsync();
-        var loader = new ApplicationCertificateLoader(NullLogger.Instance);
 
         // Act
-        await loader.EnsureLoadedAsync(application, configuration, CancellationToken.None);
+        await LoadAsync(application, configuration);
 
         // Assert
         var certificate = application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate;
@@ -42,22 +43,21 @@ public class ApplicationCertificateLoaderTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenTheSourceConnectsAgain_ThenTheLoadedCertificateIsReused()
+    public async Task WhenLoadedAgain_ThenTheStoredCertificateIsLoaded()
     {
         // Arrange
         var configuration = CreateConfiguration();
-        var loader = new ApplicationCertificateLoader(NullLogger.Instance);
         var first = await configuration.CreateApplicationInstanceAsync();
-        await loader.EnsureLoadedAsync(first, configuration, CancellationToken.None);
+        await LoadAsync(first, configuration);
         var second = await configuration.CreateApplicationInstanceAsync();
 
         // Act
-        await loader.EnsureLoadedAsync(second, configuration, CancellationToken.None);
+        await LoadAsync(second, configuration);
 
         // Assert
-        Assert.Same(
-            first.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate,
-            second.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate);
+        Assert.Equal(GetCertificate(first).Thumbprint, GetCertificate(second).Thumbprint);
+        Assert.True(GetCertificate(second).HasPrivateKey);
+        Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "certs")));
     }
 
     [Fact]
@@ -67,10 +67,9 @@ public class ApplicationCertificateLoaderTests : IDisposable
         var configuration = CreateConfiguration();
         configuration.AutoCreateApplicationCertificate = false;
         var application = await configuration.CreateApplicationInstanceAsync();
-        var loader = new ApplicationCertificateLoader(NullLogger.Instance);
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<ServiceResultException>(() => loader.EnsureLoadedAsync(application, configuration, CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<ServiceResultException>(() => LoadAsync(application, configuration));
         Assert.Contains($"CN={configuration.ApplicationName}, O=Namotion", exception.Message);
         Assert.False(Directory.Exists(Path.Combine(_storePath, "own", "certs"))
             && Directory.GetFiles(Path.Combine(_storePath, "own", "certs")).Length > 0);
@@ -82,144 +81,143 @@ public class ApplicationCertificateLoaderTests : IDisposable
         // Arrange - a host name change otherwise leaves the stored certificate with a stale URI.
         var original = CreateConfiguration();
         original.ApplicationUri = "urn:old-host:client";
-        await new ApplicationCertificateLoader(NullLogger.Instance)
-            .EnsureLoadedAsync(await original.CreateApplicationInstanceAsync(), original, CancellationToken.None);
+        await LoadAsync(await original.CreateApplicationInstanceAsync(), original);
         var changed = CreateConfiguration();
         changed.ApplicationUri = "urn:new-host:client";
 
         // Act & Assert
-        await Assert.ThrowsAsync<ServiceResultException>(async () => await new ApplicationCertificateLoader(NullLogger.Instance)
-            .EnsureLoadedAsync(await changed.CreateApplicationInstanceAsync(), changed, CancellationToken.None));
-        await new ApplicationCertificateLoader(NullLogger.Instance)
-            .EnsureLoadedAsync(await original.CreateApplicationInstanceAsync(), original, CancellationToken.None);
+        await Assert.ThrowsAsync<ServiceResultException>(async () => await LoadAsync(await changed.CreateApplicationInstanceAsync(), changed));
+        await LoadAsync(await original.CreateApplicationInstanceAsync(), original);
     }
 
     [Fact]
-    public async Task WhenASelfCreatedCertificateIsCloseToExpiry_ThenItIsRenewed()
+    public async Task WhenASelfSignedCertificateIsCloseToExpiry_ThenAWarningIsLoggedAndItIsKept()
     {
         // Arrange
         var configuration = CreateConfiguration();
         configuration.ApplicationUri = "urn:test:client";
-        using var expiring = await AddExpiringCertificateAsync(configuration);
+        using var expiring = await AddSelfSignedCertificateAsync(configuration, ageInDays: 355);
         var application = await configuration.CreateApplicationInstanceAsync();
+        var logger = new RecordingLogger();
 
         // Act
-        await new ApplicationCertificateLoader(NullLogger.Instance).EnsureLoadedAsync(application, configuration, CancellationToken.None);
+        await LoadAsync(application, configuration, logger);
 
         // Assert
-        var certificate = application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate!;
-        Assert.NotEqual(expiring.Thumbprint, certificate.Thumbprint);
+        Assert.Equal(expiring.Thumbprint, GetCertificate(application).Thumbprint);
+        Assert.True(GetCertificate(application).HasPrivateKey);
+        var warning = Assert.Single(logger.Warnings);
+        Assert.Contains(expiring.Thumbprint, warning);
+        Assert.Contains(Path.Combine(_storePath, "own"), warning);
+        Assert.Contains("once it has expired", warning);
+    }
+
+    [Fact]
+    public async Task WhenACertificateIsNotCloseToExpiry_ThenNoWarningIsLogged()
+    {
+        // Arrange
+        var configuration = CreateConfiguration();
+        var application = await configuration.CreateApplicationInstanceAsync();
+        var logger = new RecordingLogger();
+
+        // Act
+        await LoadAsync(application, configuration, logger);
+
+        // Assert
+        Assert.Empty(logger.Warnings);
+    }
+
+    [Fact]
+    public async Task WhenASelfSignedCertificateHasExpired_ThenItIsReplacedWithAWarning()
+    {
+        // Arrange - the SDK loads an expired certificate of its own as valid, so only the loader replaces it.
+        var configuration = CreateConfiguration();
+        configuration.ApplicationUri = "urn:test:client";
+        using var expired = await AddSelfSignedCertificateAsync(configuration, ageInDays: 400);
+        var application = await configuration.CreateApplicationInstanceAsync();
+        var logger = new RecordingLogger();
+
+        // Act
+        await LoadAsync(application, configuration, logger);
+
+        // Assert
+        var certificate = GetCertificate(application);
+        Assert.NotEqual(expired.Thumbprint, certificate.Thumbprint);
         Assert.True(certificate.NotAfter.ToUniversalTime() > DateTime.UtcNow.AddMonths(11));
         Assert.True(certificate.HasPrivateKey);
-        Assert.DoesNotContain(expiring.Thumbprint, Path.GetFileName(Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "certs")))));
-        Assert.DoesNotContain(expiring.Thumbprint, Path.GetFileName(Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "private")))));
+        Assert.DoesNotContain(expired.Thumbprint, Path.GetFileName(Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "certs")))));
+        Assert.DoesNotContain(expired.Thumbprint, Path.GetFileName(Assert.Single(Directory.GetFiles(PrivatePath))));
+        var warning = Assert.Single(logger.Warnings);
+        Assert.Contains(expired.Thumbprint, warning);
+        Assert.Contains(certificate.Thumbprint, warning);
     }
 
     [Fact]
-    public async Task WhenRenewalFails_ThenTheValidCertificateIsKeptAndRenewedOnTheNextAttempt()
+    public async Task WhenAutoCreationIsOffAndTheCertificateHasExpired_ThenItIsKeptWithAWarning()
     {
-        // Arrange - a private key folder that cannot be written makes deleting the old key fail.
+        // Arrange
         var configuration = CreateConfiguration();
         configuration.ApplicationUri = "urn:test:client";
-        using var expiring = await AddExpiringCertificateAsync(configuration);
-        var loader = new ApplicationCertificateLoader(NullLogger.Instance);
-        var first = await configuration.CreateApplicationInstanceAsync();
+        configuration.AutoCreateApplicationCertificate = false;
+        using var expired = await AddSelfSignedCertificateAsync(configuration, ageInDays: 400);
+        var application = await configuration.CreateApplicationInstanceAsync();
+        var logger = new RecordingLogger();
 
         // Act
-        if (OperatingSystem.IsWindows() || !await WithReadOnlyAsync(PrivatePath,
-            () => loader.EnsureLoadedAsync(first, configuration, CancellationToken.None)))
-        {
-            return;
-        }
-
-        var second = await configuration.CreateApplicationInstanceAsync();
-        await loader.EnsureLoadedAsync(second, configuration, CancellationToken.None);
+        await LoadAsync(application, configuration, logger);
 
         // Assert
-        var kept = first.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate!;
-        Assert.Equal(expiring.Thumbprint, kept.Thumbprint);
-        Assert.True(kept.HasPrivateKey);
-        var renewed = second.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate!;
-        Assert.NotEqual(expiring.Thumbprint, renewed.Thumbprint);
-        Assert.True(renewed.HasPrivateKey);
+        Assert.Equal(expired.Thumbprint, GetCertificate(application).Thumbprint);
+        Assert.Contains(expired.Thumbprint, Path.GetFileName(Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "certs")))));
+        Assert.Contains("not replaced", Assert.Single(logger.Warnings));
     }
 
     [Fact]
-    public async Task WhenRenewalFailsForAnExpiredCertificate_ThenLoadingFails()
+    public async Task WhenACaIssuedCertificateHasExpired_ThenItIsKeptWithAWarning()
     {
-        // Arrange - the SDK loads its own expired certificate, so it reaches the renewal, whose delete fails.
+        // Arrange - the issuer store completes the chain, otherwise the SDK rejects the certificate on load.
         var configuration = CreateConfiguration();
         configuration.ApplicationUri = "urn:test:client";
-        using var expired = await AddExpiringCertificateAsync(configuration, ageInDays: 400);
+        using var authority = CertificateBuilder.Create("CN=Test Authority")
+            .SetNotBefore(DateTime.UtcNow.AddDays(-500))
+            .SetLifeTime(TimeSpan.FromDays(1000))
+            .SetCAConstraint()
+            .CreateForRSA();
+        await AddToStoreAsync("issuer", authority);
+        using var issued = CertificateFactory
+            .CreateCertificate(configuration.ApplicationUri, configuration.ApplicationName, $"CN={configuration.ApplicationName}, O=Namotion", null)
+            .SetNotBefore(DateTime.UtcNow.AddDays(-400))
+            .SetLifeTime(TimeSpan.FromDays(365))
+            .SetIssuer(authority)
+            .CreateForRSA();
+        await AddToStoreAsync("own", issued);
         var application = await configuration.CreateApplicationInstanceAsync();
-        var loader = new ApplicationCertificateLoader(NullLogger.Instance);
+        var logger = new RecordingLogger();
+
+        // Act
+        await LoadAsync(application, configuration, logger);
+
+        // Assert
+        Assert.Equal(issued.Thumbprint, GetCertificate(application).Thumbprint);
+        Assert.Contains(issued.Thumbprint, Path.GetFileName(Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "certs")))));
+        Assert.Contains("not replaced", Assert.Single(logger.Warnings));
+    }
+
+    [Fact]
+    public async Task WhenReplacingAnExpiredCertificateFails_ThenLoadingFails()
+    {
+        // Arrange - a private key folder that cannot be written makes deleting the expired key fail.
+        var configuration = CreateConfiguration();
+        configuration.ApplicationUri = "urn:test:client";
+        using var expired = await AddSelfSignedCertificateAsync(configuration, ageInDays: 400);
+        var application = await configuration.CreateApplicationInstanceAsync();
 
         // Act & Assert
         if (!OperatingSystem.IsWindows())
         {
             await WithReadOnlyAsync(PrivatePath,
-                () => Assert.ThrowsAsync<UnauthorizedAccessException>(() => loader.EnsureLoadedAsync(application, configuration, CancellationToken.None)));
+                () => Assert.ThrowsAsync<UnauthorizedAccessException>(() => LoadAsync(application, configuration)));
         }
-    }
-
-    [Fact]
-    public async Task WhenTheStoreBreaksWhileTheLoadedCertificateIsValid_ThenTheLoadedCertificateIsKept()
-    {
-        // Arrange - a failed renewal keeps the expiring certificate loaded, then its private key disappears.
-        var configuration = CreateConfiguration();
-        configuration.ApplicationUri = "urn:test:client";
-        using var expiring = await AddExpiringCertificateAsync(configuration);
-        var loader = new ApplicationCertificateLoader(NullLogger.Instance);
-        var initial = await configuration.CreateApplicationInstanceAsync();
-        if (OperatingSystem.IsWindows() || !await WithReadOnlyAsync(PrivatePath,
-            () => loader.EnsureLoadedAsync(initial, configuration, CancellationToken.None)))
-        {
-            return;
-        }
-
-        File.Delete(Assert.Single(Directory.GetFiles(PrivatePath)));
-        var application = await configuration.CreateApplicationInstanceAsync();
-
-        // Act
-        await loader.EnsureLoadedAsync(application, configuration, CancellationToken.None);
-
-        // Assert
-        var certificate = application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate!;
-        Assert.Equal(expiring.Thumbprint, certificate.Thumbprint);
-        Assert.True(certificate.HasPrivateKey);
-    }
-
-    [Fact]
-    public void WhenACertificateIsCaIssued_ThenItIsNeverRenewed()
-    {
-        // Arrange
-        var configuration = CreateConfiguration();
-        using var authority = CertificateBuilder.Create("CN=Test Authority").SetCAConstraint().CreateForRSA();
-        using var issued = CertificateBuilder.Create("CN=Issued")
-            .SetLifeTime(TimeSpan.FromDays(10))
-            .SetIssuer(authority)
-            .CreateForRSA();
-
-        // Act
-        var needsRenewal = ApplicationCertificateLoader.NeedsRenewal(issued, configuration);
-
-        // Assert
-        Assert.False(needsRenewal);
-    }
-
-    [Fact]
-    public void WhenAutoCreationIsOff_ThenAnExpiringSelfSignedCertificateIsNotRenewed()
-    {
-        // Arrange
-        var configuration = CreateConfiguration();
-        configuration.AutoCreateApplicationCertificate = false;
-        using var expiring = CertificateBuilder.Create("CN=Expiring").SetLifeTime(TimeSpan.FromDays(10)).CreateForRSA();
-
-        // Act
-        var needsRenewal = ApplicationCertificateLoader.NeedsRenewal(expiring, configuration);
-
-        // Assert
-        Assert.False(needsRenewal);
     }
 
     [Fact]
@@ -232,7 +230,7 @@ public class ApplicationCertificateLoaderTests : IDisposable
         application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate = provided;
 
         // Act
-        await new ApplicationCertificateLoader(NullLogger.Instance).EnsureLoadedAsync(application, configuration, CancellationToken.None);
+        await LoadAsync(application, configuration);
 
         // Assert
         Assert.Same(provided, application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate);
@@ -249,8 +247,8 @@ public class ApplicationCertificateLoaderTests : IDisposable
 
         // Act
         await Task.WhenAll(
-            Task.Run(() => new ApplicationCertificateLoader(NullLogger.Instance).EnsureLoadedAsync(first, configuration, CancellationToken.None)),
-            Task.Run(() => new ApplicationCertificateLoader(NullLogger.Instance).EnsureLoadedAsync(second, configuration, CancellationToken.None)));
+            Task.Run(() => LoadAsync(first, configuration)),
+            Task.Run(() => LoadAsync(second, configuration)));
 
         // Assert
         Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "certs")));
@@ -268,12 +266,11 @@ public class ApplicationCertificateLoaderTests : IDisposable
         using var certificate = CertificateFactory
             .CreateCertificate("urn:test:client", configuration.ApplicationName, $"CN={configuration.ApplicationName}, O=Namotion", null)
             .CreateForRSA();
-        await AddToOwnStoreAsync(certificate, "secret".ToCharArray());
+        await AddToStoreAsync("own", certificate, "secret".ToCharArray());
         var application = await configuration.CreateApplicationInstanceAsync();
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<ServiceResultException>(() => new ApplicationCertificateLoader(NullLogger.Instance)
-            .EnsureLoadedAsync(application, configuration, CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<ServiceResultException>(() => LoadAsync(application, configuration));
         Assert.Contains("Cannot access private key", exception.Message);
         var files = Directory.GetFiles(Path.Combine(_storePath, "own", "certs"));
         Assert.Single(files);
@@ -297,11 +294,11 @@ public class ApplicationCertificateLoaderTests : IDisposable
         using var certificate = CertificateFactory
             .CreateCertificate("urn:test:client", configuration.ApplicationName, $"CN={configuration.ApplicationName}, O=Namotion", null)
             .CreateForRSA();
-        await AddToOwnStoreAsync(certificate, "secret".ToCharArray());
+        await AddToStoreAsync("own", certificate, "secret".ToCharArray());
         var application = await configuration.CreateApplicationInstanceAsync();
 
         // Act
-        await new ApplicationCertificateLoader(NullLogger.Instance).EnsureLoadedAsync(application, configuration, CancellationToken.None);
+        await LoadAsync(application, configuration);
 
         // Assert
         Assert.True(application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate!.HasPrivateKey);
@@ -312,14 +309,29 @@ public class ApplicationCertificateLoaderTests : IDisposable
 
     private string PrivatePath => Path.Combine(_storePath, "own", "private");
 
-    private async Task<X509Certificate2> AddExpiringCertificateAsync(OpcUaClientConfiguration configuration, int ageInDays = 355)
+    private static Task LoadAsync(ApplicationInstance application, OpcUaClientConfiguration configuration, ILogger? logger = null) =>
+        ApplicationCertificateLoader.EnsureLoadedAsync(
+            application,
+            configuration.AutoCreateApplicationCertificate,
+            configuration.ApplicationCertificateLifetimeInMonths,
+            configuration.ResolvedTelemetryContext,
+            logger ?? NullLogger.Instance,
+            CancellationToken.None);
+
+    private static X509Certificate2 GetCertificate(ApplicationInstance application) =>
+        application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate!;
+
+    /// <summary>
+    /// Adds a self-signed certificate valid for 365 days that was issued <paramref name="ageInDays"/> ago.
+    /// </summary>
+    private async Task<X509Certificate2> AddSelfSignedCertificateAsync(OpcUaClientConfiguration configuration, int ageInDays)
     {
         var certificate = CertificateFactory
             .CreateCertificate(configuration.ApplicationUri, configuration.ApplicationName, $"CN={configuration.ApplicationName}, O=Namotion", null)
             .SetNotBefore(DateTime.UtcNow.AddDays(-ageInDays))
             .SetLifeTime(TimeSpan.FromDays(365))
             .CreateForRSA();
-        await AddToOwnStoreAsync(certificate);
+        await AddToStoreAsync("own", certificate);
         return certificate;
     }
 
@@ -355,9 +367,9 @@ public class ApplicationCertificateLoaderTests : IDisposable
         }
     }
 
-    private async Task AddToOwnStoreAsync(X509Certificate2 certificate, char[]? password = null)
+    private async Task AddToStoreAsync(string storeName, X509Certificate2 certificate, char[]? password = null)
     {
-        using var store = new CertificateStoreIdentifier(Path.Combine(_storePath, "own"), CertificateStoreType.Directory, false)
+        using var store = new CertificateStoreIdentifier(Path.Combine(_storePath, storeName), CertificateStoreType.Directory, false)
             .OpenStore(NullTelemetryContext.Instance);
         await store.AddAsync(certificate, password);
     }

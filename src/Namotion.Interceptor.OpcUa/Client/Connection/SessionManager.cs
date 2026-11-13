@@ -19,7 +19,6 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private readonly OpcUaSubjectClientSource _source;
     private readonly SubjectPropertyWriter _propertyWriter;
     private readonly OpcUaClientConfiguration _configuration;
-    private readonly ApplicationCertificateLoader _certificateLoader;
     private readonly ILogger _logger;
 
     private volatile SessionReconnectHandler _reconnectHandler;
@@ -193,12 +192,10 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         OpcUaClientConfiguration configuration,
         PollingMetrics pollingMetrics,
         ReadAfterWriteMetrics readAfterWriteMetrics,
-        ApplicationCertificateLoader certificateLoader,
         ILogger logger)
     {
         _source = source;
         _propertyWriter = propertyWriter;
-        _certificateLoader = certificateLoader;
         _logger = logger;
         _configuration = configuration;
         _reconnectHandler = new SessionReconnectHandler(configuration.ResolvedTelemetryContext, false, (int)configuration.ReconnectHandlerTimeout.TotalMilliseconds);
@@ -781,7 +778,13 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     {
         try
         {
-            await _certificateLoader.EnsureLoadedAsync(application, configuration, cancellationToken).ConfigureAwait(false);
+            await ApplicationCertificateLoader.EnsureLoadedAsync(
+                application,
+                configuration.AutoCreateApplicationCertificate,
+                configuration.ApplicationCertificateLifetimeInMonths,
+                configuration.ResolvedTelemetryContext,
+                _logger,
+                cancellationToken).ConfigureAwait(false);
         }
         // The SDK can report a cancellation as another exception type, so the token is checked too.
         catch (Exception error) when (error is not OperationCanceledException && !cancellationToken.IsCancellationRequested)

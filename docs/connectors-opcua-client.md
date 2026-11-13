@@ -138,9 +138,9 @@ Beyond the settings shown above, the following properties are available on `OpcU
 | `ApplicationName` | "Namotion.Interceptor.Client" | Application name for identification and certificate generation |
 | `RequireSecurity` | false | Require a signed or encrypted endpoint (see [Transport Security](#transport-security)) |
 | `AutoAcceptUntrustedCertificates` | false | Accept server certificates that are not in the trusted store |
-| `AutoCreateApplicationCertificate` | true | Create and renew a self-signed client certificate for secured connections |
+| `AutoCreateApplicationCertificate` | true | Create a self-signed client certificate for secured connections, and replace it once it has expired |
 | `ApplicationUri` | null | Application URI the client certificate carries (derived from host and application name when null) |
-| `ApplicationCertificateLifetimeInMonths` | 12 | Lifetime of a certificate the client creates, at least 2 |
+| `ApplicationCertificateLifetimeInMonths` | 12 | Lifetime of a certificate the client creates, at least 1 |
 | `CreateUserIdentity` | null | Async factory for user credentials (see [Authentication](#authentication)) |
 | `CertificateStoreBasePath` | "pki" | Base directory for certificate stores |
 | `SessionFactory` | null | Custom session factory (uses `DefaultSessionFactory` when null) |
@@ -206,15 +206,15 @@ A secured connection needs a client certificate with its private key; an unsecur
 
 To provision a certificate, put it in `own/certs` as a `.der` file and its private key in `own/private` as a `.pfx` file, which may be password protected through `CertificatePasswordProvider` (see [Custom Application Configuration](#custom-application-configuration)). The certificate needs the subject `CN={ApplicationName}, O=Namotion` and the application URI `urn:{host name}:Namotion.Interceptor:{ApplicationName}`, or the value of `ApplicationUri`. Set `ApplicationUri` when the host name changes, for example in containers, because a certificate with a stale URI is rejected.
 
-Several processes sharing one certificate store should provision a certificate that is never renewed (one issued by a certificate authority, or any certificate with `AutoCreateApplicationCertificate = false`), or use different application names or store paths. The client serializes access to the store only within one process.
+Several processes sharing one certificate store should provision a certificate that is never replaced (one issued by a certificate authority, or any certificate with `AutoCreateApplicationCertificate = false`), or use different application names or store paths. The client serializes access to the store only within one process.
 
 #### Certificate Renewal
 
-With `AutoCreateApplicationCertificate = true` the client replaces any self-signed certificate in the own store 30 days before it expires, including a provisioned one: it deletes the old certificate with its private key, creates a new one and logs a warning, because servers that trust the client have to trust the new certificate. A certificate that is not self-signed, such as one issued by a certificate authority, is never replaced, and with `AutoCreateApplicationCertificate = false` nothing is ever replaced.
+Within 30 days of expiry the client logs a warning on each secured connect that names the certificate's thumbprint, its expiry and the store. With `AutoCreateApplicationCertificate = true` the client replaces a self-signed certificate in the own store once it has expired, including a provisioned one: it deletes the old certificate with its private key, creates a new one and logs a warning, because servers that trust the client have to trust the new certificate. A certificate that is not self-signed, such as one issued by a certificate authority, is never replaced, and with `AutoCreateApplicationCertificate = false` nothing is ever replaced.
 
-The client checks this only when it creates a session itself, on the initial connect and on its manual reconnects (see [Connection Loss Recovery](#connection-loss-recovery)), not on a timer and not when the SDK's reconnect handler recovers the session. A connection that stays up through the last 30 days therefore renews only at its next reconnect. If the certificate expires before that, the server rejects it when the secure channel renews, and the client can connect again only once the server trusts the new certificate.
+The client loads the certificate from the store only when it creates a session itself, on the initial connect and on its manual reconnects (see [Connection Loss Recovery](#connection-loss-recovery)), not on a timer and not when the SDK's reconnect handler recovers the session. A connection that stays up past the expiry keeps the expired certificate until the server rejects it when the secure channel renews; the client then replaces it on its next connect and can connect again once the server trusts the new certificate.
 
-If loading or renewing fails while the current certificate has not expired, the client keeps using it, logs the error and retries on the next connect. Once the certificate has expired, a failed load or renewal fails the connection.
+A failed load or replacement fails the connection, which is retried.
 
 #### Trust
 
@@ -300,7 +300,7 @@ public class MyOpcUaClientConfiguration : OpcUaClientConfiguration
 }
 ```
 
-To provide the client certificate yourself, for example from a hardware security module, set `config.SecurityConfiguration.ApplicationCertificate.Certificate` with its private key. An override can also switch the application certificate to another store type, such as the Windows certificate store, and call `CertificateValidator.UpdateAsync` again; the SDK then loads that certificate with its private key during the update, which also makes it a provided certificate. The client uses a provided certificate as is, without validating or renewing it.
+To provide the client certificate yourself, for example from a hardware security module, set `config.SecurityConfiguration.ApplicationCertificate.Certificate` with its private key. An override can also switch the application certificate to another store type, such as the Windows certificate store, and call `CertificateValidator.UpdateAsync` again; the SDK then loads that certificate with its private key during the update, which also makes it a provided certificate. The client uses a provided certificate as is, without validating or replacing it.
 
 ## Monitoring & Subscriptions
 

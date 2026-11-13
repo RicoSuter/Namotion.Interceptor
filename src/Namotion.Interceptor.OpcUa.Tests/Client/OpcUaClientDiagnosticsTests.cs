@@ -64,7 +64,6 @@ public class OpcUaClientDiagnosticsTests
             CreateConfiguration(),
             source.PollingMetrics,
             source.ReadAfterWriteMetrics,
-            new ApplicationCertificateLoader(NullLogger.Instance),
             NullLogger.Instance);
         await AsyncTestHelpers.WaitUntilAsync(
             () => sessionManager.PollingManager!.IsRunning,
@@ -145,7 +144,6 @@ public class OpcUaClientDiagnosticsTests
             CreateConfiguration(),
             source.PollingMetrics,
             source.ReadAfterWriteMetrics,
-            new ApplicationCertificateLoader(NullLogger.Instance),
             NullLogger.Instance);
         await AsyncTestHelpers.WaitUntilAsync(
             () => sessionManager.PollingManager!.IsRunning,

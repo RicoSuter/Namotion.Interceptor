@@ -319,7 +319,7 @@ public class OpcUaClientConfiguration
 
     /// <summary>
     /// Gets or sets whether the client creates a self-signed application certificate in <c>{CertificateStoreBasePath}/own</c> when none
-    /// exists for a secured connection, and renews a self-signed certificate before it expires. When false, a
+    /// exists for a secured connection, and replaces a self-signed certificate once it has expired. When false, a
     /// secured connection requires a provisioned certificate and nothing is ever replaced. Default is true.
     /// </summary>
     public bool AutoCreateApplicationCertificate { get; set; } = true;
@@ -331,7 +331,7 @@ public class OpcUaClientConfiguration
     public string? ApplicationUri { get; set; }
 
     /// <summary>
-    /// Gets or sets the lifetime in months of an application certificate the client creates. Must be at least 2. Default is 12.
+    /// Gets or sets the lifetime in months of an application certificate the client creates. Must be at least 1. Default is 12.
     /// </summary>
     public ushort ApplicationCertificateLifetimeInMonths { get; set; } = 12;
 
@@ -566,11 +566,10 @@ public class OpcUaClientConfiguration
                 nameof(ReadAfterWriteBuffer));
         }
 
-        if (ApplicationCertificateLifetimeInMonths < 2)
+        if (ApplicationCertificateLifetimeInMonths < 1)
         {
             throw new ArgumentException(
-                "ApplicationCertificateLifetimeInMonths must be at least 2 because certificates are renewed 30 days before they expire, " +
-                $"got: {ApplicationCertificateLifetimeInMonths}",
+                $"ApplicationCertificateLifetimeInMonths must be at least 1, got: {ApplicationCertificateLifetimeInMonths}",
                 nameof(ApplicationCertificateLifetimeInMonths));
         }
 

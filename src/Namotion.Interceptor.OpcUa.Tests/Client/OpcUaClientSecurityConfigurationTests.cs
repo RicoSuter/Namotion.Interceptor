@@ -105,18 +105,30 @@ public class OpcUaClientSecurityConfigurationTests
         Assert.Null(configuration.ApplicationUri);
     }
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    public void WhenTheCertificateLifetimeIsBelowTwoMonths_ThenValidationFails(ushort lifetimeInMonths)
+    [Fact]
+    public void WhenTheCertificateLifetimeIsZero_ThenValidationFails()
     {
         // Arrange
         var configuration = ClientSourceTestFactory.CreateConfiguration();
-        configuration.ApplicationCertificateLifetimeInMonths = lifetimeInMonths;
+        configuration.ApplicationCertificateLifetimeInMonths = 0;
 
         // Act & Assert
         var exception = Assert.Throws<ArgumentException>(() => configuration.Validate());
         Assert.Equal(nameof(OpcUaClientConfiguration.ApplicationCertificateLifetimeInMonths), exception.ParamName);
+    }
+
+    [Fact]
+    public void WhenTheCertificateLifetimeIsOneMonth_ThenValidationSucceeds()
+    {
+        // Arrange
+        var configuration = ClientSourceTestFactory.CreateConfiguration();
+        configuration.ApplicationCertificateLifetimeInMonths = 1;
+
+        // Act
+        var exception = Record.Exception(configuration.Validate);
+
+        // Assert
+        Assert.Null(exception);
     }
 
     [Theory]
