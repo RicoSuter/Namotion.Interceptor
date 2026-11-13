@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Reactive.Concurrency;
+using System.Reflection;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -431,6 +433,62 @@ public class PostLockQueueTests
         Assert.True(hasRun);
         Assert.Same(worker, root.Machine.Worker);
         Assert.Equal([(2, false, callTimestamp)], deliveries);
+    }
+
+    [Fact]
+    public void WhenAnotherWriteObserverIsInstalled_ThenTheReleaseOfTheLockDeliversTheQueuedChanges()
+    {
+        // Arrange: the write observer of Tracking completes an anchor write, so with another observer installed in
+        // its place the release of the lifecycle lock runs the queued work instead.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new Person(context);
+        var mother = new Person();
+        context.WithService(() => new HandlerAction(change =>
+        {
+            if (change.IsContextAttach && change.Subject == mother)
+            {
+                root.FirstName = "m";
+            }
+        }));
+        var deliveries = new List<string>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Subject == root)
+            {
+                deliveries.Add(change.Property.Name);
+            }
+        });
+        var trackingObserver = PropertyAccessObservation.WriteObserver;
+
+        // Act
+        ReplaceWriteObserver(new IgnoringWriteObserver());
+        try
+        {
+            root.Mother = mother;
+        }
+        finally
+        {
+            ReplaceWriteObserver(trackingObserver);
+        }
+
+        // Assert
+        Assert.Equal([nameof(Person.FirstName), nameof(Person.Mother)], deliveries);
+    }
+
+    // The process-wide observer is replaced through the test hook of the core library, which is internal to it.
+    private static void ReplaceWriteObserver(IPropertyWriteObserver? observer)
+    {
+        typeof(PropertyAccessObservation)
+            .GetMethod("ReplaceWriteObserverForTests", BindingFlags.NonPublic | BindingFlags.Static)!
+            .Invoke(null, [observer]);
+    }
+
+    private sealed class IgnoringWriteObserver : IPropertyWriteObserver
+    {
+        public void OnPropertyWritten(in PropertyWriteObservation write)
+        {
+            // Stands for a write observer installed by other code; it does not complete anchor writes.
+        }
     }
 
     // True when another thread takes the lifecycle lock, which it does only if this thread holds none.
