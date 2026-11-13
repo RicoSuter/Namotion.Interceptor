@@ -148,6 +148,7 @@ public class MyServerConfiguration : OpcUaServerConfiguration
         var config = application.ApplicationConfiguration;
 
         // Tighten security
+        // Also applies to the server's own certificate: delete a smaller existing one from {CertificateStoreBasePath}/own once.
         config.SecurityConfiguration.MinimumCertificateKeySize = 4096;
 
         // The validator reads security settings only when UpdateAsync runs, so call it again after changing them.

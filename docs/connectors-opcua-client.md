@@ -206,7 +206,7 @@ A secured connection needs a client certificate with its private key; an unsecur
 
 To provision a certificate, put it in `own/certs` as a `.der` file and its private key in `own/private` as a `.pfx` file, which may be password protected through `CertificatePasswordProvider` (see [Custom Application Configuration](#custom-application-configuration)). The certificate needs the subject `CN={ApplicationName}, O=Namotion` and the application URI `urn:{host name}:Namotion.Interceptor:{ApplicationName}`, or the value of `ApplicationUri`. Set `ApplicationUri` when the host name changes, for example in containers, because a certificate with a stale URI is rejected.
 
-Several processes sharing one certificate store should provision a certificate that is not renewed, one issued by a certificate authority or with `AutoCreateApplicationCertificate = false`, or use different application names or store paths. The client serializes access to the store only within one process.
+Several processes sharing one certificate store should provision a certificate that is never renewed (one issued by a certificate authority, or any certificate with `AutoCreateApplicationCertificate = false`), or use different application names or store paths. The client serializes access to the store only within one process.
 
 #### Certificate Renewal
 
