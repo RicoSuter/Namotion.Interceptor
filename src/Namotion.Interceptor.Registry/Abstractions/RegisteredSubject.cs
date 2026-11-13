@@ -308,6 +308,12 @@ public class RegisteredSubject
         Action<IInterceptorSubject, object?>? setValue,
         params Attribute[] attributes)
     {
+        // A getter that comes from configuration can read itself through other properties.
+        if (getValue is not null && attributes.Any(attribute => attribute is DerivedAttribute))
+        {
+            getValue = new DerivedGetterReentrancyGuard(name, type, getValue).GetValue;
+        }
+
         Subject.AddProperties(new SubjectPropertyMetadata(
             name,
             type,
