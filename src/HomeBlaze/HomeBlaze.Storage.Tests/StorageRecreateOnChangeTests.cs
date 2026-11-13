@@ -56,4 +56,38 @@ public class StorageRecreateOnChangeTests : StorageTestBase
         Assert.NotSame(leaf, reloaded);
         Assert.Equal("square", reloaded.Shape);
     }
+
+    [Fact]
+    public async Task WhenAConfigurationWithAChangedRecreateOnChangeValueIsWritten_ThenANewInstanceReplacesTheSubject()
+    {
+        // Arrange
+        WriteFile("Leaf.json", $$"""{ "$type": "{{LeafType}}", "name": "a", "shape": "round" }""");
+        var storage = await ConnectAsync();
+        var leaf = Assert.IsType<RecreatingTestLeaf>(storage.Children["Leaf"]);
+        leaf.Shape = "square";
+
+        // Act
+        await storage.WriteConfigurationAsync(leaf, CancellationToken.None);
+
+        // Assert
+        var replaced = Assert.IsType<RecreatingTestLeaf>(storage.Children["Leaf"]);
+        Assert.NotSame(leaf, replaced);
+        Assert.Equal("square", replaced.Shape);
+    }
+
+    [Fact]
+    public async Task WhenAConfigurationWithAChangedOrdinaryValueIsWritten_ThenTheInstanceIsKept()
+    {
+        // Arrange
+        WriteFile("Leaf.json", $$"""{ "$type": "{{LeafType}}", "name": "a", "shape": "round" }""");
+        var storage = await ConnectAsync();
+        var leaf = Assert.IsType<RecreatingTestLeaf>(storage.Children["Leaf"]);
+        leaf.Name = "b";
+
+        // Act
+        await storage.WriteConfigurationAsync(leaf, CancellationToken.None);
+
+        // Assert
+        Assert.Same(leaf, storage.Children["Leaf"]);
+    }
 }
