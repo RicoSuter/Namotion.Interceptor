@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using Namotion.Interceptor.Interceptors;
@@ -54,8 +53,6 @@ internal static class PostLockQueue
         public readonly List<QueuedRequest> Requests = [];
 
         public Dictionary<PropertyReference, int>? RequestIndex;
-
-        public bool IsEmpty => Deliveries.Count == 0 && Requests.Count == 0;
     }
 
     /// <summary>
@@ -221,8 +218,13 @@ internal static class PostLockQueue
     /// </summary>
     internal static Segment TakeAnchorSegment()
     {
-        var segments = _segments!;
-        Debug.Assert(segments[^1].AnchorDepth == _innermostAnchorDepth);
+        var segments = _segments;
+        if (segments is not { Count: > 0 } || segments[^1].AnchorDepth != _innermostAnchorDepth)
+        {
+            throw new InvalidOperationException(
+                "PostLockQueue: the innermost segment does not belong to the completed anchor write.");
+        }
+
         return Pop(segments);
     }
 
