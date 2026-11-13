@@ -509,6 +509,10 @@
     [Parameter]
     public EventCallback<MethodMetadata> OnDelete { get; set; }
 
+    /// <summary>Raised when a save in the edit dialog replaced the shown subject with a new instance.</summary>
+    [Parameter]
+    public EventCallback OnSubjectReplaced { get; set; }
+
     /// <summary>The name of the property whose row is highlighted, such as the target of a link.</summary>
     [Parameter]
     public string? HighlightedProperty { get; set; }
@@ -1016,8 +1020,16 @@
     {
         if (Subject == null) return;
 
+        var subject = Subject;
         var title = GetSubjectTitle();
-        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, $"Edit {title}");
+        var dialog = await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, subject, $"Edit {title}");
+        var result = await dialog.Result;
+
+        // A save that the subject cannot take in place creates it again and detaches this instance.
+        if (result is { Canceled: false } && subject.TryGetRegisteredSubject() is null)
+        {
+            await OnSubjectReplaced.InvokeAsync();
+        }
     }
 
     private Task OpenTagFilterAsync(string tag) => MetadataTagFilterDialog.ShowAsync(DialogService, tag);
