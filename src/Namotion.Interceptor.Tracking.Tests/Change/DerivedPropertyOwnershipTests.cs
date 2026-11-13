@@ -5,6 +5,7 @@ using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
+using static Namotion.Interceptor.Tracking.Tests.Change.DerivedPropertyTestHelpers;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
@@ -90,8 +91,7 @@ public class DerivedPropertyOwnershipTests
         var machine = new EvaluatorMachine();
         machine.Worker.Evaluator = _ => root.Anchor == 0 ? throw new InvalidOperationException() : 10;
         root.Machine = machine;
-        var changes = new List<SubjectPropertyChange>();
-        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        var changes = SubscribeToChanges(context);
 
         // Act
         root.Anchor = 1;
@@ -112,8 +112,7 @@ public class DerivedPropertyOwnershipTests
         var root2 = new Person(context2);
         var person = new Person { FirstName = "a" };
         root1.Mother = person;
-        var changes = new List<SubjectPropertyChange>();
-        context1.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        var changes = SubscribeToChanges(context1);
 
         // Act
         root2.Mother = person;
@@ -139,8 +138,7 @@ public class DerivedPropertyOwnershipTests
         worker.Evaluator = _ => Volatile.Read(ref external);
         root1.Machine = machine;
         var result = new PropertyReference(worker, nameof(EvaluatorWorker.Result));
-        var changes = new List<SubjectPropertyChange>();
-        context1.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        var changes = SubscribeToChanges(context1);
         Volatile.Write(ref external, 2);
 
         // Act
@@ -164,8 +162,7 @@ public class DerivedPropertyOwnershipTests
         var person = new Person { FirstName = "a" };
         root1.Mother = person;
         root2.Mother = person;
-        var changes = new List<SubjectPropertyChange>();
-        context1.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        var changes = SubscribeToChanges(context1);
 
         // Act
         root2.Mother = null;
@@ -382,8 +379,7 @@ public class DerivedPropertyOwnershipTests
             return value;
         };
         root.Machine = machine;
-        var changes = new List<SubjectPropertyChange>();
-        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        var changes = SubscribeToChanges(context);
 
         // Act
         root.Data = [1];
@@ -464,8 +460,7 @@ public class DerivedPropertyOwnershipTests
                 publishedValues.Add((change.GetOldValue<object?>(), change.GetNewValue<object?>()));
             }
         });
-        var previousTimestampFunction = SubjectChangeContext.GetTimestampFunction;
-        SubjectChangeContext.GetTimestampFunction = () =>
+        using var timeSource = ReplaceTimeSource(() =>
         {
             if (!isArmed || Environment.CurrentManagedThreadId != testThread)
             {
@@ -475,26 +470,19 @@ public class DerivedPropertyOwnershipTests
             isArmed = false;
             root.Anchor = 1000;
             throw new InvalidOperationException("Time source failed.");
-        };
+        });
 
-        try
-        {
-            // Act
-            var exception = Record.Exception(() => root.Machine = machine);
-            SubjectChangeContext.GetTimestampFunction = previousTimestampFunction;
-            var evaluationsAfterAttach = evaluations;
-            root.Anchor = 2000;
+        // Act
+        var exception = Record.Exception(() => root.Machine = machine);
+        timeSource.Dispose();
+        var evaluationsAfterAttach = evaluations;
+        root.Anchor = 2000;
 
-            // Assert: the recalculation after the failed attach published its value from the type's default, and
-            // a later write publishes from that value.
-            Assert.Equal("Time source failed.", Assert.IsType<InvalidOperationException>(exception).Message);
-            Assert.Equal(2, evaluationsAfterAttach);
-            Assert.Equal(new List<(object?, object?)> { (0, 1000), (1000, 2000) }, publishedValues);
-        }
-        finally
-        {
-            SubjectChangeContext.GetTimestampFunction = previousTimestampFunction;
-        }
+        // Assert: the recalculation after the failed attach published its value from the type's default, and
+        // a later write publishes from that value.
+        Assert.Equal("Time source failed.", Assert.IsType<InvalidOperationException>(exception).Message);
+        Assert.Equal(2, evaluationsAfterAttach);
+        Assert.Equal(new List<(object?, object?)> { (0, 1000), (1000, 2000) }, publishedValues);
     }
 
     [Fact]
@@ -515,8 +503,7 @@ public class DerivedPropertyOwnershipTests
             return root.Anchor;
         };
         var changes = new List<SubjectPropertyChange>();
-        var previousTimestampFunction = SubjectChangeContext.GetTimestampFunction;
-        SubjectChangeContext.GetTimestampFunction = () =>
+        using var timeSource = ReplaceTimeSource(() =>
         {
             if (isArmed && Environment.CurrentManagedThreadId == testThread)
             {
@@ -526,27 +513,20 @@ public class DerivedPropertyOwnershipTests
             }
 
             return DateTimeOffset.UtcNow;
-        };
+        });
 
-        try
-        {
-            // Act
-            root.Machine = machine;
-            context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
-            root.Anchor = 5;
+        // Act
+        root.Machine = machine;
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        root.Anchor = 5;
 
-            // Assert
-            Assert.True(hasWritten);
-            Assert.Contains(
-                new PropertyReference(root, nameof(EvaluatorRoot.Anchor)),
-                new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)).GetRequiredProperties().ToArray());
-            var change = Assert.Single(changes, c => c.Property.Subject == machine.Worker);
-            Assert.Equal(5, change.GetNewValue<int>());
-        }
-        finally
-        {
-            SubjectChangeContext.GetTimestampFunction = previousTimestampFunction;
-        }
+        // Assert
+        Assert.True(hasWritten);
+        Assert.Contains(
+            new PropertyReference(root, nameof(EvaluatorRoot.Anchor)),
+            new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)).GetRequiredProperties().ToArray());
+        var change = Assert.Single(changes, c => c.Property.Subject == machine.Worker);
+        Assert.Equal(5, change.GetNewValue<int>());
     }
 
     [Fact]
@@ -582,8 +562,7 @@ public class DerivedPropertyOwnershipTests
         var machine = new EvaluatorMachine();
         machine.Worker.Evaluator = _ => root.Anchor;
         root.Machine = machine;
-        var previousTimestampFunction = SubjectChangeContext.GetTimestampFunction;
-        SubjectChangeContext.GetTimestampFunction = () =>
+        using var timeSource = ReplaceTimeSource(() =>
         {
             var thread = Environment.CurrentManagedThreadId;
             if (thread == Volatile.Read(ref otherThread))
@@ -598,26 +577,19 @@ public class DerivedPropertyOwnershipTests
             }
 
             return DateTimeOffset.UtcNow;
-        };
+        });
 
-        try
-        {
-            // Act
-            var exception = Record.Exception(() => root.Anchor = 1);
-            var committedValue = new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)).TryGetDerivedPropertyData()?.LastKnownValue;
-            root.Anchor = 60;
+        // Act
+        var exception = Record.Exception(() => root.Anchor = 1);
+        var committedValue = new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)).TryGetDerivedPropertyData()?.LastKnownValue;
+        root.Anchor = 60;
 
-            // Assert
-            Assert.Equal("Publication 1.", Assert.IsType<InvalidOperationException>(exception).Message);
-            Assert.True(isWrittenByOtherThread);
-            Assert.False(isArmed);
-            Assert.Equal(50, committedValue);
-            Assert.Equal(new object?[] { 1, 60 }, publishedValues);
-        }
-        finally
-        {
-            SubjectChangeContext.GetTimestampFunction = previousTimestampFunction;
-        }
+        // Assert
+        Assert.Equal("Publication 1.", Assert.IsType<InvalidOperationException>(exception).Message);
+        Assert.True(isWrittenByOtherThread);
+        Assert.False(isArmed);
+        Assert.Equal(50, committedValue);
+        Assert.Equal(new object?[] { 1, 60 }, publishedValues);
     }
 
     [Fact]
@@ -775,9 +747,22 @@ public class DerivedPropertyOwnershipTests
         Assert.Equal(100, publishedValues[^1]);
     }
 
+    private static TimeSource ReplaceTimeSource(Func<DateTimeOffset> timestampFunction)
+    {
+        var timeSource = new TimeSource(SubjectChangeContext.GetTimestampFunction);
+        SubjectChangeContext.GetTimestampFunction = timestampFunction;
+        return timeSource;
+    }
+
     private static int CountHandlerFrames()
     {
         return new StackTrace().GetFrames().Count(frame => frame.GetMethod()?.DeclaringType == typeof(DerivedPropertyOwnership));
+    }
+
+    /// <summary>Restores the previous time source when disposed.</summary>
+    private sealed class TimeSource(Func<DateTimeOffset> previousTimestampFunction) : IDisposable
+    {
+        public void Dispose() => SubjectChangeContext.GetTimestampFunction = previousTimestampFunction;
     }
 
     /// <summary>Runs an action after each publication of a derived property's recalculated value.</summary>

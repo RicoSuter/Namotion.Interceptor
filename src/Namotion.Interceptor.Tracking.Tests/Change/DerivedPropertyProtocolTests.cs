@@ -1,4 +1,3 @@
-using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -559,15 +558,6 @@ public class DerivedPropertyProtocolTests
                 Paused.Set();
                 _hasTimedOut = !Resume.Wait(Timeout);
             }
-        }
-    }
-
-    [RunsBefore(typeof(ContextInheritanceHandler))]
-    private sealed class BeforeContextInheritanceLifecycleHandler(Action<SubjectLifecycleChange> callback) : ILifecycleHandler
-    {
-        public void HandleLifecycleChange(SubjectLifecycleChange change)
-        {
-            callback(change);
         }
     }
 }
