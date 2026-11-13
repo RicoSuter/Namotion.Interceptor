@@ -353,7 +353,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     /// <summary>
     /// Creates MonitoredItems for reconnection from owned properties.
     /// This recreates SDK objects on demand instead of holding them in memory.
-    /// Called by SessionManager when subscription transfer fails after server restart.
+    /// Used when a manual reconnect creates fresh subscriptions.
     /// </summary>
     private IReadOnlyList<MonitoredItem> CreateMonitoredItemsForReconnection()
     {
@@ -444,6 +444,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
         await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(
             sessionManager.Subscriptions,
+            sessionManager.SubscriptionManager.RegisterRecoveredItems,
             cancellationToken).ConfigureAwait(false);
 
         await sessionManager.SubscriptionManager

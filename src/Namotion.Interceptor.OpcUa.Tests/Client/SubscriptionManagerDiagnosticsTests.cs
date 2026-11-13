@@ -1,12 +1,15 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Client.Polling;
+using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking;
 using Opc.Ua;
 using Opc.Ua.Client;
 using static Namotion.Interceptor.OpcUa.Tests.Client.ClientSourceTestFactory;
@@ -90,6 +93,180 @@ public class SubscriptionManagerDiagnosticsTests
         Assert.Single(recreatedSubscription.FastDataChangeCallback!.GetInvocationList());
         Assert.Null(refusedSubscription.FastDataChangeCallback);
 #pragma warning restore CS0618
+    }
+
+    [Fact]
+    public async Task WhenANotificationIsApplied_ThenTheSubscriptionsApplyLockIsHeld()
+    {
+        // Arrange - read-after-write registers this lock, so it must be the one notifications apply under.
+        var configuration = CreateConfiguration();
+        await using var source = CreateClientSource(configuration: configuration);
+        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
+        await using var manager = CreateManager(source, propertyWriter, configuration, new ConcurrentQueue<Exception>());
+        var clientHandle = TrackNameProperty(manager, source);
+        await propertyWriter.LoadInitialStateAndResumeAsync(CancellationToken.None);
+        var subscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        var applyLock = manager.GetApplyLock(subscription);
+        bool? lockHeldDuringApply = null;
+        using var changes = source.RootSubject.Context
+            .GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(_ => lockHeldDuringApply = applyLock.IsHeldByCurrentThread);
+
+        // Act
+        manager.OnFastDataChange(subscription, CreateNotification(clientHandle, "value"), []);
+
+        // Assert
+        Assert.True(lockHeldDuringApply);
+    }
+
+    [Fact]
+    public async Task WhenARecreatedSubscriptionsItemIsNotCreatedYet_ThenItsReadAfterWriteMovesToThatSubscriptionsLock()
+    {
+        // Arrange - the item can receive notifications under the recreated subscription's lock before the
+        // health monitor heals and registers it again.
+        var configuration = CreateConfiguration();
+        await using var source = CreateClientSource(configuration: configuration);
+        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
+        await using var readAfterWriteManager = CreateReadAfterWriteManager(source, configuration);
+        await using var manager = CreateManager(
+            source, propertyWriter, configuration, new ConcurrentQueue<Exception>(), readAfterWriteManager: readAfterWriteManager);
+        var root = (TestRoot)source.RootSubject;
+        var property = new RegisteredSubject(root).TryGetProperty(nameof(TestRoot.Name))!;
+        var nodeId = new NodeId("Name", 2);
+        readAfterWriteManager.RegisterProperty(nodeId, property, 0, TimeSpan.FromMinutes(1), new Lock());
+        var recreatedSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        var item = new MonitoredItem(NullTelemetryContext.Instance)
+        {
+            StartNodeId = nodeId,
+            AttributeId = Opc.Ua.Attributes.Value,
+            Handle = property
+        };
+        recreatedSubscription.AddItem(item);
+        manager.TrackMonitoredItem(item);
+        var applyLock = manager.GetApplyLock(recreatedSubscription);
+        bool? lockHeldDuringApply = null;
+        using var changes = source.RootSubject.Context
+            .GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(_ => lockHeldDuringApply = applyLock.IsHeldByCurrentThread);
+
+        // Act
+        manager.UpdateTransferredSubscriptions([recreatedSubscription]);
+        readAfterWriteManager.OnPropertyWritten(nodeId);
+        await readAfterWriteManager.ProcessDueReadsAsync(DateTime.MaxValue);
+
+        // Assert
+        Assert.Equal("read", root.Name);
+        Assert.True(lockHeldDuringApply);
+    }
+
+    [Fact]
+    public async Task WhenAnItemOfATrackedSubscriptionIsHealed_ThenReadAfterWriteAppliesUnderThatSubscriptionsLock()
+    {
+        // Arrange
+        var configuration = CreateConfiguration();
+        configuration.DefaultSamplingInterval = 0;
+        await using var source = CreateClientSource(configuration: configuration);
+        await using var readAfterWriteManager = CreateReadAfterWriteManager(source, configuration);
+        await using var manager = CreateManager(
+            source, new SubjectPropertyWriter(source, NullLogger.Instance), configuration, new ConcurrentQueue<Exception>(),
+            readAfterWriteManager: readAfterWriteManager);
+        var root = (TestRoot)source.RootSubject;
+        var item = CreateNameItem(root);
+        var subscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        subscription.AddItem(item);
+        manager.TrackMonitoredItem(item);
+        manager.UpdateTransferredSubscriptions([subscription]);
+        MarkCreated(item, revisedSamplingInterval: 100);
+        var applyLock = manager.GetApplyLock(subscription);
+        bool? lockHeldDuringApply = null;
+        using var changes = source.RootSubject.Context
+            .GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(_ => lockHeldDuringApply = applyLock.IsHeldByCurrentThread);
+
+        // Act
+        manager.RegisterRecoveredItems(subscription);
+        readAfterWriteManager.OnPropertyWritten(item.StartNodeId);
+        await readAfterWriteManager.ProcessDueReadsAsync(DateTime.MaxValue);
+
+        // Assert
+        Assert.Equal("read", root.Name);
+        Assert.True(lockHeldDuringApply);
+    }
+
+    [Fact]
+    public async Task WhenAnItemOfAnUntrackedSubscriptionIsHealed_ThenItIsNotRegistered()
+    {
+        // Arrange - a heal of a subscription a reconnect has just replaced must not register its lock.
+        var configuration = CreateConfiguration();
+        configuration.DefaultSamplingInterval = 0;
+        await using var source = CreateClientSource(configuration: configuration);
+        await using var readAfterWriteManager = CreateReadAfterWriteManager(source, configuration);
+        await using var manager = CreateManager(
+            source, new SubjectPropertyWriter(source, NullLogger.Instance), configuration, new ConcurrentQueue<Exception>(),
+            readAfterWriteManager: readAfterWriteManager);
+        var item = CreateNameItem((TestRoot)source.RootSubject);
+        var replacedSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        replacedSubscription.AddItem(item);
+        manager.TrackMonitoredItem(item);
+        MarkCreated(item, revisedSamplingInterval: 100);
+
+        // Act
+        manager.RegisterRecoveredItems(replacedSubscription);
+        readAfterWriteManager.OnPropertyWritten(item.StartNodeId);
+
+        // Assert
+        Assert.Equal(0, readAfterWriteManager.PendingReadCount);
+    }
+
+    [Fact]
+    public async Task WhenASubscriptionIsRegisteredAgainAfterASubjectWasReleased_ThenItsPropertyIsNotRegistered()
+    {
+        // Arrange - a released property's SDK item stays in the subscription.
+        var configuration = CreateConfiguration();
+        configuration.DefaultSamplingInterval = 0;
+        await using var source = CreateClientSource(configuration: configuration);
+        await using var readAfterWriteManager = CreateReadAfterWriteManager(source, configuration);
+        await using var manager = CreateManager(
+            source, new SubjectPropertyWriter(source, NullLogger.Instance), configuration, new ConcurrentQueue<Exception>(),
+            readAfterWriteManager: readAfterWriteManager);
+        var item = CreateNameItem((TestRoot)source.RootSubject);
+        var subscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        subscription.AddItem(item);
+        manager.TrackMonitoredItem(item);
+        manager.UpdateTransferredSubscriptions([subscription]);
+        MarkCreated(item, revisedSamplingInterval: 100);
+        manager.RemoveItemsForSubject(source.RootSubject);
+
+        // Act
+        manager.RegisterRecoveredItems(subscription);
+        readAfterWriteManager.OnPropertyWritten(item.StartNodeId);
+
+        // Assert
+        Assert.Equal(0, readAfterWriteManager.PendingReadCount);
+    }
+
+    [Fact]
+    public async Task WhenAnItemFallsBackToPolling_ThenItIsUnregisteredFromReadAfterWrite()
+    {
+        // Arrange
+        var configuration = CreateConfiguration();
+        await using var source = CreateClientSource(configuration: configuration);
+        await using var readAfterWriteManager = CreateReadAfterWriteManager(source, configuration);
+        await using var manager = CreateManager(
+            source, new SubjectPropertyWriter(source, NullLogger.Instance), configuration, new ConcurrentQueue<Exception>(),
+            applyChangesAsync: static (_, _) => Task.CompletedTask,
+            readAfterWriteManager: readAfterWriteManager);
+        var item = CreateNameItem((TestRoot)source.RootSubject);
+        var subscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        subscription.AddItem(item);
+        readAfterWriteManager.RegisterProperty(item.StartNodeId, (RegisteredSubjectProperty)item.Handle!, 0, TimeSpan.FromMinutes(1), new Lock());
+
+        // Act
+        await manager.RemoveAndFallBackToPollingAsync(subscription, [item], [item], CancellationToken.None);
+        readAfterWriteManager.OnPropertyWritten(item.StartNodeId);
+
+        // Assert
+        Assert.Equal(0, readAfterWriteManager.PendingReadCount);
     }
 
     [Fact]
@@ -411,12 +588,13 @@ public class SubscriptionManagerDiagnosticsTests
         OpcUaClientConfiguration configuration,
         ConcurrentQueue<Exception> reportedErrors,
         Func<Subscription, CancellationToken, Task>? applyChangesAsync = null,
-        PollingManager? pollingManager = null) =>
+        PollingManager? pollingManager = null,
+        ReadAfterWriteManager? readAfterWriteManager = null) =>
         new(
             source,
             propertyWriter,
             pollingManager,
-            readAfterWriteManager: null,
+            readAfterWriteManager,
             configuration,
             error =>
             {
@@ -425,6 +603,48 @@ public class SubscriptionManagerDiagnosticsTests
             },
             NullLogger.Instance,
             applyChangesAsync);
+
+    private static ReadAfterWriteManager CreateReadAfterWriteManager(
+        OpcUaSubjectClientSource source,
+        OpcUaClientConfiguration configuration)
+    {
+        var session = new Mock<ISession>();
+        session.SetupGet(value => value.Connected).Returns(true);
+        session
+            .Setup(value => value.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ReadResponse
+            {
+                ResponseHeader = new ResponseHeader(),
+                Results = new[] { new DataValue("read", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1)) }.ToArrayOf(),
+                DiagnosticInfos = []
+            });
+
+        return new ReadAfterWriteManager(
+            () => session.Object, source, configuration, new ReadAfterWriteMetrics(), static _ => { }, NullLogger.Instance);
+    }
+
+    private static MonitoredItem CreateNameItem(TestRoot root) =>
+        new(NullTelemetryContext.Instance)
+        {
+            StartNodeId = new NodeId("Name", 2),
+            AttributeId = Opc.Ua.Attributes.Value,
+            Handle = new RegisteredSubject(root).TryGetProperty(nameof(TestRoot.Name))!
+        };
+
+    private static void MarkCreated(MonitoredItem item, double revisedSamplingInterval)
+    {
+        // Setting ServerId makes Status.Id != 0, which flips Created to true. The SDK sets the revised sampling
+        // interval only from a server response, so a test has to set it through reflection.
+        item.ServerId = 1;
+        typeof(MonitoredItemStatus)
+            .GetProperty(nameof(MonitoredItemStatus.SamplingInterval))!
+            .SetValue(item.Status, revisedSamplingInterval);
+    }
 
     private static MonitoredItem CreateFailedNameItem(OpcUaSubjectClientSource source, StatusCode statusCode)
     {
