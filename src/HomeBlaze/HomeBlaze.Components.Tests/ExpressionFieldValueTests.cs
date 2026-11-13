@@ -32,6 +32,23 @@ public class ExpressionFieldValueTests : BunitContext
     }
 
     [Fact]
+    public void WhenTheValueTextIsUnchanged_ThenRefreshingReportsNoChange()
+    {
+        // Arrange
+        var preview = new ExpressionFieldPreview { ShowsValue = true };
+        var value = 8.4m;
+        // A new string on each read, as a host formats the value each time.
+        preview.Update("/a/B * 2", [], ImmutableArray<string>.Empty, null, _ => () => new ExpressionPreview(null, value, value.ToString(System.Globalization.CultureInfo.InvariantCulture)), null);
+
+        // Act
+        var isChanged = preview.RefreshValues();
+
+        // Assert
+        Assert.False(isChanged);
+        Assert.Equal("8.4", preview.ResultText);
+    }
+
+    [Fact]
     public void WhenThePreviewShowsConditions_ThenANumberIsUnknown()
     {
         // Arrange

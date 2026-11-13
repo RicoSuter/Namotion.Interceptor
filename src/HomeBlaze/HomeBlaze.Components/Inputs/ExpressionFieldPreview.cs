@@ -114,7 +114,7 @@ internal sealed class ExpressionFieldPreview
     {
         var isChanged = false;
         var resultText = _result is { } result ? Format(result()) : null;
-        if (!ReferenceEquals(resultText, ResultText))
+        if (!string.Equals(resultText, ResultText, StringComparison.Ordinal))
         {
             ResultText = resultText;
             isChanged = true;
@@ -159,7 +159,6 @@ internal sealed class ExpressionFieldPreview
 
     private string Format(ExpressionPreview preview) => ShowsValue ? preview.Text ?? NoValueText : FormatResult(preview.Result);
 
-    // The result texts are constants, so a changed text is a different reference.
     private static string FormatResult(bool? result) => result switch
     {
         true => "true",
