@@ -103,12 +103,19 @@ internal static class DerivedPropertyOwnership
     /// Requests the recalculation of a derived property after a write to one of its dependencies (or to the
     /// property itself, for a derived property with a setter). A <paramref name="rawTimestamp"/> of 0 resolves
     /// the current changed timestamp. The request is dropped for a detached property, and left to the current
-    /// owner or attach when there is one; otherwise this call owns the property until no request is pending.
+    /// owner or attach when there is one; otherwise this call owns the property until no request is pending. While
+    /// the thread holds a lifecycle lock, the request is queued with its timestamp and runs after the lifecycle
+    /// operation (<see cref="PostLockQueue"/>).
     /// </summary>
     /// <param name="property">The derived property.</param>
     /// <param name="rawTimestamp">The raw changed timestamp of the trigger.</param>
     internal static void RequestRecalculation(PropertyReference property, long rawTimestamp)
     {
+        if (PostLockQueue.TryEnqueueRequest(property, rawTimestamp))
+        {
+            return;
+        }
+
         if (rawTimestamp == 0)
         {
             // A write without a context or a structure change: the time of the request is the trigger's.

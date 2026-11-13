@@ -39,6 +39,16 @@ internal static class SubjectLifecycleAttachments
         return DetachEnd.Instance;
     }
 
+    /// <summary>
+    /// Counts a lifecycle lock for the post-lock queue until disposed, which defers derived recalculations and change
+    /// deliveries until the lifecycle operation completed. Taken before the lock, disposed after it is released.
+    /// </summary>
+    internal static IDisposable EnterLifecycleLock(bool isWriteReconciliation)
+    {
+        PostLockQueue.EnterLock(isWriteReconciliation);
+        return LockRelease.Instance;
+    }
+
     // The scopes are stateless singletons, so they allocate nothing. They are typed IDisposable rather than ref
     // structs, which would add types to the coupling of LifecycleInterceptor (S1200).
     private sealed class RecordingResumption : IDisposable
@@ -56,6 +66,14 @@ internal static class SubjectLifecycleAttachments
         {
             // No recording ran on this thread, so nothing was suspended.
         }
+    }
+
+    private sealed class LockRelease : IDisposable
+    {
+        public static readonly LockRelease Instance = new();
+
+        // After the monitor is released: queued work never runs under a lifecycle lock.
+        public void Dispose() => PostLockQueue.ExitLock();
     }
 
     private sealed class DetachEnd : IDisposable

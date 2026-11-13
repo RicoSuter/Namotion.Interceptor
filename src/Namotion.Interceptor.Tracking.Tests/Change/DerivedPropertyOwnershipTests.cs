@@ -172,11 +172,12 @@ public class DerivedPropertyOwnershipTests
     }
 
     [Fact]
-    public void WhenGetterWritesWhatItReads_ThenAttachAndRecalculationEndAtTheLimitAndLaterWritesStillPublish()
+    public void WhenGetterWritesWhatItReads_ThenAttachCommitsAndRecalculationEndsAtTheLimitAndLaterWritesStillPublish()
     {
         // Arrange: the getter writes what it reads. Another thread writes Anchor during the first attach
         // evaluation, so the attach evaluates again once it linked Anchor; from then on every own write of the
-        // linked Anchor requests a recalculation on the evaluating thread.
+        // linked Anchor requests a recalculation on the evaluating thread. Under the lifecycle lock of the attach,
+        // those requests are queued until the structural write completes.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
@@ -206,14 +207,14 @@ public class DerivedPropertyOwnershipTests
             machine.Worker.Evaluator = _ => root.Anchor;
             root.Anchor = 1000;
 
-            // Assert: the attach evaluation never stabilizes and commits its last value; the recalculation
-            // requested after the attach never stabilizes either and ends at the limit, and a later write still
-            // recalculates.
+            // Assert: the attach commits after its evaluation following the own write, since the requests of its
+            // own writes wait for the end of the lifecycle operation; the queued recalculation never stabilizes and
+            // ends at the limit, and a later write still recalculates.
             Assert.True(isWrittenByOtherThread);
             Assert.Contains(changes, c => c.Property.Subject == machine.Worker && c.GetNewValue<int>() == 1000);
             listener.Flush();
             var trace = traceOutput.ToString();
-            Assert.Contains("exhausted while attaching", trace);
+            Assert.DoesNotContain("exhausted while attaching", trace);
             Assert.Contains("exhausted for", trace);
         }
         finally
