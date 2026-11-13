@@ -1,4 +1,6 @@
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -13,15 +15,31 @@ namespace HomeBlaze.Virtual;
 /// Lifecycle handlers run under the lifecycle lock, so the recalculation runs on the thread pool. The awaiter's own lock
 /// is never held while the lifecycle lock or the registry lock is taken.
 /// </remarks>
+// After the registry, so a subject that detaches has left it when its entries go, see Await.
+[RunsAfter(typeof(SubjectRegistry))]
 public sealed class VirtualPropertyAwaiter : ILifecycleHandler, IPropertyLifecycleHandler
 {
     private readonly Lock _lock = new();
     private readonly Dictionary<IInterceptorSubject, Dictionary<string, HashSet<PropertyReference>>> _waiting = new(ReferenceEqualityComparer.Instance);
+    private readonly ILogger _logger;
 
     /// <summary>Creates the awaiter and adds it to the handlers of the context.</summary>
-    public VirtualPropertyAwaiter(IInterceptorSubjectContext context)
+    public VirtualPropertyAwaiter(IInterceptorSubjectContext context, ILogger<VirtualPropertyAwaiter> logger)
     {
+        _logger = logger;
         context.AddService(this);
+    }
+
+    /// <summary>The number of properties that wait, counted once for each property they wait for.</summary>
+    internal int WaitCount
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _waiting.Values.Sum(names => names.Values.Sum(properties => properties.Count));
+            }
+        }
     }
 
     /// <summary>Recalculates <paramref name="property"/> once <paramref name="subject"/> gets a property <paramref name="name"/>.</summary>
@@ -45,14 +63,16 @@ public sealed class VirtualPropertyAwaiter : ILifecycleHandler, IPropertyLifecyc
         // The miss was recorded before this call, so the property may have been added in between, and the registry adds
         // a property before it attaches it. Checked outside the lock, because the registry takes its own lock.
         var registered = subject.TryGetRegisteredSubject();
-        if (registered is null)
+        if (registered is null || property.Subject.TryGetRegisteredSubject() is null)
         {
-            // The subject left the graph, so its detach may have run before the registration.
+            // The subject or the owner left the graph, so their detach may have run before the registration: a property
+            // of a detached owner can still be read. An owner that detaches concurrently can still leave its registration,
+            // because VirtualLevel.Detach forgets the owner's waits before the registry removes the owner.
             Remove(subject, name, property);
         }
         else if (registered.TryGetProperty(name) is not null && Remove(subject, name, property))
         {
-            ThreadPool.UnsafeQueueUserWorkItem(static property => property.RecalculateDerivedProperty(), property, preferLocal: false);
+            ThreadPool.UnsafeQueueUserWorkItem(static state => state.Awaiter.Recalculate(state.Property), (Awaiter: this, Property: property), preferLocal: false);
         }
     }
 
@@ -115,18 +135,31 @@ public sealed class VirtualPropertyAwaiter : ILifecycleHandler, IPropertyLifecyc
         }
 
         // No longer in the dictionary, so nothing changes it any more.
-        ThreadPool.UnsafeQueueUserWorkItem(static properties =>
+        ThreadPool.UnsafeQueueUserWorkItem(static state =>
         {
-            foreach (var property in properties)
+            foreach (var property in state.Properties)
             {
-                property.RecalculateDerivedProperty();
+                state.Awaiter.Recalculate(property);
             }
-        }, due, preferLocal: false);
+        }, (Awaiter: this, Properties: due), preferLocal: false);
     }
 
     /// <inheritdoc />
     public void DetachProperty(SubjectPropertyLifecycleChange change)
     {
+    }
+
+    // Runs on the thread pool, where an exception would end the process.
+    private void Recalculate(PropertyReference property)
+    {
+        try
+        {
+            property.RecalculateDerivedProperty();
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "The virtual property {Property} could not be recalculated.", property.Name);
+        }
     }
 
     // True when the registration was still there, so this caller and not AttachProperty owns the recalculation.

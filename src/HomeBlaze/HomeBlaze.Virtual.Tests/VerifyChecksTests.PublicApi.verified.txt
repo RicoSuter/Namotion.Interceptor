@@ -55,9 +55,11 @@ namespace HomeBlaze.Virtual
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public HomeBlaze.Virtual.VirtualState? State { get; init; }
     }
+    [Namotion.Interceptor.Attributes.RunsAfter(new System.Type[] {
+            typeof(Namotion.Interceptor.Registry.SubjectRegistry)})]
     public sealed class VirtualPropertyAwaiter : Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
     {
-        public VirtualPropertyAwaiter(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public VirtualPropertyAwaiter(Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Virtual.VirtualPropertyAwaiter> logger) { }
         public void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
         public void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
         public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }

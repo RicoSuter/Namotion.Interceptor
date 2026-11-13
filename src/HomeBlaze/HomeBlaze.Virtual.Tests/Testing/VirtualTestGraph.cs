@@ -1,5 +1,6 @@
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
@@ -11,7 +12,7 @@ namespace HomeBlaze.Virtual.Tests.Testing;
 /// <summary>A subject graph with a root of named children, the registry, parents, lifecycle, property attributes and path resolution.</summary>
 internal sealed class VirtualTestGraph
 {
-    public VirtualTestGraph()
+    public VirtualTestGraph(ILogger<VirtualPropertyAwaiter>? awaiterLogger = null)
     {
         Context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
@@ -22,7 +23,7 @@ internal sealed class VirtualTestGraph
         Root = new TestRoot(Context);
         Resolver = new SubjectPathResolver(() => Root);
         Context.AddService(Resolver);
-        Awaiter = new VirtualPropertyAwaiter(Context);
+        Awaiter = new VirtualPropertyAwaiter(Context, awaiterLogger ?? NullLogger<VirtualPropertyAwaiter>.Instance);
     }
 
     public IInterceptorSubjectContext Context { get; }
