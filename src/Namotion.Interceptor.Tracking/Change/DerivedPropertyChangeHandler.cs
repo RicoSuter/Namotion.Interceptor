@@ -37,27 +37,15 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
     /// <remarks>
     /// A detach issued by a lifecycle interceptor is ignored: the subject may still be attached to
     /// another graph, and the lifecycle detaches the derived properties itself once the subject left
-    /// its last graph (<see cref="DetachDerivedProperties"/>). A direct call detaches, unless it is made on a
-    /// thread on which a lifecycle interceptor is detaching a subject's properties (for example by a lifecycle
-    /// handler): such a call is ignored, whichever subject it is for.
+    /// its last graph. A direct call detaches, unless it is made on a thread on which a lifecycle interceptor
+    /// is detaching a subject's properties (for example by a lifecycle handler): such a call is ignored,
+    /// whichever subject it is for.
     /// </remarks>
     public void DetachProperty(SubjectPropertyLifecycleChange change)
     {
         if (!SubjectLifecycleAttachments.IsLifecycleDetach && change.Property.Metadata.IsDerived)
         {
             DerivedPropertyOwnership.Detach(change.Property, onlyIfSubjectIsDetached: false);
-        }
-    }
-
-    /// <summary>Detaches every derived property of a subject that left its last lifecycle interceptor.</summary>
-    internal static void DetachDerivedProperties(IInterceptorSubject subject)
-    {
-        foreach (var entry in subject.Properties)
-        {
-            if (entry.Value.IsDerived)
-            {
-                DerivedPropertyOwnership.Detach(new PropertyReference(subject, entry.Key), onlyIfSubjectIsDetached: true);
-            }
         }
     }
 }
