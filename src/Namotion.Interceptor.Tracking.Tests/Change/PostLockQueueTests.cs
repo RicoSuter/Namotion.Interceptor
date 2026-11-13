@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Reactive.Concurrency;
 using System.Reflection;
 using Namotion.Interceptor.Interceptors;
@@ -287,25 +286,15 @@ public class PostLockQueueTests
                 throw new InvalidOperationException("observer failure");
             }
         });
-        using var traceOutput = new StringWriter();
-        using var listener = new TextWriterTraceListener(traceOutput);
-        Trace.Listeners.Add(listener);
+        using var traceCapture = new TraceCapture();
 
-        try
-        {
-            // Act
-            var exception = Record.Exception(() => new Person(context));
+        // Act
+        var exception = Record.Exception(() => new Person(context));
 
-            // Assert
-            Assert.Null(exception);
-            Assert.Contains(nameof(Person.FullName), delivered);
-            listener.Flush();
-            Assert.Contains("observer failure", traceOutput.ToString());
-        }
-        finally
-        {
-            Trace.Listeners.Remove(listener);
-        }
+        // Assert
+        Assert.Null(exception);
+        Assert.Contains(nameof(Person.FullName), delivered);
+        Assert.Contains("observer failure", traceCapture.Text);
     }
 
     [Fact]
