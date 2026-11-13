@@ -430,6 +430,74 @@ public class DerivedPropertyProtocolTests
     }
 
     [Fact]
+    public async Task WhenAttachCompletesBetweenTheTakeOfARequestAndItsEvaluation_ThenTheChangeFollowsTheStructuralChange()
+    {
+        // Arrange: the recalculation from before the detach waits after it took its request and before it evaluates.
+        // A handler of the configuration, which attaches after the worker, resumes it and waits until it completed,
+        // while the attaching thread holds the lifecycle lock.
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var external = 0;
+        machine.Worker.Evaluator = _ => root.Anchor + Volatile.Read(ref external);
+        root.Machine = machine;
+        var result = GetResult(machine);
+        var gate = new EvaluationGate();
+        Task? recalculation = null;
+        var isArmed = false;
+        var isRecalculationDoneUnderLock = false;
+        context.WithService(() => new CallbackLifecycleHandler(change =>
+        {
+            if (isArmed && change.IsContextAttach && change.Subject == machine.Configuration)
+            {
+                Volatile.Write(ref external, 100);
+                gate.Resume.Set();
+                isRecalculationDoneUnderLock = recalculation!.Wait(Timeout);
+            }
+        }));
+        var order = new ConcurrentQueue<string>();
+        using var subscription = context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Name is nameof(EvaluatorRoot.Machine) or nameof(EvaluatorWorker.Result))
+            {
+                order.Enqueue(change.Property.Name);
+            }
+        });
+
+        // Act
+        bool isPaused;
+        DerivedPropertyOwnership.AfterTakeForTests = property =>
+        {
+            if (property == result)
+            {
+                gate.PauseIfArmed();
+            }
+        };
+        try
+        {
+            gate.Arm();
+            recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = 1; });
+            isPaused = gate.Paused.Wait(Timeout);
+            root.Machine = null;
+            order.Clear();
+            isArmed = true;
+            root.Machine = machine;
+            await recalculation.WaitAsync(Timeout);
+        }
+        finally
+        {
+            DerivedPropertyOwnership.AfterTakeForTests = null;
+        }
+
+        // Assert
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.True(isRecalculationDoneUnderLock);
+        Assert.Equal([nameof(EvaluatorRoot.Machine), nameof(EvaluatorWorker.Result)], order);
+        Assert.Equal(101, machine.Worker.Result);
+    }
+
+    [Fact]
     public async Task WhenDerivedPropertyIsDetachedDuringItsEvaluation_ThenNothingIsPublished()
     {
         // Arrange
