@@ -251,7 +251,7 @@ public class OpcUaReconnectionTests
     }
 
     [Fact]
-    public async Task WhenTheSdkRecreatesTheSessionAfterAServerRestart_ThenLivenessRisesWithoutWaitingForTheNextHealthCheck()
+    public async Task WhenTheSdkRecreatesTheSessionAfterAServerRestart_ThenLivenessRisesAndNotificationsArriveWithoutAHealthCheck()
     {
         // A server restart makes the managed session create a new server session and restore the
         // subscriptions onto it, so reporting the connector as down until the next health check would
@@ -271,6 +271,9 @@ public class OpcUaReconnectionTests
                 () => client.Source!.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(60),
                 message: "Client should report operational after the initial connect");
+            var source = (OpcUaSubjectClientSource)client.Source!;
+            var originalSessionId = source.Diagnostics.SessionId;
+            var originalSubscription = Assert.Single(source.SessionManager!.SubscriptionManager.Subscriptions);
 
             // Act
             await server.StopAsync();
@@ -292,6 +295,17 @@ public class OpcUaReconnectionTests
 
             Assert.True(client.Source!.Diagnostics.Reconnects.TotalSucceeded >= 1,
                 "The rise should follow a completed reconnect rather than an outage that never happened");
+
+            // A new server session with the client's own subscription objects restored onto it. With the
+            // health check suppressed, only a notification through them can deliver this change.
+            Assert.NotEqual(originalSessionId, source.Diagnostics.SessionId);
+            Assert.Same(originalSubscription, Assert.Single(source.SessionManager!.SubscriptionManager.Subscriptions));
+
+            server.Root!.Name = "AfterRestart";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root!.Name == "AfterRestart",
+                timeout: TimeSpan.FromSeconds(30),
+                message: "A change after the restart should reach the client through its restored subscription");
         }
         finally
         {

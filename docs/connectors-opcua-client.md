@@ -767,7 +767,6 @@ The OPC UA client hooks into the interceptor lifecycle system (see [Subject Life
 - Polling items in `PollingManager._pollingItems` are also cleaned up
 - Property data (OPC UA node IDs) associated with the subject is cleared
 - OPC UA subscription items remain on the server until session ends
-- Cleanup is skipped during reconnection to avoid interfering with subscription transfer
 
 See also [Lifecycle Limitations](connectors-opcua.md#lifecycle-limitations) that apply to both client and server.
 

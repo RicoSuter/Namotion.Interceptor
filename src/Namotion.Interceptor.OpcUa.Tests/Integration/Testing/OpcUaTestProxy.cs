@@ -10,9 +10,7 @@ namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 /// </summary>
 public sealed class OpcUaTestProxy : IAsyncDisposable
 {
-    // OPC UA TCP "too busy" status. The SDK reconnect handler does not retry reactivating the session on
-    // it, so a client that hits it while blocked creates a new session, which transfers the subscriptions the
-    // server still holds and is allowed to transfer.
+    // OPC UA TCP "too busy" status, the answer to a connection attempt while the proxy is blocked.
     private const uint BadTcpServerTooBusy = 0x807D0000;
 
     private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
