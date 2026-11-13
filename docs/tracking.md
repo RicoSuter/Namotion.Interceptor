@@ -160,7 +160,7 @@ The revision exists because arrival order can differ from commit order. Dispatch
 | Pull queue | conditional (a) | arrival | consumer thread |
 | `ChangeQueueProcessor`, buffer > 0 | no, latest-state-wins | arrival of survivors; per-property newest within a flush (b) | processor thread |
 
-(a) A throwing lifecycle handler or an earlier synchronous observer, including an inline per-property observer or synchronous Rx observer, suppresses delivery for the rest of that write's consumers. Delivery is exactly-once only while those no-throw contracts hold. A change delivered after a lifecycle operation is the exception to the first part: its delivery runs even when another delivered change, or the structural write itself, threw.
+(a) A throwing lifecycle handler or an earlier synchronous observer, including an inline per-property observer or synchronous Rx observer, suppresses delivery for the rest of that write's consumers. Delivery is exactly-once only while those no-throw contracts hold. A change written under the lifecycle lock is still delivered after the lifecycle operation even when the delivery of another change, or the structural write itself, threw.
 
 (b) Per property, a flush collapses to the newest commit in that batch, and collapsing also applies **across** flushes: a change whose revision the property has already moved past is dropped rather than emitted. Which commits count as having moved the property past it depends on the connector, via `ChangeDeliveryRule`; see [Change Batching and Merging](connectors.md#change-batching-and-merging). A consumer that needs the current value still re-reads the property rather than assuming arrival order matches commit order.
 
