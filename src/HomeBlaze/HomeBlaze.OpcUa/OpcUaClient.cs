@@ -61,6 +61,14 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     public partial string? Password { get; set; }
 
     /// <summary>
+    /// Whether server certificates that are not in this client's trusted certificate store are accepted. Leave it
+    /// off and trust the server's certificate instead, unless the network is trusted. A rejected certificate is
+    /// written to the client's rejected store and shown in the status message.
+    /// </summary>
+    [Configuration]
+    public partial bool AcceptUntrustedServerCertificates { get; set; }
+
+    /// <summary>
     /// Default sampling interval in milliseconds for monitored items.
     /// Null uses the server default. 0 enables exception-based monitoring (immediate reporting).
     /// </summary>
@@ -228,6 +236,17 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
         {
             var diagnostics = source.Diagnostics;
             IsConnected = diagnostics.IsOperational;
+
+            // Without this, a rejected server certificate leaves the client looking healthy while it never connects.
+            if (diagnostics.IsOperational == false)
+            {
+                StatusMessage = diagnostics.LastError?.Message;
+            }
+            else if (diagnostics.IsOperational == true)
+            {
+                StatusMessage = null;
+            }
+
             IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
             OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;
             MonitoredItemCount = diagnostics.MonitoredItemCount;
@@ -266,6 +285,7 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
                 CreateUserIdentity = !string.IsNullOrEmpty(Username) && !string.IsNullOrEmpty(Password)
                     ? _ => Task.FromResult(new UserIdentity(Username, Encoding.UTF8.GetBytes(Password)))
                     : null,
+                AutoAcceptUntrustedCertificates = AcceptUntrustedServerCertificates,
             };
 
             if (OpcUaCertificateStoreLocation.Resolve(this, "Client") is { } certificateStorePath)
