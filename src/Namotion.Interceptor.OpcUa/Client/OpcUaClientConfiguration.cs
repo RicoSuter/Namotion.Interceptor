@@ -331,7 +331,7 @@ public class OpcUaClientConfiguration
     public string? ApplicationUri { get; set; }
 
     /// <summary>
-    /// Gets or sets the lifetime in months of an application certificate the client creates. Default is 12.
+    /// Gets or sets the lifetime in months of an application certificate the client creates. Must be at least 2. Default is 12.
     /// </summary>
     public ushort ApplicationCertificateLifetimeInMonths { get; set; } = 12;
 
@@ -566,10 +566,11 @@ public class OpcUaClientConfiguration
                 nameof(ReadAfterWriteBuffer));
         }
 
-        if (ApplicationCertificateLifetimeInMonths == 0)
+        if (ApplicationCertificateLifetimeInMonths < 2)
         {
             throw new ArgumentException(
-                "ApplicationCertificateLifetimeInMonths must be at least 1, got: 0",
+                "ApplicationCertificateLifetimeInMonths must be at least 2 because certificates are renewed 30 days before they expire, " +
+                $"got: {ApplicationCertificateLifetimeInMonths}",
                 nameof(ApplicationCertificateLifetimeInMonths));
         }
 

@@ -69,7 +69,8 @@ public class ApplicationCertificateLoaderTests : IDisposable
         var loader = new ApplicationCertificateLoader(NullLogger.Instance);
 
         // Act & Assert
-        await Assert.ThrowsAnyAsync<Exception>(() => loader.EnsureLoadedAsync(application, configuration, CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<ServiceResultException>(() => loader.EnsureLoadedAsync(application, configuration, CancellationToken.None));
+        Assert.Contains($"CN={configuration.ApplicationName}, O=Namotion", exception.Message);
         Assert.False(Directory.Exists(Path.Combine(_storePath, "own", "certs"))
             && Directory.GetFiles(Path.Combine(_storePath, "own", "certs")).Length > 0);
     }
@@ -86,7 +87,7 @@ public class ApplicationCertificateLoaderTests : IDisposable
         changed.ApplicationUri = "urn:new-host:client";
 
         // Act & Assert
-        await Assert.ThrowsAnyAsync<Exception>(async () => await new ApplicationCertificateLoader(NullLogger.Instance)
+        await Assert.ThrowsAsync<ServiceResultException>(async () => await new ApplicationCertificateLoader(NullLogger.Instance)
             .EnsureLoadedAsync(await changed.CreateApplicationInstanceAsync(), changed, CancellationToken.None));
         await new ApplicationCertificateLoader(NullLogger.Instance)
             .EnsureLoadedAsync(await original.CreateApplicationInstanceAsync(), original, CancellationToken.None);
@@ -114,6 +115,29 @@ public class ApplicationCertificateLoaderTests : IDisposable
         Assert.NotEqual(expiring.Thumbprint, certificate.Thumbprint);
         Assert.True(certificate.NotAfter.ToUniversalTime() > DateTime.UtcNow.AddMonths(11));
         Assert.True(certificate.HasPrivateKey);
+        Assert.DoesNotContain(expiring.Thumbprint, Path.GetFileName(Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "certs")))));
+        Assert.DoesNotContain(expiring.Thumbprint, Path.GetFileName(Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "private")))));
+    }
+
+    [Fact]
+    public async Task WhenTheLifetimeIsShorterThanTheRenewalWindow_ThenTheCreatedCertificateIsKept()
+    {
+        // Arrange - Validate() rejects this lifetime; the loader must still not create a certificate on every connect.
+        var configuration = CreateConfiguration();
+        configuration.ApplicationCertificateLifetimeInMonths = 1;
+        var loader = new ApplicationCertificateLoader(NullLogger.Instance);
+        var first = await configuration.CreateApplicationInstanceAsync();
+        await loader.EnsureLoadedAsync(first, configuration, CancellationToken.None);
+        var second = await configuration.CreateApplicationInstanceAsync();
+
+        // Act
+        await loader.EnsureLoadedAsync(second, configuration, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(
+            first.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate!.Thumbprint,
+            second.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate!.Thumbprint);
+        Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "certs")));
     }
 
     [Fact]
@@ -199,8 +223,9 @@ public class ApplicationCertificateLoaderTests : IDisposable
         var application = await configuration.CreateApplicationInstanceAsync();
 
         // Act & Assert
-        await Assert.ThrowsAnyAsync<Exception>(() => new ApplicationCertificateLoader(NullLogger.Instance)
+        var exception = await Assert.ThrowsAsync<ServiceResultException>(() => new ApplicationCertificateLoader(NullLogger.Instance)
             .EnsureLoadedAsync(application, configuration, CancellationToken.None));
+        Assert.Contains("Cannot access private key", exception.Message);
         var files = Directory.GetFiles(Path.Combine(_storePath, "own", "certs"));
         Assert.Single(files);
         Assert.Contains(certificate.Thumbprint, Path.GetFileName(files[0]));
