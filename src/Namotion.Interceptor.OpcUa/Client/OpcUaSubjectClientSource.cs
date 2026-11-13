@@ -443,7 +443,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
         await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(
             sessionManager.Subscriptions,
-            sessionManager.SubscriptionManager.RegisterPropertiesWithReadAfterWriteManager,
+            sessionManager.SubscriptionManager.RegisterRecoveredItems,
             cancellationToken).ConfigureAwait(false);
 
         await sessionManager.SubscriptionManager

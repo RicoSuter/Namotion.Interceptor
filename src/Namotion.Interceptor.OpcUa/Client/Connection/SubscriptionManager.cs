@@ -327,19 +327,19 @@ internal class SubscriptionManager : IAsyncDisposable
     public void UpdateTransferredSubscriptions(IReadOnlyCollection<Subscription> transferredSubscriptions)
     {
         var oldSubscriptions = _subscriptions.Keys;
+        List<Subscription>? addedSubscriptions = null;
         foreach (var subscription in transferredSubscriptions)
         {
             if (TryAddSubscription(subscription))
             {
+                (addedSubscriptions ??= []).Add(subscription);
+
                 // A subscription the SDK recreated is a clone that already carries the original's
                 // callback and may be publishing. Replace it in one write: a plain += would deliver
                 // twice, and a -= followed by += leaves the callback null in between, which drops a batch.
                 FastDataChangeNotificationEventHandler handler = OnFastDataChange;
                 subscription.FastDataChangeCallback = (FastDataChangeNotificationEventHandler?)Delegate.Combine(
                     Delegate.Remove(subscription.FastDataChangeCallback, handler), handler);
-
-                // Its notifications now apply under its own lock, so read-after-write has to take that one.
-                RegisterPropertiesWithReadAfterWriteManager(subscription);
             }
         }
 
@@ -354,6 +354,17 @@ internal class SubscriptionManager : IAsyncDisposable
             TryRemoveSubscription(oldSubscription);
             oldSubscription.FastDataChangeCallback -= OnFastDataChange;
             removedCount++;
+        }
+
+        // Each added subscription applies its notifications under its own lock, so read-after-write has to take
+        // that one. Registered only after the replaced subscriptions are removed, so a heal of a replaced
+        // subscription racing this cannot be the last to register (see RegisterRecoveredItems).
+        if (addedSubscriptions is not null)
+        {
+            foreach (var subscription in addedSubscriptions)
+            {
+                RegisterPropertiesWithReadAfterWriteManager(subscription);
+            }
         }
 
         _logger.LogInformation("Reconnected session holds {Count} subscriptions, dropped {RemovedCount} previous ones.",
@@ -492,6 +503,9 @@ internal class SubscriptionManager : IAsyncDisposable
         foreach (var monitoredItem in toRemove)
         {
             subscription.RemoveItem(monitoredItem);
+
+            // Polled values are applied without the subscription's lock, so read-after-write cannot stay atomic.
+            _readAfterWriteManager?.UnregisterProperty(monitoredItem.StartNodeId);
         }
 
         try
@@ -596,11 +610,27 @@ internal class SubscriptionManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Registers all successfully created monitored items with ReadAfterWriteManager.
-    /// Called once the revised sampling intervals are known: after a subscription is created or recreated,
-    /// and after the health monitor healed some of its items.
+    /// Registers the items of a tracked subscription with ReadAfterWriteManager after the health monitor
+    /// healed some of them. Does nothing for a subscription that is no longer tracked.
     /// </summary>
-    internal void RegisterPropertiesWithReadAfterWriteManager(Subscription subscription)
+    internal void RegisterRecoveredItems(Subscription subscription)
+    {
+        // Checked and registered under the tracking lock: a reconnect removes a replaced subscription under it
+        // before registering its replacement, so a heal of the replaced one cannot register its lock last.
+        lock (_trackingMutationLock)
+        {
+            if (_subscriptions.ContainsKey(subscription))
+            {
+                RegisterPropertiesWithReadAfterWriteManager(subscription);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Registers all successfully created monitored items with ReadAfterWriteManager.
+    /// Called once the revised sampling intervals are known.
+    /// </summary>
+    private void RegisterPropertiesWithReadAfterWriteManager(Subscription subscription)
     {
         if (_readAfterWriteManager is null)
         {
@@ -610,7 +640,8 @@ internal class SubscriptionManager : IAsyncDisposable
         var applyLock = GetApplyLock(subscription);
         foreach (var item in subscription.MonitoredItems)
         {
-            if (item.Handle is not RegisteredSubjectProperty property)
+            // A released property's SDK item stays in the subscription; only the tracked ones are registered.
+            if (item.Handle is not RegisteredSubjectProperty property || !_monitoredItems.ContainsKey(item.ClientHandle))
             {
                 continue;
             }
@@ -623,8 +654,8 @@ internal class SubscriptionManager : IAsyncDisposable
             }
             else
             {
-                // Not created yet: the health monitor heals it within this subscription, which never registers
-                // it again, so an earlier registration moves to this subscription's lock instead of being dropped.
+                // Not created yet: an earlier registration moves to the lock this item's notifications will use
+                // rather than being dropped. The health monitor registers it again once it heals the item.
                 _readAfterWriteManager.UpdateApplyLock(item.StartNodeId, applyLock);
             }
         }
