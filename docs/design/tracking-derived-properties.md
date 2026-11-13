@@ -266,7 +266,7 @@ A request carries the raw changed timestamp of its trigger. A write with a conte
 
 **Detach of a source.** Nothing happens. A derived property keeps following a detached subject for as long as its getter reads it. If the getter reached the subject through a tracked property, the write of that property recalculates the derived property, and its commit drops the link. Links never outlive the attachment of the derived property that owns them.
 
-**Attachments.** A subject can be in several graphs, one per lifecycle interceptor. `LifecycleInterceptor` records, per subject, the interceptors the subject is attached to (`SubjectLifecycleAttachments`, internal subject data that every change replaces by compare-and-swap): it adds itself before it attaches the subject's properties and removes itself before it detaches them. A property detach issued by a lifecycle interceptor is ignored by `DerivedPropertyChangeHandler`, since the subject may still be in another graph. Once the subject left its last lifecycle interceptor, that interceptor detaches all of the subject's derived properties directly, whether or not its context has derived change detection, also when a lifecycle handler threw. Each of those detaches checks again under `lock(D)` that the subject is still detached, because another interceptor may have attached it in between.
+**Attachments.** A subject can be in several graphs, one per lifecycle interceptor, and its derived properties stay attached while it is in any of them: a property detach issued by a lifecycle interceptor is ignored by `DerivedPropertyChangeHandler`, and the interceptor from which the subject leaves its last graph detaches the derived properties, see [Per-subject attachments](tracking-lifecycle.md#per-subject-attachments).
 
 A direct call of the public `DetachSubjectProperty` on a derived property detaches it, except one made on a thread on which a lifecycle interceptor is detaching a subject's properties (for example by a lifecycle handler): such a call is ignored, whichever subject it is for, and the property detaches with its subject if that leaves its last graph. A direct call on a source property does nothing, like a lifecycle detach of a source.
 
@@ -281,17 +281,7 @@ A getter is expected to read, not write. Writes in a getter are supported, at a 
 
 ## What Is Followed and What Is Not
 
-A derived property follows every intercepted property its getter reads, on any subject: attached, not attached yet, detached, in another context, or without a context, however the getter reached the subject, through a tracked property, a field, a captured variable or a service. Every read goes through the read tap, so the subject's context and its interceptors do not matter.
-
-Not followed:
-
-- State outside the model, and plain fields or properties that are not intercepted.
-- Graph state: parents, the registry (`TryGetRegisteredSubject`, registered properties, children), whether a subject is attached, and its reference count. A getter that reads graph state follows only the intercepted properties it reads along the way.
-- Context services read directly, such as `subject.Context.TryGetService<T>()`.
-- `IInterceptorSubject.Properties` and `subject.Data` read directly.
-- Reads of a hand-written subject base class that bypasses `GetPropertyValueWithoutContext` while the subject has no context.
-
-`RecalculateDerivedProperty` covers these: it requests a recalculation like a write does.
+A derived property follows every intercepted property its getter reads, on any subject, however the getter reached it. [What a Derived Property Follows](../tracking.md#what-a-derived-property-follows) lists what is not followed; `RecalculateDerivedProperty` covers that, as it requests a recalculation like a write does.
 
 ## Concurrency Model
 
@@ -348,8 +338,6 @@ sequenceDiagram
     A->>DL: commit: lock, detached → discard, release ownership
     Note over A,B: No deadlock: lock(data) is never held during a getter or a publication
 ```
-
-The first evaluation at attach runs under the lifecycle lock, because consumers read the value while the subject attaches. A getter that blocks, or takes a lock that another thread holds while it waits for the lifecycle lock, can deadlock there; getters must not block or take locks.
 
 ## Correctness Guarantees
 
@@ -444,7 +432,3 @@ public string FullNameWithPrefix => $"Mr. {FullName}";
 When `FullNameWithPrefix` is evaluated, it calls `FullName`'s getter, which reads `FirstName` and `LastName` through the read tap. The recorder captures `FirstName` and `LastName` as direct dependencies of `FullNameWithPrefix`. So when `FirstName` changes, both `FullName` and `FullNameWithPrefix` are recalculated (both appear in `FirstName.UsedByProperties`).
 
 `FullName` itself does not appear in `FullNameWithPrefix.RequiredProperties`, because a `[Derived]` getter is a plain C# property access that does not go through the read tap. A derived property added at runtime is intercepted, so a getter that reads it records it as well as the sources its getter reads, and its publication requests the recalculation of that reader.
-
-### Following a subject the getter reached through a field
-
-A getter can reach a subject through a field, a captured variable or a service, and the derived property follows that subject's intercepted properties like any other, also while the subject is detached or has no context. What it does not follow is the field itself: if the field, the variable or the service returns another subject later, the derived property keeps the links of its last evaluation until one of them, or another dependency, changes, or `RecalculateDerivedProperty` is called. [Reaching Other Subjects](../tracking.md#reaching-other-subjects) documents this for users.

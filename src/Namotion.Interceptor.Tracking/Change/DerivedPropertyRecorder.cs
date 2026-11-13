@@ -147,11 +147,8 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
     }
 
     /// <summary>
-    /// Called after a write on this thread moved a property's version to <paramref name="newVersion"/>. A
-    /// recording of this thread that read the property at the version just before takes the new version, so the
-    /// thread's own write does not fail the version check, and is marked (<see cref="LastRecordingHasOwnWriteAfterRead"/>):
-    /// its value may stem from before the write. A write of another thread in between moved the version further:
-    /// that recording keeps its version and still fails the check.
+    /// Called after a write on this thread moved a property's version to <paramref name="newVersion"/>: rebases the
+    /// recordings of this thread that read it ("Own writes" in docs/design/tracking-derived-properties.md).
     /// </summary>
     internal void OnOwnWrite(in PropertyReference property, long newVersion)
     {

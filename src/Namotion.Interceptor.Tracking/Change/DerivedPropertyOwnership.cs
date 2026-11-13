@@ -404,13 +404,8 @@ internal static class DerivedPropertyOwnership
     }
 
     /// <summary>
-    /// Runs owner loops in this frame until no request is pending. A loop fails only after it evaluated: an
-    /// observer threw while it published (the time source included, which a request without a timestamp resolves
-    /// in its publication), or the iteration limit was reached. It then releases ownership, and a pending request
-    /// is taken over by a new loop in this frame instead of a nested one. A foreign request (raised on another
-    /// thread) is always taken over. A request raised on this thread is taken over after the first exception
-    /// only, so a getter or observer that keeps writing what the property reads ends. The first exception
-    /// propagates.
+    /// Runs owner loops in this frame until no request is pending, taking a request over after a failed loop
+    /// ("Failures and takeover" in docs/design/tracking-derived-properties.md). The first exception propagates.
     /// </summary>
     private static void RunOwnerLoops(DerivedPropertyData data, PropertyReference property, long token, long rawTimestamp)
     {
