@@ -32,7 +32,7 @@ public static class VirtualPropertyValidator
     /// <summary>Gets the paths in the tree of the valid entries that read themselves through other entries.</summary>
     /// <param name="properties">The entries of the virtual subject.</param>
     /// <param name="ownPath">The canonical path of the virtual subject, to follow absolute paths into it; null when it has none.</param>
-    public static ImmutableHashSet<string> FindCyclicEntries(IReadOnlyDictionary<string, VirtualProperty>? properties, string? ownPath)
+    internal static ImmutableHashSet<string> FindCyclicEntries(IReadOnlyDictionary<string, VirtualProperty>? properties, string? ownPath)
     {
         var computed = new Dictionary<string, ComputedEntry>(StringComparer.Ordinal);
         Walk(properties, VirtualEntryPlace.Root, parentPath: null, level: [], '/', issues: null, computed);
@@ -40,7 +40,7 @@ public static class VirtualPropertyValidator
     }
 
     /// <summary>Checks one entry, not the entries below it; null when it is valid, otherwise the message of the issue.</summary>
-    public static string? Check(string name, VirtualProperty property, VirtualEntryPlace place)
+    internal static string? Check(string name, VirtualProperty property, VirtualEntryPlace place)
     {
         if (!IsIdentifier(name))
         {

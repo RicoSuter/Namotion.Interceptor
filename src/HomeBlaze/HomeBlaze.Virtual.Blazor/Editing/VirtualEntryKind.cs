@@ -1,7 +1,7 @@
 namespace HomeBlaze.Virtual.Blazor.Editing;
 
 /// <summary>What an entry of the draft is.</summary>
-public enum VirtualEntryKind
+internal enum VirtualEntryKind
 {
     /// <summary>A nested subject with entries of its own.</summary>
     Subject,

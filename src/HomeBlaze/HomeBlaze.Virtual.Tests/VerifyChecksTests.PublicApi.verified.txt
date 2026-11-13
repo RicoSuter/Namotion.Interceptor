@@ -16,12 +16,6 @@ namespace HomeBlaze.Virtual
         public static System.Type GetClrType(HomeBlaze.Virtual.VirtualDataType dataType) { }
         public static bool TryGetDataType(System.Type type, out HomeBlaze.Virtual.VirtualDataType dataType) { }
     }
-    public enum VirtualEntryPlace
-    {
-        Root = 0,
-        Nested = 1,
-        Attribute = 2,
-    }
     public static class VirtualExpression
     {
         public static Namotion.Interceptor.Expressions.ExpressionValue Evaluate(Namotion.Interceptor.Expressions.ParsedExpression expression, HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject scope) { }
@@ -73,8 +67,6 @@ namespace HomeBlaze.Virtual
     }
     public static class VirtualPropertyValidator
     {
-        public static string? Check(string name, HomeBlaze.Virtual.VirtualProperty property, HomeBlaze.Virtual.VirtualEntryPlace place) { }
-        public static System.Collections.Immutable.ImmutableHashSet<string> FindCyclicEntries(System.Collections.Generic.IReadOnlyDictionary<string, HomeBlaze.Virtual.VirtualProperty>? properties, string? ownPath) { }
         public static System.Collections.Immutable.ImmutableArray<HomeBlaze.Virtual.VirtualPropertyIssue> Validate(System.Collections.Generic.IReadOnlyDictionary<string, HomeBlaze.Virtual.VirtualProperty>? properties, string? ownPath = null) { }
     }
     public static class VirtualServiceCollectionExtensions

@@ -1,4 +1,4 @@
-using HomeBlaze.Virtual.Blazor.Editing;
+using HomeBlaze.Virtual.Blazor;
 using PublicApiGenerator;
 
 namespace HomeBlaze.Virtual.Blazor.Tests;
@@ -13,7 +13,7 @@ public class VerifyChecksTests
     /// review the diff and accept by replacing the .verified.txt file with the test's .received.txt.
     /// </summary>
     [Fact]
-    public Task PublicApi() => Verify(typeof(VirtualEntryKind).Assembly.GeneratePublicApi(new ApiGeneratorOptions
+    public Task PublicApi() => Verify(typeof(VirtualSubjectEditComponent).Assembly.GeneratePublicApi(new ApiGeneratorOptions
     {
         DenyNamespacePrefixes = ["System", "XamlGeneratedNamespace"]
     }));

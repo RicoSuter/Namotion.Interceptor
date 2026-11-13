@@ -1,15 +1,6 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.Virtual.Blazor.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
-namespace HomeBlaze.Virtual.Blazor.Editing
-{
-    public enum VirtualEntryKind
-    {
-        Subject = 0,
-        Expression = 1,
-        Binding = 2,
-    }
-}
 namespace HomeBlaze.Virtual.Blazor
 {
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Edit, typeof(HomeBlaze.Virtual.VirtualSubject))]

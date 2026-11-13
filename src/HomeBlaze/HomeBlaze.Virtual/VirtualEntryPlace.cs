@@ -1,7 +1,7 @@
 namespace HomeBlaze.Virtual;
 
 /// <summary>Where an entry of the properties of a virtual subject is.</summary>
-public enum VirtualEntryPlace
+internal enum VirtualEntryPlace
 {
     /// <summary>An entry of the virtual subject itself.</summary>
     Root,
