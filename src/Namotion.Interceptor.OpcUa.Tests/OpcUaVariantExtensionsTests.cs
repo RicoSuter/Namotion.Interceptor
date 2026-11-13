@@ -127,6 +127,22 @@ public class OpcUaVariantExtensionsTests
     }
 
     [Fact]
+    public void WhenEnumArrayHasAnyUnderlyingType_ThenItsElementsAreTheirNumericValues()
+    {
+        // Act
+        var bytes = OpcUaVariantExtensions.ToVariant(new[] { ByteEnum.Large }).ToClrValue();
+        var shorts = OpcUaVariantExtensions.ToVariant(new[] { ShortEnum.Negative }).ToClrValue();
+        var unsignedShorts = OpcUaVariantExtensions.ToVariant(new[] { UnsignedShortEnum.Large }).ToClrValue();
+        var unsignedLongs = OpcUaVariantExtensions.ToVariant(new[] { UnsignedLongEnum.Small }).ToClrValue();
+
+        // Assert
+        Assert.Equal(new[] { 200 }, Assert.IsType<int[]>(bytes));
+        Assert.Equal(new[] { -300 }, Assert.IsType<int[]>(shorts));
+        Assert.Equal(new[] { 60000 }, Assert.IsType<int[]>(unsignedShorts));
+        Assert.Equal(new[] { 7 }, Assert.IsType<int[]>(unsignedLongs));
+    }
+
+    [Fact]
     public void WhenTimestampIsUnset_ThenClrTimestampIsMinValue()
     {
         // Act
@@ -171,7 +187,23 @@ public class OpcUaVariantExtensionsTests
 
     private enum UnsignedLongEnum : ulong
     {
+        Small = 7,
         Large = ulong.MaxValue
+    }
+
+    private enum ByteEnum : byte
+    {
+        Large = 200
+    }
+
+    private enum ShortEnum : short
+    {
+        Negative = -300
+    }
+
+    private enum UnsignedShortEnum : ushort
+    {
+        Large = 60000
     }
 
     [Flags]
