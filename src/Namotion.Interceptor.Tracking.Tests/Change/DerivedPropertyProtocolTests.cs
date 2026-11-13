@@ -254,6 +254,64 @@ public class DerivedPropertyProtocolTests
     }
 
     [Fact]
+    public async Task WhenAttachCommitsWhileARecalculationFromBeforeTheDetachOwnsTheProperty_ThenTheChangeCarriesTheAttachTimestamp()
+    {
+        // Arrange: the getter also reads state outside the model, which changes after the attach evaluation read it,
+        // so the recalculation that answers the attach publishes a change.
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var external = 0;
+        var gate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            var value = root.Anchor + Volatile.Read(ref external);
+            gate.PauseIfArmed();
+            return value;
+        };
+        root.Machine = machine;
+        var result = GetResult(machine);
+        var writeTimestamp = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var attachTimestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var published = new List<(int OldValue, int NewValue, DateTimeOffset Timestamp)>();
+        using var subscription = result.SubscribeInline((in SubjectPropertyChange change) =>
+        {
+            lock (published)
+            {
+                published.Add((change.GetOldValue<int>(), change.GetNewValue<int>(), change.ChangedTimestamp));
+            }
+        });
+
+        // Act: the recalculation of the write at the write timestamp pauses in the getter while the subject is
+        // detached and attached again at the attach timestamp; the attach commits while that recalculation still
+        // owns the property and leaves its request to it.
+        gate.Arm();
+        var recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+        {
+            using (SubjectChangeContext.WithChangedTimestamp(writeTimestamp))
+            {
+                root.Anchor = 1;
+            }
+        });
+        var isPaused = gate.Paused.Wait(Timeout);
+        root.Machine = null;
+        using (SubjectChangeContext.WithChangedTimestamp(attachTimestamp))
+        {
+            root.Machine = machine;
+        }
+
+        Volatile.Write(ref external, 100);
+        gate.Resume.Set();
+        await recalculation.WaitAsync(Timeout);
+
+        // Assert
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.Equal([(1, 101, attachTimestamp)], published);
+        Assert.Equal(101, machine.Worker.Result);
+    }
+
+    [Fact]
     public async Task WhenDerivedPropertyIsDetachedDuringItsEvaluation_ThenNothingIsPublished()
     {
         // Arrange
