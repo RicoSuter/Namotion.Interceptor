@@ -2,14 +2,12 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
-using Opc.Ua;
-using Opc.Ua.Client;
 using static Namotion.Interceptor.OpcUa.Tests.Client.ClientSourceTestFactory;
+using static Namotion.Interceptor.OpcUa.Tests.Client.SubscriptionTestFactory;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
@@ -38,16 +36,11 @@ public class SubscriptionTransactionOrderingTests
         await using var manager = new SubscriptionManager(
             source, propertyWriter, pollingManager: null, readAfterWriteManager: null,
             configuration, errors.Add, NullLogger.Instance);
-        var property = new RegisteredSubject(root).TryGetProperty(nameof(TestRoot.Name))!;
-        using var subscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        var monitoredItem = new MonitoredItem(NullTelemetryContext.Instance)
-        {
-            StartNodeId = new NodeId("Name", 2),
-            AttributeId = Opc.Ua.Attributes.Value,
-            Handle = property
-        };
-        subscription.AddItem(monitoredItem);
-        manager.TrackMonitoredItem(monitoredItem);
+        var request = CreateRequest(source, nameof(TestRoot.Name));
+        var property = request.Property;
+        var monitoredItem = CreateMonitoredItem();
+        var subscription = CreateSubscription([monitoredItem]);
+        manager.TrackMonitoredItem(monitoredItem, request);
         root.Name = "Initial";
         var committedTimestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 1, TimeSpan.Zero);
         using (var setup = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
@@ -65,17 +58,9 @@ public class SubscriptionTransactionOrderingTests
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         root.Name = "Pending";
         var incomingTimestamp = committedTimestamp.AddSeconds(timestampOffsetSeconds);
-        var notification = new DataChangeNotification
+        var notification = new[]
         {
-            MonitoredItems =
-            [
-                new MonitoredItemNotification
-                {
-                    ClientHandle = monitoredItem.ClientHandle,
-                    Value = new DataValue(incomingValue, StatusCodes.Good, incomingTimestamp.UtcDateTime)
-                }
-            ],
-            DiagnosticInfos = []
+            CreateDataChange(monitoredItem.ClientHandle, incomingValue, incomingTimestamp.UtcDateTime)
         };
 
         // Act
@@ -83,7 +68,7 @@ public class SubscriptionTransactionOrderingTests
         Task callback;
         using (ExecutionContext.SuppressFlow())
         {
-            callback = Task.Run(() => manager.OnFastDataChange(subscription, notification, []));
+            callback = Task.Run(() => manager.OnDataChange(subscription, sequenceNumber: 0, notification));
         }
         await callback.WaitAsync(TestTimeouts.Default);
 

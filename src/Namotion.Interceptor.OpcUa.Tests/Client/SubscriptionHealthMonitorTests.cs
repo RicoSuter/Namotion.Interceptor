@@ -1,8 +1,8 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Opc.Ua;
-using Opc.Ua.Client;
 using static Namotion.Interceptor.OpcUa.Tests.Client.ClientSourceTestFactory;
+using static Namotion.Interceptor.OpcUa.Tests.Client.SubscriptionTestFactory;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
@@ -12,7 +12,7 @@ public class SubscriptionHealthMonitorTests
     public void WhenItemIsNotCreated_ThenIsUnhealthyReturnsTrue()
     {
         // Arrange
-        var item = new MonitoredItem(NullTelemetryContext.Instance);
+        var item = CreateMonitoredItem(created: false);
 
         // Act
         var isUnhealthy = SubscriptionHealthMonitor.IsUnhealthy(item);
@@ -25,7 +25,7 @@ public class SubscriptionHealthMonitorTests
     public void WhenItemIsCreatedWithGoodStatus_ThenIsUnhealthyReturnsFalse()
     {
         // Arrange
-        var item = CreateMonitoredItem(StatusCodes.Good, created: true);
+        var item = CreateMonitoredItem();
 
         // Act
         var isUnhealthy = SubscriptionHealthMonitor.IsUnhealthy(item);
@@ -38,7 +38,7 @@ public class SubscriptionHealthMonitorTests
     public void WhenItemHasBadStatus_ThenIsUnhealthyReturnsTrue()
     {
         // Arrange
-        var item = CreateMonitoredItem(StatusCodes.BadNodeIdUnknown, created: true);
+        var item = CreateMonitoredItem(error: StatusCodes.BadNodeIdUnknown);
 
         // Act
         var isUnhealthy = SubscriptionHealthMonitor.IsUnhealthy(item);
@@ -60,7 +60,7 @@ public class SubscriptionHealthMonitorTests
     {
         // Arrange
         var statusCode = StatusCodeNames.Resolve(statusCodeName);
-        var item = CreateMonitoredItem(statusCode, created: true);
+        var item = CreateMonitoredItem(error: statusCode);
 
         // Act
         var isRetryable = SubscriptionHealthMonitor.IsRetryable(item);
@@ -83,7 +83,7 @@ public class SubscriptionHealthMonitorTests
     {
         // Arrange
         var statusCode = StatusCodeNames.Resolve(statusCodeName);
-        var item = CreateMonitoredItem(statusCode, created: true);
+        var item = CreateMonitoredItem(error: statusCode);
 
         // Act
         var isRetryable = SubscriptionHealthMonitor.IsRetryable(item);
@@ -96,7 +96,7 @@ public class SubscriptionHealthMonitorTests
     public void WhenItemHasGoodStatus_ThenIsRetryableReturnsFalse()
     {
         // Arrange
-        var item = CreateMonitoredItem(StatusCodes.Good, created: true);
+        var item = CreateMonitoredItem();
 
         // Act
         var isRetryable = SubscriptionHealthMonitor.IsRetryable(item);
@@ -106,7 +106,37 @@ public class SubscriptionHealthMonitorTests
     }
 
     [Fact]
-    public async Task WhenApplyChangesThrows_ThenSourceReportsFailureOnceAndKeepsItAfterRecovery()
+    public void WhenItemsAreUnhealthy_ThenOnlyTheRetryableOnesAreRequeued()
+    {
+        // Arrange
+        var healthy = CreateMonitoredItem();
+        var failedTransiently = CreateMonitoredItem(created: false, error: StatusCodes.BadTimeout);
+        var createdWithTransientError = CreateMonitoredItem(error: StatusCodes.BadOutOfService);
+        var failedPermanently = CreateMonitoredItem(created: false, error: StatusCodes.BadNodeIdUnknown);
+        var notAttemptedYet = CreateMonitoredItem(created: false);
+
+        var requeuedClientHandles = new List<uint>();
+        var subscription = CreateSubscription(
+            [healthy, failedTransiently, createdWithTransientError, failedPermanently, notAttemptedYet],
+            tryRequeue: clientHandle =>
+            {
+                requeuedClientHandles.Add(clientHandle);
+                return true;
+            });
+
+        var reportedErrors = new List<Exception>();
+        var monitor = new SubscriptionHealthMonitor(NullLogger.Instance, reportedErrors.Add);
+
+        // Act
+        monitor.CheckAndHealSubscriptions([subscription], CancellationToken.None);
+
+        // Assert
+        Assert.Equal([failedTransiently.ClientHandle, createdWithTransientError.ClientHandle], requeuedClientHandles);
+        Assert.Empty(reportedErrors);
+    }
+
+    [Fact]
+    public async Task WhenRequeueThrows_ThenSourceReportsFailureOnceAndKeepsItAfterRecovery()
     {
         // Arrange
         await using var source = CreateClientSource();
@@ -119,16 +149,14 @@ public class SubscriptionHealthMonitorTests
             source.ReportBackgroundError(exception);
         }
 
-        var subscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        subscription.AddItem(CreateMonitoredItem(StatusCodes.BadTimeout, created: true));
+        var subscription = CreateSubscription(
+            [CreateMonitoredItem(created: false, error: StatusCodes.BadTimeout)],
+            tryRequeue: _ => throw error);
 
-        var monitor = new SubscriptionHealthMonitor(
-            NullLogger.Instance,
-            ReportError,
-            applyChangesAsync: (_, _) => Task.FromException(error));
+        var monitor = new SubscriptionHealthMonitor(NullLogger.Instance, ReportError);
 
         // Act
-        await monitor.CheckAndHealSubscriptionsAsync([subscription], onItemsRecovered: null, CancellationToken.None);
+        monitor.CheckAndHealSubscriptions([subscription], CancellationToken.None);
 
         // Assert
         Assert.Equal(1, Volatile.Read(ref reportCount));
@@ -139,69 +167,52 @@ public class SubscriptionHealthMonitorTests
     }
 
     [Fact]
-    public async Task WhenAnItemRecovers_ThenItsSubscriptionIsReported()
+    public void WhenOneSubscriptionThrows_ThenTheOtherSubscriptionsAreStillHealed()
     {
-        // Arrange - read-after-write registers an item only once it is created, so a healed item needs this.
-        var item = CreateMonitoredItem(StatusCodes.BadTimeout, created: false);
-        var subscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        subscription.AddItem(item);
-        var monitor = new SubscriptionHealthMonitor(
-            NullLogger.Instance,
-            static _ => { },
-            applyChangesAsync: (_, _) =>
+        // Arrange
+        var error = new ObjectDisposedException("subscription");
+        var throwingSubscription = CreateSubscription(
+            [CreateMonitoredItem(created: false, error: StatusCodes.BadTimeout)],
+            tryRequeue: _ => throw error);
+
+        var failedItem = CreateMonitoredItem(created: false, error: StatusCodes.BadTimeout);
+        var requeuedClientHandles = new List<uint>();
+        var healthySubscription = CreateSubscription(
+            [failedItem],
+            tryRequeue: clientHandle =>
             {
-                item.ServerId = 1;
-                item.SetError(ServiceResult.Good);
-                return Task.CompletedTask;
+                requeuedClientHandles.Add(clientHandle);
+                return true;
             });
-        var recovered = new List<Subscription>();
+
+        var reportedErrors = new List<Exception>();
+        var monitor = new SubscriptionHealthMonitor(NullLogger.Instance, reportedErrors.Add);
 
         // Act
-        await monitor.CheckAndHealSubscriptionsAsync([subscription], recovered.Add, CancellationToken.None);
+        monitor.CheckAndHealSubscriptions([throwingSubscription, healthySubscription], CancellationToken.None);
 
         // Assert
-        Assert.Same(subscription, Assert.Single(recovered));
+        Assert.Equal([failedItem.ClientHandle], requeuedClientHandles);
+        Assert.Same(error, Assert.Single(reportedErrors));
     }
 
     [Fact]
-    public async Task WhenNoItemRecovers_ThenNoSubscriptionIsReported()
+    public void WhenRequeueThrowsAfterCancellation_ThenFailureIsNotReported()
     {
         // Arrange
-        var subscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        subscription.AddItem(CreateMonitoredItem(StatusCodes.BadTimeout, created: false));
-        var monitor = new SubscriptionHealthMonitor(
-            NullLogger.Instance,
-            static _ => { },
-            applyChangesAsync: static (_, _) => Task.CompletedTask);
-        var recovered = new List<Subscription>();
+        using var cancellationTokenSource = new CancellationTokenSource();
+        cancellationTokenSource.Cancel();
+        var subscription = CreateSubscription(
+            [CreateMonitoredItem(created: false, error: StatusCodes.BadTimeout)],
+            tryRequeue: _ => throw new InvalidOperationException("subscription heal failed"));
+
+        var reportedErrors = new List<Exception>();
+        var monitor = new SubscriptionHealthMonitor(NullLogger.Instance, reportedErrors.Add);
 
         // Act
-        await monitor.CheckAndHealSubscriptionsAsync([subscription], recovered.Add, CancellationToken.None);
+        monitor.CheckAndHealSubscriptions([subscription], cancellationTokenSource.Token);
 
         // Assert
-        Assert.Empty(recovered);
-    }
-
-    private static MonitoredItem CreateMonitoredItem(StatusCode statusCode, bool created)
-    {
-        var item = new MonitoredItem(NullTelemetryContext.Instance)
-        {
-            StartNodeId = NodeId.Parse("ns=2;s=TestNode"),
-            AttributeId = Opc.Ua.Attributes.Value,
-            DisplayName = "TestItem"
-        };
-
-        if (created)
-        {
-            // Setting ServerId makes Status.Id != 0, which flips Created to true.
-            item.ServerId = 1;
-        }
-
-        if (statusCode != StatusCodes.Good)
-        {
-            item.SetError(new ServiceResult(statusCode));
-        }
-
-        return item;
+        Assert.Empty(reportedErrors);
     }
 }

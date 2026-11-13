@@ -10,12 +10,13 @@ using Namotion.Interceptor.Tracking.Performance;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
+using Opc.Ua.Client.Subscriptions;
+using Opc.Ua.Client.Subscriptions.MonitoredItems;
+using MonitoredItemOptions = Opc.Ua.Client.Subscriptions.MonitoredItems.MonitoredItemOptions;
+using SubscriptionOptions = Opc.Ua.Client.Subscriptions.SubscriptionOptions;
+using SubscriptionState = Opc.Ua.Client.Subscriptions.SubscriptionState;
 
 namespace Namotion.Interceptor.OpcUa.Client.Connection;
-
-// The classic Subscription API (FastDataChangeCallback, DefaultSubscription) is obsolete in SDK 2.0 in favor of the
-// managed subscription model (ISubscriptionManager); it still works and is kept until the client moves to that model.
-#pragma warning disable CS0618
 
 /// <summary>
 /// How a monitored item that failed to (re-)create should be handled, aligned with
@@ -33,10 +34,14 @@ internal enum FailedMonitoredItemDisposition
     Drop
 }
 
-internal class SubscriptionManager : IAsyncDisposable
+internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDisposable
 {
     private static readonly ObjectPool<List<NotificationUpdate>> ChangesPool
         = new(() => new List<NotificationUpdate>(16));
+
+    // Fallback for re-checking whether a subscription's items were applied, in case an apply pass ends
+    // without raising a state change.
+    private static readonly TimeSpan AppliedCheckInterval = TimeSpan.FromMilliseconds(250);
 
     private readonly OpcUaSubjectClientSource _source;
     private readonly SubjectPropertyWriter _propertyWriter;
@@ -45,19 +50,18 @@ internal class SubscriptionManager : IAsyncDisposable
     private readonly OpcUaClientConfiguration _configuration;
     private readonly Action<Exception> _reportError;
     private readonly ILogger _logger;
-    private readonly Func<Subscription, CancellationToken, Task> _applyChangesAsync;
 
     private readonly ConcurrentDictionary<uint, MonitoredItemState> _monitoredItems = new();
-    // Keyed by object, not by the server-assigned id, which a subscription created again on the
-    // server can reuse. Cleared when the server session is created again, see ResetNotificationRanking.
-    private readonly ConditionalWeakTable<Subscription, SubscriptionApplyState> _applyStates = new();
-    private readonly ConditionalWeakTable<Subscription, Lock> _applyLocks = new();
-    private readonly ConcurrentDictionary<Subscription, byte> _subscriptions = new();
+    // Created on the first callback rather than when the subscription is tracked, because the engine
+    // raises state changes before Add returns.
+    private readonly ConditionalWeakTable<ISubscription, SubscriptionTracking> _tracking = new();
+    private readonly ConcurrentDictionary<ISubscription, byte> _subscriptions = new();
     private readonly ConcurrentDictionary<uint, int> _healAttempts = new();
     private readonly Lock _trackingMutationLock = new();
 
     private int _subscriptionCount;
     private int _monitoredItemCount;
+    private long _lastItemName;
 
     // Consecutive failed heal ticks a retryable item tolerates before it is escalated to polling
     // instead of being retried forever. With polling disabled there is no escalation target, so the
@@ -76,7 +80,7 @@ internal class SubscriptionManager : IAsyncDisposable
     /// <summary>
     /// Gets the current list of subscriptions (thread-safe collection).
     /// </summary>
-    public IReadOnlyCollection<Subscription> Subscriptions => (IReadOnlyCollection<Subscription>)_subscriptions.Keys;
+    public IReadOnlyCollection<ISubscription> Subscriptions => (IReadOnlyCollection<ISubscription>)_subscriptions.Keys;
 
     /// <summary>
     /// Gets how many subscriptions are currently held. Counting through <see cref="Subscriptions"/>
@@ -98,7 +102,7 @@ internal class SubscriptionManager : IAsyncDisposable
         {
             foreach (var subscription in _subscriptions.Keys)
             {
-                if (subscription.PublishingStopped)
+                if (_tracking.TryGetValue(subscription, out var tracking) && tracking.PublishingStopped)
                 {
                     return true;
                 }
@@ -115,8 +119,7 @@ internal class SubscriptionManager : IAsyncDisposable
         ReadAfterWriteManager? readAfterWriteManager,
         OpcUaClientConfiguration configuration,
         Action<Exception> reportError,
-        ILogger logger,
-        Func<Subscription, CancellationToken, Task>? applyChangesAsync = null)
+        ILogger logger)
     {
         _source = source;
         _propertyWriter = propertyWriter;
@@ -125,24 +128,34 @@ internal class SubscriptionManager : IAsyncDisposable
         _configuration = configuration;
         _reportError = reportError;
         _logger = logger;
-        _applyChangesAsync = applyChangesAsync ??
-            (static (subscription, cancellationToken) => subscription.ApplyChangesAsync(cancellationToken));
     }
 
+    /// <summary>
+    /// Replaces the subscriptions with new ones for <paramref name="monitoredItems"/>, one subscription
+    /// per <see cref="OpcUaClientConfiguration.MaxItemsPerSubscription"/> items. Waits up to
+    /// <see cref="OpcUaClientConfiguration.OperationTimeout"/> per subscription for the engine to apply
+    /// its items, so the total wait grows with the number of subscriptions.
+    /// </summary>
     public async Task CreateBatchedSubscriptionsAsync(
-        IReadOnlyList<MonitoredItem> monitoredItems,
+        IReadOnlyList<MonitoredItemRequest> monitoredItems,
         ISession session,
         CancellationToken cancellationToken)
     {
         _subscriptionsIncomplete = true;
 
-        // Drop the references to the subscriptions of a previous call; the caller removes them from
-        // the session.
-        foreach (var oldSubscription in _subscriptions.Keys)
+        if (!session.TryGetSubscriptionManager(out var subscriptionManager) || subscriptionManager is null)
         {
-            oldSubscription.FastDataChangeCallback -= OnFastDataChange;
+            throw new InvalidOperationException(
+                "The OPC UA session does not use the SDK's default subscription engine, which the client requires.");
         }
+
+        // The session outlives a recreate, so subscriptions from a previous call are still registered
+        // on it and have to be removed before their replacements are created.
+        var previousSubscriptions = _subscriptions.Keys.ToArray();
         ClearTrackedCollections();
+        await DisposeSubscriptionsAsync(previousSubscriptions, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+
         _healAttempts.Clear();
         // Re-attempt every owned property as a real subscription; failed nodes are re-added to
         // polling. Prevents double delivery of an escalated item that later recovers.
@@ -156,52 +169,59 @@ internal class SubscriptionManager : IAsyncDisposable
         var maxItemsPerSubscription = _configuration.MaxItemsPerSubscription;
         for (var i = 0; i < itemCount; i += maxItemsPerSubscription)
         {
-            var subscription = new Subscription(session.DefaultSubscription)
+            var subscription = subscriptionManager.Add(this, new OptionsMonitor<SubscriptionOptions>(new SubscriptionOptions
             {
                 PublishingEnabled = true,
-                PublishingInterval = _configuration.DefaultPublishingInterval,
-                DisableMonitoredItemCache = true, // not needed as we use fast data change callback
-                MinLifetimeInterval = 60_000,
+                PublishingInterval = TimeSpan.FromMilliseconds(_configuration.DefaultPublishingInterval),
+                MinLifetimeInterval = TimeSpan.FromSeconds(60),
                 KeepAliveCount = _configuration.SubscriptionKeepAliveCount,
                 LifetimeCount = _configuration.SubscriptionLifetimeCount,
                 Priority = _configuration.SubscriptionPriority,
-                MaxNotificationsPerPublish = _configuration.SubscriptionMaxNotificationsPerPublish,
-                RepublishAfterTransfer = true, // Enable SDK's automatic republish of missed messages after transfer
-                SequentialPublishing = _configuration.SubscriptionSequentialPublishing,
-            };
+                MaxNotificationsPerPublish = _configuration.SubscriptionMaxNotificationsPerPublish
+            }));
 
-            if (!session.AddSubscription(subscription))
-            {
-                throw new InvalidOperationException("Failed to add OPC UA subscription.");
-            }
-
-            subscription.FastDataChangeCallback += OnFastDataChange;
+            var batchEnd = Math.Min(i + maxItemsPerSubscription, itemCount);
+            var trackedClientHandles = new List<uint>(batchEnd - i);
+            var applyLock = GetApplyLock(subscription);
             try
             {
-                await subscription.CreateAsync(cancellationToken).ConfigureAwait(false);
-
-                var batchEnd = Math.Min(i + maxItemsPerSubscription, itemCount);
                 for (var j = i; j < batchEnd; j++)
                 {
-                    var item = monitoredItems[j];
-                    subscription.AddItem(item);
+                    var request = monitoredItems[j];
+                    var name = Interlocked.Increment(ref _lastItemName).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    if (subscription.MonitoredItems.TryAdd(name, new OptionsMonitor<MonitoredItemOptions>(request.Options), out var item) &&
+                        item is not null)
+                    {
+                        TrackMonitoredItem(item, request);
+                        trackedClientHandles.Add(item.ClientHandle);
 
-                    TrackMonitoredItem(item);
+                        // A registration from a replaced subscription moves to the lock this item's
+                        // notifications use from now on; it is registered again once the item is created.
+                        _readAfterWriteManager?.UpdateApplyLock(request.NodeId, applyLock);
+                    }
+                    else
+                    {
+                        _logger.LogError("Failed to add OPC UA monitored item for node {NodeId}.", request.NodeId);
+                    }
                 }
 
-                await ApplyChangesAndFilterFailedMonitoredItemsAsync(subscription, cancellationToken).ConfigureAwait(false);
+                await WaitUntilAppliedAsync(subscription, cancellationToken).ConfigureAwait(false);
+
+                FilterOutFailedMonitoredItems(subscription);
+
+                // Register properties with ReadAfterWriteManager now that we know revised sampling intervals
+                RegisterPropertiesWithReadAfterWriteManager(subscription);
             }
             catch
             {
-                // Not tracked yet, so a later recreate would not remove it: it would stay on the
-                // session, keep publishing and be restored by the managed session after a reconnect.
-                subscription.FastDataChangeCallback -= OnFastDataChange;
-                await TryRemoveUntrackedSubscriptionAsync(session, subscription, cancellationToken).ConfigureAwait(false);
+                foreach (var clientHandle in trackedClientHandles)
+                {
+                    TryRemoveMonitoredItem(clientHandle, out _);
+                }
+
+                await DisposeSubscriptionsAsync([subscription], cancellationToken).ConfigureAwait(false);
                 throw;
             }
-
-            // Register properties with ReadAfterWriteManager now that we know revised sampling intervals
-            RegisterPropertiesWithReadAfterWriteManager(subscription);
 
             // Add to collection AFTER initialization (temporal separation - health monitor never sees partial state)
             TryAddSubscription(subscription);
@@ -210,34 +230,129 @@ internal class SubscriptionManager : IAsyncDisposable
         _subscriptionsIncomplete = false;
     }
 
-    private async Task TryRemoveUntrackedSubscriptionAsync(ISession session, Subscription subscription, CancellationToken cancellationToken)
+    internal void TrackMonitoredItem(IMonitoredItem item, MonitoredItemRequest request)
     {
+        SetMonitoredItem(item.ClientHandle, new MonitoredItemState(request.Property, request.NodeId));
+    }
+
+    /// <summary>
+    /// Waits up to <see cref="OpcUaClientConfiguration.OperationTimeout"/> until the engine created the
+    /// subscription and attempted every monitored item once, which it does asynchronously. Items that
+    /// failed carry their error afterwards.
+    /// </summary>
+    private async Task WaitUntilAppliedAsync(ISubscription subscription, CancellationToken cancellationToken)
+    {
+        var tracking = _tracking.GetValue(subscription, static _ => new SubscriptionTracking());
+
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(_configuration.OperationTimeout);
         try
         {
-            await session.RemoveSubscriptionsAsync([subscription], cancellationToken).ConfigureAwait(false);
+            while (true)
+            {
+                // Taken before the check, so a state change between the check and the wait is not lost.
+                var changed = tracking.WaitForChangeAsync();
+                if (IsApplied(subscription))
+                {
+                    return;
+                }
+
+                await Task.WhenAny(changed, Task.Delay(AppliedCheckInterval, timeoutSource.Token)).ConfigureAwait(false);
+                timeoutSource.Token.ThrowIfCancellationRequested();
+            }
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            _logger.LogWarning(ex, "Failed to remove a partially created OPC UA subscription.");
+            if (!subscription.Created)
+            {
+                throw new TimeoutException(
+                    $"The OPC UA subscription was not created within {_configuration.OperationTimeout}.");
+            }
+
+            _logger.LogWarning(
+                "Not all OPC UA monitored items were applied within {Timeout}. The remaining items are picked up by the health check.",
+                _configuration.OperationTimeout);
         }
     }
 
-    internal void TrackMonitoredItem(MonitoredItem item)
+    private static bool IsApplied(ISubscription subscription)
     {
-        if (item.Handle is RegisteredSubjectProperty property)
+        if (!subscription.Created)
         {
-            SetMonitoredItem(item.ClientHandle, property);
+            return false;
         }
+
+        foreach (var item in subscription.MonitoredItems.Items)
+        {
+            if (!item.Created && !ServiceResult.IsBad(item.Error))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
-    internal void OnFastDataChange(Subscription subscription, DataChangeNotification notification, ArrayOf<string> stringTable)
+    /// <inheritdoc />
+    public ValueTask OnDataChangeNotificationAsync(
+        ISubscription subscription,
+        uint sequenceNumber,
+        DateTime publishTime,
+        ReadOnlyMemory<DataValueChange> notification,
+        PublishState publishStateMask,
+        IReadOnlyList<string> stringTable)
+    {
+        OnDataChange(subscription, sequenceNumber, notification.Span);
+        return default;
+    }
+
+    /// <inheritdoc />
+    public ValueTask OnEventDataNotificationAsync(
+        ISubscription subscription,
+        uint sequenceNumber,
+        DateTime publishTime,
+        ReadOnlyMemory<EventNotification> notification,
+        PublishState publishStateMask,
+        IReadOnlyList<string> stringTable) => default;
+
+    /// <inheritdoc />
+    public ValueTask OnKeepAliveNotificationAsync(
+        ISubscription subscription,
+        uint sequenceNumber,
+        DateTime publishTime,
+        PublishState publishStateMask) => default;
+
+    /// <inheritdoc />
+    public ValueTask OnSubscriptionStateChangedAsync(
+        ISubscription subscription,
+        SubscriptionState state,
+        PublishState publishStateMask,
+        CancellationToken ct = default)
+    {
+        var tracking = _tracking.GetValue(subscription, static _ => new SubscriptionTracking());
+
+        // The engine reports the aggregate over all partitions on every state change.
+        tracking.PublishingStopped = (publishStateMask & PublishState.Stopped) != 0;
+
+        if (state is SubscriptionState.Created or SubscriptionState.Deleted)
+        {
+            // A subscription created again on the server numbers its messages from 1 again, so its
+            // messages must not be ranked against those applied before.
+            tracking.ResetApplyStates();
+        }
+
+        tracking.SignalChange();
+        return default;
+    }
+
+    internal void OnDataChange(ISubscription subscription, uint sequenceNumber, ReadOnlySpan<DataValueChange> notification)
     {
         if (_shuttingDown)
         {
             return;
         }
 
-        var monitoredItemsCount = notification.MonitoredItems.Count;
+        var monitoredItemsCount = notification.Length;
         if (monitoredItemsCount == 0)
         {
             return;
@@ -250,14 +365,14 @@ internal class SubscriptionManager : IAsyncDisposable
         {
             for (var i = 0; i < monitoredItemsCount; i++)
             {
-                var item = notification.MonitoredItems[i];
-                if (_monitoredItems.TryGetValue(item.ClientHandle, out var monitoredItem))
+                ref readonly var change = ref notification[i];
+                if (_monitoredItems.TryGetValue(change.ClientHandle, out var monitoredItem))
                 {
                     changes.Add(new NotificationUpdate(
                         monitoredItem,
                         _configuration.ValueConverter.ConvertToPropertyValue(
-                            item.Value.WrappedValue.ToClrValue(), monitoredItem.Property),
-                        item.Value.SourceTimestamp.ToClrTimestamp()));
+                            change.Value.WrappedValue.ToClrValue(), monitoredItem.Property),
+                        change.Value.SourceTimestamp.ToClrTimestamp()));
                 }
             }
         }
@@ -274,16 +389,19 @@ internal class SubscriptionManager : IAsyncDisposable
         {
             _source.IncomingThroughput.Add(changes.Count);
 
-            var applyState = GetApplyState(subscription);
+            // One notification message comes from one server-side partition, and sequence numbers
+            // are per partition.
+            var applyState = GetTracking(subscription).GetApplyState(notification[0].PartitionServerId);
 
             // Pool item returned inside callback. Safe because ApplyUpdate never throws:
             // It wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
-            var state = (manager: this, source: _source, applyState, sequenceNumber: notification.SequenceNumber, receivedTimestamp, changes, logger: _logger);
+            var state = (manager: this, source: _source, applyState, sequenceNumber, receivedTimestamp, changes, logger: _logger);
             _propertyWriter.Write(state, static s =>
             {
-                // The ranking and the apply share one lock because the SDK briefly runs two workers for
-                // one subscription when it restarts its worker. Taken inside the writer's lock during
-                // replay, so nothing may take the writer's lock while holding this one.
+                // The ranking and the apply share one lock because a late message of a partition can be
+                // delivered while a newer one is applied. Read-after-write applies under it too. Taken
+                // inside the writer's lock during replay, so nothing may take the writer's lock while
+                // holding this one.
                 lock (s.applyState.Lock)
                 {
                     var stamp = s.applyState.GetStamp(s.sequenceNumber);
@@ -342,23 +460,16 @@ internal class SubscriptionManager : IAsyncDisposable
         }
     }
 
-    private SubscriptionApplyState GetApplyState(Subscription subscription)
-    {
-        if (_applyStates.TryGetValue(subscription, out var applyState))
-        {
-            return applyState;
-        }
-
-        return _applyStates.GetValue(subscription, key => new SubscriptionApplyState(GetApplyLock(key)));
-    }
-
     /// <summary>
-    /// Gets the lock under which the notifications of <paramref name="subscription"/> are applied. It
-    /// stays the same across <see cref="ResetNotificationRanking"/>, so a read-after-write registration
-    /// keeps applying under the lock the notifications take.
+    /// Gets the lock under which the notifications of <paramref name="subscription"/> are applied, by
+    /// all of its server-side partitions. It stays the same across <see cref="ResetNotificationRanking"/>
+    /// and partition changes, so a read-after-write registration keeps applying under the lock the
+    /// notifications take.
     /// </summary>
-    internal Lock GetApplyLock(Subscription subscription) =>
-        _applyLocks.GetValue(subscription, static _ => new Lock());
+    internal Lock GetApplyLock(ISubscription subscription) => GetTracking(subscription).ApplyLock;
+
+    private SubscriptionTracking GetTracking(ISubscription subscription) =>
+        _tracking.GetValue(subscription, static _ => new SubscriptionTracking());
 
     private void ReportErrorIfRunning(Exception error, CancellationToken cancellationToken = default)
     {
@@ -370,45 +481,38 @@ internal class SubscriptionManager : IAsyncDisposable
 
     /// <summary>
     /// Starts a new ranking of notification messages for every subscription. Called when the server
-    /// session was created again: the subscriptions are restored in place and number their messages
+    /// session was created again: a subscription the engine had to create again numbers its messages
     /// from the start again, which must not be ranked against the messages applied before. The apply
     /// locks are kept, see <see cref="GetApplyLock"/>.
     /// </summary>
-    internal void ResetNotificationRanking() => _applyStates.Clear();
-
-    internal async Task ApplyChangesAndFilterFailedMonitoredItemsAsync(
-        Subscription subscription,
-        CancellationToken cancellationToken)
+    internal void ResetNotificationRanking()
     {
-        try
+        foreach (var (_, tracking) in _tracking)
         {
-            await _applyChangesAsync(subscription, cancellationToken).ConfigureAwait(false);
+            tracking.ResetApplyStates();
         }
-        catch (ServiceResultException error)
-        {
-            ReportErrorIfRunning(error, cancellationToken);
-            _logger.LogWarning(error, "ApplyChanges failed for a batch; attempting to keep valid OPC UA monitored items by removing failed ones.");
-        }
-
-        await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task FilterOutFailedMonitoredItemsAsync(Subscription subscription, CancellationToken cancellationToken)
+    /// <summary>
+    /// Sorts the monitored items the server rejected: transient failures stay in the subscription for
+    /// the health monitor, nodes that do not support subscriptions move to polling and permanent
+    /// failures are removed. Items the engine has not attempted yet are left alone.
+    /// </summary>
+    internal void FilterOutFailedMonitoredItems(ISubscription subscription)
     {
-        List<MonitoredItem>? removedItems = null;
-        List<MonitoredItem>? polledItems = null;
+        var removed = 0;
+        var polled = 0;
         var keptForRetry = 0;
 
         var pollingEnabled = _configuration.EnablePollingFallback && _pollingManager != null;
 
-        foreach (var monitoredItem in subscription.MonitoredItems)
+        foreach (var monitoredItem in subscription.MonitoredItems.Items)
         {
-            if (!SubscriptionHealthMonitor.IsUnhealthy(monitoredItem))
+            var statusCode = monitoredItem.Error?.StatusCode ?? StatusCodes.Good;
+            if (!StatusCode.IsBad(statusCode))
             {
                 continue;
             }
-
-            var statusCode = monitoredItem.Status.Error?.StatusCode ?? StatusCodes.Good;
 
             switch (ClassifyFailedItem(statusCode, pollingEnabled))
             {
@@ -416,41 +520,32 @@ internal class SubscriptionManager : IAsyncDisposable
                     // Keep it in the subscription so the health monitor heals it; removing it here
                     // silently orphaned transiently-failed items.
                     keptForRetry++;
-                    _logger.LogWarning("OPC UA monitored item {DisplayName} failed transiently ({Status}); keeping it for the health monitor to retry.",
-                        monitoredItem.DisplayName, statusCode);
+                    _logger.LogWarning("OPC UA monitored item {ClientHandle} failed transiently ({Status}); keeping it for the health monitor to retry.",
+                        monitoredItem.ClientHandle, statusCode);
                     break;
 
                 case FailedMonitoredItemDisposition.FallbackToPolling:
-                    removedItems ??= [];
-                    removedItems.Add(monitoredItem);
-                    TryRemoveMonitoredItem(monitoredItem.ClientHandle);
-                    polledItems ??= [];
-                    polledItems.Add(monitoredItem);
-                    _logger.LogWarning("Monitored item {DisplayName} does not support subscriptions ({Status}), falling back to polling",
-                        monitoredItem.DisplayName, statusCode);
+                    _logger.LogWarning("Monitored item {ClientHandle} does not support subscriptions ({Status}), falling back to polling",
+                        monitoredItem.ClientHandle, statusCode);
+                    RemoveAndFallBackToPolling(subscription, monitoredItem.ClientHandle, fallBackToPolling: true);
+                    removed++;
+                    polled++;
                     break;
 
                 case FailedMonitoredItemDisposition.Drop:
-                    removedItems ??= [];
-                    removedItems.Add(monitoredItem);
-                    TryRemoveMonitoredItem(monitoredItem.ClientHandle);
-                    _logger.LogError("OPC UA monitored item creation failed permanently for {DisplayName} (Handle={Handle}): {Status}",
-                        monitoredItem.DisplayName, monitoredItem.ClientHandle, statusCode);
+                    _logger.LogError("OPC UA monitored item creation failed permanently (Handle={Handle}): {Status}",
+                        monitoredItem.ClientHandle, statusCode);
+                    RemoveAndFallBackToPolling(subscription, monitoredItem.ClientHandle, fallBackToPolling: false);
+                    removed++;
                     break;
             }
         }
 
-        if (removedItems is { Count: > 0 })
-        {
-            await RemoveAndFallBackToPollingAsync(subscription, removedItems, polledItems ?? [], cancellationToken).ConfigureAwait(false);
-        }
-
-        if (removedItems?.Count > 0 || keptForRetry > 0)
+        if (removed > 0 || keptForRetry > 0)
         {
             _logger.LogWarning(
-                "Subscription {SubscriptionId}: removed {Removed} failed monitored items " +
-                "({Polled} switched to polling), kept {Kept} for the health monitor to retry.",
-                subscription.Id, removedItems?.Count ?? 0, polledItems?.Count ?? 0, keptForRetry);
+                "Removed {Removed} failed monitored items ({Polled} switched to polling), kept {Kept} for the health monitor to retry.",
+                removed, polled, keptForRetry);
         }
     }
 
@@ -496,38 +591,20 @@ internal class SubscriptionManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Removes the given items from the SDK subscription and applies the change (tolerating an
-    /// ApplyChanges failure), then hands the polled items to the polling manager.
+    /// Removes the item from the subscription, which the engine applies to the server by itself, and
+    /// optionally hands it to the polling manager.
     /// </summary>
-    internal async Task RemoveAndFallBackToPollingAsync(
-        Subscription subscription,
-        IReadOnlyList<MonitoredItem> toRemove,
-        IReadOnlyList<MonitoredItem> toPoll,
-        CancellationToken cancellationToken)
+    internal void RemoveAndFallBackToPolling(ISubscription subscription, uint clientHandle, bool fallBackToPolling)
     {
-        foreach (var monitoredItem in toRemove)
-        {
-            subscription.RemoveItem(monitoredItem);
+        subscription.MonitoredItems.TryRemove(clientHandle);
 
-            // Polled values are applied without the subscription's lock, so read-after-write cannot stay atomic.
-            _readAfterWriteManager?.UnregisterProperty(monitoredItem.StartNodeId);
-        }
-
-        try
+        // Polled values are applied without the subscription's lock, so read-after-write cannot stay atomic.
+        if (TryRemoveMonitoredItem(clientHandle, out var state))
         {
-            await _applyChangesAsync(subscription, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            ReportErrorIfRunning(ex, cancellationToken);
-            _logger.LogWarning(ex, "ApplyChanges after removing failed OPC UA monitored items failed. Continuing with the remaining items.");
-        }
-
-        if (_pollingManager is not null)
-        {
-            foreach (var monitoredItem in toPoll)
+            _readAfterWriteManager?.UnregisterProperty(state.NodeId);
+            if (fallBackToPolling)
             {
-                _pollingManager.AddItem(monitoredItem);
+                _pollingManager?.AddItem(state.NodeId, state.Property);
             }
         }
     }
@@ -537,7 +614,7 @@ internal class SubscriptionManager : IAsyncDisposable
     /// to polling instead of retrying forever. Runs only when polling is enabled; recreating the
     /// subscriptions clears the polling set and re-attempts every item.
     /// </summary>
-    public async Task EscalatePersistentlyFailedItemsAsync(CancellationToken cancellationToken)
+    public void EscalatePersistentlyFailedItems()
     {
         if (!_configuration.EnablePollingFallback || _pollingManager is null)
         {
@@ -546,9 +623,9 @@ internal class SubscriptionManager : IAsyncDisposable
 
         foreach (var subscription in _subscriptions.Keys)
         {
-            List<MonitoredItem>? toEscalate = null;
+            List<uint>? toEscalate = null;
 
-            foreach (var monitoredItem in subscription.MonitoredItems)
+            foreach (var monitoredItem in subscription.MonitoredItems.Items)
             {
                 if (!SubscriptionHealthMonitor.IsUnhealthy(monitoredItem))
                 {
@@ -561,8 +638,8 @@ internal class SubscriptionManager : IAsyncDisposable
 
                 if (!SubscriptionHealthMonitor.IsRetryable(monitoredItem))
                 {
-                    // A runtime transition to permanent-bad is left in the subscription until reconnect,
-                    // but drop any heal counter so the map only tracks currently-retryable failing items.
+                    // A runtime transition to permanent-bad is left in the subscription until the next
+                    // recreate, but drop any heal counter so the map only tracks currently-retryable failing items.
                     if (!_healAttempts.IsEmpty)
                     {
                         _healAttempts.TryRemove(monitoredItem.ClientHandle, out _);
@@ -574,7 +651,7 @@ internal class SubscriptionManager : IAsyncDisposable
 
                 if (ShouldEscalateToPolling(attempts, MaxHealAttemptsBeforeEscalation))
                 {
-                    (toEscalate ??= []).Add(monitoredItem);
+                    (toEscalate ??= []).Add(monitoredItem.ClientHandle);
                 }
             }
 
@@ -583,17 +660,15 @@ internal class SubscriptionManager : IAsyncDisposable
                 continue;
             }
 
-            foreach (var monitoredItem in toEscalate)
+            foreach (var clientHandle in toEscalate)
             {
-                TryRemoveMonitoredItem(monitoredItem.ClientHandle);
-                _healAttempts.TryRemove(monitoredItem.ClientHandle, out _);
+                _healAttempts.TryRemove(clientHandle, out _);
+                RemoveAndFallBackToPolling(subscription, clientHandle, fallBackToPolling: true);
             }
 
-            await RemoveAndFallBackToPollingAsync(subscription, toEscalate, toEscalate, cancellationToken).ConfigureAwait(false);
-
             _logger.LogWarning(
-                "Escalated {Count} persistently-failing monitored items to polling in subscription {SubscriptionId} after {Max} retries.",
-                toEscalate.Count, subscription.Id, MaxHealAttemptsBeforeEscalation);
+                "Escalated {Count} persistently-failing monitored items to polling after {Max} retries.",
+                toEscalate.Count, MaxHealAttemptsBeforeEscalation);
         }
     }
 
@@ -608,34 +683,35 @@ internal class SubscriptionManager : IAsyncDisposable
         {
             if (kvp.Value.Property.Reference.Subject == subject)
             {
-                TryRemoveMonitoredItem(kvp.Key);
+                TryRemoveMonitoredItem(kvp.Key, out _);
                 _healAttempts.TryRemove(kvp.Key, out _);
             }
         }
     }
 
     /// <summary>
-    /// Registers the items of a tracked subscription with ReadAfterWriteManager after the health monitor
-    /// healed some of them. Does nothing for a subscription that is no longer tracked.
+    /// Registers the monitored items the engine created since the last call with the
+    /// <see cref="ReadAfterWriteManager"/>, which needs their revised sampling intervals. Covers the
+    /// items created after the subscriptions were set up, such as a retried item that succeeded.
     /// </summary>
-    internal void RegisterRecoveredItems(Subscription subscription)
+    public void RegisterCreatedItemsWithReadAfterWriteManager()
     {
-        // Checked and registered under the tracking lock: a recreate removes the replaced subscriptions under it
-        // before registering their replacements, so a heal of a replaced one cannot register its lock last.
-        lock (_trackingMutationLock)
+        if (_readAfterWriteManager is null)
         {
-            if (_subscriptions.ContainsKey(subscription))
-            {
-                RegisterPropertiesWithReadAfterWriteManager(subscription);
-            }
+            return;
+        }
+
+        foreach (var subscription in _subscriptions.Keys)
+        {
+            RegisterPropertiesWithReadAfterWriteManager(subscription);
         }
     }
 
     /// <summary>
-    /// Registers all successfully created monitored items with ReadAfterWriteManager.
-    /// Called once the revised sampling intervals are known.
+    /// Registers the created monitored items of <paramref name="subscription"/> that are not registered
+    /// yet with the <see cref="ReadAfterWriteManager"/>.
     /// </summary>
-    private void RegisterPropertiesWithReadAfterWriteManager(Subscription subscription)
+    private void RegisterPropertiesWithReadAfterWriteManager(ISubscription subscription)
     {
         if (_readAfterWriteManager is null)
         {
@@ -643,25 +719,18 @@ internal class SubscriptionManager : IAsyncDisposable
         }
 
         var applyLock = GetApplyLock(subscription);
-        foreach (var item in subscription.MonitoredItems)
+        foreach (var item in subscription.MonitoredItems.Items)
         {
-            // A released property's SDK item stays in the subscription; only the tracked ones are registered.
-            if (item.Handle is not RegisteredSubjectProperty property || !_monitoredItems.ContainsKey(item.ClientHandle))
+            // The engine sets the revised interval after the item reports itself created, so an item
+            // without one yet is left unmarked for the next call instead of being skipped for good.
+            var revisedInterval = item.CurrentSamplingInterval;
+            if (item.Created &&
+                revisedInterval > TimeSpan.Zero &&
+                _monitoredItems.TryGetValue(item.ClientHandle, out var state) &&
+                state.TryMarkRegisteredWithReadAfterWrite())
             {
-                continue;
-            }
-
-            if (item.Status?.Created == true)
-            {
-                var requestedInterval = GetRequestedSamplingInterval(property);
-                var revisedInterval = TimeSpan.FromMilliseconds(item.Status.SamplingInterval);
-                _readAfterWriteManager.RegisterProperty(item.StartNodeId, property, requestedInterval, revisedInterval, applyLock);
-            }
-            else
-            {
-                // Not created yet: an earlier registration moves to the lock this item's notifications will use
-                // rather than being dropped. The health monitor registers it again once it heals the item.
-                _readAfterWriteManager.UpdateApplyLock(item.StartNodeId, applyLock);
+                var requestedInterval = GetRequestedSamplingInterval(state.Property);
+                _readAfterWriteManager.RegisterProperty(state.NodeId, state.Property, requestedInterval, revisedInterval, applyLock);
             }
         }
     }
@@ -680,7 +749,7 @@ internal class SubscriptionManager : IAsyncDisposable
         return _configuration.DefaultSamplingInterval;
     }
 
-    internal bool TryAddSubscription(Subscription subscription)
+    private bool TryAddSubscription(ISubscription subscription)
     {
         lock (_trackingMutationLock)
         {
@@ -694,22 +763,10 @@ internal class SubscriptionManager : IAsyncDisposable
         }
     }
 
-    private void TryRemoveSubscription(Subscription subscription)
+    private void SetMonitoredItem(uint clientHandle, MonitoredItemState monitoredItem)
     {
         lock (_trackingMutationLock)
         {
-            if (_subscriptions.TryRemove(subscription, out _))
-            {
-                Volatile.Write(ref _subscriptionCount, _subscriptionCount - 1);
-            }
-        }
-    }
-
-    private void SetMonitoredItem(uint clientHandle, RegisteredSubjectProperty property)
-    {
-        lock (_trackingMutationLock)
-        {
-            var monitoredItem = new MonitoredItemState(property);
             if (_monitoredItems.TryAdd(clientHandle, monitoredItem))
             {
                 Volatile.Write(ref _monitoredItemCount, _monitoredItemCount + 1);
@@ -721,14 +778,17 @@ internal class SubscriptionManager : IAsyncDisposable
         }
     }
 
-    private void TryRemoveMonitoredItem(uint clientHandle)
+    private bool TryRemoveMonitoredItem(uint clientHandle, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out MonitoredItemState? monitoredItem)
     {
         lock (_trackingMutationLock)
         {
-            if (_monitoredItems.TryRemove(clientHandle, out _))
+            if (_monitoredItems.TryRemove(clientHandle, out monitoredItem))
             {
                 Volatile.Write(ref _monitoredItemCount, _monitoredItemCount - 1);
+                return true;
             }
+
+            return false;
         }
     }
 
@@ -750,31 +810,54 @@ internal class SubscriptionManager : IAsyncDisposable
         var subscriptions = _subscriptions.Keys.ToArray();
         ClearTrackedCollections();
 
-        foreach (var subscription in subscriptions)
+        await DisposeSubscriptionsAsync(subscriptions, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Disposes the subscriptions concurrently, which removes them from the session and deletes them on
+    /// the server. Waits up to <see cref="OpcUaClientConfiguration.SessionDisposalTimeout"/> for all of
+    /// them together; a disposal still running after that or after cancellation continues in the background.
+    /// </summary>
+    private async Task DisposeSubscriptionsAsync(IReadOnlyList<ISubscription> subscriptions, CancellationToken cancellationToken)
+    {
+        if (subscriptions.Count == 0)
         {
-            subscription.FastDataChangeCallback -= OnFastDataChange;
+            return;
         }
 
-        // Use session.RemoveSubscriptionsAsync instead of subscription.DeleteAsync
-        // to also remove subscriptions from session.m_subscriptions. DeleteAsync alone
-        // only deletes on the server but does not remove from the session's internal list,
-        // keeping the entire Subscription object graph alive until session disposal.
-        if (subscriptions.Length > 0)
+        var disposals = new Task[subscriptions.Count];
+        for (var i = 0; i < disposals.Length; i++)
         {
-            var session = subscriptions[0].Session;
-            if (session != null)
-            {
-                var disposalTimeout = _configuration.SessionDisposalTimeout;
-                try
-                {
-                    await session.RemoveSubscriptionsAsync(subscriptions, default)
-                        .WaitAsync(disposalTimeout).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to remove subscriptions during disposal.");
-                }
-            }
+            disposals[i] = DisposeSubscriptionAsync(subscriptions[i]);
+        }
+
+        try
+        {
+            await Task.WhenAll(disposals)
+                .WaitAsync(_configuration.SessionDisposalTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning(
+                "Not all OPC UA subscriptions were removed within {Timeout}; the remaining removals continue in the background.",
+                _configuration.SessionDisposalTimeout);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The caller is stopping; the remaining removals continue in the background.
+        }
+    }
+
+    // Never faults, so a disposal that outlives the shared wait is still observed and logged.
+    private async Task DisposeSubscriptionAsync(ISubscription subscription)
+    {
+        try
+        {
+            await subscription.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to remove an OPC UA subscription.");
         }
     }
 
@@ -785,23 +868,63 @@ internal class SubscriptionManager : IAsyncDisposable
         public readonly DateTimeOffset Timestamp = timestamp;
     }
 
-    private sealed class MonitoredItemState(RegisteredSubjectProperty property)
+    internal sealed class MonitoredItemState(RegisteredSubjectProperty property, NodeId nodeId)
     {
         public RegisteredSubjectProperty Property { get; } = property;
+
+        public NodeId NodeId { get; } = nodeId;
 
         /// <summary>
         /// The stamp of the last message applied to this item, 0 before the first. Read and written with
         /// <see cref="Interlocked"/>.
         /// </summary>
-        // Interlocked rather than the subscription's lock alone: a replaced subscription's late callback
-        // writes it under its own lock.
+        // Interlocked rather than the partition's lock alone: a callback ranked against an apply state
+        // that was reset meanwhile writes it under its own lock.
         public ulong LastAppliedStamp;
+
+        private int _registeredWithReadAfterWrite;
+
+        /// <summary>
+        /// Marks the item as registered with the <see cref="ReadAfterWriteManager"/>. Returns false if it
+        /// was registered already.
+        /// </summary>
+        public bool TryMarkRegisteredWithReadAfterWrite() =>
+            Interlocked.Exchange(ref _registeredWithReadAfterWrite, 1) == 0;
     }
 
     /// <summary>
-    /// Ranks the notification messages of one subscription object. A stamp packs a 24-bit epoch that
-    /// identifies the object into the high bits and the message's sequence number, extended past the
-    /// 32-bit wrap, into the low 40 bits, which last about 2^40 messages per subscription object.
+    /// What the manager tracks per subscription: whether publishing stopped, a signal for state
+    /// changes and the apply state of each server-side partition.
+    /// </summary>
+    private sealed class SubscriptionTracking
+    {
+        private readonly ConcurrentDictionary<uint, SubscriptionApplyState> _applyStates = new();
+        private TaskCompletionSource _changed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public volatile bool PublishingStopped;
+
+        /// <summary>
+        /// The lock every partition applies its notifications under. One lock for the subscription
+        /// rather than one per partition, so it stays valid when the engine creates, deletes or
+        /// resets partitions.
+        /// </summary>
+        public Lock ApplyLock { get; } = new();
+
+        public SubscriptionApplyState GetApplyState(uint partitionServerId) =>
+            _applyStates.GetOrAdd(partitionServerId, static (_, applyLock) => new SubscriptionApplyState(applyLock), ApplyLock);
+
+        public void ResetApplyStates() => _applyStates.Clear();
+
+        public Task WaitForChangeAsync() => Volatile.Read(ref _changed).Task;
+
+        public void SignalChange() =>
+            Interlocked.Exchange(ref _changed, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
+    }
+
+    /// <summary>
+    /// Ranks the notification messages of one server-side subscription between two creations. A stamp
+    /// packs a 24-bit epoch that identifies the instance into the high bits and the message's sequence
+    /// number, extended past the 32-bit wrap, into the low 40 bits, which last about 2^40 messages.
     /// </summary>
     private sealed class SubscriptionApplyState(Lock applyLock)
     {
@@ -816,8 +939,8 @@ internal class SubscriptionManager : IAsyncDisposable
         public Lock Lock { get; } = applyLock;
 
         /// <summary>
-        /// Whether <paramref name="stamp"/> belongs to an older message of the same subscription object than
-        /// <paramref name="lastApplied"/>. A stamp of another subscription object ranks against nothing.
+        /// Whether <paramref name="stamp"/> belongs to an older message of the same instance than
+        /// <paramref name="lastApplied"/>. A stamp of another instance ranks against nothing.
         /// </summary>
         public static bool IsOlder(ulong stamp, ulong lastApplied) =>
             (stamp & ~SequenceMask) == (lastApplied & ~SequenceMask) && stamp < lastApplied;

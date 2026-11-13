@@ -1,130 +1,91 @@
 using Microsoft.Extensions.Logging;
 using Opc.Ua;
-using Opc.Ua.Client;
+using Opc.Ua.Client.Subscriptions;
+using Opc.Ua.Client.Subscriptions.MonitoredItems;
 
 namespace Namotion.Interceptor.OpcUa.Client.Resilience;
 
 /// <summary>
-/// Monitors OPC UA subscription health and automatically retries failed monitored items.
-/// Periodically checks for unhealthy items and attempts to heal them by calling ApplyChanges.
+/// Monitors OPC UA subscription health and retries failed monitored items. The subscription engine
+/// retries a failed item a bounded number of times by itself; this requeues the retryable ones that
+/// are still failing afterwards, on every health check.
 /// </summary>
 internal sealed class SubscriptionHealthMonitor
 {
     private readonly ILogger _logger;
     private readonly Action<Exception> _reportError;
-    private readonly Func<Subscription, CancellationToken, Task> _applyChangesAsync;
 
-    public SubscriptionHealthMonitor(
-        ILogger logger,
-        Action<Exception> reportError,
-        Func<Subscription, CancellationToken, Task>? applyChangesAsync = null)
+    public SubscriptionHealthMonitor(ILogger logger, Action<Exception> reportError)
     {
         _logger = logger;
         _reportError = reportError;
-        _applyChangesAsync = applyChangesAsync ??
-            (static (subscription, cancellationToken) => subscription.ApplyChangesAsync(cancellationToken));
     }
 
-    /// <summary>
-    /// Retries the failed monitored items of every subscription that has any.
-    /// </summary>
-    /// <param name="subscriptions">The subscriptions to check.</param>
-    /// <param name="onItemsRecovered">Called for a subscription in which at least one item recovered.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    public async Task CheckAndHealSubscriptionsAsync(
-        IReadOnlyCollection<Subscription> subscriptions,
-        Action<Subscription>? onItemsRecovered,
-        CancellationToken cancellationToken)
+    public void CheckAndHealSubscriptions(IReadOnlyCollection<ISubscription> subscriptions, CancellationToken cancellationToken)
     {
-        try
+        foreach (var subscription in subscriptions)
         {
-            foreach (var subscription in subscriptions)
+            try
             {
-                var unhealthyCount = GetUnhealthyCount(subscription);
-                if (unhealthyCount == 0)
+                CheckAndHealSubscription(subscription);
+            }
+            catch (Exception ex)
+            {
+                if (!cancellationToken.IsCancellationRequested)
                 {
-                    continue;
+                    _reportError(ex);
                 }
 
-                try
-                {
-                    // Try to heal failed monitored items by reapplying the subscription changes
-                    await _applyChangesAsync(subscription, cancellationToken).ConfigureAwait(false);
-
-                    var stillUnhealthyCount = GetUnhealthyCount(subscription);
-                    if (stillUnhealthyCount < unhealthyCount)
-                    {
-                        onItemsRecovered?.Invoke(subscription);
-                    }
-
-                    if (stillUnhealthyCount == 0)
-                    {
-                        _logger.LogInformation(
-                            "OPC UA subscription {Id} healed successfully: All {Count} items now healthy.",
-                            subscription.Id, unhealthyCount);
-                    }
-                    else
-                    {
-                        _logger.LogWarning(
-                            "OPC UA subscription {Id} healed partially: {Healthy}/{Total} items recovered.",
-                            subscription.Id, unhealthyCount - stillUnhealthyCount, unhealthyCount);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    ReportErrorIfRunning(ex, cancellationToken);
-                    _logger.LogError(ex, "Failed to heal OPC UA subscription {Id}.", subscription.Id);
-                }
+                _logger.LogError(ex, "OPC UA subscription health check failed.");
             }
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            ReportErrorIfRunning(ex, cancellationToken);
-            _logger.LogError(ex, "OPC UA subscription health check failed.");
-        }
     }
 
-    private void ReportErrorIfRunning(Exception error, CancellationToken cancellationToken)
+    private void CheckAndHealSubscription(ISubscription subscription)
     {
-        if (!cancellationToken.IsCancellationRequested)
-        {
-            _reportError(error);
-        }
-    }
+        var unhealthyCount = 0;
+        var requeuedCount = 0;
+        var retryCollection = subscription.MonitoredItems as IMonitoredItemRetryCollection;
 
-    private static int GetUnhealthyCount(Subscription subscription)
-    {
-        var count = 0;
-        foreach (var item in subscription.MonitoredItems)
+        foreach (var item in subscription.MonitoredItems.Items)
         {
-            if (IsUnhealthy(item) && IsRetryable(item))
+            if (!IsUnhealthy(item) || !IsRetryable(item))
             {
-                count++;
+                continue;
+            }
+
+            unhealthyCount++;
+
+            // Returns false while the engine is still applying the item by itself.
+            if (retryCollection is not null && retryCollection.TryRequeue(item.ClientHandle))
+            {
+                requeuedCount++;
             }
         }
-        return count;
+
+        if (unhealthyCount > 0)
+        {
+            _logger.LogWarning(
+                "OPC UA subscription has {Unhealthy} failed monitored items that can be retried; requeued {Requeued}.",
+                unhealthyCount, requeuedCount);
+        }
     }
 
     /// <summary>
     /// Determines if a monitored item is unhealthy (not created or has bad status).
     /// </summary>
-    internal static bool IsUnhealthy(MonitoredItem item)
+    internal static bool IsUnhealthy(IMonitoredItem item)
     {
-        var statusCode = item.Status?.Error?.StatusCode ?? StatusCodes.Good;
-        return !item.Created || StatusCode.IsBad(statusCode);
+        return !item.Created || ServiceResult.IsBad(item.Error);
     }
 
     /// <summary>
     /// Determines if a failed monitored item should be retried.
     /// Returns false for permanent design-time errors, true for transient errors.
     /// </summary>
-    internal static bool IsRetryable(MonitoredItem item)
+    internal static bool IsRetryable(IMonitoredItem item)
     {
-        var statusCode = item.Status?.Error?.StatusCode ?? StatusCodes.Good;
+        var statusCode = item.Error?.StatusCode ?? StatusCodes.Good;
         return OpcUaStatusCodeClassifier.IsTransientError(statusCode);
     }
 }

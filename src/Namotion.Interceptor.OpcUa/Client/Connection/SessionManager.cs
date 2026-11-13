@@ -5,6 +5,7 @@ using Namotion.Interceptor.OpcUa.Client.Polling;
 using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Opc.Ua;
 using Opc.Ua.Client;
+using Opc.Ua.Client.Subscriptions;
 using Opc.Ua.Configuration;
 
 namespace Namotion.Interceptor.OpcUa.Client.Connection;
@@ -73,7 +74,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// <summary>
     /// Gets the current subscriptions managed by the subscription manager.
     /// </summary>
-    public IReadOnlyCollection<Subscription> Subscriptions => SubscriptionManager.Subscriptions;
+    public IReadOnlyCollection<ISubscription> Subscriptions => SubscriptionManager.Subscriptions;
 
     internal SubscriptionManager SubscriptionManager { get; }
 
@@ -266,11 +267,9 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             telemetry: configuration.ResolvedTelemetryContext,
             sessionName: application.ApplicationName ?? configuration.ApplicationName,
             sessionTimeout: (uint)configuration.SessionTimeout.TotalMilliseconds,
-            engineFactory: ClassicSubscriptionEngineFactory.Instance,
+            transferSubscriptionsOnRecreate: true,
             ct: cancellationToken).ConfigureAwait(false);
 
-        session.TransferSubscriptionsOnReconnect = true;
-        session.DeleteSubscriptionsOnClose = false;
         session.MinPublishRequestCount = _configuration.MinPublishRequestCount;
         session.KeepAliveInterval = (int)_configuration.KeepAliveInterval.TotalMilliseconds;
         Volatile.Write(ref _connectionState, (int)ConnectionState.Connected);
@@ -317,7 +316,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     }
 
     public async Task CreateSubscriptionsAsync(
-        IReadOnlyList<MonitoredItem> monitoredItems,
+        IReadOnlyList<MonitoredItemRequest> monitoredItems,
         ISession session, CancellationToken cancellationToken)
     {
         await SubscriptionManager.CreateBatchedSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
@@ -427,9 +426,10 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             "OPC UA server session recreated ({PreviousSessionId} -> {SessionId}). Full state sync pending.",
             e.PreviousSessionId, e.SessionId);
 
-        // The managed session restores the subscriptions onto the new server session in place, where
-        // they number their messages from the start again. Notifications may have been missed while
-        // no server session existed, hence the full read.
+        // The subscription engine moves the subscriptions to the new server session by itself. A
+        // transferred one keeps its message numbers, but one created again after a failed transfer
+        // numbers them from the start again, hence the new ranking. Notifications may have been
+        // missed while no server session existed, hence the full read.
         SubscriptionManager.ResetNotificationRanking();
         ReadAfterWriteManager?.ClearPendingReads();
         Interlocked.Exchange(ref _needsFullStateSync, 1);
@@ -479,9 +479,6 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     {
         session.ConnectionStateChanged -= OnConnectionStateChanged;
         session.SessionGenerationChanged -= OnSessionGenerationChanged;
-
-        // Deleted with the session: nothing transfers them to a later session once this one closes.
-        session.DeleteSubscriptionsOnClose = true;
 
         try
         {

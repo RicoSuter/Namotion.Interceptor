@@ -93,7 +93,7 @@ public class OpcUaSubjectLoaderTests
 
         // Assert
         Assert.Single(result);
-        Assert.Equal("Temperature", ((RegisteredSubjectProperty)result[0].Handle!).Name);
+        Assert.Equal("Temperature", result[0].Property.Name);
     }
 
     [Fact]

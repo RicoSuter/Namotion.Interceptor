@@ -153,7 +153,6 @@ Beyond the settings shown above, the following properties are available on `OpcU
 | `SubscriptionPriority` | 0 | Subscription priority (0 = server default) |
 | `SubscriptionMaxNotificationsPerPublish` | 0 | Max notifications per publish (0 = server default) |
 | `MinPublishRequestCount` | 3 | Minimum outstanding publish requests |
-| `SubscriptionSequentialPublishing` | false | Order messages across properties, at a throughput cost ([Thread Safety](#thread-safety)) |
 
 **Polling Fallback:**
 
@@ -438,7 +437,7 @@ builder.Services.AddOpcUaSubjectClientSource(
 ```
 
 **Retry and escalation logic:**
-- Retries transient errors (for example `BadTooManyMonitoredItems`, `BadOutOfService`) for up to three consecutive health checks (roughly 15 seconds at the default interval), so a genuinely transient failure recovers on its own.
+- Retries transient errors (for example `BadTooManyMonitoredItems`, `BadOutOfService`): the SDK's subscription engine retries a failed item a few times by itself, and each health check requeues the items that are still failing, for up to three consecutive health checks (roughly 15 seconds at the default interval), so a genuinely transient failure recovers on its own.
 - If an item keeps failing past that bound and `EnablePollingFallback` is enabled (the default), it escalates to polling rather than retrying the subscription forever.
 - With polling disabled there is nothing better to escalate to, so the item keeps being retried and recovers on its own once the node returns; it is never dropped.
 - Nodes that do not support subscriptions (`BadNotSupported`, `BadMonitoredItemFilterUnsupported`) fall back to polling immediately when enabled.
@@ -507,7 +506,6 @@ For 24/7 production use, the default configuration provides robust resilience:
 | `SubscriptionHealthCheckInterval` | 5s | Interval for health checks and post-reconnection state sync |
 | `WriteRetryQueueSize` | 1000 | Updates buffered during disconnection |
 | `SessionDisposalTimeout` | 5s | Max wait for graceful session close |
-| `SubscriptionSequentialPublishing` | false | Order messages across properties, at a throughput cost (see Thread Safety) |
 
 Final outbound delivery on stop shares the internal five-second safety bound described in [Flushing On Stop](connectors.md#flushing-on-stop). It cannot be configured per connector.
 
@@ -701,7 +699,7 @@ if (source.CurrentSession is { } session)
 
 ### Reacting to session swaps with `CurrentSessionChanged`
 
-For consumers holding session-bound state (typically A&C subscriptions), `CurrentSessionChanged` fires whenever `CurrentSession` changes (including to/from `null`), that is when the source connects, stops or restarts its connection. It does not fire on a reconnect, because the managed session instance and the classic subscriptions registered on it survive one. Method-call consumers usually do not need it: they re-read `CurrentSession` per call and surface a stale session as a failure on the next call. The event is for consumers that have no such inbound traffic.
+For consumers holding session-bound state (typically A&C subscriptions), `CurrentSessionChanged` fires whenever `CurrentSession` changes (including to/from `null`), that is when the source connects, stops or restarts its connection. It does not fire on a reconnect, because the managed session instance and the subscriptions registered on it survive one. Method-call consumers usually do not need it: they re-read `CurrentSession` per call and surface a stale session as a failure on the next call. The event is for consumers that have no such inbound traffic.
 
 ```csharp
 opcUaSource.CurrentSessionChanged += (_, args) =>
@@ -747,9 +745,9 @@ The library ensures thread-safe operations across all OPC UA interactions. Prope
 Write queue operations use `Interlocked` operations for thread-safe counter updates and flush operations are protected by semaphores to prevent concurrent flush issues.
 
 **Update ordering:**
-The SDK can deliver a subscription's notification messages out of order, for example a delayed or republished one after newer ones. The client skips a value from a message older than the last one applied to the same property, ranked by the server-assigned sequence number (logged at `Debug`). Not ranked against notifications: values that are read (initial and post-reconnect reads, polling, read-after-write) and late messages of a subscription replaced on reconnect.
+The SDK's subscription engine hands a subscription's notification messages to the client one at a time. A message can still arrive late, for example a republished one after newer ones, so the client skips a value from a message older than the last one applied to the same property, ranked by the server-assigned sequence number (logged at `Debug`). Not ranked against notifications: values that are read (initial and post-reconnect reads, polling, read-after-write) and messages from before a subscription was created again on the server, which numbers its messages from the start again.
 
-`SubscriptionSequentialPublishing = true` additionally applies a subscription's messages in order across its properties, at a throughput cost. Neither orders notifications against local writes: a notification sent before the server received a local write can overwrite it or cause a transaction conflict.
+This does not order notifications against local writes: a notification sent before the server received a local write can overwrite it or cause a transaction conflict.
 
 To prevent feedback loops when external sources update properties, apply inbound values with the `SetValueFromSource()` extension method, which stamps the write with a `FromSource` origin (source marking is per write, not through an ambient scope):
 
@@ -804,11 +802,11 @@ OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
 |-------|------|
 | `OpcUaSubjectClientSource` | Orchestrator. Inherits `SubjectSourceBase` (which owns the pump skeleton: buffer, listen, load initial state, run change queue, retry on failure). Adds the OPC UA-specific health check loop, reconnection logic, and the `ISubjectSource` contract. |
 | `SessionManager` | Creates and disposes the SDK's `ManagedSession`, which owns reconnection, and maps its state transitions onto liveness, the reconnection counters and the full state sync. Owns `SubscriptionManager`, `PollingManager`, and `ReadAfterWriteManager`. |
-| `SubscriptionManager` | Creates and manages OPC UA subscriptions and monitored items. Routes incoming data change notifications. |
+| `SubscriptionManager` | Creates OPC UA subscriptions and monitored items on the SDK's subscription engine, one subscription per `MaxItemsPerSubscription` items, and is its notification handler. Sorts failed items into retry, polling fallback and removal. |
 | `OutboundWriter` | Writes property changes to the OPC UA server. Tracks outgoing throughput. |
 | `PollingManager` | Polling fallback for nodes that don't support subscriptions. Includes a circuit breaker. |
 | `ReadAfterWriteManager` | Schedules read-backs after writes for nodes where exception-based monitoring was revised to sampling. |
-| `SubscriptionHealthMonitor` | Retries failed monitored items that may succeed later (transient server errors). |
+| `SubscriptionHealthMonitor` | Requeues failed monitored items that may succeed later (transient server errors) once the subscription engine's own retries are used up. |
 | `OpcUaSubjectLoader` | Browses the OPC UA address space and maps nodes to C# properties. |
 | `OpcUaClientDiagnostics` | Read-only public facade, a `SourceDiagnostics` narrowed for this connector, that aggregates diagnostics from all internal components. |
 | `ReconnectionMetrics` | Thread-safe counters for reconnection tracking (attempts, successes, failures, abandoned). |

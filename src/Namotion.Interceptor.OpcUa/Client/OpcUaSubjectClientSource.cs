@@ -351,10 +351,10 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     /// Creates MonitoredItems from owned properties for recreating the subscriptions.
     /// This recreates SDK objects on demand instead of holding them in memory.
     /// </summary>
-    private IReadOnlyList<MonitoredItem> CreateMonitoredItemsForReconnection()
+    private IReadOnlyList<MonitoredItemRequest> CreateMonitoredItemsForReconnection()
     {
         var ownedProperties = GetOwnedPropertiesWithNodeIds();
-        var monitoredItems = new List<MonitoredItem>(ownedProperties.Count);
+        var monitoredItems = new List<MonitoredItemRequest>(ownedProperties.Count);
 
         foreach (var (property, nodeId) in ownedProperties)
         {
@@ -420,13 +420,20 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             return;
         }
 
-        await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(
-            sessionManager.Subscriptions,
-            sessionManager.SubscriptionManager.RegisterRecoveredItems,
-            cancellationToken).ConfigureAwait(false);
+        _subscriptionHealthMonitor.CheckAndHealSubscriptions(sessionManager.Subscriptions, cancellationToken);
 
-        await sessionManager.SubscriptionManager
-            .EscalatePersistentlyFailedItemsAsync(cancellationToken).ConfigureAwait(false);
+        // Under the structure lock, so an item whose subject is being detached is not escalated or
+        // registered after the detach removed it.
+        await _structureLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            subscriptionManager.EscalatePersistentlyFailedItems();
+            subscriptionManager.RegisterCreatedItemsWithReadAfterWriteManager();
+        }
+        finally
+        {
+            _structureLock.Release();
+        }
     }
 
     /// <summary>
@@ -451,24 +458,9 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         await _structureLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var staleSubscriptions = sessionManager.Subscriptions.ToList();
-            if (staleSubscriptions.Count > 0)
-            {
-                try
-                {
-                    await session.RemoveSubscriptionsAsync(staleSubscriptions, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    _logger.LogWarning(ex, "Failed to remove stopped OPC UA subscriptions before recreating them.");
-                }
-            }
-
+            // Also without items, so the stopped subscriptions are disposed.
             var monitoredItems = CreateMonitoredItemsForReconnection();
-            if (monitoredItems.Count > 0)
-            {
-                await sessionManager.CreateSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
-            }
+            await sessionManager.CreateSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
         }
         finally
         {

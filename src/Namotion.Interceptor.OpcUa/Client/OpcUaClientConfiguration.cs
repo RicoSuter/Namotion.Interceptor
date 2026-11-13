@@ -186,16 +186,6 @@ public class OpcUaClientConfiguration
     public uint SubscriptionMaxNotificationsPerPublish { get; set; } = 0;
 
     /// <summary>
-    /// Gets or sets whether to process subscription messages sequentially (in order).
-    /// When true, a subscription's messages are applied one at a time in sequence order, reducing throughput
-    /// but ordering updates across the properties of one subscription.
-    /// When false (default), messages are applied as they arrive; a value from a message older than the last
-    /// one applied to the same property is skipped either way.
-    /// Only enable this if your application requires updates of different properties to apply in order.
-    /// </summary>
-    public bool SubscriptionSequentialPublishing { get; set; } = false;
-
-    /// <summary>
     /// Gets or sets the minimum number of publish requests the client keeps outstanding at all times.
     /// Higher values improve reliability during traffic spikes and brief network issues by ensuring
     /// multiple requests are always in flight. The OPC Foundation's reference client uses 3.

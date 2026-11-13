@@ -13,14 +13,12 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Opc.Ua;
-using Opc.Ua.Client;
+using Opc.Ua.Client.Subscriptions;
+using Opc.Ua.Client.Subscriptions.MonitoredItems;
 
 namespace Namotion.Interceptor.Benchmark;
 
 #pragma warning disable CS8618
-
-// The classic Subscription API is obsolete in SDK 2.0 and is what the client's data change handler is still built on.
-#pragma warning disable CS0618
 
 /// <summary>
 /// The OPC UA client's work per data change notification and per outgoing write, without a session: the
@@ -34,15 +32,15 @@ public class OpcUaClientBenchmark
 
     private OpcUaSubjectClientSource _source;
     private SubscriptionManager _subscriptionManager;
-    private Subscription _subscription;
+    private ISubscription _subscription;
     private OpcUaValueConverter _valueConverter;
     private Exception? _reportedError;
 
     private DataChangeNotification[] _notifications;
+    private DataValueChange[][] _changes;
     private byte[][] _encodedNotifications;
     private object[][] _notificationValues;
     private ServiceMessageContext _messageContext;
-    private ArrayOf<string> _stringTable;
     private int _nextNotification;
     private uint _sequenceNumber;
 
@@ -90,7 +88,7 @@ public class OpcUaClientBenchmark
             _source, propertyWriter, pollingManager: null, readAfterWriteManager: null,
             configuration, error => _reportedError ??= error, NullLogger.Instance);
 
-        _subscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        _subscription = new BenchmarkSubscription();
 
         _properties = new RegisteredSubjectProperty[ItemCount];
         _nodeIds = new NodeId[ItemCount];
@@ -107,14 +105,10 @@ public class OpcUaClientBenchmark
             var property = nodes[i / ScalarKindCount].TryGetRegisteredSubject()!.TryGetProperty(propertyName)!;
             var nodeId = new NodeId($"Node{i / ScalarKindCount}.{propertyName}", 2);
 
-            var monitoredItem = new MonitoredItem(NullTelemetryContext.Instance)
-            {
-                StartNodeId = nodeId,
-                AttributeId = Opc.Ua.Attributes.Value,
-                Handle = property
-            };
-            _subscription.AddItem(monitoredItem);
-            _subscriptionManager.TrackMonitoredItem(monitoredItem);
+            var monitoredItem = new BenchmarkMonitoredItem((uint)(i + 1));
+            _subscriptionManager.TrackMonitoredItem(
+                monitoredItem,
+                new MonitoredItemRequest(property, new MonitoredItemOptions { StartNodeId = nodeId }));
 
             firstItems[i] = CreateItemNotification(monitoredItem.ClientHandle, firstValue, sourceTimestamp);
             secondItems[i] = CreateItemNotification(monitoredItem.ClientHandle, secondValue, sourceTimestamp);
@@ -128,9 +122,9 @@ public class OpcUaClientBenchmark
         }
 
         _notifications = [CreateNotification(firstItems), CreateNotification(secondItems)];
-        _messageContext = new ServiceMessageContext(NullTelemetryContext.Instance);
+        _changes = [CreateChanges(_notifications[0]), CreateChanges(_notifications[1])];
+        _messageContext = ServiceMessageContext.Create(NullTelemetryContext.Instance);
         _encodedNotifications = [Encode(_notifications[0]), Encode(_notifications[1])];
-        _stringTable = [];
 
         // A failed apply is only logged and reported, so without these checks the benchmark could measure
         // a path that stores nothing.
@@ -153,11 +147,10 @@ public class OpcUaClientBenchmark
     {
         // Two messages with different values take turns, because the equality check drops a value that
         // equals the current one before it reaches the rest of the write chain.
-        var notification = _notifications[_nextNotification];
+        var changes = _changes[_nextNotification];
         _nextNotification ^= 1;
-        notification.SequenceNumber = ++_sequenceNumber;
 
-        _subscriptionManager.OnFastDataChange(_subscription, notification, _stringTable);
+        _subscriptionManager.OnDataChange(_subscription, ++_sequenceNumber, changes);
     }
 
     /// <summary>
@@ -172,9 +165,8 @@ public class OpcUaClientBenchmark
 
         using var decoder = new BinaryDecoder(encodedNotification, _messageContext);
         var notification = decoder.ReadEncodeable<DataChangeNotification>(null);
-        notification.SequenceNumber = ++_sequenceNumber;
 
-        _subscriptionManager.OnFastDataChange(_subscription, notification, _stringTable);
+        _subscriptionManager.OnDataChange(_subscription, ++_sequenceNumber, CreateChanges(notification));
     }
 
     /// <summary>
@@ -208,7 +200,6 @@ public class OpcUaClientBenchmark
     public async Task Cleanup()
     {
         await _subscriptionManager.DisposeAsync();
-        _subscription.Dispose();
         await _source.DisposeAsync();
 
         ThrowIfErrorWasReported();
@@ -290,12 +281,76 @@ public class OpcUaClientBenchmark
         };
     }
 
+    /// <summary>
+    /// Projects a notification message into the per-item changes the subscription engine hands to its
+    /// notification handler, one array per message.
+    /// </summary>
+    private static DataValueChange[] CreateChanges(DataChangeNotification notification)
+    {
+        var items = notification.MonitoredItems;
+        var changes = new DataValueChange[items.Count];
+        for (var i = 0; i < changes.Length; i++)
+        {
+            var item = items[i];
+            changes[i] = new DataValueChange(null, item.Value, null) { ClientHandle = item.ClientHandle };
+        }
+
+        return changes;
+    }
+
     private byte[] Encode(DataChangeNotification notification)
     {
         using var encoder = new BinaryEncoder(_messageContext);
         encoder.WriteEncodeable(null, notification);
         return encoder.CloseAndReturnBuffer() ?? throw new InvalidOperationException("The encoder returned no buffer.");
     }
+}
+
+/// <summary>
+/// Identifies the subscription for the data change handler, which only uses it as a key.
+/// </summary>
+internal sealed class BenchmarkSubscription : ISubscription
+{
+    public bool Created => true;
+    public TimeSpan CurrentPublishingInterval => TimeSpan.Zero;
+    public byte CurrentPriority => 0;
+    public uint CurrentLifetimeCount => 0;
+    public uint CurrentKeepAliveCount => 0;
+    public bool CurrentPublishingEnabled => true;
+    public uint CurrentMaxNotificationsPerPublish => 0;
+    public IMonitoredItemCollection MonitoredItems => throw new NotSupportedException();
+    public long MissingMessageCount => 0;
+    public long RepublishMessageCount => 0;
+    public ValueTask ConditionRefreshAsync(CancellationToken ct = default) => throw new NotSupportedException();
+    public ValueTask RecreateAsync(CancellationToken ct = default) => throw new NotSupportedException();
+    public ValueTask<TimeSpan> SetAsDurableAsync(TimeSpan lifetime, CancellationToken ct = default) => throw new NotSupportedException();
+    public ValueTask<TimeSpan> SetAsDurableAsync(Func<TimeSpan?> lifetime, CancellationToken ct = default) => throw new NotSupportedException();
+    public ValueTask<SetTriggeringResult> SetTriggeringAsync(
+        IMonitoredItem triggeringItem,
+        IReadOnlyCollection<IMonitoredItem>? linksToAdd = null,
+        IReadOnlyCollection<IMonitoredItem>? linksToRemove = null,
+        CancellationToken ct = default) => throw new NotSupportedException();
+    public ValueTask DisposeAsync() => default;
+}
+
+/// <summary>
+/// Carries the client handle the data change handler tracks a property under.
+/// </summary>
+internal sealed class BenchmarkMonitoredItem(uint clientHandle) : IMonitoredItem
+{
+    public string Name => string.Empty;
+    public uint Order => 0;
+    public uint ServerId => 0;
+    public bool Created => true;
+    public ServiceResult Error => ServiceResult.Good;
+    public MonitoringFilterResult? FilterResult => null;
+    public MonitoringMode CurrentMonitoringMode => MonitoringMode.Reporting;
+    public TimeSpan CurrentSamplingInterval => TimeSpan.Zero;
+    public uint CurrentQueueSize => 0;
+    public uint ClientHandle { get; } = clientHandle;
+    public IEnumerable<IMonitoredItem> TriggeringItems => [];
+    public IEnumerable<IMonitoredItem> TriggeredItems => [];
+    public ValueTask ConditionRefreshAsync(CancellationToken ct = default) => throw new NotSupportedException();
 }
 
 [InterceptorSubject]
