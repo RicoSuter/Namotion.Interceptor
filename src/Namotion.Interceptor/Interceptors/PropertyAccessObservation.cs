@@ -108,7 +108,12 @@ public static class PropertyAccessObservation
     /// </summary>
     public static void SetWriteObserver(IPropertyWriteObserver observer)
     {
-        Interlocked.CompareExchange(ref _writeObserver, observer, null);
+        if (Interlocked.CompareExchange(ref _writeObserver, observer, null) is null)
+        {
+            // Pairs with the read again of a write without a context, see "Observer installation" in
+            // docs/design/tracking-derived-properties.md.
+            Interlocked.MemoryBarrierProcessWide();
+        }
     }
 
     internal static int EnterWrite() => ++_writeDepth;
