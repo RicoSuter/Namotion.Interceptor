@@ -59,9 +59,11 @@ internal static class PostLockQueue
 
     /// <summary>
     /// A queued recalculation request. A <see cref="RawTimestamp"/> of 0 takes the anchor's timestamp at the drain;
-    /// otherwise it is a timestamp handed over with the request, and the newer of the two wins.
+    /// otherwise it is a timestamp handed over with the request, and the newer of the two wins. The
+    /// <see cref="AttachCount"/> of the property when it was queued drops the request at the drain when the property
+    /// was attached again since: that attach evaluated after the request's cause.
     /// </summary>
-    internal readonly record struct QueuedRequest(PropertyReference Property, long RawTimestamp);
+    internal readonly record struct QueuedRequest(PropertyReference Property, long RawTimestamp, long AttachCount);
 
     /// <summary>Whether the thread holds a lifecycle lock.</summary>
     internal static bool IsLockHeld
@@ -194,19 +196,34 @@ internal static class PostLockQueue
         deliveries[slot] = delivery;
     }
 
-    /// <summary>Adds a request to a segment; a property already queued in it keeps one entry with the newer timestamp.</summary>
+    /// <summary>
+    /// Adds a request to a segment; a property already queued in it keeps one entry with the newer timestamp and the
+    /// newer attach count.
+    /// </summary>
     internal static void AddRequest(Segment segment, PropertyReference property, long rawTimestamp)
     {
+        var attachCount = property.TryGetDerivedPropertyData() is { } data ? Volatile.Read(ref data.AttachCount) : 0;
+        Add(segment, new QueuedRequest(property, rawTimestamp, attachCount));
+    }
+
+    private static void Add(Segment segment, QueuedRequest request)
+    {
         var requests = segment.Requests;
+        var property = request.Property;
         var index = IndexOf(segment, property);
         if (index >= 0)
         {
-            requests[index] = requests[index] with { RawTimestamp = Newest(requests[index].RawTimestamp, rawTimestamp) };
+            var queued = requests[index];
+            requests[index] = queued with
+            {
+                RawTimestamp = Newest(queued.RawTimestamp, request.RawTimestamp),
+                AttachCount = Math.Max(queued.AttachCount, request.AttachCount)
+            };
             return;
         }
 
         segment.RequestIndex?.Add(property, requests.Count);
-        requests.Add(new QueuedRequest(property, rawTimestamp));
+        requests.Add(request);
         if (segment.RequestIndex is null && requests.Count > LinearSearchLimit)
         {
             var requestIndex = new Dictionary<PropertyReference, int>(requests.Count * 2, PropertyReference.Comparer);
@@ -278,7 +295,7 @@ internal static class PostLockQueue
         target.Deliveries.AddRange(segment.Deliveries);
         foreach (var request in segment.Requests)
         {
-            AddRequest(target, request.Property, request.RawTimestamp);
+            Add(target, request);
         }
 
         Return(segment);
@@ -356,8 +373,9 @@ internal static class PostLockQueue
         {
             try
             {
-                DerivedPropertyOwnership.RequestRecalculation(
-                    requests[i].Property, Newest(requests[i].RawTimestamp, anchorTimestamp));
+                var request = requests[i];
+                DerivedPropertyOwnership.RunQueuedRequest(
+                    request.Property, Newest(request.RawTimestamp, anchorTimestamp), request.AttachCount);
             }
             catch (Exception exception)
             {
