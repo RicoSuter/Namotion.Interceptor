@@ -6,12 +6,13 @@
 
 @if (_draft is { } draft)
 {
-    <MudStack Spacing="3" data-testid="virtual-editor">
-        <MudTextField T="string" Label="Title" Variant="Variant.Outlined" Value="@draft.Title" Immediate="true"
+    <div class="virtual-editor">
+    <MudStack Spacing="3" Class="virtual-stack" data-testid="virtual-editor">
+        <MudTextField T="string" Label="Title" Variant="Variant.Outlined" Value="@draft.Title" Immediate="true" Class="virtual-title"
                       ValueChanged="@((string? title) => Edit(() => draft.Title = title))" data-testid="virtual-title" />
-        <MudGrid Spacing="3">
-            <MudItem xs="12" md="5">
-                <MudStack Spacing="1">
+        <MudGrid Spacing="3" Class="virtual-grid">
+            <MudItem xs="12" md="5" Class="virtual-tree-column">
+                <MudStack Spacing="1" Class="virtual-tree-stack">
                     <MudStack Row="true" AlignItems="AlignItems.Center">
                         <MudText Typo="Typo.subtitle2" Class="flex-grow-1">Properties</MudText>
                         <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
@@ -19,6 +20,7 @@
                         <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
                                    OnClick="@(() => Add(draft.AddSubject(_selected)))" data-testid="virtual-add-subject">Subject</MudButton>
                     </MudStack>
+                    <div class="virtual-tree-scroll">
                     <MudPaper Outlined="true" Class="pa-1" Style="min-height: 320px">
                         @if (draft.Properties.Count == 0)
                         {
@@ -40,7 +42,7 @@
                     </MudPaper>
                     @if (_issues.Length > 0)
                     {
-                        <MudAlert Severity="Severity.Error" Dense="true" data-testid="virtual-errors">
+                        <MudAlert Severity="Severity.Error" Dense="true" Class="mt-1" data-testid="virtual-errors">
                             <MudText Typo="Typo.body2">Fix these before saving:</MudText>
                             @foreach (var issue in _issues)
                             {
@@ -48,9 +50,10 @@
                             }
                         </MudAlert>
                     }
+                    </div>
                 </MudStack>
             </MudItem>
-            <MudItem xs="12" md="7">
+            <MudItem xs="12" md="7" Class="virtual-detail-column">
                 @if (_selected is not { } selected)
                 {
                     <MudText Typo="Typo.body2" Class="pa-6" Align="Align.Center">Select an entry to edit it.</MudText>
@@ -180,6 +183,7 @@
             </MudItem>
         </MudGrid>
     </MudStack>
+    </div>
 }
 
 @code {
