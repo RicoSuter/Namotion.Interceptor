@@ -2,11 +2,14 @@ using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Server;
 using Opc.Ua;
+using Opc.Ua.Security.Certificates;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
 public class OpcUaClientSecurityConfigurationTests
 {
+    private static readonly Uri ServerUri = new("opc.tcp://localhost:4840");
+
     [Fact]
     public void WhenTheServerConfigurationIsCreated_ThenItKeepsItsCertificateStore()
     {
@@ -131,24 +134,22 @@ public class OpcUaClientSecurityConfigurationTests
     }
 
     [Fact]
-    public async Task WhenSecurityIsRequiredAndOnlyUnsecuredEndpointsExist_ThenSelectionFails()
+    public void WhenSecurityIsRequiredAndOnlyUnsecuredEndpointsExist_ThenSelectionFails()
     {
         // Arrange
-        var application = await ClientSourceTestFactory.CreateConfiguration().CreateApplicationInstanceAsync();
         var endpoints = new EndpointDescriptionCollection { CreateEndpoint(MessageSecurityMode.None, SecurityPolicies.None) };
 
         // Act & Assert
         var error = Assert.Throws<InvalidOperationException>(() => SessionManager.SelectEndpoint(
-            application.ApplicationConfiguration, new Uri("opc.tcp://localhost:4840"), endpoints,
-            requireSecurity: true, NullTelemetryContext.Instance));
-        Assert.Contains("RequireSecurity", error.Message);
+            CreateApplicationConfiguration(), ServerUri, endpoints, requireSecurity: true, NullTelemetryContext.Instance));
+        Assert.Contains("offers no signed or encrypted endpoint", error.Message);
+        Assert.Contains(nameof(OpcUaClientConfiguration.RequireSecurity), error.Message);
     }
 
     [Fact]
-    public async Task WhenSecurityIsRequiredAndASecuredEndpointExists_ThenItIsSelected()
+    public void WhenSecurityIsRequiredAndASecuredEndpointExists_ThenItIsSelected()
     {
         // Arrange
-        var application = await ClientSourceTestFactory.CreateConfiguration().CreateApplicationInstanceAsync();
         var endpoints = new EndpointDescriptionCollection
         {
             CreateEndpoint(MessageSecurityMode.None, SecurityPolicies.None),
@@ -157,32 +158,219 @@ public class OpcUaClientSecurityConfigurationTests
 
         // Act
         var endpoint = SessionManager.SelectEndpoint(
-            application.ApplicationConfiguration, new Uri("opc.tcp://localhost:4840"), endpoints,
-            requireSecurity: true, NullTelemetryContext.Instance);
+            CreateApplicationConfiguration(), ServerUri, endpoints, requireSecurity: true, NullTelemetryContext.Instance);
 
         // Assert
         Assert.Equal(MessageSecurityMode.SignAndEncrypt, endpoint.SecurityMode);
     }
 
     [Fact]
-    public async Task WhenSecurityIsOptionalAndOnlySecuredEndpointsExist_ThenASecuredOneIsSelected()
+    public void WhenSecurityIsRequiredAndSecuredEndpointsUseOnlyUnsupportedPolicies_ThenSelectionFails()
     {
         // Arrange
-        var application = await ClientSourceTestFactory.CreateConfiguration().CreateApplicationInstanceAsync();
+        var endpoints = new EndpointDescriptionCollection
+        {
+            CreateEndpoint(MessageSecurityMode.None, SecurityPolicies.None),
+            CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.ECC_nistP256)
+        };
+
+        // Act & Assert
+        var error = Assert.Throws<InvalidOperationException>(() => SessionManager.SelectEndpoint(
+            CreateApplicationConfiguration(), ServerUri, endpoints, requireSecurity: true, NullTelemetryContext.Instance));
+        Assert.Contains("security policies this client does not support", error.Message);
+        Assert.Contains(SecurityPolicies.ECC_nistP256, error.Message);
+        Assert.Contains(SecurityPolicies.Basic256Sha256, error.Message);
+    }
+
+    [Fact]
+    public void WhenSecurityIsOptionalAndAnUnsecuredEndpointExists_ThenItIsPreferred()
+    {
+        // Arrange
+        var endpoints = new EndpointDescriptionCollection
+        {
+            CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256),
+            CreateEndpoint(MessageSecurityMode.None, SecurityPolicies.None)
+        };
+
+        // Act
+        var endpoint = SessionManager.SelectEndpoint(
+            CreateApplicationConfiguration(), ServerUri, endpoints, requireSecurity: false, NullTelemetryContext.Instance);
+
+        // Assert
+        Assert.Equal(MessageSecurityMode.None, endpoint.SecurityMode);
+    }
+
+    [Fact]
+    public void WhenSecurityIsOptionalAndOnlySecuredEndpointsExist_ThenASecuredOneIsSelected()
+    {
+        // Arrange
         var endpoints = new EndpointDescriptionCollection { CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256) };
 
         // Act
         var endpoint = SessionManager.SelectEndpoint(
-            application.ApplicationConfiguration, new Uri("opc.tcp://localhost:4840"), endpoints,
-            requireSecurity: false, NullTelemetryContext.Instance);
+            CreateApplicationConfiguration(), ServerUri, endpoints, requireSecurity: false, NullTelemetryContext.Instance);
 
         // Assert
         Assert.Equal(MessageSecurityMode.SignAndEncrypt, endpoint.SecurityMode);
     }
 
-    private static EndpointDescription CreateEndpoint(MessageSecurityMode securityMode, string securityPolicyUri) => new()
+    [Fact]
+    public void WhenSecurityIsOptionalAndTheFirstSecuredEndpointHasAnUnsupportedPolicy_ThenASupportedOneIsSelected()
     {
-        EndpointUrl = "opc.tcp://localhost:4840",
+        // Arrange
+        var endpoints = new EndpointDescriptionCollection
+        {
+            CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.ECC_nistP256),
+            CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256)
+        };
+
+        // Act
+        var endpoint = SessionManager.SelectEndpoint(
+            CreateApplicationConfiguration(), ServerUri, endpoints, requireSecurity: false, NullTelemetryContext.Instance);
+
+        // Assert
+        Assert.Equal(SecurityPolicies.Basic256Sha256, endpoint.SecurityPolicyUri);
+    }
+
+    [Fact]
+    public void WhenSecurityIsOptionalAndSecuredEndpointsUseOnlyUnsupportedPolicies_ThenSelectionFails()
+    {
+        // Arrange
+        var endpoints = new EndpointDescriptionCollection { CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.ECC_nistP256) };
+
+        // Act & Assert
+        var error = Assert.Throws<InvalidOperationException>(() => SessionManager.SelectEndpoint(
+            CreateApplicationConfiguration(), ServerUri, endpoints, requireSecurity: false, NullTelemetryContext.Instance));
+        Assert.Contains(SecurityPolicies.ECC_nistP256, error.Message);
+        Assert.Contains(SecurityPolicies.Basic256Sha256, error.Message);
+    }
+
+    [Fact]
+    public void WhenNoEndpointMatchesTheScheme_ThenSelectionFails()
+    {
+        // Arrange
+        var endpoints = new EndpointDescriptionCollection
+        {
+            CreateEndpoint(MessageSecurityMode.None, SecurityPolicies.None, "https://localhost:4843")
+        };
+
+        // Act & Assert
+        var error = Assert.Throws<InvalidOperationException>(() => SessionManager.SelectEndpoint(
+            CreateApplicationConfiguration(), ServerUri, endpoints, requireSecurity: false, NullTelemetryContext.Instance));
+        Assert.Contains("'opc.tcp' scheme", error.Message);
+    }
+
+    [Fact]
+    public void WhenTheServerCertificateIsUntrusted_ThenTheMessageNamesTheRejectedAndTrustedFoldersAndAutoAccept()
+    {
+        // Arrange
+        using var serverCertificate = CertificateBuilder.Create("CN=Server").CreateForRSA();
+        var endpoint = CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256);
+        endpoint.ServerCertificate = serverCertificate.RawData;
+        var innerException = new ServiceResultException(StatusCodes.BadCertificateUntrusted);
+
+        // Act
+        var error = SessionManager.CreateServerCertificateRejectionException(
+            innerException, endpoint, CreateApplicationConfiguration(), NullTelemetryContext.Instance);
+
+        // Assert
+        Assert.Same(innerException, error.InnerException);
+        Assert.Contains(serverCertificate.Thumbprint, error.Message);
+        Assert.Contains(Path.Combine("store/rejected", "certs"), error.Message);
+        Assert.Contains(Path.Combine("store/trusted", "certs"), error.Message);
+        Assert.Contains(nameof(OpcUaClientConfiguration.AutoAcceptUntrustedCertificates), error.Message);
+    }
+
+    [Fact]
+    public void WhenTheServerCertificateChainIsIncomplete_ThenTheMessageNamesTheIssuerFolderWithoutAutoAccept()
+    {
+        // Arrange
+        using var serverCertificate = CertificateBuilder.Create("CN=Server").CreateForRSA();
+        var endpoint = CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256);
+        endpoint.ServerCertificate = serverCertificate.RawData;
+
+        // Act
+        var error = SessionManager.CreateServerCertificateRejectionException(
+            new ServiceResultException(StatusCodes.BadCertificateChainIncomplete), endpoint,
+            CreateApplicationConfiguration(), NullTelemetryContext.Instance);
+
+        // Assert
+        Assert.Contains(serverCertificate.Thumbprint, error.Message);
+        Assert.Contains(Path.Combine("store/issuer", "certs"), error.Message);
+        Assert.Contains(Path.Combine("store/trusted", "certs"), error.Message);
+        Assert.Contains(Path.Combine("store/rejected", "certs"), error.Message);
+        Assert.DoesNotContain(nameof(OpcUaClientConfiguration.AutoAcceptUntrustedCertificates), error.Message);
+    }
+
+    [Fact]
+    public void WhenTheEndpointHasNoServerCertificate_ThenTheThumbprintIsUnknown()
+    {
+        // Arrange
+        var endpoint = CreateEndpoint(MessageSecurityMode.None, SecurityPolicies.None);
+
+        // Act
+        var error = SessionManager.CreateServerCertificateRejectionException(
+            new ServiceResultException(StatusCodes.BadCertificateUntrusted), endpoint,
+            CreateApplicationConfiguration(), NullTelemetryContext.Instance);
+
+        // Assert
+        Assert.Contains("(unknown)", error.Message);
+    }
+
+    [Fact]
+    public void WhenTheClientHasACertificate_ThenTheRejectionMessageNamesItsThumbprint()
+    {
+        // Arrange
+        using var clientCertificate = CertificateBuilder.Create("CN=Client").CreateForRSA();
+        var applicationConfiguration = CreateApplicationConfiguration();
+        applicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate = clientCertificate;
+
+        // Act
+        var error = SessionManager.CreateServerCertificateRejectionException(
+            new ServiceResultException(StatusCodes.BadCertificateUntrusted),
+            CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256),
+            applicationConfiguration, NullTelemetryContext.Instance);
+
+        // Assert
+        Assert.Contains($"this client's certificate {clientCertificate.Thumbprint}", error.Message);
+    }
+
+    [Fact]
+    public void WhenTheRejectedStoreIsNotADirectory_ThenItsPathIsNamedWithoutTheCertsFolder()
+    {
+        // Arrange
+        var applicationConfiguration = CreateApplicationConfiguration();
+        applicationConfiguration.SecurityConfiguration.RejectedCertificateStore = new CertificateTrustList
+        {
+            StoreType = CertificateStoreType.X509Store,
+            StorePath = "CurrentUser\\Rejected"
+        };
+
+        // Act
+        var error = SessionManager.CreateServerCertificateRejectionException(
+            new ServiceResultException(StatusCodes.BadCertificateUntrusted),
+            CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256),
+            applicationConfiguration, NullTelemetryContext.Instance);
+
+        // Assert
+        Assert.Contains("'CurrentUser\\Rejected'", error.Message);
+    }
+
+    private static ApplicationConfiguration CreateApplicationConfiguration() => new()
+    {
+        SecurityConfiguration = new SecurityConfiguration
+        {
+            ApplicationCertificate = new CertificateIdentifier { StoreType = CertificateStoreType.Directory, StorePath = "store/own" },
+            TrustedPeerCertificates = new CertificateTrustList { StoreType = CertificateStoreType.Directory, StorePath = "store/trusted" },
+            TrustedIssuerCertificates = new CertificateTrustList { StoreType = CertificateStoreType.Directory, StorePath = "store/issuer" },
+            RejectedCertificateStore = new CertificateTrustList { StoreType = CertificateStoreType.Directory, StorePath = "store/rejected" }
+        }
+    };
+
+    private static EndpointDescription CreateEndpoint(
+        MessageSecurityMode securityMode, string securityPolicyUri, string endpointUrl = "opc.tcp://localhost:4840") => new()
+    {
+        EndpointUrl = endpointUrl,
         SecurityMode = securityMode,
         SecurityPolicyUri = securityPolicyUri,
         TransportProfileUri = Profiles.UaTcpTransport

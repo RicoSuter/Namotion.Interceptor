@@ -307,17 +307,11 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 preferredLocales: null,
                 cancellationToken).ConfigureAwait(false);
         }
-        catch (ServiceResultException error) when (IsServerCertificateRejection(error.StatusCode))
+        catch (ServiceResultException error) when (
+            error.StatusCode is StatusCodes.BadCertificateUntrusted or StatusCodes.BadCertificateChainIncomplete)
         {
-            throw new InvalidOperationException(
-                $"The OPC UA server certificate {GetThumbprint(endpointDescription, configuration.ResolvedTelemetryContext)} is not trusted. " +
-                $"Move it from '{Path.Combine(configuration.CertificateStoreBasePath, "rejected", "certs")}' to " +
-                $"'{Path.Combine(configuration.CertificateStoreBasePath, "trusted", "certs")}'. For a certificate issued by a " +
-                $"certificate authority, add the authority's certificate to " +
-                $"'{Path.Combine(configuration.CertificateStoreBasePath, "issuer", "certs")}' and " +
-                $"'{Path.Combine(configuration.CertificateStoreBasePath, "trusted", "certs")}'. Or set " +
-                $"{nameof(OpcUaClientConfiguration.AutoAcceptUntrustedCertificates)} = true to accept any server certificate.",
-                error);
+            throw CreateServerCertificateRejectionException(
+                error, endpointDescription, application.ApplicationConfiguration, configuration.ResolvedTelemetryContext);
         }
 
         var newSession = sessionResult as Session
@@ -695,9 +689,10 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// <summary>
     /// Selects the endpoint to connect to. With <paramref name="requireSecurity"/> only a signed or encrypted
     /// endpoint is accepted; otherwise an unsecured one is preferred and a secured one used when it is all the
-    /// server offers.
+    /// server offers. A secured endpoint is only selected with a security policy the client supports.
     /// </summary>
-    /// <exception cref="InvalidOperationException">No endpoint matches the scheme, or security is required and no secured endpoint exists.</exception>
+    /// <exception cref="InvalidOperationException">No endpoint matches the scheme, security is required and no
+    /// secured endpoint exists, or the secured endpoints use only security policies the client does not support.</exception>
     internal static EndpointDescription SelectEndpoint(
         ApplicationConfiguration applicationConfiguration,
         Uri serverUri,
@@ -709,15 +704,71 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             ?? throw new InvalidOperationException(
                 $"The OPC UA server at '{serverUri}' offers no endpoint for the '{serverUri.Scheme}' scheme.");
 
-        // The SDK falls back to any endpoint when none matches the requested security.
-        if (requireSecurity && endpoint.SecurityMode == MessageSecurityMode.None)
+        // When nothing matches the requested security, the SDK falls back to the first endpoint of the scheme,
+        // whatever its mode and policy. Without an unsecured endpoint, select among the secured ones by the
+        // client's supported policies instead.
+        if (!requireSecurity && endpoint.SecurityMode != MessageSecurityMode.None)
+        {
+            var securedEndpoint = CoreClientUtils.SelectEndpoint(applicationConfiguration, serverUri, endpoints, true, telemetryContext);
+            if (securedEndpoint is not null && securedEndpoint.SecurityMode != MessageSecurityMode.None)
+            {
+                endpoint = securedEndpoint;
+            }
+        }
+
+        var supportedPolicies = applicationConfiguration.SecurityConfiguration.SupportedSecurityPolicies;
+        if (endpoint.SecurityMode == MessageSecurityMode.None)
+        {
+            if (requireSecurity)
+            {
+                var offeredPolicies = GetOfferedSecurityPolicies(serverUri, endpoints);
+                throw new InvalidOperationException(offeredPolicies.Length == 0
+                    ? $"The OPC UA server at '{serverUri}' offers no signed or encrypted endpoint, and " +
+                      $"{nameof(OpcUaClientConfiguration.RequireSecurity)} is set."
+                    : CreateUnsupportedPoliciesMessage(serverUri, offeredPolicies, supportedPolicies) +
+                      $" {nameof(OpcUaClientConfiguration.RequireSecurity)} is set, so no unsecured endpoint is used.");
+            }
+        }
+        else if (!supportedPolicies.Contains(endpoint.SecurityPolicyUri))
         {
             throw new InvalidOperationException(
-                $"The OPC UA server at '{serverUri}' offers no signed or encrypted endpoint, and " +
-                $"{nameof(OpcUaClientConfiguration.RequireSecurity)} is set.");
+                CreateUnsupportedPoliciesMessage(serverUri, GetOfferedSecurityPolicies(serverUri, endpoints), supportedPolicies));
         }
 
         return endpoint;
+    }
+
+    /// <summary>
+    /// Creates the exception thrown when the client rejected the server certificate with
+    /// <see cref="StatusCodes.BadCertificateUntrusted"/> or <see cref="StatusCodes.BadCertificateChainIncomplete"/>.
+    /// </summary>
+    internal static InvalidOperationException CreateServerCertificateRejectionException(
+        ServiceResultException error,
+        EndpointDescription endpoint,
+        ApplicationConfiguration applicationConfiguration,
+        ITelemetryContext telemetryContext)
+    {
+        var security = applicationConfiguration.SecurityConfiguration;
+        var thumbprint = GetThumbprint(endpoint, telemetryContext);
+        var rejectedFolder = GetCertificateFolder(security.RejectedCertificateStore?.StoreType, security.RejectedCertificateStore?.StorePath);
+        var trustedFolder = GetCertificateFolder(security.TrustedPeerCertificates?.StoreType, security.TrustedPeerCertificates?.StorePath);
+
+        // Auto-accept only covers an untrusted certificate, never an incomplete chain.
+        var cause = error.StatusCode == StatusCodes.BadCertificateChainIncomplete
+            ? $"The OPC UA server certificate {thumbprint} is not trusted because its issuer chain is incomplete. " +
+              $"Add the certificates of the authorities that issued it to " +
+              $"'{GetCertificateFolder(security.TrustedIssuerCertificates?.StoreType, security.TrustedIssuerCertificates?.StorePath)}' " +
+              $"and the root authority's certificate to '{trustedFolder}'; the server's certificate chain is written to '{rejectedFolder}'."
+            : $"The OPC UA server certificate {thumbprint} is not trusted. Move it from '{rejectedFolder}' to '{trustedFolder}', " +
+              $"or set {nameof(OpcUaClientConfiguration.AutoAcceptUntrustedCertificates)} = true to accept any server certificate.";
+
+        // A server may report the same codes when it rejected the client certificate, so name that case too.
+        var clientCertificate = security.ApplicationCertificate?.Certificate;
+        var clientHint = clientCertificate is null
+            ? " If this server certificate is already trusted, the server may instead have rejected this client's certificate; trust it on the server."
+            : $" If this server certificate is already trusted, the server may instead have rejected this client's certificate {clientCertificate.Thumbprint}; trust it on the server.";
+
+        return new InvalidOperationException(cause + clientHint, error);
     }
 
     private async Task LoadApplicationCertificateAsync(
@@ -729,23 +780,41 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         {
             await _certificateLoader.EnsureLoadedAsync(application, configuration, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception error) when (error is not OperationCanceledException)
+        // The SDK can report a cancellation as another exception type, so the token is checked too.
+        catch (Exception error) when (error is not OperationCanceledException && !cancellationToken.IsCancellationRequested)
         {
             var applicationConfiguration = application.ApplicationConfiguration;
             var identifier = applicationConfiguration.SecurityConfiguration.ApplicationCertificate;
             throw new InvalidOperationException(
                 $"Failed to load the OPC UA client application certificate from " +
-                $"'{Path.Combine(identifier.StorePath ?? string.Empty, "certs")}'. A provisioned certificate needs the " +
-                $"subject '{identifier.SubjectName}' and the application URI " +
-                $"'{applicationConfiguration.ApplicationUri}'; set {nameof(OpcUaClientConfiguration.ApplicationUri)} to match it, or set " +
-                $"{nameof(OpcUaClientConfiguration.AutoCreateApplicationCertificate)} = true to create one.",
+                $"'{GetCertificateFolder(identifier?.StoreType, identifier?.StorePath)}'. A provisioned certificate needs the " +
+                $"subject '{identifier?.SubjectName}' and the application URI '{applicationConfiguration.ApplicationUri}'; " +
+                $"set {nameof(OpcUaClientConfiguration.ApplicationUri)} to match it" +
+                (configuration.AutoCreateApplicationCertificate
+                    ? "."
+                    : $", or set {nameof(OpcUaClientConfiguration.AutoCreateApplicationCertificate)} = true to create one."),
                 error);
         }
     }
 
-    private static bool IsServerCertificateRejection(StatusCode statusCode) =>
-        statusCode == StatusCodes.BadCertificateUntrusted ||
-        statusCode == StatusCodes.BadCertificateChainIncomplete;
+    private static string[] GetOfferedSecurityPolicies(Uri serverUri, EndpointDescriptionCollection endpoints) => endpoints
+        .Where(endpoint =>
+            endpoint.SecurityMode != MessageSecurityMode.None &&
+            endpoint.EndpointUrl?.StartsWith(serverUri.Scheme, StringComparison.Ordinal) == true)
+        .Select(endpoint => endpoint.SecurityPolicyUri)
+        .Distinct(StringComparer.Ordinal)
+        .ToArray();
+
+    private static string CreateUnsupportedPoliciesMessage(Uri serverUri, string[] offeredPolicies, StringCollection supportedPolicies) =>
+        $"The signed or encrypted endpoints of the OPC UA server at '{serverUri}' use only security policies this client " +
+        $"does not support. The server offers {string.Join(", ", offeredPolicies)}; the client supports " +
+        $"{string.Join(", ", supportedPolicies.Where(policy => policy != SecurityPolicies.None))}.";
+
+    // A directory store keeps its certificates in a certs subfolder; other store types are named by their path.
+    private static string GetCertificateFolder(string? storeType, string? storePath) =>
+        storeType == CertificateStoreType.Directory
+            ? Path.Combine(storePath ?? string.Empty, "certs")
+            : storePath ?? string.Empty;
 
     // Called while wrapping a rejection, so it must not throw and hide that error.
     private static string GetThumbprint(EndpointDescription endpoint, ITelemetryContext telemetryContext)
