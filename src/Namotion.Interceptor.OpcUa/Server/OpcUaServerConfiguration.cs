@@ -45,10 +45,11 @@ public class OpcUaServerConfiguration
     public IPropertyMapper<OpcUaPropertyMapping> Mapper { get; set; } = DefaultMapper;
 
     /// <summary>
-    /// Gets or sets a value indicating whether to clean up old certificates from the
-    /// application certificate store on connect. Defaults to true.
+    /// Gets or sets whether the application certificate store is emptied on startup, which makes the server
+    /// create a new certificate on every start. Clients that trust the server then have to trust it again.
+    /// Default is false.
     /// </summary>
-    public bool CleanCertificateStore { get; set; } = true;
+    public bool CleanCertificateStore { get; set; }
 
     /// <summary>
     /// Gets or sets the time window to buffer incoming changes (default: 8ms).
