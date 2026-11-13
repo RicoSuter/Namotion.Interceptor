@@ -312,7 +312,7 @@ public class RegisteredSubjectProperty
     /// <param name="attributes">The .NET reflection attributes of the attribute.</param>
     /// <returns>The created attribute property.</returns>
     /// <remarks>
-    /// Getters that read each other get `default` for the inner read instead of recursing, and form a dependency cycle that tracking does not support yet (#971); avoid such cycles. See docs/registry.md, Add properties.
+    /// Getters that read each other get <c>default</c> for the inner read instead of recursing, and form a dependency cycle that tracking does not support yet (#971); avoid such cycles. See docs/registry.md, Add properties.
     /// </remarks>
     public RegisteredSubjectProperty AddDerivedAttribute(
         string name, Type type, 
