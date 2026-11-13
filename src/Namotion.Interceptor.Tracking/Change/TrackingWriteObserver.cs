@@ -19,16 +19,26 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
             return;
         }
 
-        // W2: the value landed before the data lookup, so an evaluation that creates the data later
-        // reads this value.
+        // W2: the value landed before the gate and the data are read, so an evaluation that creates the data
+        // later reads this value.
         Interlocked.MemoryBarrier();
         var property = write.Property;
-        var data = property.TryGetDerivedPropertyData();
-        if (data is null)
+
+        // The gate is raised before the first data of the subject's type is stored: not raised means no data.
+        if (!DerivedPropertyTypeGate.Of(property.Subject).IsRaised)
         {
             return;
         }
 
+        var data = property.TryGetDerivedPropertyData();
+        if (data is not null)
+        {
+            RequestRecalculations(write, property, data);
+        }
+    }
+
+    private static void RequestRecalculations(in PropertyWriteObservation write, PropertyReference property, DerivedPropertyData data)
+    {
         // W4, then W5: the used-by set is read after the version moved.
         var newVersion = Interlocked.Increment(ref data.Version);
         if (DerivedPropertyRecorder.IsEvaluatingOnThisThread)

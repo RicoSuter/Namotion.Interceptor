@@ -99,8 +99,9 @@ internal static class SubjectLifecycleAttachments
     internal static void DetachDerivedPropertiesIfDetached(IInterceptorSubject subject)
     {
         // Only a fast path: DerivedPropertyChangeHandler checks again under each property's lock, because
-        // another interceptor may attach the subject in between.
-        if (!IsAttached(subject))
+        // another interceptor may attach the subject in between. A type whose gate is not raised has no
+        // derived property data, so there is nothing to detach.
+        if (DerivedPropertyTypeGate.Of(subject).IsRaised && !IsAttached(subject))
         {
             DerivedPropertyChangeHandler.DetachDerivedProperties(subject);
         }

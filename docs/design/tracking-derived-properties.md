@@ -39,6 +39,7 @@ The design rests on three rules:
 | `DerivedPropertyRecorder` | Tracking | Thread-static recorder, installed as the thread's read observer while a getter is evaluated. Records each read property with its version, in nested frames. Uses `ArrayPool` to avoid allocations in steady state. |
 | `TrackingWriteObserver` | Tracking | The write observer: once per landed write, moves the written property's version and requests the recalculation of every derived property that read it. |
 | `DerivedPropertyData` | Tracking | Per-property state, created once and never removed or replaced. Stored in `Subject.Data` under key `"ni.dpd"`. |
+| `DerivedPropertyTypeGate` | Tracking | Per subject type, whether any `DerivedPropertyData` exists for a subject of the type. Raised before the first data of the type is stored, never lowered. Lets a write, and the detach of a subject, skip the data lookup for types nothing derived touches. |
 | `PropertyReferenceCollection` | Tracking | Collection for used-by properties with lock-free snapshot reads and writes under its own leaf lock. See [Used-by properties collection](#used-by-properties-collection). |
 | `SubjectLifecycleAttachments` | Tracking | Per subject, the lifecycle interceptors the subject is attached to, so a derived property stays attached while its subject is in any graph. See [Detach and Attachments](#detach-and-attachments). |
 | `DerivedPropertyChangeHandlerExtensions` | Tracking | `GetRequiredProperties`, `GetUsedByProperties`, `RecalculateDerivedProperty`, and access to `DerivedPropertyData` via `PropertyReference`. |
@@ -150,7 +151,7 @@ For every landed write, in `TrackingWriteObserver`, after the whole chain:
 
 - **W1**: the value lands (the terminal write of the chain, or the plain field write without a context).
 - **W2**: a full fence (`Interlocked.MemoryBarrier`).
-- **W3**: look up the property's `DerivedPropertyData` without creating it; stop if there is none.
+- **W3**: read the gate of the subject's type (`DerivedPropertyTypeGate`, a volatile read) and stop if it is not raised; otherwise look up the property's `DerivedPropertyData` without creating it, and stop if there is none.
 - **W4**: `Interlocked.Increment` its `Version`.
 - **W5**: read its used-by collection and request a recalculation of each derived property in it, and of the property itself when it is a derived property with a setter and the write is not a recalculation's publication.
 
@@ -160,7 +161,7 @@ A write that did not land (vetoed, captured by a transaction, stopped by the equ
 
 Take a read R3 of E and a write W1 of the same property:
 
-- **W3 finds no data.** The data did not exist when W3 ran, and data is never removed, so R1 created it later. The fences at W2 and R1 order W1 before R3, so E reads W1's value or a later one.
+- **W3 finds no data.** The data did not exist when W3 ran, and data is never removed, so R1 created it later. The fences at W2 and R1 order W1 before R3, so E reads W1's value or a later one. A gate that is not raised is the same case: whoever creates the first data of a type raises the gate, with a full fence after the store, before it stores the data, and the gate is never lowered. A gate that W3 finds not raised, after the fence of W2, therefore means that no data of the type was stored yet, this property's included.
 - **W4 precedes R2 in the version's order.** W1 precedes W4 (W2), and R3 follows R2, so E reads W1's value or a later one.
 - **W4 follows R2.** The recorded version is older than W4's. By the full fences on both sides (W4's interlocked increment before W5, R5's fence after R4), either R5 reads W4's version, and E evaluates again, or W5 reads D's link from R4, and requests a recalculation. That request takes `lock(D)`: if E has not committed yet, it finds E owning D and sets `RecalculationNeeded`, so E evaluates again before it commits; if E committed and still owns D, E evaluates again after it published; if E released D, the request takes ownership itself and evaluates. Every evaluation that follows starts after W1.
 - **W1 is E's own write**, made on E's thread after R3 (by the getter, or by a write it triggers on this thread). See [Own writes](#own-writes): the version check does not fire for it, and E is evaluated exactly once more, which reads W1's value.
@@ -363,6 +364,7 @@ The first evaluation at attach runs under the lifecycle lock, because consumers 
 | Ownership state, request flags, pending timestamp, `IsAttached`, `HasValue`, `IsFaulted` | `lock(data)` | requests, owner loop, attach, detach |
 | `LastKnownValue`, `RecalculationSequence` | `lock(data)` (write) / `Volatile.Read` (stale-publication guard) | commit, detach, publication |
 | `IsDerived` | `Volatile.Write` once at attach / `Volatile.Read` | attach, request, write observer |
+| Type gate | `Volatile.Write` and a full fence before the first data of the type is stored / `Volatile.Read` | data creation, write observer (W3), lifecycle detach |
 | Recorder frames | `[ThreadStatic]` (no sharing) | read tap, own writes, commit |
 | Subject attachments | per-subject lock (writes) / `Volatile.Read` of the published array | lifecycle attach and detach, derived detach |
 
@@ -386,7 +388,8 @@ Every link belongs to an attached derived property: D's detach removes all of D'
 |----------|-------------|------|
 | Read outside an evaluation | Zero | One thread-static load and a null check (read tap) |
 | Read during an evaluation | Zero in steady state (pooled buffers) | Data lookup or creation, a full fence, a volatile read, and a scan of the frame for duplicates |
-| Write of a property nobody read | Zero | Write depth increment and decrement, the observer call, a full fence (W2), one data lookup (W3) |
+| Write to a subject of a type without derived property data | Zero | Write depth increment and decrement, the observer call, a full fence (W2), the type gate (W3): a thread-static load, a type comparison and a volatile read |
+| Write of a property nobody read, on a type with derived property data | Zero | Above, plus one data lookup (W3) |
 | Write of a property with dependents | Zero | Above, plus `Interlocked.Increment` (W4), a used-by snapshot read, and a request per dependent |
 | Request for an owned property | Zero | One brief `lock(data)` |
 | Recalculation, dependencies unchanged | Zero (beyond the getter) | Brief `lock(data)` for the request, the commit and after the publication, the getter, a full fence and a version read per dependency (R5) |
