@@ -201,6 +201,58 @@ public class DerivedPropertyProtocolTests
     }
 
     [Fact]
+    public async Task WhenRecalculationInFlightTakesOverAnotherThreadsWrite_ThenTheChangeCarriesThatWritesTimestamp()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var gate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            var anchor = root.Anchor;
+            gate.PauseIfArmed();
+            return anchor;
+        };
+        root.Machine = machine;
+        var result = GetResult(machine);
+        var firstTimestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var secondTimestamp = firstTimestamp.AddMinutes(1);
+        var published = new List<(int OldValue, int NewValue, DateTimeOffset Timestamp)>();
+        using var subscription = result.SubscribeInline((in SubjectPropertyChange change) =>
+        {
+            lock (published)
+            {
+                published.Add((change.GetOldValue<int>(), change.GetNewValue<int>(), change.ChangedTimestamp));
+            }
+        });
+
+        // Act: the recalculation of the write at the first timestamp pauses after it read Anchor, and the write at
+        // the second timestamp is left to it.
+        gate.Arm();
+        var recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+        {
+            using (SubjectChangeContext.WithChangedTimestamp(firstTimestamp))
+            {
+                root.Anchor = 1;
+            }
+        });
+        var isPaused = gate.Paused.Wait(Timeout);
+        using (SubjectChangeContext.WithChangedTimestamp(secondTimestamp))
+        {
+            root.Anchor = 2;
+        }
+
+        gate.Resume.Set();
+        await recalculation.WaitAsync(Timeout);
+
+        // Assert
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.Equal([(0, 2, secondTimestamp)], published);
+    }
+
+    [Fact]
     public async Task WhenDerivedPropertyIsDetachedDuringItsEvaluation_ThenNothingIsPublished()
     {
         // Arrange
