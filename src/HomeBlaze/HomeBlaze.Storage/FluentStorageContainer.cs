@@ -191,8 +191,19 @@ public partial class FluentStorageContainer :
         return base.StartAsync(cancellationToken);
     }
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
-        => ConnectAsync(stoppingToken);
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        try
+        {
+            await ConnectAsync(stoppingToken);
+        }
+        catch (Exception) when (!stoppingToken.IsCancellationRequested)
+        {
+            // Not rethrown: a faulted execution ends the run, and the hosting stops a subject whose run ended.
+            // The connect has already reported this through Status and the log, a published connection
+            // retries its pass, and a configuration edit connects again.
+        }
+    }
 
     /// <summary>
     /// Stops following the storage: neither a file event nor the periodic timer starts a pass any more, so
@@ -279,7 +290,17 @@ public partial class FluentStorageContainer :
         // Read once, so the connection is created with exactly the settings it is later compared by.
         var settings = Settings;
         if (!settings.IsInMemory && string.IsNullOrWhiteSpace(settings.ConnectionString))
+        {
+            lock (_connectionLock)
+            {
+                if (!_isDisposed)
+                {
+                    Status = StorageStatus.Error;
+                }
+            }
+
             throw new InvalidOperationException("ConnectionString is not configured");
+        }
 
         // One connect at a time: two of them would each end the same connection and both start a new one.
         await _connectGate.WaitAsync(cancellationToken);

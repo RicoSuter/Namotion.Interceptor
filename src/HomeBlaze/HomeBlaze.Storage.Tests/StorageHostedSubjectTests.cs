@@ -652,7 +652,7 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
         await readReached;
         await AsyncTestHelpers.WaitUntilAsync(() => _timeProvider.ArmedTimerCount == idleTimerCount + 1);
         _timeProvider.Advance(StorageCallTimeout.Limit);
-        await Assert.ThrowsAsync<StorageUnresponsiveException>(() => storage.ExecuteTask!);
+        await storage.ExecuteTask!;
         Assert.Equal(StorageStatus.Error, storage.Status);
         return storage;
     }
