@@ -462,7 +462,7 @@ The client handles connection loss through two cooperating mechanisms: the OPC U
 
 When the connection drops, the OPC UA SDK's `SessionReconnectHandler` attempts to reconnect automatically. It first tries to reactivate the existing session, which leads to Flow B; on connection errors it keeps retrying that until its estimate of the session timeout runs out. When reactivation fails, it creates a new session and carries the client's subscriptions over, by transfer or by creating them fresh. If the session or a subscription cannot be created, the whole attempt fails and the handler retries.
 
-A transfer needs the server to still hold the subscription, which it does only until the subscription's lifetime expires without publish requests. A server built on the OPC Foundation SDK also transfers an anonymous user's subscriptions only over a signed channel, so with security off such a server always recreates them.
+A transfer needs the server to still hold the subscription, which it does only until the subscription's lifetime expires without publish requests. A server built on the OPC Foundation SDK also transfers an anonymous user's subscriptions only over a signed channel, so with security off it refuses the transfer and the SDK recreates them. With this client's defaults, stall detection (`MaxReconnectDuration`, 30 s) resets the SDK handler long before its session timeout estimate (120 s) runs out, so after a plain network partition the new-session path is reached only when reactivation fails with a status the handler does not retry, such as `BadSessionIdInvalid` after a server restart.
 
 1. Keep-alive detects dead connection and triggers the SDK reconnect handler
 2. SDK creates a new session, transfers the subscriptions the server still holds via `TransferSubscriptions` and recreates the others
@@ -504,7 +504,7 @@ When the SDK's reconnection handler gets stuck (e.g., server never responds), th
 
 Between the SDK's `OnReconnectComplete` (step 3) and the health check's full state read (step 4), there is a window of up to one health check interval (~5 seconds by default) where:
 
-- Subscription notifications from the transfer may apply partially (some notifications may have been lost due to server-side queue overflow or subscription lifetime expiration)
+- Subscription notifications after the reconnect may apply partially (some notifications may have been lost due to server-side queue overflow or subscription lifetime expiration)
 - Property values may temporarily reflect incomplete state
 
 This window is bounded and self-correcting: the health check's full state read overwrites all values with the server's current state. For most industrial applications, this brief window is acceptable. If tighter consistency is required, reduce `SubscriptionHealthCheckInterval`.
@@ -653,7 +653,7 @@ When a batch write to the OPC UA server partially fails, the client throws an `O
 
 `OpcUaClientDiagnostics` derives from `SourceDiagnostics`, whose members, buffer semantics and read guarantees are described once in [Connector Diagnostics](connectors.md#connector-diagnostics). What follows is what is specific to this client.
 
-**`IsOperational` here means the client has a live session with its subscriptions set up.** This built-in client implements liveness monitoring, but `IsOperational` is `null` before its first protocol-specific observation. It then publishes false for the whole address space browse and subscription creation, which on a large server takes minutes. Which step raises it depends on how the session came about: the first health check tick on an initial connect, the completed subscription transfer on an SDK reconnect, and the completed state reload on a manual reconnect. It drops whenever the session is lost, killed or torn down, and whenever a connect attempt ends, so a client sitting in its retry delay reports an explicit false rather than serving.
+**`IsOperational` here means the client has a live session with its subscriptions set up.** This built-in client implements liveness monitoring, but `IsOperational` is `null` before its first protocol-specific observation. It then publishes false for the whole address space browse and subscription creation, which on a large server takes minutes. Which step raises it depends on how the session came about: the first health check tick on an initial connect, the SDK reconnect completing with a new session, and the completed state reload on a manual reconnect. It drops whenever the session is lost, killed or torn down, and whenever a connect attempt ends, so a client sitting in its retry delay reports an explicit false rather than serving.
 
 It is not a claim that the model is in sync, and the two are not ordered against each other: the initial value read can run either side of the rise on an initial connect, and on a manual reconnect the reload always finishes first. While that read runs, `ISubjectSource.State` is `Synchronizing`, so reading it together with `IsOperational` is how a dropped network is told apart from a connected client that is still loading. See [Diagnostics and State answer different questions](connectors-monitoring.md#diagnostics-and-state-answer-different-questions).
 
