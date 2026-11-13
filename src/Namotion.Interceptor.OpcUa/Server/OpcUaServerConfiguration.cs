@@ -27,6 +27,17 @@ public class OpcUaServerConfiguration
     public string ApplicationName { get; set; } = "Namotion.Interceptor.Server";
 
     /// <summary>
+    /// Gets or sets the application URI the server presents and its certificate must carry. When null,
+    /// "urn:{host name}:Namotion.Interceptor:{ApplicationName}" is used, which changes when the host name changes.
+    /// </summary>
+    /// <remarks>
+    /// A kept certificate must also carry the host of <see cref="BaseAddress"/>, where localhost stands for the host
+    /// name, so a server whose host name changes, such as a recreated container, also needs a stable host name or an
+    /// explicit host in <see cref="BaseAddress"/>.
+    /// </remarks>
+    public string? ApplicationUri { get; set; }
+
+    /// <summary>
     /// Gets the primary namespace URI for the OPC UA server used to identify custom nodes.
     /// Default is "http://namotion.com/Interceptor/".
     /// </summary>
@@ -100,8 +111,7 @@ public class OpcUaServerConfiguration
             ApplicationType = ApplicationType.Server
         };
 
-        var host = System.Net.Dns.GetHostName();
-        var applicationUri = $"urn:{host}:Namotion.Interceptor:{ApplicationName}";
+        var applicationUri = ApplicationUri ?? $"urn:{System.Net.Dns.GetHostName()}:Namotion.Interceptor:{ApplicationName}";
 
         var config = new ApplicationConfiguration
         {
@@ -214,6 +224,20 @@ public class OpcUaServerConfiguration
 
         application.ApplicationConfiguration = config;
         return application;
+    }
+
+    /// <summary>
+    /// Validates configuration values and throws ArgumentException if invalid.
+    /// Call this method during initialization to fail fast with clear error messages.
+    /// </summary>
+    public void Validate()
+    {
+        if (ApplicationUri is not null && string.IsNullOrWhiteSpace(ApplicationUri))
+        {
+            throw new ArgumentException(
+                "ApplicationUri must not be empty or whitespace when set",
+                nameof(ApplicationUri));
+        }
     }
 
     public virtual string[] GetNamespaceUris()

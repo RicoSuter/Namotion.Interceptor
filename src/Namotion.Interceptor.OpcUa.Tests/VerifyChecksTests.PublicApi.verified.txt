@@ -361,6 +361,7 @@ namespace Namotion.Interceptor.OpcUa.Server
     {
         public OpcUaServerConfiguration() { }
         public string ApplicationName { get; set; }
+        public string? ApplicationUri { get; set; }
         public bool AutoAcceptUntrustedCertificates { get; set; }
         public string BaseAddress { get; set; }
         public System.TimeSpan? BufferTime { get; set; }
@@ -376,6 +377,7 @@ namespace Namotion.Interceptor.OpcUa.Server
         public virtual string[] GetNamespaceUris() { }
         protected void LoadNodeSetFromEmbeddedResource<TAssemblyType>(string name, Opc.Ua.NodeStateCollection nodes, Opc.Ua.ISystemContext context) { }
         public virtual void LoadPredefinedNodes(Opc.Ua.NodeStateCollection collection, Opc.Ua.ISystemContext context) { }
+        public void Validate() { }
     }
     public sealed class OpcUaServerDiagnostics : Namotion.Interceptor.Connectors.Diagnostics.ConnectorDiagnostics
     {

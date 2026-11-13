@@ -87,6 +87,8 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         ILogger logger)
         : base(new ConnectorMetrics(new ThroughputCounter(), new ThroughputCounter()))
     {
+        configuration.Validate();
+
         _subject = subject;
         _context = subject.Context;
         _logger = logger;
