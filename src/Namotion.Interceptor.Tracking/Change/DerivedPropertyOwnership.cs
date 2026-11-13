@@ -107,8 +107,7 @@ internal static class DerivedPropertyOwnership
     /// </summary>
     /// <param name="property">The derived property.</param>
     /// <param name="rawTimestamp">The raw changed timestamp of the trigger.</param>
-    /// <param name="isHandOver">The request carries its own trigger timestamp (handed over by an owner or an attach).</param>
-    internal static void RequestRecalculation(PropertyReference property, long rawTimestamp, bool isHandOver = false)
+    internal static void RequestRecalculation(PropertyReference property, long rawTimestamp)
     {
         if (rawTimestamp == 0)
         {
@@ -200,7 +199,7 @@ internal static class DerivedPropertyOwnership
 
         if (requestAfterAttach)
         {
-            RequestRecalculation(property, pendingTimestamp, isHandOver: true);
+            RequestRecalculation(property, pendingTimestamp);
         }
 
         // Traced outside lock(data), and after the request, so a failing trace listener cannot lose it.
@@ -333,7 +332,7 @@ internal static class DerivedPropertyOwnership
     {
         try
         {
-            RequestRecalculation(property, pendingTimestamp, isHandOver: true);
+            RequestRecalculation(property, pendingTimestamp);
         }
         catch (Exception)
         {
@@ -648,7 +647,9 @@ internal static class DerivedPropertyOwnership
         return new Commit(CommitOutcome.Committed, ShouldPublish: shouldPublish, OldValue: oldValue, NewValue: newValue, Sequence: sequence);
     }
 
-    private static object? GetDefault(Type type) => type.IsValueType ? Activator.CreateInstance(type) : null;
+    // The boxed default of a nullable value type is null.
+    private static object? GetDefault(Type type) =>
+        type.IsValueType && Nullable.GetUnderlyingType(type) is null ? RuntimeHelpers.GetUninitializedObject(type) : null;
 
     /// <summary>
     /// Fires change notification for a recalculated derived property.
@@ -775,10 +776,13 @@ internal static class DerivedPropertyOwnership
 
     private static bool HasVersionChanged(ReadOnlySpan<RecordedDependency> recorded)
     {
+        // R5: a full fence between setting the links and reading the versions, paired with the writer's Interlocked
+        // increment of the version (W4) before it reads the used-by set (W5): either a version read here sees the
+        // write, or the writer sees the link.
+        Interlocked.MemoryBarrier();
         foreach (ref readonly var dependency in recorded)
         {
-            // R5: a full fence, paired with the writer's Interlocked increment before it reads the used-by set.
-            if (Interlocked.Read(ref dependency.Data.Version) != dependency.Version)
+            if (Volatile.Read(ref dependency.Data.Version) != dependency.Version)
             {
                 return true;
             }

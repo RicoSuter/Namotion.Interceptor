@@ -87,7 +87,7 @@ public class DerivedPropertyReattachTests
 
         // Act
         var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { child.FirstName = "A"; });
-        Assert.True(blocker.Entered.Wait(TimeSpan.FromSeconds(10)));
+        Assert.True(blocker.Entered.Wait(TestTimeouts.Default));
 
         parent.Mother = null;
         parent.Father = child;
@@ -125,7 +125,7 @@ public class DerivedPropertyReattachTests
         // while the leaf is detached and attached again.
         blocker.Arm();
         var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { holder.Trigger = 1; });
-        var isReadEntered = blocker.Entered.Wait(TimeSpan.FromSeconds(10));
+        var isReadEntered = blocker.Entered.Wait(TestTimeouts.Default);
         holder.First = null;
         var isLeafDetached = !SubjectLifecycleAttachments.IsAttached(leaf);
         holder.First = leaf;
@@ -175,7 +175,7 @@ public class DerivedPropertyReattachTests
 
         // Act: the subject is attached again, reader first, while Nickname's recalculation is in flight.
         var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { person.Nickname = "X"; });
-        Assert.True(blocker.Entered.Wait(TimeSpan.FromSeconds(10)));
+        Assert.True(blocker.Entered.Wait(TestTimeouts.Default));
 
         person.DetachSubjectProperty(prefixedProperty);
         person.DetachSubjectProperty(nicknameProperty);
@@ -285,7 +285,7 @@ public class DerivedPropertyReattachTests
         try
         {
             detach = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { holder.First = null; });
-            Assert.True(SpinWait.SpinUntil(() => detach.IsCompleted, TimeSpan.FromSeconds(10)));
+            Assert.True(SpinWait.SpinUntil(() => detach.IsCompleted, TestTimeouts.Default));
         }
         finally
         {
@@ -460,7 +460,7 @@ public class DerivedPropertyReattachTests
     public async Task WhenSubjectIsAttachedAgainWhileItsDerivedPropertyIsRecalculated_ThenChangeIsPublishedFromTheValueOfThatAttach()
     {
         // Arrange
-        var timeout = TimeSpan.FromSeconds(30);
+        var timeout = TestTimeouts.Default;
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
@@ -517,7 +517,7 @@ public class DerivedPropertyReattachTests
             if (context.Property.Name == propertyName && Interlocked.Exchange(ref _isArmed, 0) == 1)
             {
                 Entered.Set();
-                HasTimedOut = !Proceed.Wait(TimeSpan.FromSeconds(10));
+                HasTimedOut = !Proceed.Wait(TestTimeouts.Default);
             }
 
             return next(ref context);

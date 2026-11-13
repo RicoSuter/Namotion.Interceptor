@@ -106,12 +106,12 @@ internal sealed class DerivedPropertyData
 
     /// <summary>
     /// True if this data belongs to a derived property (vs. a source property whose data exists only
-    /// because a derived depends on it). Lets WriteProperty identify derived-with-setter writes
+    /// because a derived depends on it). Lets the write observer identify derived-with-setter writes
     /// without touching metadata on the hot path.
     /// </summary>
     /// <remarks>
-    /// Written via <c>Volatile.Write</c> in AttachProperty, read via <c>Volatile.Read</c> in
-    /// WriteProperty. Write-once; never reset (metadata.IsDerived is immutable).
+    /// Written via <c>Volatile.Write</c> by the attach, read via <c>Volatile.Read</c> by the write observer and
+    /// a recalculation request. Write-once; never reset (metadata.IsDerived is immutable).
     /// </remarks>
     internal bool IsDerived;
 

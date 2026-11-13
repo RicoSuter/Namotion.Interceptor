@@ -118,6 +118,7 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
         }
         finally
         {
+            // An observer exception replaces the chain's; observers must not throw when the chain has failed.
             PropertyAccessObservation.ExitWrite(depth);
             PropertyAccessObservation.WriteObserver?.OnPropertyWritten(new PropertyWriteObservation(
                 context.Property,
@@ -161,6 +162,7 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
         }
         finally
         {
+            // An observer exception replaces the write's; observers must not throw when the write has failed.
             PropertyAccessObservation.ExitWrite(depth);
             observer.OnPropertyWritten(new PropertyWriteObservation(
                 new PropertyReference(subject, propertyName), !hasFailed, 0, false, depth, hasFailed));

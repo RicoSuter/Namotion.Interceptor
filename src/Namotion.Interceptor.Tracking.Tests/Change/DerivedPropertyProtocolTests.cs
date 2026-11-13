@@ -16,7 +16,7 @@ public class DerivedPropertyProtocolTests
 {
     public DerivedPropertyProtocolTests() => PropertyChangeSubscriptions.ResetForTests();
 
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan Timeout = TestTimeouts.Default;
 
     [Fact]
     public async Task WhenWriteLandsBetweenReadAndLink_ThenEvaluationRunsAgain()
@@ -108,7 +108,8 @@ public class DerivedPropertyProtocolTests
     [Fact]
     public async Task WhenAttachRunsWhileRecalculationEvaluates_ThenOwnershipIsHandedOffAndChangeIsPublishedAfterTheAttach()
     {
-        // Arrange: the getter also reads state outside the model, which only an explicit recalculation follows.
+        // Arrange: the getter also reads state outside the model, which changes after the attach evaluation read it,
+        // so only an evaluation after the attach sees it.
         var context = CreateContext();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
@@ -128,7 +129,8 @@ public class DerivedPropertyProtocolTests
         using var subscription = RecordPublications(result, published);
 
         // Act: a recalculation from before the detach evaluates the value 1 and reaches its commit while the
-        // attach of the new attachment evaluates. The explicit request is left to the owner in flight.
+        // attach of the new attachment evaluates. The attach found the property owned by that recalculation, so it
+        // set the request flag, which the recalculation hands off to the attach.
         recalculationGate.Arm();
         var recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = 1; });
         var isRecalculationPaused = recalculationGate.Paused.Wait(Timeout);
@@ -138,7 +140,6 @@ public class DerivedPropertyProtocolTests
         var attach = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Machine = machine; });
         var isAttachPaused = attachGate.Paused.Wait(Timeout);
         Volatile.Write(ref external, 100);
-        result.RecalculateDerivedProperty();
         recalculationGate.Resume.Set();
         var isRecalculationDone = await CompletesInTimeAsync(recalculation);
         attachGate.Resume.Set();

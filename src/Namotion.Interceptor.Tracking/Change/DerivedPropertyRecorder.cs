@@ -38,6 +38,11 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
     /// <summary>A getter is being evaluated on this thread, also while its recording is suspended.</summary>
     internal static bool IsEvaluatingOnThisThread => _current is { _depth: > 0 };
 
+    /// <summary>
+    /// Starts a recording frame for the getter of <paramref name="property"/> (reuses a pooled buffer; allocation-free in
+    /// steady state). Reads of <paramref name="property"/> itself are filtered so a derived property never depends on
+    /// itself: a dynamic derived getter reads its own property again through the interceptor chain.
+    /// </summary>
     public void StartRecording(in PropertyReference property)
     {
         PushFrame(property, isSuspended: false);
@@ -84,6 +89,8 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
             frame.Buffer ??= _pool.Rent(8);
         }
 
+        // The read observer is a single slot: a recording replaces any other observer of this thread, and
+        // FinishRecording clears it instead of restoring one.
         PropertyAccessObservation.ReadObserver = this;
     }
 
@@ -161,6 +168,11 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
         }
     }
 
+    /// <summary>
+    /// Ends the innermost frame and returns its reads. The span (and <see cref="LastRecording"/>) stays valid until
+    /// <see cref="ClearLastRecording"/> or the next <see cref="StartRecording"/> on this thread, which the version
+    /// check of a commit relies on.
+    /// </summary>
     public ReadOnlySpan<RecordedDependency> FinishRecording()
     {
         _depth--;
@@ -185,6 +197,10 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
     /// </summary>
     internal bool LastRecordingHasOwnWriteAfterRead => _frames[_depth].HasOwnWriteAfterRead;
 
+    /// <summary>
+    /// Clears the reads of the recording finished last, so the thread-static recorder holds no references to
+    /// subjects that may be detached. Called once its span is no longer in use.
+    /// </summary>
     public void ClearLastRecording()
     {
         // No recording finished at this depth yet (a failure before the first recording on this thread).

@@ -248,7 +248,7 @@ public class RecalculateDerivedPropertyTests
         // Assert
         // Thread-safety contract: concurrent calls must not deadlock, notifications must
         // arrive in order (no stale value after a newer one), and the final settled value
-        // must be correct. The count is non-deterministic because IsRecalculating coalesces
+        // must be correct. The count is non-deterministic because a request left to the owner coalesces
         // concurrent calls, so fewer than 100 getter evaluations occur.
         lock (changes)
         {

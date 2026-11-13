@@ -248,15 +248,15 @@ namespace Namotion.Interceptor.Interceptors
         public System.DateTimeOffset? WriteTimestamp { get; }
         public TProperty GetFinalValue() { }
     }
-    public readonly struct PropertyWriteObservation : System.IEquatable<Namotion.Interceptor.Interceptors.PropertyWriteObservation>
+    public readonly struct PropertyWriteObservation
     {
-        public PropertyWriteObservation(Namotion.Interceptor.PropertyReference Property, bool IsWritten, long RawTimestamp, bool IsDerivedRecalculation, int Depth, bool HasFailed) { }
-        public int Depth { get; init; }
-        public bool HasFailed { get; init; }
-        public bool IsDerivedRecalculation { get; init; }
-        public bool IsWritten { get; init; }
-        public Namotion.Interceptor.PropertyReference Property { get; init; }
-        public long RawTimestamp { get; init; }
+        public PropertyWriteObservation(Namotion.Interceptor.PropertyReference property, bool isWritten, long rawTimestamp, bool isDerivedRecalculation, int depth, bool hasFailed) { }
+        public int Depth { get; }
+        public bool HasFailed { get; }
+        public bool IsDerivedRecalculation { get; }
+        public bool IsWritten { get; }
+        public Namotion.Interceptor.PropertyReference Property { get; }
+        public long RawTimestamp { get; }
     }
     public delegate TProperty ReadInterceptionDelegate<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext<TProperty> context);
     public delegate void WriteInterceptionDelegate<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context);

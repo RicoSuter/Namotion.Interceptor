@@ -1,4 +1,3 @@
-// src/Namotion.Interceptor.Tests/PropertyAccessObservationTests.cs
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 
