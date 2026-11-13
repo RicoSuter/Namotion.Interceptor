@@ -72,4 +72,20 @@ public class DerivedGetterReentrancyTests
         // Assert
         Assert.Null(value);
     }
+
+    [Fact]
+    public void WhenAnEnumDerivedPropertyReadsItself_ThenItGivesTheDefaultOfTheEnum()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var registered = new Person(context).TryGetRegisteredSubject()!;
+        registered.AddDerivedProperty("Day", typeof(DayOfWeek), subject => (DayOfWeek)subject.TryGetRegisteredProperty("Day")!.GetValue()!, null);
+
+        // Act
+        var value = registered.TryGetProperty("Day")!.GetValue();
+
+        // Assert
+        Assert.IsType<DayOfWeek>(value);
+        Assert.Equal(DayOfWeek.Sunday, value);
+    }
 }

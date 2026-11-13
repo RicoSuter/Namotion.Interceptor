@@ -308,7 +308,7 @@ public class RegisteredSubject
         Action<IInterceptorSubject, object?>? setValue,
         params Attribute[] attributes)
     {
-        // A getter that comes from configuration can read itself through other properties.
+        // A dynamic getter can read itself through other properties, which would otherwise recurse until the stack overflows.
         if (getValue is not null && attributes.Any(attribute => attribute is DerivedAttribute))
         {
             getValue = new DerivedGetterReentrancyGuard(name, type, getValue).GetValue;

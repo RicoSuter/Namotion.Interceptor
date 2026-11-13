@@ -14,10 +14,9 @@ internal sealed class DerivedGetterReentrancyGuard(string name, Type type, Func<
     [ThreadStatic]
     private static List<(DerivedGetterReentrancyGuard Guard, IInterceptorSubject Subject)>? _active;
 
-    // A boxed default, so that a property of a non-nullable value type reads a value of its type.
-    private readonly object? _defaultValue = type.IsValueType && Nullable.GetUnderlyingType(type) is null
-        ? RuntimeHelpers.GetUninitializedObject(type)
-        : null;
+    // Created on the first reentry, as a cycle is rare. Boxed, so that a property of a non-nullable value type
+    // reads a value of its type.
+    private object? _defaultValue;
 
     private int _hasReported;
 
@@ -29,7 +28,7 @@ internal sealed class DerivedGetterReentrancyGuard(string name, Type type, Func<
             if (ReferenceEquals(entry.Guard, this) && ReferenceEquals(entry.Subject, subject))
             {
                 Report(subject);
-                return _defaultValue;
+                return _defaultValue ??= CreateDefault();
             }
         }
 
@@ -42,6 +41,13 @@ internal sealed class DerivedGetterReentrancyGuard(string name, Type type, Func<
         {
             active.RemoveAt(active.Count - 1);
         }
+    }
+
+    private object? CreateDefault()
+    {
+        return type.IsValueType && Nullable.GetUnderlyingType(type) is null
+            ? RuntimeHelpers.GetUninitializedObject(type)
+            : null;
     }
 
     private void Report(IInterceptorSubject subject)
