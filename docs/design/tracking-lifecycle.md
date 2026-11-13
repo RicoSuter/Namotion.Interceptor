@@ -178,6 +178,8 @@ Below those two sit the registry's per-object locks: `_children` on each `Regist
 
 The `_attachedSubjects` lock is re-entrant (C# `Monitor`). `WriteProperty` may trigger lifecycle handlers that write to *other* properties, re-entering the lock. Each property has its own `_lastProcessedValues` entry, so there is no interference. Handlers must NOT write to the *same* property being reconciled. This is a documented contract requirement.
 
+The lifecycle itself publishes no property change while it holds `_attachedSubjects`: the recalculation of a derived property that an attach leaves behind runs once the thread holds no lifecycle lock anymore (see [Attach](tracking-derived-properties.md#1-attach-initialization)). A change published by a handler that writes a property is published under the lock.
+
 ## Handler Order Around the Descent
 
 `ContextInheritanceHandler` is the handler that walks down into a newly attached subtree. Where a handler sits relative to it decides both the order it sees subjects in and what it can look up.
@@ -219,7 +221,7 @@ public void HandleLifecycleChange(SubjectLifecycleChange change)
 
 (`GetParents()` needs `WithParents()` on the context. Without it the same walk goes over `RegisteredSubject.Parents`, the registry's own parent edges.)
 
-Were the registry behind the descent, `child` would see only part of that chain and `TryGetRegisteredSubject()` would return null for the rest, so a walk would compute a wrong answer rather than fail. Derived getters are exposed to this too, because `DerivedPropertyChangeHandler` evaluates them while the property attaches.
+Were the registry behind the descent, `child` would see only part of that chain and `TryGetRegisteredSubject()` would return null for the rest, so a walk would compute a wrong answer rather than fail. Derived getters are exposed to this too, because `DerivedPropertyChangeHandler` evaluates them while the property attaches. A `[Derived]` property that by then depends on a property that can hold subjects, or has no dependencies at all, is evaluated again when the outermost attach operation ends, if subjects were attached after it, so its dependencies end up complete (see [Attach](tracking-derived-properties.md#1-attach-initialization)).
 
 A handler that records something other handlers read during attach therefore has to say so with `[RunsBefore(typeof(ContextInheritanceHandler))]`. Registration order alone is not enough, because an unrelated handler's ordering constraint can move it. `[RunsAfter(typeof(SubjectRegistry))]` is not a substitute: it constrains the handler only against the registry, leaving its position relative to the descent dependent on where it was registered.
 
