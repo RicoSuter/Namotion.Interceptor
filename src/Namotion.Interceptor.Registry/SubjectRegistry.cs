@@ -184,12 +184,8 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                 var registeredProperty = parentRegisteredSubject.TryGetProperty(property.Name) ??
                     throw new InvalidOperationException($"Property '{property.Name}' not found.");
 
-                registeredSubject.AddParent(registeredProperty, change.Index);
-                registeredProperty.AddChild(new SubjectPropertyChild
-                {
-                    Index = change.Index,
-                    Subject = change.Subject,
-                });
+                registeredSubject.AddParent(registeredProperty, change.Index, change.AdditionalIndices);
+                registeredProperty.AddChild(change.Subject, change.Index, change.AdditionalIndices);
             }
 
             return;
@@ -208,8 +204,8 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
 
                     if (property is not null)
                     {
-                        registeredSubject.RemoveParent(property);
-                        property.RemoveChild(change.Subject);
+                        var removed = registeredSubject.RemoveParent(property);
+                        property.RemoveChild(change.Subject, removed);
                     }
                 }
                 
@@ -286,7 +282,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     {
     }
 
-    void IChildIndexHandler.HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
+    void IChildIndexHandler.ReplaceChildIndices(PropertyReference property, ReadOnlySpan<SubjectChild> children)
     {
         lock (_knownSubjects)
         {

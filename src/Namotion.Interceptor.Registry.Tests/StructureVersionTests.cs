@@ -106,6 +106,163 @@ public class StructureVersionTests
     }
 
     [Fact]
+    public void WhenADictionaryGainsAnotherKeyForASubjectItHolds_ThenStructureVersionRisesAndChildrenHoldBothKeys()
+    {
+        // Arrange
+        var (context, registry) = CreateContext();
+        var light = new Light();
+        var group = new LightGroup(context) { LightsByName = new Dictionary<string, Light> { ["a"] = light } };
+        var before = registry.StructureVersion;
+
+        // Act
+        group.LightsByName = new Dictionary<string, Light> { ["a"] = light, ["b"] = light };
+
+        // Assert
+        AssertRisenToAnEvenValue(before, registry.StructureVersion);
+        AssertChildrenAndParents(group, nameof(LightGroup.LightsByName), (light, "a"), (light, "b"));
+    }
+
+    [Fact]
+    public void WhenADictionaryLosesTheSecondOfTwoKeysForASubject_ThenStructureVersionRisesAndChildrenHoldTheRemainingKey()
+    {
+        // Arrange
+        var (context, registry) = CreateContext();
+        var light = new Light();
+        var group = new LightGroup(context) { LightsByName = new Dictionary<string, Light> { ["a"] = light, ["b"] = light } };
+        var before = registry.StructureVersion;
+
+        // Act
+        group.LightsByName = new Dictionary<string, Light> { ["a"] = light };
+
+        // Assert
+        AssertRisenToAnEvenValue(before, registry.StructureVersion);
+        AssertChildrenAndParents(group, nameof(LightGroup.LightsByName), (light, "a"));
+    }
+
+    [Fact]
+    public void WhenADictionaryReplacesTheSecondKeyOfASubject_ThenStructureVersionRisesAndChildrenHoldTheNewKey()
+    {
+        // Arrange
+        var (context, registry) = CreateContext();
+        var light = new Light();
+        var group = new LightGroup(context) { LightsByName = new Dictionary<string, Light> { ["a"] = light, ["b"] = light } };
+        var before = registry.StructureVersion;
+
+        // Act
+        group.LightsByName = new Dictionary<string, Light> { ["a"] = light, ["c"] = light };
+
+        // Assert
+        AssertRisenToAnEvenValue(before, registry.StructureVersion);
+        AssertChildrenAndParents(group, nameof(LightGroup.LightsByName), (light, "a"), (light, "c"));
+    }
+
+    [Fact]
+    public void WhenAListGainsAnotherPositionForASubjectItHolds_ThenStructureVersionRisesAndChildrenHoldBothPositions()
+    {
+        // Arrange
+        var (context, registry) = CreateContext();
+        var light = new Light();
+        var group = new LightGroup(context) { Lights = [light] };
+        var before = registry.StructureVersion;
+
+        // Act
+        group.Lights = [light, light];
+
+        // Assert
+        AssertRisenToAnEvenValue(before, registry.StructureVersion);
+        AssertChildrenAndParents(group, nameof(LightGroup.Lights), (light, 0), (light, 1));
+    }
+
+    [Fact]
+    public void WhenAListLosesTheSecondOfTwoPositionsOfASubject_ThenStructureVersionRisesAndChildrenHoldTheRemainingPosition()
+    {
+        // Arrange
+        var (context, registry) = CreateContext();
+        var light = new Light();
+        var group = new LightGroup(context) { Lights = [light, light] };
+        var before = registry.StructureVersion;
+
+        // Act
+        group.Lights = [light];
+
+        // Assert
+        AssertRisenToAnEvenValue(before, registry.StructureVersion);
+        AssertChildrenAndParents(group, nameof(LightGroup.Lights), (light, 0));
+    }
+
+    [Fact]
+    public void WhenAListHoldingSubjectsTwiceIsReorderedWithoutMovingTheirFirstPositions_ThenStructureVersionRisesAndChildrenFollowThePositions()
+    {
+        // Arrange
+        var (context, registry) = CreateContext();
+        var first = new Light();
+        var second = new Light();
+        var group = new LightGroup(context) { Lights = [first, second, second, first] };
+        var before = registry.StructureVersion;
+
+        // Act
+        group.Lights = [first, second, first, second];
+
+        // Assert
+        AssertRisenToAnEvenValue(before, registry.StructureVersion);
+        AssertChildrenAndParents(group, nameof(LightGroup.Lights), (first, 0), (second, 1), (first, 2), (second, 3));
+    }
+
+    [Fact]
+    public void WhenAnArrayGainsAnotherPositionForASubjectItHolds_ThenStructureVersionRisesAndChildrenHoldBothPositions()
+    {
+        // Arrange
+        var (context, registry) = CreateContext();
+        var child = new Person();
+        var root = new Person(context) { Children = [child] };
+        var before = registry.StructureVersion;
+
+        // Act
+        root.Children = [child, child];
+
+        // Assert
+        AssertRisenToAnEvenValue(before, registry.StructureVersion);
+        AssertChildrenAndParents(root, nameof(Person.Children), (child, 0), (child, 1));
+    }
+
+    [Fact]
+    public void WhenAListHoldingASubjectTwiceIsAssignedAgainWithTheSameItems_ThenStructureVersionIsUnchanged()
+    {
+        // Arrange
+        var (context, registry) = CreateContext();
+        var first = new Light();
+        var second = new Light();
+        var group = new LightGroup(context) { Lights = [first, second, first] };
+        var before = registry.StructureVersion;
+
+        // Act
+        group.Lights = [first, second, first];
+
+        // Assert
+        Assert.Equal(before, registry.StructureVersion);
+    }
+
+    [Fact]
+    public void WhenADictionaryHoldingASubjectTwiceIsRebuiltInAnotherOrderThatKeepsTheKeysOfEachSubjectInOrder_ThenStructureVersionIsUnchanged()
+    {
+        // Arrange
+        var (context, registry) = CreateContext();
+        var light = new Light();
+        var other = new Light();
+        var group = new LightGroup(context)
+        {
+            LightsByName = new Dictionary<string, Light> { ["a"] = light, ["b"] = light, ["c"] = other }
+        };
+        var before = registry.StructureVersion;
+
+        // Act
+        group.LightsByName = new Dictionary<string, Light> { ["a"] = light, ["c"] = other, ["b"] = light };
+
+        // Assert
+        Assert.Equal(before, registry.StructureVersion);
+    }
+
+    [Fact]
     public void WhenAPropertyIsAddedAtRunTime_ThenStructureVersionRisesByTwo()
     {
         // Arrange
@@ -232,6 +389,20 @@ public class StructureVersionTests
         Assert.Equal(0, before % 2);
         Assert.True(after > before);
         Assert.Equal(0, after % 2);
+    }
+
+    private static void AssertChildrenAndParents(
+        IInterceptorSubject holder, string propertyName, params (IInterceptorSubject Subject, object Index)[] expected)
+    {
+        var property = holder.TryGetRegisteredSubject()!.TryGetProperty(propertyName)!;
+        Assert.Equal(expected, property.Children.Select(child => (child.Subject, child.Index!)));
+
+        foreach (var subject in expected.Select(entry => entry.Subject).Distinct())
+        {
+            Assert.Equal(
+                expected.Where(entry => entry.Subject == subject).Select(entry => entry.Index),
+                subject.TryGetRegisteredSubject()!.Parents.Where(parent => parent.Property == property).Select(parent => parent.Index!));
+        }
     }
 
     private static (IInterceptorSubjectContext Context, ISubjectRegistry Registry) CreateContext()

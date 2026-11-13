@@ -86,6 +86,24 @@ public class SubjectTableRowsTests
         Assert.Equal(expected, GetNames(rows));
     }
 
+    [Fact]
+    public void WhenSourceHoldsASubjectAtSeveralPlaces_ThenItIsOneRowAtItsFirstPlace()
+    {
+        // Arrange
+        var graph = CreateGraph();
+        var first = new TestDevice { Name = "First" };
+        var second = new TestDevice { Name = "Second" };
+        var devices = graph.Pump.TryGetFirstParent<TestFolder>()!;
+        devices.Devices = [first, second, first];
+
+        // Act
+        var found = SubjectTableRows.TryGetRows(graph.Resolver, graph.Table, "../devices/Devices", null, out var rows, out _);
+
+        // Assert
+        Assert.True(found);
+        Assert.Equal([(first, 0), (second, 1)], rows.Select(row => ((TestDevice)row.Subject, (int)row.Index!)));
+    }
+
     [Theory]
     [InlineData("../devices/Pump")]
     [InlineData("../devices/Label")]

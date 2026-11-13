@@ -70,8 +70,36 @@ internal static class SubjectTableRows
         _ = property.GetValue();
 
         error = null;
-        rows = Filter(property.Children, typeName);
+        rows = Filter(WithoutRepeats(property), typeName);
         return true;
+    }
+
+    // A subject held at several places is one row, at its first place, since the rows are keyed by subject.
+    private static ImmutableArray<SubjectPropertyChild> WithoutRepeats(RegisteredSubjectProperty property)
+    {
+        var children = property.Children;
+        if (children.Length < 2)
+        {
+            return children;
+        }
+
+        var seen = new HashSet<IInterceptorSubject>(children.Length, ReferenceEqualityComparer.Instance);
+        ImmutableArray<SubjectPropertyChild>.Builder? builder = null;
+        for (var index = 0; index < children.Length; index++)
+        {
+            var child = children[index];
+            if (seen.Add(child.Subject))
+            {
+                builder?.Add(child);
+            }
+            else if (builder is null)
+            {
+                builder = ImmutableArray.CreateBuilder<SubjectPropertyChild>(children.Length - 1);
+                builder.AddRange(children, index);
+            }
+        }
+
+        return builder?.ToImmutable() ?? children;
     }
 
     /// <summary>

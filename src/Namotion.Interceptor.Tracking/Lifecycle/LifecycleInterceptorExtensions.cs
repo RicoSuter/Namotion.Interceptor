@@ -14,7 +14,8 @@ public static class LifecycleInterceptorExtensions
     }
 
     /// <summary>
-    /// Gets the current reference count (number of parent references) for the subject.
+    /// Gets the current reference count of the subject: the number of properties that hold it, however many keys or
+    /// positions of a property hold it.
     /// Returns 0 if subject is not attached or lifecycle tracking is not enabled.
     /// </summary>
     public static int GetReferenceCount(this IInterceptorSubject subject)

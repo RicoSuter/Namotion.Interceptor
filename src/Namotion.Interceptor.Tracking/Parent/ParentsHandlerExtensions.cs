@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Tracking.Parent;
 
@@ -8,10 +9,11 @@ public static class ParentsHandlerExtensions
 {
     private const string ParentsKey = "ni.parents";
 
-    internal static void AddParent(this IInterceptorSubject subject, PropertyReference parent, object? index)
+    internal static void AddParent(this IInterceptorSubject subject, PropertyReference parent, object? index,
+        ImmutableArray<object?> additionalIndices = default)
     {
         var parentsSet = (ParentsSet)subject.Data.GetOrAdd((null, ParentsKey), _ => new ParentsSet())!;
-        parentsSet.Add(parent, index);
+        parentsSet.Add(parent, index, additionalIndices);
     }
 
     internal static void RemoveParent(this IInterceptorSubject subject, PropertyReference parent)
@@ -22,11 +24,11 @@ public static class ParentsHandlerExtensions
         }
     }
 
-    internal static void UpdateParentIndex(this IInterceptorSubject subject, PropertyReference parent, object? index)
+    internal static void ReplaceParentIndices(this IInterceptorSubject subject, PropertyReference parent, ReadOnlySpan<SubjectChild> places)
     {
         if (subject.Data.TryGetValue((null, ParentsKey), out var existing))
         {
-            ((ParentsSet)existing!).UpdateIndex(parent, index);
+            ((ParentsSet)existing!).ReplaceIndices(parent, places);
         }
     }
 
@@ -162,7 +164,7 @@ public static class ParentsHandlerExtensions
     /// <summary>
     /// Gets the parents of the subject as an immutable array.
     /// This is the preferred method for accessing parents with zero-allocation enumeration.
-    /// One entry per property that holds the subject, with its first key or position (<c>null</c> for a subject reference).
+    /// One entry per key or position that holds the subject, grouped by property in the order of its value (<c>null</c> for a subject reference).
     /// </summary>
     public static ImmutableArray<SubjectParent> GetParents(this IInterceptorSubject subject)
     {
@@ -174,22 +176,57 @@ public static class ParentsHandlerExtensions
     }
 
     /// <summary>
+    /// Gets the number of distinct properties that hold the subject, which is less than the number of entries when a
+    /// property holds the subject at more than one key or position.
+    /// </summary>
+    /// <param name="parents">The parents, as <see cref="GetParents"/> returns them, with the entries of a property adjacent.</param>
+    /// <returns>The number of properties.</returns>
+    public static int CountProperties(this ImmutableArray<SubjectParent> parents)
+    {
+        var span = parents.AsSpan();
+        if (span.Length <= 1)
+        {
+            return span.Length;
+        }
+
+        var count = 1;
+        for (var i = 1; i < span.Length; i++)
+        {
+            if (span[i].Property != span[i - 1].Property)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    /// <summary>
     /// Thread-safe collection with O(1) writes and zero-allocation reads via cached ImmutableArray.
     /// </summary>
     private sealed class ParentsSet
     {
         private readonly Lock _lock = new();
 
-        // Keyed by the property alone, because the lifecycle attaches a subject to a property
-        // once, however many keys or positions of it hold the subject.
+        // Keyed by the property, because the lifecycle attaches a subject to a property once. A property that holds the
+        // subject at several keys or positions stores a Places holder instead of the index.
         private readonly Dictionary<PropertyReference, object?> _indices = [];
         private volatile ImmutableArray<SubjectParent>[]? _cache; // Box in array for volatile
 
-        public void Add(PropertyReference parent, object? index)
+        public void Add(PropertyReference parent, object? index, ImmutableArray<object?> additionalIndices)
         {
+            object? stored = index;
+            if (!additionalIndices.IsDefaultOrEmpty)
+            {
+                var indices = new object?[additionalIndices.Length + 1];
+                indices[0] = index;
+                additionalIndices.CopyTo(indices, 1);
+                stored = new Places(indices);
+            }
+
             lock (_lock)
             {
-                _indices[parent] = index;
+                _indices[parent] = stored;
                 _cache = null; // Invalidate cache
             }
         }
@@ -205,7 +242,7 @@ public static class ParentsHandlerExtensions
             }
         }
 
-        public void UpdateIndex(PropertyReference parent, object? index)
+        public void ReplaceIndices(PropertyReference parent, ReadOnlySpan<SubjectChild> places)
         {
             lock (_lock)
             {
@@ -215,7 +252,25 @@ public static class ParentsHandlerExtensions
                     return;
                 }
 
-                current = index;
+                if (places.Length == 1)
+                {
+                    current = places[0].Index;
+                }
+                else
+                {
+                    // Snapshots copy the indices, so a holder of the same length can be refilled.
+                    if (current is not Places holder || holder.Indices.Length != places.Length)
+                    {
+                        holder = new Places(new object?[places.Length]);
+                        current = holder;
+                    }
+
+                    for (var i = 0; i < places.Length; i++)
+                    {
+                        holder.Indices[i] = places[i].Index;
+                    }
+                }
+
                 _cache = null; // Invalidate cache
             }
         }
@@ -245,17 +300,38 @@ public static class ParentsHandlerExtensions
                     return ImmutableArray<SubjectParent>.Empty;
                 }
 
-                var parents = new SubjectParent[_indices.Count];
+                var count = 0;
+                foreach (var index in _indices.Values)
+                {
+                    count += index is Places places ? places.Indices.Length : 1;
+                }
+
+                var parents = new SubjectParent[count];
                 var position = 0;
                 foreach (var (parent, index) in _indices)
                 {
-                    parents[position++] = new SubjectParent(parent, index);
+                    if (index is Places places)
+                    {
+                        foreach (var placeIndex in places.Indices)
+                        {
+                            parents[position++] = new SubjectParent(parent, placeIndex);
+                        }
+                    }
+                    else
+                    {
+                        parents[position++] = new SubjectParent(parent, index);
+                    }
                 }
 
                 var array = ImmutableCollectionsMarshal.AsImmutableArray(parents);
                 _cache = [array];
                 return array;
             }
+        }
+
+        private sealed class Places(object?[] indices)
+        {
+            public object?[] Indices { get; } = indices;
         }
     }
 }

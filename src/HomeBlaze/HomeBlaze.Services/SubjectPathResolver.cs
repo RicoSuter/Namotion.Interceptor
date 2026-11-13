@@ -189,10 +189,10 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                     return null;
                 }
 
-                // Ambiguous with several parents.
+                // Ambiguous when several properties hold the subject; several places of one property share the parent.
                 var parents = registered.Parents;
                 recorder?.AddParentStep(current, parents);
-                if (parents.Length != 1)
+                if (parents.CountProperties() != 1)
                     return null;
 
                 current = parents[0].Property.Subject;
@@ -217,9 +217,8 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         }
     }
 
-    /// <summary>
-    /// Gets all paths to the subject (subject can have multiple parents).
-    /// </summary>
+    /// <inheritdoc />
+    /// <remarks>An ancestor contributes its first parent only.</remarks>
     public IReadOnlyList<string> GetPaths(
         IInterceptorSubject subject,
         PathStyle style) => GetPathsCore(subject, style, recorder: null);
@@ -317,7 +316,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     }
 
     // A move attaches and detaches nothing, so this is the only change it makes.
-    void IChildIndexHandler.HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
+    void IChildIndexHandler.ReplaceChildIndices(PropertyReference property, ReadOnlySpan<SubjectChild> children)
     {
         InvalidatePaths();
     }

@@ -1,6 +1,8 @@
 ﻿using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -14,8 +16,15 @@ public class RegisteredSubjectProperty
     [ThreadStatic]
     private static Dictionary<IInterceptorSubject, int>? _reusableChildPositions;
 
+    [ThreadStatic]
+    private static List<SubjectPropertyChild>? _reusableChildren;
+
     private readonly List<SubjectPropertyChild> _children = [];
     private ImmutableArray<SubjectPropertyChild> _childrenCache;
+
+    // Entries beyond the first of each subject. While zero, no reported subject can have more than one entry. Read and
+    // written under the _children lock.
+    private int _repeatedChildCount;
 
     private readonly PropertyAttributeAttribute? _attributeMetadata;
 
@@ -218,7 +227,7 @@ public class RegisteredSubjectProperty
     }
 
     /// <summary>
-    /// Gets the collection or dictionary items of the property, each subject once with its first key or position.
+    /// Gets the collection or dictionary items of the property, one entry per key or position that holds a subject.
     /// Thread-safe: Lock on private readonly List ensures thread-safe access.
     /// Performance: Returns cached ImmutableArray - only rebuilds when invalidated.
     /// </summary>
@@ -373,44 +382,75 @@ public class RegisteredSubjectProperty
         lock (_children)
         {
             _children.Clear();
+            _repeatedChildCount = 0;
             _childrenCache = default;
         }
     }
 
-    internal void AddChild(SubjectPropertyChild child)
+    // Adds an entry per place, the index first. No Contains check needed: the lifecycle attaches a subject to a property
+    // once, with all of its places.
+    internal void AddChild(IInterceptorSubject subject, object? index, ImmutableArray<object?> additionalIndices)
     {
         lock (_children)
         {
-            // No Contains check needed - LifecycleInterceptor attaches a subject to a property once.
-            _children.Insert(GetInsertPosition(child.Index), child);
-            _childrenCache = default;
-        }
-    }
-
-    internal void RemoveChild(IInterceptorSubject subject)
-    {
-        lock (_children)
-        {
-            var position = IndexOfChild(subject);
-            if (position >= 0)
+            _children.Insert(GetInsertPosition(index), new SubjectPropertyChild { Subject = subject, Index = index });
+            foreach (var additionalIndex in additionalIndices)
             {
-                _children.RemoveAt(position);
+                _children.Insert(GetInsertPosition(additionalIndex), new SubjectPropertyChild { Subject = subject, Index = additionalIndex });
+            }
+
+            _repeatedChildCount += additionalIndices.Length;
+            _childrenCache = default;
+        }
+    }
+
+    // Removes the last count entries of the subject, which are all of them: the caller takes the count from the
+    // parent entries it removed. Both stores are written only by SubjectRegistry, in the same handler call under its
+    // _knownSubjects lock, so the subject has as many child entries here as parent entries for this property.
+    internal void RemoveChild(IInterceptorSubject subject, int count)
+    {
+        lock (_children)
+        {
+            // Searches backwards, as IndexOfChild does.
+            var removed = 0;
+            for (var i = _children.Count - 1; i >= 0 && removed < count; i--)
+            {
+                if (_children[i].Subject == subject)
+                {
+                    _children.RemoveAt(i);
+                    removed++;
+                }
+            }
+
+            Debug.Assert(removed == count, "The child entries of the subject must match its parent entries for the property.");
+
+            if (removed > 0)
+            {
+                _repeatedChildCount -= removed - 1;
                 _childrenCache = default;
             }
         }
     }
 
     /// <summary>
-    /// Gives moved children and their parent entries the key or position they have in the value now.
+    /// Gives reported children and their parent entries the keys or positions they have in the value now.
     /// Must be called inside the registry's _knownSubjects lock, which every change to children and
     /// parent entries takes first.
     /// </summary>
-    /// <param name="children">The children that moved, with their new key or position.</param>
+    /// <param name="children">The reported children with every key or position they have now, each subject's as one consecutive run.</param>
     /// <param name="knownSubjects">The registered subjects, to find the parent entries of the children.</param>
     internal void UpdateChildIndices(ReadOnlySpan<SubjectChild> children, Dictionary<IInterceptorSubject, RegisteredSubject> knownSubjects)
     {
         lock (_children)
         {
+            // The update in place moves one entry per reported subject, so it serves any change that reports no subject
+            // with more than one place or entry, whatever other subjects repeat.
+            if (HasRepeatedSubject(children) || (_repeatedChildCount > 0 && HasChildWithSeveralEntries(children)))
+            {
+                ReplaceChildPlaces(children, knownSubjects);
+                return;
+            }
+
             // A lookup pays off from the second child on, since a moved collection item usually
             // shifts the rest.
             Dictionary<IInterceptorSubject, int>? positions = null;
@@ -440,6 +480,111 @@ public class RegisteredSubjectProperty
             // throws; a throw would leave entries of this property in the thread-static map for the next one.
             positions?.Clear();
         }
+    }
+
+    private static bool HasRepeatedSubject(ReadOnlySpan<SubjectChild> children)
+    {
+        foreach (var group in children.GroupBySubject())
+        {
+            if (group.Children.Length > 1)
+                return true;
+        }
+
+        return false;
+    }
+
+    // Whether a reported subject has more than one entry. Must be called under the _children lock.
+    private bool HasChildWithSeveralEntries(ReadOnlySpan<SubjectChild> children)
+    {
+        if (children.Length == 1)
+        {
+            var subject = children[0].Subject;
+            var count = 0;
+            foreach (var child in _children)
+            {
+                if (child.Subject == subject && ++count > 1)
+                    return true;
+            }
+
+            return false;
+        }
+
+        var counts = _reusableChildPositions ??= new Dictionary<IInterceptorSubject, int>(ReferenceEqualityComparer.Instance);
+        foreach (var child in children)
+        {
+            counts[child.Subject] = 0;
+        }
+
+        var hasSeveral = false;
+        foreach (var child in _children)
+        {
+            ref var count = ref CollectionsMarshal.GetValueRefOrNullRef(counts, child.Subject);
+            if (!Unsafe.IsNullRef(ref count) && ++count > 1)
+            {
+                hasSeveral = true;
+                break;
+            }
+        }
+
+        // Release references so subjects can be GC'd on idle threads, and leave the map empty for the update. Nothing
+        // above runs user code or throws.
+        counts.Clear();
+        return hasSeveral;
+    }
+
+    // Replaces the entries of each reported subject with its run of places. Must be called under the _children lock.
+    private void ReplaceChildPlaces(ReadOnlySpan<SubjectChild> children, Dictionary<IInterceptorSubject, RegisteredSubject> knownSubjects)
+    {
+        // The first place of each reported subject, where its run starts.
+        var starts = _reusableChildPositions ??= new Dictionary<IInterceptorSubject, int>(ReferenceEqualityComparer.Instance);
+        var groupStart = 0;
+        foreach (var group in children.GroupBySubject())
+        {
+            starts.TryAdd(group.Subject, groupStart);
+            groupStart += group.Children.Length;
+        }
+
+        // A run takes the place of its subject's first entry, which keeps dictionary children in attach order;
+        // collection children are sorted by position afterwards.
+        var replaced = _reusableChildren ??= [];
+        foreach (var child in _children)
+        {
+            ref var start = ref CollectionsMarshal.GetValueRefOrNullRef(starts, child.Subject);
+            if (Unsafe.IsNullRef(ref start))
+            {
+                replaced.Add(child);
+                continue;
+            }
+
+            // A later entry of a subject whose run is already in.
+            if (start < 0)
+                continue;
+
+            var end = start + 1;
+            while (end < children.Length && ReferenceEquals(children[end].Subject, child.Subject))
+            {
+                end++;
+            }
+
+            var places = children[start..end];
+            foreach (var place in places)
+            {
+                replaced.Add(new SubjectPropertyChild { Subject = place.Subject, Index = place.Index });
+            }
+
+            knownSubjects.GetValueOrDefault(child.Subject)?.ReplaceParentIndices(this, places);
+            start = -1;
+        }
+
+        _repeatedChildCount += replaced.Count - _children.Count;
+        _children.Clear();
+        _children.AddRange(replaced);
+        SortByPosition();
+        _childrenCache = default;
+
+        // Release references so subjects can be GC'd on idle threads. Nothing above runs user code or throws.
+        replaced.Clear();
+        starts.Clear();
     }
 
     // Searches backwards because a reconciled write detaches in reverse order, which finds each

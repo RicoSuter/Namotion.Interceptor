@@ -162,8 +162,16 @@ internal sealed class McpSubjectReadability
             return false;
         }
 
+        // The entries of a property are adjacent, and its path does not depend on the key or position.
+        RegisteredSubjectProperty? previousProperty = null;
         foreach (var parent in subject.Parents)
         {
+            if (parent.Property == previousProperty)
+            {
+                continue;
+            }
+
+            previousProperty = parent.Property;
             if (parent.Property.HasPath(_toolPathProvider!, _rootSubject!))
             {
                 return true;

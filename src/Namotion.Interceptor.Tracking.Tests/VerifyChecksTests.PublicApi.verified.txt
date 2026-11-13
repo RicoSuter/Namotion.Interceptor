@@ -161,7 +161,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
     }
     public interface IChildIndexHandler
     {
-        void HandleChildIndexChanges(Namotion.Interceptor.PropertyReference property, System.ReadOnlySpan<Namotion.Interceptor.Tracking.Lifecycle.SubjectChild> children);
+        void ReplaceChildIndices(Namotion.Interceptor.PropertyReference property, System.ReadOnlySpan<Namotion.Interceptor.Tracking.Lifecycle.SubjectChild> children);
     }
     public interface ILifecycleHandler
     {
@@ -195,8 +195,24 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
         public object? Index { get; init; }
         public Namotion.Interceptor.IInterceptorSubject Subject { get; init; }
     }
+    public static class SubjectChildExtensions
+    {
+        public static Namotion.Interceptor.Tracking.Lifecycle.SubjectChildGroupEnumerator GroupBySubject(this System.ReadOnlySpan<Namotion.Interceptor.Tracking.Lifecycle.SubjectChild> children) { }
+    }
+    public readonly ref struct SubjectChildGroup
+    {
+        public System.ReadOnlySpan<Namotion.Interceptor.Tracking.Lifecycle.SubjectChild> Children { get; }
+        public Namotion.Interceptor.IInterceptorSubject Subject { get; }
+    }
+    public ref struct SubjectChildGroupEnumerator
+    {
+        public Namotion.Interceptor.Tracking.Lifecycle.SubjectChildGroup Current { get; }
+        public Namotion.Interceptor.Tracking.Lifecycle.SubjectChildGroupEnumerator GetEnumerator() { }
+        public bool MoveNext() { }
+    }
     public readonly struct SubjectLifecycleChange
     {
+        public System.Collections.Immutable.ImmutableArray<object?> AdditionalIndices { get; init; }
         public object? Index { get; init; }
         public bool IsContextAttach { get; init; }
         public bool IsContextDetach { get; init; }
@@ -224,6 +240,7 @@ namespace Namotion.Interceptor.Tracking.Parent
     }
     public static class ParentsHandlerExtensions
     {
+        public static int CountProperties(this System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Tracking.Parent.SubjectParent> parents) { }
         public static System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Tracking.Parent.SubjectParent> GetParents(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static TRoot? TryGetFirstParent<TRoot>(this Namotion.Interceptor.IInterceptorSubject subject)
             where TRoot :  class { }

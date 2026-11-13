@@ -178,8 +178,15 @@ public static class SubjectRegistryExtensions
 
         while (queue.TryDequeue(out var current))
         {
+            var previousProperty = default(PropertyReference?);
             foreach (var parent in current.GetParents())
             {
+                // The entries of a property are adjacent, one per key or position, and all lead to the same subject.
+                if (parent.Property == previousProperty)
+                    continue;
+
+                previousProperty = parent.Property;
+
                 // Only [Configuration] properties are serialized, so a parent beyond any other property does not
                 // persist the subject.
                 if (parent.Property.TryGetRegisteredProperty()?.IsConfigurationProperty() != true)
