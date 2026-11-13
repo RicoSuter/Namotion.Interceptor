@@ -2,8 +2,8 @@ using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Interceptor.Tracking.Tests.Models;
 
-// Used by DerivedPropertyTypeGateTests only: a type's gate is raised once per process, so each test needs
-// types that no other test tracks.
+// Used by DerivedPropertyTypeGateTests only. A type's gate stays raised for the process once a derived property
+// read a subject of the type, so no test may let a derived property read UntrackedGateSubject.
 
 [InterceptorSubject]
 public partial class UntrackedGateSubject

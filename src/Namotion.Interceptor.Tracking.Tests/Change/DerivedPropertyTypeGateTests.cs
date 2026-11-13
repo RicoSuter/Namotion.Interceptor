@@ -27,10 +27,11 @@ public class DerivedPropertyTypeGateTests
     [Fact]
     public void WhenPropertyOfTypeIsReadByDerivedProperty_ThenGateIsRaisedAndLaterWritesArePublished()
     {
-        // Arrange
+        // Arrange: the gate stays raised for the process, so a rerun in the same process finds it raised already.
+        // The order of the raise against a concurrent write is covered by the proof in
+        // docs/design/tracking-derived-properties.md, not by a test.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
         var source = new TrackedGateSource { Value = "a" };
-        var isRaisedBeforeFirstRead = DerivedPropertyTypeGate.Of(source).IsRaised;
         var reader = new TrackedGateReader { Source = source };
         var changes = new List<SubjectPropertyChange>();
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
@@ -40,7 +41,6 @@ public class DerivedPropertyTypeGateTests
         source.Value = "b";
 
         // Assert
-        Assert.False(isRaisedBeforeFirstRead);
         Assert.True(DerivedPropertyTypeGate.Of(source).IsRaised);
         var change = Assert.Single(changes, c => c.Property.Name == nameof(TrackedGateReader.SourceValue));
         Assert.Equal("b", change.GetNewValue<string?>());
