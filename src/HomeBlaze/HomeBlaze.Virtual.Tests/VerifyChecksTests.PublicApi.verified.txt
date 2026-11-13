@@ -44,6 +44,13 @@ namespace HomeBlaze.Virtual
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public HomeBlaze.Virtual.VirtualState? State { get; init; }
     }
+    public sealed class VirtualPropertyAwaiter : Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
+    {
+        public VirtualPropertyAwaiter(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
+        public void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
+        public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }
+    }
     public sealed class VirtualPropertyIssue : System.IEquatable<HomeBlaze.Virtual.VirtualPropertyIssue>
     {
         public VirtualPropertyIssue(string Path, string Message) { }
