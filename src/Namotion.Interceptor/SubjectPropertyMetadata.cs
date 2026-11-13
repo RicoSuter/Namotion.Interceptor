@@ -57,6 +57,27 @@ public readonly record struct SubjectPropertyMetadata
     /// </summary>
     public PropertyInfo? PropertyInfo { get; }
 
+    // A Func<IInterceptorSubject, TProperty> reading the backing store without interception. The terminal
+    // write invokes it while holding the subject's SyncRoot, so it must not take locks or run interceptors.
+    internal Delegate? ReadStoredValue { get; }
+
+    /// <summary>
+    /// Returns a copy that carries a plain read of the property's backing store. A committed write through
+    /// the interceptor chain then reports the value the store replaced, read with it under the subject lock
+    /// immediately before the store, instead of the value the caller passed. Generated partial properties
+    /// carry one; registry and dynamic properties do not.
+    /// </summary>
+    /// <remarks>
+    /// The reader runs under the subject's SyncRoot, so it must read the store directly, without locks or
+    /// interception. It applies to a write whose <c>TProperty</c> the reader is assignable to: the declared
+    /// type, or <c>object</c> for a reference-type property. A boxed write of a value-type property and a
+    /// derived recalculation keep the caller's value.
+    /// </remarks>
+    public SubjectPropertyMetadata WithStoredValueReader<TProperty>(Func<IInterceptorSubject, TProperty> readStoredValue)
+    {
+        return new SubjectPropertyMetadata(this, readStoredValue);
+    }
+
     public SubjectPropertyMetadata(
         PropertyInfo propertyInfo, 
         Func<IInterceptorSubject, object?>? getValue, 
@@ -118,5 +139,20 @@ public readonly record struct SubjectPropertyMetadata
             PropertyInfo is null ||
             PropertyInfo.GetMethod?.IsPublic == true ||
             PropertyInfo.SetMethod?.IsPublic == true;
+    }
+
+    private SubjectPropertyMetadata(in SubjectPropertyMetadata source, Delegate readStoredValue)
+    {
+        Name = source.Name;
+        Type = source.Type;
+        Attributes = source.Attributes;
+        GetValue = source.GetValue;
+        SetValue = source.SetValue;
+        IsIntercepted = source.IsIntercepted;
+        IsDynamic = source.IsDynamic;
+        IsDerived = source.IsDerived;
+        PropertyInfo = source.PropertyInfo;
+        IsPublic = source.IsPublic;
+        ReadStoredValue = readStoredValue;
     }
 }
