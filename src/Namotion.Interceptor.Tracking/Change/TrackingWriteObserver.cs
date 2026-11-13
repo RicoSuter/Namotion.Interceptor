@@ -6,7 +6,8 @@ namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
 /// Runs once per write after the whole interceptor chain: requests the recalculation of every derived
-/// property that depends on the written property.
+/// property that depends on the written property. A request raised while the thread holds a lifecycle lock is queued
+/// (<see cref="PostLockQueue"/>), and the anchor write of queued work drains it here.
 /// </summary>
 internal sealed class TrackingWriteObserver : IPropertyWriteObserver
 {
@@ -34,9 +35,40 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
 
     public void OnPropertyWritten(in PropertyWriteObservation write)
     {
+        // Write depths start at 1, so no write matches when nothing is queued for an anchor write.
+        if (write.Depth == PostLockQueue.InnermostAnchorDepth)
+        {
+            CompleteAnchorWrite(write);
+            return;
+        }
+
+        var data = TryGetWrittenData(write);
+        if (data is not null)
+        {
+            RequestRecalculations(write, data, segment: null);
+        }
+    }
+
+    // The anchor write was announced in its chain; its own requests join the work queued under the lock, which runs
+    // now: the queued deliveries first, then the recalculations.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void CompleteAnchorWrite(in PropertyWriteObservation write)
+    {
+        var segment = PostLockQueue.TakeAnchorSegment();
+        var data = TryGetWrittenData(write);
+        if (data is not null)
+        {
+            RequestRecalculations(write, data, segment);
+        }
+
+        PostLockQueue.CompleteAnchorWrite(segment, write.RawTimestamp, write.HasFailed);
+    }
+
+    private static DerivedPropertyData? TryGetWrittenData(in PropertyWriteObservation write)
+    {
         if (!write.IsWritten)
         {
-            return;
+            return null;
         }
 
         // W2: the value landed before the gate and the data are read, so an evaluation that creates the data
@@ -47,20 +79,18 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
         // The gate is raised before the first data of the subject's type is stored: not raised means no data.
         if (!DerivedPropertyTypeGate.Of(property.Subject).IsRaised)
         {
-            return;
+            return null;
         }
 
-        var data = write.IsDerivedRecalculation && _publication is { } publication && publication.Property == property
+        return write.IsDerivedRecalculation && _publication is { } publication && publication.Property == property
             ? publication
             : property.TryGetDerivedPropertyData();
-        if (data is not null)
-        {
-            RequestRecalculations(write, property, data);
-        }
     }
 
-    private static void RequestRecalculations(in PropertyWriteObservation write, PropertyReference property, DerivedPropertyData data)
+    private static void RequestRecalculations(in PropertyWriteObservation write, DerivedPropertyData data, PostLockQueue.Segment? segment)
     {
+        var property = write.Property;
+
         // W4, then W5: the used-by set is read after the version moved.
         var newVersion = Interlocked.Increment(ref data.Version);
         if (DerivedPropertyRecorder.IsEvaluatingOnThisThread)
@@ -69,17 +99,37 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
             DerivedPropertyRecorder.Current.OnOwnWrite(property, newVersion);
         }
 
+        var isSettableDerived = !write.IsDerivedRecalculation &&
+                                Volatile.Read(ref data.IsDerived) &&
+                                property.Metadata.SetValue is not null;
+        var dependents = data.GetUsedByProperties();
+        if (!isSettableDerived && dependents.IsEmpty)
+        {
+            return;
+        }
+
+        // A write under a lifecycle lock queues its requests; they take the anchor's timestamp at the drain.
+        segment ??= PostLockQueue.TryGetOpenSegment();
+        if (segment is not null)
+        {
+            Enqueue(segment, property, isSettableDerived, dependents);
+            return;
+        }
+
+        RequestNow(write, isSettableDerived, dependents);
+    }
+
+    private static void RequestNow(in PropertyWriteObservation write, bool isSettableDerived, ReadOnlySpan<PropertyReference> dependents)
+    {
         // Every dependent is requested, also after one threw (an observer of its change). A request that throws ends
         // this loop and RequestAfterException requests the remaining dependents, so the loop runs without a handler
         // per request.
-        var dependents = data.GetUsedByProperties();
+        var property = write.Property;
         var rawTimestamp = write.RawTimestamp;
         var next = 0;
         try
         {
-            if (!write.IsDerivedRecalculation &&
-                Volatile.Read(ref data.IsDerived) &&
-                property.Metadata.SetValue is not null)
+            if (isSettableDerived)
             {
                 DerivedPropertyOwnership.RequestRecalculation(property, ResolveTimestamp(ref rawTimestamp));
             }
@@ -96,6 +146,23 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
         catch (Exception exception)
         {
             RequestAfterException(write, dependents[next..], rawTimestamp, exception);
+        }
+    }
+
+    private static void Enqueue(
+        PostLockQueue.Segment segment, PropertyReference property, bool isSettableDerived, ReadOnlySpan<PropertyReference> dependents)
+    {
+        if (isSettableDerived)
+        {
+            PostLockQueue.AddRequest(segment, property, 0);
+        }
+
+        foreach (var dependent in dependents)
+        {
+            if (dependent != property)
+            {
+                PostLockQueue.AddRequest(segment, dependent, 0);
+            }
         }
     }
 
