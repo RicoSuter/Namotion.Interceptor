@@ -48,7 +48,9 @@ internal static class PostLockQueue
         /// <summary>The write depth of the anchor write, or 0 for a segment that drains at a lock release.</summary>
         public int AnchorDepth;
 
-        public readonly List<Action> Deliveries = [];
+        // A null entry is a slot reserved for a delivery that was not filled (the write did not land, or had no
+        // consumers); the drain skips it.
+        public readonly List<Action?> Deliveries = [];
 
         public readonly List<QueuedRequest> Requests = [];
 
@@ -156,16 +158,40 @@ internal static class PostLockQueue
         return true;
     }
 
-    /// <summary>Queues a change delivery when the thread holds a lifecycle lock.</summary>
-    internal static bool TryEnqueueDelivery(Action delivery)
+    /// <summary>The delivery slot of a change written while the thread holds no lifecycle lock: it is delivered at once.</summary>
+    internal const int ImmediateDelivery = -2;
+
+    /// <summary>The delivery slot of a change written under a lifecycle lock without a reserved slot.</summary>
+    internal const int UnreservedDelivery = -1;
+
+    /// <summary>The delivery slot of a change that reserved none: queued when the thread holds a lifecycle lock.</summary>
+    internal static int DeliverySlot => _heldLocks == 0 ? ImmediateDelivery : UnreservedDelivery;
+
+    /// <summary>
+    /// Reserves the place of a delivery in arrival order, for a write that the thread makes while it holds a lifecycle
+    /// lock, before the write's chain runs. Returns the slot to pass to <see cref="EnqueueDelivery"/>.
+    /// </summary>
+    internal static int ReserveDelivery()
     {
-        if (_heldLocks == 0)
+        var deliveries = TryGetOpenSegment()!.Deliveries;
+        deliveries.Add(null);
+        return deliveries.Count - 1;
+    }
+
+    /// <summary>
+    /// Queues a change delivery while the thread holds a lifecycle lock: in the slot reserved for it, or, for
+    /// <see cref="UnreservedDelivery"/>, after the deliveries queued so far.
+    /// </summary>
+    internal static void EnqueueDelivery(int slot, Action delivery)
+    {
+        var deliveries = TryGetOpenSegment()!.Deliveries;
+        if (slot == UnreservedDelivery)
         {
-            return false;
+            deliveries.Add(delivery);
+            return;
         }
 
-        TryGetOpenSegment()!.Deliveries.Add(delivery);
-        return true;
+        deliveries[slot] = delivery;
     }
 
     /// <summary>Adds a request to a segment; a property already queued in it keeps one entry with the newer timestamp.</summary>
@@ -303,13 +329,13 @@ internal static class PostLockQueue
         DerivedPropertyOwnership.TraceDropped("queued work threw after a lifecycle operation", firstException.SourceException);
     }
 
-    private static void RunDeliveries(List<Action> deliveries, ref ExceptionDispatchInfo? firstException)
+    private static void RunDeliveries(List<Action?> deliveries, ref ExceptionDispatchInfo? firstException)
     {
         for (var i = 0; i < deliveries.Count; i++)
         {
             try
             {
-                deliveries[i]();
+                deliveries[i]?.Invoke();
             }
             catch (Exception exception)
             {
