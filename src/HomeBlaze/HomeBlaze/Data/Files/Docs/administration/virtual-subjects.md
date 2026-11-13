@@ -13,7 +13,7 @@ Create a subject of the type **Virtual subject**, add a property, and give it an
 
 ## The editor
 
-A virtual subject is edited in the subject edit dialog, the pencil on the subject panel in the Browser. The dialog shows a tree of the properties, nested subjects and attributes on the left and the details of the selected entry on the right. An entry is a **Binding** or an **Expression**. For a binding, a path picker chooses the target, and **Use type and unit** takes over the data type and unit of the target once. The state fields (title, unit, position and so on) make the property state. Entries with issues are marked, and **Save** is disabled while there are issues.
+A virtual subject is edited in the subject edit dialog, the pencil on the subject panel in the Browser. The dialog shows a tree of the properties, nested subjects and attributes on the left and the details of the selected entry on the right. The first node of the tree is the subject itself, and selecting it adds new top-level entries. An entry is a **Binding** or an **Expression**. For a binding, a path picker chooses the target, and **Use type and unit** takes over the data type and unit of the target once, makes the entry state, and takes the title of the target when the entry has none. The **State** checkbox makes a property state, and it shows the state fields (title, unit, position and so on). Entries with issues are marked, and **Save** is disabled while there are issues.
 
 ## The configuration
 
@@ -67,7 +67,7 @@ The properties of this subject are `Solar/Pv/Power`, `Solar/Pv/Share` and the at
 
 ## Paths
 
-Expressions use the syntax of [page expressions](pages.md#live-expressions) without pipes and variables. A path without `/` names a property of the same subject, such as `Power` in the example. `./` and a path with `/` are relative to that subject, `../` goes up one level, and a leading `/` starts at the root. A secret and a property excluded from expressions cannot be read. A property that appears later, such as one of a device that loads later or one added at run time, is picked up automatically.
+Expressions use the syntax of [page expressions](pages.md#live-expressions) without pipes and variables. A path without `/` names a property of the same subject, such as `Power` in the example. `./` and a path with `/` are relative to that subject, `../` goes up one level, and a leading `/` starts at the root. After a comparison operator a bare word is text, as in page expressions, so compare with a property of the same subject as `./Limit`, and put spaces around `/` when dividing, as in `Power / Limit`; see [Conditions](pages.md#conditions) and the [expression reference](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/expressions.md). A secret and a property excluded from expressions cannot be read. A property that appears later, such as one of a device that loads later or one added at run time, is picked up automatically.
 
 ## State and helpers
 
@@ -86,7 +86,7 @@ A write to a binding is rejected when the target is missing, has no public sette
 ## Limitations
 
 - **A change of the properties creates the subject again.** The registry cannot remove a property yet, so a saved change of `properties` replaces the subject with a new instance at the same path. Pages, automations and history follow it by its path.
-- **A binding does not take over the attributes of its target.** Its `Minimum`, `Maximum` and `IsEnabled`, and its title and unit, are not copied. Declare the attributes and the state you need. The editor offers to take over the data type and unit once, when you pick the target.
+- **A binding does not take over the attributes of its target.** Its `Minimum`, `Maximum` and `IsEnabled`, and its title and unit, are not copied. Declare the attributes and the state you need. The editor offers to take over the data type and unit once, when you pick the target; see [The editor](#the-editor).
 - **Bindings reach scalar values only.** A binding cannot target a property that holds subjects. It writes only to a property that has a public setter.
 - **No time in expressions.** Expressions have no variables such as `now`, so a value based on the current time would not be calculated again.
 - **A change high in the tree recalculates more.** A virtual property is calculated again when a subject on the way of one of its paths is added, removed or replaced. A change near the root, such as a file added at the top level, therefore recalculates every virtual property whose paths pass through the root.
