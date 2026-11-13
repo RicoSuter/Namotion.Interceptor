@@ -8,6 +8,16 @@ namespace Namotion.Interceptor.OpcUa.Tests.Server;
 public class OpcUaServerConfigurationTests
 {
     [Fact]
+    public void WhenTheServerConfigurationIsCreated_ThenItKeepsItsCertificateStore()
+    {
+        // Act
+        var configuration = new OpcUaServerConfiguration();
+
+        // Assert
+        Assert.False(configuration.CleanCertificateStore);
+    }
+
+    [Fact]
     public async Task WhenAnApplicationUriIsSet_ThenTheApplicationUsesIt()
     {
         // Arrange

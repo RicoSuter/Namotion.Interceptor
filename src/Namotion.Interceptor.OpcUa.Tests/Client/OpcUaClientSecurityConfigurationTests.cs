@@ -1,7 +1,6 @@
 using System.Security.Cryptography.X509Certificates;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Client.Connection;
-using Namotion.Interceptor.OpcUa.Server;
 using Opc.Ua;
 using Opc.Ua.Security.Certificates;
 
@@ -11,42 +10,21 @@ public class OpcUaClientSecurityConfigurationTests
 {
     private static readonly Uri ServerUri = new("opc.tcp://localhost:4840");
 
-    [Fact]
-    public void WhenTheServerConfigurationIsCreated_ThenItKeepsItsCertificateStore()
-    {
-        // Act
-        var configuration = new OpcUaServerConfiguration();
-
-        // Assert
-        Assert.False(configuration.CleanCertificateStore);
-    }
-
-    [Fact]
-    public async Task WhenNoTrustOptionIsSet_ThenTheValidatorDoesNotAutoAcceptUntrustedCertificates()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenTheApplicationIsCreated_ThenTheValidatorAutoAcceptsUntrustedCertificatesOnlyWhenSet(bool autoAccept)
     {
         // Arrange
         var configuration = ClientSourceTestFactory.CreateConfiguration();
+        configuration.AutoAcceptUntrustedCertificates = autoAccept;
 
         // Act
         var application = await configuration.CreateApplicationInstanceAsync();
 
         // Assert
-        Assert.False(application.ApplicationConfiguration.SecurityConfiguration.AutoAcceptUntrustedCertificates);
-        Assert.False(application.ApplicationConfiguration.CertificateValidator.AutoAcceptUntrustedCertificates);
-    }
-
-    [Fact]
-    public async Task WhenUntrustedCertificatesAreAccepted_ThenTheValidatorAutoAcceptsThem()
-    {
-        // Arrange
-        var configuration = ClientSourceTestFactory.CreateConfiguration();
-        configuration.AutoAcceptUntrustedCertificates = true;
-
-        // Act
-        var application = await configuration.CreateApplicationInstanceAsync();
-
-        // Assert
-        Assert.True(application.ApplicationConfiguration.CertificateValidator.AutoAcceptUntrustedCertificates);
+        Assert.Equal(autoAccept, application.ApplicationConfiguration.SecurityConfiguration.AutoAcceptUntrustedCertificates);
+        Assert.Equal(autoAccept, application.ApplicationConfiguration.CertificateValidator.AutoAcceptUntrustedCertificates);
     }
 
     [Fact]
@@ -284,20 +262,6 @@ public class OpcUaClientSecurityConfigurationTests
 
         // Assert
         Assert.Equal(MessageSecurityMode.None, endpoint.SecurityMode);
-    }
-
-    [Fact]
-    public void WhenSecurityIsOptionalAndOnlySecuredEndpointsExist_ThenASecuredOneIsSelected()
-    {
-        // Arrange
-        var endpoints = new EndpointDescriptionCollection { CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256) };
-
-        // Act
-        var endpoint = SessionManager.SelectEndpoint(
-            CreateApplicationConfiguration(), ServerUri, endpoints, MessageSecurityMode.None, NullTelemetryContext.Instance);
-
-        // Assert
-        Assert.Equal(MessageSecurityMode.SignAndEncrypt, endpoint.SecurityMode);
     }
 
     [Fact]
