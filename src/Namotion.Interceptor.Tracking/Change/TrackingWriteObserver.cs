@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Change;
@@ -67,27 +68,56 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
             DerivedPropertyRecorder.Current.OnOwnWrite(property, newVersion);
         }
 
-        var rawTimestamp = write.RawTimestamp;
-        try
-        {
-            if (!write.IsDerivedRecalculation &&
-                Volatile.Read(ref data.IsDerived) &&
-                property.Metadata.SetValue is not null)
-            {
-                DerivedPropertyOwnership.RequestRecalculation(property, ResolveTimestamp(ref rawTimestamp));
-            }
+        var isSettableDerived = !write.IsDerivedRecalculation &&
+                                Volatile.Read(ref data.IsDerived) &&
+                                property.Metadata.SetValue is not null;
+        RequestNow(write, isSettableDerived, data.GetUsedByProperties());
+    }
 
-            foreach (var dependent in data.GetUsedByProperties())
+    // Every dependent is requested, also after one threw (an observer of its change); the first exception is
+    // rethrown afterwards, unless the write itself failed: its own exception is in flight and wins, and the
+    // dependent's exception is traced.
+    private static void RequestNow(in PropertyWriteObservation write, bool isSettableDerived, ReadOnlySpan<PropertyReference> dependents)
+    {
+        var property = write.Property;
+        var rawTimestamp = write.RawTimestamp;
+        ExceptionDispatchInfo? firstException = null;
+        if (isSettableDerived)
+        {
+            Request(property, ref rawTimestamp, ref firstException);
+        }
+
+        foreach (var dependent in dependents)
+        {
+            if (dependent != property)
             {
-                if (dependent != property)
-                {
-                    DerivedPropertyOwnership.RequestRecalculation(dependent, ResolveTimestamp(ref rawTimestamp));
-                }
+                Request(dependent, ref rawTimestamp, ref firstException);
             }
         }
-        catch (Exception) when (write.HasFailed)
+
+        if (firstException is null)
         {
-            // The write's own exception is in flight and wins; observers that also threw are dropped.
+            return;
+        }
+
+        if (write.HasFailed)
+        {
+            DerivedPropertyOwnership.TraceDropped("a dependent of a failed write threw", firstException.SourceException);
+            return;
+        }
+
+        firstException.Throw();
+    }
+
+    private static void Request(PropertyReference property, ref long rawTimestamp, ref ExceptionDispatchInfo? firstException)
+    {
+        try
+        {
+            DerivedPropertyOwnership.RequestRecalculation(property, ResolveTimestamp(ref rawTimestamp));
+        }
+        catch (Exception exception)
+        {
+            firstException ??= ExceptionDispatchInfo.Capture(exception);
         }
     }
 
