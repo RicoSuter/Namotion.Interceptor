@@ -10,9 +10,10 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// A write requests the recalculation of its dependents once, after the whole write chain.
 /// </summary>
 /// <remarks>
-/// Deadlock safety: locks are acquired on per-property <see cref="DerivedPropertyData"/> objects.
-/// Nesting follows derived → dependency direction (DAG), so cycles are impossible.
-/// The used-by collection's leaf lock acquires nothing further.
+/// Deadlock safety: a getter and a change publication never run under the per-property lock of
+/// <see cref="DerivedPropertyData"/>, and no other property's lock is taken inside it; only the used-by
+/// collection's leaf lock is. One owner at a time evaluates and publishes a derived property; a request
+/// that finds it owned is left to that owner.
 /// See docs/design/tracking-derived-properties.md for full concurrency analysis.
 /// </remarks>
 public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
@@ -41,43 +42,72 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
             return;
         }
 
-        Attach(change.Property.GetDerivedPropertyData(), change.Property);
-    }
-
-    private static void Attach(DerivedPropertyData data, in PropertyReference property)
-    {
+        var property = change.Property;
+        var data = property.GetDerivedPropertyData();
+        long attachToken;
+        bool ownsData;
         lock (data)
         {
-            // Signal any in-progress recalculation to re-evaluate after we change state.
-            if (data.IsRecalculating)
+            // Attached through another graph already: it has its value and its links.
+            if (data.IsAttached)
             {
-                data.RecalculationNeeded = true;
+                return;
             }
 
             data.IsAttached = true;
             Volatile.Write(ref data.IsDerived, true);
-            try
+            data.HasValue = false;
+            data.IsFaulted = false;
+            attachToken = data.AttachToken = DerivedPropertyData.NewToken();
+            ownsData = data.OwnerToken == 0;
+            if (ownsData)
             {
-                data.LastKnownValue = EvaluateAndStabilize(data, property, callerHoldsLock: true);
-                property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
+                // Requests on a detached property are dropped, so a flag left from before the detach is stale.
+                data.OwnerToken = attachToken;
+                data.RecalculationNeeded = false;
+                data.PendingRawTimestamp = 0;
             }
-            catch (Exception)
+            else
             {
-                // Getter threw. The value will be computed on the next dependency write.
+                // A recalculation from before a detach is in flight: it hands off at its next lock.
+                data.RecalculationNeeded = true;
             }
         }
+
+        EvaluateAtAttach(data, property, attachToken, ownsData);
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A detach issued by a lifecycle interceptor is ignored: the subject may still be attached to
+    /// another graph, and the lifecycle detaches the derived properties itself once the subject left
+    /// its last graph (<see cref="DetachDerivedProperties"/>). A direct call always detaches, except one
+    /// made by a lifecycle handler while the lifecycle detaches that subject's properties.
+    /// </remarks>
     public void DetachProperty(SubjectPropertyLifecycleChange change)
     {
-        // A source keeps its data and links: only the derived property changes its links.
-        if (!change.Property.Metadata.IsDerived)
+        if (!SubjectLifecycleAttachments.IsLifecycleDetach)
+        {
+            DetachDerivedProperty(change.Property);
+        }
+    }
+
+    /// <summary>Detaches every derived property of a subject that left its last lifecycle interceptor.</summary>
+    internal static void DetachDerivedProperties(IInterceptorSubject subject)
+    {
+        foreach (var name in subject.Properties.Keys)
+        {
+            DetachDerivedProperty(new PropertyReference(subject, name), onlyIfSubjectIsDetached: true);
+        }
+    }
+
+    private static void DetachDerivedProperty(in PropertyReference property, bool onlyIfSubjectIsDetached = false)
+    {
+        if (!property.Metadata.IsDerived)
         {
             return;
         }
 
-        var property = change.Property;
         var data = property.TryGetDerivedPropertyData();
         if (data is null)
         {
@@ -86,205 +116,385 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
 
         lock (data)
         {
-            data.RemoveAllLinks(property);
+            // Decided under the lock that AttachProperty takes as well: an interceptor that attached the
+            // subject after the caller's check keeps the property attached.
+            if (!data.IsAttached || (onlyIfSubjectIsDetached && SubjectLifecycleAttachments.IsAttached(property.Subject)))
+            {
+                return;
+            }
+
             data.IsAttached = false;
+            data.AttachToken = 0;
+            data.RemoveAllLinks(property);
             data.LastKnownValue = null;
+            data.HasValue = false;
+            data.IsFaulted = false;
 
             // Fails the stale-publication guard of a publication already past its commit, also for a null value.
             data.RecalculationSequence++;
-
-            // Signal an in-flight recalculation, which discards its result at its next lock.
-            if (data.IsRecalculating)
-            {
-                data.RecalculationNeeded = true;
-            }
         }
     }
 
     /// <summary>
-    /// Recalculates a derived property after a write to one of its dependencies (or to the property itself, for a
-    /// derived property with a setter). A <paramref name="rawTimestamp"/> of 0 resolves the current changed timestamp.
+    /// Requests the recalculation of a derived property after a write to one of its dependencies (or to the
+    /// property itself, for a derived property with a setter). A <paramref name="rawTimestamp"/> of 0 resolves
+    /// the current changed timestamp. The request is dropped for a detached property, and left to the current
+    /// owner or attach when there is one; otherwise this call owns the property until no request is pending.
     /// </summary>
-    internal static void RequestRecalculation(PropertyReference property, long rawTimestamp)
+    /// <param name="property">The derived property.</param>
+    /// <param name="rawTimestamp">The raw changed timestamp of the trigger.</param>
+    /// <param name="isHandOver">The request carries its own trigger timestamp (handed over by an owner or an attach).</param>
+    internal static void RequestRecalculation(PropertyReference property, long rawTimestamp, bool isHandOver = false)
     {
         if (rawTimestamp == 0)
         {
+            // A write without a context or a structure change: the time of the request is the trigger's.
             rawTimestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
         }
 
-        var storageTimestamp = rawTimestamp > 0 ? rawTimestamp : 0L;
-        RecalculateDerivedProperty(ref property, storageTimestamp, rawTimestamp);
-    }
-
-    /// <summary>
-    /// Recalculates a derived property: re-evaluates getter, updates deps, fires change notification.
-    /// The getter is evaluated OUTSIDE lock(data) to prevent deadlock with lock(_attachedSubjects)
-    /// in LifecycleInterceptor when getters have side effects that write to subject-typed properties.
-    /// IsRecalculating serializes concurrent recalculations; RecalculationNeeded catches state changes
-    /// (writes, attach, detach) that occur during the unlocked evaluation window.
-    /// </summary>
-    internal static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long storageTimestamp, long rawTimestamp)
-    {
-        // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
-
-        // Phase 1: Acquire recalculation ownership (brief lock).
-        var data = TryBeginRecalculation(derivedProperty, out var oldValue);
-        if (data is null)
+        // The IsDerived check: data that a dependent's recording created before this property's attach
+        // must not start a recalculation.
+        var data = property.TryGetDerivedPropertyData();
+        if (data is null || !Volatile.Read(ref data.IsDerived))
         {
             return;
         }
 
-        // Outer loop handles the post-notification RecalculationNeeded check without recursion,
-        // preventing stack overflow under sustained concurrent writes.
-        // The try-finally at this level ensures IsRecalculating is always cleared on exit.
-        // Crucially, IsRecalculating stays true during NotifyDerivedPropertyChanged. This
-        // serializes notification delivery with recalculation, preventing a stale notification
-        // from being delivered after a newer one (TOCTOU race between guard checks and delivery).
-        try
+        long token;
+        lock (data)
         {
-            for (var outerIteration = 0; outerIteration < MaxStabilizationIterations; outerIteration++)
+            if (!data.IsAttached)
             {
-                if (!TryEvaluateAndCommit(data, ref derivedProperty, storageTimestamp, out var newValue, out var sequence))
-                {
-                    return;
-                }
+                return;
+            }
 
-                // Any concurrent writes during delivery set RecalculationNeeded=true and bail out,
-                // so no new recalculation (or notification) can start until delivery completes.
-                NotifyDerivedPropertyChanged(ref derivedProperty, data, sequence, newValue, oldValue, rawTimestamp);
+            if (data.OwnerToken != 0 || data.AttachToken != 0)
+            {
+                data.RecalculationNeeded = true;
+                data.PendingRawTimestamp = rawTimestamp;
+                return;
+            }
 
-                // Uses a loop (not recursion) to prevent stack overflow under sustained concurrent writes.
-                lock (data)
+            token = data.OwnerToken = DerivedPropertyData.NewToken();
+        }
+
+        RunOwnerLoop(data, property, token, rawTimestamp);
+    }
+
+    /// <summary>
+    /// Evaluates the getter at attach, outside lock(data), and commits the first value without publishing it.
+    /// The attach token decides whether the commit counts: a newer attach or a detach supersedes it.
+    /// </summary>
+    private static void EvaluateAtAttach(DerivedPropertyData data, PropertyReference property, long attachToken, bool ownsData)
+    {
+        var requestAfterAttach = false;
+        long pendingTimestamp = 0;
+
+        // The last iteration always commits, so the loop ends by a break.
+        for (var iteration = 0; iteration < MaxStabilizationIterations; iteration++)
+        {
+            var evaluation = Evaluate(property);
+            var isLastIteration = iteration == MaxStabilizationIterations - 1;
+            lock (data)
+            {
+                if (data.AttachToken != attachToken)
                 {
-                    if (!data.RecalculationNeeded || !data.IsAttached)
+                    // Superseded by a newer attach or a detach (also by the getter detaching its own subject).
+                    DiscardRecording();
+                    if (ownsData && data.OwnerToken == attachToken)
                     {
-                        return;
+                        data.OwnerToken = 0;
                     }
 
-                    data.RecalculationNeeded = false;
-                    oldValue = data.LastKnownValue;
+                    requestAfterAttach = TakePendingRequestIfUnowned(data, out pendingTimestamp);
+                    break;
                 }
+
+                var isStable = IsAttachEvaluationStable(data, property, ownsData);
+                if (!isStable && !isLastIteration)
+                {
+                    continue;
+                }
+
+                CommitAttachEvaluation(data, property, evaluation, isStable, attachToken, ownsData);
+                requestAfterAttach = TakePendingRequestIfUnowned(data, out pendingTimestamp);
+                break;
+            }
+        }
+
+        if (requestAfterAttach)
+        {
+            RequestRecalculation(property, pendingTimestamp, isHandOver: true);
+        }
+    }
+
+    // Called under lock(data). When the attach owns the property, a request that arrived during the
+    // evaluation is answered by evaluating again; otherwise the flag belongs to the owner in flight.
+    private static bool IsAttachEvaluationStable(DerivedPropertyData data, in PropertyReference property, bool ownsData)
+    {
+        var isStable = CommitLinks(data, property);
+        if (ownsData && data.RecalculationNeeded)
+        {
+            data.RecalculationNeeded = false;
+            data.PendingRawTimestamp = 0;
+            isStable = false;
+        }
+
+        return isStable;
+    }
+
+    // Called under lock(data) with a current attach token, after the last evaluation of the attach.
+    private static void CommitAttachEvaluation(
+        DerivedPropertyData data, in PropertyReference property, Evaluation evaluation, bool isStable, long attachToken, bool ownsData)
+    {
+        if (!isStable)
+        {
+            // The getter keeps changing what it reads (for example it writes a property it reads): the last
+            // value is committed, and a recalculation is requested after the attach.
+            Trace.TraceWarning(
+                $"DerivedPropertyChangeHandler: MaxStabilizationIterations ({MaxStabilizationIterations}) exhausted " +
+                $"while attaching '{property.Metadata.Name}' on {property.Subject.GetType().Name}.");
+            data.RecalculationNeeded = true;
+        }
+
+        CommitFirstValue(data, property, evaluation);
+        data.AttachToken = 0;
+        if (ownsData && data.OwnerToken == attachToken)
+        {
+            data.OwnerToken = 0;
+        }
+    }
+
+    // Called under lock(data): a request that an in-flight owner handed off to the attach.
+    private static bool TakePendingRequestIfUnowned(DerivedPropertyData data, out long pendingTimestamp)
+    {
+        pendingTimestamp = 0;
+        if (data.OwnerToken != 0 || data.AttachToken != 0 || !data.IsAttached || !data.RecalculationNeeded)
+        {
+            return false;
+        }
+
+        pendingTimestamp = TakePendingTimestamp(data);
+        data.RecalculationNeeded = false;
+        return true;
+    }
+
+    // Called under lock(data). Zeroed when taken, so a flag set without a request (by an attach) does
+    // not carry an older write's timestamp; 0 resolves to the current time in RequestRecalculation.
+    private static long TakePendingTimestamp(DerivedPropertyData data)
+    {
+        var timestamp = data.PendingRawTimestamp;
+        data.PendingRawTimestamp = 0;
+        return timestamp;
+    }
+
+    // Called under lock(data) by an owner that adopts a pending request instead of passing it to RequestRecalculation.
+    private static long AdoptPendingTimestamp(DerivedPropertyData data)
+    {
+        var timestamp = TakePendingTimestamp(data);
+        return timestamp != 0 ? timestamp : SubjectChangeContext.Current.ResolveChangedTimestamp();
+    }
+
+    // Called under lock(data). The first value is not published: consumers read it while the subject attaches.
+    private static void CommitFirstValue(DerivedPropertyData data, in PropertyReference property, Evaluation evaluation)
+    {
+        if (evaluation.HasThrown)
+        {
+            data.IsFaulted = true;
+            data.HasValue = false;
+            return;
+        }
+
+        data.LastKnownValue = evaluation.Value;
+        data.HasValue = true;
+        data.IsFaulted = false;
+        data.RecalculationSequence++;
+        property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
+    }
+
+    private static void RunOwnerLoop(DerivedPropertyData data, PropertyReference property, long token, long rawTimestamp)
+    {
+        var isOwner = true;
+        try
+        {
+            for (var iteration = 0; iteration < MaxStabilizationIterations; iteration++)
+            {
+                var step = RunOwnerIteration(data, property, token, ref rawTimestamp);
+                if (step == OwnerStep.Continue)
+                {
+                    continue;
+                }
+
+                isOwner = false;
+                return;
             }
 
             Trace.TraceWarning(
                 $"DerivedPropertyChangeHandler: MaxStabilizationIterations ({MaxStabilizationIterations}) exhausted for " +
-                $"'{derivedProperty.Metadata.Name}' on {derivedProperty.Subject.GetType().Name}. " +
-                "This indicates a derived getter with circular side effects.");
+                $"'{property.Metadata.Name}' on {property.Subject.GetType().Name}.");
         }
         finally
         {
-            // Atomically clear IsRecalculating. If a write set RecalculationNeeded
-            // in the gap between the outer loop's return-check and this finally,
-            // we must re-trigger so the derived property reflects the latest state.
-            // RecalculationNeeded is cleared before the re-trigger to prevent unbounded
-            // recursion when the getter consistently throws: without clearing, the flag
-            // persists (Phase 3 never runs to clear it), causing each re-trigger's
-            // finally to re-trigger again indefinitely.
-            bool needsRetrigger;
-            lock (data)
+            if (isOwner)
             {
-                needsRetrigger = data is { RecalculationNeeded: true, IsAttached: true };
-                if (needsRetrigger)
-                {
-                    data.RecalculationNeeded = false;
-                }
-
-                data.IsRecalculating = false;
-            }
-
-            if (needsRetrigger)
-            {
-                RecalculateDerivedProperty(ref derivedProperty, storageTimestamp, rawTimestamp);
+                ReleaseAfterFailure(data, property, token);
             }
         }
     }
 
-    /// <summary>
-    /// Takes recalculation ownership of an attached derived property. Returns null when there is
-    /// nothing to recalculate or another recalculation owns it, which is then told to re-evaluate.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static DerivedPropertyData? TryBeginRecalculation(in PropertyReference derivedProperty, out object? oldValue)
+    private enum OwnerStep
     {
-        oldValue = null;
+        Continue,
+        Released
+    }
 
-        // The IsDerived check: data that a dependent's recording created before this property's attach
-        // must not start a recalculation.
-        var data = derivedProperty.TryGetDerivedPropertyData();
-        if (data is null || !Volatile.Read(ref data.IsDerived))
+    /// <summary>
+    /// One evaluation of the owner loop: evaluates and commits, publishes outside the lock while still owning
+    /// the property, then continues with a pending request or releases ownership.
+    /// </summary>
+    private static OwnerStep RunOwnerIteration(DerivedPropertyData data, PropertyReference property, long token, ref long rawTimestamp)
+    {
+        if (!TryEvaluateAndCommit(data, property, token, ref rawTimestamp, out var commit))
         {
-            return null;
+            if (!commit.IsReleased)
+            {
+                return OwnerStep.Continue;
+            }
+
+            if (commit.HasPendingRequest)
+            {
+                RequestRecalculation(property, commit.PendingTimestamp, isHandOver: true);
+            }
+
+            return OwnerStep.Released;
+        }
+
+        if (commit.ShouldPublish)
+        {
+            NotifyDerivedPropertyChanged(property, data, commit.Sequence, commit.NewValue, commit.OldValue, rawTimestamp);
         }
 
         lock (data)
         {
-            if (data.IsRecalculating)
+            if (data.OwnerToken != token)
             {
-                data.RecalculationNeeded = true;
-                return null;
+                return OwnerStep.Released;
             }
 
-            if (!data.IsAttached)
+            if (data.RecalculationNeeded && data.IsAttached && data.AttachToken == 0)
             {
-                return null;
+                data.RecalculationNeeded = false;
+                rawTimestamp = AdoptPendingTimestamp(data);
+                return OwnerStep.Continue;
             }
 
-            data.IsRecalculating = true;
-            oldValue = data.LastKnownValue;
-            return data;
+            // Detached, or an attach is in progress, which takes over a pending request (RecalculationNeeded stays).
+            data.OwnerToken = 0;
+            return OwnerStep.Released;
         }
     }
 
+    // An observer threw while this loop owned the property, or the iteration limit was reached:
+    // release ownership and hand a pending request to a new owner instead of losing it.
+    private static void ReleaseAfterFailure(DerivedPropertyData data, PropertyReference property, long token)
+    {
+        long pendingTimestamp;
+        lock (data)
+        {
+            if (data.OwnerToken != token)
+            {
+                return;
+            }
+
+            data.OwnerToken = 0;
+            if (!data.RecalculationNeeded || !data.IsAttached || data.AttachToken != 0)
+            {
+                return;
+            }
+
+            data.RecalculationNeeded = false;
+            pendingTimestamp = TakePendingTimestamp(data);
+        }
+
+        // A new owner for the pending request; an owner loop that keeps failing or exhausting hands over again.
+        RequestRecalculation(property, pendingTimestamp, isHandOver: true);
+    }
+
+    private readonly record struct Commit(
+        bool IsReleased, bool HasPendingRequest, long PendingTimestamp, bool ShouldPublish, object? OldValue, object? NewValue, long Sequence);
+
     /// <summary>
-    /// Evaluates without holding lock(data), retries stale results, and commits the value and timestamp under lock.
-    /// Requires recalculation ownership. Returns false if evaluation throws or the property is detached.
+    /// Evaluates outside lock(data) and commits under it. Returns true when a value was committed; false with
+    /// <see cref="Commit.IsReleased"/> when this loop no longer owns the property, false otherwise when it has
+    /// to evaluate again.
     /// </summary>
     private static bool TryEvaluateAndCommit(
-        DerivedPropertyData data,
-        ref PropertyReference derivedProperty,
-        long storageTimestamp,
-        out object? newValue,
-        out long sequence)
+        DerivedPropertyData data, PropertyReference property, long token, ref long rawTimestamp, out Commit commit)
     {
-        newValue = null;
-        sequence = 0;
-
-        while (true)
+        var evaluation = Evaluate(property);
+        lock (data)
         {
-            // Getter side effects can acquire lock(_attachedSubjects) in LifecycleInterceptor,
-            // so holding lock(data) here would invert the lock order.
-            try
+            commit = default;
+            if (data.OwnerToken != token)
             {
-                newValue = EvaluateAndStabilize(data, derivedProperty, callerHoldsLock: false);
-            }
-            catch (Exception)
-            {
-                // Getter threw. Keep LastKnownValue; a concurrent writer's cascade will retry.
+                DiscardRecording();
+                commit = commit with { IsReleased = true };
                 return false;
             }
 
-            lock (data)
+            if (!data.IsAttached || data.AttachToken != 0)
             {
-                if (!data.IsAttached)
-                {
-                    return false;
-                }
-
-                // State changed during evaluation (write, attach, or detach set this flag).
-                // Discard the stale result and re-evaluate with a fresh state.
-                if (data.RecalculationNeeded)
-                {
-                    data.RecalculationNeeded = false;
-                    continue;
-                }
-
-                data.LastKnownValue = newValue;
-                sequence = ++data.RecalculationSequence;
-                derivedProperty.SetWriteTimestamp(storageTimestamp);
-                return true;
+                // Detached, or an attach is in progress and takes over (RecalculationNeeded stays).
+                DiscardRecording();
+                data.OwnerToken = 0;
+                commit = commit with { IsReleased = true };
+                return false;
             }
+
+            if (data.RecalculationNeeded)
+            {
+                DiscardRecording();
+                data.RecalculationNeeded = false;
+                rawTimestamp = AdoptPendingTimestamp(data);
+                return false;
+            }
+
+            if (!CommitLinks(data, property))
+            {
+                return false;
+            }
+
+            if (evaluation.HasThrown)
+            {
+                // The previous value stays; the first success afterwards is published (IsFaulted).
+                data.IsFaulted = true;
+                data.OwnerToken = 0;
+                var hasPendingRequest = TakePendingRequestIfUnowned(data, out var pendingTimestamp);
+                commit = commit with { IsReleased = true, HasPendingRequest = hasPendingRequest, PendingTimestamp = pendingTimestamp };
+                return false;
+            }
+
+            commit = CommitValue(data, property, evaluation.Value, rawTimestamp);
+            return true;
         }
     }
+
+    // Called under lock(data) by the owner. The old value is the last committed one, or the type's default
+    // when there is none (the attach evaluation threw); only the attach's first value is not published.
+    private static Commit CommitValue(DerivedPropertyData data, in PropertyReference property, object? newValue, long rawTimestamp)
+    {
+        var hadValue = data.HasValue;
+        var oldValue = hadValue ? data.LastKnownValue : GetDefault(property.Metadata.Type);
+        var shouldPublish = hadValue || data.IsFaulted;
+        data.LastKnownValue = newValue;
+        data.HasValue = true;
+        data.IsFaulted = false;
+        var sequence = ++data.RecalculationSequence;
+        property.SetWriteTimestamp(rawTimestamp > 0 ? rawTimestamp : 0L);
+        return new Commit(false, false, 0, shouldPublish, oldValue, newValue, sequence);
+    }
+
+    private static object? GetDefault(Type type) => type.IsValueType ? Activator.CreateInstance(type) : null;
 
     /// <summary>
     /// Fires change notification for a recalculated derived property.
@@ -293,7 +503,7 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void NotifyDerivedPropertyChanged(
-        ref PropertyReference derivedProperty,
+        PropertyReference derivedProperty,
         DerivedPropertyData data,
         long sequence,
         object? newValue,
@@ -314,9 +524,9 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
         // Cascade re-entry: pre-populates the new context's _writeTimestamp with the trigger's
         // raw cached value so the dependent's write skips lazy-resolve (and we therefore do
         // not need a WithChangedTimestamp scope active to share the time with the dependent).
-        // newValue is the value the stabilization loop settled on and the value paired with
-        // oldValue by the guards above, so finalValueIsNewValue publishes it rather than
-        // re-invoking the getter (see PropertyWriteContext.FinalValueIsNewValue).
+        // newValue is the value the owner committed and the value paired with oldValue by the
+        // guards above, so finalValueIsNewValue publishes it rather than re-invoking the getter
+        // (see PropertyWriteContext.FinalValueIsNewValue).
         derivedProperty.PublishDerivedPropertyValue(newValue, oldValue, rawTimestamp, finalValueIsNewValue: true);
 
         if (derivedProperty.Subject is IRaisePropertyChanged raiser)
@@ -325,115 +535,51 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
         }
     }
 
-    /// <summary>
-    /// Evaluates a derived property getter, records dependencies, and runs the stabilization
-    /// loop if the dependency set changed or a recorded dependency was written after it was read.
-    /// When <paramref name="callerHoldsLock"/> is true (AttachProperty), the caller already holds
-    /// lock(data) and lock(_attachedSubjects), so UpdateDependencies runs directly.
-    /// When false (RecalculateDerivedProperty), the lock is acquired only briefly for
-    /// UpdateDependencies, preventing deadlock between lock(data) and lock(_attachedSubjects)
-    /// when getters have side effects that write to subject-typed properties.
-    /// </summary>
-    private static object? EvaluateAndStabilize(
-        DerivedPropertyData data, in PropertyReference property, bool callerHoldsLock)
+    private readonly struct Evaluation(object? value, bool hasThrown)
     {
-        var ownsActiveRecording = false;
+        public object? Value { get; } = value;
 
+        public bool HasThrown { get; } = hasThrown;
+    }
+
+    /// <summary>
+    /// Runs the getter outside every lock and records what it read; the recording stays on the
+    /// recorder until <see cref="CommitLinks"/> or <see cref="DiscardRecording"/>.
+    /// </summary>
+    private static Evaluation Evaluate(in PropertyReference property)
+    {
+        var recorder = DerivedPropertyRecorder.Current;
+        recorder.StartRecording(property);
         try
         {
-            StartRecordingTouchedProperties(property);
-            ownsActiveRecording = true;
-            var result = property.Metadata.GetValue?.Invoke(property.Subject);
-            var recordedDependencies = DerivedPropertyRecorder.Current.FinishRecording();
-            ownsActiveRecording = false;
-
-            var dependencyUpdate = ReconcileDependencies(data, property, recordedDependencies, callerHoldsLock);
-            if (dependencyUpdate != DependencyUpdate.Changed)
-            {
-                return result;
-            }
-
-            // The dependency set changed or a recorded source was written after it was read. Stabilize.
-            for (var iteration = 0; iteration < MaxStabilizationIterations; iteration++)
-            {
-                StartRecordingTouchedProperties(property);
-                ownsActiveRecording = true;
-                result = property.Metadata.GetValue?.Invoke(property.Subject);
-                recordedDependencies = DerivedPropertyRecorder.Current.FinishRecording();
-                ownsActiveRecording = false;
-
-                dependencyUpdate = ReconcileDependencies(data, property, recordedDependencies, callerHoldsLock);
-                if (dependencyUpdate == DependencyUpdate.Abandoned)
-                {
-                    return result;
-                }
-
-                if (dependencyUpdate == DependencyUpdate.Unchanged)
-                {
-                    return result;
-                }
-            }
-
-            Trace.TraceWarning(
-                $"DerivedPropertyChangeHandler: MaxStabilizationIterations ({MaxStabilizationIterations}) exhausted " +
-                $"during dependency stabilization for '{property.Metadata.Name}' on {property.Subject.GetType().Name}.");
-
-            return result;
+            return new Evaluation(property.Metadata.GetValue?.Invoke(property.Subject), hasThrown: false);
+        }
+        catch (Exception)
+        {
+            // The reads before the throw are the ones that decided it; they are kept as dependencies.
+            return new Evaluation(null, hasThrown: true);
         }
         finally
         {
-            DiscardActiveRecording(ownsActiveRecording);
+            recorder.FinishRecording();
         }
-    }
-
-    private enum DependencyUpdate
-    {
-        Changed,
-        Unchanged,
-        Abandoned
     }
 
     /// <summary>
-    /// Reconciles dependencies under the caller's lock or a brief lock acquired here, then clears the recording.
-    /// When acquiring the lock, abandons the recording if attachment or recalculation state changed.
-    /// Returns <see cref="DependencyUpdate.Changed"/> when the dependency set changed or a recorded
-    /// source was written after it was read.
+    /// Sets the links to the recorded reads and reports whether no source moved since it was read.
+    /// Called under lock(data).
     /// </summary>
-    private static DependencyUpdate ReconcileDependencies(
-        DerivedPropertyData data,
-        in PropertyReference property,
-        ReadOnlySpan<RecordedDependency> recordedDependencies,
-        bool callerHoldsLock)
+    private static bool CommitLinks(DerivedPropertyData data, in PropertyReference property)
     {
-        if (callerHoldsLock)
-        {
-            return UpdateDependenciesAndCheckVersions(data, property, recordedDependencies);
-        }
-
-        lock (data)
-        {
-            if (!data.IsAttached || data.RecalculationNeeded)
-            {
-                DerivedPropertyRecorder.Current.ClearLastRecording();
-                return DependencyUpdate.Abandoned;
-            }
-
-            return UpdateDependenciesAndCheckVersions(data, property, recordedDependencies);
-        }
+        var recorder = DerivedPropertyRecorder.Current;
+        var recorded = recorder.LastRecording;
+        data.UpdateDependencies(property, recorded);
+        var hasVersionChanged = HasVersionChanged(recorded);
+        recorder.ClearLastRecording();
+        return !hasVersionChanged;
     }
 
-    private static DependencyUpdate UpdateDependenciesAndCheckVersions(
-        DerivedPropertyData data,
-        in PropertyReference property,
-        ReadOnlySpan<RecordedDependency> recordedDependencies)
-    {
-        var isMembershipChanged = data.UpdateDependencies(property, recordedDependencies);
-        var hasVersionChanged = HasVersionChanged(recordedDependencies);
-        DerivedPropertyRecorder.Current.ClearLastRecording();
-        return isMembershipChanged || hasVersionChanged
-            ? DependencyUpdate.Changed
-            : DependencyUpdate.Unchanged;
-    }
+    private static void DiscardRecording() => DerivedPropertyRecorder.Current.ClearLastRecording();
 
     private static bool HasVersionChanged(ReadOnlySpan<RecordedDependency> recorded)
     {
@@ -447,27 +593,5 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
         }
 
         return false;
-    }
-
-    private static void StartRecordingTouchedProperties(in PropertyReference property)
-    {
-        DerivedPropertyRecorder.Current.StartRecording(property);
-    }
-
-    /// <summary>
-    /// Cleans up the recorder state if the getter threw before UpdateDependencies ran.
-    /// No-op on the happy path (recording already finished and cleared).
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void DiscardActiveRecording(bool ownsActiveRecording)
-    {
-        var recorder = DerivedPropertyRecorder.Current;
-        if (ownsActiveRecording)
-        {
-            recorder.FinishRecording();
-        }
-
-        // Always clear to prevent thread-static from holding refs to detached subjects.
-        recorder.ClearLastRecording();
     }
 }

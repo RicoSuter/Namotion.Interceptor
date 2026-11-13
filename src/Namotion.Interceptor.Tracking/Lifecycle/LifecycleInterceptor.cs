@@ -12,10 +12,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     private readonly Dictionary<PropertyReference, object?> _lastProcessedValues = new(PropertyReference.Comparer);
 
     [ThreadStatic]
-    private static Stack<List<(IInterceptorSubject subject, PropertyReference property, object? index)>>? _listPool;
+    private static List<List<(IInterceptorSubject subject, PropertyReference property, object? index)>>? _listPool;
 
     [ThreadStatic]
-    private static Stack<HashSet<IInterceptorSubject>>? _subjectHashSetPool;
+    private static List<HashSet<IInterceptorSubject>>? _subjectHashSetPool;
 
     public LifecycleInterceptor()
     {
@@ -139,6 +139,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             return;
         }
 
+        SubjectLifecycleAttachments.Add(subject, this);
+
         var count = subject.GetReferenceCount();
         var change = new SubjectLifecycleChange
         {
@@ -169,6 +171,11 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         if (!set.Add(property))
         {
             return;
+        }
+
+        if (isFirstAttach)
+        {
+            SubjectLifecycleAttachments.Add(subject, this);
         }
 
         var count = subject.IncrementReferenceCount();
@@ -221,15 +228,26 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             return;
         }
-        
-        foreach (var entry in subject.Properties)
-        {
-            var property = new PropertyReference(subject, entry.Key);
-            if (entry.Value is { IsIntercepted: true } && entry.Value.Type.CanContainSubjects())
-                _lastProcessedValues.Remove(property);
 
-            subject.DetachSubjectProperty(property);
+        SubjectLifecycleAttachments.Remove(subject, this);
+        SubjectLifecycleAttachments.EnterLifecycleDetach();
+        try
+        {
+            foreach (var entry in subject.Properties)
+            {
+                var property = new PropertyReference(subject, entry.Key);
+                if (entry.Value is { IsIntercepted: true } && entry.Value.Type.CanContainSubjects())
+                    _lastProcessedValues.Remove(property);
+
+                subject.DetachSubjectProperty(property);
+            }
         }
+        finally
+        {
+            SubjectLifecycleAttachments.ExitLifecycleDetach();
+        }
+
+        SubjectLifecycleAttachments.DetachDerivedPropertiesIfDetached(subject);
 
         var count = subject.GetReferenceCount();
         var change = new SubjectLifecycleChange
@@ -264,6 +282,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         if (isLastDetach)
         {
             _attachedSubjects.Remove(subject);
+            SubjectLifecycleAttachments.Remove(subject, this);
             children = DetachSubjectProperties(subject);
         }
 
@@ -301,28 +320,41 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         IInterceptorSubject subject)
     {
         List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
-        foreach (var entry in subject.Properties)
+        SubjectLifecycleAttachments.EnterLifecycleDetach();
+        try
         {
-            var subjectProperty = new PropertyReference(subject, entry.Key);
-
-            var metadata = entry.Value;
-            if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
+            foreach (var entry in subject.Properties)
             {
-                // Use _lastProcessedValues (what was actually attached) instead of the backing
-                // store, which may contain unattached children from a concurrent next() call.
-                if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
-                {
-                    children ??= GetList();
-                    FindSubjectsInProperty(subjectProperty, lastProcessed, children, null);
-                }
-
-                _lastProcessedValues.Remove(subjectProperty);
+                DetachSubjectProperty(subject, entry.Key, entry.Value, ref children);
             }
-
-            subject.DetachSubjectProperty(subjectProperty);
+        }
+        finally
+        {
+            SubjectLifecycleAttachments.ExitLifecycleDetach();
         }
 
+        SubjectLifecycleAttachments.DetachDerivedPropertiesIfDetached(subject);
         return children;
+    }
+
+    private void DetachSubjectProperty(IInterceptorSubject subject, string name, SubjectPropertyMetadata metadata,
+        ref List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children)
+    {
+        var subjectProperty = new PropertyReference(subject, name);
+        if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
+        {
+            // Use _lastProcessedValues (what was actually attached) instead of the backing
+            // store, which may contain unattached children from a concurrent next() call.
+            if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
+            {
+                children ??= GetList();
+                FindSubjectsInProperty(subjectProperty, lastProcessed, children, null);
+            }
+
+            _lastProcessedValues.Remove(subjectProperty);
+        }
+
+        subject.DetachSubjectProperty(subjectProperty);
     }
 
     private static void InvokeRemovedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
@@ -615,31 +647,40 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static List<(IInterceptorSubject subject, PropertyReference property, object? index)> GetList()
     {
-        _listPool ??= new Stack<List<(IInterceptorSubject, PropertyReference, object?)>>();
-        return _listPool.Count > 0 ? _listPool.Pop() : new List<(IInterceptorSubject, PropertyReference, object?)>(8);
+        _listPool ??= [];
+        return _listPool.Count > 0 ? Pop(_listPool) : new List<(IInterceptorSubject, PropertyReference, object?)>(8);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static HashSet<IInterceptorSubject> GetSubjectHashSet()
     {
-        _subjectHashSetPool ??= new Stack<HashSet<IInterceptorSubject>>();
-        return _subjectHashSetPool.Count > 0 ? _subjectHashSetPool.Pop() : new HashSet<IInterceptorSubject>(8, ReferenceEqualityComparer.Instance);
+        _subjectHashSetPool ??= [];
+        return _subjectHashSetPool.Count > 0 ? Pop(_subjectHashSetPool) : new HashSet<IInterceptorSubject>(8, ReferenceEqualityComparer.Instance);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void ReturnList(List<(IInterceptorSubject, PropertyReference, object?)> list)
     {
         list.Clear();
-        _listPool ??= new Stack<List<(IInterceptorSubject, PropertyReference, object?)>>();
-        _listPool.Push(list);
+        _listPool ??= [];
+        _listPool.Add(list);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void ReturnSubjectHashSet(HashSet<IInterceptorSubject> hashSet)
     {
         hashSet.Clear();
-        _subjectHashSetPool ??= new Stack<HashSet<IInterceptorSubject>>();
-        _subjectHashSetPool.Push(hashSet);
+        _subjectHashSetPool ??= [];
+        _subjectHashSetPool.Add(hashSet);
+    }
+
+    // The pools are lists used as stacks: the last returned item is taken first.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static T Pop<T>(List<T> pool)
+    {
+        var item = pool[^1];
+        pool.RemoveAt(pool.Count - 1);
+        return item;
     }
 
     #endregion

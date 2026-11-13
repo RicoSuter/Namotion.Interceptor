@@ -131,6 +131,12 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
         return new ReadOnlySpan<RecordedDependency>(frame.Buffer, 0, frame.Count);
     }
 
+    /// <summary>
+    /// The reads of the recording finished last on this thread; valid after <see cref="FinishRecording"/> until
+    /// <see cref="ClearLastRecording"/> or the next <see cref="StartRecording"/>.
+    /// </summary>
+    internal ReadOnlySpan<RecordedDependency> LastRecording => new(_frames[_depth].Buffer, 0, _frames[_depth].Count);
+
     public void ClearLastRecording()
     {
         ref var frame = ref _frames[_depth];
