@@ -4,7 +4,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
 /// Consolidated per-property data for derived property tracking.
-/// Stored once per (subject, property) in Subject.Data under a short key
+/// Created once per (subject, property) and never removed or replaced. Stored in Subject.Data under a short key
 /// to minimize dictionary lookups (one lookup instead of separate lookups
 /// for UsedByProperties, RequiredProperties, and LastKnownValue).
 /// </summary>
@@ -68,8 +68,7 @@ internal sealed class DerivedPropertyData
     /// <summary>
     /// Lifecycle flag cleared during DetachProperty under lock(this).
     /// Checked by RecalculateDerivedProperty to prevent zombie used-by property resurrection.
-    /// Set by AttachProperty on every attach of a derived property. Not read for source properties,
-    /// whose data a detach always removes.
+    /// Set by AttachProperty on every attach of a derived property. Not read for source properties.
     /// Defaults to true because properties are assumed to be attached until explicitly detached.
     /// </summary>
     internal bool IsAttached = true;
@@ -131,34 +130,17 @@ internal sealed class DerivedPropertyData
     }
 
     /// <summary>
-    /// Detaches this property: sets IsAttached=false, cleans dependencies (if derived),
-    /// snapshots, and clears used-by properties. Called under lock(this).
+    /// Removes this derived property from the used-by set of every dependency and clears its dependencies.
+    /// Called under lock(this).
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal PropertyReference[] DetachAndSnapshotUsedBy(in PropertyReference property)
+    internal void RemoveAllLinks(in PropertyReference derivedProperty)
     {
-        IsAttached = false;
-
-        // Case 1 (derived only): remove this property from each dependency's UsedByProperties.
-        if (property.Metadata.IsDerived)
+        foreach (ref readonly var dependency in RequiredPropertiesSpan)
         {
-            var requiredProperties = RequiredPropertiesSpan;
-            for (var i = 0; i < requiredProperties.Length; i++)
-            {
-                requiredProperties[i]
-                    .TryGetDerivedPropertyData()?
-                    .RemoveUsedByProperty(property);
-            }
-
-            ClearRequiredProperties();
-            LastKnownValue = null;
+            dependency.TryGetDerivedPropertyData()?.RemoveUsedByProperty(derivedProperty);
         }
 
-        // Case 2: snapshot used-by properties, then clear. The snapshot is stable because the collection
-        // never changes an array it handed out.
-        var snapshot = _usedByProperties?.ItemsArray ?? [];
-        _usedByProperties = null;
-        return snapshot;
+        ClearRequiredProperties();
     }
 
     /// <summary>
@@ -224,20 +206,7 @@ internal sealed class DerivedPropertyData
 
     private static void AddUsedByPropertyToCurrentData(in PropertyReference dependency, in PropertyReference derivedProperty)
     {
-        // A detach may remove the fetched data before it is locked. Registering on the removed instance would
-        // lose this used-by property when the dependency is attached again, so register on the current data.
-        while (true)
-        {
-            var dependencyData = dependency.GetDerivedPropertyData();
-            lock (dependencyData)
-            {
-                if (ReferenceEquals(dependency.TryGetDerivedPropertyData(), dependencyData))
-                {
-                    dependencyData.AddUsedByProperty(derivedProperty);
-                    return;
-                }
-            }
-        }
+        dependency.GetDerivedPropertyData().AddUsedByProperty(derivedProperty);
     }
 
     /// <summary>
@@ -276,45 +245,6 @@ internal sealed class DerivedPropertyData
     {
         _requiredProperties = null;
         _requiredPropertyCount = 0;
-    }
-
-    /// <summary>
-    /// Removes a dependency using swap-remove (no array allocation).
-    /// Nulls out array when the last item is removed.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal bool RemoveRequiredProperty(in PropertyReference property)
-    {
-        var required = _requiredProperties;
-        var requiredCount = _requiredPropertyCount;
-        if (required is null || requiredCount == 0)
-        {
-            return false;
-        }
-
-        var index = Array.IndexOf(required, property, 0, requiredCount);
-        if (index < 0)
-        {
-            return false;
-        }
-
-        // Swap-remove: move the last item into the removed slot, decrement count.
-        // No array allocation. Safe under lock.
-        var lastIndex = requiredCount - 1;
-        if (index < lastIndex)
-        {
-            required[index] = required[lastIndex];
-        }
-
-        required[lastIndex] = default;
-        _requiredPropertyCount = lastIndex;
-
-        if (lastIndex == 0)
-        {
-            _requiredProperties = null;
-        }
-
-        return true;
     }
 
     /// <summary>

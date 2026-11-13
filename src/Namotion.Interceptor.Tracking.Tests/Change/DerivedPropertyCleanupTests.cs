@@ -39,10 +39,8 @@ public class DerivedPropertyCleanupTests
     }
 
     [Fact]
-    public void WhenSourcePropertyIsDetachedStandalone_ThenItIsRemovedFromDerivedPropertiesRequiredProperties()
+    public void WhenSourcePropertyIsDetachedStandalone_ThenDerivedPropertyKeepsItsDependency()
     {
-        // Standalone detach (not inside WriteProperty) uses immediate Remove() for Case 2.
-
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
@@ -64,8 +62,8 @@ public class DerivedPropertyCleanupTests
         // Act - Standalone detach (not inside a WriteProperty call)
         person.DetachSubjectProperty(firstNameProperty);
 
-        // Assert - FirstName should be immediately removed from FullName's RequiredProperties
-        Assert.DoesNotContain(firstNameProperty, fullNameProperty.GetRequiredProperties().ToArray());
+        // Assert - Only the derived property changes its own links, so FullName keeps following FirstName
+        Assert.Contains(firstNameProperty, fullNameProperty.GetRequiredProperties().ToArray());
     }
 
     [Fact]

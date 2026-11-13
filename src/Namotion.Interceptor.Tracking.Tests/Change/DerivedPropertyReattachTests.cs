@@ -117,12 +117,12 @@ public class DerivedPropertyReattachTests
         var valueProperty = new PropertyReference(leaf, nameof(UntrackedReferenceLeaf.Value));
         var observedProperty = new PropertyReference(holder, nameof(UntrackedReferenceHolder.Observed));
         var valueData = valueProperty.TryGetDerivedPropertyData()!;
+        var observedData = observedProperty.TryGetDerivedPropertyData()!;
 
-        // Act: Observed's recalculation fetches the leaf's data, then waits for its lock while the leaf is
-        // detached and attached again, which recreates its data through Structural.
+        // Act: Observed's recalculation waits for its own lock while the leaf is detached and attached again.
         Thread? writerThread = null;
         Task writer;
-        Monitor.Enter(valueData);
+        Monitor.Enter(observedData);
         var contentionBefore = Monitor.LockContentionCount;
         try
         {
@@ -140,11 +140,13 @@ public class DerivedPropertyReattachTests
 
             holder.First = null;
             holder.First = leaf;
-            Assert.NotSame(valueData, valueProperty.TryGetDerivedPropertyData());
+
+            // Data is never removed or replaced, so the registration that follows lands on the leaf's current data.
+            Assert.Same(valueData, valueProperty.TryGetDerivedPropertyData());
         }
         finally
         {
-            Monitor.Exit(valueData);
+            Monitor.Exit(observedData);
         }
 
         await writer.WaitAsync(TimeSpan.FromSeconds(10));
@@ -228,7 +230,7 @@ public class DerivedPropertyReattachTests
         var fullNameData = fullNameProperty.TryGetDerivedPropertyData()!;
 
         // Act: an attach outside the graph lock, as for a property added at runtime, fetches the data
-        // and waits for its lock while the property is detached and recreated, as a dependent's registration would.
+        // and waits for its lock while the property is detached and a dependent's registration fetches its data.
         Thread? attachThread = null;
         Task attach;
         Monitor.Enter(fullNameData);
@@ -249,7 +251,9 @@ public class DerivedPropertyReattachTests
 
             person.DetachSubjectProperty(fullNameProperty);
             fullNameProperty.GetDerivedPropertyData();
-            Assert.NotSame(fullNameData, fullNameProperty.TryGetDerivedPropertyData());
+
+            // Data is never removed or replaced, so the waiting attach holds the current data.
+            Assert.Same(fullNameData, fullNameProperty.TryGetDerivedPropertyData());
         }
         finally
         {
@@ -271,7 +275,7 @@ public class DerivedPropertyReattachTests
     }
 
     [Fact]
-    public async Task WhenDependentRegistersAgainWhileItsSourceIsDetaching_ThenBothDirectionsAgree()
+    public async Task WhenSourceIsDetachedWhileItsDependentIsLocked_ThenTheDetachDoesNotWaitAndBothDirectionsAgree()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -288,35 +292,23 @@ public class DerivedPropertyReattachTests
         var observedProperty = new PropertyReference(holder, nameof(UntrackedReferenceHolder.Observed));
         var observedData = observedProperty.TryGetDerivedPropertyData()!;
 
-        // Act: the detach of the leaf waits to remove Value from Observed's dependencies, while Observed
-        // drops Value and then reads it again, registering on Value's fresh data.
-        Thread? detachThread = null;
+        // Act: the leaf is detached while Observed's lock is held. Only a derived property changes its own links,
+        // so the detach completes without it. Observed then drops Value and reads it again.
         Task detach;
         Monitor.Enter(observedData);
-        var contentionBefore = Monitor.LockContentionCount;
         try
         {
-            detach = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
-            {
-                detachThread = Thread.CurrentThread;
-                holder.First = null;
-            });
-
-            Assert.True(SpinWait.SpinUntil(
-                () => detachThread is not null &&
-                      (detachThread.ThreadState & ThreadState.WaitSleepJoin) != 0 &&
-                      Monitor.LockContentionCount > contentionBefore,
-                TimeSpan.FromSeconds(10)));
-
-            holder.Trigger = 0;
-            holder.Trigger = 1;
+            detach = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { holder.First = null; });
+            Assert.True(SpinWait.SpinUntil(() => detach.IsCompleted, TimeSpan.FromSeconds(10)));
         }
         finally
         {
             Monitor.Exit(observedData);
         }
 
-        await detach.WaitAsync(TimeSpan.FromSeconds(10));
+        await detach;
+        holder.Trigger = 0;
+        holder.Trigger = 1;
 
         // Assert
         Assert.Contains(valueProperty, observedProperty.GetRequiredProperties().ToArray());
@@ -324,7 +316,7 @@ public class DerivedPropertyReattachTests
     }
 
     [Fact]
-    public void WhenSubjectIsDetached_ThenItsTrackingDataIsRemoved()
+    public void WhenSubjectIsDetached_ThenItsTrackingDataIsKept()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -337,19 +329,22 @@ public class DerivedPropertyReattachTests
 
         var fullNameProperty = new PropertyReference(child, nameof(Person.FullName));
         var firstNameProperty = new PropertyReference(child, nameof(Person.FirstName));
-        Assert.NotNull(fullNameProperty.TryGetDerivedPropertyData());
-        Assert.NotNull(firstNameProperty.TryGetDerivedPropertyData());
+        var fullNameData = fullNameProperty.TryGetDerivedPropertyData();
+        var firstNameData = firstNameProperty.TryGetDerivedPropertyData();
+        Assert.NotNull(fullNameData);
+        Assert.NotNull(firstNameData);
 
         // Act
         parent.Mother = null;
 
-        // Assert
-        Assert.Null(fullNameProperty.TryGetDerivedPropertyData());
-        Assert.Null(firstNameProperty.TryGetDerivedPropertyData());
+        // Assert: data is created once and never removed or replaced, so a registration or attach that fetched it
+        // before the detach still holds the current data.
+        Assert.Same(fullNameData, fullNameProperty.TryGetDerivedPropertyData());
+        Assert.Same(firstNameData, firstNameProperty.TryGetDerivedPropertyData());
     }
 
     [Fact]
-    public void WhenDetachedDerivedPropertyDataIsRecreatedByADependent_ThenARecalculationDoesNotReattachIt()
+    public void WhenDependentRegistersOnADetachedDerivedProperty_ThenARecalculationDoesNotReattachIt()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -361,7 +356,7 @@ public class DerivedPropertyReattachTests
         var pressureProperty = new PropertyReference(car.Tires[0], nameof(Tire.Pressure));
         car.DetachSubjectProperty(averagePressureProperty);
 
-        // A dependent registering on the detached property recreates its data, attached but not derived.
+        // A dependent registering on the detached property fetches its data, which stays marked detached.
         averagePressureProperty.GetDerivedPropertyData();
 
         // Act: a write that took its used-by snapshot before the detach recalculates afterwards.
@@ -397,7 +392,7 @@ public class DerivedPropertyReattachTests
     }
 
     [Fact]
-    public void WhenSiblingSourceIsReattached_ThenOnlyADependentReachingItThroughTrackedPropertiesFollowsIt()
+    public void WhenSiblingSourceIsReattached_ThenDependentsReachingItThroughFieldsAndTrackedPropertiesFollowIt()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -416,8 +411,8 @@ public class DerivedPropertyReattachTests
         root.Source = source;
         source.Value = 2;
 
-        // Assert: detach dropped the field reader's dependency and nothing recalculated it since.
-        Assert.Equal(1, GetLastKnownValue(reader, nameof(ReferenceReader.ViaField)));
+        // Assert: only a derived property changes its own links, so the source's detach kept the field reader's link.
+        Assert.Equal(2, GetLastKnownValue(reader, nameof(ReferenceReader.ViaField)));
         Assert.Equal(2, GetLastKnownValue(reader, nameof(ReferenceReader.ViaTrackedPath)));
     }
 
