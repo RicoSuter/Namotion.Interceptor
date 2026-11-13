@@ -44,7 +44,8 @@ The client prefers an unsecured endpoint and uses a secured one only when the se
 
 | State | Description |
 |-------|-------------|
-| `Status`, `StatusMessage` | Service status, and the error when the server could not be set up, such as a path that does not resolve. A failed start, such as a server certificate that cannot be loaded, is retried and only logged |
+| `Status`, `StatusMessage` | Service status, and the error when the server could not be set up, such as a path that does not resolve. A failed start, such as a server certificate that cannot be loaded, is retried, and `StatusMessage` shows its error until the server accepts connections |
+| `IsAcceptingConnections` | Whether the server accepts client connections; empty while it is not running. `IsServerRunning` and the green icon require it |
 | `IncomingChangesPerSecond`, `OutgoingChangesPerSecond`, `ActiveSessionCount` | Statistics |
 
 ## Certificates

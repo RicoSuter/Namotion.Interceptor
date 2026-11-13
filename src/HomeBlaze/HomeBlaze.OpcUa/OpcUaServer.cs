@@ -96,10 +96,17 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
     public partial ServiceStatus Status { get; set; }
 
     /// <summary>
-    /// Error message when Status is Error.
+    /// Error message when Status is Error, or the last start error while the server is running but not accepting connections.
     /// </summary>
     [State]
     public partial string? StatusMessage { get; set; }
+
+    /// <summary>
+    /// Whether the server has started and accepts client connections. Null when not running or before the
+    /// server has reported its liveness.
+    /// </summary>
+    [State]
+    public partial bool? IsAcceptingConnections { get; set; }
 
     /// <summary>
     /// Average incoming changes per second (client writes to server). Null when not running.
@@ -154,15 +161,18 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
 
     // Interface implementations
 
+    /// <summary>
+    /// Whether the server is running and accepts client connections.
+    /// </summary>
     [Derived]
-    public bool IsServerRunning => Status == ServiceStatus.Running;
+    public bool IsServerRunning => Status == ServiceStatus.Running && IsAcceptingConnections == true;
 
     public string? Title => Name;
 
     public string? IconName => "Dns";
 
     [Derived]
-    public string? IconColor => Status == ServiceStatus.Running ? "Success" : null;
+    public string? IconColor => IsServerRunning ? "Success" : null;
 
     public OpcUaServer(
         RootManager rootManager,
@@ -184,21 +194,15 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
         if (IsEnabled)
         {
             await StartServerAsync(stoppingToken);
+            UpdateDiagnostics();
         }
 
         try
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                if (_serverService is { } service)
-                {
-                    var diagnostics = service.Diagnostics;
-                    IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
-                    OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;
-                    ActiveSessionCount = diagnostics.ActiveSessionCount;
-                }
-
-                await Task.Delay(TimeSpan.FromSeconds(60), stoppingToken);
+                await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+                UpdateDiagnostics();
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -212,6 +216,23 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
     {
         await StopServerAsync(cancellationToken);
         await StartServerAsync(cancellationToken);
+    }
+
+    private void UpdateDiagnostics()
+    {
+        if (_serverService is { } service)
+        {
+            var diagnostics = service.Diagnostics;
+            IsAcceptingConnections = diagnostics.IsOperational;
+
+            // Without this, a server whose start keeps failing, for example on a rejected certificate after a
+            // host name change, looks healthy while it never accepts connections.
+            StatusMessage = OpcUaStatusMessage.Resolve(Status, diagnostics.IsOperational, diagnostics.LastError, StatusMessage);
+
+            IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
+            OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;
+            ActiveSessionCount = diagnostics.ActiveSessionCount;
+        }
     }
 
     private async Task StartServerAsync(CancellationToken cancellationToken)
@@ -308,6 +329,8 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
             {
                 _serverService = null;
                 Status = ServiceStatus.Stopped;
+                StatusMessage = null;
+                IsAcceptingConnections = null;
                 IncomingChangesPerSecond = null;
                 OutgoingChangesPerSecond = null;
                 ActiveSessionCount = null;

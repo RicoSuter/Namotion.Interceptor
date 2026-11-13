@@ -238,14 +238,7 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
             IsConnected = diagnostics.IsOperational;
 
             // Without this, a rejected server certificate leaves the client looking healthy while it never connects.
-            if (diagnostics.IsOperational == false)
-            {
-                StatusMessage = diagnostics.LastError?.Message;
-            }
-            else if (diagnostics.IsOperational == true)
-            {
-                StatusMessage = null;
-            }
+            StatusMessage = OpcUaStatusMessage.Resolve(Status, diagnostics.IsOperational, diagnostics.LastError, StatusMessage);
 
             IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
             OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;
