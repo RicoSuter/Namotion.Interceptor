@@ -259,17 +259,7 @@ internal static class PostLockQueue
             Return(segment);
         }
 
-        if (firstException is null)
-        {
-            return;
-        }
-
-        if (rethrow)
-        {
-            firstException.Throw();
-        }
-
-        DerivedPropertyOwnership.TraceDropped("queued work threw after a lifecycle operation", firstException.SourceException);
+        DerivedPropertyOwnership.ThrowOrTrace(firstException, rethrow, "queued work threw after a lifecycle operation");
     }
 
     private static void RunDeliveries(List<Action?> deliveries, ref ExceptionDispatchInfo? firstException)

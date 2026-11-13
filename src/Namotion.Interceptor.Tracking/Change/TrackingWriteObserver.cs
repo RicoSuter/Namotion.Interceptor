@@ -190,13 +190,7 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
             }
         }
 
-        if (write.HasFailed)
-        {
-            DerivedPropertyOwnership.TraceDropped("a dependent of a failed write threw", firstException.SourceException);
-            return;
-        }
-
-        firstException.Throw();
+        DerivedPropertyOwnership.ThrowOrTrace(firstException, rethrow: !write.HasFailed, "a dependent of a failed write threw");
     }
 
     // A write without a context has no timestamp: resolved at its first request, so every dependent shares it. A
