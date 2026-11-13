@@ -970,7 +970,7 @@ A block that cannot be shown is replaced by a red box with the line number of th
 
 ## What an Edit of the Page Keeps
 
-When the text of a page changes, the page is read again. A subject that is still on the page is not created again, it is updated in place. This is what keeps a running motor running while you edit the text around it. A subject that is created again starts from its configuration, the same as after a restart of HomeBlaze.
+When the text of a page changes, the page is read again. A subject that is still on the page is not created again, it is updated in place. This is what keeps a running motor running while you edit the text around it. A subject that is created again starts from its configuration, the same as after a restart of HomeBlaze. [Updating in place or recreating](../development/configurable-subject.md#updating-in-place-or-recreating) lists when a subject is created again.
 
 ~~~~markdown
 :: HomeBlaze.Samples.Motor#keptmotor Name="Named Motor" TargetSpeed=2000
