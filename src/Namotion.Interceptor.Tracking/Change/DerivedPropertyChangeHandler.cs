@@ -258,6 +258,7 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
         out bool isExhausted)
     {
         var requestAfterAttach = false;
+        var hasEvaluatedAfterOwnWrite = false;
         pendingTimestamp = 0;
         isExhausted = false;
 
@@ -285,7 +286,7 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
                     break;
                 }
 
-                var isStable = CommitAttachLinks(data, property, ownsData);
+                var isStable = CommitAttachLinks(data, property, ownsData, ref hasEvaluatedAfterOwnWrite);
                 if (!isStable && !isLastIteration)
                 {
                     continue;
@@ -304,9 +305,10 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
     // Called under lock(data). Sets the links and returns whether the evaluation is stable. When the attach owns
     // the property, it takes a request that arrived during the evaluation and answers it by evaluating again;
     // otherwise the flag belongs to the owner in flight.
-    private static bool CommitAttachLinks(DerivedPropertyData data, in PropertyReference property, bool ownsData)
+    private static bool CommitAttachLinks(
+        DerivedPropertyData data, in PropertyReference property, bool ownsData, ref bool hasEvaluatedAfterOwnWrite)
     {
-        var isStable = CommitLinks(data, property);
+        var isStable = IsStable(CommitLinks(data, property), ref hasEvaluatedAfterOwnWrite);
         if (ownsData && data.RecalculationNeeded)
         {
             TakePendingRequest(data);
@@ -497,6 +499,9 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
 
         /// <summary>The loop completed its first evaluation step (a commit, a pending request or a moved source).</summary>
         public bool HasEvaluated;
+
+        /// <summary>The loop evaluated again since its last commit because the getter wrote a source it had read.</summary>
+        public bool HasEvaluatedAfterOwnWrite;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -550,6 +555,7 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
         }
 
         state.Unanswered = UnansweredRequest.None;
+        state.HasEvaluatedAfterOwnWrite = false;
 
         if (commit.ShouldPublish)
         {
@@ -661,11 +667,17 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
                 return new Commit(CommitOutcome.EvaluateAgain);
             }
 
-            if (!CommitLinks(data, property))
+            var check = CommitLinks(data, property);
+            if (check == RecordingCheck.SourceMoved)
             {
                 // A source moved without a request (its writer read the used-by set before this link). The
                 // recording follows this thread's own writes, so the writer is another thread.
                 state.Unanswered = UnansweredRequest.Foreign;
+                return new Commit(CommitOutcome.EvaluateAgain);
+            }
+
+            if (!IsStable(check, ref state.HasEvaluatedAfterOwnWrite))
+            {
                 return new Commit(CommitOutcome.EvaluateAgain);
             }
 
@@ -769,17 +781,22 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
     }
 
     /// <summary>
-    /// Sets the links to the recorded reads and reports whether no source moved since it was read.
-    /// Called under lock(data).
+    /// Sets the links to the recorded reads and reports whether a source moved since it was read. Called under
+    /// lock(data).
     /// </summary>
-    private static bool CommitLinks(DerivedPropertyData data, in PropertyReference property)
+    private static RecordingCheck CommitLinks(DerivedPropertyData data, in PropertyReference property)
     {
         var recorder = DerivedPropertyRecorder.Current;
         try
         {
             var recorded = recorder.LastRecording;
             data.UpdateDependencies(property, recorded);
-            return !HasVersionChanged(recorded);
+            if (HasVersionChanged(recorded))
+            {
+                return RecordingCheck.SourceMoved;
+            }
+
+            return recorder.LastRecordingHasOwnWriteAfterRead ? RecordingCheck.OwnWriteAfterRead : RecordingCheck.Current;
         }
         finally
         {
@@ -788,6 +805,34 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
     }
 
     private static void DiscardRecording() => DerivedPropertyRecorder.Current.ClearLastRecording();
+
+    private enum RecordingCheck
+    {
+        /// <summary>No source moved since the evaluation read it.</summary>
+        Current,
+
+        /// <summary>A write of another thread moved a source after the evaluation read it.</summary>
+        SourceMoved,
+
+        /// <summary>
+        /// Only writes of the evaluating thread moved a source after the evaluation read it: the value may stem from
+        /// before such a write, and a write of a source not linked yet requests nothing.
+        /// </summary>
+        OwnWriteAfterRead
+    }
+
+    // An own write after a read is answered by exactly one further evaluation per commit, so a getter that writes on
+    // every evaluation (for example to a subject it creates) still commits.
+    private static bool IsStable(RecordingCheck check, ref bool hasEvaluatedAfterOwnWrite)
+    {
+        if (check == RecordingCheck.OwnWriteAfterRead && !hasEvaluatedAfterOwnWrite)
+        {
+            hasEvaluatedAfterOwnWrite = true;
+            return false;
+        }
+
+        return check != RecordingCheck.SourceMoved;
+    }
 
     private static bool HasVersionChanged(ReadOnlySpan<RecordedDependency> recorded)
     {

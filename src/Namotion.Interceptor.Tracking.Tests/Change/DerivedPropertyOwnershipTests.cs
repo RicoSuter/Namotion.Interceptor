@@ -263,10 +263,11 @@ public class DerivedPropertyOwnershipTests
     }
 
     [Fact]
-    public async Task WhenGetterWritesASubjectItCreates_ThenAttachCommitsAfterOneEvaluationAndLaterWritesPublish()
+    public async Task WhenGetterWritesASubjectItCreates_ThenEachCommitTakesTwoEvaluationsAndLaterWritesPublish()
     {
         // Arrange: the getter reads and then writes a property of a subject it creates, a property no derived
-        // property is linked to, so the write requests nothing.
+        // property is linked to, so the write requests nothing. Each evaluation writes after it read, so each
+        // commit follows exactly one further evaluation.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
@@ -287,7 +288,8 @@ public class DerivedPropertyOwnershipTests
         await DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => root.Anchor = 5).WaitAsync(Timeout);
 
         // Assert
-        Assert.Equal(1, evaluationsAfterAttach);
+        Assert.Equal(2, evaluationsAfterAttach);
+        Assert.Equal(4, Volatile.Read(ref evaluations));
         var change = Assert.Single(changes, c => c.Property.Subject == machine.Worker);
         Assert.Equal(0, change.GetOldValue<int>());
         Assert.Equal(5, change.GetNewValue<int>());
@@ -297,7 +299,8 @@ public class DerivedPropertyOwnershipTests
     public async Task WhenAnotherThreadWritesBetweenTheGettersReadAndItsOwnWrite_ThenTheGetterIsEvaluatedAgain()
     {
         // Arrange: during the first evaluation another thread writes the property the getter read and writes
-        // next, so the getter's own write does not follow the version the evaluation read.
+        // next, so the getter's own write does not follow the version the evaluation read. The second evaluation
+        // writes after its read on its own thread only, which is answered by exactly one further evaluation.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
@@ -322,7 +325,118 @@ public class DerivedPropertyOwnershipTests
 
         // Assert
         Assert.True(isWrittenByOtherThread);
-        Assert.Equal(2, Volatile.Read(ref evaluations));
+        Assert.Equal(3, Volatile.Read(ref evaluations));
+    }
+
+    [Fact]
+    public void WhenGetterWritesASourceItReadBeforeItIsLinkedAtAttach_ThenTheAttachCommitsTheValueOfAnotherEvaluation()
+    {
+        // Arrange: the first evaluation reads Anchor and then writes it. Anchor is not linked yet, so the write
+        // requests no recalculation.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var evaluations = 0;
+        machine.Worker.Evaluator = _ =>
+        {
+            var value = root.Anchor;
+            if (++evaluations == 1)
+            {
+                root.Anchor = value + 1;
+            }
+
+            return value;
+        };
+
+        // Act
+        root.Machine = machine;
+
+        // Assert
+        Assert.Equal(2, evaluations);
+        Assert.Equal(1, machine.Worker.Result);
+        Assert.Equal(1, new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)).TryGetDerivedPropertyData()?.LastKnownValue);
+    }
+
+    [Fact]
+    public void WhenRecalculationNewlyReadsASourceAndWritesIt_ThenTheValueOfAnotherEvaluationIsPublished()
+    {
+        // Arrange: once Data is set, the getter reads Anchor, which is not linked yet, and writes it once.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var isWritten = false;
+        machine.Worker.Evaluator = _ =>
+        {
+            if (root.Data is null)
+            {
+                return -1;
+            }
+
+            var value = root.Anchor;
+            if (!isWritten)
+            {
+                isWritten = true;
+                root.Anchor = 10;
+            }
+
+            return value;
+        };
+        root.Machine = machine;
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+
+        // Act
+        root.Data = [1];
+
+        // Assert
+        var change = Assert.Single(changes, c => c.Property.Subject == machine.Worker);
+        Assert.Equal(-1, change.GetOldValue<int>());
+        Assert.Equal(10, change.GetNewValue<int>());
+        Assert.Equal(10, machine.Worker.Result);
+    }
+
+    [Fact]
+    public void WhenANestedRecalculationWritesASourceTheOuterGetterRead_ThenTheOuterAttachCommitsTheValueOfAnotherEvaluation()
+    {
+        // Arrange: the inner derived property follows the other root's Anchor and writes the root's Anchor. The
+        // outer getter reads the root's Anchor and then writes the other root's Anchor once, which recalculates
+        // the inner derived property on this thread, nested in the outer evaluation.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var otherRoot = new EvaluatorRoot(context);
+        var inner = new EvaluatorMachine();
+        inner.Worker.Evaluator = _ =>
+        {
+            var value = otherRoot.Anchor;
+            if (value == 1)
+            {
+                root.Anchor = 10;
+            }
+
+            return value;
+        };
+        otherRoot.Machine = inner;
+        var outer = new EvaluatorMachine();
+        var isWritten = false;
+        outer.Worker.Evaluator = _ =>
+        {
+            var value = root.Anchor;
+            if (!isWritten)
+            {
+                isWritten = true;
+                otherRoot.Anchor = 1;
+            }
+
+            return value;
+        };
+
+        // Act
+        root.Machine = outer;
+
+        // Assert
+        Assert.Equal(1, inner.Worker.Result);
+        Assert.Equal(10, outer.Worker.Result);
+        Assert.Equal(10, new PropertyReference(outer.Worker, nameof(EvaluatorWorker.Result)).TryGetDerivedPropertyData()?.LastKnownValue);
     }
 
     [Fact]
