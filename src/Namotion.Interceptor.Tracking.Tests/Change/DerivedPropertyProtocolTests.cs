@@ -1,3 +1,5 @@
+using System.Reactive.Concurrency;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -561,6 +563,53 @@ public class DerivedPropertyProtocolTests
         Assert.True(isWrittenWithoutContext);
         Assert.Equal([(0, 5), (5, 7)], published);
         Assert.Equal(7, machine.Worker.Result);
+    }
+
+    [Theory]
+    [InlineData(nameof(Person.Mother))]
+    [InlineData(nameof(Person.FirstName))]
+    public void WhenObserverOfQueuedChangeAttachesSubject_ThenOuterEntriesAreNotDrainedEarly(string attachingOn)
+    {
+        // Arrange: attaching the mother queues two writes of the root and its derived changes. An observer attaches
+        // another subject to the context, whose handler writes the marker, either while the structural write is
+        // announced (before the drain) or while the first queued change is delivered (during the drain).
+        var context = CreateContext();
+        var root = new Person(context);
+        var marker = new Person(context);
+        var mother = new Person();
+        var isAttachingLate = false;
+        context.WithService(() => new BeforeContextInheritanceLifecycleHandler(change =>
+        {
+            if (change.IsContextAttach && change.Subject == mother)
+            {
+                root.FirstName = "a";
+                root.LastName = "b";
+            }
+            else if (change.IsContextAttach && isAttachingLate)
+            {
+                marker.FirstName = "x";
+            }
+        }));
+        var deliveries = new List<string>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            deliveries.Add($"{(change.Property.Subject == root ? "root" : "marker")}.{change.Property.Name}");
+            if (change.Property.Subject == root && change.Property.Name == attachingOn && !isAttachingLate)
+            {
+                isAttachingLate = true;
+                _ = new Person(context);
+            }
+        });
+
+        // Act
+        root.Mother = mother;
+
+        // Assert
+        string[] markerEntries = ["marker.FirstName", "marker.FullName", "marker.FullNameWithPrefix"];
+        string[] expected = attachingOn == nameof(Person.Mother)
+            ? ["root.Mother", .. markerEntries, "root.FirstName", "root.LastName", "root.FullName", "root.FullNameWithPrefix"]
+            : ["root.Mother", "root.FirstName", .. markerEntries, "root.LastName", "root.FullName", "root.FullNameWithPrefix"];
+        Assert.Equal(expected, deliveries);
     }
 
     private static IInterceptorSubjectContext CreateContext()

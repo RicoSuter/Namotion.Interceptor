@@ -1,3 +1,4 @@
+using System.Reactive.Concurrency;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
@@ -304,6 +305,113 @@ public class DerivedPropertyAttachOrderTests
 
         // Assert
         AssertSingleChange(changes, machine.Worker, propertyName, 5);
+    }
+
+    [Fact]
+    public void WhenStructuralWriteFails_ThenChangedDerivedValueIsPublishedAndTheExceptionOfTheWriteWins()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new SiblingReadingRoot(context);
+        var machine = new SiblingReadingMachine();
+        var failingMachine = new SiblingReadingMachine();
+        context.WithService(() => new CallbackLifecycleHandler(change =>
+        {
+            if (change is { IsContextAttach: true, Subject: SiblingReadingConfiguration configuration })
+            {
+                configuration.Installed = true;
+            }
+
+            if (change.IsContextAttach && change.Subject == failingMachine)
+            {
+                throw new NotSupportedException();
+            }
+        }));
+        var changes = SubscribeToChanges(context);
+        using var throwingSubscription = context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Subject == machine.Device && change.Property.Name == nameof(SiblingReadingDevice.IsInstalled))
+            {
+                throw new InvalidOperationException();
+            }
+        });
+
+        // Act
+        var exception = Record.Exception(() => root.Machines = [machine, failingMachine]);
+
+        // Assert
+        Assert.IsType<NotSupportedException>(exception);
+        AssertSingleChange(changes, machine.Device, nameof(SiblingReadingDevice.IsInstalled), true);
+    }
+
+    [Fact]
+    public void WhenContextAttachFails_ThenItsExceptionWinsOverAnObserverThatThrows()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var machine = new SiblingReadingMachine();
+        var failingMachine = new SiblingReadingMachine();
+        var root = new SiblingReadingRoot { Machines = [machine, failingMachine] };
+        context.WithService(() => new CallbackLifecycleHandler(change =>
+        {
+            if (change is { IsContextAttach: true, Subject: SiblingReadingConfiguration configuration })
+            {
+                configuration.Installed = true;
+            }
+
+            if (change.IsContextAttach && change.Subject == failingMachine)
+            {
+                throw new NotSupportedException();
+            }
+        }));
+        using var throwingSubscription = context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Name == nameof(SiblingReadingDevice.IsInstalled))
+            {
+                throw new InvalidOperationException();
+            }
+        });
+
+        // Act
+        var exception = Record.Exception(() => ((IInterceptorSubject)root).Context.AddFallbackContext(context));
+
+        // Assert
+        Assert.IsType<NotSupportedException>(exception);
+    }
+
+    [Fact]
+    public void WhenObserverThrowsOnChangedDerivedValue_ThenRemainingDerivedPropertiesStillPublish()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new SiblingReadingRoot(context);
+        var first = new SiblingReadingMachine();
+        var second = new SiblingReadingMachine();
+        context.WithService(() => new CallbackLifecycleHandler(change =>
+        {
+            if (change is { IsContextAttach: true, Subject: SiblingReadingConfiguration configuration })
+            {
+                configuration.Installed = true;
+            }
+        }));
+
+        // Subscribed first, because an observer that throws keeps later observers from seeing that change.
+        var changes = SubscribeToChanges(context);
+        using var throwingSubscription = context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Subject == first.Device)
+            {
+                throw new InvalidOperationException();
+            }
+        });
+
+        // Act
+        var exception = Record.Exception(() => root.Machines = [first, second]);
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(exception);
+        Assert.Contains(changes, change => change.Property.Subject == root && change.Property.Name == nameof(SiblingReadingRoot.Machines));
+        AssertSingleChange(changes, second.Device, nameof(SiblingReadingDevice.IsInstalled), true);
     }
 
     private static void AssertSingleChange<T>(List<SubjectPropertyChange> changes, IInterceptorSubject subject, string propertyName, T newValue)
