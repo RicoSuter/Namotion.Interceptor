@@ -196,19 +196,39 @@ var config = new OpcUaClientConfiguration
 };
 ```
 
-**Endpoint selection.** With `RequireSecurity = true` the client connects only to a signed or encrypted endpoint whose security policy it supports, and fails if the server offers none. With `false`, the default, it prefers an unsecured endpoint; when the server offers none, it uses the best secured endpoint whose security policy it supports. With the default RSA certificate the client supports Basic256Sha256, Aes128_Sha256_RsaOaep and Aes256_Sha256_RsaPss. In both modes, a server whose secured endpoints use only other policies makes connecting fail with a message that lists the offered and the supported policies.
+#### Endpoint Selection
 
-**Client certificate.** A secured connection needs a client certificate with its private key; an unsecured connection needs none. The client looks for it in `{CertificateStoreBasePath}/own`. With `AutoCreateApplicationCertificate = true`, the default, it creates a self-signed certificate there the first time, valid for `ApplicationCertificateLifetimeInMonths` (default 12, at least 2). With `AutoCreateApplicationCertificate = false` a missing certificate fails the connection. A provisioned certificate needs the subject `CN={ApplicationName}, O=Namotion` and the application URI `urn:{host name}:Namotion.Interceptor:{ApplicationName}`, or the value of `ApplicationUri`. Set `ApplicationUri` when the host name changes, for example in containers, because a certificate with a stale URI is rejected. Several processes sharing one certificate store should provision the certificate up front or use different application names or store paths.
+With `RequireSecurity = true` the client connects only to a signed or encrypted endpoint whose security policy it supports, and fails if the server offers none. With `false`, the default, it prefers an unsecured endpoint; when the server offers none, it uses the best secured endpoint whose security policy it supports. With the default RSA certificate the client supports Basic256Sha256, Aes128_Sha256_RsaOaep and Aes256_Sha256_RsaPss. When a secured endpoint is needed and every secured endpoint the server offers uses a policy the client does not support, connecting fails with a message that lists the offered and the supported policies.
 
-**Certificate renewal.** With `AutoCreateApplicationCertificate = true` the client replaces any self-signed certificate in the own store 30 days before it expires, including a provisioned one: it deletes the old certificate with its private key, creates a new one and logs a warning, because servers that trust the client have to trust the new certificate. A certificate that is not self-signed, such as one issued by a certificate authority, is never replaced, and with `AutoCreateApplicationCertificate = false` nothing is ever replaced. If loading or renewing fails while the current certificate has not expired, the client keeps using it, logs the error and retries on the next connect. Once the certificate has expired, the connection fails.
+#### Client Certificate
 
-**Trusting the server.** The client checks the server certificate on secured connections, and on unsecured connections before it encrypts a username or certificate login for the server. With `AutoAcceptUntrustedCertificates = false`, the default, an unknown server certificate is rejected and written to `{CertificateStoreBasePath}/rejected/certs`. Move it to `{CertificateStoreBasePath}/trusted/certs` to trust the server, or provision that folder up front. For a server certificate issued by a certificate authority, put the certificates of the issuing authorities in `{CertificateStoreBasePath}/issuer/certs` and the root authority's certificate in `trusted/certs`. The check repeats whenever the secure channel renews, about hourly, so removing a trusted certificate drops a live connection.
+A secured connection needs a client certificate with its private key; an unsecured connection needs none. The client looks for it in `{CertificateStoreBasePath}/own`. With `AutoCreateApplicationCertificate = true`, the default, it creates a self-signed certificate there the first time, valid for `ApplicationCertificateLifetimeInMonths`. With `AutoCreateApplicationCertificate = false` a missing certificate fails the connection.
+
+To provision a certificate, put it in `own/certs` as a `.der` file and its private key in `own/private` as a `.pfx` file, which may be password protected through `CertificatePasswordProvider` (see [Custom Application Configuration](#custom-application-configuration)). The certificate needs the subject `CN={ApplicationName}, O=Namotion` and the application URI `urn:{host name}:Namotion.Interceptor:{ApplicationName}`, or the value of `ApplicationUri`. Set `ApplicationUri` when the host name changes, for example in containers, because a certificate with a stale URI is rejected.
+
+Several processes sharing one certificate store should provision a certificate that is not renewed, one issued by a certificate authority or with `AutoCreateApplicationCertificate = false`, or use different application names or store paths. The client serializes access to the store only within one process.
+
+#### Certificate Renewal
+
+With `AutoCreateApplicationCertificate = true` the client replaces any self-signed certificate in the own store 30 days before it expires, including a provisioned one: it deletes the old certificate with its private key, creates a new one and logs a warning, because servers that trust the client have to trust the new certificate. A certificate that is not self-signed, such as one issued by a certificate authority, is never replaced, and with `AutoCreateApplicationCertificate = false` nothing is ever replaced.
+
+The client checks this only when it creates a session itself, on the initial connect and on its manual reconnects (see [Connection Loss Recovery](#connection-loss-recovery)), not on a timer and not when the SDK's reconnect handler recovers the session. A connection that stays up through the last 30 days therefore renews only at its next reconnect. If the certificate expires before that, the server rejects it when the secure channel renews, and the client can connect again only once the server trusts the new certificate.
+
+If loading or renewing fails while the current certificate has not expired, the client keeps using it, logs the error and retries on the next connect. Once the certificate has expired, a failed load or renewal fails the connection.
+
+#### Trust
+
+**Trusting the server.** The client checks the server certificate on secured connections, and on unsecured connections before it encrypts a username or certificate login for the server. With `AutoAcceptUntrustedCertificates = false`, the default, an unknown server certificate is rejected and written to `{CertificateStoreBasePath}/rejected/certs`. Move it to `{CertificateStoreBasePath}/trusted/certs` to trust the server, or provision that folder up front. For a server certificate issued by a certificate authority, put the certificates of the issuing authorities in `{CertificateStoreBasePath}/issuer/certs` and the root authority's certificate in `trusted/certs`. The check repeats whenever the secure channel renews, roughly every 45 minutes with the default token lifetime of one hour (the SDK renews at 75% of the lifetime, which the server may revise), so removing a trusted certificate drops a live connection.
 
 **Trusting the client.** The server has to trust the client certificate in the same way, through its own trusted store. The server of this library uses the same folder layout under its own `CertificateStoreBasePath` (see [Server Configuration](connectors-opcua-server.md#configuration)).
 
-**Errors.** A failed connection attempt is reported in `Diagnostics.LastError` (see [Diagnostics](#diagnostics)) and retried. When the client rejects the server certificate, the message names its thumbprint and the folders to move it between; for an incomplete issuer chain it names the issuer folder instead and does not suggest auto-accepting. On secured endpoints the message also notes that the server may instead have rejected the client's certificate, since servers report that with the same status codes. When the client certificate cannot be loaded, the message names the own folder and the subject and application URI a provisioned certificate needs.
+#### Errors
 
-**Upgrading.** `UseSecurity` was renamed to `RequireSecurity`, and `true` now fails when the server offers no usable secured endpoint instead of connecting without security. Server certificates are now validated by default, which affects username and certificate logins over unsecured connections too: trust the server as above, or set `AutoAcceptUntrustedCertificates = true` for the previous behavior. The server of this library now keeps its certificate across restarts, see [Server Configuration](connectors-opcua-server.md#configuration).
+A failed connection attempt is reported in `Diagnostics.LastError` (see [Diagnostics](#diagnostics)) and retried. When the client rejects the server certificate, the message names its thumbprint and the folders to move it between; for an incomplete issuer chain it names the issuer and trusted folders instead and does not suggest auto-accepting. On secured endpoints the message also notes that the server may instead have rejected the client's certificate, since servers report that with the same status codes. When the client certificate cannot be loaded, the message names the own folder and the subject and application URI a provisioned certificate needs.
+
+#### Upgrading
+
+`UseSecurity` was renamed to `RequireSecurity`, and `true` now fails when the server offers no usable secured endpoint instead of connecting without security. Server certificates are now validated by default, which affects username and certificate logins over unsecured connections too: trust the server as above, or set `AutoAcceptUntrustedCertificates = true` for the previous behavior. The server of this library now keeps its certificate across restarts, see [Server Configuration](connectors-opcua-server.md#configuration).
 
 ### Authentication
 
@@ -254,6 +274,9 @@ Override `CreateApplicationInstanceAsync()` in a derived configuration class for
 
 ```csharp
 using System.Text;
+using Namotion.Interceptor.OpcUa.Client;
+using Opc.Ua;
+using Opc.Ua.Configuration;
 
 public class MyOpcUaClientConfiguration : OpcUaClientConfiguration
 {
@@ -269,7 +292,7 @@ public class MyOpcUaClientConfiguration : OpcUaClientConfiguration
         config.SecurityConfiguration.CertificatePasswordProvider = new CertificatePasswordProvider(Encoding.UTF8.GetBytes(CertificatePassword));
         config.TransportQuotas.MaxMessageSize = 64_000_000;
 
-        // The validator copies security settings only here.
+        // The validator reads security settings only when UpdateAsync runs, so call it again after changing them.
         await config.CertificateValidator.UpdateAsync(config);
 
         return application;
@@ -277,7 +300,7 @@ public class MyOpcUaClientConfiguration : OpcUaClientConfiguration
 }
 ```
 
-To provide the client certificate yourself, for example from a hardware security module or the Windows certificate store, set `config.SecurityConfiguration.ApplicationCertificate.Certificate` with its private key; the client then uses it as is. The same applies when an override switches the application certificate to another store type, such as the Windows certificate store, and calls `CertificateValidator.UpdateAsync` again: the SDK loads that certificate with its private key during the update, so the client uses it as provided, without its own validation or renewal.
+To provide the client certificate yourself, for example from a hardware security module, set `config.SecurityConfiguration.ApplicationCertificate.Certificate` with its private key. An override can also switch the application certificate to another store type, such as the Windows certificate store, and call `CertificateValidator.UpdateAsync` again; the SDK then loads that certificate with its private key during the update, which also makes it a provided certificate. The client uses a provided certificate as is, without validating or renewing it.
 
 ## Monitoring & Subscriptions
 

@@ -102,7 +102,7 @@ await server.StartAsync(cancellationToken);
 | `BufferTime` | `TimeSpan?` | 8ms | Time window to buffer incoming property changes before publishing to clients |
 | `TelemetryContext` | `ITelemetryContext` | NullTelemetryContext | Telemetry integration for logging and diagnostics |
 | `AutoAcceptUntrustedCertificates` | `bool` | false | Accept untrusted client certificates (testing/development only) |
-| `CleanCertificateStore` | `bool` | false | Empty the application certificate store on startup, which creates a new certificate on every start and makes clients trust the server again |
+| `CleanCertificateStore` | `bool` | false | Delete the whole application certificate store (`{CertificateStoreBasePath}/own`) on startup, so the server creates a new certificate on every start and clients have to trust the new certificate after every restart. A client sharing the same `CertificateStoreBasePath` (both default to "pki") loses its certificate too |
 | `CertificateStoreBasePath` | `string` | "pki" | Base directory for certificate stores. Change to isolate stores for parallel test execution |
 
 **Upgrading.** `CleanCertificateStore` used to default to true, so the server created a new certificate on every start. It now keeps its certificate across restarts; set `CleanCertificateStore = true` for the previous behavior.
@@ -148,8 +148,10 @@ public class MyServerConfiguration : OpcUaServerConfiguration
         var config = application.ApplicationConfiguration;
 
         // Tighten security
-        config.SecurityConfiguration.AutoAcceptUntrustedCertificates = false;
         config.SecurityConfiguration.MinimumCertificateKeySize = 4096;
+
+        // The validator reads security settings only when UpdateAsync runs, so call it again after changing them.
+        await config.CertificateValidator.UpdateAsync(config);
 
         // Adjust transport limits
         config.TransportQuotas.MaxMessageSize = 64_000_000;
