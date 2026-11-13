@@ -148,9 +148,14 @@ internal static class DerivedPropertyOwnership
     /// <summary>Traces an exception that is dropped because another one wins or nobody can receive it.</summary>
     internal static void TraceDropped(string reason, Exception exception)
     {
+        TraceWarning($"DerivedPropertyChangeHandler: {reason}: {exception}");
+    }
+
+    private static void TraceWarning(string message)
+    {
         try
         {
-            Trace.TraceWarning($"DerivedPropertyChangeHandler: {reason}: {exception}");
+            Trace.TraceWarning(message);
         }
         catch (Exception)
         {
@@ -188,7 +193,8 @@ internal static class DerivedPropertyOwnership
 
     /// <summary>
     /// Evaluates the getter at attach, outside lock(data), and commits the first value without publishing it.
-    /// The attach token decides whether the commit counts: a newer attach or a detach supersedes it.
+    /// The attach token decides whether the commit counts: a newer attach or a detach supersedes it. Never throws:
+    /// an exception is traced, so the remaining properties and lifecycle handlers of the subject still attach.
     /// </summary>
     private static void EvaluateAtAttach(DerivedPropertyData data, PropertyReference property, long attachToken, bool ownsData)
     {
@@ -199,29 +205,44 @@ internal static class DerivedPropertyOwnership
         {
             requestAfterAttach = RunAttachEvaluations(data, property, attachToken, ownsData, out pendingTimestamp, out isExhausted);
         }
-        catch (Exception)
+        catch (Exception exception)
         {
-            // Something besides the getter threw (a trace listener, a timestamp): the attach must not keep the
-            // property owned, or every later request would be left to it.
+            // Something besides the getter threw (a time source): the attach must not keep the property owned, or
+            // every later request would be left to it.
             if (ReleaseAttachAfterFailure(data, attachToken, out pendingTimestamp))
             {
-                RequestRecalculationAfterAttachFailure(property, pendingTimestamp);
+                RequestRecalculationAfterAttach(property, pendingTimestamp);
             }
 
-            throw;
+            TraceDropped($"the attach of '{property.Metadata.Name}' on {property.Subject.GetType().Name} failed", exception);
+            return;
         }
 
         if (requestAfterAttach)
         {
-            RequestRecalculation(property, pendingTimestamp);
+            RequestRecalculationAfterAttach(property, pendingTimestamp);
         }
 
         // Traced outside lock(data), and after the request, so a failing trace listener cannot lose it.
         if (isExhausted)
         {
-            Trace.TraceWarning(
+            TraceWarning(
                 $"DerivedPropertyChangeHandler: MaxStabilizationIterations ({MaxStabilizationIterations}) exhausted " +
                 $"while attaching '{property.Metadata.Name}' on {property.Subject.GetType().Name}.");
+        }
+    }
+
+    // The recalculation publishes on the attaching thread: an observer's exception is traced, and the recalculation
+    // has handled the requests it left (see RunOwnerLoops).
+    private static void RequestRecalculationAfterAttach(PropertyReference property, long pendingTimestamp)
+    {
+        try
+        {
+            RequestRecalculation(property, pendingTimestamp);
+        }
+        catch (Exception exception)
+        {
+            TraceDropped($"the recalculation after the attach of '{property.Metadata.Name}' on {property.Subject.GetType().Name} threw", exception);
         }
     }
 
@@ -346,18 +367,6 @@ internal static class DerivedPropertyOwnership
             }
 
             return TakePendingRequestIfUnowned(data, out pendingTimestamp);
-        }
-    }
-
-    private static void RequestRecalculationAfterAttachFailure(PropertyReference property, long pendingTimestamp)
-    {
-        try
-        {
-            RequestRecalculation(property, pendingTimestamp);
-        }
-        catch (Exception)
-        {
-            // The attach's exception propagates; a later one is dropped, as in RunOwnerLoops.
         }
     }
 

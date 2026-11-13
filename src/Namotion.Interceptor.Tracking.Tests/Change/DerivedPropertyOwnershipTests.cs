@@ -439,7 +439,8 @@ public class DerivedPropertyOwnershipTests
     public void WhenAttachFailsOutsideTheGetter_ThenThePropertyIsReleasedAndItsFirstSuccessIsPublished()
     {
         // Arrange: the time source writes Anchor and fails when the attach resolves the timestamp of its first
-        // value, before the attach committed its links or a value.
+        // value, before the attach committed its links or a value. The worker's second derived property attaches
+        // after the first one.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
@@ -471,18 +472,35 @@ public class DerivedPropertyOwnershipTests
             root.Anchor = 1000;
             throw new InvalidOperationException("Time source failed.");
         });
+        machine.Worker.ObjectEvaluator = _ => root.Data;
+        using var traceOutput = new StringWriter();
+        using var listener = new TextWriterTraceListener(traceOutput);
+        Trace.Listeners.Add(listener);
 
-        // Act
-        var exception = Record.Exception(() => root.Machine = machine);
-        timeSource.Dispose();
-        var evaluationsAfterAttach = evaluations;
-        root.Anchor = 2000;
+        try
+        {
+            // Act
+            var exception = Record.Exception(() => root.Machine = machine);
+            timeSource.Dispose();
+            var evaluationsAfterAttach = evaluations;
+            root.Anchor = 2000;
+            var data = new byte[1];
+            root.Data = data;
 
-        // Assert: the recalculation after the failed attach published its value from the type's default, and
-        // a later write publishes from that value.
-        Assert.Equal("Time source failed.", Assert.IsType<InvalidOperationException>(exception).Message);
-        Assert.Equal(2, evaluationsAfterAttach);
-        Assert.Equal(new List<(object?, object?)> { (0, 1000), (1000, 2000) }, publishedValues);
+            // Assert: the attach completes and traces the failure. The recalculation after the failed attach
+            // published its value from the type's default, and a later write publishes from that value.
+            Assert.Null(exception);
+            listener.Flush();
+            Assert.Contains("Time source failed.", traceOutput.ToString());
+            Assert.Equal(2, evaluationsAfterAttach);
+            Assert.Equal((0, 1000), publishedValues[0]);
+            Assert.Equal((1000, 2000), publishedValues[1]);
+            Assert.Equal((null, data), publishedValues[2]);
+        }
+        finally
+        {
+            Trace.Listeners.Remove(listener);
+        }
     }
 
     [Fact]
