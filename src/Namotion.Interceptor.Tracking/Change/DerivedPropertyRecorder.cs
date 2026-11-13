@@ -139,6 +139,12 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
 
     public void ClearLastRecording()
     {
+        // No recording finished at this depth yet (a failure before the first recording on this thread).
+        if (_depth >= _frames.Length)
+        {
+            return;
+        }
+
         ref var frame = ref _frames[_depth];
         if (frame.Count > 0)
         {
