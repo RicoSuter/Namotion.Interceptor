@@ -318,7 +318,7 @@ public class OpcUaClientConfiguration
     public bool AutoAcceptUntrustedCertificates { get; set; }
 
     /// <summary>
-    /// Gets or sets whether the client creates a self-signed application certificate in its own store when none
+    /// Gets or sets whether the client creates a self-signed application certificate in <c>{CertificateStoreBasePath}/own</c> when none
     /// exists for a secured connection, and renews a self-signed certificate before it expires. When false, a
     /// secured connection requires a provisioned certificate and nothing is ever replaced. Default is true.
     /// </summary>
@@ -381,12 +381,15 @@ public class OpcUaClientConfiguration
     public ITelemetryContext ResolvedTelemetryContext => TelemetryContext ?? NullTelemetryContext.Instance;
 
     /// <summary>
-    /// Creates and configures an OPC UA application instance for the client. Override this method to customize
-    /// application configuration, security settings, or certificate handling. An override that changes security
-    /// settings after calling the base must call <c>CertificateValidator.UpdateAsync</c> on the configuration
-    /// again, because the validator copies them only then. Set <c>SecurityConfiguration.ApplicationCertificate.Certificate</c>
-    /// with its private key to provide the client certificate yourself; it is then used as is.
+    /// Creates and configures an OPC UA application instance for the client.
+    /// Override this method to customize application configuration, security settings, or certificate handling.
     /// </summary>
+    /// <remarks>
+    /// An override that changes security settings after calling the base must call
+    /// <c>CertificateValidator.UpdateAsync</c> on the configuration again, because the validator copies them only
+    /// then. Set <c>SecurityConfiguration.ApplicationCertificate.Certificate</c> with its private key to provide
+    /// the client certificate yourself; it is then used as is.
+    /// </remarks>
     /// <returns>A configured <see cref="ApplicationInstance"/> ready for connecting to OPC UA servers.</returns>
     public virtual async Task<ApplicationInstance> CreateApplicationInstanceAsync()
     {
@@ -561,6 +564,20 @@ public class OpcUaClientConfiguration
             throw new ArgumentException(
                 $"ReadAfterWriteBuffer must be non-negative, got: {ReadAfterWriteBuffer}",
                 nameof(ReadAfterWriteBuffer));
+        }
+
+        if (ApplicationCertificateLifetimeInMonths == 0)
+        {
+            throw new ArgumentException(
+                "ApplicationCertificateLifetimeInMonths must be at least 1, got: 0",
+                nameof(ApplicationCertificateLifetimeInMonths));
+        }
+
+        if (ApplicationUri is not null && string.IsNullOrWhiteSpace(ApplicationUri))
+        {
+            throw new ArgumentException(
+                "ApplicationUri must not be empty or whitespace when set",
+                nameof(ApplicationUri));
         }
     }
 }

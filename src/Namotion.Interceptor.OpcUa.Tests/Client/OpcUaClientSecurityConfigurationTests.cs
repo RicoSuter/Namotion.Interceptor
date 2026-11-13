@@ -1,3 +1,4 @@
+using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Server;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
@@ -15,7 +16,7 @@ public class OpcUaClientSecurityConfigurationTests
     }
 
     [Fact]
-    public async Task WhenNoTrustOptionIsSet_ThenTheValidatorRejectsUntrustedServerCertificates()
+    public async Task WhenNoTrustOptionIsSet_ThenTheValidatorDoesNotAutoAcceptUntrustedCertificates()
     {
         // Arrange
         var configuration = ClientSourceTestFactory.CreateConfiguration();
@@ -29,7 +30,7 @@ public class OpcUaClientSecurityConfigurationTests
     }
 
     [Fact]
-    public async Task WhenUntrustedCertificatesAreAccepted_ThenTheValidatorAcceptsThem()
+    public async Task WhenUntrustedCertificatesAreAccepted_ThenTheValidatorAutoAcceptsThem()
     {
         // Arrange
         var configuration = ClientSourceTestFactory.CreateConfiguration();
@@ -90,12 +91,36 @@ public class OpcUaClientSecurityConfigurationTests
     public void WhenTheClientConfigurationIsCreated_ThenSecurityIsOptionalAndCertificatesAreCreatedForTwelveMonths()
     {
         // Act
-        var configuration = ClientSourceTestFactory.CreateConfiguration();
+        var configuration = new OpcUaClientConfiguration { ServerUrl = "opc.tcp://localhost:4840" };
 
         // Assert
         Assert.False(configuration.RequireSecurity);
         Assert.True(configuration.AutoCreateApplicationCertificate);
         Assert.Equal((ushort)12, configuration.ApplicationCertificateLifetimeInMonths);
         Assert.Null(configuration.ApplicationUri);
+    }
+
+    [Fact]
+    public void WhenTheCertificateLifetimeIsZero_ThenValidationFails()
+    {
+        // Arrange
+        var configuration = ClientSourceTestFactory.CreateConfiguration();
+        configuration.ApplicationCertificateLifetimeInMonths = 0;
+
+        // Act & Assert
+        Assert.Throws<ArgumentException>(() => configuration.Validate());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("  ")]
+    public void WhenTheApplicationUriIsEmpty_ThenValidationFails(string applicationUri)
+    {
+        // Arrange
+        var configuration = ClientSourceTestFactory.CreateConfiguration();
+        configuration.ApplicationUri = applicationUri;
+
+        // Act & Assert
+        Assert.Throws<ArgumentException>(() => configuration.Validate());
     }
 }
