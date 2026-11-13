@@ -68,7 +68,7 @@ When running from source, the data folder is `src/HomeBlaze/HomeBlaze/Data`. The
 
 `AutomationState/` holds one checkpoint file per automation with its current state and last runs, described in [Automations: The checkpoint](automation.md#the-checkpoint).
 
-`OpcUa/` holds the certificate stores of the OPC UA client and server subjects, one folder per role: `OpcUa/Client/Pki` and `OpcUa/Server/Pki`. An OPC UA client checks the server certificate on secured connections and before it sends a username and password over an unsecured one, rejects a certificate it does not trust, and shows the reason in its status message. To trust the server, move the certificate that the client writes when its connection attempt is rejected from `OpcUa/Client/Pki/rejected/certs` to `OpcUa/Client/Pki/trusted/certs`; the next connection attempt then succeeds. Alternatively, switch on **Accept Untrusted Server Certificates** in the client's settings (`AcceptUntrustedServerCertificates`), which accepts any server certificate and is only appropriate on a trusted network.
+`OpcUa/` holds the certificate stores of the OPC UA client and server subjects, `OpcUa/Client/Pki` and `OpcUa/Server/Pki`, described in [OPC UA](opc-ua.md#certificates).
 
 ---
 
