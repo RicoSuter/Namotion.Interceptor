@@ -152,4 +152,20 @@ public class VirtualSubjectDraftTests
         Assert.Null(entry.Unit);
         Assert.Equal("Mine", entry.Title);
     }
+
+    [Fact]
+    public void WhenTheUnitIsDefault_ThenItIsSavedAsNone()
+    {
+        // Arrange
+        var draft = VirtualSubjectDraft.From(null, null);
+        var entry = draft.AddProperty(null);
+        entry.Expression = "1";
+        entry.Unit = StateUnit.Default;
+
+        // Act
+        var result = draft.ToProperties();
+
+        // Assert
+        Assert.Null(result!["Property"].State!.Unit);
+    }
 }

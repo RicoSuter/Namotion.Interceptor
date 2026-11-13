@@ -66,6 +66,21 @@ public class VirtualSubjectEditComponentTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenTheEditorIsSavedWithErrors_ThenItThrowsAndTheSubjectIsUnchanged()
+    {
+        // Arrange
+        var properties = new Dictionary<string, VirtualProperty> { ["A"] = new() { Expression = "1", DataType = VirtualDataType.Number } };
+        _subject.Properties = properties;
+        var editor = _context.Render<VirtualSubjectEditComponent>(parameters => parameters.Add(component => component.Subject, _subject));
+        await editor.Find("[data-testid=virtual-add-property]").ClickAsync();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() => editor.InvokeAsync(() => editor.Instance.SaveAsync(CancellationToken.None)));
+        Assert.Same(properties, _subject.Properties);
+        Assert.True(editor.Instance.IsDirty);
+    }
+
+    [Fact]
     public void WhenEntriesReadEachOther_ThenTheEditorReportsItAndIsInvalid()
     {
         // Arrange
