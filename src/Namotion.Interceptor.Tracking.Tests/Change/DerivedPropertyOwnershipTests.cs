@@ -384,6 +384,125 @@ public class DerivedPropertyOwnershipTests
     }
 
     [Fact]
+    public void WhenTimeSourceRecalculatesAnotherDerivedPropertyDuringAttach_ThenTheAttachKeepsItsDependencies()
+    {
+        // Arrange: once the first attach evaluation ran, the next time source call on this thread writes FirstName,
+        // which recalculates FullName on this thread.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var person = new Person(context) { FirstName = "a" };
+        var machine = new EvaluatorMachine();
+        var testThread = Environment.CurrentManagedThreadId;
+        var isArmed = false;
+        var hasWritten = false;
+        machine.Worker.Evaluator = _ =>
+        {
+            isArmed = !hasWritten;
+            return root.Anchor;
+        };
+        var changes = new List<SubjectPropertyChange>();
+        var previousTimestampFunction = SubjectChangeContext.GetTimestampFunction;
+        SubjectChangeContext.GetTimestampFunction = () =>
+        {
+            if (isArmed && Environment.CurrentManagedThreadId == testThread)
+            {
+                isArmed = false;
+                hasWritten = true;
+                person.FirstName = "b";
+            }
+
+            return DateTimeOffset.UtcNow;
+        };
+
+        try
+        {
+            // Act
+            root.Machine = machine;
+            context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+            root.Anchor = 5;
+
+            // Assert
+            Assert.True(hasWritten);
+            Assert.Contains(
+                new PropertyReference(root, nameof(EvaluatorRoot.Anchor)),
+                new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)).GetRequiredProperties().ToArray());
+            var change = Assert.Single(changes, c => c.Property.Subject == machine.Worker);
+            Assert.Equal(5, change.GetNewValue<int>());
+        }
+        finally
+        {
+            SubjectChangeContext.GetTimestampFunction = previousTimestampFunction;
+        }
+    }
+
+    [Fact]
+    public void WhenALoopThatTookOverAForeignRequestFailsBeforeItsFirstEvaluation_ThenTheRequestIsStillPublished()
+    {
+        // Arrange: the first publication lets another thread write Anchor and throws. That thread's time source
+        // returns no time, so the request carries no timestamp, and the loop that takes it over resolves one
+        // first; that resolution throws once, before the loop evaluates.
+        var testThread = Environment.CurrentManagedThreadId;
+        var otherThread = 0;
+        var isArmed = false;
+        var isWrittenByOtherThread = false;
+        var publications = 0;
+        var publishedValues = new List<object?>();
+        EvaluatorRoot? root = null;
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        context.AddService(new PublicationObserver((_, value) =>
+        {
+            publishedValues.Add(value);
+            if (++publications == 1)
+            {
+                isWrittenByOtherThread = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+                {
+                    Volatile.Write(ref otherThread, Environment.CurrentManagedThreadId);
+                    root!.Anchor = 50;
+                }).Wait(Timeout);
+                isArmed = true;
+                throw new InvalidOperationException("Publication 1.");
+            }
+        }));
+        root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = _ => root.Anchor;
+        root.Machine = machine;
+        var previousTimestampFunction = SubjectChangeContext.GetTimestampFunction;
+        SubjectChangeContext.GetTimestampFunction = () =>
+        {
+            var thread = Environment.CurrentManagedThreadId;
+            if (thread == Volatile.Read(ref otherThread))
+            {
+                return DateTimeOffset.MinValue;
+            }
+
+            if (isArmed && thread == testThread)
+            {
+                isArmed = false;
+                throw new InvalidOperationException("Time source failed.");
+            }
+
+            return DateTimeOffset.UtcNow;
+        };
+
+        try
+        {
+            // Act
+            var exception = Record.Exception(() => root.Anchor = 1);
+
+            // Assert
+            Assert.Equal("Publication 1.", Assert.IsType<InvalidOperationException>(exception).Message);
+            Assert.True(isWrittenByOtherThread);
+            Assert.False(isArmed);
+            Assert.Equal(new object?[] { 1, 50 }, publishedValues);
+        }
+        finally
+        {
+            SubjectChangeContext.GetTimestampFunction = previousTimestampFunction;
+        }
+    }
+
+    [Fact]
     public async Task WhenAnotherThreadWritesDuringEveryEvaluationAcrossIterationLimits_ThenNoRequestIsLostAndLoopsDoNotNest()
     {
         // Arrange: during each evaluation, a dedicated thread writes Anchor and the getter waits until that write
