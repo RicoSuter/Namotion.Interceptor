@@ -98,4 +98,4 @@ When the file or the block on a page is edited from outside, all three rules app
 
 Mark a property with `RecreateOnChange` when the running instance cannot apply a change of it, for example because it adds dynamic properties when it is attached and the registry cannot remove them. Values are compared as JSON. A missing key keeps the value on an update, so a value that disappears counts as unchanged only if it was null before, while a value that is newly written, null included, counts as changed. A hand-written value in another but equivalent form, such as an enum as a number, differs from what HomeBlaze writes, so the first save from the dialog creates such a subject again once.
 
-A recreated subject is a new instance at the same path: whatever resolves it by path, such as pages, automations and history, finds the new one.
+A recreated subject is a new instance at the same path.
