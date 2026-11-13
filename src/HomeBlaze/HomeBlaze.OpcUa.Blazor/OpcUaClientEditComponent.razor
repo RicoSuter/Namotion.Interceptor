@@ -47,9 +47,8 @@
 
     <MudCheckBox @bind-Value="_acceptUntrustedServerCertificates"
                  @bind-Value:after="OnFieldChanged"
-                 Label="Accept untrusted server certificates"
+                 Label="Accept Untrusted Server Certificates"
                  Class="mt-4" />
-    <MudText Typo="Typo.caption">Leave off and trust the server's certificate instead, unless the network is trusted. See the status message below for a rejected certificate.</MudText>
 
     <MudNumericField @bind-Value="_samplingInterval"
                      Label="Sampling Interval (ms)"

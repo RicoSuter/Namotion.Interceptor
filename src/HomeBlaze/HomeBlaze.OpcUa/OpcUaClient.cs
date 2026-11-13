@@ -91,7 +91,7 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     public partial ServiceStatus Status { get; set; }
 
     /// <summary>
-    /// Error message when Status is Error.
+    /// Error message when Status is Error, or the last connection error while the client is running but not connected.
     /// </summary>
     [State]
     public partial string? StatusMessage { get; set; }
@@ -343,6 +343,7 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
                 _clientSource = null;
                 Root = null;
                 Status = ServiceStatus.Stopped;
+                StatusMessage = null;
                 IsConnected = null;
                 MonitoredItemCount = null;
                 PollingItemCount = null;
