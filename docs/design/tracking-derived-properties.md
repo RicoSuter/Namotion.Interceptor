@@ -48,7 +48,7 @@ The design rests on three rules:
 
 **Read tap.** `InterceptorExecutor.GetPropertyValue` and `InterceptorExecutor.GetPropertyValueWithoutContext` report the property to the thread's read observer, when one is set, before the value is read. Tracking sets the observer only while a getter is evaluated, so outside of an evaluation a read costs one thread-static load and a null check. The slot holds one observer: whoever sets it replaces the previous observer, and clearing it does not restore one.
 
-**Write tap.** `InterceptorExecutor.SetPropertyValue`, `PublishDerivedPropertyValue` and `SetPropertyValueWithoutContext` increment the thread's write depth before the chain, and in a `finally` after it decrement it and call the process-wide write observer with a `PropertyWriteObservation`: the property, whether the value landed (`IsWritten`, always true without a context), the raw write timestamp (0 when the write did not land or the subject has no context), `IsDerivedRecalculation`, the write's nesting depth on the thread, and whether the chain threw (`HasFailed`). An observer exception replaces the chain's own, so an observer must not throw when `HasFailed` is set. A write without a context that found no observer reads it again after the write and a full fence, and reports the write to an observer installed in the meantime, so the first evaluations after the observer's installation do not miss it.
+**Write tap.** `InterceptorExecutor.SetPropertyValue`, `PublishDerivedPropertyValue` and `SetPropertyValueWithoutContext` increment the thread's write depth before the chain, and in a `finally` after it decrement it and call the process-wide write observer with a `PropertyWriteObservation`: the property, whether the value landed (`IsWritten`, always true without a context), the raw write timestamp (0 when the write did not land or the subject has no context), `IsDerivedRecalculation`, the write's nesting depth on the thread, and whether the chain threw (`HasFailed`). An observer exception replaces the chain's own, so an observer must not throw when `HasFailed` is set. A write without a context that found no observer reads it again after the write and reports the write to an observer installed in the meantime, see [Observer installation](#observer-installation).
 
 **Registration.** `TrackingWriteObserver` is installed by the first `DerivedPropertyChangeHandler` or `LifecycleInterceptor` created in the process, and is never removed. `SetWriteObserver` keeps the first observer, so code that installs another observer before Tracking does pre-empts derived property tracking.
 
@@ -156,6 +156,10 @@ For every landed write, in `TrackingWriteObserver`, after the whole chain:
 - **W5**: read its used-by collection and request a recalculation of each derived property in it, and of the property itself when it is a derived property with a setter and the write is not a recalculation's publication. Every one is requested, also after a request threw (an observer of its publication); the first exception propagates afterwards.
 
 A write that did not land (vetoed, captured by a transaction, stopped by the equality check) is skipped entirely.
+
+### Observer installation
+
+A write without a context that found no write observer does not pay a fence: after W1 it reads the observer again (a volatile read) and, when one is set now, reports the write to it, which then runs W2 to W5. The first installation of an observer executes `Interlocked.MemoryBarrierProcessWide()`, a full barrier on every running thread at an instruction boundary: a W1 before that point is visible to every evaluation that starts after the installation completed, and a W1 after it is followed in program order by the read again, which then sees the observer. A writer that is not running during the barrier is covered too, since its context switch is a full barrier.
 
 ### Proof that no write is missed
 

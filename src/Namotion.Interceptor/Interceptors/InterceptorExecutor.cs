@@ -151,10 +151,8 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
         {
             setValue(subject, newValue);
 
-            // The first observer can be installed during the write, and an evaluation can read the old value after
-            // that: the write is reported to it. The fence pairs with the one of the installation, so either this
-            // read sees the observer or that evaluation sees the new value.
-            Interlocked.MemoryBarrier();
+            // Reports the write to an observer installed during it, see "Observer installation" in
+            // docs/design/tracking-derived-properties.md.
             PropertyAccessObservation.WriteObserver?.OnPropertyWritten(new PropertyWriteObservation(
                 new PropertyReference(subject, propertyName), true, 0, false, PropertyAccessObservation.WriteDepth + 1, false));
             return true;
