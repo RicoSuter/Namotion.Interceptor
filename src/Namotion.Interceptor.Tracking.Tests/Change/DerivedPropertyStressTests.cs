@@ -111,9 +111,18 @@ public class DerivedPropertyStressTests
         var lifecycle = graph.Context.TryGetLifecycleInterceptor()!;
         foreach (var subject in graph.Sources)
         {
-            if (lifecycle.TryRunWhileAttached(subject, static () => { }) != fresh.Map.ContainsKey(subject))
+            var isAttached = fresh.Map.ContainsKey(subject);
+            if (lifecycle.TryRunWhileAttached(subject, static () => { }) != isAttached)
             {
                 mismatches.Add($"{graph.Label(subject)}: attached state differs from reachability");
+            }
+
+            foreach (var entry in ((IInterceptorSubject)subject).Properties)
+            {
+                if (!isAttached && entry.Value.IsDerived && new PropertyReference(subject, entry.Key).GetRequiredProperties().Length > 0)
+                {
+                    mismatches.Add($"{graph.Label(subject)}.{entry.Key}: detached, but keeps a link");
+                }
             }
         }
 
@@ -149,6 +158,12 @@ public class DerivedPropertyStressTests
         if (!Equals(originalData.LastKnownValue, expectedValue))
         {
             mismatches.Add($"{label}: tracked value {originalData.LastKnownValue}, expected {expectedValue}");
+        }
+
+        var getterValue = originalProperty.Metadata.GetValue!(originalProperty.Subject);
+        if (!Equals(originalData.LastKnownValue, getterValue))
+        {
+            mismatches.Add($"{label}: tracked value {originalData.LastKnownValue}, the getter returns {getterValue}");
         }
     }
 
