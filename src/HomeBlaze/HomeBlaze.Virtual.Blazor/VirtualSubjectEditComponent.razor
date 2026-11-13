@@ -1,0 +1,453 @@
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(VirtualSubject))]
+@implements ISubjectEditComponent
+@using HomeBlaze.Abstractions.Metadata
+@using Namotion.Interceptor.Expressions
+@inject SubjectPathResolver PathResolver
+
+@if (_draft is { } draft)
+{
+    <MudStack Spacing="3" data-testid="virtual-editor">
+        <MudTextField T="string" Label="Title" Variant="Variant.Outlined" Value="@draft.Title" Immediate="true"
+                      ValueChanged="@((string? title) => Edit(() => draft.Title = title))" data-testid="virtual-title" />
+        <MudGrid Spacing="3">
+            <MudItem xs="12" md="5">
+                <MudStack Spacing="1">
+                    <MudStack Row="true" AlignItems="AlignItems.Center">
+                        <MudText Typo="Typo.subtitle2" Class="flex-grow-1">Properties</MudText>
+                        <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                                   OnClick="@(() => Add(draft.AddProperty(_selected)))" data-testid="virtual-add-property">Property</MudButton>
+                        <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                                   OnClick="@(() => Add(draft.AddSubject(_selected)))" data-testid="virtual-add-subject">Subject</MudButton>
+                    </MudStack>
+                    <MudPaper Outlined="true" Class="pa-1" Style="min-height: 320px">
+                        @if (draft.Properties.Count == 0)
+                        {
+                            <MudText Typo="Typo.body2" Class="pa-6" Align="Align.Center">No properties yet. Add a property or a subject.</MudText>
+                        }
+                        <MudTreeView T="VirtualEntryDraft" Items="@_items" SelectionMode="SelectionMode.SingleSelection"
+                                     SelectedValue="@_selected" SelectedValueChanged="@((VirtualEntryDraft? entry) => Select(entry))" Hover="true" Dense="true">
+                            <ItemTemplate>
+                                @{ var entry = context.Value!; }
+                                @* Selected as well as SelectedValue: the tree applies a SelectedValue only to the items it has, not to one an edit adds. *@
+                                <MudTreeViewItem T="VirtualEntryDraft" Value="@entry" Items="@context.Children" @bind-Expanded="@context.Expanded"
+                                                 Selected="@ReferenceEquals(entry, _selected)"
+                                                 Text="@GetTreeText(entry)" Icon="@GetIcon(entry)" IconColor="@GetIconColor(entry)"
+                                                 EndText="@GetValueText(entry)" EndTextTypo="Typo.caption"
+                                                 EndIcon="@(HasIssue(entry) ? Icons.Material.Filled.Error : null)" EndIconColor="Color.Error"
+                                                 data-testid="@($"virtual-entry-{entry.GetPath()}")" />
+                            </ItemTemplate>
+                        </MudTreeView>
+                    </MudPaper>
+                    @if (_issues.Length > 0)
+                    {
+                        <MudAlert Severity="Severity.Error" Dense="true" data-testid="virtual-errors">
+                            <MudText Typo="Typo.body2">Fix these before saving:</MudText>
+                            @foreach (var issue in _issues)
+                            {
+                                <MudLink Typo="Typo.body2" OnClick="@(() => Select(draft.Find(issue.Path)))">@issue.Path: @issue.Message</MudLink><br />
+                            }
+                        </MudAlert>
+                    }
+                </MudStack>
+            </MudItem>
+            <MudItem xs="12" md="7">
+                @if (_selected is not { } selected)
+                {
+                    <MudText Typo="Typo.body2" Class="pa-6" Align="Align.Center">Select an entry to edit it.</MudText>
+                }
+                else
+                {
+                    <MudStack Spacing="3">
+                        <MudStack Row="true" AlignItems="AlignItems.Center">
+                            <MudStack Spacing="0" Class="flex-grow-1">
+                                <MudText Typo="Typo.caption">@selected.GetPath()</MudText>
+                                <MudText Typo="Typo.subtitle1">@GetHeading(selected)</MudText>
+                            </MudStack>
+                            <MudButton Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete"
+                                       OnClick="@(() => Remove(draft, selected))" data-testid="virtual-delete">Delete</MudButton>
+                        </MudStack>
+                        @foreach (var issue in GetIssues(selected))
+                        {
+                            <MudAlert Severity="Severity.Error" Dense="true">@issue.Message</MudAlert>
+                        }
+                        <MudTextField T="string" Label="Name" Variant="Variant.Outlined" Value="@selected.Name" Immediate="true"
+                                      ValueChanged="@((string? name) => Edit(() => selected.Name = name ?? string.Empty))" data-testid="virtual-name" />
+                        @if (selected.Kind == VirtualEntryKind.Subject)
+                        {
+                            <MudText Typo="Typo.body2">A nested subject. Its entries become properties of @selected.GetPath().</MudText>
+                        }
+                        else
+                        {
+                            <MudToggleGroup T="VirtualEntryKind" Value="@selected.Kind" Color="Color.Primary" Outlined="true"
+                                            ValueChanged="@((VirtualEntryKind kind) => Edit(() => selected.Kind = kind))" data-testid="virtual-source">
+                                <MudToggleItem Value="@VirtualEntryKind.Binding" Text="Binding" />
+                                <MudToggleItem Value="@VirtualEntryKind.Expression" Text="Expression" />
+                            </MudToggleGroup>
+                            @if (selected.Kind == VirtualEntryKind.Binding)
+                            {
+                                <SubjectPathField Label="Path" Variant="Variant.Outlined" Value="@selected.Path" CanSelectProperty="@CanBind"
+                                                  ValueChanged="@((string? path) => Edit(() => selected.Path = path))" />
+                                <MudText Typo="Typo.caption">Reads from the target and writes through to it, converted to the target's type.</MudText>
+                                @if (ResolveTarget(selected) is { } target)
+                                {
+                                    <MudAlert Severity="Severity.Info" Dense="true">
+                                        @GetTargetText(target)
+                                        <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => Edit(() => UseTarget(selected, target)))">Use type and unit</MudButton>
+                                    </MudAlert>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(selected.Path))
+                                {
+                                    <MudAlert Severity="Severity.Warning" Dense="true">The path does not resolve right now. The value stays empty until it does, and writes are rejected.</MudAlert>
+                                }
+                            }
+                            else
+                            {
+                                @* Keyed by the entry, so that selecting another entry starts the field afresh. *@
+                                <ExpressionField @key="selected" Kind="ExpressionFieldKind.Value" Label="Expression" Value="@selected.Expression"
+                                                 ValueChanged="@((string? text) => Edit(() => selected.Expression = text))"
+                                                 Validate="@ValidateExpression" Preview="@PrepareValuePreview"
+                                                 Variables="@(ImmutableArray<string>.Empty)" TestId="virtual-expression" />
+                            }
+                            <MudSelect T="VirtualDataType?" Label="Data type" Variant="Variant.Outlined" Value="@selected.DataType" Clearable="true"
+                                       ValueChanged="@((VirtualDataType? dataType) => Edit(() => selected.DataType = dataType))" data-testid="virtual-data-type">
+                                @foreach (var dataType in Enum.GetValues<VirtualDataType>())
+                                {
+                                    <MudSelectItem T="VirtualDataType?" Value="@dataType">@dataType</MudSelectItem>
+                                }
+                            </MudSelect>
+                            <MudDivider />
+                            <MudCheckBox T="bool" Value="@selected.IsState" ValueChanged="@((bool isState) => Edit(() => selected.IsState = isState))"
+                                         Label="State (shown in the UI, recorded in history, exposed over OPC UA and MCP)" data-testid="virtual-state" />
+                            @if (selected.IsState)
+                            {
+                                <MudGrid Spacing="2">
+                                    <MudItem xs="12" sm="6">
+                                        <MudTextField T="string" Label="Title" Variant="Variant.Outlined" Value="@selected.Title" Immediate="true"
+                                                      Placeholder="@selected.Name" ValueChanged="@((string? title) => Edit(() => selected.Title = title))" />
+                                    </MudItem>
+                                    <MudItem xs="12" sm="6">
+                                        <MudSelect T="StateUnit?" Label="Unit" Variant="Variant.Outlined" Value="@selected.Unit" Clearable="true"
+                                                   ValueChanged="@((StateUnit? unit) => Edit(() => selected.Unit = unit))">
+                                            @foreach (var unit in Enum.GetValues<StateUnit>())
+                                            {
+                                                <MudSelectItem T="StateUnit?" Value="@unit">@unit</MudSelectItem>
+                                            }
+                                        </MudSelect>
+                                    </MudItem>
+                                    <MudItem xs="12" sm="6">
+                                        <MudTextField T="string" Label="Category" Variant="Variant.Outlined" Value="@selected.Category" Immediate="true"
+                                                      ValueChanged="@((string? category) => Edit(() => selected.Category = category))" />
+                                    </MudItem>
+                                    <MudItem xs="12" sm="6">
+                                        <MudNumericField T="int?" Label="Position" Variant="Variant.Outlined" Value="@selected.Position"
+                                                         ValueChanged="@((int? position) => Edit(() => selected.Position = position))" />
+                                    </MudItem>
+                                    <MudItem xs="12">
+                                        <MudStack Row="true" Wrap="Wrap.Wrap">
+                                            <MudCheckBox T="bool" Label="Cumulative" Value="@selected.IsCumulative" ValueChanged="@((bool value) => Edit(() => selected.IsCumulative = value))" />
+                                            <MudCheckBox T="bool" Label="Discrete" Value="@selected.IsDiscrete" ValueChanged="@((bool value) => Edit(() => selected.IsDiscrete = value))" />
+                                            <MudCheckBox T="bool" Label="Estimated" Value="@selected.IsEstimated" ValueChanged="@((bool value) => Edit(() => selected.IsEstimated = value))" />
+                                        </MudStack>
+                                    </MudItem>
+                                </MudGrid>
+                            }
+                            else
+                            {
+                                <MudText Typo="Typo.body2">Helper property: hidden from the UI, history and OPC UA, but other expressions can read it.</MudText>
+                            }
+                            <MudDivider />
+                            <MudStack Row="true" AlignItems="AlignItems.Center">
+                                <MudText Typo="Typo.subtitle2" Class="flex-grow-1">Attributes</MudText>
+                                <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                                           OnClick="@(() => Add(draft.AddAttribute(selected)))" data-testid="virtual-add-attribute">Attribute</MudButton>
+                            </MudStack>
+                            @if (selected.Attributes.Count == 0)
+                            {
+                                <MudText Typo="Typo.body2">None. Attributes such as Minimum, Maximum or IsEnabled are defined like properties.</MudText>
+                            }
+                            else
+                            {
+                                <div>
+                                    @foreach (var attributeEntry in selected.Attributes)
+                                    {
+                                        <MudChip T="string" OnClick="@(() => Select(attributeEntry))">@GetTreeText(attributeEntry)</MudChip>
+                                    }
+                                </div>
+                            }
+                        }
+                    </MudStack>
+                }
+            </MudItem>
+        </MudGrid>
+    </MudStack>
+}
+
+@code {
+    private VirtualSubjectDraft? _draft;
+    private VirtualEntryDraft? _selected;
+    private List<ITreeItemData<VirtualEntryDraft>> _items = [];
+    private ImmutableArray<VirtualPropertyIssue> _issues = [];
+    private string? _ownPath;
+    private bool _isDirty;
+    private bool _wasValid = true;
+
+    [Parameter] public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter] public bool IsCreating { get; set; }
+
+    public event Action<bool>? IsValidChanged;
+
+    public event Action<bool>? IsDirtyChanged;
+
+    public string PreferredDialogSize => "Large";
+
+    public bool IsDirty => _isDirty;
+
+    // Validated after each edit, not on every read: the host reads this on every input event.
+    public bool IsValid => _draft is not null && _issues.Length == 0;
+
+    protected override void OnInitialized()
+    {
+        if (Subject is VirtualSubject subject)
+        {
+            _draft = VirtualSubjectDraft.From(subject);
+            _ownPath = PathResolver.GetPath(subject, PathStyle.Canonical);
+            _selected = _draft.Properties.FirstOrDefault();
+            Refresh();
+        }
+
+        _wasValid = IsValid;
+    }
+
+    // The host shows the exception and keeps the dialog open instead of persisting an invalid draft.
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (Subject is VirtualSubject subject && _draft is { } draft)
+        {
+            Refresh();
+            if (!IsValid)
+            {
+                StateHasChanged();
+                throw new InvalidOperationException("Fix the errors listed in the editor before saving.");
+            }
+
+            draft.ApplyTo(subject);
+            SetDirty(false);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void Select(VirtualEntryDraft? entry)
+    {
+        _selected = entry;
+        Refresh();
+    }
+
+    private void Add(VirtualEntryDraft entry)
+    {
+        _selected = entry;
+        Refresh();
+        SetDirty(true);
+    }
+
+    private void Remove(VirtualSubjectDraft draft, VirtualEntryDraft entry)
+    {
+        draft.Remove(entry);
+        _selected = entry.Parent;
+        Refresh();
+        SetDirty(true);
+    }
+
+    private void Edit(Action edit)
+    {
+        edit();
+        Refresh();
+        SetDirty(true);
+    }
+
+    private void Refresh()
+    {
+        if (_draft is not { } draft)
+        {
+            return;
+        }
+
+        _issues = draft.Validate(_ownPath);
+        _items = BuildItems(draft.Properties, CollectCollapsed(_items));
+        ReportValidity();
+    }
+
+    private static List<ITreeItemData<VirtualEntryDraft>> BuildItems(List<VirtualEntryDraft> entries, HashSet<VirtualEntryDraft> collapsed)
+    {
+        var items = new List<ITreeItemData<VirtualEntryDraft>>(entries.Count);
+        foreach (var entry in entries)
+        {
+            var children = BuildItems([.. entry.Properties, .. entry.Attributes], collapsed);
+            items.Add(new TreeItemData<VirtualEntryDraft>
+            {
+                Value = entry,
+                Expandable = children.Count > 0,
+                Expanded = !collapsed.Contains(entry),
+                Children = children.Count > 0 ? children : null
+            });
+        }
+
+        return items;
+    }
+
+    // Entries are expanded unless the user collapsed them; collapsed ones are carried over on each rebuild.
+    private static HashSet<VirtualEntryDraft> CollectCollapsed(List<ITreeItemData<VirtualEntryDraft>> items)
+    {
+        var collapsed = new HashSet<VirtualEntryDraft>(ReferenceEqualityComparer.Instance);
+        var pending = new Stack<ITreeItemData<VirtualEntryDraft>>(items);
+        while (pending.TryPop(out var item))
+        {
+            if (!item.Expanded && item.Value is { } entry)
+            {
+                collapsed.Add(entry);
+            }
+
+            foreach (var child in item.Children ?? [])
+            {
+                pending.Push(child);
+            }
+        }
+
+        return collapsed;
+    }
+
+    private IEnumerable<VirtualPropertyIssue> GetIssues(VirtualEntryDraft entry)
+    {
+        var path = entry.GetPath();
+        return _issues.Where(issue => issue.Path == path);
+    }
+
+    private bool HasIssue(VirtualEntryDraft entry) => GetIssues(entry).Any();
+
+    private static string GetTreeText(VirtualEntryDraft entry) => entry.IsAttribute ? "@" + entry.Name : entry.Name;
+
+    private static string GetIcon(VirtualEntryDraft entry) => entry.Kind switch
+    {
+        VirtualEntryKind.Subject => Icons.Material.Filled.AccountTree,
+        VirtualEntryKind.Binding => Icons.Material.Filled.SyncAlt,
+        _ => Icons.Material.Filled.Functions
+    };
+
+    private static Color GetIconColor(VirtualEntryDraft entry) => entry.Kind switch
+    {
+        VirtualEntryKind.Binding => Color.Info,
+        VirtualEntryKind.Expression => Color.Warning,
+        _ => Color.Default
+    };
+
+    private static string GetHeading(VirtualEntryDraft entry)
+    {
+        if (entry.Kind == VirtualEntryKind.Subject)
+        {
+            return "Subject";
+        }
+
+        return entry.IsAttribute ? $"Attribute of {entry.Parent?.Name}" : "Property";
+    }
+
+    // The live value of an entry that is saved already; entries added in this edit have none yet.
+    private string? GetValueText(VirtualEntryDraft entry)
+    {
+        if (entry.Kind == VirtualEntryKind.Subject || Subject is null)
+        {
+            return null;
+        }
+
+        var property = VirtualExpression.ResolveProperty(PathResolver, entry.GetPath(), Subject);
+        return property is null ? null : ExpressionDisplay.ToText(ExpressionValue.FromProperty(property, property.GetValue()), timeZone: null);
+    }
+
+    // The subject the relative paths of an entry start at: the virtual subject, or the nested subject that holds the
+    // entry. Null for a nested subject that is not saved yet, as its paths cannot be resolved before it exists.
+    private IInterceptorSubject? ResolveScope(VirtualEntryDraft? entry)
+    {
+        var owner = entry?.Parent;
+        while (owner is not null && owner.Kind != VirtualEntryKind.Subject)
+        {
+            owner = owner.Parent;
+        }
+
+        return owner is null || Subject is null ? Subject : PathResolver.ResolveSubject(owner.GetPath(), PathStyle.Canonical, Subject);
+    }
+
+    private RegisteredSubjectProperty? ResolveTarget(VirtualEntryDraft entry)
+    {
+        if (string.IsNullOrWhiteSpace(entry.Path))
+        {
+            return null;
+        }
+
+        // An absolute path resolves from the root whatever the scope is.
+        var scope = entry.Path.StartsWith(SubjectPathResolver.Separator) ? Subject : ResolveScope(entry);
+        return scope is null ? null : VirtualExpression.ResolveProperty(PathResolver, entry.Path, scope);
+    }
+
+    private static string GetTargetText(RegisteredSubjectProperty target)
+    {
+        var state = target.TryGetAttribute(KnownAttributes.State)?.GetValue() as StateMetadata;
+        var unit = state is { Unit: not StateUnit.Default } ? $", {state.Unit}" : string.Empty;
+        var access = target.HasPublicSetter ? "writable" : "read-only";
+        return $"{state?.Title ?? target.Name}: {target.Type.Name}{unit}, {access}";
+    }
+
+    private static void UseTarget(VirtualEntryDraft entry, RegisteredSubjectProperty target)
+    {
+        if (VirtualDataTypes.TryGetDataType(target.Type, out var dataType))
+        {
+            entry.DataType = dataType;
+        }
+
+        if (target.TryGetAttribute(KnownAttributes.State)?.GetValue() is StateMetadata state)
+        {
+            entry.Unit = state.Unit == StateUnit.Default ? null : state.Unit;
+            entry.Title ??= state.Title;
+        }
+    }
+
+    private static bool CanBind(RegisteredSubjectProperty property) =>
+        !property.CanContainSubjects && property.HasPublicSetter && property.IsDisplayable();
+
+    private static string? ValidateExpression(string text) => VirtualExpression.TryParse(text, out _, out var error) ? null : error;
+
+    private Func<ExpressionPreview>? PrepareValuePreview(string text)
+    {
+        if (!VirtualExpression.TryParse(text, out var expression, out _) || ResolveScope(_selected) is not { } scope)
+        {
+            return null;
+        }
+
+        return () =>
+        {
+            var value = VirtualExpression.Evaluate(expression, PathResolver, scope);
+            return value.IsMissing
+                ? new ExpressionPreview(null, null, null)
+                : new ExpressionPreview(value.Value as bool?, value.Value, ExpressionDisplay.ToText(value, timeZone: null));
+        };
+    }
+
+    // Raised on transitions only, because the host renders its save button again on each event.
+    private void ReportValidity()
+    {
+        var isValid = IsValid;
+        if (isValid != _wasValid)
+        {
+            _wasValid = isValid;
+            IsValidChanged?.Invoke(isValid);
+        }
+    }
+
+    private void SetDirty(bool isDirty)
+    {
+        if (_isDirty != isDirty)
+        {
+            _isDirty = isDirty;
+            IsDirtyChanged?.Invoke(isDirty);
+        }
+    }
+}
