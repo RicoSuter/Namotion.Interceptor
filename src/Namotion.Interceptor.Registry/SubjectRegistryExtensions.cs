@@ -1,6 +1,7 @@
 ﻿using System.Linq.Expressions;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Registry;
 
@@ -136,6 +137,8 @@ public static class SubjectRegistryExtensions
     public static RegisteredSubject? TryGetRegisteredSubject(this IInterceptorSubject subject)
     {
         // TODO(perf): Replace calls of TryGetRegisteredSubject with registry.TryGetRegisteredSubject to avoid multiple registry resolves
+        // Recorded before the registry is resolved: a subject without a registry gains one when it is attached.
+        SubjectStructure.RecordRead(subject);
         var registry = subject.Context.TryGetService<ISubjectRegistry>();
         return registry?.TryGetRegisteredSubject(subject);
     }

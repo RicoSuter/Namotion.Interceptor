@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
@@ -44,6 +45,7 @@ public class RegisteredSubject
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
+            SubjectStructure.RecordRead(Subject);
             var snapshot = Volatile.Read(ref _parentsSnapshot);
             return snapshot is not null
                 ? ImmutableCollectionsMarshal.AsImmutableArray(snapshot)
@@ -87,14 +89,29 @@ public class RegisteredSubject
     /// <summary>
     /// Gets all registered properties.
     /// </summary>
-    public ImmutableArray<RegisteredSubjectProperty> Properties => _properties.Values;
+    public ImmutableArray<RegisteredSubjectProperty> Properties
+    {
+        get
+        {
+            SubjectStructure.RecordRead(Subject);
+            return _properties.Values;
+        }
+    }
 
     /// <summary>
     /// Gets all attributes that are attached to this property.
     /// </summary>
     public IEnumerable<RegisteredSubjectProperty> GetPropertyAttributes(string propertyName)
     {
-        foreach (var property in _properties.Values)
+        // Recorded when called, not when enumerated: a getter may enumerate the result after it returned.
+        SubjectStructure.RecordRead(Subject);
+        return GetPropertyAttributes(_properties, propertyName);
+    }
+
+    private static IEnumerable<RegisteredSubjectProperty> GetPropertyAttributes(
+        FrozenDictionary<string, RegisteredSubjectProperty> properties, string propertyName)
+    {
+        foreach (var property in properties.Values)
         {
             if (property.IsAttribute && property.AttributeMetadata.PropertyName == propertyName)
             {
@@ -111,6 +128,7 @@ public class RegisteredSubject
     /// <returns>The attribute property.</returns>
     public RegisteredSubjectProperty? TryGetPropertyAttribute(string propertyName, string attributeName)
     {
+        SubjectStructure.RecordRead(Subject);
         foreach (var property in _properties.Values)
         {
             if (property.IsAttribute &&
@@ -131,6 +149,7 @@ public class RegisteredSubject
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubjectProperty? TryGetProperty(string propertyName)
     {
+        SubjectStructure.RecordRead(Subject);
         return _properties.GetValueOrDefault(propertyName);
     }
 
@@ -354,6 +373,7 @@ public class RegisteredSubject
             }
         }
 
+        SubjectStructure.Changed(Subject);
         Subject.AttachSubjectProperty(subjectProperty.Reference);
         return subjectProperty;
     }
