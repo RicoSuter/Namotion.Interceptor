@@ -88,18 +88,14 @@ public partial class SunSpecDevice :
     private long _rediscoveryIntervalTicks;
 
     /// <summary>
-    /// The source attachment, or null while none is wanted. Touched only by this subject's own start and run loop,
-    /// which the hosting handler serializes. Kept across a stop: the attachment survives the subject leaving the
-    /// graph, and the handler re-creates its source on re-entry, so a restarted run loop must reuse it rather than
-    /// attach a second source beside that one.
+    /// The running source, or null. This subject owns it for the duration of its own run: the start or the run loop
+    /// starts it, and whichever of the run loop's restart and <see cref="StopAsync"/> takes it first stops and
+    /// disposes it, so a loop that never ran or outlives a timed out stop still leaves nothing running.
     /// </summary>
-    private IHostedServiceAttachment<ModbusSubjectClientSource>? _attachment;
+    private ModbusSubjectClientSource? _source;
 
-    /// <summary>
-    /// The fault the attachment carried out of the graph. It stays recorded until the handler's restart on re-entry
-    /// clears it, and until then it describes the source before the stop rather than the one being started.
-    /// </summary>
-    private Exception? _faultBeforeStart;
+    /// <summary>Why the source the start tried to start failed, for the run loop to report and retry.</summary>
+    private Exception? _startFailure;
 
     /// <summary>
     /// Why a source stopped, which decides how the next one starts.
@@ -338,31 +334,25 @@ public partial class SunSpecDevice :
         }
     }
 
-    public override Task StartAsync(CancellationToken cancellationToken)
+    public override async Task StartAsync(CancellationToken cancellationToken)
     {
-        // Attached here rather than from the run loop: the base start only schedules the loop, so an attach issued
-        // there defers startup completion after this subject's own completion deferral is released, and a startup
-        // completion wait could pass in between against a tree whose source is not attached yet.
-        _faultBeforeStart = _attachment?.Fault;
-        if (_attachment is null &&
-            !string.IsNullOrWhiteSpace(HostAddress) &&
-            TryPrepareSource(SourceRestart.ConfigurationChanged, out _))
+        // Started here rather than from the run loop, which the base start only schedules: the source registers in its
+        // own start, and inside this one that registration counts towards startup completion.
+        if (!string.IsNullOrWhiteSpace(HostAddress) && TryPrepareSource(SourceRestart.ConfigurationChanged, out _))
         {
-            _attachment = this.AttachHostedService(CreateSource);
+            _startFailure = await TryStartSourceAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        return base.StartAsync(cancellationToken);
+        await base.StartAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
-        // Deliberately does not detach: this runs inside the handler's stop transition for this subject, and the
-        // source's stop is ordered behind it, so a detach awaited here would wait on itself. The handler stops and
-        // disposes the source once this returns. See docs/hosting.md#do-not-detach-from-your-own-stop-path.
         await base.StopAsync(cancellationToken).ConfigureAwait(false);
 
-        // Here rather than at the tail of the run loop: a stop that lands before the base start has scheduled the
-        // loop cancels it without running it.
+        // After the run loop has exited, and also for a loop that never ran because this stop landed first.
+        await StopSourceAsync(isConnectionStateKept: false, cancellationToken).ConfigureAwait(false);
+
         IsConnected = false;
         Status = ServiceStatus.Stopped;
         StatusMessage = null;
@@ -376,12 +366,6 @@ public partial class SunSpecDevice :
             var hostAddress = HostAddress;
             if (string.IsNullOrWhiteSpace(hostAddress))
             {
-                if (_attachment is { } attachment)
-                {
-                    // Re-created by the handler on re-entry, from an address cleared while the subject was out of the graph.
-                    await DetachSourceAsync(attachment, isConnectionStateKept: false, stoppingToken).ConfigureAwait(false);
-                }
-
                 Status = ServiceStatus.Stopped;
                 StatusMessage = "No host address configured";
                 await WaitForConfigurationChangeAsync(Timeout.InfiniteTimeSpan, stoppingToken).ConfigureAwait(false);
@@ -394,16 +378,18 @@ public partial class SunSpecDevice :
     }
 
     /// <summary>
-    /// Runs the attached source, or attaches one, until a configuration edit, a chain change, a rediscovery or a
-    /// failure asks for a new one, then detaches it so that the next one never polls beside it. Returns without
-    /// detaching when the subject stops.
+    /// Runs the source, or starts one, until a configuration edit, a chain change, a rediscovery or a failure asks for a
+    /// new one, then stops it so that the next one never polls beside it. Returns without stopping it when the subject
+    /// stops, whose own stop does.
     /// </summary>
     private async Task<SourceRestart> RunSourceAsync(string hostAddress, SourceRestart previousRestart, CancellationToken stoppingToken)
     {
         // Captured once, so a configuration edit applies only through the restart it signals.
         var pollingInterval = GetEffectivePollingInterval();
         var isPlannedRediscovery = previousRestart == SourceRestart.Rediscovery;
-        if (_attachment is null)
+
+        var failure = Interlocked.Exchange(ref _startFailure, null);
+        if (failure is null && Volatile.Read(ref _source) is null)
         {
             if (!TryPrepareSource(previousRestart, out var configurationError))
             {
@@ -420,18 +406,29 @@ public partial class SunSpecDevice :
                 StatusMessage = "Connecting...";
             }
 
-            _attachment = this.AttachHostedService(CreateSource);
+            failure = await TryStartSourceAsync(stoppingToken).ConfigureAwait(false);
         }
 
-        var attachment = _attachment;
-        var restart = await MonitorSourceAsync(attachment, hostAddress, isPlannedRediscovery, stoppingToken).ConfigureAwait(false);
+        var restart = SourceRestart.ConfigurationChanged;
+        if (failure is not null)
+        {
+            _logger.LogError(failure, "SunSpec device {HostAddress} failed.", hostAddress);
+            Status = ServiceStatus.Error;
+            StatusMessage = failure.Message;
+            restart = SourceRestart.Failed;
+        }
+        else if (Volatile.Read(ref _source) is { } source)
+        {
+            restart = await MonitorSourceAsync(source, hostAddress, isPlannedRediscovery, stoppingToken).ConfigureAwait(false);
+        }
+
         if (stoppingToken.IsCancellationRequested)
         {
-            // The handler stops and disposes the source behind this subject's own stop, which this unwind is part of.
             return restart;
         }
 
-        await DetachSourceAsync(attachment, isConnectionStateKept: restart == SourceRestart.Rediscovery, stoppingToken).ConfigureAwait(false);
+        // Awaited before the next source connects, which a device that accepts a single client needs.
+        await StopSourceAsync(isConnectionStateKept: restart == SourceRestart.Rediscovery, stoppingToken).ConfigureAwait(false);
 
         var reconnectDelay = GetReconnectDelay(restart, pollingInterval);
         if (reconnectDelay > TimeSpan.Zero &&
@@ -444,17 +441,17 @@ public partial class SunSpecDevice :
     }
 
     /// <summary>
-    /// Mirrors the attachment into this device's state until the source must restart or the configuration changes.
+    /// Mirrors the source into this device's state until the source must restart or the configuration changes.
     /// </summary>
     private async Task<SourceRestart> MonitorSourceAsync(
-        IHostedServiceAttachment<ModbusSubjectClientSource> attachment, string hostAddress, bool isPlannedRediscovery, CancellationToken stoppingToken)
+        ModbusSubjectClientSource source, string hostAddress, bool isPlannedRediscovery, CancellationToken stoppingToken)
     {
         // A planned rediscovery keeps the previous connection's state until this one is up or fails, so the device does
         // not appear to restart.
         var isKeepingStatus = isPlannedRediscovery;
         while (!stoppingToken.IsCancellationRequested)
         {
-            if (MirrorAttachment(attachment, hostAddress, ref isKeepingStatus) is { } restart)
+            if (MirrorSource(source.Diagnostics, hostAddress, ref isKeepingStatus) is { } restart)
             {
                 return restart;
             }
@@ -468,40 +465,61 @@ public partial class SunSpecDevice :
         return SourceRestart.ConfigurationChanged;
     }
 
-    /// <summary>
-    /// Mirrors what the attachment holds into this device's state, and returns why the source must restart, or null
-    /// while it keeps running. Returns <see cref="SourceRestart.Failed"/> once the handler has recorded a fault that no
-    /// start is retrying.
-    /// </summary>
-    private SourceRestart? MirrorAttachment(
-        IHostedServiceAttachment<ModbusSubjectClientSource> attachment, string hostAddress, ref bool isKeepingStatus)
+    /// <summary>Creates and starts a source, and returns why it failed, having stopped and disposed it, or null.</summary>
+    private async Task<Exception?> TryStartSourceAsync(CancellationToken cancellationToken)
     {
-        // The fault first and the state after it: docs/hosting.md#reading-the-outcome.
-        var fault = attachment.Fault;
-        var state = attachment.GetState(out var source);
-        if (source is not null)
+        try
         {
-            return MirrorSource(source.Diagnostics, hostAddress, ref isKeepingStatus);
+            var source = this.CreateModbusClientSource(CreateConfiguration(_unitIds), _logger);
+            Volatile.Write(ref _source, source);
+            await source.StartAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            await StopSourceAsync(isConnectionStateKept: false, CancellationToken.None).ConfigureAwait(false);
+            return exception;
         }
 
-        if (fault is not null &&
-            state is not HostedServiceAttachmentState.Starting &&
-            !ReferenceEquals(fault, _faultBeforeStart))
+        if (cancellationToken.IsCancellationRequested)
         {
-            _logger.LogError(fault, "SunSpec device {HostAddress} failed.", hostAddress);
-            Status = ServiceStatus.Error;
-            StatusMessage = fault.Message;
-            return SourceRestart.Failed;
-        }
-
-        if (!isKeepingStatus)
-        {
-            IsConnected = false;
-            Status = ServiceStatus.Starting;
-            StatusMessage = "Connecting...";
+            // Published after a stop that already took the previous source, which only a timed out stop leaves running.
+            await StopSourceAsync(isConnectionStateKept: false, CancellationToken.None).ConfigureAwait(false);
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Stops and disposes the source, if this caller takes it. A cancelled token cuts the source's own stop short; the
+    /// dispose still runs.
+    /// </summary>
+    private async Task StopSourceAsync(bool isConnectionStateKept, CancellationToken cancellationToken)
+    {
+        if (Interlocked.Exchange(ref _source, null) is not { } source)
+        {
+            return;
+        }
+
+        try
+        {
+            await source.StopAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The caller's deadline, not a failure of the source.
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Failed to stop the Modbus source of {Device}.", Title);
+        }
+        finally
+        {
+            await source.DisposeAsync().ConfigureAwait(false);
+            if (!isConnectionStateKept)
+            {
+                IsConnected = false;
+            }
+        }
     }
 
     /// <summary>
@@ -588,7 +606,7 @@ public partial class SunSpecDevice :
 
     /// <summary>
     /// Validates the configuration and prepares the discovery for the next source, so that a configuration only an edit
-    /// can fix is reported at once rather than as a fault of the attachment.
+    /// can fix is reported as such rather than as a failure that is retried.
     /// </summary>
     private bool TryPrepareSource(SourceRestart restart, [NotNullWhen(false)] out Exception? error)
     {
@@ -623,15 +641,6 @@ public partial class SunSpecDevice :
         Volatile.Write(ref _isChainGuardArmed, false);
         error = null;
         return true;
-    }
-
-    /// <summary>
-    /// Builds the source for the attachment. Reads the configuration when invoked rather than capturing it at attach
-    /// time, because the handler invokes it again when the subject re-enters the graph.
-    /// </summary>
-    private ModbusSubjectClientSource CreateSource()
-    {
-        return this.CreateModbusClientSource(CreateConfiguration(_unitIds), _logger);
     }
 
     private ModbusClientConfiguration CreateConfiguration(byte[] unitIds)
@@ -685,38 +694,6 @@ public partial class SunSpecDevice :
         }
 
         return false;
-    }
-
-    /// <summary>
-    /// Detaches the source and waits for the handler to stop and dispose it, which a device that accepts a single
-    /// client needs before the next source connects. Called from the run loop only, never from the unwind on
-    /// <paramref name="stoppingToken"/>, which runs inside this subject's own stop.
-    /// </summary>
-    private async Task DetachSourceAsync(
-        IHostedServiceAttachment<ModbusSubjectClientSource> attachment, bool isConnectionStateKept, CancellationToken stoppingToken)
-    {
-        // Cleared ahead of the call: the detach removes the attachment before its wait begins and the stop runs
-        // whatever the token does, so the handle is spent on every path below. The stopping token rather than none: a
-        // subject stop landing meanwhile orders this source's stop behind its own, and an unbounded wait here would
-        // then wait on itself. A cancelled token also cuts the source's own stop short; its dispose still waits for it.
-        _attachment = null;
-        try
-        {
-            await this.DetachHostedServiceAsync(attachment, stoppingToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-            // The handler finishes the stop on its own.
-        }
-        catch (Exception exception)
-        {
-            _logger.LogWarning(exception, "Failed to detach the Modbus source of {Device}.", Title);
-        }
-
-        if (!isConnectionStateKept)
-        {
-            IsConnected = false;
-        }
     }
 
     private async Task<bool> WaitForConfigurationChangeAsync(TimeSpan timeout, CancellationToken cancellationToken)
