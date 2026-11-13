@@ -197,7 +197,7 @@ All of it is read and written under `lock(data)` of the derived property:
 |-------|---------|
 | `OwnerToken`, `OwnerThreadId` | The token of the owning evaluation (a recalculation or an attach), 0 when nobody owns the property, and the thread it runs on. |
 | `AttachToken` | The token of the attach in progress, 0 when none is. A newer attach or a detach replaces it, which tells the attach its result no longer counts. |
-| `AttachCount` | Incremented by every attach, never reset; read without the lock when an evaluation of the owner loop starts and when a request is queued under the lifecycle lock. |
+| `AttachCount` | Incremented by every attach, never reset; read under the lock whenever the owner loop takes ownership or a request, and without the lock when a request is queued under the lifecycle lock. |
 | `RecalculationNeeded`, `HasForeignRequest` | A request arrived while the property was owned or an attach was in progress, and whether one of them came from another thread than the owner's (or while nobody owned it). |
 | `PendingRawTimestamp` | The raw changed timestamp of the newest pending request, 0 when it has none. |
 | `IsAttached` | Set by the attach, cleared by the detach. A request for a detached property is dropped. |
@@ -221,7 +221,7 @@ A request comes from the write observer (W5), from `RecalculateDerivedProperty`,
    - Not the owner anymore: return without touching any state.
    - Detached, or an attach in progress: release ownership and return. An attach takes over a set `RecalculationNeeded` (the hand-off).
    - `RecalculationNeeded` is set: clear it, adopt the pending timestamp, and go to 1.
-   - `AttachCount` moved since the evaluation started: an attach committed meanwhile, and its value is newer. Release ownership and return; the attach requested a recalculation after it.
+   - `AttachCount` moved since the loop took its last request: an attach committed meanwhile and evaluated after every request the loop took, so its value is newer. Release ownership and return; the attach requested a recalculation after it.
    - R4 and R5 (see [Reading](#reading-r1-to-r5)). A source moved without a request: go to 1. An own write after a read not evaluated again yet: go to 1 once.
    - The getter threw: mark D faulted, keep the previous value, release ownership and return.
    - Otherwise commit: store the new value, increment `RecalculationSequence`, and stamp the write timestamp when the request carried one. The old value is the last committed value, or the default of the property type when there is none.

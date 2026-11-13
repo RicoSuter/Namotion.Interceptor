@@ -27,6 +27,12 @@ internal static class DerivedPropertyOwnership
     private const long AnyAttachCount = -1;
 
     /// <summary>
+    /// Runs, when a test sets it, after an owner or an attach took a request under lock(data) and before the request
+    /// is evaluated, queued or run.
+    /// </summary>
+    internal static Action<PropertyReference>? AfterTakeForTests { get; set; }
+
+    /// <summary>
     /// Attaches a derived property and evaluates its first value, unless it is attached through another graph
     /// already.
     /// </summary>
@@ -143,6 +149,7 @@ internal static class DerivedPropertyOwnership
         }
 
         long token;
+        long ownerAttachCount;
         lock (data)
         {
             if (!data.IsAttached || (attachCount != AnyAttachCount && data.AttachCount != attachCount))
@@ -158,9 +165,10 @@ internal static class DerivedPropertyOwnership
             }
 
             token = TakeOwnership(data, DerivedPropertyData.NewToken());
+            ownerAttachCount = data.AttachCount;
         }
 
-        RunOwnerLoops(data, property, token, rawTimestamp);
+        RunOwnerLoops(data, property, token, rawTimestamp, ownerAttachCount);
     }
 
     /// <summary>Traces an exception that is dropped because another one wins or nobody can receive it.</summary>
@@ -445,10 +453,10 @@ internal static class DerivedPropertyOwnership
     /// Runs owner loops in this frame until no request is pending, taking a request over after a failed loop
     /// ("Failures and takeover" in docs/design/tracking-derived-properties.md). The first exception propagates.
     /// </summary>
-    private static void RunOwnerLoops(DerivedPropertyData data, PropertyReference property, long token, long rawTimestamp)
+    private static void RunOwnerLoops(DerivedPropertyData data, PropertyReference property, long token, long rawTimestamp, long attachCount)
     {
         ExceptionDispatchInfo? firstException = null;
-        var state = new OwnerLoopState { RawTimestamp = rawTimestamp };
+        var state = new OwnerLoopState { RawTimestamp = rawTimestamp, AttachCount = attachCount };
         while (true)
         {
             var isFirstException = false;
@@ -498,6 +506,12 @@ internal static class DerivedPropertyOwnership
         public long RawTimestamp;
 
         public UnansweredRequest Unanswered;
+
+        /// <summary>
+        /// The attach count when the loop took its last request, read under lock(data) at the take: an attach that
+        /// committed since evaluated after every request the loop took.
+        /// </summary>
+        public long AttachCount;
 
         /// <summary>The loop evaluated again since its last commit because the getter wrote a source it had read.</summary>
         public bool HasEvaluatedAfterOwnWrite;
@@ -557,6 +571,7 @@ internal static class DerivedPropertyOwnership
             if (data.RecalculationNeeded && data.IsAttached && data.AttachToken == 0)
             {
                 state.Unanswered = Add(UnansweredRequest.None, TakePendingRequest(data, out state.RawTimestamp));
+                state.AttachCount = data.AttachCount;
                 return false;
             }
 
@@ -601,6 +616,7 @@ internal static class DerivedPropertyOwnership
             }
 
             token = TakeOwnership(data, DerivedPropertyData.NewToken());
+            state.AttachCount = data.AttachCount;
             return true;
         }
     }
@@ -618,7 +634,7 @@ internal static class DerivedPropertyOwnership
     /// <summary>Evaluates outside lock(data) and commits under it.</summary>
     private static Commit EvaluateAndCommit(DerivedPropertyData data, PropertyReference property, long token, ref OwnerLoopState state)
     {
-        var attachCount = Volatile.Read(ref data.AttachCount);
+        AfterTakeForTests?.Invoke(property);
         var evaluation = Evaluate(data, property);
         lock (data)
         {
@@ -640,13 +656,14 @@ internal static class DerivedPropertyOwnership
             {
                 DiscardRecording();
                 state.Unanswered = Add(state.Unanswered, TakePendingRequest(data, out state.RawTimestamp));
+                state.AttachCount = data.AttachCount;
                 return new Commit(CommitOutcome.EvaluateAgain);
             }
 
-            if (data.AttachCount != attachCount)
+            if (data.AttachCount != state.AttachCount)
             {
-                // Evaluated before an attach that has committed since: the attach's value is newer, and the attach
-                // requested a recalculation after it, which answers the requests this loop took.
+                // An attach has committed since the loop took its last request: the attach's value is newer, and the
+                // attach requested a recalculation after it, which answers the requests this loop took.
                 DiscardRecording();
                 data.OwnerToken = 0;
                 return new Commit(CommitOutcome.Released);
