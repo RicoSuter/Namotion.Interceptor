@@ -19,9 +19,9 @@ internal static class VirtualValueConverter
     public static object? ToDataType(object? value, VirtualDataType dataType) => dataType switch
     {
         VirtualDataType.Number => ToNumber(value),
-        VirtualDataType.Boolean => value as bool?,
+        VirtualDataType.Boolean => value is bool ? value : null,
         VirtualDataType.Text => ToText(value),
-        VirtualDataType.Duration => value as TimeSpan?,
+        VirtualDataType.Duration => value is TimeSpan ? value : null,
         VirtualDataType.DateTime => ToInstant(value),
         _ => null
     };
@@ -58,13 +58,7 @@ internal static class VirtualValueConverter
         converted = null;
         if (underlying.IsEnum)
         {
-            if (value is string name && Enum.TryParse(underlying, name, ignoreCase: true, out var parsed))
-            {
-                converted = parsed;
-                return true;
-            }
-
-            return false;
+            return value is string name && TryParseEnum(name, underlying, out converted);
         }
 
         if (underlying == typeof(string))
@@ -81,12 +75,61 @@ internal static class VirtualValueConverter
 
         if (IsNumber(underlying) && IsNumber(value.GetType()))
         {
+            // Convert.ChangeType rounds a fraction to an integer, which would write another value than the one given.
+            if (IntegerTypes.Contains(underlying) && !IsIntegral(value))
+            {
+                return false;
+            }
+
             converted = Convert.ChangeType(value, underlying, CultureInfo.InvariantCulture);
             return true;
         }
 
         return false;
     }
+
+    // By the names of its values only: a number, or names combined for an enum without [Flags], would write a value that
+    // the enum may not have.
+    private static bool TryParseEnum(string text, Type enumType, out object? converted)
+    {
+        converted = null;
+        var isFlags = enumType.IsDefined(typeof(FlagsAttribute), inherit: false);
+        if ((!isFlags && text.Contains(',')) || !HasNamesOnly(text))
+        {
+            return false;
+        }
+
+        if (!Enum.TryParse(enumType, text, ignoreCase: true, out var parsed) ||
+            (!isFlags && !Enum.IsDefined(enumType, parsed)))
+        {
+            return false;
+        }
+
+        converted = parsed;
+        return true;
+    }
+
+    private static bool HasNamesOnly(string text)
+    {
+        foreach (var range in text.AsSpan().Split(','))
+        {
+            var part = text.AsSpan(range).Trim();
+            if (part.IsEmpty || char.IsAsciiDigit(part[0]) || part[0] is '-' or '+')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsIntegral(object number) => number switch
+    {
+        decimal value => decimal.IsInteger(value),
+        double value => double.IsInteger(value),
+        float value => float.IsInteger(value),
+        _ => true
+    };
 
     /// <summary>Gets whether the type is one of the CLR number types that expressions compute with.</summary>
     public static bool IsNumber(Type type) => NumberTypes.Contains(type);
@@ -97,7 +140,7 @@ internal static class VirtualValueConverter
         {
             return value switch
             {
-                decimal number => number,
+                decimal => value,
                 double number => double.IsFinite(number) ? (decimal)number : null,
                 float number => float.IsFinite(number) ? (decimal)number : null,
                 _ when value is not null && IntegerTypes.Contains(value.GetType()) => Convert.ToDecimal(value, CultureInfo.InvariantCulture),
@@ -125,7 +168,7 @@ internal static class VirtualValueConverter
         {
             return value switch
             {
-                DateTimeOffset instant => instant,
+                DateTimeOffset => value,
                 DateTime { Kind: DateTimeKind.Unspecified } dateTime => new DateTimeOffset(DateTime.SpecifyKind(dateTime, DateTimeKind.Utc)),
                 DateTime dateTime => new DateTimeOffset(dateTime),
                 _ => null
