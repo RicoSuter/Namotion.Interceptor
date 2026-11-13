@@ -288,8 +288,10 @@ internal static class DerivedPropertyOwnership
         }
     }
 
-    // The recalculation publishes on the attaching thread: an observer's exception is traced, and the recalculation
-    // has handled the requests it left (see RunOwnerLoops).
+    // Outside the lifecycle lock the recalculation publishes here: an observer's exception is traced, and the
+    // recalculation has handled the requests it left (see RunOwnerLoops). Under the lock the request is queued, and an
+    // observer's exception is rethrown from the structural write that drains it, after the attach completed, or traced
+    // at a release anchor or when that write failed.
     private static void RequestRecalculationAfterAttach(PropertyReference property, long pendingTimestamp, long attachCount)
     {
         try
