@@ -51,6 +51,7 @@ Starts and stops queued before the host starts run once it does, or once an [awa
 | A subject whose constructor dependencies only exist after `builder.Build()`, or a subject that should run from dependency injection, in a private context by default | `services.AddSubject<T>()` |
 | A service that should run for as long as a subject is in the graph | Factory attachment |
 | A subject whose own purpose is a background loop | Let the subject implement `BackgroundService` |
+| A service that a hosted subject starts and stops as part of its own run, such as a device's connection | Let the subject own it directly |
 
 ### Construct and register directly
 
@@ -138,6 +139,14 @@ When a service is not the subject itself but should run for as long as a subject
 
 When the subject's whole purpose is a background loop over its own properties, let it extend `BackgroundService`. See [Subject as Hosted Service](#subject-as-hosted-service) below.
 
+### A service a hosted subject owns
+
+When a subject that is itself a hosted service decides when a child service runs, for example a device that starts a connector once its configuration is valid and replaces it after a configuration edit, the child lives exactly as long as the subject's own run. Let the subject own it directly: start it from its own `StartAsync` or run loop, and stop and dispose it on a restart and from its own `StopAsync`, after `base.StopAsync`. Starting it inside `StartAsync` also counts its start towards [startup completion](#queued-starts-and-startup-completion), because the handler holds that open until the subject's own start returns.
+
+Do not attach such a child. An attachment follows the subject's membership in the graph, not its run: the handler restarts it when the subject re-enters the graph and stops it behind the subject's own stop, so the subject ends up working against a second owner of the same instance.
+
+Two things are easy to miss. Since .NET 10 a `BackgroundService` schedules `ExecuteAsync` on the thread pool, so a stop can land before the run loop has run, and the subject's `StopAsync` has to stop a child its `StartAsync` started. And `base.StopAsync` returns at its token's deadline while the run loop may still be running, so the run loop and `StopAsync` can both reach the child: take it with `Interlocked.Exchange` so exactly one of them stops and disposes it.
+
 ## Factory Attachment
 
 Attach a factory to a subject and the handler runs an instance of it for exactly as long as the subject is in the graph:
@@ -197,7 +206,7 @@ When a subject leaves the graph, the handler stops the subject first and holds e
 
 Nothing resolves that. The wedged queue never drains, the instance is never stopped and never disposed, and every later start or stop for the same service queues behind it for the rest of the process. Shutdown is the one thing the wedge cannot hold: the handler stops waiting for its outstanding stops when the host's `ShutdownTimeout` expires, so `StopAsync` returns even though the wedged service is still sitting there. That bounds the process, not the damage.
 
-Detaching from an operation, from a configuration change, or from any path not reached through the service's own stop is fine, with two exceptions. A subject must not await a detach of its own attachment from its own `StartAsync`. If shutdown begins while that start is still running, the detach queues behind shutdown's stop for the attachment, which waits for the subject's stop, which waits for that start. The same holds for a `BackgroundService` whose `ExecuteAsync` awaits a detach of its own attachment with `CancellationToken.None` as shutdown begins: the subject's stop waits for `ExecuteAsync`, so the detach parks until the host's shutdown deadline. Pass the stopping token to that detach, which the subject's stop cancels first, or use the synchronous `DetachHostedService`. Nothing detects the bad shape, so it is a rule rather than a guard. Both OPC UA wrappers in this repository had it and were changed, so it is a shape that gets written rather than a hypothetical one. `HostedServiceHandlerTests.WhenASubjectOwningAnAttachmentIsStoppedByTheHost_ThenShutdownCompletesWellInsideTheTimeout` is the regression guard.
+Detaching from an operation, from a configuration change, or from any path not reached through the service's own stop is fine, with two exceptions. A subject must not await a detach of its own attachment from its own `StartAsync`. If shutdown begins while that start is still running, the detach queues behind shutdown's stop for the attachment, which waits for the subject's stop, which waits for that start. The same holds for a `BackgroundService` whose `ExecuteAsync` awaits a detach of its own attachment with `CancellationToken.None` as shutdown begins: the subject's stop waits for `ExecuteAsync`, so the detach parks until the host's shutdown deadline. Pass the stopping token to that detach, which the subject's stop cancels first, or use the synchronous `DetachHostedService`. Nothing detects the bad shape, so it is a rule rather than a guard. A subject that wants to release an attachment as its own run ends usually should not hold an attachment at all: see [A service a hosted subject owns](#a-service-a-hosted-subject-owns). `HostedServiceHandlerTests.WhenASubjectOwningAnAttachmentIsStoppedByTheHost_ThenShutdownCompletesWellInsideTheTimeout` is the regression guard.
 
 ### Keep the dispose path out of the lifecycle lock
 
