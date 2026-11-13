@@ -334,6 +334,30 @@ public class PostLockQueueTests
     }
 
     [Fact]
+    public void WhenCallbackOfTryRunWhileAttachedWritesWithItsOwnTimestamp_ThenTheDerivedChangeKeepsThatTimestamp()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var lifecycle = context.GetService<LifecycleInterceptor>();
+        var person = new Person(context) { FirstName = "a" };
+        var timestamp = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+
+        // Act
+        lifecycle.TryRunWhileAttached(person, () =>
+        {
+            using (SubjectChangeContext.WithChangedTimestamp(timestamp))
+            {
+                person.FirstName = "b";
+            }
+        });
+
+        // Assert
+        Assert.Equal(timestamp, changes.Single(c => c.Property.Name == nameof(Person.FullName)).ChangedTimestamp);
+    }
+
+    [Fact]
     public void WhenHandlerWritesDuringContextDetach_ThenChangesAreDeliveredOutsideTheLifecycleLock()
     {
         // Arrange: the leaving subject detaches from the context directly, so the release of the lock is the anchor.

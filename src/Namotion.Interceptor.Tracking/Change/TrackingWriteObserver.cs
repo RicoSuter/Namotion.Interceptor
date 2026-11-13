@@ -108,11 +108,12 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
             return;
         }
 
-        // A write under a lifecycle lock queues its requests; they take the anchor's timestamp at the drain.
+        // A write under a lifecycle lock queues its requests. Under an anchor write they take that write's timestamp at
+        // the drain; at a release anchor, which has no write, they keep this write's.
         segment ??= PostLockQueue.TryGetOpenSegment();
         if (segment is not null)
         {
-            Enqueue(segment, property, isSettableDerived, dependents);
+            Enqueue(segment, property, segment.AnchorDepth == 0 ? write.RawTimestamp : 0, isSettableDerived, dependents);
             return;
         }
 
@@ -150,18 +151,19 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
     }
 
     private static void Enqueue(
-        PostLockQueue.Segment segment, PropertyReference property, bool isSettableDerived, ReadOnlySpan<PropertyReference> dependents)
+        PostLockQueue.Segment segment, PropertyReference property, long rawTimestamp, bool isSettableDerived,
+        ReadOnlySpan<PropertyReference> dependents)
     {
         if (isSettableDerived)
         {
-            PostLockQueue.AddRequest(segment, property, 0);
+            PostLockQueue.AddRequest(segment, property, rawTimestamp);
         }
 
         foreach (var dependent in dependents)
         {
             if (dependent != property)
             {
-                PostLockQueue.AddRequest(segment, dependent, 0);
+                PostLockQueue.AddRequest(segment, dependent, rawTimestamp);
             }
         }
     }

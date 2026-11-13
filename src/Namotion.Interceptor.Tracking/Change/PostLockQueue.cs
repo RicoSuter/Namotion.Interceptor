@@ -58,8 +58,9 @@ internal static class PostLockQueue
     }
 
     /// <summary>
-    /// A queued recalculation request. A <see cref="RawTimestamp"/> of 0 takes the anchor's timestamp at the drain;
-    /// otherwise it is a timestamp handed over with the request, and the newer of the two wins. The
+    /// A queued recalculation request. A <see cref="RawTimestamp"/> of 0 takes the anchor write's timestamp at the
+    /// drain, or the time of the drain at a release anchor; otherwise it is the request's own (handed over with it, or
+    /// the causing write's at a release anchor), and the newer of it and the anchor write's wins. The
     /// <see cref="AttachCount"/> of the property when it was queued drops the request at the drain when the property
     /// was attached again since: that attach evaluated after the request's cause.
     /// </summary>
@@ -375,13 +376,20 @@ internal static class PostLockQueue
             {
                 var request = requests[i];
                 DerivedPropertyOwnership.RunQueuedRequest(
-                    request.Property, Newest(request.RawTimestamp, anchorTimestamp), request.AttachCount);
+                    request.Property, TimestampOf(request, rawTimestamp, anchorTimestamp), request.AttachCount);
             }
             catch (Exception exception)
             {
                 firstException ??= ExceptionDispatchInfo.Capture(exception);
             }
         }
+    }
+
+    // Under an anchor write, the newer of the request's and the write's timestamp. At a release anchor, or for an
+    // anchor write that did not land, the request's own, or the time of the drain for a request without one.
+    private static long TimestampOf(in QueuedRequest request, long rawTimestamp, long anchorTimestamp)
+    {
+        return rawTimestamp == 0 && request.RawTimestamp != 0 ? request.RawTimestamp : Newest(request.RawTimestamp, anchorTimestamp);
     }
 
     // The anchor write's timestamp; at a lock release, or for an anchor write that did not land, the current one. A
