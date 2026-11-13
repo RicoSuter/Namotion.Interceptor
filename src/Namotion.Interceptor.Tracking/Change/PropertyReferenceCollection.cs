@@ -111,10 +111,10 @@ public sealed class PropertyReferenceCollection
     /// <returns>True if property was added; false if already exists.</returns>
     /// <remarks>
     /// A successful add is a full memory barrier: the addition is visible to other threads before any later
-    /// read by the calling thread. Dependency registration relies on this to pair with the write generation. An
+    /// read by the calling thread. Dependency registration relies on this to pair with the version check. An
     /// add that returns false needs no barrier: every add of a dependent runs under that dependent's own data lock,
-    /// so the add that succeeded earlier already executed it. See the "Concurrent write detection via
-    /// _writeGeneration" section of docs/design/tracking-derived-properties.md.
+    /// so the add that succeeded earlier already executed it. See the version protocol in
+    /// docs/design/tracking-derived-properties.md.
     /// </remarks>
     internal bool Add(in PropertyReference property)
     {

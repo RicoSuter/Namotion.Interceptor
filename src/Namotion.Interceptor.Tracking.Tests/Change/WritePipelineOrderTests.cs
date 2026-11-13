@@ -6,10 +6,9 @@ using Namotion.Interceptor.Tracking.Transactions;
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
 /// <summary>
-/// Pins the resolved write chain. The order carries semantics that are otherwise only visible
-/// through behavior: the change interceptor must sit outer of the lifecycle interceptor (so
-/// dispatch happens after attach/detach reconciliation) and inner of the derived handler (so a
-/// triggering write is announced before the recalculations it causes).
+/// Pins the resolved write chain: the change interceptor sits outer of the lifecycle interceptor, so
+/// dispatch happens after attach and detach reconciliation. Derived recalculation runs after the
+/// whole chain through the core's write observer.
 /// </summary>
 public class WritePipelineOrderTests
 {
@@ -26,7 +25,6 @@ public class WritePipelineOrderTests
         Assert.Equal(
             [
                 typeof(PropertyValueEqualityCheckHandler),
-                typeof(DerivedPropertyChangeHandler),
                 typeof(PropertyChangeInterceptor),
                 typeof(LifecycleInterceptor)
             ],
@@ -47,7 +45,6 @@ public class WritePipelineOrderTests
             [
                 typeof(PropertyValueEqualityCheckHandler),
                 typeof(SubjectTransactionInterceptor),
-                typeof(DerivedPropertyChangeHandler),
                 typeof(PropertyChangeInterceptor),
                 typeof(LifecycleInterceptor)
             ],
@@ -66,15 +63,11 @@ public class WritePipelineOrderTests
         // Act
         var chain = childContext.GetServices<IWriteInterceptor>().Select(interceptor => interceptor.GetType()).ToArray();
 
-        // Assert: an exact array, because this is the only configuration where the derived-before-change
-        // edge is load-bearing. A weaker "all change before all lifecycle" predicate is satisfied by
-        // the interleaved order too, so removing that edge would not fail any test.
+        // Assert: both change interceptors precede both lifecycle interceptors.
         Assert.Equal(
             [
                 typeof(PropertyValueEqualityCheckHandler),
                 typeof(PropertyValueEqualityCheckHandler),
-                typeof(DerivedPropertyChangeHandler),
-                typeof(DerivedPropertyChangeHandler),
                 typeof(PropertyChangeInterceptor),
                 typeof(PropertyChangeInterceptor),
                 typeof(LifecycleInterceptor),

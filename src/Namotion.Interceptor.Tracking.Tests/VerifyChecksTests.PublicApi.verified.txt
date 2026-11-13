@@ -6,16 +6,11 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace Namotion.Interceptor.Tracking.Change
 {
-    [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
-            typeof(Namotion.Interceptor.Tracking.Change.PropertyChangeInterceptor)})]
-    [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
-            typeof(Namotion.Interceptor.Tracking.Lifecycle.LifecycleInterceptor)})]
-    public class DerivedPropertyChangeHandler : Namotion.Interceptor.Interceptors.IWriteInterceptor, Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
+    public class DerivedPropertyChangeHandler : Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
     {
         public DerivedPropertyChangeHandler() { }
         public void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
         public void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
-        public void WriteProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, Namotion.Interceptor.Interceptors.WriteInterceptionDelegate<TProperty> next) { }
     }
     public static class DerivedPropertyChangeHandlerExtensions
     {
@@ -327,7 +322,8 @@ namespace Namotion.Interceptor.Tracking.Transactions
         public static Namotion.Interceptor.Tracking.Transactions.TransactionAwaitable BeginTransactionAsync(this Namotion.Interceptor.IInterceptorSubjectContext context, Namotion.Interceptor.Tracking.Transactions.TransactionFailureHandling failureHandling, Namotion.Interceptor.Tracking.Transactions.TransactionLocking locking = 0, Namotion.Interceptor.Tracking.Transactions.TransactionRequirement requirement = 0, Namotion.Interceptor.Tracking.Transactions.TransactionConflictBehavior conflictBehavior = 0, Namotion.Interceptor.Tracking.Transactions.TransactionCheckMode checkMode = 0, System.TimeSpan? commitTimeout = default, System.Threading.CancellationToken cancellationToken = default) { }
     }
     [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
-            typeof(Namotion.Interceptor.Tracking.Change.DerivedPropertyChangeHandler)})]
+            typeof(Namotion.Interceptor.Tracking.Lifecycle.LifecycleInterceptor),
+            typeof(Namotion.Interceptor.Tracking.Change.PropertyChangeInterceptor)})]
     public sealed class SubjectTransactionInterceptor : Namotion.Interceptor.Interceptors.IReadInterceptor, Namotion.Interceptor.Interceptors.IWriteInterceptor
     {
         public SubjectTransactionInterceptor() { }

@@ -2,6 +2,7 @@ using System.Collections;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -15,6 +16,11 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
     [ThreadStatic]
     private static Stack<HashSet<IInterceptorSubject>>? _subjectHashSetPool;
+
+    public LifecycleInterceptor()
+    {
+        TrackingWriteObserver.EnsureRegistered();
+    }
 
     /// <summary>
     /// Raised when a subject is attached to the object graph.
