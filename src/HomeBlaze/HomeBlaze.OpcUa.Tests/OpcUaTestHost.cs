@@ -72,9 +72,8 @@ internal sealed class OpcUaTestHost : IAsyncDisposable
     /// <summary>
     /// Completes <see cref="RootManager.RootLoaded"/> the only way the application can: by running the
     /// manager's own <c>ExecuteAsync</c> over a configuration file. The server wrapper awaits that task
-    /// from its start path and spins on <see cref="RootManager.IsLoaded"/> from its factory, and both
-    /// are driven by one private completion source, so a stand-in would have to re-implement the very
-    /// ordering the wrapper depends on.
+    /// from its start path, so a stand-in would have to re-implement the very ordering the wrapper
+    /// depends on.
     /// </summary>
     public async Task LoadRootAsync()
     {
@@ -141,15 +140,28 @@ internal sealed class OpcUaTestHost : IAsyncDisposable
     }
 
     /// <summary>
-    /// Waits for a wrapper to report <paramref name="expected"/>. Both wrappers reconcile from a
-    /// transition on another queue, so a status has to be waited for rather than read straight after
-    /// the write that triggers it.
+    /// Waits for a wrapper to report <paramref name="expected"/>. The hosting handler starts and stops
+    /// both wrappers on its own queue, so a status has to be waited for rather than read straight after
+    /// the graph write that triggers it.
     /// </summary>
     public static Task WaitForStatusAsync(Func<ServiceStatus> status, ServiceStatus expected)
     {
         return AsyncTestHelpers.WaitUntilAsync(
             () => status() == expected,
             message: $"The wrapper did not reach {expected}.");
+    }
+
+    /// <summary>
+    /// Waits for the hosting handler to have started a wrapper that entered the graph. A start request
+    /// issued before that finds no run to start a connector in. The base start sets
+    /// <see cref="BackgroundService.ExecuteTask"/> after the wrapper's own start has run, so the task
+    /// being there proves it has.
+    /// </summary>
+    public static Task WaitForWrapperStartedAsync(BackgroundService wrapper)
+    {
+        return AsyncTestHelpers.WaitUntilAsync(
+            () => wrapper.ExecuteTask is not null,
+            message: "The handler did not start the wrapper.");
     }
 
     /// <summary>

@@ -4,19 +4,36 @@ namespace HomeBlaze.OpcUa.Tests;
 
 /// <summary>
 /// A startup completion that records how many completion deferrals had been taken when all of them had
-/// first been released, which is the moment a startup completion wait would have passed.
+/// first been released, which is the moment a startup completion wait would have passed, and what a
+/// probe read at that moment.
 /// </summary>
 internal sealed class StartupCompletionRecorder : IStartupCompletion
 {
     /// <summary>
     /// A leaf lock, so the count a release reads and the deferral that may race it are one step. Nothing
-    /// is called while it is held.
+    /// but the probe is called while it is held.
     /// </summary>
     private readonly Lock _lock = new();
 
     private int _outstanding;
     private int _deferralCount;
     private int? _deferralCountWhenFirstSettled;
+    private bool? _probeWhenFirstSettled;
+
+    /// <summary>Read once, when no deferral is outstanding for the first time.</summary>
+    public Func<bool>? Probe { get; set; }
+
+    /// <summary>What <see cref="Probe"/> returned when none was outstanding for the first time, or null before that.</summary>
+    public bool? ProbeWhenFirstSettled
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _probeWhenFirstSettled;
+            }
+        }
+    }
 
     public int Outstanding
     {
@@ -68,9 +85,10 @@ internal sealed class StartupCompletionRecorder : IStartupCompletion
         lock (_lock)
         {
             _outstanding--;
-            if (_outstanding == 0)
+            if (_outstanding == 0 && _deferralCountWhenFirstSettled is null)
             {
-                _deferralCountWhenFirstSettled ??= _deferralCount;
+                _deferralCountWhenFirstSettled = _deferralCount;
+                _probeWhenFirstSettled = Probe?.Invoke();
             }
         }
     }

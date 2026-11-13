@@ -17,18 +17,22 @@ namespace HomeBlaze.OpcUa;
 /// <summary>
 /// OPC UA client subject that connects to an OPC UA server and discovers its address space dynamically.
 /// </summary>
+/// <remarks>
+/// Owns its client source for the duration of its own run: the source is started and stopped by this
+/// subject's start, stop and configuration paths, never by the hosting graph.
+/// </remarks>
 [Category("Integrations")]
 [Description("Connects to an OPC UA server and discovers properties dynamically")]
 [DisplayName("OPC UA client")]
 [SubjectIcon("Cable")]
 [InterceptorSubject]
 public partial class OpcUaClient
-    : BackgroundService, IConfigurable, ITitleProvider, IIconProvider, IAttachmentOwner<IOpcUaSubjectClientSource>
+    : BackgroundService, IConfigurable, ITitleProvider, IIconProvider, IConnectorOwner<IOpcUaSubjectClientSource>
 {
     private readonly ILogger<OpcUaClient> _logger;
 
-    /// <summary>The attachment this wrapper owns and every path that maintains it.</summary>
-    private readonly SingleAttachmentHost<IOpcUaSubjectClientSource> _attachmentHost;
+    /// <summary>The connector this wrapper owns for the duration of its own run.</summary>
+    private readonly OwnedConnectorHost<IOpcUaSubjectClientSource> _connectorHost;
 
     // Configuration properties
 
@@ -154,7 +158,7 @@ public partial class OpcUaClient
     public Task StartAsync()
     {
         IsEnabled = true;
-        return _attachmentHost.StartAsync(CancellationToken.None);
+        return _connectorHost.StartAsync(CancellationToken.None);
     }
 
     [Derived]
@@ -168,7 +172,7 @@ public partial class OpcUaClient
     public Task StopAsync()
     {
         IsEnabled = false;
-        return _attachmentHost.StopAsync(CancellationToken.None);
+        return _connectorHost.StopAsync(CancellationToken.None);
     }
 
     [Derived]
@@ -185,13 +189,13 @@ public partial class OpcUaClient
     public string? IconColor => Status == ServiceStatus.Running ? "Success" : null;
 
     /// <remarks>
-    /// <paramref name="diagnosticsPollInterval"/> is how often the running client is reconciled with its
-    /// attachment, and null takes the default.
+    /// <paramref name="diagnosticsPollInterval"/> is how often the running client's diagnostics are
+    /// refreshed, and null takes the default.
     /// </remarks>
     public OpcUaClient(ILogger<OpcUaClient> logger, TimeSpan? diagnosticsPollInterval = null)
     {
         _logger = logger;
-        _attachmentHost = new SingleAttachmentHost<IOpcUaSubjectClientSource>(this, logger, diagnosticsPollInterval);
+        _connectorHost = new OwnedConnectorHost<IOpcUaSubjectClientSource>(this, logger, diagnosticsPollInterval);
 
         Name = string.Empty;
         ServerUrl = string.Empty;
@@ -199,39 +203,42 @@ public partial class OpcUaClient
         IsEnabled = true;
     }
 
-    public override Task StartAsync(CancellationToken cancellationToken)
+    public override async Task StartAsync(CancellationToken cancellationToken)
     {
-        _attachmentHost.BeginRun();
-        return base.StartAsync(cancellationToken);
+        await _connectorHost.StartRunAsync(cancellationToken);
+        await base.StartAsync(cancellationToken);
     }
 
     public override Task StopAsync(CancellationToken cancellationToken)
     {
-        return _attachmentHost.StopRunAsync(base.StopAsync, cancellationToken);
+        return _connectorHost.StopRunAsync(base.StopAsync, cancellationToken);
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        return _attachmentHost.RunAsync(stoppingToken);
+        return _connectorHost.RunAsync(stoppingToken);
     }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
-        return _attachmentHost.ApplyConfigurationAsync(cancellationToken);
+        return _connectorHost.ApplyConfigurationAsync(cancellationToken);
     }
 
-    // Attachment host callbacks
+    /// <summary>The running client source, or null. Test only.</summary>
+    internal IOpcUaSubjectClientSource? Connector => _connectorHost.Current;
 
-    string IAttachmentOwner<IOpcUaSubjectClientSource>.LogName => "OPC UA client";
+    // Connector host callbacks
 
-    string IAttachmentOwner<IOpcUaSubjectClientSource>.LogTarget => ServerUrl;
+    string IConnectorOwner<IOpcUaSubjectClientSource>.LogName => "OPC UA client";
 
-    string? IAttachmentOwner<IOpcUaSubjectClientSource>.GetConfigurationError()
+    string IConnectorOwner<IOpcUaSubjectClientSource>.LogTarget => ServerUrl;
+
+    string? IConnectorOwner<IOpcUaSubjectClientSource>.GetConfigurationError()
     {
         return string.IsNullOrEmpty(ServerUrl) ? "Server URL is not configured" : null;
     }
 
-    IOpcUaSubjectClientSource IAttachmentOwner<IOpcUaSubjectClientSource>.CreateInstance()
+    IOpcUaSubjectClientSource IConnectorOwner<IOpcUaSubjectClientSource>.CreateInstance()
     {
         var rootPathSegments = RootPath?.Split('/', StringSplitOptions.RemoveEmptyEntries);
         var root = new OpcUaDynamicSubject(rootPathSegments is { Length: > 0 } ? rootPathSegments[^1] : "Root");
@@ -258,7 +265,7 @@ public partial class OpcUaClient
         return root.CreateOpcUaClientSource(configuration, _logger);
     }
 
-    void IAttachmentOwner<IOpcUaSubjectClientSource>.ApplyDiagnostics(IOpcUaSubjectClientSource source)
+    void IConnectorOwner<IOpcUaSubjectClientSource>.ApplyDiagnostics(IOpcUaSubjectClientSource source)
     {
         var diagnostics = source.Diagnostics;
         IsConnected = diagnostics.IsOperational;
@@ -270,7 +277,7 @@ public partial class OpcUaClient
         TotalReconnections = diagnostics.Reconnects.TotalAttempts;
     }
 
-    void IAttachmentOwner<IOpcUaSubjectClientSource>.ResetDiagnostics()
+    void IConnectorOwner<IOpcUaSubjectClientSource>.ResetDiagnostics()
     {
         IsConnected = null;
         IncomingChangesPerSecond = null;
@@ -283,9 +290,9 @@ public partial class OpcUaClient
 
     /// <summary>
     /// Drops the discovered tree, which belongs to the source that filled it and is built again by the
-    /// next factory run.
+    /// next start.
     /// </summary>
-    void IAttachmentOwner<IOpcUaSubjectClientSource>.DropInstanceState()
+    void IConnectorOwner<IOpcUaSubjectClientSource>.DropInstanceState()
     {
         Root = null;
     }

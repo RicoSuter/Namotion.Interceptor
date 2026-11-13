@@ -16,6 +16,10 @@ namespace HomeBlaze.OpcUa;
 /// <summary>
 /// OPC UA server subject that exposes other subjects via OPC UA protocol.
 /// </summary>
+/// <remarks>
+/// Owns its server connector for the duration of its own run: the connector is started and stopped by
+/// this subject's start, stop and configuration paths, never by the hosting graph.
+/// </remarks>
 [Category("Integrations")]
 [Description("Exposes subjects via OPC UA protocol")]
 [DisplayName("OPC UA server")]
@@ -23,7 +27,7 @@ namespace HomeBlaze.OpcUa;
 [InterceptorSubject]
 public partial class OpcUaServer
     : BackgroundService, IConfigurable, ITitleProvider, IIconProvider, IServerSubject,
-      IAttachmentOwner<IOpcUaSubjectServer>
+      IConnectorOwner<IOpcUaSubjectServer>
 {
     private static readonly TimeSpan DefaultRootLoadWaitTimeout = TimeSpan.FromSeconds(10);
 
@@ -32,8 +36,8 @@ public partial class OpcUaServer
     private readonly ILogger<OpcUaServer> _logger;
     private readonly TimeSpan _rootLoadWaitTimeout;
 
-    /// <summary>The attachment this wrapper owns and every path that maintains it.</summary>
-    private readonly SingleAttachmentHost<IOpcUaSubjectServer> _attachmentHost;
+    /// <summary>The connector this wrapper owns for the duration of its own run.</summary>
+    private readonly OwnedConnectorHost<IOpcUaSubjectServer> _connectorHost;
 
     // Configuration properties (persisted to JSON)
 
@@ -137,7 +141,7 @@ public partial class OpcUaServer
     public Task StartAsync()
     {
         IsEnabled = true;
-        return _attachmentHost.StartAsync(CancellationToken.None);
+        return _connectorHost.StartAsync(CancellationToken.None);
     }
 
     [Derived]
@@ -151,7 +155,7 @@ public partial class OpcUaServer
     public Task StopAsync()
     {
         IsEnabled = false;
-        return _attachmentHost.StopAsync(CancellationToken.None);
+        return _connectorHost.StopAsync(CancellationToken.None);
     }
 
     [Derived]
@@ -171,8 +175,8 @@ public partial class OpcUaServer
     public string? IconColor => Status == ServiceStatus.Running ? "Success" : null;
 
     /// <remarks>
-    /// <paramref name="diagnosticsPollInterval"/> is how often the running server is reconciled with its
-    /// attachment, and <paramref name="rootLoadWaitTimeout"/> how long a start waits for the root before
+    /// <paramref name="diagnosticsPollInterval"/> is how often the running server's diagnostics are
+    /// refreshed, and <paramref name="rootLoadWaitTimeout"/> how long a start waits for the root before
     /// it fails. Null takes the default for either.
     /// </remarks>
     public OpcUaServer(
@@ -186,7 +190,7 @@ public partial class OpcUaServer
         _pathResolver = pathResolver;
         _logger = logger;
         _rootLoadWaitTimeout = rootLoadWaitTimeout ?? DefaultRootLoadWaitTimeout;
-        _attachmentHost = new SingleAttachmentHost<IOpcUaSubjectServer>(this, logger, diagnosticsPollInterval);
+        _connectorHost = new OwnedConnectorHost<IOpcUaSubjectServer>(this, logger, diagnosticsPollInterval);
 
         Name = string.Empty;
         Path = string.Empty;
@@ -194,39 +198,42 @@ public partial class OpcUaServer
         IsEnabled = true;
     }
 
-    public override Task StartAsync(CancellationToken cancellationToken)
+    public override async Task StartAsync(CancellationToken cancellationToken)
     {
-        _attachmentHost.BeginRun();
-        return base.StartAsync(cancellationToken);
+        await _connectorHost.StartRunAsync(cancellationToken);
+        await base.StartAsync(cancellationToken);
     }
 
     public override Task StopAsync(CancellationToken cancellationToken)
     {
-        return _attachmentHost.StopRunAsync(base.StopAsync, cancellationToken);
+        return _connectorHost.StopRunAsync(base.StopAsync, cancellationToken);
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        return _attachmentHost.RunAsync(stoppingToken);
+        return _connectorHost.RunAsync(stoppingToken);
     }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
-        return _attachmentHost.ApplyConfigurationAsync(cancellationToken);
+        return _connectorHost.ApplyConfigurationAsync(cancellationToken);
     }
 
-    // Attachment host callbacks
+    /// <summary>The running server connector, or null. Test only.</summary>
+    internal IOpcUaSubjectServer? Connector => _connectorHost.Current;
 
-    string IAttachmentOwner<IOpcUaSubjectServer>.LogName => "OPC UA server";
+    // Connector host callbacks
 
-    string IAttachmentOwner<IOpcUaSubjectServer>.LogTarget => Path;
+    string IConnectorOwner<IOpcUaSubjectServer>.LogName => "OPC UA server";
 
-    string? IAttachmentOwner<IOpcUaSubjectServer>.GetConfigurationError()
+    string IConnectorOwner<IOpcUaSubjectServer>.LogTarget => Path;
+
+    string? IConnectorOwner<IOpcUaSubjectServer>.GetConfigurationError()
     {
         return string.IsNullOrEmpty(Path) ? "Path is not configured" : null;
     }
 
-    async ValueTask<bool> IAttachmentOwner<IOpcUaSubjectServer>.WaitUntilStartableAsync(CancellationToken cancellationToken)
+    async ValueTask<bool> IConnectorOwner<IOpcUaSubjectServer>.WaitUntilStartableAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -234,8 +241,8 @@ public partial class OpcUaServer
             // cancellation has to be checked in its own right.
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Bounded because the start holds the attachment gate across this wait and the Start
-            // operation passes no token, so an unbounded wait on a root that never loads keeps Stop out.
+            // Bounded because the start holds the host's gate across this wait and the Start operation
+            // passes no token, so an unbounded wait on a root that never loads keeps Stop out.
             await _rootManager.RootLoaded.WaitAsync(_rootLoadWaitTimeout, cancellationToken);
             return true;
         }
@@ -250,22 +257,11 @@ public partial class OpcUaServer
         }
     }
 
-    IOpcUaSubjectServer IAttachmentOwner<IOpcUaSubjectServer>.CreateInstance()
+    IOpcUaSubjectServer IConnectorOwner<IOpcUaSubjectServer>.CreateInstance()
     {
-        // Blocks rather than awaits, because a synchronous Func<T> cannot await and the handler invokes
-        // this directly on a re-attach, which never passes through the awaited wait in the start path.
-        // Returns at once in every reachable case, because the root manager publishes the root before it
-        // attaches the graph this subject belongs to, so no attach of this subject can precede the load.
-        // Bounded anyway, so a case that is somehow not satisfied fails the start rather than pinning a
-        // thread.
-        if (!SpinWait.SpinUntil(() => _rootManager.IsLoaded, _rootLoadWaitTimeout))
-        {
-            throw CreateRootNotLoadedException();
-        }
-
-        // A synchronous factory can only signal a failed lookup by throwing, which
-        // AttachHostedServiceAsync rethrows into a StatusMessage. Re-resolved on every attach rather
-        // than captured: the graph may have replaced the subject at that path since the previous one.
+        // Only reached once the start has waited for the root, so the path resolves against the loaded
+        // graph. Re-resolved on every start rather than captured: the graph may have replaced the subject
+        // at that path since the previous one.
         var targetSubject = _pathResolver.ResolveSubject(Path, PathStyle.Canonical)
             ?? throw new InvalidOperationException($"Could not resolve subject at path: {Path}");
 
@@ -303,7 +299,7 @@ public partial class OpcUaServer
             $"The root manager did not load within {_rootLoadWaitTimeout.TotalSeconds:F0} seconds, so the path could not be resolved: {Path}");
     }
 
-    void IAttachmentOwner<IOpcUaSubjectServer>.ApplyDiagnostics(IOpcUaSubjectServer server)
+    void IConnectorOwner<IOpcUaSubjectServer>.ApplyDiagnostics(IOpcUaSubjectServer server)
     {
         var diagnostics = server.Diagnostics;
         IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
@@ -311,7 +307,7 @@ public partial class OpcUaServer
         ActiveSessionCount = diagnostics.ActiveSessionCount;
     }
 
-    void IAttachmentOwner<IOpcUaSubjectServer>.ResetDiagnostics()
+    void IConnectorOwner<IOpcUaSubjectServer>.ResetDiagnostics()
     {
         IncomingChangesPerSecond = null;
         OutgoingChangesPerSecond = null;

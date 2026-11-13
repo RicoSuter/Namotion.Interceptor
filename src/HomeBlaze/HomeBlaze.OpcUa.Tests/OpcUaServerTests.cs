@@ -1,5 +1,4 @@
 using HomeBlaze.Abstractions;
-using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Xunit;
@@ -9,7 +8,7 @@ namespace HomeBlaze.OpcUa.Tests;
 public class OpcUaServerTests
 {
     /// <summary>
-    /// How long the root stays unloaded while the start is observed not to have attached anything. See
+    /// How long the root stays unloaded while the start is observed not to have created anything. See
     /// the test that uses it for why the observation cannot false fail.
     /// </summary>
     private static readonly TimeSpan UnloadedRootObservation = TimeSpan.FromMilliseconds(500);
@@ -18,7 +17,7 @@ public class OpcUaServerTests
     private static readonly TimeSpan CompletionTimeout = TimeSpan.FromSeconds(30);
 
     [Fact]
-    public async Task WhenTheConfiguredPathDoesNotResolve_ThenTheStartFailsAndKeepsNoAttachment()
+    public async Task WhenTheConfiguredPathDoesNotResolve_ThenTheStartFailsWithoutAConnector()
     {
         // Arrange
         await using var testHost = await OpcUaTestHost.StartAsync();
@@ -26,22 +25,22 @@ public class OpcUaServerTests
 
         var server = testHost.CreateServer("/NotInTheGraph", isEnabled: false);
         testHost.Container.Server = server;
+        await OpcUaTestHost.WaitForWrapperStartedAsync(server);
 
         // Act
         await server.StartAsync();
 
         // Assert
-        // A synchronous factory can only report a failed lookup by throwing, and the awaited attach is
-        // transactional, so the failure has to arrive as the wrapper's own status with nothing left
-        // attached behind it. An attachment kept here would block every later start.
+        // The factory reports a failed lookup by throwing, so the failure has to arrive as the wrapper's
+        // own status with nothing kept running behind it.
         Assert.Equal(ServiceStatus.Error, server.Status);
         Assert.Equal("Could not resolve subject at path: /NotInTheGraph", server.StatusMessage);
-        Assert.Empty(server.GetHostedServiceAttachments());
+        Assert.Null(server.Connector);
         Assert.False(server.IsServerRunning);
     }
 
     [Fact]
-    public async Task WhenAnEnabledServerEntersTheGraph_ThenTheServerHoldIsTakenBeforeTheWrapperHoldIsReleased()
+    public async Task WhenAnEnabledServerEntersTheGraph_ThenItsConnectorStartRunsBeforeStartupCompletes()
     {
         // Arrange
         var recorder = new StartupCompletionRecorder();
@@ -49,6 +48,7 @@ public class OpcUaServerTests
             context => context.AddService<IStartupCompletion>(recorder));
         await testHost.LoadRootAsync();
         var server = testHost.CreateServer("/NotInTheGraph");
+        recorder.Probe = () => server.Status == ServiceStatus.Error;
 
         // Act
         testHost.Container.Server = server;
@@ -58,11 +58,11 @@ public class OpcUaServerTests
             message: "A completion deferral was never released.");
 
         // Assert
-        // The wrapper's own completion deferral and the attached server's, which is taken when its
-        // start is queued and so whether or not that start then fails, as it does here against a path
-        // that does not resolve.
-        Assert.Equal(2, recorder.DeferralCount);
-        Assert.Equal(2, recorder.DeferralCountWhenFirstSettled);
+        // The wrapper's own completion deferral covers its start, which runs the connector's start to
+        // its end, here the failure against a path that does not resolve. Settling before that is a
+        // startup completion wait passing while the connector's start is still to come.
+        Assert.Equal(1, recorder.DeferralCount);
+        Assert.True(recorder.ProbeWhenFirstSettled);
     }
 
     [Fact]
@@ -72,6 +72,7 @@ public class OpcUaServerTests
         await using var testHost = await OpcUaTestHost.StartAsync();
         var server = testHost.CreateServer(path: string.Empty, isEnabled: false);
         testHost.Container.Server = server;
+        await OpcUaTestHost.WaitForWrapperStartedAsync(server);
 
         // Act
         await server.StartAsync();
@@ -79,7 +80,7 @@ public class OpcUaServerTests
         // Assert
         Assert.Equal(ServiceStatus.Error, server.Status);
         Assert.Equal("Path is not configured", server.StatusMessage);
-        Assert.Empty(server.GetHostedServiceAttachments());
+        Assert.Null(server.Connector);
 
         // The guard runs ahead of the wait on the root, so an unconfigured server reports its error at
         // once instead of sitting in Starting until a root arrives.
@@ -87,7 +88,7 @@ public class OpcUaServerTests
     }
 
     [Fact]
-    public async Task WhenTheRootHasNotLoaded_ThenTheStartWaitsForItBeforeAttaching()
+    public async Task WhenTheRootHasNotLoaded_ThenTheStartWaitsForItBeforeCreatingTheConnector()
     {
         // Arrange
         await using var testHost = await OpcUaTestHost.StartAsync();
@@ -103,7 +104,7 @@ public class OpcUaServerTests
         // that task, so waiting longer cannot change the answer.
         await Task.Delay(UnloadedRootObservation);
         Assert.Equal(ServiceStatus.Starting, server.Status);
-        Assert.Empty(server.GetHostedServiceAttachments());
+        Assert.Null(server.Connector);
 
         // Act
         await testHost.LoadRootAsync();
@@ -132,12 +133,11 @@ public class OpcUaServerTests
         await server.StartAsync();
 
         // Assert
-        // The drained handler enqueues nothing, so the awaited attach hands back a handle holding no
-        // instance and no fault. Reaching this without the factory having run at all is what
-        // distinguishes it from the resolution failure above.
+        // The wrapper's run has ended, so the start refuses before the factory runs at all, which is
+        // what distinguishes it from the resolution failure above.
         Assert.Equal(ServiceStatus.Error, server.Status);
-        Assert.Equal("Not attached to a running host, so nothing was started", server.StatusMessage);
-        Assert.Empty(server.GetHostedServiceAttachments());
+        Assert.Equal("Not running in a host, so nothing was started", server.StatusMessage);
+        Assert.Null(server.Connector);
     }
 
     [Fact]
@@ -162,16 +162,16 @@ public class OpcUaServerTests
         await server.ApplyConfigurationAsync(CancellationToken.None);
 
         // Assert
-        // The failed start kept no attachment, so the stop here has nothing to do and the edit is
-        // applied by the start alone. The factory resolves the path on every attach, so a message
-        // naming the edited path is that start having run rather than the previous one still reported.
+        // The failed start kept no connector, so the stop here has nothing to do and the edit is applied
+        // by the start alone. The factory resolves the path on every start, so a message naming the
+        // edited path is that start having run rather than the previous one still reported.
         Assert.Equal(ServiceStatus.Error, server.Status);
         Assert.Equal("Could not resolve subject at path: /AlsoNotInTheGraph", server.StatusMessage);
-        Assert.Empty(server.GetHostedServiceAttachments());
+        Assert.Null(server.Connector);
     }
 
     [Fact]
-    public async Task WhenTheServerSubjectLeavesTheGraph_ThenTheUnwindReportsStopped()
+    public async Task WhenTheServerSubjectLeavesTheGraph_ThenItReportsStopped()
     {
         // Arrange
         await using var testHost = await OpcUaTestHost.StartAsync();
@@ -185,9 +185,6 @@ public class OpcUaServerTests
         testHost.Container.Server = null;
 
         // Assert
-        // The unwind neither detaches nor takes the gate, so a detach that had to wait for the
-        // wrapper's own stop transition would hang here rather than fail.
-        //
         // The message is waited for alongside the status rather than read after it: the wrapper arrives
         // here from Error, the message is the text behind that status alone, and the reported stop
         // writes the status first.
@@ -197,45 +194,41 @@ public class OpcUaServerTests
 
         // The diagnostics are deliberately not asserted here. This server never reaches Running, since
         // its path does not resolve, so they were never set and asserting them null passes with the
-        // unwind's own reset deleted. Pinning that needs a server that binds a port.
-
+        // stop's own reset deleted. Pinning that needs a server that binds a port.
     }
 
     [Fact]
-    public async Task WhenTheSubjectLeavesTheGraphWhileAStartWaitsForTheRoot_ThenTheStartDoesNotOverwriteTheStop()
+    public async Task WhenTheSubjectLeavesTheGraphWhileAStartWaitsForTheRoot_ThenTheStartIsAbandoned()
     {
         // Arrange
         await using var testHost = await OpcUaTestHost.StartAsync();
-        var (server, start) = await StartServerThatLeavesTheGraphWhileWaitingAsync(testHost);
+
+        // Disabled, so the wrapper starts nothing itself and the start below comes from another caller.
+        var server = testHost.CreateServer("/NotInTheGraph", isEnabled: false);
+        testHost.Container.Server = server;
+        await OpcUaTestHost.WaitForWrapperStartedAsync(server);
+
+        var start = server.StartAsync();
+        await OpcUaTestHost.WaitForStatusAsync(() => server.Status, ServiceStatus.Starting);
 
         // Act
-        // The subject is out of the graph, so the attach this releases hands back no instance and the
-        // start commits its not attached error.
+        testHost.Container.Server = null;
+
+        // Assert
+        // The wrapper's stop cancels the wait the start holds the gate across, so the start ends without
+        // the root having loaded, rather than at the end of the wait's own bound.
+        await start.WaitAsync(CompletionTimeout);
+        await OpcUaTestHost.WaitForStatusAsync(() => server.Status, ServiceStatus.Stopped);
+        Assert.Null(server.StatusMessage);
+        Assert.Null(server.Connector);
+
+        // Act
         await testHost.LoadRootAsync();
-        await start.WaitAsync(CompletionTimeout);
 
         // Assert
+        // The abandoned start does not resume once the root arrives.
         Assert.Equal(ServiceStatus.Stopped, server.Status);
-        Assert.Null(server.StatusMessage);
-        Assert.Empty(server.GetHostedServiceAttachments());
-    }
-
-    [Fact]
-    public async Task WhenTheSubjectLeavesTheGraphWhileAStartWaitsForARootThatFails_ThenTheStartDoesNotOverwriteTheStop()
-    {
-        // Arrange
-        await using var testHost = await OpcUaTestHost.StartAsync();
-        var (server, start) = await StartServerThatLeavesTheGraphWhileWaitingAsync(testHost);
-
-        // Act
-        // The wait rethrows the load failure, so the start commits from its catch rather than from the
-        // attach path the test above drives.
-        await testHost.FailRootLoadAsync();
-        await start.WaitAsync(CompletionTimeout);
-
-        // Assert
-        Assert.Equal(ServiceStatus.Stopped, server.Status);
-        Assert.Null(server.StatusMessage);
+        Assert.Null(server.Connector);
     }
 
     [Fact]
@@ -248,14 +241,11 @@ public class OpcUaServerTests
         testHost.Container.Server = server;
 
         // Enabling it before the wrapper's own start has read the flag would start it a second time.
-        // The base start sets ExecuteTask after that read, so the task being there proves it happened.
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => server.ExecuteTask is not null,
-            message: "The handler did not start the server.");
+        await OpcUaTestHost.WaitForWrapperStartedAsync(server);
 
         // Act
-        // The Start operation passes no token, and the start holds the attachment gate the stop needs
-        // across this wait, so only the wait's own bound ends it.
+        // The Start operation passes no token, and the start holds the gate the stop needs across this
+        // wait, so only the wait's own bound ends it.
         await server.StartAsync().WaitAsync(CompletionTimeout);
 
         // Assert
@@ -268,7 +258,7 @@ public class OpcUaServerTests
         // Assert
         Assert.Equal(ServiceStatus.Stopped, server.Status);
         Assert.Null(server.StatusMessage);
-        Assert.Empty(server.GetHostedServiceAttachments());
+        Assert.Null(server.Connector);
     }
 
     [Fact]
@@ -281,9 +271,7 @@ public class OpcUaServerTests
 
         // Enabled only once the wrapper's own start has read the flag, so the reconfiguration below is
         // the one start that runs.
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => server.ExecuteTask is not null,
-            message: "The handler did not start the server.");
+        await OpcUaTestHost.WaitForWrapperStartedAsync(server);
         server.IsEnabled = true;
 
         using var cancellation = new CancellationTokenSource();
@@ -299,32 +287,5 @@ public class OpcUaServerTests
         // start itself can take the status off Starting.
         Assert.Equal(ServiceStatus.Stopped, server.Status);
         Assert.Null(server.StatusMessage);
-    }
-
-    /// <summary>
-    /// Parks a start from the Start operation on the unloaded root, with the attachment gate held, and
-    /// lets the unwind report Stopped underneath it. The unwind takes no gate, so only the stop
-    /// generation can order the start's later commit against it.
-    /// </summary>
-    private static async Task<(OpcUaServer Server, Task Start)> StartServerThatLeavesTheGraphWhileWaitingAsync(
-        OpcUaTestHost testHost)
-    {
-        // Disabled, so the wrapper starts nothing itself and the start below comes from another caller.
-        var server = testHost.CreateServer("/NotInTheGraph", isEnabled: false);
-        testHost.Container.Server = server;
-
-        // Leaving the graph before the handler has started the wrapper would leave nothing to unwind.
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => server.ExecuteTask is not null,
-            message: "The handler did not start the server.");
-
-        var start = server.StartAsync();
-        await OpcUaTestHost.WaitForStatusAsync(() => server.Status, ServiceStatus.Starting);
-
-        testHost.Container.Server = null;
-        await OpcUaTestHost.WaitForStatusAsync(() => server.Status, ServiceStatus.Stopped);
-
-        Assert.False(start.IsCompleted);
-        return (server, start);
     }
 }
