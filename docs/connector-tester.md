@@ -261,7 +261,7 @@ Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfigur
 |----------|------|------------|-------------------|
 | Abrupt server crash | Current attempt cancelled, TCP listeners closed (RST to clients) | Delegates to Kill | Background loop auto-restarts with exponential backoff (1s-30s + jitter) |
 | Abrupt client crash | Transport channel disposed without CloseSession RPC | Transport channel closed, session preserved | Managed session reconnects, then full state reload |
-| Network partition | N/A | Client transport closed, keep-alive detects within 5-10s | Managed session reactivates the server session on a new channel |
+| Network partition | N/A | Client transport closed, keep-alive detects within 5-10s | Managed session reactivates the server session on a new channel, then full state reload |
 | Server restart (clean state) | Full server restart, new node manager | N/A | Managed session creates a new server session and restores the subscriptions, then full state reload |
 | Server stays away | N/A | N/A | Managed session retries in cycles bounded by `MaxReconnectDuration` (30s), each exhausted cycle counted as a failed attempt |
 | Subscription creation failure | N/A | N/A | `SubscriptionHealthMonitor` retries failed items every 5s, falls back to polling |

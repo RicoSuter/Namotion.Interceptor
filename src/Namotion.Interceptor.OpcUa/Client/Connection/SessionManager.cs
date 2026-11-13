@@ -151,7 +151,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     {
         // Taken before the load rather than cleared after it: a recovery that happens while the load
         // runs requests another sync, and the load it supersedes returns without applying anything.
-        if (Interlocked.Exchange(ref _needsFullStateSync, 0) != 1)
+        // A caller that started buffering always loads, so buffering cannot outlive it.
+        if (Interlocked.Exchange(ref _needsFullStateSync, 0) != 1 && !alreadyBuffering)
         {
             return;
         }
