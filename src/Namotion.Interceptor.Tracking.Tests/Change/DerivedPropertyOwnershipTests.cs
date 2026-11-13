@@ -731,19 +731,23 @@ public class DerivedPropertyOwnershipTests
     [Fact]
     public void WhenObserverThrowsOnThePublicationOfEveryDependent_ThenEveryDependentOfTheWriteIsRecalculated()
     {
-        // Arrange
+        // Arrange: Upper and Doubled both read FirstName and do not read each other, so neither publication
+        // requests the other, whatever order the write requests them in.
         var isThrowing = false;
         var publishedProperties = new List<string>();
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         context.AddService(new PublicationObserver((property, _) =>
         {
-            if (isThrowing)
+            if (isThrowing && property.Name is "Upper" or "Doubled")
             {
-                publishedProperties.Add(property.Metadata.Name);
-                throw new InvalidOperationException($"Publication of {property.Metadata.Name}.");
+                publishedProperties.Add(property.Name);
+                throw new InvalidOperationException($"Publication of {property.Name}.");
             }
         }));
         var person = new Person(context) { FirstName = "a", LastName = "c" };
+        var registered = person.TryGetRegisteredSubject()!;
+        var upper = registered.AddDerivedProperty<string?>("Upper", subject => ((Person)subject).FirstName?.ToUpperInvariant()).Reference;
+        var doubled = registered.AddDerivedProperty<string?>("Doubled", subject => ((Person)subject).FirstName + ((Person)subject).FirstName).Reference;
         isThrowing = true;
 
         // Act
@@ -751,9 +755,9 @@ public class DerivedPropertyOwnershipTests
 
         // Assert: the first exception propagates after both dependents were requested.
         Assert.StartsWith("Publication of ", Assert.IsType<InvalidOperationException>(exception).Message);
-        Assert.Equal([nameof(Person.FullName), nameof(Person.FullNameWithPrefix)], publishedProperties.Order());
-        Assert.Equal("b c", new PropertyReference(person, nameof(Person.FullName)).TryGetDerivedPropertyData()?.LastKnownValue);
-        Assert.Equal("Mr. b c", new PropertyReference(person, nameof(Person.FullNameWithPrefix)).TryGetDerivedPropertyData()?.LastKnownValue);
+        Assert.Equal(["Doubled", "Upper"], publishedProperties.Order());
+        Assert.Equal("B", upper.TryGetDerivedPropertyData()?.LastKnownValue);
+        Assert.Equal("bb", doubled.TryGetDerivedPropertyData()?.LastKnownValue);
     }
 
     [Fact]
