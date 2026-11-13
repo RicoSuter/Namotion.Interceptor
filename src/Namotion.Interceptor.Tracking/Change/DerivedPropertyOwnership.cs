@@ -169,6 +169,25 @@ internal static class DerivedPropertyOwnership
         TraceWarning($"DerivedPropertyChangeHandler: {reason}", exception);
     }
 
+    /// <summary>
+    /// Rethrows the first exception of work that ran on after it, or traces it when <paramref name="rethrow"/> is
+    /// false because another exception is in flight or the caller must not throw.
+    /// </summary>
+    internal static void ThrowOrTrace(ExceptionDispatchInfo? exception, bool rethrow, string reason)
+    {
+        if (exception is null)
+        {
+            return;
+        }
+
+        if (rethrow)
+        {
+            exception.Throw();
+        }
+
+        TraceDropped(reason, exception.SourceException);
+    }
+
     private static void TraceWarning(string message, Exception? exception = null)
     {
         try
