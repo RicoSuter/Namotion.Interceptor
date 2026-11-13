@@ -563,6 +563,137 @@ public class DerivedPropertyProtocolTests
     }
 
     [Fact]
+    public async Task WhenAttachFailsOutsideTheGetterWhileARecalculationFromBeforeTheDetachIsInFlight_ThenTheFirstSuccessFollowsTheStructuralChange()
+    {
+        // Arrange: the time source throws once when the worker's derived property attaches under the lifecycle lock,
+        // before its first evaluation. A handler of the configuration, which attaches after the worker, resumes the
+        // recalculation from before the detach and waits until it completed.
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var external = 0;
+        var gate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            var value = root.Anchor + Volatile.Read(ref external);
+            gate.PauseIfArmed();
+            return value;
+        };
+        root.Machine = machine;
+        var result = GetResult(machine);
+        var testThread = Environment.CurrentManagedThreadId;
+        Task? recalculation = null;
+        var isArmed = false;
+        var isTimeSourceArmed = false;
+        var hasTimeSourceThrown = false;
+        var isRecalculationDoneUnderLock = false;
+        context.WithService(() => new CallbackLifecycleHandler(change =>
+        {
+            if (isArmed && change.IsContextAttach && change.Subject == machine.Worker)
+            {
+                isTimeSourceArmed = true;
+            }
+
+            if (isArmed && change.IsContextAttach && change.Subject == machine.Configuration)
+            {
+                Volatile.Write(ref external, 100);
+                gate.Resume.Set();
+                isRecalculationDoneUnderLock = recalculation!.Wait(Timeout);
+            }
+        }));
+        var order = new ConcurrentQueue<string>();
+        using var subscription = context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Name is nameof(EvaluatorRoot.Machine) or nameof(EvaluatorWorker.Result))
+            {
+                order.Enqueue(change.Property.Name);
+            }
+        });
+        var published = new List<(int OldValue, int NewValue)>();
+        using var publications = RecordPublications(result, published);
+        var previousTimeSource = SubjectChangeContext.GetTimestampFunction;
+
+        // Act
+        bool isPaused;
+        SubjectChangeContext.GetTimestampFunction = () =>
+        {
+            if (!isTimeSourceArmed || Environment.CurrentManagedThreadId != testThread)
+            {
+                return DateTimeOffset.UtcNow;
+            }
+
+            isTimeSourceArmed = false;
+            hasTimeSourceThrown = true;
+            throw new InvalidOperationException("Time source failed.");
+        };
+        try
+        {
+            gate.Arm();
+            recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = 1; });
+            isPaused = gate.Paused.Wait(Timeout);
+            root.Machine = null;
+            order.Clear();
+            isArmed = true;
+            root.Machine = machine;
+            await recalculation.WaitAsync(Timeout);
+        }
+        finally
+        {
+            SubjectChangeContext.GetTimestampFunction = previousTimeSource;
+        }
+
+        root.Anchor = 2;
+
+        // Assert: the recalculation released the property at its commit, and the request after the failed attach
+        // published the first success after the structural change. A later write publishes, so nobody owns it.
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.True(hasTimeSourceThrown);
+        Assert.True(isRecalculationDoneUnderLock);
+        Assert.Equal([nameof(EvaluatorRoot.Machine), nameof(EvaluatorWorker.Result), nameof(EvaluatorWorker.Result)], order);
+        Assert.Equal([(0, 101), (101, 102)], published);
+    }
+
+    [Fact]
+    public async Task WhenPropertyIsAttachedOutsideTheLifecycleLockWhileARecalculationIsInFlight_ThenTheRecalculationPublishesOnceAndReleasesIt()
+    {
+        // Arrange: the property is detached and attached directly while a recalculation evaluates; an input that the
+        // getter reads without tracking changes after the attach evaluated.
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var external = 0;
+        var gate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            var value = root.Anchor + Volatile.Read(ref external);
+            gate.PauseIfArmed();
+            return value;
+        };
+        root.Machine = machine;
+        var result = GetResult(machine);
+        var published = new List<(int OldValue, int NewValue)>();
+        using var subscription = RecordPublications(result, published);
+
+        // Act
+        gate.Arm();
+        var recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = 1; });
+        var isPaused = gate.Paused.Wait(Timeout);
+        machine.Worker.DetachSubjectProperty(result);
+        machine.Worker.AttachSubjectProperty(result);
+        Volatile.Write(ref external, 100);
+        gate.Resume.Set();
+        await recalculation.WaitAsync(Timeout);
+        root.Anchor = 2;
+
+        // Assert: the attach handed its request to the recalculation in flight, which evaluated again and published
+        // once. A later write publishes, so nobody owns the property.
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.Equal([(1, 101), (101, 102)], published);
+    }
+
+    [Fact]
     public async Task WhenDerivedPropertyIsDetachedDuringItsEvaluation_ThenNothingIsPublished()
     {
         // Arrange
