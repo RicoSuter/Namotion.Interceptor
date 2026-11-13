@@ -291,53 +291,27 @@ internal static class PostLockQueue
         }
     }
 
+    // A request takes the newer of its own timestamp and the anchor write's. At a release anchor, or for an anchor
+    // write that did not land, rawTimestamp is 0: a request keeps its own, and the requests without one share the
+    // time of the drain, resolved at the first of them.
     private static void RunRequests(List<QueuedRequest> requests, long rawTimestamp, ref ExceptionDispatchInfo? firstException)
     {
-        if (requests.Count == 0)
-        {
-            return;
-        }
-
-        var anchorTimestamp = ResolveAnchorTimestamp(rawTimestamp, ref firstException);
+        long drainTimestamp = 0;
         for (var i = 0; i < requests.Count; i++)
         {
+            var request = requests[i];
             try
             {
-                var request = requests[i];
+                var timestamp = Newest(request.RawTimestamp, rawTimestamp);
                 DerivedPropertyOwnership.RunQueuedRequest(
-                    request.Property, TimestampOf(request, rawTimestamp, anchorTimestamp), request.AttachCount);
+                    request.Property,
+                    timestamp != 0 ? timestamp : TrackingWriteObserver.ResolveTimestamp(ref drainTimestamp),
+                    request.AttachCount);
             }
             catch (Exception exception)
             {
                 firstException ??= ExceptionDispatchInfo.Capture(exception);
             }
-        }
-    }
-
-    // Under an anchor write, the newer of the request's and the write's timestamp. At a release anchor, or for an
-    // anchor write that did not land, the request's own, or the time of the drain for a request without one.
-    private static long TimestampOf(in QueuedRequest request, long rawTimestamp, long anchorTimestamp)
-    {
-        return rawTimestamp == 0 && request.RawTimestamp != 0 ? request.RawTimestamp : Newest(request.RawTimestamp, anchorTimestamp);
-    }
-
-    // The anchor write's timestamp; at a lock release, or for an anchor write that did not land, the current one. A
-    // time source that throws leaves 0, which each request resolves again.
-    private static long ResolveAnchorTimestamp(long rawTimestamp, ref ExceptionDispatchInfo? firstException)
-    {
-        if (rawTimestamp != 0)
-        {
-            return rawTimestamp;
-        }
-
-        try
-        {
-            return SubjectChangeContext.Current.ResolveChangedTimestamp();
-        }
-        catch (Exception exception)
-        {
-            firstException ??= ExceptionDispatchInfo.Capture(exception);
-            return 0;
         }
     }
 
