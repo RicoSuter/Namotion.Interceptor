@@ -161,6 +161,7 @@ typeProvider
     .AddAssembly(typeof(HomeBlaze.Automation.Automation).Assembly)                          // HomeBlaze.Automation
     .AddAssembly(typeof(HomeBlaze.Automation.Blazor.AutomationPage).Assembly)               // HomeBlaze.Automation.Blazor
     .AddAssembly(typeof(HomeBlaze.Virtual.VirtualSubject).Assembly)                         // HomeBlaze.Virtual
+    .AddAssembly(typeof(HomeBlaze.Virtual.Blazor.Editing.VirtualEntryKind).Assembly)         // HomeBlaze.Virtual.Blazor
     .AddAssembly(typeof(ClaudeCliAgent).Assembly)                                           // HomeBlaze.AI
     .AddAssembly(typeof(HomeBlaze.AI.Blazor.AgentPage).Assembly);                           // HomeBlaze.AI.Blazor
 
