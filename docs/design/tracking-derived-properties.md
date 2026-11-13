@@ -159,7 +159,7 @@ A write that did not land (vetoed, captured by a transaction, stopped by the equ
 
 ### Observer installation
 
-A write without a context that found no write observer does not pay a fence: after W1 it reads the observer again (a volatile read) and, when one is set now, reports the write to it, which then runs W2 to W5. The first installation of an observer executes `Interlocked.MemoryBarrierProcessWide()`, a full barrier on every running thread at an instruction boundary: a W1 before that point is visible to every evaluation that starts after the installation completed, and a W1 after it is followed in program order by the read again, which then sees the observer. A writer that is not running during the barrier is covered too, since its context switch is a full barrier.
+A write without a context that found no write observer does not pay a fence: after W1 it reads the observer again (a volatile read) and, when one is set now, reports the write to it, which then runs W2 to W5. The first installation of an observer executes `Interlocked.MemoryBarrierProcessWide()`, a full barrier on every running thread at an instruction boundary: a W1 before that point is visible to every evaluation that starts after the installation completed, and a W1 after it is followed in program order by the read again, which then sees the observer. A writer that is not running during the barrier is covered too, since its context switch is a full barrier. `SetWriteObserver` returns only after the barrier completed, also to a caller that lost the race to install, so the guarantee holds for every evaluation that starts after any `SetWriteObserver` call returned.
 
 ### Proof that no write is missed
 

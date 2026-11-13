@@ -83,6 +83,8 @@ public static class PropertyAccessObservation
 
     private static IPropertyWriteObserver? _writeObserver;
 
+    private static bool _isWriteObserverInstalled;
+
     /// <summary>
     /// The read observer of the current thread. A single slot: whoever sets it replaces the previous observer, and
     /// clearing it does not restore one.
@@ -112,8 +114,20 @@ public static class PropertyAccessObservation
         {
             // Pairs with the read again of a write without a context, see "Observer installation" in
             // docs/design/tracking-derived-properties.md.
-            Interlocked.MemoryBarrierProcessWide();
+            try
+            {
+                Interlocked.MemoryBarrierProcessWide();
+            }
+            finally
+            {
+                Volatile.Write(ref _isWriteObserverInstalled, true);
+            }
+
+            return;
         }
+
+        // A caller that lost the race returns only after the winner's barrier, like the winner.
+        SpinWait.SpinUntil(static () => Volatile.Read(ref _isWriteObserverInstalled));
     }
 
     internal static int EnterWrite() => ++_writeDepth;
@@ -123,5 +137,6 @@ public static class PropertyAccessObservation
     internal static void ReplaceWriteObserverForTests(IPropertyWriteObserver? observer)
     {
         Volatile.Write(ref _writeObserver, observer);
+        Volatile.Write(ref _isWriteObserverInstalled, observer is not null);
     }
 }
