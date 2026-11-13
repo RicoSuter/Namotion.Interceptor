@@ -28,7 +28,22 @@ public static class DerivedPropertyChangeHandlerExtensions
     public static ReadOnlySpan<PropertyReference> GetRequiredProperties(this PropertyReference property)
     {
         var data = property.TryGetDerivedPropertyData();
-        return data is not null ? data.RequiredPropertiesSpan : ReadOnlySpan<PropertyReference>.Empty;
+        if (data is null)
+        {
+            return ReadOnlySpan<PropertyReference>.Empty;
+        }
+
+        // The structures the getter read are dependencies, but not properties.
+        var dependencies = data.RequiredPropertiesSpan;
+        foreach (ref readonly var dependency in dependencies)
+        {
+            if (SubjectStructure.IsStructure(dependency))
+            {
+                return dependencies.ToArray().Where(d => !SubjectStructure.IsStructure(d)).ToArray();
+            }
+        }
+
+        return dependencies;
     }
 
     /// <summary>
