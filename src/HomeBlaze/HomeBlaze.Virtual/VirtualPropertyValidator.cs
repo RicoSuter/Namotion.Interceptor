@@ -90,7 +90,17 @@ public static class VirtualPropertyValidator
             return "A path is required.";
         }
 
-        return property.Expression is { } text && !VirtualExpression.TryParse(text, out _, out var error) ? error : null;
+        if (property.Expression is not { } text)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return "An expression is required.";
+        }
+
+        return VirtualExpression.TryParse(text, out _, out var error) ? null : error;
     }
 
     // Collects the issues of the entries and the valid expression and binding entries by their path in the tree; an

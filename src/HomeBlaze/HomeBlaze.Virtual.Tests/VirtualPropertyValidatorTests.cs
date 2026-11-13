@@ -116,6 +116,18 @@ public class VirtualPropertyValidatorTests
         Assert.Contains("at position", Assert.Single(issues).Message);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("  ")]
+    public void WhenAnExpressionIsEmpty_ThenTheIssueSaysThatOneIsRequired(string text)
+    {
+        // Act
+        var issues = VirtualPropertyValidator.Validate(new Dictionary<string, VirtualProperty> { ["A"] = Expression(text) });
+
+        // Assert
+        Assert.Equal("An expression is required.", Assert.Single(issues).Message);
+    }
+
     [Fact]
     public void WhenAnEntryIsInvalid_ThenItsChildrenAreNotChecked()
     {
