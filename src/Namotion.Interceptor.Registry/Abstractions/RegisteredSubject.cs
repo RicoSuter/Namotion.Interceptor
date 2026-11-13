@@ -243,6 +243,9 @@ public class RegisteredSubject
     /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
+    /// <remarks>
+    /// A getter that is evaluated again while it evaluates on the same thread, such as one that reads itself through other properties, gets the default of the property type for that read; see the registry documentation on derived properties.
+    /// </remarks>
     public RegisteredSubjectProperty AddDerivedProperty<TProperty>(string name, 
         Func<IInterceptorSubject, TProperty?>? getValue,
         Action<IInterceptorSubject, TProperty?>? setValue = null,
@@ -282,6 +285,9 @@ public class RegisteredSubject
     /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
+    /// <remarks>
+    /// A getter that is evaluated again while it evaluates on the same thread, such as one that reads itself through other properties, gets the default of the property type for that read; see the registry documentation on derived properties.
+    /// </remarks>
     public RegisteredSubjectProperty AddDerivedProperty(string name, 
         Type type,
         Func<IInterceptorSubject, object?>? getValue,
