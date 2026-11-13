@@ -511,7 +511,7 @@ internal static class SubjectCodeGenerator
         builder.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
         builder.AppendLine($"        {HidingModifier(metadata, MemberNames.GetPropertyValue)}{modifier} TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)");
         builder.AppendLine("        {");
-        builder.AppendLine("            return _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;");
+        builder.AppendLine("            return _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : global::Namotion.Interceptor.Interceptors.InterceptorExecutor.GetPropertyValueWithoutContext(this, propertyName, readValue)!;");
         builder.AppendLine("        }");
         builder.AppendLine();
         builder.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
@@ -519,8 +519,7 @@ internal static class SubjectCodeGenerator
         builder.AppendLine("        {");
         builder.AppendLine("            if (_context is null)");
         builder.AppendLine("            {");
-        builder.AppendLine("                setValue(this, newValue);");
-        builder.AppendLine("                return true;");
+        builder.AppendLine("                return global::Namotion.Interceptor.Interceptors.InterceptorExecutor.SetPropertyValueWithoutContext(this, propertyName, newValue, setValue);");
         builder.AppendLine("            }");
         builder.AppendLine("            else");
         builder.AppendLine("            {");

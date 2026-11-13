@@ -103,6 +103,7 @@ internal static class SubjectBaseContract
     /// </summary>
     /// <remarks>
     /// Missing <see cref="KnownTypes.IRaisePropertyChanged"/> prevents member sharing but can fall back to root mode.
+    /// Without a context, a hand-written implementation must call <c>InterceptorExecutor.GetPropertyValueWithoutContext</c> and <c>InterceptorExecutor.SetPropertyValueWithoutContext</c> instead of reading and writing the field directly, so that derived properties follow the subject before it is attached.
     /// </remarks>
     private static bool SatisfiesContract(
         INamedTypeSymbol ancestor,
