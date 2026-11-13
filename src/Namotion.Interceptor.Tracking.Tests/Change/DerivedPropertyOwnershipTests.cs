@@ -224,6 +224,62 @@ public class DerivedPropertyOwnershipTests
     }
 
     [Fact]
+    public void WhenAnotherThreadWritesADependencyDuringEveryAttachEvaluation_ThenAttachCommitsItsLastEvaluationAndTheRecalculationAfterItPublishes()
+    {
+        // Arrange: while each of the first 100 evaluations (the attach's iteration limit) runs, another thread
+        // writes Anchor, which the getter reads, so no attach evaluation is stable. The writes come from another
+        // thread, so they are not queued under the attach's lifecycle lock but set the request flag of the attach.
+        const int attachIterationLimit = 100;
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var evaluations = 0;
+        var areWritesCompleted = true;
+        machine.Worker.Evaluator = _ =>
+        {
+            var value = root.Anchor;
+            if (++evaluations <= attachIterationLimit)
+            {
+                areWritesCompleted &= DedicatedThreadTestHelpers
+                    .RunOnDedicatedThreadAsync(() => root.Anchor = value + 1)
+                    .Wait(Timeout);
+            }
+
+            return value;
+        };
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Subject == machine.Worker)
+            {
+                changes.Add(change);
+            }
+        });
+        using var traceOutput = new StringWriter();
+        using var listener = new TextWriterTraceListener(traceOutput);
+        Trace.Listeners.Add(listener);
+
+        try
+        {
+            // Act
+            root.Machine = machine;
+
+            // Assert: the attach commits its last evaluation (99), which is not published, and the recalculation
+            // requested after the attach publishes the value of the last write (100).
+            Assert.True(areWritesCompleted);
+            var change = Assert.Single(changes);
+            Assert.Equal((attachIterationLimit - 1, attachIterationLimit), (change.GetOldValue<int>(), change.GetNewValue<int>()));
+            Assert.Equal(attachIterationLimit, machine.Worker.Result);
+            listener.Flush();
+            Assert.Contains("exhausted while attaching", traceOutput.ToString());
+        }
+        finally
+        {
+            Trace.Listeners.Remove(listener);
+        }
+    }
+
+    [Fact]
     public async Task WhenGetterWritesASubjectItCreates_ThenEachCommitTakesTwoEvaluationsAndLaterWritesPublish()
     {
         // Arrange: the getter reads and then writes a property of a subject it creates, a property no derived
