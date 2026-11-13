@@ -1,5 +1,3 @@
-using System.Collections;
-using System.Collections.Concurrent;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Parent;
 
@@ -15,40 +13,6 @@ public partial class EvaluatorRoot
     public partial int Anchor { get; set; }
 
     public partial byte[]? Data { get; set; }
-
-    public partial EvaluatorMachineSet MachineSet { get; set; }
-}
-
-/// <summary>
-/// A collection of machines that is a value type without references: it holds only a key into a shared table.
-/// </summary>
-public readonly struct EvaluatorMachineSet : IEnumerable<EvaluatorMachine>
-{
-    private static readonly ConcurrentDictionary<int, EvaluatorMachine[]> Table = new();
-    private static int _lastKey;
-    private readonly int _key;
-
-    private EvaluatorMachineSet(int key)
-    {
-        _key = key;
-    }
-
-    public static EvaluatorMachineSet Create(params EvaluatorMachine[] machines)
-    {
-        var key = Interlocked.Increment(ref _lastKey);
-        Table[key] = machines;
-        return new EvaluatorMachineSet(key);
-    }
-
-    public IEnumerator<EvaluatorMachine> GetEnumerator()
-    {
-        return ((IEnumerable<EvaluatorMachine>)Table.GetValueOrDefault(_key, [])).GetEnumerator();
-    }
-
-    IEnumerator IEnumerable.GetEnumerator()
-    {
-        return GetEnumerator();
-    }
 }
 
 /// <summary>
@@ -81,8 +45,6 @@ public partial class EvaluatorConfiguration
 public partial class EvaluatorWorker
 {
     public Func<EvaluatorWorker, int>? Evaluator { get; set; }
-
-    public int EvaluationCount { get; set; }
 
     [Derived]
     public int Result => Evaluator?.Invoke(this) ?? 0;
