@@ -48,67 +48,40 @@ internal sealed class DerivedPropertyData
     /// </summary>
     internal long Version;
 
-    /// <summary>
-    /// The token of the evaluation that owns this derived property (a recalculation or an attach), or 0 when
-    /// nobody owns it. The owner evaluates, commits and publishes; a request that finds it owned sets
-    /// <see cref="RecalculationNeeded"/> instead. Only read/written inside lock(this).
-    /// </summary>
+    // Ownership state, see "Ownership Protocol" in docs/design/tracking-derived-properties.md. Read and written only
+    // under lock(this) unless noted.
+
+    /// <summary>The token of the evaluation that owns this derived property (a recalculation or an attach), or 0.</summary>
     internal long OwnerToken;
 
-    /// <summary>
-    /// The token of the attach in progress, or 0. A newer attach or a detach replaces it, which tells the
-    /// attach that its result no longer counts. Only read/written inside lock(this).
-    /// </summary>
+    /// <summary>The token of the attach in progress, or 0; a newer attach or a detach replaces it.</summary>
     internal long AttachToken;
 
     /// <summary>
-    /// Sequence counter incremented under lock(this) for every committed value and every detach. Read via
-    /// Volatile.Read outside the lock to detect stale notifications: if the sequence has advanced, a newer
-    /// commit or a detach happened and the current notification is skipped.
+    /// Incremented for every committed value and every detach. Read via Volatile.Read outside the lock to skip a
+    /// stale publication: if the sequence has advanced, a newer commit or a detach happened.
     /// </summary>
     internal long RecalculationSequence;
 
-    /// <summary>
-    /// Set under lock(this) when a recalculation is requested while the property is owned or an attach is in
-    /// progress. The owner discards its evaluation and evaluates again before it commits, or after it
-    /// published; an attach in progress takes the request over when it completes.
-    /// </summary>
+    /// <summary>A recalculation was requested while the property is owned or an attach is in progress.</summary>
     internal bool RecalculationNeeded;
 
-    /// <summary>
-    /// True when a request that set <see cref="RecalculationNeeded"/> came from another thread than the owner's
-    /// (or while nobody owned the property). An owner drops only requests raised on its own thread. Only
-    /// read/written inside lock(this).
-    /// </summary>
+    /// <summary>A pending request came from another thread than the owner's, or while nobody owned the property.</summary>
     internal bool HasForeignRequest;
 
-    /// <summary>
-    /// The managed thread id of the owner set with <see cref="OwnerToken"/>. Only read/written inside lock(this).
-    /// </summary>
+    /// <summary>The managed thread id of the owner set with <see cref="OwnerToken"/>.</summary>
     internal int OwnerThreadId;
 
-    /// <summary>
-    /// The raw changed timestamp of the newest request that set <see cref="RecalculationNeeded"/>, or 0 when
-    /// none is pending. Only read/written inside lock(this).
-    /// </summary>
+    /// <summary>The raw changed timestamp of the newest pending request, or 0.</summary>
     internal long PendingRawTimestamp;
 
-    /// <summary>
-    /// True while the derived property is attached: set by its attach, cleared by its detach under lock(this).
-    /// A request for a detached property is dropped. Not read for source properties.
-    /// </summary>
+    /// <summary>The derived property is attached. Not read for source properties.</summary>
     internal bool IsAttached;
 
-    /// <summary>
-    /// True when <see cref="LastKnownValue"/> holds a committed value of the current attachment. Only
-    /// read/written inside lock(this).
-    /// </summary>
+    /// <summary><see cref="LastKnownValue"/> holds a committed value of the current attachment.</summary>
     internal bool HasValue;
 
-    /// <summary>
-    /// True when the last evaluation threw, so the first successful evaluation afterwards is published even
-    /// when there is no committed value to publish it from. Only read/written inside lock(this).
-    /// </summary>
+    /// <summary>The last evaluation threw, so the first success afterwards is published.</summary>
     internal bool IsFaulted;
 
     /// <summary>
@@ -216,23 +189,21 @@ internal sealed class DerivedPropertyData
 
     /// <summary>
     /// Updates dependencies (RequiredProperties) and used-by properties (UsedByProperties) to the recorded set.
-    /// Called under lock(this). Returns true if a dependency was added or removed.
+    /// Called under lock(this).
     /// </summary>
-    internal bool UpdateDependencies(in PropertyReference derivedProperty, ReadOnlySpan<RecordedDependency> recorded)
+    internal void UpdateDependencies(in PropertyReference derivedProperty, ReadOnlySpan<RecordedDependency> recorded)
     {
         var previous = RequiredPropertiesSpan;
         if (previous.Length == recorded.Length && IsSameOrder(previous, recorded))
         {
-            return false;
+            return;
         }
 
-        var isChanged = false;
         foreach (ref readonly var old in previous)
         {
             if (IndexOf(recorded, old) < 0)
             {
                 old.TryGetDerivedPropertyData()?.RemoveUsedByProperty(derivedProperty);
-                isChanged = true;
             }
         }
 
@@ -240,13 +211,11 @@ internal sealed class DerivedPropertyData
         {
             if (previous.IndexOf(dependency.Property) < 0)
             {
-                AddUsedByPropertyToCurrentData(dependency.Property, derivedProperty);
-                isChanged = true;
+                dependency.Property.GetDerivedPropertyData().AddUsedByProperty(derivedProperty);
             }
         }
 
         SetRequiredProperties(recorded);
-        return isChanged;
     }
 
     private static bool IsSameOrder(ReadOnlySpan<PropertyReference> previous, ReadOnlySpan<RecordedDependency> recorded)
@@ -273,11 +242,6 @@ internal sealed class DerivedPropertyData
         }
 
         return -1;
-    }
-
-    private static void AddUsedByPropertyToCurrentData(in PropertyReference dependency, in PropertyReference derivedProperty)
-    {
-        dependency.GetDerivedPropertyData().AddUsedByProperty(derivedProperty);
     }
 
     /// <summary>
@@ -329,7 +293,7 @@ internal sealed class DerivedPropertyData
     /// with the item pre-populated, avoiding a separate Add.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal void AddUsedByProperty(in PropertyReference dependentProperty)
+    private void AddUsedByProperty(in PropertyReference dependentProperty)
     {
         var usedByProperty = Volatile.Read(ref _usedByProperties);
         if (usedByProperty is not null)
@@ -350,7 +314,7 @@ internal sealed class DerivedPropertyData
     /// Removes a used-by property if the collection exists.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal void RemoveUsedByProperty(in PropertyReference dependent)
+    private void RemoveUsedByProperty(in PropertyReference dependent)
     {
         _usedByProperties?.Remove(dependent);
     }
