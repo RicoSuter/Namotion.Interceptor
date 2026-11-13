@@ -86,8 +86,9 @@ public static class PropertyAccessObservation
     private static bool _isWriteObserverInstalled;
 
     /// <summary>
-    /// The read observer of the current thread. A single slot: whoever sets it replaces the previous observer, and
-    /// clearing it does not restore one.
+    /// The read observer of the current thread. A single slot: whoever sets it replaces the previous observer, which
+    /// sees no reads until it is set again. Derived property tracking sets it while a getter is recorded and restores
+    /// the previous observer afterwards.
     /// </summary>
     public static IPropertyReadObserver? ReadObserver
     {
