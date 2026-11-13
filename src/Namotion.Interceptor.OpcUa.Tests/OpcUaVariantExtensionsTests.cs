@@ -105,6 +105,28 @@ public class OpcUaVariantExtensionsTests
     }
 
     [Fact]
+    public void WhenUnsignedEnumValueHasHighestBitSet_ThenItRoundTripsWithItsBits()
+    {
+        // Act
+        var scalar = OpcUaVariantExtensions.ToVariant(UnsignedEnum.High).ToClrValue();
+        var array = OpcUaVariantExtensions.ToVariant(new[] { UnsignedEnum.Low, UnsignedEnum.High }).ToClrValue();
+
+        // Assert
+        Assert.Equal(UnsignedEnum.High, scalar);
+        Assert.Equal(new[] { 1, int.MinValue }, Assert.IsType<int[]>(array));
+    }
+
+    [Fact]
+    public void WhenEnumHasNarrowSignedUnderlyingType_ThenNegativeValueKeepsItsSign()
+    {
+        // Act
+        var array = OpcUaVariantExtensions.ToVariant(new[] { SignedByteEnum.Negative }).ToClrValue();
+
+        // Assert
+        Assert.Equal(new[] { -5 }, Assert.IsType<int[]>(array));
+    }
+
+    [Fact]
     public void WhenTimestampIsUnset_ThenClrTimestampIsMinValue()
     {
         // Act
@@ -150,5 +172,17 @@ public class OpcUaVariantExtensionsTests
     private enum UnsignedLongEnum : ulong
     {
         Large = ulong.MaxValue
+    }
+
+    [Flags]
+    private enum UnsignedEnum : uint
+    {
+        Low = 1,
+        High = 0x80000000
+    }
+
+    private enum SignedByteEnum : sbyte
+    {
+        Negative = -5
     }
 }
