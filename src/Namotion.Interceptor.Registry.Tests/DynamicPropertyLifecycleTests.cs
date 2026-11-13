@@ -62,6 +62,42 @@ public class DynamicPropertyLifecycleTests
     }
 
     [Fact]
+    public void WhenWritingToDynamicDerivedPropertyWithSetter_ThenTheWriteEvaluatesTheGetterOnceForItsRecalculation()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var root = new Person(context) { FirstName = "John" };
+        string? overrideValue = null;
+        var evaluations = 0;
+        var property = root.TryGetRegisteredSubject()!.AddDerivedProperty<string>(
+            "DisplayName",
+            getValue: _ =>
+            {
+                evaluations++;
+                return overrideValue ?? root.FirstName ?? "NA";
+            },
+            setValue: (_, value) => overrideValue = value);
+        var changes = new List<SubjectPropertyChange>();
+        context
+            .GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Where(c => c.Property.Name == "DisplayName")
+            .Subscribe(changes.Add);
+        var evaluationsBeforeWrite = evaluations;
+
+        // Act
+        property.Reference.Metadata.SetValue!.Invoke(root, "Custom");
+
+        // Assert: the write reads its previous and its final value through the getter, and its recalculation
+        // evaluates the getter once more.
+        Assert.Equal(3, evaluations - evaluationsBeforeWrite);
+        Assert.Equal("Custom", changes[^1].GetNewValue<string?>());
+    }
+
+    [Fact]
     public void WhenSourceChanges_ThenDynamicDerivedPropertyIsRecalculated()
     {
         // Arrange: Dynamic derived property depending on FirstName.
