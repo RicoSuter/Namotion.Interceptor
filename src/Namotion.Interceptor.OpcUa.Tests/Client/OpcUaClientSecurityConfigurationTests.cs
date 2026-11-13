@@ -1,3 +1,4 @@
+using System.Security.Cryptography.X509Certificates;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Server;
@@ -355,7 +356,7 @@ public class OpcUaClientSecurityConfigurationTests
         var innerException = new ServiceResultException(StatusCodes.BadCertificateUntrusted);
 
         // Act
-        var error = SessionManager.CreateServerCertificateRejectionException(
+        var error = SessionManager.CreateCertificateErrorException(
             innerException, endpoint, CreateApplicationConfiguration(), NullTelemetryContext.Instance);
 
         // Assert
@@ -375,7 +376,7 @@ public class OpcUaClientSecurityConfigurationTests
         endpoint.ServerCertificate = serverCertificate.RawData;
 
         // Act
-        var error = SessionManager.CreateServerCertificateRejectionException(
+        var error = SessionManager.CreateCertificateErrorException(
             new ServiceResultException(StatusCodes.BadCertificateChainIncomplete), endpoint,
             CreateApplicationConfiguration(), NullTelemetryContext.Instance);
 
@@ -394,7 +395,7 @@ public class OpcUaClientSecurityConfigurationTests
         var endpoint = CreateEndpoint(MessageSecurityMode.None, SecurityPolicies.None);
 
         // Act
-        var error = SessionManager.CreateServerCertificateRejectionException(
+        var error = SessionManager.CreateCertificateErrorException(
             new ServiceResultException(StatusCodes.BadCertificateUntrusted), endpoint,
             CreateApplicationConfiguration(), NullTelemetryContext.Instance);
 
@@ -403,7 +404,7 @@ public class OpcUaClientSecurityConfigurationTests
     }
 
     [Fact]
-    public void WhenTheClientHasACertificate_ThenTheRejectionMessageNamesItsThumbprint()
+    public void WhenTheServerCertificateIsUntrusted_ThenTheMessageDoesNotBlameTheClientCertificate()
     {
         // Arrange
         using var clientCertificate = CertificateBuilder.Create("CN=Client").CreateForRSA();
@@ -411,32 +412,119 @@ public class OpcUaClientSecurityConfigurationTests
         applicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate = clientCertificate;
 
         // Act
-        var error = SessionManager.CreateServerCertificateRejectionException(
+        var error = SessionManager.CreateCertificateErrorException(
             new ServiceResultException(StatusCodes.BadCertificateUntrusted),
             CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256),
             applicationConfiguration, NullTelemetryContext.Instance);
 
         // Assert
-        Assert.Contains($"this client's certificate {clientCertificate.Thumbprint}", error.Message);
+        Assert.DoesNotContain(clientCertificate.Thumbprint, error.Message);
     }
 
     [Fact]
-    public void WhenTheEndpointIsUnsecured_ThenTheRejectionMessageOmitsTheClientCertificateHint()
+    public void WhenTheServerRejectsTheSecureChannel_ThenTheMessageNamesTheClientCertificateAndTheOwnFolder()
     {
         // Arrange
         using var clientCertificate = CertificateBuilder.Create("CN=Client").CreateForRSA();
         var applicationConfiguration = CreateApplicationConfiguration();
         applicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate = clientCertificate;
+        var innerException = new ServiceResultException(StatusCodes.BadSecurityChecksFailed);
 
         // Act
-        var error = SessionManager.CreateServerCertificateRejectionException(
-            new ServiceResultException(StatusCodes.BadCertificateUntrusted),
-            CreateEndpoint(MessageSecurityMode.None, SecurityPolicies.None),
+        var error = SessionManager.CreateCertificateErrorException(
+            innerException,
+            CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256),
             applicationConfiguration, NullTelemetryContext.Instance);
 
         // Assert
-        Assert.DoesNotContain("this client's certificate", error.Message);
-        Assert.DoesNotContain(clientCertificate.Thumbprint, error.Message);
+        Assert.Same(innerException, error.InnerException);
+        Assert.Contains($"does not trust this client's certificate {clientCertificate.Thumbprint}", error.Message);
+        Assert.Contains(Path.Combine("store/own", "certs"), error.Message);
+        Assert.DoesNotContain(nameof(OpcUaClientConfiguration.AutoAcceptUntrustedCertificates), error.Message);
+    }
+
+    [Fact]
+    public void WhenTheServerCertificateHasExpired_ThenTheMessageNamesItAndItsValidity()
+    {
+        // Arrange
+        using var serverCertificate = CreateCertificate("CN=Server", notBefore: DateTime.UtcNow.AddDays(-30), notAfter: DateTime.UtcNow.AddDays(-1));
+        var endpoint = CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256);
+        endpoint.ServerCertificate = serverCertificate.RawData;
+
+        // Act
+        var error = SessionManager.CreateCertificateErrorException(
+            new ServiceResultException(StatusCodes.BadCertificateTimeInvalid), endpoint,
+            CreateApplicationConfiguration(), NullTelemetryContext.Instance);
+
+        // Assert
+        Assert.Contains($"The OPC UA server certificate {serverCertificate.Thumbprint} is expired or not yet valid", error.Message);
+        Assert.Contains(serverCertificate.NotAfter.ToUniversalTime().ToString("u"), error.Message);
+    }
+
+    [Fact]
+    public void WhenTheClientCertificateHasExpired_ThenTheMessageNamesItAndTheOwnFolder()
+    {
+        // Arrange
+        using var serverCertificate = CertificateBuilder.Create("CN=Server").CreateForRSA();
+        using var clientCertificate = CreateCertificate("CN=Client", notBefore: DateTime.UtcNow.AddDays(-30), notAfter: DateTime.UtcNow.AddDays(-1));
+        var endpoint = CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256);
+        endpoint.ServerCertificate = serverCertificate.RawData;
+        var applicationConfiguration = CreateApplicationConfiguration();
+        applicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate = clientCertificate;
+
+        // Act
+        var error = SessionManager.CreateCertificateErrorException(
+            new ServiceResultException(StatusCodes.BadCertificateTimeInvalid), endpoint,
+            applicationConfiguration, NullTelemetryContext.Instance);
+
+        // Assert
+        Assert.Contains($"this client's certificate {clientCertificate.Thumbprint}", error.Message);
+        Assert.Contains(Path.Combine("store/own", "certs"), error.Message);
+        Assert.DoesNotContain(serverCertificate.Thumbprint, error.Message);
+    }
+
+    [Theory]
+    [InlineData(StatusCodes.BadCertificateUntrusted, MessageSecurityMode.None, true)]
+    [InlineData(StatusCodes.BadCertificateChainIncomplete, MessageSecurityMode.SignAndEncrypt, true)]
+    [InlineData(StatusCodes.BadCertificateTimeInvalid, MessageSecurityMode.None, true)]
+    [InlineData(StatusCodes.BadSecurityChecksFailed, MessageSecurityMode.Sign, true)]
+    [InlineData(StatusCodes.BadSecurityChecksFailed, MessageSecurityMode.None, false)]
+    [InlineData(StatusCodes.BadTimeout, MessageSecurityMode.SignAndEncrypt, false)]
+    public void WhenSessionCreationFails_ThenOnlyCertificateErrorsAreExplained(
+        uint statusCode, MessageSecurityMode securityMode, bool expected)
+    {
+        // Arrange
+        var endpoint = CreateEndpoint(securityMode, securityMode == MessageSecurityMode.None ? SecurityPolicies.None : SecurityPolicies.Basic256Sha256);
+
+        // Act
+        var isCertificateError = SessionManager.IsCertificateError(new ServiceResultException(statusCode), endpoint);
+
+        // Assert
+        Assert.Equal(expected, isCertificateError);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void WhenTheClientCertificateCannotBeLoaded_ThenTheMessageNamesTheCauseSubjectAndApplicationUri(bool autoCreate)
+    {
+        // Arrange
+        var applicationConfiguration = CreateApplicationConfiguration();
+        applicationConfiguration.ApplicationUri = "urn:test:client";
+        applicationConfiguration.SecurityConfiguration.ApplicationCertificate.SubjectName = "CN=Client, O=Namotion";
+        var innerException = new InvalidOperationException("The private key is missing.");
+
+        // Act
+        var error = SessionManager.CreateCertificateLoadException(innerException, applicationConfiguration, autoCreate);
+
+        // Assert
+        Assert.Same(innerException, error.InnerException);
+        Assert.Contains("The private key is missing.", error.Message);
+        Assert.Contains(Path.Combine("store/own", "certs"), error.Message);
+        Assert.Contains("'CN=Client, O=Namotion'", error.Message);
+        Assert.Contains("'urn:test:client'", error.Message);
+        Assert.Equal(autoCreate, error.Message.Contains("delete"));
+        Assert.Equal(!autoCreate, error.Message.Contains(nameof(OpcUaClientConfiguration.AutoCreateApplicationCertificate)));
     }
 
     [Fact]
@@ -451,7 +539,7 @@ public class OpcUaClientSecurityConfigurationTests
         };
 
         // Act
-        var error = SessionManager.CreateServerCertificateRejectionException(
+        var error = SessionManager.CreateCertificateErrorException(
             new ServiceResultException(StatusCodes.BadCertificateUntrusted),
             CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256),
             applicationConfiguration, NullTelemetryContext.Instance);
@@ -470,6 +558,12 @@ public class OpcUaClientSecurityConfigurationTests
             RejectedCertificateStore = new CertificateTrustList { StoreType = CertificateStoreType.Directory, StorePath = "store/rejected" }
         }
     };
+
+    private static X509Certificate2 CreateCertificate(string subjectName, DateTime notBefore, DateTime notAfter) => CertificateBuilder
+        .Create(subjectName)
+        .SetNotBefore(notBefore)
+        .SetNotAfter(notAfter)
+        .CreateForRSA();
 
     private static EndpointDescription CreateEndpoint(
         MessageSecurityMode securityMode, string securityPolicyUri, string endpointUrl = "opc.tcp://localhost:4840") => new()

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.Polling;
@@ -282,7 +283,22 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         // Discovery needs no client certificate, and an unsecured endpoint never does.
         if (endpointDescription.SecurityMode != MessageSecurityMode.None)
         {
-            await LoadApplicationCertificateAsync(application, configuration, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await ApplicationCertificateLoader.EnsureLoadedAsync(
+                    application,
+                    configuration.AutoCreateApplicationCertificate,
+                    configuration.ApplicationCertificateLifetimeInMonths,
+                    configuration.ResolvedTelemetryContext,
+                    _logger,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            // The SDK can report a cancellation as another exception type, so the token is checked too.
+            catch (Exception error) when (error is not OperationCanceledException && !cancellationToken.IsCancellationRequested)
+            {
+                throw CreateCertificateLoadException(
+                    error, application.ApplicationConfiguration, configuration.AutoCreateApplicationCertificate);
+            }
         }
 
         var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
@@ -304,10 +320,9 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 preferredLocales: null,
                 cancellationToken).ConfigureAwait(false);
         }
-        catch (ServiceResultException error) when (
-            error.StatusCode is StatusCodes.BadCertificateUntrusted or StatusCodes.BadCertificateChainIncomplete)
+        catch (ServiceResultException error) when (IsCertificateError(error, endpointDescription))
         {
-            throw CreateServerCertificateRejectionException(
+            throw CreateCertificateErrorException(
                 error, endpointDescription, application.ApplicationConfiguration, configuration.ResolvedTelemetryContext);
         }
 
@@ -744,71 +759,84 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Creates the exception thrown when the client rejected the server certificate with
-    /// <see cref="StatusCodes.BadCertificateUntrusted"/> or <see cref="StatusCodes.BadCertificateChainIncomplete"/>.
+    /// Gets whether <see cref="CreateCertificateErrorException"/> explains a failed session creation: the client rejected
+    /// the server certificate, or the server rejected the secure channel of a secured endpoint.
     /// </summary>
-    internal static InvalidOperationException CreateServerCertificateRejectionException(
+    internal static bool IsCertificateError(ServiceResultException error, EndpointDescription endpoint) =>
+        error.StatusCode is StatusCodes.BadCertificateUntrusted or StatusCodes.BadCertificateChainIncomplete or StatusCodes.BadCertificateTimeInvalid ||
+        (error.StatusCode == StatusCodes.BadSecurityChecksFailed && endpoint.SecurityMode != MessageSecurityMode.None);
+
+    /// <summary>
+    /// Creates the exception thrown for an error <see cref="IsCertificateError"/> accepts. The message names the
+    /// certificate at fault and the folders or option that resolve it.
+    /// </summary>
+    internal static InvalidOperationException CreateCertificateErrorException(
         ServiceResultException error,
         EndpointDescription endpoint,
         ApplicationConfiguration applicationConfiguration,
         ITelemetryContext telemetryContext)
     {
         var security = applicationConfiguration.SecurityConfiguration;
-        var thumbprint = GetThumbprint(endpoint, telemetryContext);
-        var rejectedFolder = GetCertificateFolder(security.RejectedCertificateStore?.StoreType, security.RejectedCertificateStore?.StorePath);
-        var trustedFolder = GetCertificateFolder(security.TrustedPeerCertificates?.StoreType, security.TrustedPeerCertificates?.StorePath);
-
-        // Auto-accept only covers an untrusted certificate, never an incomplete chain.
-        var cause = error.StatusCode == StatusCodes.BadCertificateChainIncomplete
-            ? $"The OPC UA server certificate {thumbprint} is not trusted because its issuer chain is incomplete. " +
-              $"Add the certificates of the authorities that issued it to " +
-              $"'{GetCertificateFolder(security.TrustedIssuerCertificates?.StoreType, security.TrustedIssuerCertificates?.StorePath)}' " +
-              $"and the root authority's certificate to '{trustedFolder}'; the server's certificate chain is written to '{rejectedFolder}'."
-            : $"The OPC UA server certificate {thumbprint} is not trusted. Move it from '{rejectedFolder}' to '{trustedFolder}', " +
-              $"or set {nameof(OpcUaClientConfiguration.AutoAcceptUntrustedCertificates)} = true to accept any server certificate.";
-
-        // A server may report the same codes when it rejected the client certificate, so name that case too.
-        // An unsecured endpoint involves no client certificate.
+        using var serverCertificate = ParseServerCertificate(endpoint, telemetryContext);
+        var serverThumbprint = serverCertificate?.Thumbprint ?? "(unknown)";
         var clientCertificate = security.ApplicationCertificate?.Certificate;
-        var clientHint = endpoint.SecurityMode == MessageSecurityMode.None
-            ? string.Empty
-            : clientCertificate is null
-                ? " If this server certificate is already trusted, the server may instead have rejected this client's certificate; trust it on the server."
-                : $" If this server certificate is already trusted, the server may instead have rejected this client's certificate {clientCertificate.Thumbprint}; trust it on the server.";
+        var ownFolder = GetCertificateFolder(security.ApplicationCertificate?.StoreType, security.ApplicationCertificate?.StorePath);
+        var rejectedFolder = GetCertificateFolder(security.RejectedCertificateStore);
+        var trustedFolder = GetCertificateFolder(security.TrustedPeerCertificates);
 
-        return new InvalidOperationException(cause + clientHint, error);
+        // A server also reports an expired client certificate with BadCertificateTimeInvalid.
+        var isClientCertificateTimeInvalid =
+            endpoint.SecurityMode != MessageSecurityMode.None &&
+            clientCertificate is not null && !IsTimeValid(clientCertificate) &&
+            (serverCertificate is null || IsTimeValid(serverCertificate));
+
+        // Auto-accept only covers an untrusted server certificate, so only that message suggests it.
+        var message = error.StatusCode switch
+        {
+            // Servers report an untrusted, incomplete, revoked or invalid client certificate with this code, which the
+            // client otherwise raises only for a rare transport failure.
+            StatusCodes.BadSecurityChecksFailed =>
+                $"The OPC UA server rejected the secure channel, most likely because it does not trust this client's certificate " +
+                $"{clientCertificate?.Thumbprint ?? "(unknown)"} in '{ownFolder}'. Trust it on the server; for a certificate issued " +
+                $"by a certificate authority, the server also needs the authority's certificates.",
+            StatusCodes.BadCertificateTimeInvalid when isClientCertificateTimeInvalid =>
+                $"The OPC UA server rejected this client's certificate {clientCertificate!.Thumbprint} in '{ownFolder}' because it " +
+                $"is expired or not yet valid{FormatValidity(clientCertificate)}. Provide a valid certificate there and trust it " +
+                $"on the server, and check that the clocks of the server and this client are correct.",
+            StatusCodes.BadCertificateTimeInvalid =>
+                $"The OPC UA server certificate {serverThumbprint} is expired or not yet valid{FormatValidity(serverCertificate)}. " +
+                $"The server needs a valid certificate; also check that the clocks of the server and this client are correct.",
+            StatusCodes.BadCertificateChainIncomplete =>
+                $"The OPC UA server certificate {serverThumbprint} is not trusted because its issuer chain is incomplete. " +
+                $"Add the certificates of the authorities that issued it to '{GetCertificateFolder(security.TrustedIssuerCertificates)}' " +
+                $"and the root authority's certificate to '{trustedFolder}'; the server's certificate chain is written to '{rejectedFolder}'.",
+            _ =>
+                $"The OPC UA server certificate {serverThumbprint} is not trusted. Move it from '{rejectedFolder}' to '{trustedFolder}', " +
+                $"or set {nameof(OpcUaClientConfiguration.AutoAcceptUntrustedCertificates)} = true to accept any server certificate."
+        };
+
+        return new InvalidOperationException(message, error);
     }
 
-    private async Task LoadApplicationCertificateAsync(
-        ApplicationInstance application,
-        OpcUaClientConfiguration configuration,
-        CancellationToken cancellationToken)
+    /// <summary>
+    /// Creates the exception thrown when the client application certificate cannot be loaded, created or replaced.
+    /// </summary>
+    internal static InvalidOperationException CreateCertificateLoadException(
+        Exception error,
+        ApplicationConfiguration applicationConfiguration,
+        bool autoCreate)
     {
-        try
-        {
-            await ApplicationCertificateLoader.EnsureLoadedAsync(
-                application,
-                configuration.AutoCreateApplicationCertificate,
-                configuration.ApplicationCertificateLifetimeInMonths,
-                configuration.ResolvedTelemetryContext,
-                _logger,
-                cancellationToken).ConfigureAwait(false);
-        }
-        // The SDK can report a cancellation as another exception type, so the token is checked too.
-        catch (Exception error) when (error is not OperationCanceledException && !cancellationToken.IsCancellationRequested)
-        {
-            var applicationConfiguration = application.ApplicationConfiguration;
-            var identifier = applicationConfiguration.SecurityConfiguration.ApplicationCertificate;
-            throw new InvalidOperationException(
-                $"Failed to load the OPC UA client application certificate from " +
-                $"'{GetCertificateFolder(identifier?.StoreType, identifier?.StorePath)}'. A provisioned certificate needs the " +
-                $"subject '{identifier?.SubjectName}' and the application URI '{applicationConfiguration.ApplicationUri}'; " +
-                $"set {nameof(OpcUaClientConfiguration.ApplicationUri)} to match it" +
-                (configuration.AutoCreateApplicationCertificate
-                    ? "."
-                    : $", or set {nameof(OpcUaClientConfiguration.AutoCreateApplicationCertificate)} = true to create one."),
-                error);
-        }
+        var identifier = applicationConfiguration.SecurityConfiguration.ApplicationCertificate;
+        return new InvalidOperationException(
+            $"Failed to load the OPC UA client application certificate from " +
+            $"'{GetCertificateFolder(identifier?.StoreType, identifier?.StorePath)}': {error.Message.TrimEnd('.')}. " +
+            $"A provisioned certificate needs the subject '{identifier?.SubjectName}' and the application URI " +
+            $"'{applicationConfiguration.ApplicationUri}'; set {nameof(OpcUaClientConfiguration.ApplicationUri)} to match it. " +
+            (autoCreate
+                ? $"A certificate the client created is created again when it is deleted with its private key from " +
+                  $"'{identifier?.StorePath}', and the server then has to trust the new one."
+                : $"Or set {nameof(OpcUaClientConfiguration.AutoCreateApplicationCertificate)} = true to create one."),
+            error);
     }
 
     private static string DescribeEndpoints(IEnumerable<EndpointDescription> endpoints) => string.Join(", ", endpoints
@@ -821,23 +849,35 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             ? Path.Combine(storePath ?? string.Empty, "certs")
             : storePath ?? string.Empty;
 
-    // Called while wrapping a rejection, so it must not throw and hide that error.
-    private static string GetThumbprint(EndpointDescription endpoint, ITelemetryContext telemetryContext)
+    private static string GetCertificateFolder(CertificateStoreIdentifier? store) =>
+        GetCertificateFolder(store?.StoreType, store?.StorePath);
+
+    private static bool IsTimeValid(X509Certificate2 certificate)
+    {
+        var now = DateTime.UtcNow;
+        return certificate.NotBefore.ToUniversalTime() <= now && now <= certificate.NotAfter.ToUniversalTime();
+    }
+
+    private static string FormatValidity(X509Certificate2? certificate) => certificate is null
+        ? string.Empty
+        : $" (valid from {certificate.NotBefore.ToUniversalTime():u} to {certificate.NotAfter.ToUniversalTime():u})";
+
+    // Called while wrapping an error, so it must not throw and hide that error.
+    private static X509Certificate2? ParseServerCertificate(EndpointDescription endpoint, ITelemetryContext telemetryContext)
     {
         if (endpoint.ServerCertificate is not { Length: > 0 } data)
         {
-            return "(unknown)";
+            return null;
         }
 
         try
         {
             // The server may send its whole chain; this parses the first certificate, which is its own.
-            using var certificate = Utils.ParseCertificateBlob(data, telemetryContext);
-            return certificate.Thumbprint;
+            return Utils.ParseCertificateBlob(data, telemetryContext);
         }
         catch (ServiceResultException)
         {
-            return "(unknown)";
+            return null;
         }
     }
 

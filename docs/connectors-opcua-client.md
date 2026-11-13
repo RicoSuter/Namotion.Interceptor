@@ -224,7 +224,7 @@ A failed load or replacement fails the connection, which is retried.
 
 #### Errors
 
-A failed connection attempt is reported in `Diagnostics.LastError` (see [Diagnostics](#diagnostics)) and retried. When the client rejects the server certificate, the message names its thumbprint and the folders to move it between; for an incomplete issuer chain it names the issuer and trusted folders instead and does not suggest auto-accepting. On secured endpoints the message also notes that the server may instead have rejected the client's certificate, since servers report that with the same status codes. When the client certificate cannot be loaded, the message names the own folder and the subject and application URI a provisioned certificate needs.
+A failed connection attempt is reported in `Diagnostics.LastError` (see [Diagnostics](#diagnostics)) and retried. When the client rejects the server certificate, the message names its thumbprint and the folders to move it between; for an incomplete issuer chain it names the issuer and trusted folders instead, and for an expired or not yet valid certificate its validity period, and neither suggests auto-accepting. A server reports a client certificate it does not trust, or one that is incomplete, revoked or invalid, as `BadSecurityChecksFailed`, and an expired one as `BadCertificateTimeInvalid`; the message then names the client certificate's thumbprint and the own folder, so the certificate can be trusted on the server. When the client certificate cannot be loaded, the message gives the cause, the own folder and the subject and application URI a provisioned certificate needs.
 
 #### Upgrading
 
