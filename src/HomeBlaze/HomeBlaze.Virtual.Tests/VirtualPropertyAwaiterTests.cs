@@ -12,11 +12,10 @@ public class VirtualPropertyAwaiterTests
     {
         // Arrange
         var graph = new VirtualTestGraph();
-        var awaiter = new VirtualPropertyAwaiter(graph.Context);
         var meter = new TestMeter();
         graph.Add("Meter", meter);
         var (waiting, getCount) = AddCountingProperty(graph);
-        awaiter.Await(meter, "Wind", waiting);
+        graph.Awaiter.Await(meter, "Wind", waiting);
         var countBefore = getCount();
 
         // Act
@@ -31,7 +30,6 @@ public class VirtualPropertyAwaiterTests
     {
         // Arrange
         var graph = new VirtualTestGraph();
-        var awaiter = new VirtualPropertyAwaiter(graph.Context);
         var meter = new TestMeter();
         graph.Add("Meter", meter);
         var (waiting, getCount) = AddCountingProperty(graph);
@@ -39,7 +37,7 @@ public class VirtualPropertyAwaiterTests
         var countBefore = getCount();
 
         // Act
-        awaiter.Await(meter, "Wind", waiting);
+        graph.Awaiter.Await(meter, "Wind", waiting);
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => getCount() > countBefore, message: "The waiting property did not recalculate");

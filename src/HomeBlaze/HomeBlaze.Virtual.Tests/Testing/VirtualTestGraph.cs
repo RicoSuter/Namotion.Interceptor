@@ -1,5 +1,6 @@
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
@@ -21,6 +22,7 @@ internal sealed class VirtualTestGraph
         Root = new TestRoot(Context);
         Resolver = new SubjectPathResolver(() => Root);
         Context.AddService(Resolver);
+        Awaiter = new VirtualPropertyAwaiter(Context);
     }
 
     public IInterceptorSubjectContext Context { get; }
@@ -28,6 +30,11 @@ internal sealed class VirtualTestGraph
     public TestRoot Root { get; }
 
     public SubjectPathResolver Resolver { get; }
+
+    public VirtualPropertyAwaiter Awaiter { get; }
+
+    public VirtualSubject CreateVirtualSubject(IReadOnlyDictionary<string, VirtualProperty> properties) =>
+        new(Resolver, Awaiter, NullLogger<VirtualSubject>.Instance) { Properties = properties };
 
     /// <summary>Attaches the subject under <c>/name</c>, replacing the subject that had the name.</summary>
     public void Add(string name, IInterceptorSubject subject) =>
