@@ -151,7 +151,7 @@ For every landed write, in `TrackingWriteObserver`, after the whole chain:
 
 - **W1**: the value lands (the terminal write of the chain, or the plain field write without a context).
 - **W2**: a full fence (`Interlocked.MemoryBarrier`).
-- **W3**: read the gate of the subject's type (`DerivedPropertyTypeGate`, a volatile read) and stop if it is not raised; otherwise look up the property's `DerivedPropertyData` without creating it, and stop if there is none.
+- **W3**: read the gate of the subject's type (`DerivedPropertyTypeGate`, a volatile read) and stop if it is not raised; otherwise look up the property's `DerivedPropertyData` without creating it, and stop if there is none. The publication of a recalculation does not look it up: the owner marks the data it publishes on its thread for the observer.
 - **W4**: `Interlocked.Increment` its `Version`.
 - **W5**: read its used-by collection and request a recalculation of each derived property in it, and of the property itself when it is a derived property with a setter and the write is not a recalculation's publication.
 
