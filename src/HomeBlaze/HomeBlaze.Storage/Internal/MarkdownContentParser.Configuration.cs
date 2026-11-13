@@ -272,7 +272,7 @@ public sealed partial class MarkdownContentParser
             subject, new AppliedBlock(state.Source, start, length, innerSubjects.ToArray(), textSegments.ToArray()));
     }
 
-    // See ConfigurationUpdatePolicy: a removed key or a changed value that the subject cannot apply in place recreates it.
+    // Recreates when ConfigurationUpdatePolicy says the subject cannot take the change in place.
     private bool CanUpdateInPlace([NotNullWhen(true)] IInterceptorSubject? existing, Type type, BlockConfiguration configuration)
     {
         if (existing is null)

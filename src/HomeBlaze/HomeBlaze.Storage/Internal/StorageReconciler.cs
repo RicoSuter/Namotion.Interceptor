@@ -230,6 +230,7 @@ internal sealed class StorageReconciler
 
                 entry.Key = key;
                 entry.Subject = null;
+                entry.AppliedConfiguration = null;
                 continue;
             }
 
@@ -460,6 +461,7 @@ internal sealed class StorageReconciler
                 entry.Subject = null;
                 entry.Version = default;
                 entry.Hash = null;
+                entry.AppliedConfiguration = null;
             }
         }
     }
@@ -844,8 +846,7 @@ internal sealed class StorageReconciler
         return true;
     }
 
-    // A configuration of another type, without a key that the subject took last, or with another value of a property
-    // that the subject cannot change in place, replaces the subject: see ConfigurationUpdatePolicy.
+    // Recreates when ConfigurationUpdatePolicy says the subject cannot take the change in place.
     private static bool CanUpdateInPlace(StorageEntry entry, string json) =>
         FileSubjectFactory.DescribesTypeOf(entry.Subject!, json) &&
         ConfigurationUpdatePolicy.CanUpdateInPlace(

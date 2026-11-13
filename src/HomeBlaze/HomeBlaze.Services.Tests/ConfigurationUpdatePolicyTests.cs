@@ -165,6 +165,20 @@ public class ConfigurationUpdatePolicyTests
         Assert.True(result);
     }
 
+    [Fact]
+    public void WhenARecreateOnChangeValueChangesFromAbsentToNull_ThenTheSubjectIsRecreated()
+    {
+        // Arrange
+        var subject = CreateAttachedSubject();
+
+        // Act
+        var result = ConfigurationUpdatePolicy.CanUpdateInPlace(subject, typeof(PolicyTestSubject),
+            $$"""{ "$type": "{{Type}}", "name": "a", "connectionMode": null }""", $$"""{ "$type": "{{Type}}", "name": "a" }""", null, ConfigurationNaming.JsonProperty);
+
+        // Assert
+        Assert.False(result);
+    }
+
     private static string Json(string name, string connectionMode) => $$"""{ "$type": "{{Type}}", "name": "{{name}}", "connectionMode": "{{connectionMode}}" }""";
 
     private static PolicyTestSubject CreateAttachedSubject()

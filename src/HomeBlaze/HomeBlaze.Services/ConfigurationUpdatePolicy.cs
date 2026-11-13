@@ -73,10 +73,15 @@ public static class ConfigurationUpdatePolicy
         foreach (var declaredName in GetRecreateOnChangeNames(type))
         {
             var name = ConfigurableSubjectSerializer.GetJsonName(declaredName, naming);
-            // An explicit null and a missing key both mean null, and the serializer omits nulls.
-            var hasValue = root.TryGetProperty(name, out var value) && value.ValueKind != JsonValueKind.Null;
-            var hadValue = appliedRoot.TryGetProperty(name, out var appliedValue) && appliedValue.ValueKind != JsonValueKind.Null;
-            if (hasValue != hadValue || (hasValue && !JsonElement.DeepEquals(value, appliedValue)))
+            var hasValue = root.TryGetProperty(name, out var value);
+            var hadValue = appliedRoot.TryGetProperty(name, out var appliedValue);
+
+            // A missing key keeps the value on update but takes the default on create, so absent after null is
+            // unchanged (the serializer omits nulls), while null after absent can replace a non-null default.
+            var isUnchanged = hasValue
+                ? hadValue && JsonElement.DeepEquals(value, appliedValue)
+                : !hadValue || appliedValue.ValueKind == JsonValueKind.Null;
+            if (!isUnchanged)
             {
                 return false;
             }
