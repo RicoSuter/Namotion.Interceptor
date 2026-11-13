@@ -67,11 +67,7 @@ internal static class PostLockQueue
     internal readonly record struct QueuedRequest(PropertyReference Property, long RawTimestamp, long AttachCount);
 
     /// <summary>Whether the thread holds a lifecycle lock.</summary>
-    internal static bool IsLockHeld
-    {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => _heldLocks > 0;
-    }
+    internal static bool IsLockHeld => _heldLocks > 0;
 
     /// <summary>
     /// Whether the write of this depth is the anchor write of the innermost segment, which the write observer
@@ -144,12 +140,12 @@ internal static class PostLockQueue
     /// <param name="handedOverRawTimestamp">The timestamp that comes with the request, 0 to take the anchor's.</param>
     internal static bool TryEnqueueRequest(PropertyReference property, long handedOverRawTimestamp)
     {
-        if (_heldLocks == 0)
+        if (TryGetOpenSegment() is not { } segment)
         {
             return false;
         }
 
-        AddRequest(TryGetOpenSegment()!, property, handedOverRawTimestamp);
+        AddRequest(segment, property, handedOverRawTimestamp);
         return true;
     }
 
