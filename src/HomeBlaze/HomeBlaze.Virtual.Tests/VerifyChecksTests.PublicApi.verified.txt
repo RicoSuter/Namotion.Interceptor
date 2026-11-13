@@ -11,4 +11,43 @@ namespace HomeBlaze.Virtual
         Duration = 3,
         DateTime = 4,
     }
+    public static class VirtualDataTypes
+    {
+        public static System.Type GetClrType(HomeBlaze.Virtual.VirtualDataType dataType) { }
+        public static bool TryGetDataType(System.Type type, out HomeBlaze.Virtual.VirtualDataType dataType) { }
+    }
+    public sealed class VirtualProperty : System.IEquatable<HomeBlaze.Virtual.VirtualProperty>
+    {
+        public VirtualProperty() { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.Collections.Generic.IReadOnlyDictionary<string, HomeBlaze.Virtual.VirtualProperty>? Attributes { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public HomeBlaze.Virtual.VirtualDataType? DataType { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Expression { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Path { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.Collections.Generic.IReadOnlyDictionary<string, HomeBlaze.Virtual.VirtualProperty>? Properties { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public HomeBlaze.Virtual.VirtualState? State { get; init; }
+    }
+    public sealed class VirtualState : System.IEquatable<HomeBlaze.Virtual.VirtualState>
+    {
+        public VirtualState() { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Category { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool? IsCumulative { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool? IsDiscrete { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool? IsEstimated { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int? Position { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Title { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public HomeBlaze.Abstractions.Attributes.StateUnit? Unit { get; init; }
+    }
 }
