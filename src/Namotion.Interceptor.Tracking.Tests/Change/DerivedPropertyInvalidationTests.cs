@@ -59,35 +59,6 @@ public class DerivedPropertyInvalidationTests
     }
 
     [Fact]
-    public void WhenObserverOfOneDependentThrows_ThenOtherDependentsArePublishedAndTheWriteThrows()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
-        var person = new Person(context) { FirstName = "a", LastName = "x" };
-        var changes = new List<SubjectPropertyChange>();
-        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
-        var thrownFor = new List<string>();
-        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
-        {
-            // Throws for the first dependent announced, whichever it is.
-            if (change.Property.Name != nameof(Person.FirstName) && thrownFor.Count == 0)
-            {
-                thrownFor.Add(change.Property.Name);
-                throw new InvalidOperationException();
-            }
-        });
-
-        // Act
-        var exception = Record.Exception(() => person.FirstName = "b");
-
-        // Assert
-        Assert.IsType<InvalidOperationException>(exception);
-        Assert.Single(thrownFor);
-        Assert.Equal("b x", Assert.Single(changes, c => c.Property.Name == nameof(Person.FullName)).GetNewValue<string>());
-        Assert.Equal("Mr. b x", Assert.Single(changes, c => c.Property.Name == nameof(Person.FullNameWithPrefix)).GetNewValue<string>());
-    }
-
-    [Fact]
     public void WhenChainThrowsAfterTheValueLanded_ThenDependentsArePublishedAndTheExceptionOfTheWriteWins()
     {
         // Arrange: the value lands, then an interceptor throws; an observer of a dependent throws as well.

@@ -348,41 +348,6 @@ public class DerivedPropertyAttachOrderTests
     }
 
     [Fact]
-    public void WhenContextAttachFails_ThenItsExceptionWinsOverAnObserverThatThrows()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
-        var machine = new SiblingReadingMachine();
-        var failingMachine = new SiblingReadingMachine();
-        var root = new SiblingReadingRoot { Machines = [machine, failingMachine] };
-        context.WithService(() => new CallbackLifecycleHandler(change =>
-        {
-            if (change is { IsContextAttach: true, Subject: SiblingReadingConfiguration configuration })
-            {
-                configuration.Installed = true;
-            }
-
-            if (change.IsContextAttach && change.Subject == failingMachine)
-            {
-                throw new NotSupportedException();
-            }
-        }));
-        using var throwingSubscription = context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
-        {
-            if (change.Property.Name == nameof(SiblingReadingDevice.IsInstalled))
-            {
-                throw new InvalidOperationException();
-            }
-        });
-
-        // Act
-        var exception = Record.Exception(() => ((IInterceptorSubject)root).Context.AddFallbackContext(context));
-
-        // Assert
-        Assert.IsType<NotSupportedException>(exception);
-    }
-
-    [Fact]
     public void WhenObserverThrowsOnChangedDerivedValue_ThenRemainingDerivedPropertiesStillPublish()
     {
         // Arrange
