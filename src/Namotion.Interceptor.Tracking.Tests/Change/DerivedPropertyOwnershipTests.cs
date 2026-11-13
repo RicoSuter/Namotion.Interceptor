@@ -550,11 +550,12 @@ public class DerivedPropertyOwnershipTests
     }
 
     [Fact]
-    public void WhenALoopThatTookOverAForeignRequestFailsBeforeItsFirstEvaluation_ThenTheRequestIsStillPublished()
+    public void WhenTimeSourceFailsWhileALoopPublishesATakenOverForeignRequest_ThenTheRequestIsCommittedAndThePropertyReleased()
     {
         // Arrange: the first publication lets another thread write Anchor and throws. That thread's time source
-        // returns no time, so the request carries no timestamp, and the loop that takes it over resolves one
-        // first; that resolution throws once, before the loop evaluates.
+        // returns no time, so the request carries no timestamp. The loop that takes it over evaluates and commits
+        // it, and its publication resolves the time source, which throws once: the publication fails as if an
+        // observer threw.
         var testThread = Environment.CurrentManagedThreadId;
         var otherThread = 0;
         var isArmed = false;
@@ -603,12 +604,15 @@ public class DerivedPropertyOwnershipTests
         {
             // Act
             var exception = Record.Exception(() => root.Anchor = 1);
+            var committedValue = new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)).TryGetDerivedPropertyData()?.LastKnownValue;
+            root.Anchor = 60;
 
             // Assert
             Assert.Equal("Publication 1.", Assert.IsType<InvalidOperationException>(exception).Message);
             Assert.True(isWrittenByOtherThread);
             Assert.False(isArmed);
-            Assert.Equal(new object?[] { 1, 50 }, publishedValues);
+            Assert.Equal(50, committedValue);
+            Assert.Equal(new object?[] { 1, 60 }, publishedValues);
         }
         finally
         {
@@ -773,7 +777,7 @@ public class DerivedPropertyOwnershipTests
 
     private static int CountHandlerFrames()
     {
-        return new StackTrace().GetFrames().Count(frame => frame.GetMethod()?.DeclaringType == typeof(DerivedPropertyChangeHandler));
+        return new StackTrace().GetFrames().Count(frame => frame.GetMethod()?.DeclaringType == typeof(DerivedPropertyOwnership));
     }
 
     /// <summary>Runs an action after each publication of a derived property's recalculated value.</summary>

@@ -348,7 +348,7 @@ public class DerivedPropertyReattachTests
         averagePressureProperty.GetDerivedPropertyData();
 
         // Act: a write that took its used-by snapshot before the detach recalculates afterwards.
-        DerivedPropertyChangeHandler.RequestRecalculation(averagePressureProperty, 0);
+        DerivedPropertyOwnership.RequestRecalculation(averagePressureProperty, 0);
 
         // Assert
         Assert.DoesNotContain(averagePressureProperty, pressureProperty.GetUsedByProperties().Items.ToArray());

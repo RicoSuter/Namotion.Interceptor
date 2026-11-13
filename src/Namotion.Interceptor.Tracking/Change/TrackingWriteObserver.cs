@@ -44,14 +44,14 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
                 Volatile.Read(ref data.IsDerived) &&
                 property.Metadata.SetValue is not null)
             {
-                DerivedPropertyChangeHandler.RequestRecalculation(property, ResolveTimestamp(ref rawTimestamp));
+                DerivedPropertyOwnership.RequestRecalculation(property, ResolveTimestamp(ref rawTimestamp));
             }
 
             foreach (var dependent in data.GetUsedByProperties())
             {
                 if (dependent != property)
                 {
-                    DerivedPropertyChangeHandler.RequestRecalculation(dependent, ResolveTimestamp(ref rawTimestamp));
+                    DerivedPropertyOwnership.RequestRecalculation(dependent, ResolveTimestamp(ref rawTimestamp));
                 }
             }
         }
