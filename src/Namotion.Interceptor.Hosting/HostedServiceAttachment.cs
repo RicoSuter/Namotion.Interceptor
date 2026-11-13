@@ -40,14 +40,16 @@ public interface IHostedServiceAttachment<T> : IHostedServiceAttachment
     HostedServiceAttachmentState GetState(out T? current);
 }
 
-/// <summary>
-/// Lets the handler reach the slot from a non generic attachment. An abstract base class cannot
-/// serve here: the generic and non generic <c>Current</c> differ only by return type, so declaring
-/// both on one class is CS0102. The non generic one is implemented explicitly instead.
-/// </summary>
+/// <summary>Lets the handler reach the slot from a non generic attachment.</summary>
 internal interface IHostedServiceSlotAccess
 {
     HostedServiceSlot Slot { get; }
+}
+
+internal static class HostedServiceAttachmentExtensions
+{
+    public static HostedServiceSlot GetSlot(this IHostedServiceAttachment attachment)
+        => ((IHostedServiceSlotAccess)attachment).Slot;
 }
 
 internal sealed class HostedServiceAttachment<T> : IHostedServiceAttachment<T>, IHostedServiceSlotAccess

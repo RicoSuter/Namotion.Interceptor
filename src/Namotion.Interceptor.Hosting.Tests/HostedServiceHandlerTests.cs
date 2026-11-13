@@ -477,7 +477,7 @@ public class HostedServiceHandlerTests
             var attachment = person.AttachHostedService(() => instance);
 
             await attachment.DrainAsync();
-            var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+            var slot = attachment.GetSlot();
             Assert.True(handler.IsTrackedForDrain(slot));
 
             // Act
@@ -544,7 +544,7 @@ public class HostedServiceHandlerTests
                     () =>
                     {
                         var attachment = person.GetHostedServiceAttachments().Single();
-                        slot = ((IHostedServiceSlotAccess)attachment).Slot;
+                        slot = attachment.GetSlot();
                         throw new InvalidOperationException("factory failed");
                     },
                     CancellationToken.None));
@@ -1052,7 +1052,7 @@ public class HostedServiceHandlerTests
 
             // Assert - the empty transitions drain what the detach enqueued on each queue.
             var subjectSlot = ((IInterceptorSubject)child).TryGetSubjectSlot()!;
-            var attachmentSlot = ((IHostedServiceSlotAccess)attachment).Slot;
+            var attachmentSlot = attachment.GetSlot();
             await subjectSlot.DrainAsync();
             await attachmentSlot.DrainAsync();
 
@@ -1096,7 +1096,7 @@ public class HostedServiceHandlerTests
 
             // Assert
             var subjectSlot = ((IInterceptorSubject)child).TryGetSubjectSlot()!;
-            var attachmentSlot = ((IHostedServiceSlotAccess)attachment).Slot;
+            var attachmentSlot = attachment.GetSlot();
             await subjectSlot.DrainAsync();
             await attachmentSlot.DrainAsync();
 
@@ -1546,7 +1546,7 @@ public class HostedServiceHandlerTests
         });
 
         var second = child.AttachHostedService(() => new TrackedBackgroundService());
-        var firstSlot = ((IHostedServiceSlotAccess)first).Slot;
+        var firstSlot = first.GetSlot();
 
         // The context detach releases both slots, the explicit detach then keeps the re-attach from
         // retaking the first one, and the re-attach writes liveness again for the second.
@@ -1558,7 +1558,7 @@ public class HostedServiceHandlerTests
         // subject is live again because the re-attach retook the second slot, and this handler no
         // longer owns the first, so liveness lets the body through and only ownership refuses it.
         Assert.True(handler.IsLive(child));
-        Assert.Same(handler, ((IHostedServiceSlotAccess)second).Slot.Owner);
+        Assert.Same(handler, second.GetSlot().Owner);
         Assert.Null(firstSlot.Owner);
 
         // Act - opening the startup gate releases the parked body into its guard.

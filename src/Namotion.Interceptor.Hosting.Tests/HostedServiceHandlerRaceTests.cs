@@ -135,7 +135,7 @@ public class HostedServiceHandlerRaceTests
                 : child.AttachHostedService(Factory);
 
             // Assert
-            var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+            var slot = attachment.GetSlot();
             await slot.DrainAsync();
 
             Assert.All(await Task.WhenAll(detaches), Assert.True);
@@ -163,7 +163,7 @@ public class HostedServiceHandlerRaceTests
         parent.Child = child;
         await AsyncTestHelpers.WaitUntilAsync(() => instance.IsStarted);
 
-        var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+        var slot = attachment.GetSlot();
         using var drainStop = slot.HoldAtTransition();
 
         // Act
@@ -251,7 +251,7 @@ public class HostedServiceHandlerRaceTests
         // Assert - read while the drain is still held. Once it is let go it happens to release this
         // slot too, because a take this early is still inside the snapshot it takes next, so the
         // ownership is only observable here.
-        Assert.Null(((IHostedServiceSlotAccess)attachment).Slot.Owner);
+        Assert.Null(attachment.GetSlot().Owner);
 
         drain.Release();
         await stopping;
@@ -407,7 +407,7 @@ public class HostedServiceHandlerRaceTests
             return instance;
         });
 
-        var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+        var slot = attachment.GetSlot();
         using var take = slot.HoldAtQueueLock();
 
         // Act
@@ -462,7 +462,7 @@ public class HostedServiceHandlerRaceTests
         parent.Child = child;
         await AsyncTestHelpers.WaitUntilAsync(() => attachment.Fault is not null);
 
-        var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+        var slot = attachment.GetSlot();
         using var start = slot.HoldAtTransition();
 
         var handler = context.TryGetService<HostedServiceHandler>()!;
@@ -583,7 +583,7 @@ public class HostedServiceHandlerRaceTests
         remainingParent.Child = remaining;
         await AsyncTestHelpers.WaitUntilAsync(() => remainingInstance.IsStarted);
 
-        var remainingSlot = ((IHostedServiceSlotAccess)remainingAttachment).Slot;
+        var remainingSlot = remainingAttachment.GetSlot();
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var ownerWhenTheQueuedStopRan =
             new TaskCompletionSource<HostedServiceHandler?>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -625,7 +625,7 @@ public class HostedServiceHandlerRaceTests
             var child = new Person();
             var attachment = child.AttachHostedService(() => new TrackedBackgroundService());
 
-            var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+            var slot = attachment.GetSlot();
             using var start = slot.HoldAtTransition();
 
             // Act - the start is enqueued while the graph write runs, and its body is held at the
@@ -665,7 +665,7 @@ public class HostedServiceHandlerRaceTests
             return new TrackedBackgroundService();
         });
 
-        using var start = ((IHostedServiceSlotAccess)attachment).Slot.HoldAtTransition();
+        using var start = attachment.GetSlot().HoldAtTransition();
 
         parent.Child = child;
         Assert.Equal(1, startupCompletion.Outstanding);
@@ -704,7 +704,7 @@ public class HostedServiceHandlerRaceTests
                 return new TrackedBackgroundService();
             });
 
-            var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+            var slot = attachment.GetSlot();
             using var start = slot.HoldAtTransition();
 
             parent.Child = child;
@@ -807,7 +807,7 @@ public class HostedServiceHandlerRaceTests
             });
 
             // Assert
-            var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+            var slot = attachment.GetSlot();
             Assert.Equal(1, startupCompletion.DeferralCount);
             Assert.Null(slot.Owner);
 
@@ -872,7 +872,7 @@ public class HostedServiceHandlerRaceTests
         // Assert - read while the drain is still held. Once it is let go the drain releases every
         // slot its snapshot held, so a take that survived here would be released a moment later for
         // an unrelated reason and the window would be unobservable.
-        var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+        var slot = attachment.GetSlot();
         Assert.True(drain.WasReached, "The attach did not land its writes inside the drain window.");
         Assert.True(handler.IsLive(child), "The drain cleared liveness early, so the take was refused for another reason.");
         Assert.Null(slot.Owner);
@@ -994,7 +994,7 @@ public class HostedServiceHandlerRaceTests
             return new TrackedBackgroundService();
         });
 
-        var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+        var slot = attachment.GetSlot();
         var takeReached = new ManualResetEventSlim(false);
         var detachRunning = new ManualResetEventSlim(false);
         var detachFinished = 0;
@@ -1130,7 +1130,7 @@ public class HostedServiceHandlerRaceTests
         Assert.True(created.ToArray() is [{ IsStarted: true }]);
 
         // Holds the detach's stop body, so a drain that missed it returns while it has provably not run.
-        using var stop = ((IHostedServiceSlotAccess)attachment).Slot.HoldAtTransition();
+        using var stop = attachment.GetSlot().HoldAtTransition();
         using var snapshot = handler.HoldAtDrainEnqueue();
 
         var stopping = Task.Run(() => host.StopAsync());
@@ -1531,7 +1531,7 @@ public class HostedServiceHandlerRaceTests
         Assert.True(instance.IsStarted);
         Assert.Equal(0, handler.InFlightTransitionCount);
 
-        using var stop = ((IHostedServiceSlotAccess)attachment).Slot.HoldAtTransition();
+        using var stop = attachment.GetSlot().HoldAtTransition();
 
         // Act
         var stopping = host.StopAsync();
@@ -1570,7 +1570,7 @@ public class HostedServiceHandlerRaceTests
         await attachment.DrainAsync();
         Assert.True(instance.IsStarted);
 
-        var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+        var slot = attachment.GetSlot();
         using var firstWait = handler.HoldAtDrainRelease();
 
         // Armed from inside the seam, so the drain's own stop ran unheld and the count provably reached
@@ -1616,7 +1616,7 @@ public class HostedServiceHandlerRaceTests
         parent.Child = child;
         await AsyncTestHelpers.WaitUntilAsync(() => attachment.Fault is not null);
 
-        var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+        var slot = attachment.GetSlot();
         Assert.Same(handler, slot.Owner);
         Assert.True(handler.IsTrackedForDrain(slot), "The take tracked nothing, so the drain has nothing to release.");
 

@@ -89,22 +89,21 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
     private void AttachSubject(IInterceptorSubject subject)
     {
-        if (_gate.IsDraining)
-        {
-            return;
-        }
-
-        var subjectSlot = subject is IHostedService hostedService
-            ? hostedService.GetOrAddSubjectSlot()
-            : null;
-
         var attachments = subject.GetHostedServiceAttachments();
-        if (subjectSlot is null && attachments.IsEmpty)
+        if (subject is not IHostedService && attachments.IsEmpty)
         {
             // Liveness is recorded only for a subject that hosts something: every reader of it holds
             // a slot. MarkLiveIfAttached covers the one moment that is not true.
             return;
         }
+
+        // After the exit above, which almost every subject takes, and before the liveness write.
+        if (_gate.IsDraining)
+        {
+            return;
+        }
+
+        var subjectSlot = (subject as IHostedService)?.GetOrAddSubjectSlot();
 
         _liveSubjects[subject] = 0;
 
@@ -115,7 +114,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
         foreach (var attachment in attachments)
         {
-            TryTakeOwnershipAndStart(subject, ((IHostedServiceSlotAccess)attachment).Slot);
+            TryTakeOwnershipAndStart(subject, attachment.GetSlot());
         }
 
         if (_gate.IsDraining)
@@ -151,13 +150,10 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             _ = EnqueueStopIfOwned(subject, subjectSlot, waitFor: null, CancellationToken.None);
         }
 
+        var subjectStop = subjectSlot?.GetStopToAwait(this);
         foreach (var attachment in attachments)
         {
-            _ = EnqueueStopIfOwned(
-                subject,
-                ((IHostedServiceSlotAccess)attachment).Slot,
-                waitFor: subjectSlot?.GetStopToAwait(this),
-                CancellationToken.None);
+            _ = EnqueueStopIfOwned(subject, attachment.GetSlot(), waitFor: subjectStop, CancellationToken.None);
         }
 
         // After the stops are enqueued and never from a body:
@@ -165,7 +161,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         subjectSlot?.ReleaseOwnership(this);
         foreach (var attachment in attachments)
         {
-            ((IHostedServiceSlotAccess)attachment).Slot.ReleaseOwnership(this);
+            attachment.GetSlot().ReleaseOwnership(this);
         }
     }
 

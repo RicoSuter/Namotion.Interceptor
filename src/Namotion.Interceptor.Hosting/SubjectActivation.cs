@@ -10,12 +10,8 @@ namespace Namotion.Interceptor.Hosting;
 internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, IDisposable
     where T : class, IInterceptorSubject
 {
-    /// <summary>
-    /// The longest disposal waits for the stop of a host that was never stopped: five seconds, after
-    /// which disposal returns and a stop still running continues unobserved.
-    /// </summary>
     // Bounded, because the generic host disposes without stopping after a failed start, and a stuck
-    // stop must not hang the provider's disposal.
+    // stop must not hang the provider's disposal; a stop still running continues unobserved.
     private static readonly TimeSpan DisposeStopTimeout = TimeSpan.FromSeconds(5);
 
     private readonly IServiceProvider _serviceProvider;

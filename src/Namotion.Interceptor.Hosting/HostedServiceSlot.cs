@@ -102,7 +102,7 @@ internal sealed class HostedServiceSlot
 
     public HostedServiceHandler? Owner => Volatile.Read(ref _owner);
 
-    public void SetFault(Exception? fault) => Volatile.Write(ref _fault, fault);
+    public void SetFault(Exception fault) => Volatile.Write(ref _fault, fault);
 
     /// <summary>Records a failed start, as the slot's fault and as the start's own outcome.</summary>
     public void SetStartFault(Exception fault)
@@ -170,7 +170,6 @@ internal sealed class HostedServiceSlot
     /// </summary>
     public HostedServiceAttachmentState GetState(out IHostedService? current)
     {
-        // The instance and the phase come out of this one load, so no transition can land between them.
         var snapshot = Volatile.Read(ref _snapshot);
         current = snapshot.Instance;
 

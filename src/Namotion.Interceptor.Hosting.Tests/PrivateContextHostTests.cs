@@ -26,7 +26,7 @@ public class PrivateContextHostTests
         }
         finally
         {
-            await host.DisposeAsync();
+            await host.StopAsync();
         }
     }
 
@@ -47,7 +47,7 @@ public class PrivateContextHostTests
         }
         finally
         {
-            await host.DisposeAsync();
+            await host.StopAsync();
         }
     }
 
@@ -61,7 +61,7 @@ public class PrivateContextHostTests
         await AsyncTestHelpers.WaitUntilAsync(() => subject.Instance?.IsStarted == true);
 
         // Act
-        await host.DisposeAsync();
+        await host.StopAsync();
 
         // Assert
         Assert.True(subject.Instance!.IsStopped);
@@ -87,7 +87,7 @@ public class PrivateContextHostTests
         }
         finally
         {
-            await first.DisposeAsync();
+            await first.StopAsync();
         }
     }
 
@@ -245,7 +245,7 @@ public class PrivateContextHostTests
 
         // Act
         await host.StopAsync();
-        await host.DisposeAsync();
+        await host.StopAsync();
 
         // Assert
         Assert.Equal(1, subject.StopCount);
@@ -276,7 +276,7 @@ public class PrivateContextHostTests
         var subject = new CountingHostedSubject();
         var first = CreateHost();
         await first.StartAsync(subject, CancellationToken.None);
-        await first.DisposeAsync();
+        await first.StopAsync();
         var second = CreateHost();
 
         try
@@ -291,7 +291,7 @@ public class PrivateContextHostTests
         }
         finally
         {
-            await second.DisposeAsync();
+            await second.StopAsync();
         }
     }
 
@@ -315,7 +315,7 @@ public class PrivateContextHostTests
         }
         finally
         {
-            await host.DisposeAsync();
+            await host.StopAsync();
         }
     }
 
@@ -336,7 +336,7 @@ public class PrivateContextHostTests
         }
         finally
         {
-            await host.DisposeAsync();
+            await host.StopAsync();
         }
     }
 
@@ -363,7 +363,7 @@ public class PrivateContextHostTests
         await host.StartAsync(subject, CancellationToken.None);
 
         // Act
-        await host.DisposeAsync();
+        await host.StopAsync();
 
         // Assert
         Assert.Null(subject.TryGetRegisteredSubject());

@@ -73,7 +73,6 @@ public static class InterceptorHostingExtensions
 
         if (start is not null)
         {
-            // The token bounds this wait only; the transition runs to completion either way.
             await start.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -189,7 +188,7 @@ public static class InterceptorHostingExtensions
             handler?.OpenGate();
         }
 
-        var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+        var slot = attachment.GetSlot();
         stop = MarkDetachedAndEnqueueStop(subject, slot, handler, cancellationToken);
 
         // Untracked without releasing, and before a caller awaits the stop so a cancelled wait cannot skip it:
@@ -239,10 +238,11 @@ public static class InterceptorHostingExtensions
         var attachment = new HostedServiceAttachment<T>(new HostedServiceSlot(factory, subject: null));
 
         subject.Data.AddOrUpdate((null, AttachmentsKey),
-            _ => ImmutableArray.Create<IHostedServiceAttachment>(attachment),
-            (_, value) => value is ImmutableArray<IHostedServiceAttachment> attachments
-                ? attachments.Add(attachment)
-                : ImmutableArray.Create<IHostedServiceAttachment>(attachment));
+            static (_, added) => ImmutableArray.Create(added),
+            static (_, value, added) => value is ImmutableArray<IHostedServiceAttachment> attachments
+                ? attachments.Add(added)
+                : ImmutableArray.Create(added),
+            (IHostedServiceAttachment)attachment);
 
         return attachment;
     }

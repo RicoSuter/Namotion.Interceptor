@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking;
@@ -11,7 +12,7 @@ namespace Namotion.Interceptor.Hosting;
 /// Stopping or disposing it stops and disposes what it started and detaches the subject from the
 /// private context, so the subject and its children are plain data again.
 /// </summary>
-internal sealed class PrivateContextHost : IAsyncDisposable
+internal sealed class PrivateContextHost
 {
     private readonly HostedServiceHandler _handler = new();
     private readonly ILogger? _logger;
@@ -22,7 +23,7 @@ internal sealed class PrivateContextHost : IAsyncDisposable
 
     internal PrivateContextHost(IServiceProvider serviceProvider)
     {
-        _logger = serviceProvider.GetService(typeof(ILogger<HostedServiceHandler>)) as ILogger;
+        _logger = serviceProvider.GetService<ILogger<HostedServiceHandler>>();
         if (_logger is not null)
         {
             _handler.SetLogger(_logger);
@@ -113,7 +114,7 @@ internal sealed class PrivateContextHost : IAsyncDisposable
 
     /// <summary>
     /// Stops and disposes everything the host started, then detaches the subject from the private
-    /// context. Later calls, and <see cref="DisposeAsync"/>, return the first call's task and ignore
+    /// context. Later calls return the first call's task and ignore
     /// their token.
     /// </summary>
     /// <remarks>
@@ -140,12 +141,6 @@ internal sealed class PrivateContextHost : IAsyncDisposable
         _ = CompleteStopAsync(stop, cancellationToken);
         return stop.Task;
     }
-
-    /// <summary>
-    /// Stops without a deadline, so a service whose stop never returns blocks it. Call
-    /// <see cref="StopAsync"/> first to bound it, which makes this a no-op.
-    /// </summary>
-    public ValueTask DisposeAsync() => new(StopAsync(CancellationToken.None));
 
     private async Task CompleteStopAsync(TaskCompletionSource stop, CancellationToken cancellationToken)
     {
