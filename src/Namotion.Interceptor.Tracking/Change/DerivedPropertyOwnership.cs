@@ -230,7 +230,7 @@ internal static class DerivedPropertyOwnership
             // commits. Resolved before the evaluation, since a time source that writes can run another
             // evaluation on this thread, which would replace the recording this evaluation leaves until its commit.
             var timestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
-            var evaluation = Evaluate(property);
+            var evaluation = Evaluate(data, property);
             var isLastIteration = iteration == MaxStabilizationIterations - 1;
             lock (data)
             {
@@ -583,7 +583,7 @@ internal static class DerivedPropertyOwnership
     /// <summary>Evaluates outside lock(data) and commits under it.</summary>
     private static Commit EvaluateAndCommit(DerivedPropertyData data, PropertyReference property, long token, ref OwnerLoopState state)
     {
-        var evaluation = Evaluate(property);
+        var evaluation = Evaluate(data, property);
         lock (data)
         {
             if (data.OwnerToken != token)
@@ -709,10 +709,10 @@ internal static class DerivedPropertyOwnership
     /// Runs the getter outside every lock and records what it read; the recording stays on the
     /// recorder until <see cref="CommitLinks"/> or <see cref="DiscardRecording"/> clears it.
     /// </summary>
-    private static Evaluation Evaluate(in PropertyReference property)
+    private static Evaluation Evaluate(DerivedPropertyData data, in PropertyReference property)
     {
         var recorder = DerivedPropertyRecorder.Current;
-        recorder.StartRecording(property);
+        recorder.StartRecording(property, data.RequiredData);
         try
         {
             return new Evaluation(property.Metadata.GetValue?.Invoke(property.Subject), hasThrown: false);
