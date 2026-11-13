@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Reactive.Concurrency;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -827,6 +828,44 @@ public class DerivedPropertyOwnershipTests
         Assert.Equal([nameof(EvaluatorWorker.ObjectResult), nameof(EvaluatorWorker.Result)], publishedProperties.Order());
         Assert.Equal(1, new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)).TryGetDerivedPropertyData()?.LastKnownValue);
         Assert.Same(spare, new PropertyReference(machine.Worker, nameof(EvaluatorWorker.ObjectResult)).TryGetDerivedPropertyData()?.LastKnownValue);
+    }
+
+    [Fact]
+    public void WhenAPublicationPublishesAnotherDerivedPropertyBeforeItsObserverRuns_ThenEachVersionMovesOnceAndTheReaderFollowsBoth()
+    {
+        // Arrange: the publication of Upper writes LastName in its chain, which publishes Lower before the write
+        // observer of Upper's publication runs. Both reads Upper and Lower.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var isWritingLastName = false;
+        Person? person = null;
+        context.AddService(new PublicationObserver((property, _) =>
+        {
+            if (isWritingLastName && property.Name == "Upper")
+            {
+                isWritingLastName = false;
+                person!.LastName = "X";
+            }
+        }));
+        person = new Person(context) { FirstName = "a", LastName = "c" };
+        var registered = person.TryGetRegisteredSubject()!;
+        var upper = registered.AddDerivedProperty<string?>("Upper", subject => ((Person)subject).FirstName?.ToUpperInvariant()).Reference;
+        var lower = registered.AddDerivedProperty<string?>("Lower", subject => ((Person)subject).LastName?.ToLowerInvariant()).Reference;
+        var both = registered.AddDerivedProperty<string>(
+            "Both", subject => $"{subject.Properties["Upper"].GetValue?.Invoke(subject)}{subject.Properties["Lower"].GetValue?.Invoke(subject)}").Reference;
+        var upperVersion = upper.TryGetDerivedPropertyData()!.Version;
+        var lowerVersion = lower.TryGetDerivedPropertyData()!.Version;
+        isWritingLastName = true;
+
+        // Act
+        person.FirstName = "b";
+
+        // Assert
+        Assert.False(isWritingLastName);
+        Assert.Equal(upperVersion + 1, upper.TryGetDerivedPropertyData()!.Version);
+        Assert.Equal(lowerVersion + 1, lower.TryGetDerivedPropertyData()!.Version);
+        Assert.Equal("Bx", both.TryGetDerivedPropertyData()?.LastKnownValue);
+        Assert.Contains(upper, both.GetRequiredProperties().ToArray());
+        Assert.Contains(lower, both.GetRequiredProperties().ToArray());
     }
 
     private static TimeSource ReplaceTimeSource(Func<DateTimeOffset> timestampFunction)

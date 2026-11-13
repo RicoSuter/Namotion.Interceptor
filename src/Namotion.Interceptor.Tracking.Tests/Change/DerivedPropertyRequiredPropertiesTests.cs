@@ -313,4 +313,37 @@ public class DerivedPropertyRequiredPropertiesTests
         Assert.DoesNotContain(derivedReference, deps);
         Assert.Contains(firstNameReference, deps);
     }
+
+    [Fact]
+    public void WhenGetterReadsItsDependenciesInAnotherOrder_ThenEachLinkHasTheDataOfItsOwnProperty()
+    {
+        // Arrange: the getter reads Anchor and Value in an order that a flag outside the model decides, so the
+        // second evaluation reads at each position another property than the last commit's links.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var configuration = machine.Configuration;
+        var isAnchorReadFirst = true;
+        machine.Worker.Evaluator = _ => isAnchorReadFirst
+            ? root.Anchor + 10 * configuration.Value
+            : 10 * configuration.Value + root.Anchor;
+        root.Machine = machine;
+        var result = new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result));
+        var anchor = new PropertyReference(root, nameof(EvaluatorRoot.Anchor));
+        var value = new PropertyReference(configuration, nameof(EvaluatorConfiguration.Value));
+
+        // Act
+        isAnchorReadFirst = false;
+        root.Anchor = 1;
+        var requiredProperties = result.GetRequiredProperties().ToArray();
+        var requiredData = result.TryGetDerivedPropertyData()!.RequiredData!;
+        configuration.Value = 2;
+        root.Anchor = 3;
+
+        // Assert
+        Assert.Equal([value, anchor], requiredProperties);
+        Assert.Same(value.TryGetDerivedPropertyData(), requiredData[0]);
+        Assert.Same(anchor.TryGetDerivedPropertyData(), requiredData[1]);
+        Assert.Equal(23, result.TryGetDerivedPropertyData()?.LastKnownValue);
+    }
 }
