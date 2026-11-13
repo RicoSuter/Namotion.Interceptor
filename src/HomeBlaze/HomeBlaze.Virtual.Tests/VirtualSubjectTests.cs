@@ -3,7 +3,10 @@ using System.Reactive.Concurrency;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
+using HomeBlaze.Services;
 using HomeBlaze.Virtual.Tests.Testing;
+using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
@@ -334,5 +337,118 @@ public class VirtualSubjectTests
 
         // Assert
         Assert.Contains(8m, changes);
+    }
+
+    [Fact]
+    public void WhenTheVirtualSubjectWithNestedEntriesIsAttachedAgain_ThenItStillPublishesChanges()
+    {
+        // Arrange
+        var graph = new VirtualTestGraph();
+        var meter = new TestMeter { Power = 1 };
+        graph.Add("Meter", meter);
+        var solar = graph.CreateVirtualSubject(Entries(("Pv", new VirtualProperty
+        {
+            Properties = Entries(
+                ("Power", Binding("/Meter/Power") with { Attributes = Entries(("Maximum", Expression("Power * 10"))) }),
+                ("Double", Expression("Power * 2")))
+        })));
+        graph.Add("Solar", solar);
+        graph.Remove("Solar");
+        graph.Add("Solar", solar);
+        var doubles = RecordChanges(graph, "Double", out var doubleSubscription);
+        using var _ = doubleSubscription;
+        var maximums = RecordChanges(graph, "Power@Maximum", out var maximumSubscription);
+        using var __ = maximumSubscription;
+
+        // Act
+        meter.Power = 4;
+
+        // Assert
+        Assert.Contains(8m, doubles);
+        Assert.Contains(40m, maximums);
+    }
+
+    [Fact]
+    public async Task WhenAnEntryReadsASiblingDeclaredAfterIt_ThenItGetsTheValue()
+    {
+        // Arrange
+        var graph = new VirtualTestGraph();
+        graph.Add("Meter", new TestMeter { Power = 3 });
+        var solar = graph.CreateVirtualSubject(Entries(("Double", Expression("Power * 2")), ("Power", Binding("/Meter/Power"))));
+
+        // Act
+        graph.Add("Solar", solar);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => solar.TryGetRegisteredProperty("Double")!.GetValue() is 6m, message: "The entry did not get the value of its sibling");
+    }
+
+    [Fact]
+    public void WhenTheTargetOfABindingIsReadOnly_ThenAWriteThrows()
+    {
+        // Arrange
+        var graph = new VirtualTestGraph();
+        graph.Add("Meter", new TestMeter());
+        var solar = graph.CreateVirtualSubject(Entries(("Energy", Binding("/Meter/Energy"))));
+        graph.Add("Solar", solar);
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => solar.TryGetRegisteredProperty("Energy")!.SetValue(1m));
+    }
+
+    [Fact]
+    public void WhenTheContextHasNoRegistry_ThenTheStatusReportsIt()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithLifecycle();
+        var root = new TestRoot(context);
+        var resolver = new SubjectPathResolver(() => root);
+        var solar = new VirtualSubject(resolver, new VirtualPropertyAwaiter(context, NullLogger<VirtualPropertyAwaiter>.Instance), NullLogger<VirtualSubject>.Instance)
+        {
+            Properties = Entries(("One", Expression("1")))
+        };
+
+        // Act
+        root.Children = new Dictionary<string, IInterceptorSubject> { ["Solar"] = solar };
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, solar.Status);
+        Assert.Equal("A virtual subject needs a context with a registry.", solar.StatusMessage);
+    }
+
+    [Fact]
+    public void WhenTheVirtualSubjectIsDetached_ThenTheStatusMessageIsCleared()
+    {
+        // Arrange
+        var graph = new VirtualTestGraph();
+        var solar = graph.CreateVirtualSubject(Entries(("Bad", Expression("(1"))));
+        graph.Add("Solar", solar);
+
+        // Act
+        graph.Remove("Solar");
+
+        // Assert
+        Assert.Equal(ServiceStatus.Stopped, solar.Status);
+        Assert.Null(solar.StatusMessage);
+    }
+
+    [Fact]
+    public void WhenEntriesAreSkipped_ThenOneWarningListsThem()
+    {
+        // Arrange
+        var graph = new VirtualTestGraph();
+        var logger = new RecordingLogger<VirtualSubject>();
+        var solar = new VirtualSubject(graph.Resolver, graph.Awaiter, logger)
+        {
+            Properties = Entries(("Bad", Expression("(1")), ("Worse", Expression("(2")), ("Good", Expression("1")))
+        };
+
+        // Act
+        graph.Add("Solar", solar);
+
+        // Assert
+        var warning = Assert.Single(logger.Warnings);
+        Assert.Contains("Bad: ", warning);
+        Assert.Contains("Worse: ", warning);
     }
 }

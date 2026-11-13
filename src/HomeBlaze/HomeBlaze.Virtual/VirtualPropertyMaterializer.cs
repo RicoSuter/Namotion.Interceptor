@@ -93,10 +93,18 @@ internal sealed class VirtualPropertyMaterializer(VirtualRuntime runtime)
                 continue;
             }
 
-            var attribute = owner.TryGetAttribute(name)
-                ?? AddValue(entry, scope, (type, read, write, reflectionAttributes) => owner.AddDerivedAttribute(name, type, read, write, reflectionAttributes));
-            computed.Add(attribute.Reference);
-            ApplyAttributes(attribute, entry.Attributes, scope, path, rejected, computed);
+            try
+            {
+                var attribute = owner.TryGetAttribute(name)
+                    ?? AddValue(entry, scope, (type, read, write, reflectionAttributes) => owner.AddDerivedAttribute(name, type, read, write, reflectionAttributes));
+                computed.Add(attribute.Reference);
+                ApplyAttributes(attribute, entry.Attributes, scope, path, rejected, computed);
+            }
+            catch (Exception exception)
+            {
+                // Lifecycle handlers must not throw, and one attribute must not stop the others.
+                runtime.Logger.LogError(exception, "The virtual property attribute {Path} could not be added.", path);
+            }
         }
     }
 
@@ -108,18 +116,24 @@ internal sealed class VirtualPropertyMaterializer(VirtualRuntime runtime)
         var dataType = entry.DataType!.Value;
         var type = VirtualDataTypes.GetClrType(dataType);
         var attributes = CreateAttributes(entry.State);
-        if (entry.Expression is { } text && VirtualExpression.TryParse(text, out var expression, out _))
+        if (entry.Path is { } path)
         {
-            var evaluator = new VirtualExpressionEvaluator(expression, dataType, scope, runtime);
-            var expressionProperty = add(type, evaluator.Evaluate, null, attributes);
-            evaluator.Misses.Attach(expressionProperty.Reference);
-            return expressionProperty;
+            var binding = new VirtualBinding(path, dataType, scope, runtime);
+            var bindingProperty = add(type, binding.Read, binding.Write, attributes);
+            binding.Misses.Attach(bindingProperty.Reference);
+            return bindingProperty;
         }
 
-        var binding = new VirtualBinding(entry.Path!, dataType, scope, runtime);
-        var bindingProperty = add(type, binding.Read, binding.Write, attributes);
-        binding.Misses.Attach(bindingProperty.Reference);
-        return bindingProperty;
+        // The validator has checked that the entry has a path or an expression that parses.
+        if (entry.Expression is not { } text || !VirtualExpression.TryParse(text, out var expression, out _))
+        {
+            throw new InvalidOperationException("The entry has no path and no valid expression.");
+        }
+
+        var evaluator = new VirtualExpressionEvaluator(expression, dataType, scope, runtime);
+        var expressionProperty = add(type, evaluator.Evaluate, null, attributes);
+        evaluator.Misses.Attach(expressionProperty.Reference);
+        return expressionProperty;
     }
 
     // PropertyAttributeInitializer turns these into the State registry attribute, as for a declared property.

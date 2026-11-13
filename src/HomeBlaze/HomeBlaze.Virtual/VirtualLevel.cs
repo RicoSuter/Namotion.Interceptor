@@ -12,13 +12,21 @@ internal sealed class VirtualLevel(IInterceptorSubject subject, VirtualRuntime r
 {
     private PropertyReference[] _computed = [];
 
-    public void Attach(IReadOnlyDictionary<string, VirtualProperty>? entries, string? prefix, ImmutableHashSet<string> rejected)
+    public const string MissingRegistryMessage = "A virtual subject needs a context with a registry.";
+
+    /// <summary>Adds the entries; false when the context has no registry, so nothing could be added.</summary>
+    public bool Attach(IReadOnlyDictionary<string, VirtualProperty>? entries, string? prefix, ImmutableHashSet<string> rejected)
     {
-        var registered = subject.TryGetRegisteredSubject()
-            ?? throw new InvalidOperationException("A virtual subject needs a context with a registry.");
+        // A lifecycle handler must not throw, so the caller reports it.
+        if (subject.TryGetRegisteredSubject() is not { } registered)
+        {
+            return false;
+        }
+
         var computed = new List<PropertyReference>();
         new VirtualPropertyMaterializer(runtime).Apply(registered, entries, place, prefix, rejected, computed);
         _computed = [.. computed];
+        return true;
     }
 
     public void Detach()

@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -15,6 +16,7 @@ public partial class VirtualNode : ILifecycleHandler
     private readonly string _path;
     private readonly ImmutableHashSet<string> _rejected;
     private readonly VirtualLevel _level;
+    private readonly ILogger _logger;
 
     internal VirtualNode(IReadOnlyDictionary<string, VirtualProperty> entries, string path, ImmutableHashSet<string> rejected, VirtualRuntime runtime)
     {
@@ -22,6 +24,7 @@ public partial class VirtualNode : ILifecycleHandler
         _path = path;
         _rejected = rejected;
         _level = new VirtualLevel(this, runtime, VirtualEntryPlace.Nested);
+        _logger = runtime.Logger;
     }
 
     void ILifecycleHandler.HandleLifecycleChange(SubjectLifecycleChange change)
@@ -33,7 +36,10 @@ public partial class VirtualNode : ILifecycleHandler
 
         if (change.IsContextAttach)
         {
-            _level.Attach(_entries, _path, _rejected);
+            if (!_level.Attach(_entries, _path, _rejected))
+            {
+                _logger.LogError("The virtual properties of {Path} were not added: {Message}", _path, VirtualLevel.MissingRegistryMessage);
+            }
         }
         else if (change.IsContextDetach)
         {

@@ -22,11 +22,13 @@ public partial class VirtualSubject : IConfigurable, IMonitoredService, ITitlePr
 {
     private readonly SubjectPathResolver _pathResolver;
     private readonly VirtualLevel _level;
+    private readonly ILogger _logger;
 
     /// <summary>Creates a virtual subject; the services come from dependency injection.</summary>
     public VirtualSubject(SubjectPathResolver pathResolver, VirtualPropertyAwaiter awaiter, ILogger<VirtualSubject> logger)
     {
         _pathResolver = pathResolver;
+        _logger = logger;
         _level = new VirtualLevel(this, new VirtualRuntime(pathResolver, awaiter, logger), VirtualEntryPlace.Root);
         Status = ServiceStatus.Stopped;
     }
@@ -69,15 +71,33 @@ public partial class VirtualSubject : IConfigurable, IMonitoredService, ITitlePr
             var properties = Properties;
             // The registry has placed the subject by now, so its path is known.
             var ownPath = _pathResolver.GetPath(this, PathStyle.Canonical);
-            _level.Attach(properties, prefix: null, VirtualPropertyValidator.FindCyclicEntries(properties, ownPath));
+            if (!_level.Attach(properties, prefix: null, VirtualPropertyValidator.FindCyclicEntries(properties, ownPath)))
+            {
+                _logger.LogError("The virtual subject {Title} added no properties: {Message}", Title, VirtualLevel.MissingRegistryMessage);
+                Status = ServiceStatus.Error;
+                StatusMessage = VirtualLevel.MissingRegistryMessage;
+                return;
+            }
+
             var issues = VirtualPropertyValidator.Validate(properties, ownPath);
-            Status = issues.IsEmpty ? ServiceStatus.Running : ServiceStatus.Error;
-            StatusMessage = issues.IsEmpty ? null : string.Join("; ", issues.Select(issue => $"{issue.Path}: {issue.Message}"));
+            if (issues.IsEmpty)
+            {
+                Status = ServiceStatus.Running;
+                StatusMessage = null;
+            }
+            else
+            {
+                var message = string.Join("; ", issues.Select(issue => $"{issue.Path}: {issue.Message}"));
+                _logger.LogWarning("The virtual subject {Path} skipped entries: {Issues}", ownPath ?? Title, message);
+                Status = ServiceStatus.Error;
+                StatusMessage = message;
+            }
         }
         else if (change.IsContextDetach)
         {
             _level.Detach();
             Status = ServiceStatus.Stopped;
+            StatusMessage = null;
         }
     }
 }

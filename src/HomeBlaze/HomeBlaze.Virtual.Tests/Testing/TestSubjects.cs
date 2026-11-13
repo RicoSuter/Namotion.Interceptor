@@ -26,6 +26,9 @@ public partial class TestMeter
     [State]
     public partial int Mode { get; set; }
 
+    [State]
+    public partial decimal? Energy { get; internal set; }
+
     [Configuration(IsSecret = true)]
     public partial string? ApiKey { get; set; }
 }
