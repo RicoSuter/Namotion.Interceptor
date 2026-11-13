@@ -139,7 +139,6 @@
     <Project Path="HomeBlaze/HomeBlaze.E2E.Tests/HomeBlaze.E2E.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Host.Services.Tests/HomeBlaze.Host.Services.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Installation.Tests/HomeBlaze.Installation.Tests.csproj" />
-    <Project Path="HomeBlaze/HomeBlaze.OpcUa.Tests/HomeBlaze.OpcUa.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Services.Tests/HomeBlaze.Services.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage.Abstractions.Tests/HomeBlaze.Storage.Abstractions.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage.Blazor.Tests/HomeBlaze.Storage.Blazor.Tests.csproj" />

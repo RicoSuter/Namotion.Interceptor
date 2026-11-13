@@ -235,10 +235,20 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
         if (_clientSource is { } source)
         {
             var diagnostics = source.Diagnostics;
+
+            // A stop or restart that ran meanwhile has already reset these properties.
+            if (!ReferenceEquals(_clientSource, source))
+            {
+                return;
+            }
+
             IsConnected = diagnostics.IsOperational;
 
             // Without this, a rejected server certificate leaves the client looking healthy while it never connects.
-            StatusMessage = OpcUaStatusMessage.Resolve(Status, diagnostics.IsOperational, diagnostics.LastError, StatusMessage);
+            if (Status == ServiceStatus.Running && diagnostics.IsOperational is { } isOperational)
+            {
+                StatusMessage = isOperational ? null : diagnostics.LastError?.Message;
+            }
 
             IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
             OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;

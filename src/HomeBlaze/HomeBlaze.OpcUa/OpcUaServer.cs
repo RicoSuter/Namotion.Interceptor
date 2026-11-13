@@ -223,11 +223,19 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
         if (_serverService is { } service)
         {
             var diagnostics = service.Diagnostics;
-            IsAcceptingConnections = diagnostics.IsOperational;
 
-            // Without this, a server whose start keeps failing, for example on a rejected certificate after a
-            // host name change, looks healthy while it never accepts connections.
-            StatusMessage = OpcUaStatusMessage.Resolve(Status, diagnostics.IsOperational, diagnostics.LastError, StatusMessage);
+            // A stop or restart that ran meanwhile has already reset these properties.
+            if (!ReferenceEquals(_serverService, service))
+            {
+                return;
+            }
+
+            // Without this, a server whose start keeps failing looks healthy while it never accepts connections.
+            IsAcceptingConnections = diagnostics.IsOperational;
+            if (Status == ServiceStatus.Running && diagnostics.IsOperational is { } isOperational)
+            {
+                StatusMessage = isOperational ? null : diagnostics.LastError?.Message;
+            }
 
             IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
             OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;
