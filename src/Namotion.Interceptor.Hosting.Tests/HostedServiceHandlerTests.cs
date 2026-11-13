@@ -115,6 +115,28 @@ public class HostedServiceHandlerTests
     }
 
     [Fact]
+    public async Task WhenTheHostIsDisposedWithoutBeingStopped_ThenItsServicesAreStoppedAndNoLaterAttachStarts()
+    {
+        // Arrange
+        var (host, context) = await HostingTestHost.StartAsync();
+        var person = new Person(context);
+        var attachment = await person.AttachHostedServiceAsync(
+            () => new TrackedBackgroundService(), CancellationToken.None);
+        var instance = Assert.IsType<TrackedBackgroundService>(attachment.Current);
+
+        // Act - the generic host disposes without stopping after a failed start.
+        await ((IAsyncDisposable)host).DisposeAsync();
+        var late = new TrackedBackgroundService();
+        var lateAttachment = person.AttachHostedService(() => late);
+        await lateAttachment.DrainAsync();
+
+        // Assert
+        Assert.True(instance.IsStopped);
+        Assert.True(instance.IsDisposed);
+        Assert.Equal(0, late.StartCount);
+    }
+
+    [Fact]
     public async Task WhenTheFactoryIsHeld_ThenTheAttachmentReportsStartingUntilTheInstanceIsRecorded()
     {
         // Arrange - a consumer polling the handle sees Current null both before a start and inside one,

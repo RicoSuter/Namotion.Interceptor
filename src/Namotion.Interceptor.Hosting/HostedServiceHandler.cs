@@ -9,8 +9,16 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 namespace Namotion.Interceptor.Hosting;
 
 [RunsAfter(typeof(ContextInheritanceHandler))]
-internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
+internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler, IAsyncDisposable, IDisposable
 {
+    /// <summary>
+    /// How long a disposal waits for the shutdown it runs on a handler that was never stopped. A stop still
+    /// running after it continues unobserved.
+    /// </summary>
+    // Bounded, because the generic host disposes without stopping after a failed start, and a stuck stop
+    // must not hang the provider's disposal.
+    internal static readonly TimeSpan DisposeStopTimeout = TimeSpan.FromSeconds(5);
+
     // A workaround, not a design choice: docs/design/hosting-service-ownership.md#the-50-ms-delay.
     private const int TransitionDelayMilliseconds = 50;
 
@@ -811,6 +819,28 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
         // The drain set is not cleared: what is left belongs to installs whose own gate re-read releases them.
     }
+
+    /// <summary>
+    /// Runs the shutdown of <see cref="StopAsync"/> when none has begun, so a host disposed without being
+    /// stopped still stops and disposes what this handler started and refuses every later start. Does
+    /// nothing after a stop.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (_gate.IsDraining)
+        {
+            return;
+        }
+
+        using var timeout = new CancellationTokenSource(DisposeStopTimeout);
+        await StopAsync(timeout.Token).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+    }
+
+    /// <summary>
+    /// The synchronous form, for a provider disposed synchronously, which otherwise throws on a service
+    /// that is only asynchronously disposable.
+    /// </summary>
+    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
 
     /// <summary>
     /// Waits for every transition this handler enqueued to finish, and reports how many were still

@@ -10,10 +10,6 @@ namespace Namotion.Interceptor.Hosting;
 internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, IDisposable
     where T : class, IInterceptorSubject
 {
-    // Bounded, because the generic host disposes without stopping after a failed start, and a stuck
-    // stop must not hang the provider's disposal; a stop still running continues unobserved.
-    private static readonly TimeSpan DisposeStopTimeout = TimeSpan.FromSeconds(5);
-
     private readonly IServiceProvider _serviceProvider;
     private readonly SubjectRegistration<T> _registration;
 
@@ -103,7 +99,7 @@ internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, I
             return;
         }
 
-        using var timeout = new CancellationTokenSource(DisposeStopTimeout);
+        using var timeout = new CancellationTokenSource(HostedServiceHandler.DisposeStopTimeout);
 
         // The token bounds a first stop; the wait bounds a stop already running without a deadline,
         // whose task a later StopAsync returns. Suppressed rather than thrown: when this disposal's own
