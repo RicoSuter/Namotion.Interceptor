@@ -58,6 +58,12 @@ internal sealed class DerivedPropertyData
     internal long AttachToken;
 
     /// <summary>
+    /// Incremented by every attach and never reset, so an evaluation or a queued request from before an attach is
+    /// recognized as older than its value. Read via Volatile.Read outside the lock.
+    /// </summary>
+    internal long AttachCount;
+
+    /// <summary>
     /// Incremented for every committed value and every detach. Read via Volatile.Read outside the lock to skip a
     /// stale publication: if the sequence has advanced, a newer commit or a detach happened.
     /// </summary>
