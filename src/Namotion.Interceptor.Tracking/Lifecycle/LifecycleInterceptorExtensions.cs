@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Tracking.Change;
+
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 public static class LifecycleInterceptorExtensions
@@ -16,6 +18,7 @@ public static class LifecycleInterceptorExtensions
     /// </summary>
     public static int GetReferenceCount(this IInterceptorSubject subject)
     {
+        SubjectStructure.RecordRead(subject);
         return SubjectLifecycleAttachments.GetReferenceCount(subject);
     }
 

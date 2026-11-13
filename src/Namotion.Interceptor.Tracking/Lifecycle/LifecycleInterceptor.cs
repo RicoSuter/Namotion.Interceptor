@@ -162,6 +162,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         var properties = subject.Properties.Keys;
         InvokeAddedLifecycleHandlers(subject, context, change);
+        TrackingWriteObserver.OnStructureChanged(subject);
 
         SubjectAttached?.Invoke(change);
         foreach (var propertyName in properties)
@@ -202,6 +203,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         var properties = subject.Properties.Keys;
         InvokeAddedLifecycleHandlers(subject, context, change);
+        TrackingWriteObserver.OnStructureChanged(subject);
 
         if (isFirstAttach)
         {
@@ -262,6 +264,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         SubjectDetaching?.Invoke(change);
         InvokeRemovedLifecycleHandlers(subject, context, change);
+        TrackingWriteObserver.OnStructureChanged(subject);
     }
 
     /// <summary>
@@ -306,6 +309,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
 
         InvokeRemovedLifecycleHandlers(subject, context, change);
+        TrackingWriteObserver.OnStructureChanged(subject);
 
         if (children is not null)
         {
