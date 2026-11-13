@@ -1,6 +1,9 @@
 using System.Reactive.Concurrency;
 using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
@@ -414,9 +417,88 @@ public class DerivedPropertyAttachOrderTests
         AssertSingleChange(changes, second.Device, nameof(SiblingReadingDevice.IsInstalled), true);
     }
 
+    [Fact]
+    public async Task WhenSubtreeIsAttachedAgainOnAnotherThreadBeforeTheWriteDrains_ThenItsQueuedRequestIsDroppedAndTheChangeCarriesTheLaterAttachTimestamp()
+    {
+        // Arrange: each attach of the configuration writes its value under the lifecycle lock, which queues a request
+        // for the worker's result. The first write's queued work runs after the second attach and before that
+        // attach's own queued work.
+        var timeout = TestTimeouts.Default;
+        var firstTimestamp = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var secondTimestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = _ => machine.Configuration.Value;
+        var configurationAttaches = 0;
+        context.WithService(() => new CallbackLifecycleHandler(change =>
+        {
+            if (change.IsContextAttach && change.Subject == machine.Configuration)
+            {
+                machine.Configuration.Value = ++configurationAttaches;
+            }
+        }));
+        using var secondAttachIsDone = new ManualResetEventSlim();
+        using var firstWriteHasReturned = new ManualResetEventSlim();
+        var secondWriter = Task.CompletedTask;
+        var machineWrites = 0;
+        var hasSecondAttachCompleted = false;
+        var hasFirstWriteReturned = false;
+        context.WithService(() => new AfterWriteInterceptor(property =>
+        {
+            var write = property.Name == nameof(EvaluatorRoot.Machine) ? Interlocked.Increment(ref machineWrites) : 0;
+            if (write == 1)
+            {
+                // The first write released the lifecycle lock and has not run its queued work yet.
+                secondWriter = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+                {
+                    root.Machine = null;
+                    using (SubjectChangeContext.WithChangedTimestamp(secondTimestamp))
+                    {
+                        root.Machine = machine;
+                    }
+                });
+                hasSecondAttachCompleted = secondAttachIsDone.Wait(timeout);
+            }
+            else if (write == 3)
+            {
+                secondAttachIsDone.Set();
+                hasFirstWriteReturned = firstWriteHasReturned.Wait(timeout);
+            }
+        }));
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        using (SubjectChangeContext.WithChangedTimestamp(firstTimestamp))
+        {
+            root.Machine = machine;
+        }
+
+        firstWriteHasReturned.Set();
+        await secondWriter.WaitAsync(timeout);
+
+        // Assert
+        Assert.True(hasSecondAttachCompleted);
+        Assert.True(hasFirstWriteReturned);
+        var change = Assert.Single(changes, c => c.Property.Subject == machine.Worker && c.Property.Name == nameof(EvaluatorWorker.Result));
+        Assert.Equal((1, 2), (change.GetOldValue<int>(), change.GetNewValue<int>()));
+        Assert.Equal(secondTimestamp, change.ChangedTimestamp);
+    }
+
     private static void AssertSingleChange<T>(List<SubjectPropertyChange> changes, IInterceptorSubject subject, string propertyName, T newValue)
     {
         var change = Assert.Single(changes, c => c.Property.Subject == subject && c.Property.Name == propertyName);
         Assert.Equal(newValue, change.GetNewValue<T>());
+    }
+
+    // Runs its callback after the lifecycle interceptor reconciled the write and released its lock.
+    [RunsBefore(typeof(LifecycleInterceptor))]
+    private sealed class AfterWriteInterceptor(Action<PropertyReference> callback) : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+            callback(context.Property);
+        }
     }
 }

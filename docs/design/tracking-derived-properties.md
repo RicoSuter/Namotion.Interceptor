@@ -197,7 +197,7 @@ All of it is read and written under `lock(data)` of the derived property:
 |-------|---------|
 | `OwnerToken`, `OwnerThreadId` | The token of the owning evaluation (a recalculation or an attach), 0 when nobody owns the property, and the thread it runs on. |
 | `AttachToken` | The token of the attach in progress, 0 when none is. A newer attach or a detach replaces it, which tells the attach its result no longer counts. |
-| `AttachCount` | Incremented by every attach, never reset; read without the lock when an evaluation of the owner loop starts. |
+| `AttachCount` | Incremented by every attach, never reset; read without the lock when an evaluation of the owner loop starts and when a request is queued under the lifecycle lock. |
 | `RecalculationNeeded`, `HasForeignRequest` | A request arrived while the property was owned or an attach was in progress, and whether one of them came from another thread than the owner's (or while nobody owned it). |
 | `PendingRawTimestamp` | The raw changed timestamp of the newest pending request, 0 when it has none. |
 | `IsAttached` | Set by the attach, cleared by the detach. A request for a detached property is dropped. |
@@ -210,7 +210,7 @@ All of it is read and written under `lock(data)` of the derived property:
 
 A request comes from the write observer (W5), from `RecalculateDerivedProperty`, or from the protocol itself after an attach. While the thread holds a lifecycle lock, the request is queued instead and runs after the lifecycle operation, outside the lock (see [Post-Lock Queue](tracking-lifecycle.md#post-lock-queue)). A request without a timestamp (a write without a context) takes the current time first. Under `lock(D)`:
 
-1. D is detached: drop the request.
+1. D is detached, or the request was queued under the lifecycle lock and D was attached again since (`AttachCount` moved): drop the request. That attach evaluated after the request's cause.
 2. D is owned, or an attach is in progress: set `RecalculationNeeded`, store the request's timestamp in `PendingRawTimestamp` (the last request to arrive wins, which carries the trigger's timestamp to the coalesced change), mark it foreign when it comes from another thread than the owner's, and return. The caller does not wait.
 3. Otherwise take ownership with a new token and run the owner loop on this thread.
 

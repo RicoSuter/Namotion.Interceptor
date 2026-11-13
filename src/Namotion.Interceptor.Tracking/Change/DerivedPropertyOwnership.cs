@@ -23,6 +23,9 @@ internal static class DerivedPropertyOwnership
     // In correct code, the loop runs 1-2 iterations max.
     private const int MaxStabilizationIterations = 100;
 
+    // The attach count of a request that is not checked against the property's attach count.
+    private const long AnyAttachCount = -1;
+
     /// <summary>
     /// Attaches a derived property and evaluates its first value, unless it is attached through another graph
     /// already.
@@ -107,11 +110,24 @@ internal static class DerivedPropertyOwnership
     /// <param name="rawTimestamp">The raw changed timestamp of the trigger.</param>
     internal static void RequestRecalculation(PropertyReference property, long rawTimestamp)
     {
-        if (PostLockQueue.TryEnqueueRequest(property, rawTimestamp))
+        if (!PostLockQueue.TryEnqueueRequest(property, rawTimestamp))
         {
-            return;
+            Request(property, rawTimestamp, AnyAttachCount);
         }
+    }
 
+    /// <summary>
+    /// Runs a request that was queued under a lifecycle lock, outside every lifecycle lock. It is dropped when the
+    /// property was attached again since it was queued (<paramref name="attachCount"/> moved): that attach evaluated
+    /// after the request's cause.
+    /// </summary>
+    internal static void RunQueuedRequest(PropertyReference property, long rawTimestamp, long attachCount)
+    {
+        Request(property, rawTimestamp, attachCount);
+    }
+
+    private static void Request(PropertyReference property, long rawTimestamp, long attachCount)
+    {
         if (rawTimestamp == 0)
         {
             // A write without a context or a structure change: the time of the request is the trigger's.
@@ -129,7 +145,7 @@ internal static class DerivedPropertyOwnership
         long token;
         lock (data)
         {
-            if (!data.IsAttached)
+            if (!data.IsAttached || (attachCount != AnyAttachCount && data.AttachCount != attachCount))
             {
                 return;
             }
