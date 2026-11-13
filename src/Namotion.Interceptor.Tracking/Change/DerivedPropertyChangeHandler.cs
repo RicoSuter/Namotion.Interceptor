@@ -12,8 +12,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// <remarks>
 /// Deadlock safety: locks are acquired on per-property <see cref="DerivedPropertyData"/> objects.
 /// Nesting follows derived → dependency direction (DAG), so cycles are impossible.
-/// <see cref="DetachProperty"/> never holds lock(data) and lock(derivedData) at the same time;
-/// the used-by collection's leaf lock it may take acquires nothing further.
+/// The used-by collection's leaf lock acquires nothing further.
 /// See docs/design/tracking-derived-properties.md for full concurrency analysis.
 /// </remarks>
 public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
@@ -37,30 +36,18 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
     /// <inheritdoc />
     public void AttachProperty(SubjectPropertyLifecycleChange change)
     {
-        // Source data is never kept by a detach, so its current data is already attached.
         if (!change.Property.Metadata.IsDerived)
         {
             return;
         }
 
-        // A detach may remove the fetched data before it is locked: attach the current data instead.
-        bool isAttached;
-        do
-        {
-            isAttached = TryAttach(change.Property.GetDerivedPropertyData(), change.Property);
-        }
-        while (!isAttached);
+        Attach(change.Property.GetDerivedPropertyData(), change.Property);
     }
 
-    private static bool TryAttach(DerivedPropertyData data, in PropertyReference property)
+    private static void Attach(DerivedPropertyData data, in PropertyReference property)
     {
         lock (data)
         {
-            if (!ReferenceEquals(property.TryGetDerivedPropertyData(), data))
-            {
-                return false;
-            }
-
             // Signal any in-progress recalculation to re-evaluate after we change state.
             if (data.IsRecalculating)
             {
@@ -78,66 +65,40 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
             {
                 // Getter threw. The value will be computed on the next dependency write.
             }
-
-            return true;
         }
     }
 
     /// <inheritdoc />
     public void DetachProperty(SubjectPropertyLifecycleChange change)
     {
-        var property = change.Property;
+        // A source keeps its data and links: only the derived property changes its links.
+        if (!change.Property.Metadata.IsDerived)
+        {
+            return;
+        }
 
-        // Skip properties without tracking data (never participated in the dependency graph).
+        var property = change.Property;
         var data = property.TryGetDerivedPropertyData();
         if (data is null)
         {
             return;
         }
 
-        // Single lock: set IsAttached=false, clean dependencies (Case 1), snapshot used-by properties (Case 2).
-        // Lock serializes with UpdateDependencies' used-by Add on the same depData.
-        PropertyReference[] usedBySnapshot;
         lock (data)
         {
-            usedBySnapshot = data.DetachAndSnapshotUsedBy(property);
+            data.RemoveAllLinks(property);
+            data.IsAttached = false;
+            data.LastKnownValue = null;
+
+            // Fails the stale-publication guard of a publication already past its commit, also for a null value.
+            data.RecalculationSequence++;
+
+            // Signal an in-flight recalculation, which discards its result at its next lock.
             if (data.IsRecalculating)
             {
-                // Kept, so that its IsRecalculating serializes the in-flight recalculation with the ones after
-                // a re-attach. Signal it to re-evaluate after we change state.
                 data.RecalculationNeeded = true;
             }
-            else
-            {
-                // Removed under the lock, so that a registration or attach that fetched this instance sees
-                // that it is no longer current and uses the current data instead.
-                property.RemoveDerivedPropertyData(data);
-            }
         }
-
-        // Case 2: Remove this property from each dependent's RequiredProperties (outside lock).
-        foreach (ref readonly var derivedProperty in usedBySnapshot.AsSpan())
-        {
-            var derivedData = derivedProperty.TryGetDerivedPropertyData();
-            if (derivedData is null)
-            {
-                continue;
-            }
-
-            lock (derivedData)
-            {
-                // A dependent that registered on this property's current data after the snapshot keeps it.
-                if (!IsUsedByCurrentData(property, derivedProperty))
-                {
-                    derivedData.RemoveRequiredProperty(property);
-                }
-            }
-        }
-    }
-
-    private static bool IsUsedByCurrentData(in PropertyReference property, in PropertyReference derivedProperty)
-    {
-        return property.TryGetDerivedPropertyData()?.UsedByDependencies?.Contains(derivedProperty) is true;
     }
 
     /// <summary>
@@ -247,8 +208,8 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
     {
         oldValue = null;
 
-        // TryGet and the IsDerived check: data removed by a detach, or recreated by a dependent's
-        // registration, must not bring a detached derived property back from a stale used-by snapshot.
+        // The IsDerived check: data that a dependent's recording created before this property's attach
+        // must not start a recalculation.
         var data = derivedProperty.TryGetDerivedPropertyData();
         if (data is null || !Volatile.Read(ref data.IsDerived))
         {
