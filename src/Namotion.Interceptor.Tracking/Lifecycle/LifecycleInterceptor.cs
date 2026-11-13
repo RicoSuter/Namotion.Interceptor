@@ -19,8 +19,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
     public LifecycleInterceptor()
     {
+        SingleAttachment = [this];
         TrackingWriteObserver.EnsureRegistered();
     }
+
+    /// <summary>The attachments of a subject that is attached to this interceptor only.</summary>
+    internal LifecycleInterceptor[] SingleAttachment { get; }
 
     /// <summary>
     /// Raised when a subject is attached to the object graph.

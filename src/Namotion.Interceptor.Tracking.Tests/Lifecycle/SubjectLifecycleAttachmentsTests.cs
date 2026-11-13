@@ -50,4 +50,29 @@ public class SubjectLifecycleAttachmentsTests
         Assert.False(isAttachedAfterLeaving);
         Assert.True(SubjectLifecycleAttachments.IsAttached(child));
     }
+
+    [Fact]
+    public void WhenInterceptorsAreEqualButNotTheSame_ThenRemovingOneKeepsTheOther()
+    {
+        // Arrange
+        var first = new EqualLifecycleInterceptor();
+        var second = new EqualLifecycleInterceptor();
+        var child = new Person();
+        SubjectLifecycleAttachments.Add(child, first);
+        SubjectLifecycleAttachments.Add(child, second);
+        SubjectLifecycleAttachments.Remove(child, first);
+
+        // Act
+        SubjectLifecycleAttachments.Remove(child, first);
+
+        // Assert
+        Assert.True(SubjectLifecycleAttachments.IsAttached(child));
+    }
+
+    private sealed class EqualLifecycleInterceptor : LifecycleInterceptor
+    {
+        public override bool Equals(object? obj) => obj is EqualLifecycleInterceptor;
+
+        public override int GetHashCode() => 0;
+    }
 }
