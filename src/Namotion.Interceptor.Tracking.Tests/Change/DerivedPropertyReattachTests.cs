@@ -1,5 +1,6 @@
 using System.Reactive.Concurrency;
 using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -105,9 +106,11 @@ public class DerivedPropertyReattachTests
     {
         // Arrange
         var changes = new List<SubjectPropertyChange>();
+        var blocker = new BlockingReadInterceptor(nameof(UntrackedReferenceLeaf.Value));
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking();
+        context.WithService(() => blocker);
 
         var holder = new UntrackedReferenceHolder(context);
         var leaf = new UntrackedReferenceLeaf();
@@ -117,38 +120,17 @@ public class DerivedPropertyReattachTests
         var valueProperty = new PropertyReference(leaf, nameof(UntrackedReferenceLeaf.Value));
         var observedProperty = new PropertyReference(holder, nameof(UntrackedReferenceHolder.Observed));
         var valueData = valueProperty.TryGetDerivedPropertyData()!;
-        var observedData = observedProperty.TryGetDerivedPropertyData()!;
 
-        // Act: Observed's recalculation waits for its own lock while the leaf is detached and attached again.
-        Thread? writerThread = null;
-        Task writer;
-        Monitor.Enter(observedData);
-        var contentionBefore = Monitor.LockContentionCount;
-        try
-        {
-            writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
-            {
-                writerThread = Thread.CurrentThread;
-                holder.Trigger = 1;
-            });
-
-            Assert.True(SpinWait.SpinUntil(
-                () => writerThread is not null &&
-                      (writerThread.ThreadState & ThreadState.WaitSleepJoin) != 0 &&
-                      Monitor.LockContentionCount > contentionBefore,
-                TimeSpan.FromSeconds(10)));
-
-            holder.First = null;
-            holder.First = leaf;
-
-            // Data is never removed or replaced, so the registration that follows lands on the leaf's current data.
-            Assert.Same(valueData, valueProperty.TryGetDerivedPropertyData());
-        }
-        finally
-        {
-            Monitor.Exit(observedData);
-        }
-
+        // Act: Observed's recalculation recorded the leaf's Value and waits inside the read, before it links it,
+        // while the leaf is detached and attached again.
+        blocker.Arm();
+        var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { holder.Trigger = 1; });
+        var isReadEntered = blocker.Entered.Wait(TimeSpan.FromSeconds(10));
+        holder.First = null;
+        var isLeafDetached = !SubjectLifecycleAttachments.IsAttached(leaf);
+        holder.First = leaf;
+        var currentValueData = valueProperty.TryGetDerivedPropertyData();
+        blocker.Proceed.Set();
         await writer.WaitAsync(TimeSpan.FromSeconds(10));
 
         context
@@ -156,7 +138,11 @@ public class DerivedPropertyReattachTests
             .Subscribe(changes.Add);
         leaf.Value = 5;
 
-        // Assert
+        // Assert: data is never removed or replaced, so the link lands on the leaf's current data.
+        Assert.True(isReadEntered);
+        Assert.False(blocker.HasTimedOut);
+        Assert.True(isLeafDetached);
+        Assert.Same(valueData, currentValueData);
         Assert.Contains(valueProperty, observedProperty.GetRequiredProperties().ToArray());
         Assert.Contains(changes, change => change.Property == observedProperty && change.GetNewValue<int>() == 5);
     }
@@ -307,10 +293,12 @@ public class DerivedPropertyReattachTests
         }
 
         await detach;
+        var isLeafDetached = !SubjectLifecycleAttachments.IsAttached(leaf);
         holder.Trigger = 0;
         holder.Trigger = 1;
 
         // Assert
+        Assert.True(isLeafDetached);
         Assert.Contains(valueProperty, observedProperty.GetRequiredProperties().ToArray());
         Assert.Contains(observedProperty, valueProperty.GetUsedByProperties().Items.ToArray());
     }
@@ -509,5 +497,30 @@ public class DerivedPropertyReattachTests
         var change = Assert.Single(changes, c => c.Property.Name == nameof(EvaluatorWorker.Result));
         Assert.Equal(1, change.GetOldValue<int>());
         Assert.Equal(2, change.GetNewValue<int>());
+    }
+
+    /// <summary>Blocks the first read of a property after <see cref="Arm"/>, after the read was recorded.</summary>
+    private sealed class BlockingReadInterceptor(string propertyName) : IReadInterceptor
+    {
+        private int _isArmed;
+
+        public ManualResetEventSlim Entered { get; } = new();
+
+        public ManualResetEventSlim Proceed { get; } = new();
+
+        public bool HasTimedOut { get; private set; }
+
+        public void Arm() => Volatile.Write(ref _isArmed, 1);
+
+        public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
+        {
+            if (context.Property.Name == propertyName && Interlocked.Exchange(ref _isArmed, 0) == 1)
+            {
+                Entered.Set();
+                HasTimedOut = !Proceed.Wait(TimeSpan.FromSeconds(10));
+            }
+
+            return next(ref context);
+        }
     }
 }
