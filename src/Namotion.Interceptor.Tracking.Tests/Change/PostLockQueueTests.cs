@@ -17,10 +17,14 @@ public class PostLockQueueTests
 {
     private static readonly TimeSpan Timeout = TestTimeouts.Default;
 
-    [Fact]
-    public void WhenHandlerWritesDuringAttach_ThenStructuralWriteIsAnnouncedFirstAndDerivedLast()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenHandlerWritesDuringAttach_ThenStructuralWriteIsAnnouncedFirstAndDerivedLast(bool handlerMakesStructuralWrite)
     {
-        // Arrange: the handler writes a property of the already attached root, whose FullName depends on it.
+        // Arrange: the handler writes a property of the already attached root, whose FullName depends on it. A
+        // structural write of the handler takes the lifecycle lock again and releases it, which does not drain the
+        // queue.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new Person(context) { FirstName = "r" };
         var mother = new Person();
@@ -28,6 +32,11 @@ public class PostLockQueueTests
         {
             if (change.IsContextAttach && change.Subject == mother)
             {
+                if (handlerMakesStructuralWrite)
+                {
+                    root.Father = new Person();
+                }
+
                 root.LastName = "l";
             }
         }));
@@ -38,41 +47,14 @@ public class PostLockQueueTests
         root.Mother = mother;
 
         // Assert
+        string[] handlerWrites = handlerMakesStructuralWrite ? [nameof(Person.Father), nameof(Person.LastName)] : [nameof(Person.LastName)];
         Assert.Equal(
-            [nameof(Person.Mother), nameof(Person.LastName), nameof(Person.FullName), nameof(Person.FullNameWithPrefix)],
+            [nameof(Person.Mother), .. handlerWrites, nameof(Person.FullName), nameof(Person.FullNameWithPrefix)],
             changes.Where(c => c.Property.Subject == root).Select(c => c.Property.Name).ToArray());
         var structural = changes.Single(c => c.Property.Name == nameof(Person.Mother));
         var derived = changes.Single(c => c.Property.Subject == root && c.Property.Name == nameof(Person.FullName));
         Assert.Equal("r l", derived.GetNewValue<string>());
         Assert.Equal(structural.ChangedTimestamp, derived.ChangedTimestamp);
-    }
-
-    [Fact]
-    public void WhenHandlerMakesStructuralWriteDuringAttach_ThenItsReleaseOfTheLockDoesNotDrainTheQueue()
-    {
-        // Arrange: the handler's structural write takes the lifecycle lock again and releases it, while the
-        // structural write that attaches the mother still holds it.
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
-        var root = new Person(context) { FirstName = "r" };
-        var mother = new Person();
-        context.WithService(() => new CallbackLifecycleHandler(change =>
-        {
-            if (change.IsContextAttach && change.Subject == mother)
-            {
-                root.Father = new Person();
-                root.LastName = "l";
-            }
-        }));
-        var changes = new List<SubjectPropertyChange>();
-        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
-
-        // Act
-        root.Mother = mother;
-
-        // Assert
-        Assert.Equal(
-            [nameof(Person.Mother), nameof(Person.Father), nameof(Person.LastName), nameof(Person.FullName), nameof(Person.FullNameWithPrefix)],
-            changes.Where(c => c.Property.Subject == root).Select(c => c.Property.Name).ToArray());
     }
 
     [Fact]
@@ -229,34 +211,56 @@ public class PostLockQueueTests
         Assert.Equal(1, mother.GetReferenceCount());
     }
 
-    [Fact]
-    public void WhenHandlerWritesDuringContextAttach_ThenChangesAreDeliveredOutsideTheLifecycleLock()
+    [Theory]
+    [InlineData("attach")]
+    [InlineData("detach")]
+    [InlineData("tryRunWhileAttached")]
+    public void WhenWriteIsMadeUnderTheLockOfAnOperationWithoutStructuralWrite_ThenChangesAreDeliveredAfterTheRelease(string operation)
     {
-        // Arrange: the root attaches to the context directly, so the release of the lock is the anchor.
+        // Arrange: a context attach, a context detach or TryRunWhileAttached takes the lifecycle lock without a
+        // structural write, so the release of the lock is the anchor.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var lifecycle = context.GetService<LifecycleInterceptor>();
         var existing = new Person(context);
-        var isInHandler = false;
+        var leaving = new Person(context);
+        var isUnderLock = false;
+        void Write()
+        {
+            isUnderLock = true;
+            existing.FirstName = "f";
+            isUnderLock = false;
+        }
+
         context.WithService(() => new CallbackLifecycleHandler(change =>
         {
-            if (change.IsContextAttach && change.Subject != existing)
+            var isOperation = operation == "attach" ? change.IsContextAttach : operation == "detach" && change.IsContextDetach;
+            if (isOperation && change.Subject != existing)
             {
-                isInHandler = true;
-                existing.FirstName = "f";
-                isInHandler = false;
+                Write();
             }
         }));
-        var deliveries = new List<(string Name, bool IsInHandler, bool IsLockFree)>();
+        var deliveries = new List<(string Name, bool IsUnderLock, bool IsLockFree)>();
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
         {
             if (change.Property.Subject == existing)
             {
-                deliveries.Add((change.Property.Name, isInHandler, IsLockFreeForOtherThreads(lifecycle, existing)));
+                deliveries.Add((change.Property.Name, isUnderLock, IsLockFreeForOtherThreads(lifecycle, existing)));
             }
         });
 
         // Act
-        _ = new Person(context);
+        switch (operation)
+        {
+            case "attach":
+                _ = new Person(context);
+                break;
+            case "detach":
+                ((IInterceptorSubject)leaving).Context.RemoveFallbackContext(context);
+                break;
+            default:
+                Assert.True(lifecycle.TryRunWhileAttached(existing, Write));
+                break;
+        }
 
         // Assert
         Assert.Equal(
@@ -298,33 +302,6 @@ public class PostLockQueueTests
     }
 
     [Fact]
-    public void WhenHandlerWritesInsideTryRunWhileAttached_ThenChangeIsDeliveredAfterTheCallback()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
-        var lifecycle = context.GetService<LifecycleInterceptor>();
-        var person = new Person(context) { FirstName = "a" };
-        var isInCallback = false;
-        var deliveries = new List<(string Name, bool IsInCallback)>();
-        context.GetPropertyChangeObservable(ImmediateScheduler.Instance)
-            .Subscribe(change => deliveries.Add((change.Property.Name, isInCallback)));
-
-        // Act
-        var hasRun = lifecycle.TryRunWhileAttached(person, () =>
-        {
-            isInCallback = true;
-            person.FirstName = "b";
-            isInCallback = false;
-        });
-
-        // Assert
-        Assert.True(hasRun);
-        Assert.Equal(
-            [(nameof(Person.FirstName), false), (nameof(Person.FullName), false), (nameof(Person.FullNameWithPrefix), false)],
-            deliveries);
-    }
-
-    [Fact]
     public void WhenCallbackOfTryRunWhileAttachedWritesWithItsOwnTimestamp_ThenTheDerivedChangeKeepsThatTimestamp()
     {
         // Arrange
@@ -346,42 +323,6 @@ public class PostLockQueueTests
 
         // Assert
         Assert.Equal(timestamp, changes.Single(c => c.Property.Name == nameof(Person.FullName)).ChangedTimestamp);
-    }
-
-    [Fact]
-    public void WhenHandlerWritesDuringContextDetach_ThenChangesAreDeliveredOutsideTheLifecycleLock()
-    {
-        // Arrange: the leaving subject detaches from the context directly, so the release of the lock is the anchor.
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
-        var lifecycle = context.GetService<LifecycleInterceptor>();
-        var existing = new Person(context);
-        var leaving = new Person(context);
-        var isInHandler = false;
-        context.WithService(() => new CallbackLifecycleHandler(change =>
-        {
-            if (change.IsContextDetach && change.Subject == leaving)
-            {
-                isInHandler = true;
-                existing.FirstName = "f";
-                isInHandler = false;
-            }
-        }));
-        var deliveries = new List<(string Name, bool IsInHandler, bool IsLockFree)>();
-        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
-        {
-            if (change.Property.Subject == existing)
-            {
-                deliveries.Add((change.Property.Name, isInHandler, IsLockFreeForOtherThreads(lifecycle, existing)));
-            }
-        });
-
-        // Act
-        ((IInterceptorSubject)leaving).Context.RemoveFallbackContext(context);
-
-        // Assert
-        Assert.Equal(
-            [(nameof(Person.FirstName), false, true), (nameof(Person.FullName), false, true), (nameof(Person.FullNameWithPrefix), false, true)],
-            deliveries);
     }
 
     [Fact]
