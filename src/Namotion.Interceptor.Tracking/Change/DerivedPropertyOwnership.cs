@@ -55,8 +55,9 @@ internal static class DerivedPropertyOwnership
             }
             else
             {
-                // A recalculation from before a detach is in flight: it hands off at its next lock. A pending
-                // timestamp is from before the detach, so the request is stamped when it runs.
+                // A recalculation from before a detach is in flight: it hands off at its next lock, or answers the
+                // request with the attach's timestamp when the attach commits first. A pending timestamp is from
+                // before the detach.
                 MarkRecalculationNeeded(data);
                 data.PendingRawTimestamp = 0;
             }
@@ -292,6 +293,13 @@ internal static class DerivedPropertyOwnership
         }
 
         CommitFirstValue(data, property, evaluation, timestamp);
+        if (!ownsData && data.PendingRawTimestamp == 0)
+        {
+            // The owner in flight answers the request of this attach: it publishes the change with the attach's
+            // timestamp, not with one resolved on its own thread. A request that arrived since carries its own.
+            data.PendingRawTimestamp = timestamp;
+        }
+
         data.AttachToken = 0;
         if (ownsData && data.OwnerToken == attachToken)
         {
