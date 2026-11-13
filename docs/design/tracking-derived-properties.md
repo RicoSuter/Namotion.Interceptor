@@ -44,6 +44,7 @@ The design rests on three rules:
 | `PropertyReferenceCollection` | Tracking | Collection for used-by properties with lock-free snapshot reads and writes under its own leaf lock. See [Used-by properties collection](#used-by-properties-collection). |
 | `SubjectLifecycleAttachments` | Tracking | Per subject, the lifecycle interceptors the subject is attached to and its reference count, so a derived property stays attached while its subject is in any graph. See [Detach and Attachments](#detach-and-attachments). |
 | `DerivedPropertyChangeHandlerExtensions` | Tracking | `GetRequiredProperties`, `GetUsedByProperties`, `RecalculateDerivedProperty`, and access to `DerivedPropertyData` via `PropertyReference`. |
+| `SubjectStructure` | Tracking | Records a getter's reads of a subject's structure and reports changes of it, for the lifecycle, parent tracking and the registry. Public, `[EditorBrowsable(Never)]` infrastructure. See [Structure Cells](#structure-cells). |
 
 ## Access Taps
 
@@ -185,6 +186,32 @@ A marked evaluation is evaluated exactly once more before it commits, so a value
 
 A getter that throws is not a failure of the protocol. The reads before the throw are the ones that decided the outcome, so they are linked (R4) and checked (R5) as usual, the previous value is kept, and the property is marked faulted, so the first successful evaluation afterwards is published even when no value was committed before (its old value is then the default of the property type). A success clears the mark.
 
+## Structure Cells
+
+The structure of a subject is whether it is attached and registered, its reference count, its parents with their keys or positions, and its registered properties with their attributes. A getter that reads any part of it follows all of it: the structure is one dependency source per subject, its cell, and any change of it recalculates every derived property that read any part of it.
+
+A cell is the `DerivedPropertyData` of the subject's structure: it is stored like a property's data, under a reference without a property name (`SubjectStructure.Of`), and has a version and a used-by collection like a property's. Recording, linking and the version check are therefore those of a property: a structure read records the cell and its version (R1, R2) before the state is read, the commit links it (R4) and checks its version (R5), and the [proof](#proof-that-no-write-is-missed) and the [own-write rule](#own-writes) apply unchanged. `GetRequiredProperties` lists properties only, not cells. A cell raises no [type gate](#components), since the structure is never written through the write observer.
+
+Recorded, only while a getter is recorded, by:
+
+| API | Records |
+|---|---|
+| `GetParents(S)` | S |
+| `TryGetFirstParent`, `TryGetFirstParentOrSelf` | every visited subject, through `GetParents` |
+| `GetReferenceCount(S)`, `RegisteredSubject.ReferenceCount` | S |
+| `subject.TryGetRegisteredSubject()` | S, before the registry is resolved, so a subject whose context has no registry yet is followed |
+| `ISubjectRegistry.TryGetRegisteredSubject(S)` | S |
+| `RegisteredSubject.Parents`, `Properties`, `TryGetProperty`, `GetPropertyAttributes`, `TryGetPropertyAttribute` of S | S |
+| `RegisteredSubjectProperty.Children` of a property P | P, and the cell of P's subject: the registry clears the children when that subject detaches, without a write of P |
+
+Changed by the following; a change updates the state first, then runs W2 to W5 on the cell (`TrackingWriteObserver.OnStructureChanged`), whose requests are queued while the thread holds a lifecycle lock (see [Structure Changes](tracking-lifecycle.md#structure-changes)) and run immediately otherwise:
+
+- `LifecycleInterceptor`, once per lifecycle change of S it dispatches (context attach or detach, reference added or removed), after all lifecycle handlers ran.
+- `LifecycleInterceptor`, once per child whose key or position a write changed, after the `IChildIndexHandler` services ran.
+- `RegisteredSubject.AddProperty`, `AddDerivedProperty` and `AddAttribute`, after the registered properties were replaced and before the new property attaches.
+
+A change of fallback contexts reaches the lifecycle as an attach or detach and is covered by the first point. Reads made while the lifecycle reconciles are not recorded (see [Derived Properties Under the Lock](tracking-lifecycle.md#derived-properties-under-the-lock)), so a getter whose side effect attaches a subject does not follow the structure that the reconciliation and its handlers read.
+
 ## Ownership Protocol
 
 `DerivedPropertyOwnership` implements the protocol. Its invariant: one owner at a time evaluates, commits and publishes a derived property, and a getter or a publication never runs under `lock(data)`.
@@ -287,7 +314,7 @@ A getter is expected to read, not write. Writes in a getter are supported, at a 
 
 ## What Is Followed and What Is Not
 
-A derived property follows every intercepted property its getter reads, on any subject, however the getter reached it. [What a Derived Property Follows](../tracking.md#what-a-derived-property-follows) lists what is not followed; `RecalculateDerivedProperty` covers that, as it requests a recalculation like a write does.
+A derived property follows every intercepted property its getter reads, on any subject, however the getter reached it, and the structure of every subject whose structure it reads through the APIs listed in [Structure Cells](#structure-cells). [What a Derived Property Follows](../tracking.md#what-a-derived-property-follows) lists what is not followed; `RecalculateDerivedProperty` covers that, as it requests a recalculation like a write does.
 
 ## Concurrency Model
 
@@ -366,7 +393,7 @@ Every evaluation except the first at attach, and every publication, runs outside
 
 ### Value correctness
 
-After concurrent writes, attaches and detaches settle, every attached derived property's last committed and last published value equals what its getter returns on the current state, for every property it follows. A write of a followed property is never missed ([the proof above](#proof-that-no-write-is-missed)), every commit links exactly what its evaluation read, and only the owner publishes, in commit order. The exceptions are the documented bounds: a request dropped after a failure on the owner's own thread (a self-writing getter or observer), a publication that threw, and what is not followed.
+After concurrent writes, attaches and detaches settle, every attached derived property's last committed and last published value equals what its getter returns on the current state, for every property and structure it follows. A write of a followed property, or a change of a followed structure, is never missed ([the proof above](#proof-that-no-write-is-missed)), every commit links exactly what its evaluation read, and only the owner publishes, in commit order. The exceptions are the documented bounds: a request dropped after a failure on the owner's own thread (a self-writing getter or observer), a publication that threw, and what is not followed.
 
 ### No stale links
 
@@ -388,6 +415,8 @@ Every link belongs to an attached derived property: D's detach removes all of D'
 | Write of a property nobody read, on a type with derived property data | Zero | Above, plus one data lookup (W3) |
 | Write of a property with dependents | Zero | Above, plus `Interlocked.Increment` (W4), a used-by snapshot read, and a request per dependent |
 | Request for an owned property | Zero | One brief `lock(data)` |
+| Structure read outside an evaluation | Zero | One thread-static load and a type check |
+| Lifecycle change of a subject whose structure no getter read | Zero | A full fence (W2) and one data lookup |
 | Request under a lifecycle lock | Zero in steady state (segments reused per thread) | One queue entry per derived property; a change delivery queued under the lock allocates its closure |
 | Recalculation, dependencies unchanged | Zero (beyond the getter) | Brief `lock(data)` for the request, the commit and after the publication, the getter, a full fence and a version read per dependency (R5) |
 | Recalculation, dependencies changed | One `PropertyReference[]` when the buffer grows | Above, plus used-by adds and removes |

@@ -271,11 +271,14 @@ Getters must not block or take locks. The first evaluation runs while the subjec
 
 A subject without a context is followed because generated code reads and writes it through `InterceptorExecutor.GetPropertyValueWithoutContext` and `InterceptorExecutor.SetPropertyValueWithoutContext`. A [hand-written subject base class](generator.md#hand-written-base-classes-and-subclasses) has to call them as well instead of reading and writing its fields directly while the subject has no context, or derived properties do not follow its subjects until they are attached.
 
+A derived property also follows the structure of a subject its getter reads through `GetParents`, `TryGetFirstParent`, `GetReferenceCount` or the registry (`TryGetRegisteredSubject`, the parents, properties, attributes and children of a registered subject): whether the subject is attached and registered, its reference count, its parents and its registered properties. Any change of that structure recalculates the derived property.
+
 Not followed:
 
 - State outside the model, such as external services, static state, or plain fields and properties that are not intercepted
-- Graph state: parents, the registry, whether a subject is attached, and its reference count
 - Context services read directly, such as `subject.Context.TryGetService<T>()`
+- Registry resolution changed by a fallback context added to a subject that is already attached, or replaced by application code
+- Registry-wide queries, such as `KnownSubjects`
 - `IInterceptorSubject.Properties` and `subject.Data` read directly
 
 Use `RecalculateDerivedProperty()` (below) when such state changes.

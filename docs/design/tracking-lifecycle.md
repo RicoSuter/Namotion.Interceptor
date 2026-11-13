@@ -217,6 +217,15 @@ Derived property tracking hooks into the lifecycle at two points: the lifecycle 
 
 **Cost.** See [Performance Characteristics](tracking-derived-properties.md#performance-characteristics). In addition, a write with consumers reads the lock count in `PropertyChangeInterceptor`, and a structural write counts its lock.
 
+## Structure Changes
+
+A derived getter can read the structure of a subject: whether it is attached and registered, its reference count, its parents, its registered properties. The lifecycle reports each change of it, so the derived properties that read it are recalculated (see [Structure Cells](tracking-derived-properties.md#structure-cells)):
+
+- once per lifecycle change of a subject it dispatches (context attach or detach, reference added or removed), after all lifecycle handlers ran, so parent tracking and the registry have updated their state. On attach, this is before the subject's properties attach, so a derived property of the subject itself evaluates on the new state;
+- once per kept child whose key or position a write changed, after the `IChildIndexHandler` services ran.
+
+A change made under the lifecycle lock queues its recalculation requests in the [post-lock queue](#post-lock-queue) like a write does: they run after the lifecycle operation and take the anchor's timestamp. `RegisteredSubject.AddProperty` reports a change of the registered properties itself; outside the lifecycle lock, its requests run before it returns.
+
 ## Handler Order Around the Descent
 
 `ContextInheritanceHandler` is the handler that walks down into a newly attached subtree. Where a handler sits relative to it decides both the order it sees subjects in and what it can look up.
