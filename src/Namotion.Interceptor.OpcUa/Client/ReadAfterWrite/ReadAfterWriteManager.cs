@@ -137,6 +137,23 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
     }
 
     /// <summary>
+    /// Moves a tracked property to the lock of the subscription that now holds it, keeping its revised
+    /// interval. Does nothing for a property that is not tracked.
+    /// </summary>
+    /// <param name="nodeId">The OPC UA node ID.</param>
+    /// <param name="applyLock">The lock under which notifications for this property are now applied.</param>
+    public void UpdateApplyLock(NodeId nodeId, Lock applyLock)
+    {
+        lock (_lock)
+        {
+            if (_trackedProperties.TryGetValue(nodeId, out var tracked))
+            {
+                _trackedProperties[nodeId] = tracked with { ApplyLock = applyLock };
+            }
+        }
+    }
+
+    /// <summary>
     /// Notifies that a property was successfully written. Schedules a read-after-write if needed.
     /// </summary>
     /// <param name="nodeId">The OPC UA node ID that was written.</param>

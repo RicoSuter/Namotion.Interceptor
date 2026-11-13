@@ -622,8 +622,9 @@ internal class SubscriptionManager : IAsyncDisposable
             }
             else
             {
-                // An earlier registration would still carry a replaced subscription's lock.
-                _readAfterWriteManager.UnregisterProperty(item.StartNodeId);
+                // Not created yet: the health monitor heals it within this subscription, which never registers
+                // it again, so an earlier registration moves to this subscription's lock instead of being dropped.
+                _readAfterWriteManager.UpdateApplyLock(item.StartNodeId, applyLock);
             }
         }
     }

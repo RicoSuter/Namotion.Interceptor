@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Client.Polling;
+using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
@@ -112,6 +114,60 @@ public class SubscriptionManagerDiagnosticsTests
         manager.OnFastDataChange(subscription, CreateNotification(clientHandle, "value"), []);
 
         // Assert
+        Assert.True(lockHeldDuringApply);
+    }
+
+    [Fact]
+    public async Task WhenARecreatedSubscriptionsItemIsNotCreatedYet_ThenItsReadAfterWriteMovesToThatSubscriptionsLock()
+    {
+        // Arrange - the health monitor heals the item within the recreated subscription and never registers
+        // it again, so the existing registration has to follow it.
+        var configuration = CreateConfiguration();
+        await using var source = CreateClientSource(configuration: configuration);
+        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
+        var session = new Mock<ISession>();
+        session.SetupGet(value => value.Connected).Returns(true);
+        session
+            .Setup(value => value.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ReadResponse
+            {
+                ResponseHeader = new ResponseHeader(),
+                Results = [new DataValue { Value = "read", StatusCode = StatusCodes.Good, SourceTimestamp = DateTime.UtcNow.AddMinutes(1) }],
+                DiagnosticInfos = []
+            });
+        await using var readAfterWriteManager = new ReadAfterWriteManager(
+            () => session.Object, source, configuration, new ReadAfterWriteMetrics(), static _ => { }, NullLogger.Instance);
+        await using var manager = CreateManager(
+            source, propertyWriter, configuration, new ConcurrentQueue<Exception>(), readAfterWriteManager: readAfterWriteManager);
+        var root = (TestRoot)source.RootSubject;
+        var property = new RegisteredSubject(root).TryGetProperty(nameof(TestRoot.Name))!;
+        var nodeId = new NodeId("Name", 2);
+        readAfterWriteManager.RegisterProperty(nodeId, property, 0, TimeSpan.FromMinutes(1), new Lock());
+        var recreatedSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        recreatedSubscription.AddItem(new MonitoredItem(NullTelemetryContext.Instance)
+        {
+            StartNodeId = nodeId,
+            AttributeId = Opc.Ua.Attributes.Value,
+            Handle = property
+        });
+        var applyLock = manager.GetApplyLock(recreatedSubscription);
+        bool? lockHeldDuringApply = null;
+        using var changes = source.RootSubject.Context
+            .GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(_ => lockHeldDuringApply = applyLock.IsHeldByCurrentThread);
+
+        // Act
+        manager.UpdateTransferredSubscriptions([recreatedSubscription]);
+        readAfterWriteManager.OnPropertyWritten(nodeId);
+        await readAfterWriteManager.ProcessDueReadsAsync(DateTime.MaxValue);
+
+        // Assert
+        Assert.Equal("read", root.Name);
         Assert.True(lockHeldDuringApply);
     }
 
@@ -434,12 +490,13 @@ public class SubscriptionManagerDiagnosticsTests
         OpcUaClientConfiguration configuration,
         ConcurrentQueue<Exception> reportedErrors,
         Func<Subscription, CancellationToken, Task>? applyChangesAsync = null,
-        PollingManager? pollingManager = null) =>
+        PollingManager? pollingManager = null,
+        ReadAfterWriteManager? readAfterWriteManager = null) =>
         new(
             source,
             propertyWriter,
             pollingManager,
-            readAfterWriteManager: null,
+            readAfterWriteManager,
             configuration,
             error =>
             {

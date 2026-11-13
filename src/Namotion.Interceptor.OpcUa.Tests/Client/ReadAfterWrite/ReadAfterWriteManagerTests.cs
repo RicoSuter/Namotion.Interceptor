@@ -538,6 +538,37 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task WhenTheApplyLockIsUpdated_ThenTheReadIsAppliedUnderTheNewLock()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var subject = new TestPerson(context);
+        var newLock = new Lock();
+        bool? newLockHeldDuringApply = null;
+        using var subscription = context
+            .GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(_ => newLockHeldDuringApply = newLock.IsHeldByCurrentThread);
+        var session = CreateSessionReturning(CreateDataValue("read", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1)));
+        await using var manager = new ReadAfterWriteManager(
+            () => session.Object,
+            new Mock<Connectors.ISubjectSource>().Object,
+            CreateConfiguration(TimeSpan.FromMilliseconds(250)),
+            new ReadAfterWriteMetrics(),
+            reportError: static _ => { },
+            NullLogger.Instance);
+        var nodeId = new NodeId("FirstName", 2);
+        RegisterAndSchedule(manager, nodeId, CreateTestProperty(subject), applyLock: new Lock());
+
+        // Act
+        manager.UpdateApplyLock(nodeId, newLock);
+        await manager.ProcessDueReadsAsync(DateTime.MaxValue);
+
+        // Assert
+        Assert.Equal("read", subject.FirstName);
+        Assert.True(newLockHeldDuringApply);
+    }
+
+    [Fact]
     public async Task WhenCompletionLoggingThrows_ThenTheReadOutcomeIsCountedOnce()
     {
         // Arrange
