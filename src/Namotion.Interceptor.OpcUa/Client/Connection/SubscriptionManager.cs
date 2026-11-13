@@ -182,6 +182,7 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
 
             var batchEnd = Math.Min(i + maxItemsPerSubscription, itemCount);
             var trackedClientHandles = new List<uint>(batchEnd - i);
+            var applyLock = GetApplyLock(subscription);
             try
             {
                 for (var j = i; j < batchEnd; j++)
@@ -193,6 +194,10 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
                     {
                         TrackMonitoredItem(item, request);
                         trackedClientHandles.Add(item.ClientHandle);
+
+                        // A registration from a replaced subscription moves to the lock this item's
+                        // notifications use from now on; it is registered again once the item is created.
+                        _readAfterWriteManager?.UpdateApplyLock(request.NodeId, applyLock);
                     }
                     else
                     {
@@ -386,9 +391,7 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
 
             // One notification message comes from one server-side partition, and sequence numbers
             // are per partition.
-            var applyState = _tracking
-                .GetValue(subscription, static _ => new SubscriptionTracking())
-                .GetApplyState(notification[0].PartitionServerId);
+            var applyState = GetTracking(subscription).GetApplyState(notification[0].PartitionServerId);
 
             // Pool item returned inside callback. Safe because ApplyUpdate never throws:
             // It wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
@@ -396,8 +399,9 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
             _propertyWriter.Write(state, static s =>
             {
                 // The ranking and the apply share one lock because a late message of a partition can be
-                // delivered while a newer one is applied. Taken inside the writer's lock during
-                // replay, so nothing may take the writer's lock while holding this one.
+                // delivered while a newer one is applied. Read-after-write applies under it too. Taken
+                // inside the writer's lock during replay, so nothing may take the writer's lock while
+                // holding this one.
                 lock (s.applyState.Lock)
                 {
                     var stamp = s.applyState.GetStamp(s.sequenceNumber);
@@ -456,6 +460,17 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
         }
     }
 
+    /// <summary>
+    /// Gets the lock under which the notifications of <paramref name="subscription"/> are applied, by
+    /// all of its server-side partitions. It stays the same across <see cref="ResetNotificationRanking"/>
+    /// and partition changes, so a read-after-write registration keeps applying under the lock the
+    /// notifications take.
+    /// </summary>
+    internal Lock GetApplyLock(ISubscription subscription) => GetTracking(subscription).ApplyLock;
+
+    private SubscriptionTracking GetTracking(ISubscription subscription) =>
+        _tracking.GetValue(subscription, static _ => new SubscriptionTracking());
+
     private void ReportErrorIfRunning(Exception error, CancellationToken cancellationToken = default)
     {
         if (!_shuttingDown && !cancellationToken.IsCancellationRequested)
@@ -467,7 +482,8 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
     /// <summary>
     /// Starts a new ranking of notification messages for every subscription. Called when the server
     /// session was created again: a subscription the engine had to create again numbers its messages
-    /// from the start again, which must not be ranked against the messages applied before.
+    /// from the start again, which must not be ranked against the messages applied before. The apply
+    /// locks are kept, see <see cref="GetApplyLock"/>.
     /// </summary>
     internal void ResetNotificationRanking()
     {
@@ -582,9 +598,14 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
     {
         subscription.MonitoredItems.TryRemove(clientHandle);
 
-        if (TryRemoveMonitoredItem(clientHandle, out var state) && fallBackToPolling)
+        // Polled values are applied without the subscription's lock, so read-after-write cannot stay atomic.
+        if (TryRemoveMonitoredItem(clientHandle, out var state))
         {
-            _pollingManager?.AddItem(state.NodeId, state.Property);
+            _readAfterWriteManager?.UnregisterProperty(state.NodeId);
+            if (fallBackToPolling)
+            {
+                _pollingManager?.AddItem(state.NodeId, state.Property);
+            }
         }
     }
 
@@ -697,6 +718,7 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
             return;
         }
 
+        var applyLock = GetApplyLock(subscription);
         foreach (var item in subscription.MonitoredItems.Items)
         {
             // The engine sets the revised interval after the item reports itself created, so an item
@@ -708,7 +730,7 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
                 state.TryMarkRegisteredWithReadAfterWrite())
             {
                 var requestedInterval = GetRequestedSamplingInterval(state.Property);
-                _readAfterWriteManager.RegisterProperty(state.NodeId, state.Property, requestedInterval, revisedInterval);
+                _readAfterWriteManager.RegisterProperty(state.NodeId, state.Property, requestedInterval, revisedInterval, applyLock);
             }
         }
     }
@@ -881,8 +903,15 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
 
         public volatile bool PublishingStopped;
 
+        /// <summary>
+        /// The lock every partition applies its notifications under. One lock for the subscription
+        /// rather than one per partition, so it stays valid when the engine creates, deletes or
+        /// resets partitions.
+        /// </summary>
+        public Lock ApplyLock { get; } = new();
+
         public SubscriptionApplyState GetApplyState(uint partitionServerId) =>
-            _applyStates.GetOrAdd(partitionServerId, static _ => new SubscriptionApplyState());
+            _applyStates.GetOrAdd(partitionServerId, static (_, applyLock) => new SubscriptionApplyState(applyLock), ApplyLock);
 
         public void ResetApplyStates() => _applyStates.Clear();
 
@@ -897,7 +926,7 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
     /// packs a 24-bit epoch that identifies the instance into the high bits and the message's sequence
     /// number, extended past the 32-bit wrap, into the low 40 bits, which last about 2^40 messages.
     /// </summary>
-    private sealed class SubscriptionApplyState
+    private sealed class SubscriptionApplyState(Lock applyLock)
     {
         private const int SequenceBits = 40;
         private const ulong SequenceMask = (1UL << SequenceBits) - 1;
@@ -907,7 +936,7 @@ internal class SubscriptionManager : ISubscriptionNotificationHandler, IAsyncDis
         private readonly ulong _epoch = ((ulong)(uint)Interlocked.Increment(ref _lastEpoch) & 0xFF_FFFF) << SequenceBits;
         private ulong _highestSequenceNumber;
 
-        public Lock Lock { get; } = new();
+        public Lock Lock { get; } = applyLock;
 
         /// <summary>
         /// Whether <paramref name="stamp"/> belongs to an older message of the same instance than
