@@ -321,21 +321,16 @@ public class ApplicationCertificateLoaderTests : IDisposable
     public async Task WhenTheKeyIsPasswordProtected_ThenItLoadsThroughThePasswordProvider()
     {
         // Arrange
-        var configuration = new PasswordConfiguration("secret")
-        {
-            ServerUrl = "opc.tcp://localhost:4840",
-            CertificateStoreBasePath = _storePath,
-            ApplicationUri = "urn:test:client",
-            AutoCreateApplicationCertificate = false,
-            TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
-            ValueConverter = new OpcUaValueConverter(),
-            SubjectFactory = new OpcUaSubjectFactory(Connectors.DefaultSubjectFactory.Instance)
-        };
+        var configuration = CreateConfiguration();
+        configuration.ApplicationUri = "urn:test:client";
+        configuration.AutoCreateApplicationCertificate = false;
         using var certificate = CertificateFactory
             .CreateCertificate("urn:test:client", configuration.ApplicationName, $"CN={configuration.ApplicationName}, O=Namotion", null)
             .CreateForRSA();
         await AddToStoreAsync("own", certificate, "secret".ToCharArray());
         var application = await configuration.CreateApplicationInstanceAsync();
+        application.ApplicationConfiguration.SecurityConfiguration.CertificatePasswordProvider =
+            new CertificatePasswordProvider(Encoding.UTF8.GetBytes("secret"));
 
         // Act
         await LoadAsync(application, configuration);
@@ -434,16 +429,5 @@ public class ApplicationCertificateLoaderTests : IDisposable
         using var store = new CertificateStoreIdentifier(Path.Combine(_storePath, storeName), CertificateStoreType.Directory, false)
             .OpenStore(NullTelemetryContext.Instance);
         await store.AddAsync(certificate, password);
-    }
-
-    private sealed class PasswordConfiguration(string password) : OpcUaClientConfiguration
-    {
-        public override async Task<ApplicationInstance> CreateApplicationInstanceAsync()
-        {
-            var application = await base.CreateApplicationInstanceAsync();
-            application.ApplicationConfiguration.SecurityConfiguration.CertificatePasswordProvider =
-                new CertificatePasswordProvider(Encoding.UTF8.GetBytes(password));
-            return application;
-        }
     }
 }
