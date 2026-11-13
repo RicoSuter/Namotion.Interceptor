@@ -108,8 +108,9 @@ public sealed partial class MarkdownContentParser
     }
 
     /// <summary>
-    /// Records the configuration that was written to the page for a subject, so that the reload
-    /// which follows the write updates the subject in place. The JSON must have the naming of a page,
+    /// Records the configuration that was written to the page for a subject. The reload which follows the write
+    /// compares the page with these keys and the JSON applied before, so it updates the subject in place unless
+    /// the update policy says to recreate it. The JSON must have the naming of a page,
     /// <see cref="ConfigurationNaming.CSharpProperty"/>, because its keys are compared with those of the page.
     /// </summary>
     internal void RememberConfiguration(IInterceptorSubject subject, string configurationJson)

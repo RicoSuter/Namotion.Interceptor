@@ -36,4 +36,41 @@ public class MarkdownRecreateOnChangeTests
         Assert.Same(leaf, page.Children["leaf"]);
         Assert.Equal("bb", leaf.Name);
     }
+
+    [Fact]
+    public async Task WhenARecreateOnChangeValueOfABlockIsSavedFromTheEditDialog_ThenANewInstanceIsCreated()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", $":: {LeafType}#leaf Name=a Shape=round\n::\n");
+        var leaf = (RecreatingTestLeaf)page.Children["leaf"];
+        leaf.Shape = "square";
+
+        // Act
+        await page.WriteConfigurationAsync(leaf, CancellationToken.None);
+        await page.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        var reloaded = Assert.IsType<RecreatingTestLeaf>(page.Children["leaf"]);
+        Assert.NotSame(leaf, reloaded);
+        Assert.Equal("square", reloaded.Shape);
+    }
+
+    [Fact]
+    public async Task WhenAnOrdinaryValueOfABlockIsSavedFromTheEditDialog_ThenTheInstanceIsKept()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", $":: {LeafType}#leaf Name=a Shape=round\n::\n");
+        var leaf = (RecreatingTestLeaf)page.Children["leaf"];
+        leaf.Name = "bb";
+
+        // Act
+        await page.WriteConfigurationAsync(leaf, CancellationToken.None);
+        await page.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Same(leaf, page.Children["leaf"]);
+        Assert.Equal("bb", leaf.Name);
+    }
 }
