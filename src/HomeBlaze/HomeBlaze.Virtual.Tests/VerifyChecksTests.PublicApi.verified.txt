@@ -16,6 +16,12 @@ namespace HomeBlaze.Virtual
         public static System.Type GetClrType(HomeBlaze.Virtual.VirtualDataType dataType) { }
         public static bool TryGetDataType(System.Type type, out HomeBlaze.Virtual.VirtualDataType dataType) { }
     }
+    public static class VirtualExpression
+    {
+        public static Namotion.Interceptor.Expressions.ExpressionValue Evaluate(Namotion.Interceptor.Expressions.ParsedExpression expression, HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject scope) { }
+        public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveProperty(HomeBlaze.Services.SubjectPathResolver resolver, string path, Namotion.Interceptor.IInterceptorSubject scope) { }
+        public static bool TryParse(string text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Expressions.ParsedExpression? expression, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
+    }
     public sealed class VirtualProperty : System.IEquatable<HomeBlaze.Virtual.VirtualProperty>
     {
         public VirtualProperty() { }
