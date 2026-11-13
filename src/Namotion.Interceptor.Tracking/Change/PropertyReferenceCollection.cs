@@ -110,11 +110,10 @@ public sealed class PropertyReferenceCollection
     /// </summary>
     /// <returns>True if property was added; false if already exists.</returns>
     /// <remarks>
-    /// A successful add is a full memory barrier: the addition is visible to other threads before any later
-    /// read by the calling thread. Dependency registration relies on this to pair with the version check. An
-    /// add that returns false needs no barrier: every add of a dependent runs under that dependent's own data lock,
-    /// so the add that succeeded earlier already executed it. See the version protocol in
-    /// docs/design/tracking-derived-properties.md.
+    /// A successful add ends with a full memory barrier, so the addition is published before the call returns.
+    /// Ordering the addition against a later read of another location is the caller's job: dependency registration
+    /// does it with its own fence in the version check. An add that returns false publishes nothing and needs no
+    /// barrier.
     /// </remarks>
     internal bool Add(in PropertyReference property)
     {
@@ -143,7 +142,7 @@ public sealed class PropertyReferenceCollection
                 Volatile.Write(ref _state, new LargeStorage(array, property));
             }
 
-            // Not implied by the lock: releasing it is not documented to be a full fence.
+            // Releasing the lock is not documented to be a full fence.
             Interlocked.MemoryBarrier();
             return true;
         }
