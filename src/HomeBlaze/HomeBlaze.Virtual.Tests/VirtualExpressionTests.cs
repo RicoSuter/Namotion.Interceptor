@@ -94,6 +94,95 @@ public class VirtualExpressionTests
         Assert.Equal("Wind", miss.Name);
     }
 
+    [Theory]
+    [InlineData("/Meter/Sub/Power")]
+    [InlineData("Meter/Sub/Power")]
+    public void WhenAMiddleSegmentIsMissing_ThenTheMissIsRecordedOnItsParent(string path)
+    {
+        // Arrange
+        var graph = new VirtualTestGraph();
+        var meter = new TestMeter();
+        graph.Add("Meter", meter);
+        List<VirtualMiss>? misses = null;
+
+        // Act
+        var property = VirtualExpression.ResolveProperty(graph.Resolver, path, graph.Root, ref misses);
+
+        // Assert
+        Assert.Null(property);
+        var miss = Assert.Single(misses!);
+        Assert.Same(meter, miss.Subject);
+        Assert.Equal("Sub", miss.Name);
+    }
+
+    [Fact]
+    public void WhenAPathResolvesThroughInlinePaths_ThenNoMissIsRecorded()
+    {
+        // Arrange
+        var graph = new VirtualTestGraph();
+        graph.Add("Meter", new TestMeter { Power = 3 });
+        List<VirtualMiss>? misses = null;
+
+        // Act
+        var property = VirtualExpression.ResolveProperty(graph.Resolver, "/Meter/Power", graph.Root, ref misses);
+
+        // Assert
+        Assert.Equal(3m, property?.GetValue());
+        Assert.Null(misses);
+    }
+
+    [Fact]
+    public void WhenAMiddleSegmentIsAPropertyWithoutSubject_ThenNoMissIsRecorded()
+    {
+        // Arrange
+        var graph = new VirtualTestGraph();
+        graph.Add("Meter", new TestMeter());
+        List<VirtualMiss>? misses = null;
+
+        // Act
+        var property = VirtualExpression.ResolveProperty(graph.Resolver, "/Meter/Power/Value", graph.Root, ref misses);
+
+        // Assert
+        Assert.Null(property);
+        Assert.Null(misses);
+    }
+
+    [Theory]
+    [InlineData("/Meter/Power[0]")]
+    [InlineData("/Meter/Items[0]/Power")]
+    [InlineData("/Meter/..")]
+    [InlineData("/Meter/./Power/.")]
+    public void WhenAMissingNameCanNeverBeAProperty_ThenNoMissIsRecorded(string path)
+    {
+        // Arrange
+        var graph = new VirtualTestGraph();
+        graph.Add("Meter", new TestMeter());
+        List<VirtualMiss>? misses = null;
+
+        // Act
+        var property = VirtualExpression.ResolveProperty(graph.Resolver, path, graph.Root, ref misses);
+
+        // Assert
+        Assert.Null(property);
+        Assert.Null(misses);
+    }
+
+    [Fact]
+    public void WhenTheSubjectIsNotRegistered_ThenNoMissIsRecorded()
+    {
+        // Arrange
+        var graph = new VirtualTestGraph();
+        var detached = new TestMeter();
+        List<VirtualMiss>? misses = null;
+
+        // Act
+        var property = VirtualExpression.ResolveProperty(graph.Resolver, "Wind", detached, ref misses);
+
+        // Assert
+        Assert.Null(property);
+        Assert.Null(misses);
+    }
+
     [Fact]
     public void WhenAnExpressionIsEvaluated_ThenItComputesWithTheValuesOfItsPaths()
     {

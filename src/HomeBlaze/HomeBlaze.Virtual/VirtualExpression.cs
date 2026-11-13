@@ -56,7 +56,10 @@ public static class VirtualExpression
         return ResolveProperty(resolver, path, scope, ref misses);
     }
 
-    /// <summary>Resolves like the public overload and adds a path that led to a subject without the property to <paramref name="misses"/>.</summary>
+    /// <summary>
+    /// Resolves like the public overload and adds to <paramref name="misses"/> the subject that a path led to without the
+    /// property it names next, also a middle segment, when that property could be added at run time.
+    /// </summary>
     internal static RegisteredSubjectProperty? ResolveProperty(SubjectPathResolver resolver, string path, IInterceptorSubject scope, ref List<VirtualMiss>? misses)
     {
         var separator = path.LastIndexOf(SubjectPathResolver.Separator);
@@ -68,14 +71,26 @@ public static class VirtualExpression
 
         try
         {
-            if (ResolveSubject(resolver, path, separator, scope) is not { } subject)
+            if (GetStart(resolver, path, scope, out var walkStart) is not { } start)
             {
                 return null;
             }
 
-            if (subject.TryGetRegisteredProperty(name) is not { } property)
+            var subject = walkStart > separator ? start : resolver.ResolveSubject(path[walkStart..(separator + 1)], PathStyle.Canonical, start);
+            if (subject is null)
             {
-                (misses ??= []).Add(new VirtualMiss(subject, name));
+                AddMissOfMissingSegment(resolver, path, start, walkStart, separator, ref misses);
+                return null;
+            }
+
+            if (subject.TryGetRegisteredSubject() is not { } registered)
+            {
+                return null;
+            }
+
+            if (registered.TryGetProperty(name) is not { } property)
+            {
+                AddMiss(subject, name, ref misses);
                 return null;
             }
 
@@ -88,23 +103,54 @@ public static class VirtualExpression
         }
     }
 
-    // An absolute path is walked relative to the root: the resolver caches absolute paths and reads nothing that derived
-    // tracking records, while a relative walk reads each property that holds subjects on the way, so a subject that is
-    // added or replaced there recalculates the property that resolved the path.
-    // The subject part keeps its trailing separator, so that "./" and "../" reach the resolver as the prefixes it knows.
-    private static IInterceptorSubject? ResolveSubject(SubjectPathResolver resolver, string path, int separator, IInterceptorSubject scope)
+    // Gets the subject the walk starts at and the index in the path where it starts. An absolute path is walked relative
+    // to the root: the resolver caches absolute paths and reads nothing that derived tracking records, while a relative
+    // walk reads each property that holds subjects on the way, so a subject that is added or replaced there recalculates
+    // the property that resolved the path.
+    private static IInterceptorSubject? GetStart(SubjectPathResolver resolver, string path, IInterceptorSubject scope, out int walkStart)
     {
-        if (separator < 0)
+        walkStart = 0;
+        if (path[0] != SubjectPathResolver.Separator)
         {
             return scope;
         }
 
-        if (path[0] != SubjectPathResolver.Separator)
-        {
-            return resolver.ResolveSubject(path[..(separator + 1)], PathStyle.Canonical, scope);
-        }
+        walkStart = 1;
+        return resolver.ResolveSubject("/", PathStyle.Canonical, scope);
+    }
 
-        var root = resolver.ResolveSubject("/", PathStyle.Canonical, scope);
-        return root is null || separator == 0 ? root : resolver.ResolveSubject(path[1..(separator + 1)], PathStyle.Canonical, root);
+    // Only for a path that did not resolve: finds the last subject on the way and the segment after it, by resolving ever
+    // shorter parts of the path, as a failed step reports too little to the resolver's recorder to tell where it failed.
+    // A part keeps its trailing separator, so that "./" and "../" reach the resolver as the prefixes it knows.
+    private static void AddMissOfMissingSegment(
+        SubjectPathResolver resolver, string path, IInterceptorSubject start, int walkStart, int separator, ref List<VirtualMiss>? misses)
+    {
+        var segmentEnd = separator;
+        while (segmentEnd > walkStart)
+        {
+            var boundary = path.LastIndexOf(SubjectPathResolver.Separator, segmentEnd - 1, segmentEnd - walkStart);
+            var parent = boundary < 0 ? start : resolver.ResolveSubject(path[walkStart..(boundary + 1)], PathStyle.Canonical, start);
+            if (parent is not null)
+            {
+                var segment = path[(boundary < 0 ? walkStart : boundary + 1)..segmentEnd];
+                if (parent.TryGetRegisteredSubject() is { } registered && registered.TryGetProperty(segment) is null)
+                {
+                    AddMiss(parent, segment, ref misses);
+                }
+
+                return;
+            }
+
+            segmentEnd = boundary;
+        }
+    }
+
+    // An empty name, a name with an index, or "." or "..", is never added as a property, so waiting for it would never end.
+    private static void AddMiss(IInterceptorSubject subject, string name, ref List<VirtualMiss>? misses)
+    {
+        if (name is not ("" or "." or "..") && !name.Contains('['))
+        {
+            (misses ??= []).Add(new VirtualMiss(subject, name));
+        }
     }
 }
