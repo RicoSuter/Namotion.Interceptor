@@ -266,6 +266,9 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
         {
             var evaluation = Evaluate(property);
             var isLastIteration = iteration == MaxStabilizationIterations - 1;
+
+            // The time source is user code: resolved outside lock(data), and discarded unless this iteration commits.
+            var timestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
             lock (data)
             {
                 if (data.AttachToken != attachToken)
@@ -287,7 +290,7 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
                     continue;
                 }
 
-                CommitAttachEvaluation(data, property, evaluation, isStable, attachToken, ownsData);
+                CommitAttachEvaluation(data, property, evaluation, isStable, attachToken, ownsData, timestamp);
                 isExhausted = !isStable;
                 requestAfterAttach = TakePendingRequestIfUnowned(data, out pendingTimestamp);
                 break;
@@ -315,7 +318,8 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
 
     // Called under lock(data) with a current attach token, after the last evaluation of the attach.
     private static void CommitAttachEvaluation(
-        DerivedPropertyData data, in PropertyReference property, Evaluation evaluation, bool isStable, long attachToken, bool ownsData)
+        DerivedPropertyData data, in PropertyReference property, Evaluation evaluation, bool isStable, long attachToken,
+        bool ownsData, long timestamp)
     {
         if (!isStable)
         {
@@ -324,7 +328,7 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
             MarkRecalculationNeeded(data);
         }
 
-        CommitFirstValue(data, property, evaluation);
+        CommitFirstValue(data, property, evaluation, timestamp);
         data.AttachToken = 0;
         if (ownsData && data.OwnerToken == attachToken)
         {
@@ -341,13 +345,15 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
         {
             if (data.AttachToken == attachToken)
             {
-                // Failed before its first value was committed: the first success afterwards is published, as
-                // after a getter that threw.
+                // Failed before its first value and maybe its links were committed: a recalculation after the
+                // failure evaluates again, and its success is published, as after a getter that threw.
                 data.AttachToken = 0;
                 if (!data.HasValue)
                 {
                     data.IsFaulted = true;
                 }
+
+                MarkRecalculationNeeded(data);
             }
 
             if (data.OwnerToken == attachToken)
@@ -385,8 +391,9 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
         return true;
     }
 
-    // Called under lock(data). Zeroed when taken, so a flag set without a request (by an attach) does
-    // not carry an older write's timestamp; 0 resolves to the current time in RequestRecalculation.
+    // Called under lock(data). Zeroed when taken, so a flag set without a request (by an attach) does not carry
+    // an older write's timestamp; 0 is resolved to the current time outside the lock (RequestRecalculation,
+    // RunOwnerIteration).
     private static long TakePendingTimestamp(DerivedPropertyData data)
     {
         var timestamp = data.PendingRawTimestamp;
@@ -394,15 +401,8 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
         return timestamp;
     }
 
-    // Called under lock(data) by an owner that adopts a pending request instead of passing it to RequestRecalculation.
-    private static long AdoptPendingTimestamp(DerivedPropertyData data)
-    {
-        var timestamp = TakePendingTimestamp(data);
-        return timestamp != 0 ? timestamp : SubjectChangeContext.Current.ResolveChangedTimestamp();
-    }
-
     // Called under lock(data). The first value is not published: consumers read it while the subject attaches.
-    private static void CommitFirstValue(DerivedPropertyData data, in PropertyReference property, Evaluation evaluation)
+    private static void CommitFirstValue(DerivedPropertyData data, in PropertyReference property, Evaluation evaluation, long timestamp)
     {
         if (evaluation.HasThrown)
         {
@@ -411,8 +411,6 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
             return;
         }
 
-        // Resolved first, so a failing time source leaves no partly committed value.
-        var timestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
         data.LastKnownValue = evaluation.Value;
         data.HasValue = true;
         data.IsFaulted = false;
@@ -435,10 +433,10 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
         {
             var isFurtherLoopAfterException = firstException is not null;
             var hasThrown = false;
-            var hasForeignRequest = false;
+            var unanswered = UnansweredRequest.None;
             try
             {
-                if (RunOwnerLoop(data, property, token, ref rawTimestamp, ref hasForeignRequest))
+                if (RunOwnerLoop(data, property, token, ref rawTimestamp, ref unanswered))
                 {
                     break;
                 }
@@ -450,7 +448,7 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
             }
 
             var isOwnRequestTakenOver = hasThrown && !isFurtherLoopAfterException;
-            if (!TryTakeOverAfterFailure(data, ref token, ref rawTimestamp, hasForeignRequest, isOwnRequestTakenOver))
+            if (!TryTakeOverAfterFailure(data, ref token, ref rawTimestamp, unanswered, isOwnRequestTakenOver))
             {
                 break;
             }
@@ -459,15 +457,32 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
         firstException?.Throw();
     }
 
-    // Returns true when the loop released ownership, false when the iteration limit was reached while it owns the
-    // property. hasForeignRequest: a request taken since the last commit was foreign, or a write moved a source
-    // without a request (R5), so the loop has evaluations to answer that were not committed.
+    /// <summary>
+    /// The request a loop took since its last commit and has not answered with a commit yet: none, only requests
+    /// raised on the owner's thread, or a foreign one (another thread's request, or a write of another thread
+    /// that moved a source without a request, R5).
+    /// </summary>
+    private enum UnansweredRequest
+    {
+        None,
+        Own,
+        Foreign
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static UnansweredRequest Add(UnansweredRequest unanswered, bool isForeign)
+    {
+        var request = isForeign ? UnansweredRequest.Foreign : UnansweredRequest.Own;
+        return request > unanswered ? request : unanswered;
+    }
+
+    // Returns true when the loop released ownership, false when the iteration limit was reached while it owns the property.
     private static bool RunOwnerLoop(
-        DerivedPropertyData data, PropertyReference property, long token, ref long rawTimestamp, ref bool hasForeignRequest)
+        DerivedPropertyData data, PropertyReference property, long token, ref long rawTimestamp, ref UnansweredRequest unanswered)
     {
         for (var iteration = 0; iteration < MaxStabilizationIterations; iteration++)
         {
-            if (RunOwnerIteration(data, property, token, ref rawTimestamp, ref hasForeignRequest) == OwnerStep.Released)
+            if (RunOwnerIteration(data, property, token, ref rawTimestamp, ref unanswered) == OwnerStep.Released)
             {
                 return true;
             }
@@ -490,15 +505,22 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
     /// the property, then continues with a pending request or releases ownership.
     /// </summary>
     private static OwnerStep RunOwnerIteration(
-        DerivedPropertyData data, PropertyReference property, long token, ref long rawTimestamp, ref bool hasForeignRequest)
+        DerivedPropertyData data, PropertyReference property, long token, ref long rawTimestamp, ref UnansweredRequest unanswered)
     {
-        var commit = EvaluateAndCommit(data, property, token, ref rawTimestamp, ref hasForeignRequest);
+        if (rawTimestamp == 0)
+        {
+            // A request without a timestamp (a flag set by an attach): the time source is user code, so it is
+            // resolved here, outside lock(data).
+            rawTimestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
+        }
+
+        var commit = EvaluateAndCommit(data, property, token, ref rawTimestamp, ref unanswered);
         if (commit.Outcome != CommitOutcome.Committed)
         {
             return commit.Outcome == CommitOutcome.EvaluateAgain ? OwnerStep.Continue : OwnerStep.Released;
         }
 
-        hasForeignRequest = false;
+        unanswered = UnansweredRequest.None;
 
         if (commit.ShouldPublish)
         {
@@ -514,8 +536,8 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
 
             if (data.RecalculationNeeded && data.IsAttached && data.AttachToken == 0)
             {
-                hasForeignRequest = TakePendingRequest(data);
-                rawTimestamp = AdoptPendingTimestamp(data);
+                unanswered = Add(UnansweredRequest.None, TakePendingRequest(data));
+                rawTimestamp = TakePendingTimestamp(data);
                 return OwnerStep.Continue;
             }
 
@@ -528,7 +550,7 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
     // Called after a failed owner loop: releases ownership and takes a pending request over with a new token. A
     // request raised on this thread alone is dropped unless isOwnRequestTakenOver.
     private static bool TryTakeOverAfterFailure(
-        DerivedPropertyData data, ref long token, ref long rawTimestamp, bool hasForeignRequest, bool isOwnRequestTakenOver)
+        DerivedPropertyData data, ref long token, ref long rawTimestamp, UnansweredRequest unanswered, bool isOwnRequestTakenOver)
     {
         lock (data)
         {
@@ -538,14 +560,14 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
             }
 
             data.OwnerToken = 0;
-            if (!(data.RecalculationNeeded || hasForeignRequest) || !data.IsAttached || data.AttachToken != 0)
+            if (!(data.RecalculationNeeded || unanswered != UnansweredRequest.None) || !data.IsAttached || data.AttachToken != 0)
             {
                 // Nothing pending, detached, or an attach in progress, which evaluates again and takes over a set flag.
                 return false;
             }
 
             var hasNewRequest = data.RecalculationNeeded;
-            var isForeign = TakePendingRequest(data) || hasForeignRequest;
+            var isForeign = TakePendingRequest(data) || unanswered == UnansweredRequest.Foreign;
             if (!isForeign && !isOwnRequestTakenOver)
             {
                 data.PendingRawTimestamp = 0;
@@ -555,7 +577,7 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
             // A request carried over from the failed loop keeps the timestamp it adopted; a newer one wins.
             if (hasNewRequest)
             {
-                rawTimestamp = AdoptPendingTimestamp(data);
+                rawTimestamp = TakePendingTimestamp(data);
             }
 
             token = TakeOwnership(data, DerivedPropertyData.NewToken());
@@ -575,7 +597,7 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
 
     /// <summary>Evaluates outside lock(data) and commits under it.</summary>
     private static Commit EvaluateAndCommit(
-        DerivedPropertyData data, PropertyReference property, long token, ref long rawTimestamp, ref bool hasForeignRequest)
+        DerivedPropertyData data, PropertyReference property, long token, ref long rawTimestamp, ref UnansweredRequest unanswered)
     {
         var evaluation = Evaluate(property);
         lock (data)
@@ -597,16 +619,16 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
             if (data.RecalculationNeeded)
             {
                 DiscardRecording();
-                hasForeignRequest |= TakePendingRequest(data);
-                rawTimestamp = AdoptPendingTimestamp(data);
+                unanswered = Add(unanswered, TakePendingRequest(data));
+                rawTimestamp = TakePendingTimestamp(data);
                 return new Commit(CommitOutcome.EvaluateAgain);
             }
 
             if (!CommitLinks(data, property))
             {
-                // A source moved without a request (its writer read the used-by set before this link): its
-                // writer may be another thread.
-                hasForeignRequest = true;
+                // A source moved without a request (its writer read the used-by set before this link). The
+                // recording follows this thread's own writes, so the writer is another thread.
+                unanswered = UnansweredRequest.Foreign;
                 return new Commit(CommitOutcome.EvaluateAgain);
             }
 

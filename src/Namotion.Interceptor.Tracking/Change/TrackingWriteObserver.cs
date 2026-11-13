@@ -30,7 +30,12 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
         }
 
         // W4, then W5: the used-by set is read after the version moved.
-        Interlocked.Increment(ref data.Version);
+        var newVersion = Interlocked.Increment(ref data.Version);
+        if (DerivedPropertyRecorder.IsEvaluatingOnThisThread)
+        {
+            // A getter that writes what it read (or a write it triggers on this thread) does not fail the version check.
+            DerivedPropertyRecorder.Current.OnOwnWrite(property, newVersion);
+        }
 
         var rawTimestamp = write.RawTimestamp;
         try

@@ -119,6 +119,41 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
         buffer[frame.Count++] = new RecordedDependency(property, data, version);
     }
 
+    /// <summary>
+    /// Called after a write on this thread moved a property's version to <paramref name="newVersion"/>. A
+    /// recording of this thread that read the property at the version just before takes the new version, so the
+    /// thread's own write does not fail the version check. A write of another thread in between moved the version
+    /// further: that recording keeps its version and still fails the check.
+    /// </summary>
+    internal void OnOwnWrite(in PropertyReference property, long newVersion)
+    {
+        for (var depth = 0; depth < _depth; depth++)
+        {
+            ref var frame = ref _frames[depth];
+            if (!frame.IsSuspended)
+            {
+                RebaseOnOwnWrite(ref frame, property, newVersion);
+            }
+        }
+    }
+
+    private static void RebaseOnOwnWrite(ref RecordingFrame frame, in PropertyReference property, long newVersion)
+    {
+        var buffer = frame.Buffer!;
+        for (var i = 0; i < frame.Count; i++)
+        {
+            if (buffer[i].Property == property)
+            {
+                if (buffer[i].Version == newVersion - 1)
+                {
+                    buffer[i] = buffer[i] with { Version = newVersion };
+                }
+
+                return;
+            }
+        }
+    }
+
     public ReadOnlySpan<RecordedDependency> FinishRecording()
     {
         _depth--;

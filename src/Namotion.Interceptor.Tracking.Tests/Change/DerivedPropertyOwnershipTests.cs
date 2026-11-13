@@ -212,13 +212,27 @@ public class DerivedPropertyOwnershipTests
     }
 
     [Fact]
-    public void WhenGetterWritesWhatItReadsDuringAttach_ThenAttachCompletesAndLaterWritesStillPublish()
+    public void WhenGetterWritesWhatItReads_ThenAttachAndRecalculationEndAtTheLimitAndLaterWritesStillPublish()
     {
-        // Arrange
+        // Arrange: the getter writes what it reads. Another thread writes Anchor during the first attach
+        // evaluation, so the attach evaluates again once it linked Anchor; from then on every own write of the
+        // linked Anchor requests a recalculation on the evaluating thread.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
-        machine.Worker.Evaluator = _ => root.Anchor++;
+        var evaluations = 0;
+        var isWrittenByOtherThread = false;
+        machine.Worker.Evaluator = _ =>
+        {
+            var value = root.Anchor;
+            if (++evaluations == 1)
+            {
+                isWrittenByOtherThread = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => root.Anchor = 500).Wait(Timeout);
+            }
+
+            root.Anchor = value + 1;
+            return value;
+        };
         var changes = new List<SubjectPropertyChange>();
         using var traceOutput = new StringWriter();
         using var listener = new TextWriterTraceListener(traceOutput);
@@ -233,7 +247,9 @@ public class DerivedPropertyOwnershipTests
             root.Anchor = 1000;
 
             // Assert: the attach evaluation never stabilizes and commits its last value; the recalculation
-            // requested after the attach never stabilizes either, and a later write still recalculates.
+            // requested after the attach never stabilizes either and ends at the limit, and a later write still
+            // recalculates.
+            Assert.True(isWrittenByOtherThread);
             Assert.Contains(changes, c => c.Property.Subject == machine.Worker && c.GetNewValue<int>() == 1000);
             listener.Flush();
             var trace = traceOutput.ToString();
@@ -247,10 +263,73 @@ public class DerivedPropertyOwnershipTests
     }
 
     [Fact]
+    public async Task WhenGetterWritesASubjectItCreates_ThenAttachCommitsAfterOneEvaluationAndLaterWritesPublish()
+    {
+        // Arrange: the getter reads and then writes a property of a subject it creates, a property no derived
+        // property is linked to, so the write requests nothing.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var evaluations = 0;
+        machine.Worker.Evaluator = _ =>
+        {
+            Interlocked.Increment(ref evaluations);
+            var summary = new EvaluatorConfiguration();
+            summary.Value += root.Anchor;
+            return summary.Value;
+        };
+        var changes = new List<SubjectPropertyChange>();
+
+        // Act
+        await DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => root.Machine = machine).WaitAsync(Timeout);
+        var evaluationsAfterAttach = Volatile.Read(ref evaluations);
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        await DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => root.Anchor = 5).WaitAsync(Timeout);
+
+        // Assert
+        Assert.Equal(1, evaluationsAfterAttach);
+        var change = Assert.Single(changes, c => c.Property.Subject == machine.Worker);
+        Assert.Equal(0, change.GetOldValue<int>());
+        Assert.Equal(5, change.GetNewValue<int>());
+    }
+
+    [Fact]
+    public async Task WhenAnotherThreadWritesBetweenTheGettersReadAndItsOwnWrite_ThenTheGetterIsEvaluatedAgain()
+    {
+        // Arrange: during the first evaluation another thread writes the property the getter read and writes
+        // next, so the getter's own write does not follow the version the evaluation read.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var evaluations = 0;
+        var isWrittenByOtherThread = false;
+        machine.Worker.Evaluator = _ =>
+        {
+            var evaluation = Interlocked.Increment(ref evaluations);
+            var summary = new EvaluatorConfiguration();
+            var value = summary.Value;
+            if (evaluation == 1)
+            {
+                isWrittenByOtherThread = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => summary.Value = 100).Wait(Timeout);
+            }
+
+            summary.Value = value + root.Anchor + 1;
+            return summary.Value;
+        };
+
+        // Act
+        await DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => root.Machine = machine).WaitAsync(Timeout);
+
+        // Assert
+        Assert.True(isWrittenByOtherThread);
+        Assert.Equal(2, Volatile.Read(ref evaluations));
+    }
+
+    [Fact]
     public void WhenAttachFailsOutsideTheGetter_ThenThePropertyIsReleasedAndItsFirstSuccessIsPublished()
     {
-        // Arrange: the time source fails when the attach commits its first value; before it throws, it writes
-        // Anchor on the attaching thread, a request the attach owns.
+        // Arrange: the time source writes Anchor and fails when the attach resolves the timestamp of its first
+        // value, before the attach committed its links or a value.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
@@ -292,8 +371,8 @@ public class DerivedPropertyOwnershipTests
             var evaluationsAfterAttach = evaluations;
             root.Anchor = 2000;
 
-            // Assert: the request the failed attach owned ran after the failure and published its value from the
-            // type's default, and a later write publishes from that value.
+            // Assert: the recalculation after the failed attach published its value from the type's default, and
+            // a later write publishes from that value.
             Assert.Equal("Time source failed.", Assert.IsType<InvalidOperationException>(exception).Message);
             Assert.Equal(2, evaluationsAfterAttach);
             Assert.Equal(new List<(object?, object?)> { (0, 1000), (1000, 2000) }, publishedValues);
@@ -318,6 +397,7 @@ public class DerivedPropertyOwnershipTests
         using var writeRequested = new SemaphoreSlim(0);
         using var writeDone = new SemaphoreSlim(0);
         var writes = 0;
+        var hasTimedOut = false;
         var firstHandlerFrames = 0;
         var maxHandlerFrames = 0;
         machine.Worker.Evaluator = _ =>
@@ -329,7 +409,7 @@ public class DerivedPropertyOwnershipTests
             if (Volatile.Read(ref writes) < writeCount)
             {
                 writeRequested.Release();
-                Assert.True(writeDone.Wait(Timeout));
+                hasTimedOut |= !writeDone.Wait(Timeout);
             }
 
             return value;
@@ -357,6 +437,7 @@ public class DerivedPropertyOwnershipTests
         await writer.WaitAsync(Timeout);
 
         // Assert: a loop after an iteration limit runs in the frame of the first one, not nested in it.
+        Assert.False(hasTimedOut);
         Assert.Equal(writeCount, writes);
         Assert.Equal(root.Anchor, lastValue);
         Assert.True(maxHandlerFrames <= firstHandlerFrames, $"Handler frames: first {firstHandlerFrames}, max {maxHandlerFrames}.");
@@ -368,6 +449,7 @@ public class DerivedPropertyOwnershipTests
         // Arrange: the first publication writes Anchor on the owner's thread and throws, so one further loop
         // runs. Its publication lets another thread write Anchor and throws as well.
         var publications = 0;
+        var isWrittenByOtherThread = false;
         var publishedValues = new List<object?>();
         EvaluatorRoot? root = null;
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
@@ -383,7 +465,7 @@ public class DerivedPropertyOwnershipTests
 
             if (publications == 2)
             {
-                Assert.True(DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => root!.Anchor = 50).Wait(Timeout));
+                isWrittenByOtherThread = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => root!.Anchor = 50).Wait(Timeout);
                 throw new InvalidOperationException("Publication 2.");
             }
         }));
@@ -397,6 +479,7 @@ public class DerivedPropertyOwnershipTests
 
         // Assert
         Assert.Equal("Publication 1.", Assert.IsType<InvalidOperationException>(exception).Message);
+        Assert.True(isWrittenByOtherThread);
         Assert.Equal(new object?[] { 1, 10, 50 }, publishedValues);
     }
 
