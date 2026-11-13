@@ -763,10 +763,13 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
               $"or set {nameof(OpcUaClientConfiguration.AutoAcceptUntrustedCertificates)} = true to accept any server certificate.";
 
         // A server may report the same codes when it rejected the client certificate, so name that case too.
+        // An unsecured endpoint involves no client certificate.
         var clientCertificate = security.ApplicationCertificate?.Certificate;
-        var clientHint = clientCertificate is null
-            ? " If this server certificate is already trusted, the server may instead have rejected this client's certificate; trust it on the server."
-            : $" If this server certificate is already trusted, the server may instead have rejected this client's certificate {clientCertificate.Thumbprint}; trust it on the server.";
+        var clientHint = endpoint.SecurityMode == MessageSecurityMode.None
+            ? string.Empty
+            : clientCertificate is null
+                ? " If this server certificate is already trusted, the server may instead have rejected this client's certificate; trust it on the server."
+                : $" If this server certificate is already trusted, the server may instead have rejected this client's certificate {clientCertificate.Thumbprint}; trust it on the server.";
 
         return new InvalidOperationException(cause + clientHint, error);
     }

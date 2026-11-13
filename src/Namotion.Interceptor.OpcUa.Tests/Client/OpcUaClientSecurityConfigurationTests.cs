@@ -336,6 +336,25 @@ public class OpcUaClientSecurityConfigurationTests
     }
 
     [Fact]
+    public void WhenTheEndpointIsUnsecured_ThenTheRejectionMessageOmitsTheClientCertificateHint()
+    {
+        // Arrange
+        using var clientCertificate = CertificateBuilder.Create("CN=Client").CreateForRSA();
+        var applicationConfiguration = CreateApplicationConfiguration();
+        applicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate = clientCertificate;
+
+        // Act
+        var error = SessionManager.CreateServerCertificateRejectionException(
+            new ServiceResultException(StatusCodes.BadCertificateUntrusted),
+            CreateEndpoint(MessageSecurityMode.None, SecurityPolicies.None),
+            applicationConfiguration, NullTelemetryContext.Instance);
+
+        // Assert
+        Assert.DoesNotContain("this client's certificate", error.Message);
+        Assert.DoesNotContain(clientCertificate.Thumbprint, error.Message);
+    }
+
+    [Fact]
     public void WhenTheRejectedStoreIsNotADirectory_ThenItsPathIsNamedWithoutTheCertsFolder()
     {
         // Arrange
