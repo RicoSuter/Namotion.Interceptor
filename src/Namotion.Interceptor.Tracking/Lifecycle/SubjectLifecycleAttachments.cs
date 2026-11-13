@@ -10,29 +10,86 @@ internal static class SubjectLifecycleAttachments
 {
     private const string Key = "ni.lca";
 
+    // The subjects whose properties a lifecycle interceptor detaches on this thread, the innermost last.
     [ThreadStatic]
-    private static int _lifecycleDetachDepth;
+    private static List<IInterceptorSubject>? _detachingSubjects;
 
     /// <summary>True while a lifecycle interceptor detaches the properties of a subject on this thread.</summary>
-    internal static bool IsLifecycleDetach => _lifecycleDetachDepth > 0;
-
-    internal static void EnterLifecycleDetach() => _lifecycleDetachDepth++;
-
-    internal static void ExitLifecycleDetach() => _lifecycleDetachDepth--;
+    internal static bool IsLifecycleDetach => _detachingSubjects is { Count: > 0 };
 
     /// <summary>
-    /// Suspends the derived recording of this thread while a lifecycle interceptor reconciles under its lock: a
-    /// write in a derived getter reconciles on the evaluating thread, and the reads of the reconciliation and its
-    /// handlers are not dependencies of that getter. A derived attach inside records its own reads. Returns the
-    /// value to pass to <see cref="ResumeDerivedRecording"/>.
+    /// Suspends the derived recording of this thread until disposed, while a lifecycle interceptor reconciles under
+    /// its lock: a write in a derived getter reconciles on the evaluating thread, and the reads of the reconciliation
+    /// and its handlers are not dependencies of that getter. A derived attach inside records its own reads.
     /// </summary>
-    internal static bool SuspendDerivedRecording() => DerivedPropertyRecorder.TrySuspend();
-
-    internal static void ResumeDerivedRecording(bool isSuspended)
+    internal static IDisposable SuspendDerivedRecording()
     {
-        if (isSuspended)
+        return DerivedPropertyRecorder.TrySuspend() ? RecordingResumption.Instance : NothingSuspended.Instance;
+    }
+
+    /// <summary>
+    /// Removes the interceptor from the subject's attachments and marks this thread as detaching the subject's
+    /// properties until disposed. Disposing detaches the subject's derived properties when it left its last graph,
+    /// also when a lifecycle handler threw.
+    /// </summary>
+    internal static IDisposable BeginDetach(IInterceptorSubject subject, LifecycleInterceptor interceptor)
+    {
+        Remove(subject, interceptor);
+        (_detachingSubjects ??= []).Add(subject);
+        return DetachEnd.Instance;
+    }
+
+    // The scopes are stateless singletons, so they allocate nothing. They are typed IDisposable rather than ref
+    // structs, which would add types to the coupling of LifecycleInterceptor (S1200).
+    private sealed class RecordingResumption : IDisposable
+    {
+        public static readonly RecordingResumption Instance = new();
+
+        public void Dispose() => DerivedPropertyRecorder.Resume();
+    }
+
+    private sealed class NothingSuspended : IDisposable
+    {
+        public static readonly NothingSuspended Instance = new();
+
+        public void Dispose()
         {
-            DerivedPropertyRecorder.Resume();
+            // No recording ran on this thread, so nothing was suspended.
+        }
+    }
+
+    private sealed class DetachEnd : IDisposable
+    {
+        public static readonly DetachEnd Instance = new();
+
+        public void Dispose()
+        {
+            var subjects = _detachingSubjects!;
+            var subject = subjects[^1];
+            subjects.RemoveAt(subjects.Count - 1);
+            DetachDerivedPropertiesIfDetached(subject);
+        }
+
+        // Property detaches issued by a lifecycle interceptor do not detach a derived property, since the subject
+        // may still be in another graph; once the subject left its last graph, its derived properties detach here,
+        // whether or not that interceptor's context has derived change detection.
+        private static void DetachDerivedPropertiesIfDetached(IInterceptorSubject subject)
+        {
+            // Only a fast path: DerivedPropertyOwnership.Detach checks again under each property's lock, because
+            // another interceptor may attach the subject in between. A type whose gate is not raised has no derived
+            // property data, so there is nothing to detach.
+            if (!DerivedPropertyTypeGate.Of(subject).IsRaised || IsAttached(subject))
+            {
+                return;
+            }
+
+            foreach (var entry in subject.Properties)
+            {
+                if (entry.Value.IsDerived)
+                {
+                    DerivedPropertyOwnership.Detach(new PropertyReference(subject, entry.Key), onlyIfSubjectIsDetached: true);
+                }
+            }
         }
     }
 
@@ -137,22 +194,5 @@ internal static class SubjectLifecycleAttachments
         Array.Copy(interceptors, remaining, index);
         Array.Copy(interceptors, index + 1, remaining, index, remaining.Length - index);
         return remaining;
-    }
-
-    /// <summary>
-    /// Called by a lifecycle interceptor after it detached a subject's properties. Its property detaches do not
-    /// detach a derived property, since the subject may still be in another graph; once the subject left its
-    /// last graph, its derived properties detach here, whether or not that interceptor's context has derived
-    /// change detection.
-    /// </summary>
-    internal static void DetachDerivedPropertiesIfDetached(IInterceptorSubject subject)
-    {
-        // Only a fast path: DerivedPropertyChangeHandler checks again under each property's lock, because
-        // another interceptor may attach the subject in between. A type whose gate is not raised has no
-        // derived property data, so there is nothing to detach.
-        if (DerivedPropertyTypeGate.Of(subject).IsRaised && !IsAttached(subject))
-        {
-            DerivedPropertyChangeHandler.DetachDerivedProperties(subject);
-        }
     }
 }

@@ -89,24 +89,17 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             lock (_attachedSubjects)
             {
-                var isRecordingSuspended = SubjectLifecycleAttachments.SuspendDerivedRecording();
-                try
+                using var suspension = SubjectLifecycleAttachments.SuspendDerivedRecording();
+                FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
+
+                foreach (var child in collectedSubjects)
                 {
-                    FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
-
-                    foreach (var child in collectedSubjects)
-                    {
-                        AttachToProperty(child.subject, subject.Context, child.property, child.index);
-                    }
-
-                    if (!_attachedSubjects.ContainsKey(subject))
-                    {
-                        AttachToContext(subject, subject.Context);
-                    }
+                    AttachToProperty(child.subject, subject.Context, child.property, child.index);
                 }
-                finally
+
+                if (!_attachedSubjects.ContainsKey(subject))
                 {
-                    SubjectLifecycleAttachments.ResumeDerivedRecording(isRecordingSuspended);
+                    AttachToContext(subject, subject.Context);
                 }
             }
         }
@@ -123,22 +116,15 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             lock (_attachedSubjects)
             {
-                var isRecordingSuspended = SubjectLifecycleAttachments.SuspendDerivedRecording();
-                try
-                {
-                    FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Use);
+                using var suspension = SubjectLifecycleAttachments.SuspendDerivedRecording();
+                FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Use);
 
-                    foreach (var child in collectedSubjects)
-                    {
-                        DetachFromProperty(child.subject, subject.Context, child.property, child.index);
-                    }
-
-                    DetachFromContext(subject, subject.Context);
-                }
-                finally
+                foreach (var child in collectedSubjects)
                 {
-                    SubjectLifecycleAttachments.ResumeDerivedRecording(isRecordingSuspended);
+                    DetachFromProperty(child.subject, subject.Context, child.property, child.index);
                 }
+
+                DetachFromContext(subject, subject.Context);
             }
         }
         finally
@@ -249,9 +235,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             return;
         }
 
-        SubjectLifecycleAttachments.Remove(subject, this);
-        SubjectLifecycleAttachments.EnterLifecycleDetach();
-        try
+        using (SubjectLifecycleAttachments.BeginDetach(subject, this))
         {
             foreach (var entry in subject.Properties)
             {
@@ -261,12 +245,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
                 subject.DetachSubjectProperty(property);
             }
-        }
-        finally
-        {
-            // Also when a handler threw: this interceptor removed the subject already.
-            SubjectLifecycleAttachments.ExitLifecycleDetach();
-            SubjectLifecycleAttachments.DetachDerivedPropertiesIfDetached(subject);
         }
 
         var count = subject.GetReferenceCount();
@@ -302,7 +280,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         if (isLastDetach)
         {
             _attachedSubjects.Remove(subject);
-            SubjectLifecycleAttachments.Remove(subject, this);
             children = DetachSubjectProperties(subject);
         }
 
@@ -339,42 +316,30 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     private List<(IInterceptorSubject subject, PropertyReference property, object? index)>? DetachSubjectProperties(
         IInterceptorSubject subject)
     {
+        using var detach = SubjectLifecycleAttachments.BeginDetach(subject, this);
         List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
-        SubjectLifecycleAttachments.EnterLifecycleDetach();
-        try
+        foreach (var entry in subject.Properties)
         {
-            foreach (var entry in subject.Properties)
+            var subjectProperty = new PropertyReference(subject, entry.Key);
+
+            var metadata = entry.Value;
+            if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
             {
-                DetachSubjectProperty(subject, entry.Key, entry.Value, ref children);
+                // Use _lastProcessedValues (what was actually attached) instead of the backing
+                // store, which may contain unattached children from a concurrent next() call.
+                if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
+                {
+                    children ??= GetList();
+                    FindSubjectsInProperty(subjectProperty, lastProcessed, children, null);
+                }
+
+                _lastProcessedValues.Remove(subjectProperty);
             }
+
+            subject.DetachSubjectProperty(subjectProperty);
         }
-        finally
-        {
-            // Also when a handler threw: this interceptor removed the subject already.
-            SubjectLifecycleAttachments.ExitLifecycleDetach();
-            SubjectLifecycleAttachments.DetachDerivedPropertiesIfDetached(subject);
-        }
+
         return children;
-    }
-
-    private void DetachSubjectProperty(IInterceptorSubject subject, string name, SubjectPropertyMetadata metadata,
-        ref List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children)
-    {
-        var subjectProperty = new PropertyReference(subject, name);
-        if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
-        {
-            // Use _lastProcessedValues (what was actually attached) instead of the backing
-            // store, which may contain unattached children from a concurrent next() call.
-            if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
-            {
-                children ??= GetList();
-                FindSubjectsInProperty(subjectProperty, lastProcessed, children, null);
-            }
-
-            _lastProcessedValues.Remove(subjectProperty);
-        }
-
-        subject.DetachSubjectProperty(subjectProperty);
     }
 
     private static void InvokeRemovedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
@@ -413,42 +378,29 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         lock (_attachedSubjects)
         {
-            var isRecordingSuspended = SubjectLifecycleAttachments.SuspendDerivedRecording();
-            try
+            using var suspension = SubjectLifecycleAttachments.SuspendDerivedRecording();
+            var lastProcessed = _lastProcessedValues.GetValueOrDefault(context.Property);
+
+            // Read the actual backing store value to handle concurrent writes correctly.
+            // context.NewValue may differ from the backing store if another thread
+            // overwrote the property between our next() call and lock acquisition.
+            var getValue = metadata.GetValue;
+            var newValue = getValue is not null
+                ? getValue(context.Property.Subject)
+                : context.NewValue;
+
+            if (ReferenceEquals(lastProcessed, newValue))
             {
-                ReconcileWrittenProperty(ref context, metadata);
+                return;
             }
-            finally
+
+            if (IsScalarValue(lastProcessed) && IsScalarValue(newValue))
             {
-                SubjectLifecycleAttachments.ResumeDerivedRecording(isRecordingSuspended);
+                return;
             }
+
+            ReconcilePropertySubjects(ref context, lastProcessed, newValue);
         }
-    }
-
-    // Called under lock(_attachedSubjects).
-    private void ReconcileWrittenProperty<TProperty>(ref PropertyWriteContext<TProperty> context, SubjectPropertyMetadata metadata)
-    {
-        var lastProcessed = _lastProcessedValues.GetValueOrDefault(context.Property);
-
-        // Read the actual backing store value to handle concurrent writes correctly.
-        // context.NewValue may differ from the backing store if another thread
-        // overwrote the property between our next() call and lock acquisition.
-        var getValue = metadata.GetValue;
-        var newValue = getValue is not null
-            ? getValue(context.Property.Subject)
-            : context.NewValue;
-
-        if (ReferenceEquals(lastProcessed, newValue))
-        {
-            return;
-        }
-
-        if (IsScalarValue(lastProcessed) && IsScalarValue(newValue))
-        {
-            return;
-        }
-
-        ReconcilePropertySubjects(ref context, lastProcessed, newValue);
     }
 
     private static bool IsScalarValue(object? value)
@@ -708,7 +660,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         _subjectHashSetPool.Add(hashSet);
     }
 
-    // The pools are lists used as stacks: the last returned item is taken first.
+    // The pools are lists used as stacks (the last returned item is taken first): a Stack<T> would add a type to the
+    // coupling of this class, which is at the limit of S1200.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static T Pop<T>(List<T> pool)
     {
