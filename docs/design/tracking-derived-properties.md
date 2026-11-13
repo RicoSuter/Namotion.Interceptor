@@ -197,7 +197,7 @@ All of it is read and written under `lock(data)` of the derived property:
 |-------|---------|
 | `OwnerToken`, `OwnerThreadId` | The token of the owning evaluation (a recalculation or an attach), 0 when nobody owns the property, and the thread it runs on. |
 | `AttachToken` | The token of the attach in progress, 0 when none is. A newer attach or a detach replaces it, which tells the attach its result no longer counts. |
-| `AttachCount` | Incremented by every attach, never reset; read under the lock whenever the owner loop takes ownership or a request, and without the lock when a request is queued under the lifecycle lock. |
+| `AttachCount` | Incremented by every attach, never reset; read under the lock whenever the owner loop takes ownership or a request and when an attach decides to request a recalculation after it, and without the lock when a write's request is queued under the lifecycle lock. |
 | `RecalculationNeeded`, `HasForeignRequest` | A request arrived while the property was owned or an attach was in progress, and whether one of them came from another thread than the owner's (or while nobody owned it). |
 | `PendingRawTimestamp` | The raw changed timestamp of the newest pending request, 0 when it has none. |
 | `IsAttached` | Set by the attach, cleared by the detach. A request for a detached property is dropped. |
@@ -210,7 +210,7 @@ All of it is read and written under `lock(data)` of the derived property:
 
 A request comes from the write observer (W5), from `RecalculateDerivedProperty`, or from the protocol itself after an attach. While the thread holds a lifecycle lock, the request is queued instead and runs after the lifecycle operation, outside the lock (see [Post-Lock Queue](tracking-lifecycle.md#post-lock-queue)). A request without a timestamp (a write without a context) takes the current time first. Under `lock(D)`:
 
-1. D is detached, or the request was queued under the lifecycle lock and D was attached again since (`AttachCount` moved): drop the request. That attach evaluated after the request's cause.
+1. D is detached, or the request was queued under the lifecycle lock or handed over by an attach, and D was attached again since (`AttachCount` moved): drop the request. That attach evaluated after the request's cause.
 2. D is owned, or an attach is in progress: set `RecalculationNeeded`, store the request's timestamp in `PendingRawTimestamp` (the last request to arrive wins, which carries the trigger's timestamp to the coalesced change), mark it foreign when it comes from another thread than the owner's, and return. The caller does not wait.
 3. Otherwise take ownership with a new token and run the owner loop on this thread.
 
@@ -254,7 +254,7 @@ Then the attach evaluates outside `lock(D)`. Before each evaluation it resolves 
 
 - The attach token was superseded (a newer attach, or a detach, also by a getter that detaches its own subject): discard the recording, release ownership if the attach holds it, and take over a request that is pending on an attached D nobody owns.
 - Otherwise set the links (R4, R5). If the attach owns D and a request arrived during the evaluation, or the evaluation is not stable (a source moved, or an own write after a read not evaluated again yet), evaluate again. Otherwise commit the first value with the attach's timestamp, without publishing it: consumers read it while the subject attaches. If the getter threw, D is marked faulted instead.
-- Clear the attach token and release ownership if held. If a request is pending and nobody owns D (the previous owner handed off), the evaluation was not stable, or an evaluation from before a detach owned D when the attach started, request a recalculation on this thread after the attach. It publishes from the attach's value. The request carries the pending timestamp, and the attach's when there is none and the attach did not own D, so the change of the new attachment carries the attach's time.
+- Clear the attach token and release ownership if held. If a request is pending and nobody owns D (the previous owner handed off), the evaluation was not stable, or an evaluation from before a detach owned D when the attach started, request a recalculation on this thread after the attach. It publishes from the attach's value. The request carries the pending timestamp, and the attach's when there is none and the attach did not own D, so the change of the new attachment carries the attach's time. It also carries `AttachCount` as read under `lock(D)` when the attach decided it, so it is dropped when D was attached again since: that attach evaluated after every cause of the request.
 
 The attach evaluation is bounded like the owner loop: at the limit, the last evaluation is committed, a recalculation is requested after the attach, and a warning is traced outside the lock after that request, so a failing trace listener cannot lose it.
 

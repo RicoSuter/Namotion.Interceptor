@@ -498,6 +498,71 @@ public class DerivedPropertyProtocolTests
     }
 
     [Fact]
+    public void WhenPropertyIsAttachedAgainBeforeTheHandOverOfAnEarlierAttachIsQueued_ThenTheHandOverIsDropped()
+    {
+        // Arrange: the attach under the lifecycle lock finds the recalculation from before the detach in flight, so it
+        // hands a request over. Before the request is queued, the recalculation releases the property, another thread
+        // attaches the property again directly, and an input the getter reads without tracking changes.
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var external = 0;
+        var gate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            var value = root.Anchor + Volatile.Read(ref external);
+            gate.PauseIfArmed();
+            return value;
+        };
+        root.Machine = machine;
+        var result = GetResult(machine);
+        var published = new List<(int OldValue, int NewValue)>();
+        using var subscription = RecordPublications(result, published);
+        Task? recalculation = null;
+        var isHandOverArmed = 0;
+        var isRecalculationDone = false;
+        var isAttachedAgain = false;
+
+        // Act
+        bool isPaused;
+        DerivedPropertyOwnership.AfterTakeForTests = property =>
+        {
+            if (property == result && Interlocked.Exchange(ref isHandOverArmed, 0) == 1)
+            {
+                gate.Resume.Set();
+                isRecalculationDone = recalculation!.Wait(Timeout);
+                isAttachedAgain = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+                {
+                    machine.Worker.DetachSubjectProperty(result);
+                    machine.Worker.AttachSubjectProperty(result);
+                }).Wait(Timeout);
+                Volatile.Write(ref external, 100);
+            }
+        };
+        try
+        {
+            gate.Arm();
+            recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = 1; });
+            isPaused = gate.Paused.Wait(Timeout);
+            root.Machine = null;
+            Volatile.Write(ref isHandOverArmed, 1);
+            root.Machine = machine;
+        }
+        finally
+        {
+            DerivedPropertyOwnership.AfterTakeForTests = null;
+        }
+
+        // Assert: the attach on the other thread evaluated after the hand-over's cause, and answers for it.
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.True(isRecalculationDone);
+        Assert.True(isAttachedAgain);
+        Assert.Empty(published);
+        Assert.Equal(1, result.TryGetDerivedPropertyData()?.LastKnownValue);
+    }
+
+    [Fact]
     public async Task WhenDerivedPropertyIsDetachedDuringItsEvaluation_ThenNothingIsPublished()
     {
         // Arrange
