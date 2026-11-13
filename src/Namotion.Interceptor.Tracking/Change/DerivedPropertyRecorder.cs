@@ -32,8 +32,6 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
 
     internal static DerivedPropertyRecorder Current => _current ??= new DerivedPropertyRecorder();
 
-    internal static bool IsRecordingOnThisThread => _current is { IsRecording: true };
-
     public bool IsRecording => _depth > 0 && !_frames[_depth - 1].IsSuspended;
 
     /// <summary>A getter is being evaluated on this thread, also while its recording is suspended.</summary>

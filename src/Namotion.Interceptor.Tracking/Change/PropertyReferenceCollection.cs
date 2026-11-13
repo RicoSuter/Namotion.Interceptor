@@ -142,7 +142,7 @@ public sealed class PropertyReferenceCollection
                 Volatile.Write(ref _state, new LargeStorage(array, property));
             }
 
-            // Releasing the lock is not documented to be a full fence.
+            // Not implied by the lock: releasing it is not documented to be a full fence.
             Interlocked.MemoryBarrier();
             return true;
         }
