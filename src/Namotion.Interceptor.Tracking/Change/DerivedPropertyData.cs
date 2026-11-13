@@ -117,6 +117,20 @@ internal sealed class DerivedPropertyData
 
     private static long _lastToken;
 
+    private DerivedPropertyData()
+    {
+    }
+
+    /// <summary>
+    /// Creates the data of a property of <paramref name="subject"/> and raises the gate of the subject's type
+    /// first, so the gate is raised before the data can be found.
+    /// </summary>
+    internal static DerivedPropertyData Create(IInterceptorSubject subject)
+    {
+        DerivedPropertyTypeGate.Of(subject).Raise();
+        return new DerivedPropertyData();
+    }
+
     /// <summary>Returns a new, process-wide unique, nonzero owner or attach token.</summary>
     internal static long NewToken() => Interlocked.Increment(ref _lastToken);
 
