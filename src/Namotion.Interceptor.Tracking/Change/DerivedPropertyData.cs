@@ -69,6 +69,18 @@ internal sealed class DerivedPropertyData
     internal bool RecalculationNeeded;
 
     /// <summary>
+    /// True when a request that set <see cref="RecalculationNeeded"/> came from another thread than the owner's
+    /// (or while nobody owned the property). An owner drops only requests raised on its own thread. Only
+    /// read/written inside lock(this).
+    /// </summary>
+    internal bool HasForeignRequest;
+
+    /// <summary>
+    /// The managed thread id of the owner set with <see cref="OwnerToken"/>. Only read/written inside lock(this).
+    /// </summary>
+    internal int OwnerThreadId;
+
+    /// <summary>
     /// The raw changed timestamp of the newest request that set <see cref="RecalculationNeeded"/>, or 0 when
     /// none is pending. Only read/written inside lock(this).
     /// </summary>

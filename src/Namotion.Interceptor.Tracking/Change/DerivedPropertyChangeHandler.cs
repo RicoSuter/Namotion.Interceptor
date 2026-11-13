@@ -64,15 +64,15 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
             if (ownsData)
             {
                 // Requests on a detached property are dropped, so a flag left from before the detach is stale.
-                data.OwnerToken = attachToken;
-                data.RecalculationNeeded = false;
+                TakeOwnership(data, attachToken);
+                TakePendingRequest(data);
                 data.PendingRawTimestamp = 0;
             }
             else
             {
                 // A recalculation from before a detach is in flight: it hands off at its next lock. A pending
                 // timestamp is from before the detach, so the request is stamped when it runs.
-                data.RecalculationNeeded = true;
+                MarkRecalculationNeeded(data);
                 data.PendingRawTimestamp = 0;
             }
         }
@@ -173,15 +173,43 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
 
             if (data.OwnerToken != 0 || data.AttachToken != 0)
             {
-                data.RecalculationNeeded = true;
+                MarkRecalculationNeeded(data);
                 data.PendingRawTimestamp = rawTimestamp;
                 return;
             }
 
-            token = data.OwnerToken = DerivedPropertyData.NewToken();
+            token = TakeOwnership(data, DerivedPropertyData.NewToken());
         }
 
         RunOwnerLoops(data, property, token, rawTimestamp);
+    }
+
+    // Called under lock(data).
+    private static long TakeOwnership(DerivedPropertyData data, long token)
+    {
+        data.OwnerToken = token;
+        data.OwnerThreadId = Environment.CurrentManagedThreadId;
+        return token;
+    }
+
+    // Called under lock(data) for a request while the property is owned or an attach is in progress. A request
+    // raised on another thread than the owner's is foreign, and a foreign request is never dropped.
+    private static void MarkRecalculationNeeded(DerivedPropertyData data)
+    {
+        data.RecalculationNeeded = true;
+        if (data.OwnerToken == 0 || data.OwnerThreadId != Environment.CurrentManagedThreadId)
+        {
+            data.HasForeignRequest = true;
+        }
+    }
+
+    // Called under lock(data). Clears the pending request flags and returns whether a foreign request was among them.
+    private static bool TakePendingRequest(DerivedPropertyData data)
+    {
+        var isForeign = data.HasForeignRequest;
+        data.RecalculationNeeded = false;
+        data.HasForeignRequest = false;
+        return isForeign;
     }
 
     /// <summary>
@@ -192,9 +220,10 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
     {
         bool requestAfterAttach;
         long pendingTimestamp;
+        bool isExhausted;
         try
         {
-            requestAfterAttach = RunAttachEvaluations(data, property, attachToken, ownsData, out pendingTimestamp);
+            requestAfterAttach = RunAttachEvaluations(data, property, attachToken, ownsData, out pendingTimestamp, out isExhausted);
         }
         catch (Exception)
         {
@@ -212,14 +241,25 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
         {
             RequestRecalculation(property, pendingTimestamp, isHandOver: true);
         }
+
+        // Traced outside lock(data), and after the request, so a failing trace listener cannot lose it.
+        if (isExhausted)
+        {
+            Trace.TraceWarning(
+                $"DerivedPropertyChangeHandler: MaxStabilizationIterations ({MaxStabilizationIterations}) exhausted " +
+                $"while attaching '{property.Metadata.Name}' on {property.Subject.GetType().Name}.");
+        }
     }
 
-    // Returns true when a request is pending and nobody owns the property after the attach.
+    // Returns true when a request is pending and nobody owns the property after the attach. isExhausted: the
+    // iteration limit was reached and the last, unstable evaluation was committed.
     private static bool RunAttachEvaluations(
-        DerivedPropertyData data, PropertyReference property, long attachToken, bool ownsData, out long pendingTimestamp)
+        DerivedPropertyData data, PropertyReference property, long attachToken, bool ownsData, out long pendingTimestamp,
+        out bool isExhausted)
     {
         var requestAfterAttach = false;
         pendingTimestamp = 0;
+        isExhausted = false;
 
         // The last iteration always commits, so the loop ends by a break.
         for (var iteration = 0; iteration < MaxStabilizationIterations; iteration++)
@@ -248,6 +288,7 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
                 }
 
                 CommitAttachEvaluation(data, property, evaluation, isStable, attachToken, ownsData);
+                isExhausted = !isStable;
                 requestAfterAttach = TakePendingRequestIfUnowned(data, out pendingTimestamp);
                 break;
             }
@@ -264,7 +305,7 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
         var isStable = CommitLinks(data, property);
         if (ownsData && data.RecalculationNeeded)
         {
-            data.RecalculationNeeded = false;
+            TakePendingRequest(data);
             data.PendingRawTimestamp = 0;
             isStable = false;
         }
@@ -280,10 +321,7 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
         {
             // The getter keeps changing what it reads (for example it writes a property it reads): the last
             // value is committed, and a recalculation is requested after the attach.
-            Trace.TraceWarning(
-                $"DerivedPropertyChangeHandler: MaxStabilizationIterations ({MaxStabilizationIterations}) exhausted " +
-                $"while attaching '{property.Metadata.Name}' on {property.Subject.GetType().Name}.");
-            data.RecalculationNeeded = true;
+            MarkRecalculationNeeded(data);
         }
 
         CommitFirstValue(data, property, evaluation);
@@ -303,7 +341,13 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
         {
             if (data.AttachToken == attachToken)
             {
+                // Failed before its first value was committed: the first success afterwards is published, as
+                // after a getter that threw.
                 data.AttachToken = 0;
+                if (!data.HasValue)
+                {
+                    data.IsFaulted = true;
+                }
             }
 
             if (data.OwnerToken == attachToken)
@@ -337,7 +381,7 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
         }
 
         pendingTimestamp = TakePendingTimestamp(data);
-        data.RecalculationNeeded = false;
+        TakePendingRequest(data);
         return true;
     }
 
@@ -367,18 +411,22 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
             return;
         }
 
+        // Resolved first, so a failing time source leaves no partly committed value.
+        var timestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
         data.LastKnownValue = evaluation.Value;
         data.HasValue = true;
         data.IsFaulted = false;
         data.RecalculationSequence++;
-        property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
+        property.SetWriteTimestamp(timestamp);
     }
 
     /// <summary>
     /// Runs owner loops in this frame until no request is pending. After a failure (an observer threw, or the
     /// iteration limit was reached) the loop releases ownership, and a pending request is taken over by a new
-    /// loop in this frame instead of a nested one. After an exception at most one further loop runs, so an
-    /// observer that always throws and writes a dependency ends; the first exception propagates.
+    /// loop in this frame instead of a nested one. A foreign request (raised on another thread) is always taken
+    /// over. A request raised on this thread is taken over once after a first exception, and dropped at the
+    /// iteration limit and after the loop that follows an exception, so a getter or observer that keeps writing
+    /// what the property reads ends. The first exception propagates.
     /// </summary>
     private static void RunOwnerLoops(DerivedPropertyData data, PropertyReference property, long token, long rawTimestamp)
     {
@@ -386,19 +434,23 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
         while (true)
         {
             var isFurtherLoopAfterException = firstException is not null;
+            var hasThrown = false;
+            var hasForeignRequest = false;
             try
             {
-                if (RunOwnerLoop(data, property, token, ref rawTimestamp))
+                if (RunOwnerLoop(data, property, token, ref rawTimestamp, ref hasForeignRequest))
                 {
                     break;
                 }
             }
             catch (Exception exception)
             {
+                hasThrown = true;
                 firstException ??= ExceptionDispatchInfo.Capture(exception);
             }
 
-            if (!TryTakeOverAfterFailure(data, ref token, ref rawTimestamp, isTakeOverAllowed: !isFurtherLoopAfterException))
+            var isOwnRequestTakenOver = hasThrown && !isFurtherLoopAfterException;
+            if (!TryTakeOverAfterFailure(data, ref token, ref rawTimestamp, hasForeignRequest, isOwnRequestTakenOver))
             {
                 break;
             }
@@ -407,12 +459,15 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
         firstException?.Throw();
     }
 
-    // Returns true when the loop released ownership, false when the iteration limit was reached while it owns the property.
-    private static bool RunOwnerLoop(DerivedPropertyData data, PropertyReference property, long token, ref long rawTimestamp)
+    // Returns true when the loop released ownership, false when the iteration limit was reached while it owns the
+    // property. hasForeignRequest: a request taken since the last commit was foreign, or a write moved a source
+    // without a request (R5), so the loop has evaluations to answer that were not committed.
+    private static bool RunOwnerLoop(
+        DerivedPropertyData data, PropertyReference property, long token, ref long rawTimestamp, ref bool hasForeignRequest)
     {
         for (var iteration = 0; iteration < MaxStabilizationIterations; iteration++)
         {
-            if (RunOwnerIteration(data, property, token, ref rawTimestamp) == OwnerStep.Released)
+            if (RunOwnerIteration(data, property, token, ref rawTimestamp, ref hasForeignRequest) == OwnerStep.Released)
             {
                 return true;
             }
@@ -434,13 +489,16 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
     /// One evaluation of the owner loop: evaluates and commits, publishes outside the lock while still owning
     /// the property, then continues with a pending request or releases ownership.
     /// </summary>
-    private static OwnerStep RunOwnerIteration(DerivedPropertyData data, PropertyReference property, long token, ref long rawTimestamp)
+    private static OwnerStep RunOwnerIteration(
+        DerivedPropertyData data, PropertyReference property, long token, ref long rawTimestamp, ref bool hasForeignRequest)
     {
-        var commit = EvaluateAndCommit(data, property, token, ref rawTimestamp);
+        var commit = EvaluateAndCommit(data, property, token, ref rawTimestamp, ref hasForeignRequest);
         if (commit.Outcome != CommitOutcome.Committed)
         {
             return commit.Outcome == CommitOutcome.EvaluateAgain ? OwnerStep.Continue : OwnerStep.Released;
         }
+
+        hasForeignRequest = false;
 
         if (commit.ShouldPublish)
         {
@@ -456,7 +514,7 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
 
             if (data.RecalculationNeeded && data.IsAttached && data.AttachToken == 0)
             {
-                data.RecalculationNeeded = false;
+                hasForeignRequest = TakePendingRequest(data);
                 rawTimestamp = AdoptPendingTimestamp(data);
                 return OwnerStep.Continue;
             }
@@ -467,9 +525,10 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
         }
     }
 
-    // Called after a failed owner loop: releases ownership and, when allowed, takes a pending request over with
-    // a new token. A pending request that may not be taken over is dropped.
-    private static bool TryTakeOverAfterFailure(DerivedPropertyData data, ref long token, ref long rawTimestamp, bool isTakeOverAllowed)
+    // Called after a failed owner loop: releases ownership and takes a pending request over with a new token. A
+    // request raised on this thread alone is dropped unless isOwnRequestTakenOver.
+    private static bool TryTakeOverAfterFailure(
+        DerivedPropertyData data, ref long token, ref long rawTimestamp, bool hasForeignRequest, bool isOwnRequestTakenOver)
     {
         lock (data)
         {
@@ -479,20 +538,27 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
             }
 
             data.OwnerToken = 0;
-            if (!data.RecalculationNeeded || !data.IsAttached || data.AttachToken != 0)
+            if (!(data.RecalculationNeeded || hasForeignRequest) || !data.IsAttached || data.AttachToken != 0)
             {
+                // Nothing pending, detached, or an attach in progress, which evaluates again and takes over a set flag.
                 return false;
             }
 
-            data.RecalculationNeeded = false;
-            if (!isTakeOverAllowed)
+            var hasNewRequest = data.RecalculationNeeded;
+            var isForeign = TakePendingRequest(data) || hasForeignRequest;
+            if (!isForeign && !isOwnRequestTakenOver)
             {
                 data.PendingRawTimestamp = 0;
                 return false;
             }
 
-            rawTimestamp = AdoptPendingTimestamp(data);
-            token = data.OwnerToken = DerivedPropertyData.NewToken();
+            // A request carried over from the failed loop keeps the timestamp it adopted; a newer one wins.
+            if (hasNewRequest)
+            {
+                rawTimestamp = AdoptPendingTimestamp(data);
+            }
+
+            token = TakeOwnership(data, DerivedPropertyData.NewToken());
             return true;
         }
     }
@@ -508,7 +574,8 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
         CommitOutcome Outcome, bool ShouldPublish = false, object? OldValue = null, object? NewValue = null, long Sequence = 0);
 
     /// <summary>Evaluates outside lock(data) and commits under it.</summary>
-    private static Commit EvaluateAndCommit(DerivedPropertyData data, PropertyReference property, long token, ref long rawTimestamp)
+    private static Commit EvaluateAndCommit(
+        DerivedPropertyData data, PropertyReference property, long token, ref long rawTimestamp, ref bool hasForeignRequest)
     {
         var evaluation = Evaluate(property);
         lock (data)
@@ -530,13 +597,16 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
             if (data.RecalculationNeeded)
             {
                 DiscardRecording();
-                data.RecalculationNeeded = false;
+                hasForeignRequest |= TakePendingRequest(data);
                 rawTimestamp = AdoptPendingTimestamp(data);
                 return new Commit(CommitOutcome.EvaluateAgain);
             }
 
             if (!CommitLinks(data, property))
             {
+                // A source moved without a request (its writer read the used-by set before this link): its
+                // writer may be another thread.
+                hasForeignRequest = true;
                 return new Commit(CommitOutcome.EvaluateAgain);
             }
 
