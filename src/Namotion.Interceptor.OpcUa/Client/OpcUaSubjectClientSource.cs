@@ -474,7 +474,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             _structureLock.Release();
         }
 
-        await sessionManager.PerformFullStateSyncIfNeededAsync(cancellationToken).ConfigureAwait(false);
+        await sessionManager.PerformFullStateSyncIfNeededAsync(cancellationToken, alreadyBuffering: true).ConfigureAwait(false);
     }
 
     private async Task<ReferenceDescription?> TryGetRootNodeAsync(ISession session, CancellationToken cancellationToken)

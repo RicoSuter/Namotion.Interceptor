@@ -142,7 +142,12 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// Buffers incoming notifications, reads all property values from the server, replays the buffer
     /// and resumes. On failure the request is restored, so the next health check tick retries.
     /// </summary>
-    internal async Task PerformFullStateSyncIfNeededAsync(CancellationToken cancellationToken)
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <param name="alreadyBuffering">
+    /// True when the caller started buffering itself, so the notifications buffered since are replayed
+    /// instead of being discarded by starting over.
+    /// </param>
+    internal async Task PerformFullStateSyncIfNeededAsync(CancellationToken cancellationToken, bool alreadyBuffering = false)
     {
         // Taken before the load rather than cleared after it: a recovery that happens while the load
         // runs requests another sync, and the load it supersedes returns without applying anything.
@@ -152,7 +157,11 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         }
 
         _logger.LogInformation("Performing full state sync after OPC UA session recreation...");
-        _propertyWriter.StartBuffering();
+        if (!alreadyBuffering)
+        {
+            _propertyWriter.StartBuffering();
+        }
+
         try
         {
             await _propertyWriter.LoadInitialStateAndResumeAsync(cancellationToken).ConfigureAwait(false);
@@ -285,14 +294,12 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
     private void CatchUpMissedConnectionLoss(ManagedSession session)
     {
-        if (!session.Reconnecting)
-        {
-            return;
-        }
-
+        // Read under the lock the handler runs under: the managed session sets its state before it
+        // raises the change, so a recovery that already ran its handler is seen here as recovered.
         lock (_stateLock)
         {
-            if (Volatile.Read(ref _disposed) == 1 ||
+            if (!session.Reconnecting ||
+                Volatile.Read(ref _disposed) == 1 ||
                 !ReferenceEquals(session, Volatile.Read(ref _session)) ||
                 (ConnectionState)Volatile.Read(ref _connectionState) is not ConnectionState.Connected)
             {
