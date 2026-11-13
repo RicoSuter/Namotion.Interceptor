@@ -61,8 +61,9 @@ internal static class PostLockQueue
     /// A queued recalculation request. A <see cref="RawTimestamp"/> of 0 takes the anchor write's timestamp at the
     /// drain, or the time of the drain at a release anchor; otherwise it is the request's own (handed over with it, or
     /// the causing write's at a release anchor), and the newer of it and the anchor write's wins. The
-    /// <see cref="AttachCount"/> of the property when it was queued drops the request at the drain when the property
-    /// was attached again since: that attach evaluated after the request's cause.
+    /// <see cref="AttachCount"/> of the property when the request was queued, or when an attach handed it over, drops
+    /// the request at the drain when the property was attached again since: that attach evaluated after the request's
+    /// cause.
     /// </summary>
     internal readonly record struct QueuedRequest(PropertyReference Property, long RawTimestamp, long AttachCount);
 
@@ -138,14 +139,18 @@ internal static class PostLockQueue
     /// <summary>Queues a recalculation request when the thread holds a lifecycle lock.</summary>
     /// <param name="property">The derived property.</param>
     /// <param name="handedOverRawTimestamp">The timestamp that comes with the request, 0 to take the anchor's.</param>
-    internal static bool TryEnqueueRequest(PropertyReference property, long handedOverRawTimestamp)
+    /// <param name="attachCount">
+    /// The attach count the request answers for, or <see cref="DerivedPropertyOwnership.AnyAttachCount"/> to take the
+    /// property's when it is queued.
+    /// </param>
+    internal static bool TryEnqueueRequest(PropertyReference property, long handedOverRawTimestamp, long attachCount)
     {
         if (TryGetOpenSegment() is not { } segment)
         {
             return false;
         }
 
-        AddRequest(segment, property, handedOverRawTimestamp);
+        AddRequest(segment, property, handedOverRawTimestamp, attachCount);
         return true;
     }
 
@@ -187,11 +192,16 @@ internal static class PostLockQueue
 
     /// <summary>
     /// Adds a request to a segment; a property already queued in it keeps one entry with the newer timestamp and the
-    /// newer attach count.
+    /// newer attach count. A request raised by a write takes the property's attach count now, after the write's W4.
     /// </summary>
-    internal static void AddRequest(Segment segment, PropertyReference property, long rawTimestamp)
+    internal static void AddRequest(
+        Segment segment, PropertyReference property, long rawTimestamp, long attachCount = DerivedPropertyOwnership.AnyAttachCount)
     {
-        var attachCount = property.TryGetDerivedPropertyData() is { } data ? Volatile.Read(ref data.AttachCount) : 0;
+        if (attachCount == DerivedPropertyOwnership.AnyAttachCount)
+        {
+            attachCount = property.TryGetDerivedPropertyData() is { } data ? Volatile.Read(ref data.AttachCount) : 0;
+        }
+
         var requests = segment.Requests;
         ref var index = ref CollectionsMarshal.GetValueRefOrAddDefault(segment.RequestIndex, property, out var exists);
         if (exists)
