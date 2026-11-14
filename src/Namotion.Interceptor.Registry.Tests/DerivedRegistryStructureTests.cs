@@ -295,11 +295,11 @@ public class DerivedRegistryStructureTests
         Assert.NotEqual(initialValue, read());
     }
 
-    [Theory]
-    [InlineData("\0children")]
-    [InlineData("Name\0")]
-    public void WhenAddedPropertyNameContainsNullCharacter_ThenAddPropertyThrowsAndAddsNothing(string name)
+    [Fact]
+    public void WhenAddedPropertyNameIsTheReservedChildrenName_ThenAddPropertyThrowsAndAddsNothing()
     {
+        const string name = "\0children";
+
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var target = new RegistryTarget(context);

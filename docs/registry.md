@@ -137,7 +137,7 @@ registered.AddDerivedProperty("Status", typeof(string),
 
 Derived properties automatically participate in change tracking and will update when their dependencies change.
 
-A property name must not contain a null character: `AddProperty` and `AddDerivedProperty` throw an `ArgumentException` for one, since derived property tracking reserves such names.
+The property name `"\0children"` (a null character followed by `children`) is reserved: `AddProperty` and `AddDerivedProperty` throw an `ArgumentException` for it, since derived property tracking records the children of a subject under it.
 
 ### Lifecycle tracking for dynamic properties
 
