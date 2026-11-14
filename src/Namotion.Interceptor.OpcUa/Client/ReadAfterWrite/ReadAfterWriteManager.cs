@@ -332,17 +332,13 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         }
 
         var successCount = 0;
-        var failedCount = 0;
         var skippedCount = 0;
 
         try
         {
             try
             {
-                // Chunked to the server's read limit: past it the SDK splits the read itself and reuses the request
-                // header, so only its last split would be checked against the request handle.
-                var maxNodesPerRead = session.OperationLimits?.MaxNodesPerRead ?? 0;
-                var chunkSize = maxNodesPerRead > 0 && maxNodesPerRead < (uint)dueCount ? (int)maxNodesPerRead : dueCount;
+                var chunkSize = OpcUaValueReader.GetNodesPerRead(session, dueCount);
                 var readValues = new ReadValueIdCollection(chunkSize);
                 for (var offset = 0; offset < dueCount; offset += chunkSize)
                 {
@@ -359,39 +355,24 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                         });
                     }
 
-                    var requestHeader = new RequestHeader();
-                    ReadResponse response;
+                    DataValueCollection results;
                     try
                     {
-                        response = await session.ReadAsync(
-                            requestHeader,
-                            maxAge: 0,
-                            timestampsToReturn: TimestampsToReturn.Source,
-                            readValues,
-                            _cts.Token).ConfigureAwait(false);
+                        results = await OpcUaValueReader.ReadAsync(
+                            session, readValues, TimestampsToReturn.Source, _cts.Token).ConfigureAwait(false);
                     }
-                    catch (Exception) when (_cts.IsCancellationRequested)
+                    catch (Exception exception) when (_cts.IsCancellationRequested && exception is not OpcUaResponseMismatchException)
                     {
                         return;
-                    }
-                    catch (InvalidCastException exception)
-                    {
-                        throw OpcUaResponseMismatchException.FromInvalidCast("Read", exception);
-                    }
-
-                    if (OpcUaResponseMismatchException.Check("Read", requestHeader, response.ResponseHeader) is { } mismatch)
-                    {
-                        throw mismatch;
                     }
 
                     var receivedTimestamp = DateTimeOffset.UtcNow;
 
-                    for (var i = 0; i < response.Results.Count && i < count; i++)
+                    for (var i = 0; i < results.Count; i++)
                     {
-                        var result = response.Results[i];
+                        var result = results[i];
                         if (!StatusCode.IsGood(result.StatusCode))
                         {
-                            failedCount++;
                             continue;
                         }
 
@@ -428,9 +409,8 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             {
                 // Every due read that did not succeed or get skipped failed, including those a
                 // thrown batch never processed.
-                failedCount = dueCount - successCount - skippedCount;
                 _metrics.RecordExecuted(successCount);
-                _metrics.RecordFailed(failedCount);
+                _metrics.RecordFailed(dueCount - successCount - skippedCount);
                 ReportErrorIfRunning(ex);
                 if (_circuitBreaker.RecordFailure())
                 {
@@ -445,9 +425,8 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             }
 
             // A response can carry fewer results than requested; the unanswered remainder failed.
-            failedCount = dueCount - successCount - skippedCount;
             _metrics.RecordExecuted(successCount);
-            _metrics.RecordFailed(failedCount);
+            _metrics.RecordFailed(dueCount - successCount - skippedCount);
             _circuitBreaker.RecordSuccess();
 
             // Logging provider failures are not read failures. Let them propagate to the timer callback's

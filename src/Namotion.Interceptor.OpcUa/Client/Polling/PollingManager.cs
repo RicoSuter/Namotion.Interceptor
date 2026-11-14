@@ -248,12 +248,8 @@ internal sealed class PollingManager : IAsyncDisposable
             // Get snapshot of items to poll
             var itemsToRead = _pollingItems.Values.ToArray();
 
-            // Capped at the server's read limit: past it the SDK splits the read itself and reuses the request
-            // header, so only its last split would be checked against the request handle.
-            var maxNodesPerRead = session.OperationLimits?.MaxNodesPerRead ?? 0;
-            var batchLimit = maxNodesPerRead > 0 && maxNodesPerRead < (uint)_configuration.PollingBatchSize
-                ? (int)maxNodesPerRead
-                : _configuration.PollingBatchSize;
+            // Each batch is one read, so it may not exceed the server's read limit.
+            var batchLimit = OpcUaValueReader.GetNodesPerRead(session, _configuration.PollingBatchSize);
 
             // Process in batches using direct indexing
             for (int i = 0; i < itemsToRead.Length; i += batchLimit)
@@ -342,33 +338,15 @@ internal sealed class PollingManager : IAsyncDisposable
                 });
             }
 
-            var requestHeader = new RequestHeader();
-            ReadResponse response;
-            try
-            {
-                response = await session.ReadAsync(
-                    requestHeader,
-                    maxAge: 0,
-                    timestampsToReturn: TimestampsToReturn.Both,
-                    nodesToRead,
-                    cancellationToken).ConfigureAwait(false);
-            }
-            catch (InvalidCastException exception)
-            {
-                throw OpcUaResponseMismatchException.FromInvalidCast("Read", exception);
-            }
-
-            if (OpcUaResponseMismatchException.Check("Read", requestHeader, response.ResponseHeader) is { } mismatch)
-            {
-                throw mismatch;
-            }
+            var results = await OpcUaValueReader.ReadAsync(
+                session, nodesToRead, TimestampsToReturn.Both, cancellationToken).ConfigureAwait(false);
 
             // Process results - count metrics per item for accurate monitoring
-            for (var i = 0; i < Math.Min(response.Results.Count, batch.Count); i++)
+            for (var i = 0; i < results.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var dataValue = response.Results[i];
+                var dataValue = results[i];
                 var pollingItem = batch[i];
 
                 if (StatusCode.IsGood(dataValue.StatusCode))

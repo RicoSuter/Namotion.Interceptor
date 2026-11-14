@@ -408,6 +408,61 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task WhenALaterChunkReceivesTheResponseToADifferentRequest_ThenEarlierChunksStayApplied()
+    {
+        // Arrange
+        var subjects = Enumerable.Range(0, 2)
+            .Select(_ => new TestPerson(InterceptorSubjectContext.Create().WithFullPropertyTracking()))
+            .ToArray();
+        uint nextHandle = 0;
+        var session = new Mock<ISession>();
+        session.SetupGet(value => value.Connected).Returns(true);
+        session.SetupGet(value => value.OperationLimits).Returns(new OperationLimits { MaxNodesPerRead = 1 });
+        session
+            .Setup(value => value.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader requestHeader, double _, TimestampsToReturn _, ReadValueIdCollection _, CancellationToken _) =>
+            {
+                requestHeader.RequestHandle = ++nextHandle;
+                return new ReadResponse
+                {
+                    // Only the second request is answered for another request.
+                    ResponseHeader = new ResponseHeader { RequestHandle = nextHandle == 2 ? 99u : nextHandle },
+                    Results = new DataValueCollection([CreateDataValue("read", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1))]),
+                    DiagnosticInfos = []
+                };
+            });
+
+        var metrics = new ReadAfterWriteMetrics();
+        var reportedErrors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        await using var manager = new ReadAfterWriteManager(
+            () => session.Object,
+            new Mock<Connectors.ISubjectSource>().Object,
+            CreateConfiguration(TimeSpan.FromMilliseconds(250)),
+            metrics,
+            reportedErrors.Enqueue,
+            NullLogger.Instance);
+
+        RegisterAndSchedule(manager, new NodeId("First", 2), CreateTestProperty(subjects[0]));
+        RegisterAndSchedule(manager, new NodeId("Second", 2), CreateTestProperty(subjects[1]));
+
+        // Act
+        await manager.ProcessDueReadsAsync(DateTime.MaxValue);
+
+        // Assert
+        Assert.Equal(2u, nextHandle);
+        Assert.Equal("read", subjects[0].FirstName);
+        Assert.Equal(string.Empty, subjects[1].FirstName);
+        Assert.Equal(1, metrics.Executed);
+        Assert.Equal(1, metrics.Failed);
+        Assert.Collection(reportedErrors, error => Assert.IsType<OpcUaResponseMismatchException>(error));
+    }
+
+    [Fact]
     public async Task WhenTheServerOmitsResults_ThenEachMissingResultIsCountedAsFailed()
     {
         // Arrange

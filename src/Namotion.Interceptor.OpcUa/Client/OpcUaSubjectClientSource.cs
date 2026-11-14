@@ -16,8 +16,6 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjectClientSource, IFaultInjectable, IAsyncDisposable
 {
-    private const int DefaultChunkSize = 512;
-
     private readonly IInterceptorSubject _subject;
     private readonly ILogger _logger;
     private readonly SourceOwnershipManager _ownership;
@@ -276,15 +274,14 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         }
 
         var itemCount = ownedProperties.Count;
-        var batchSize = (int)(session.OperationLimits?.MaxNodesPerRead ?? DefaultChunkSize);
-        batchSize = batchSize is 0 ? int.MaxValue : batchSize;
-
+        var nodesPerRead = OpcUaValueReader.GetNodesPerRead(session, itemCount);
+        var readValues = new ReadValueIdCollection(nodesPerRead);
         var result = new Dictionary<RegisteredSubjectProperty, DataValue>(itemCount);
-        for (var offset = 0; offset < itemCount; offset += batchSize)
+        for (var offset = 0; offset < itemCount; offset += nodesPerRead)
         {
-            var take = Math.Min(batchSize, itemCount - offset);
-            var readValues = new ReadValueIdCollection(take);
-
+            // Reused across reads: the previous read has completed, so the SDK no longer holds it.
+            readValues.Clear();
+            var take = Math.Min(nodesPerRead, itemCount - offset);
             for (var i = 0; i < take; i++)
             {
                 readValues.Add(new ReadValueId
@@ -294,35 +291,15 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                 });
             }
 
-            var requestHeader = new RequestHeader();
-            ReadResponse readResponse;
-            try
-            {
-                readResponse = await session.ReadAsync(
-                    requestHeader,
-                    maxAge: 0,
-                    timestampsToReturn: TimestampsToReturn.Source,
-                    readValues,
-                    cancellationToken).ConfigureAwait(false);
-            }
-            catch (InvalidCastException exception)
-            {
-                throw OpcUaResponseMismatchException.FromInvalidCast("Read", exception);
-            }
+            // A mismatch fails the whole load, whose callers reload on failure, so the session is resynced anyway.
+            var results = await OpcUaValueReader.ReadAsync(
+                session, readValues, TimestampsToReturn.Source, cancellationToken).ConfigureAwait(false);
 
-            // Fails the whole load, whose callers reload on failure, so the session is resynced anyway.
-            if (OpcUaResponseMismatchException.Check("Read", requestHeader, readResponse.ResponseHeader) is { } mismatch)
+            for (var i = 0; i < results.Count; i++)
             {
-                throw mismatch;
-            }
-
-            var resultCount = Math.Min(readResponse.Results.Count, readValues.Count);
-            for (var i = 0; i < resultCount; i++)
-            {
-                if (StatusCode.IsGood(readResponse.Results[i].StatusCode))
+                if (StatusCode.IsGood(results[i].StatusCode))
                 {
-                    var dataValue = readResponse.Results[i];
-                    result[ownedProperties[offset + i].Property] = dataValue;
+                    result[ownedProperties[offset + i].Property] = results[i];
                 }
             }
         }
