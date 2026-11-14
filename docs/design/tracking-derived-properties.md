@@ -199,7 +199,7 @@ Recorded, only while a getter is recorded, by:
 | `GetParents(S)` | S |
 | `TryGetFirstParent`, `TryGetFirstParentOrSelf` | every visited subject, through `GetParents` |
 | `GetReferenceCount(S)`, `RegisteredSubject.ReferenceCount` | S |
-| `subject.TryGetRegisteredSubject()` | S, before the registry is resolved, so a subject whose context has no registry yet is followed |
+| `subject.TryGetRegisteredSubject()`, `subject.TryGetRegisteredProperty(name)` and its expression overload | S (every subject on the path), before the registry is resolved, so a subject whose context has no registry yet is followed |
 | `ISubjectRegistry.TryGetRegisteredSubject(S)` | S |
 | `RegisteredSubject.Parents`, `Properties`, `TryGetProperty`, `GetPropertyAttributes`, `TryGetPropertyAttribute` of S | S |
 | `RegisteredSubjectProperty.Children` of a property of S | the children of S |
