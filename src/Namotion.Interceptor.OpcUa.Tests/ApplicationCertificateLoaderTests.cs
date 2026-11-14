@@ -138,7 +138,7 @@ public class ApplicationCertificateLoaderTests : IDisposable
         Assert.True(GetCertificate(application).HasPrivateKey);
         var warning = Assert.Single(logger.Warnings);
         Assert.Contains(expiring.Thumbprint, warning);
-        Assert.Contains(Path.Combine(_storePath, "own"), warning);
+        Assert.Contains(application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.StorePath, warning);
         Assert.Contains("once it has expired", warning);
     }
 
