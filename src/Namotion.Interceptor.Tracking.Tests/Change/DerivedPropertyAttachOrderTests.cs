@@ -304,10 +304,11 @@ public class DerivedPropertyAttachOrderTests
     }
 
     [Fact]
-    public async Task WhenSubtreeIsAttachedAgainOnAnotherThreadBeforeTheWriteReturns_ThenTheChangedDerivedValueIsPublishedOnce()
+    public async Task WhenSubtreeIsAttachedAgainOnAnotherThreadBeforeTheWriteReturns_ThenTheLaterAttachPublishesTheChangedDerivedValue()
     {
         // Arrange
         var timeout = TestTimeouts.Default;
+        var timestamp = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
@@ -327,7 +328,10 @@ public class DerivedPropertyAttachOrderTests
                 secondWriter = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
                 {
                     root.Machine = null;
-                    root.Machine = machine;
+                    using (SubjectChangeContext.WithChangedTimestamp(timestamp))
+                    {
+                        root.Machine = machine;
+                    }
                 });
                 hasSecondAttachCompleted = secondAttachIsDone.Wait(timeout);
             }
@@ -345,11 +349,12 @@ public class DerivedPropertyAttachOrderTests
         firstWriteHasReturned.Set();
         await secondWriter.WaitAsync(timeout);
 
-        // Assert: the work the first write queued runs first, after the second attach, and publishes the change of
-        // that attachment once.
+        // Assert: the work the first write queued is dropped, since the worker was attached again since.
         Assert.True(hasSecondAttachCompleted);
         Assert.True(hasFirstWriteReturned);
-        AssertSingleChange(changes, machine.Worker, nameof(EvaluatorWorker.Result), 1);
+        var change = Assert.Single(changes, c => c.Property.Subject == machine.Worker && c.Property.Name == nameof(EvaluatorWorker.Result));
+        Assert.Equal(1, change.GetNewValue<int>());
+        Assert.Equal(timestamp, change.ChangedTimestamp);
         Assert.Equal(1, machine.Worker.Result);
     }
 
