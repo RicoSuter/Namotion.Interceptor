@@ -173,7 +173,16 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             // unwind may have found nothing registered yet.
             if (State == SourceState.Stopped)
             {
-                UnwindRegistrations(monitors);
+                try
+                {
+                    UnwindRegistrations(monitors);
+                }
+                catch (Exception unwindException)
+                {
+                    // Logged, not thrown: it would replace the registration failure being propagated.
+                    _logger.LogError(unwindException, "Unwinding a failed source registration threw.");
+                }
+
                 throw;
             }
 
@@ -204,11 +213,17 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     private void UnwindRegistrations(ImmutableArray<SourceMonitor> monitors)
     {
         ImmutableInterlocked.InterlockedExchange(ref _registeredMonitors, ImmutableArray<SourceMonitor>.Empty);
-        foreach (var monitor in monitors)
-        {
-            monitor.Unregister(this);
-        }
+        UnregisterFromAll(monitors);
     }
+
+    /// <summary>
+    /// Unregisters from every monitor, even when one throws, then reports the failures together.
+    /// </summary>
+    // Unregister re-evaluates pending waits, so a poisoned anchor makes it throw, and both callers
+    // have already taken and cleared the field, so whatever a first throw skipped could never be
+    // unwound afterwards.
+    private void UnregisterFromAll(ImmutableArray<SourceMonitor> monitors)
+        => ExceptionAggregation.ForEach(monitors, monitor => monitor.Unregister(this));
 
     /// <inheritdoc />
     protected sealed override async Task RunAsync(CancellationToken stoppingToken)
@@ -652,12 +667,23 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         // on a later call, and so the field is never read while another thread is writing it.
         var monitors = ImmutableInterlocked.InterlockedExchange(
             ref _registeredMonitors, ImmutableArray<SourceMonitor>.Empty);
-        foreach (var monitor in monitors)
-        {
-            monitor.Unregister(this);
-        }
 
-        WriteRetryQueue.Dispose();
-        base.Dispose();
+        try
+        {
+            UnregisterFromAll(monitors);
+        }
+        finally
+        {
+            // base.Dispose cancels the pump's token source, so nothing may skip it: a disposed
+            // source must not keep pumping.
+            try
+            {
+                WriteRetryQueue.Dispose();
+            }
+            finally
+            {
+                base.Dispose();
+            }
+        }
     }
 }
