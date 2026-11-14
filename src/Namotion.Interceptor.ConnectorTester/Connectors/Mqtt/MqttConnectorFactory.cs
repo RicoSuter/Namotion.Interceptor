@@ -14,7 +14,7 @@ public sealed class MqttConnectorFactory : IConnectorFactory
     public ConnectorKind Kind => ConnectorKind.Mqtt;
     public int DefaultPort => 1883;
 
-    public void RegisterServer(IServiceCollection services, TestNode root, int port)
+    public void RegisterServer(IServiceCollection services, TestNode root, ParticipantConfiguration participantConfiguration, int port)
     {
         services.AddSingleton(root);
         services.AddMqttSubjectServer(
