@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Parent;
 
@@ -166,6 +167,7 @@ public static class ParentsHandlerExtensions
     /// </summary>
     public static ImmutableArray<SubjectParent> GetParents(this IInterceptorSubject subject)
     {
+        SubjectStructure.RecordRead(subject);
         if (subject.Data.TryGetValue((null, ParentsKey), out var parents))
         {
             return ((ParentsSet)parents!).ToImmutableArray();

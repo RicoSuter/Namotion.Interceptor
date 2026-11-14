@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
@@ -25,7 +26,10 @@ public class RegisteredSubjectProperty
     // 0: not computed yet, 1: no, 2: yes. Cached because segment lookups ask it for every matching property.
     private byte _isInlinePathsProperty;
 
-    internal RegisteredSubjectProperty[]? AttributesCache = null; // TODO: Dangerous cache, needs review
+    // Published with one write and used only while the number of registered properties equals the one it was computed
+    // from. Properties are only ever added, so a read that computed it before an add and stores it after the add
+    // does not keep it.
+    internal AttributesSnapshot? AttributesCache;
 
     public RegisteredSubjectProperty(RegisteredSubject parent, string name,
         Type type, IReadOnlyCollection<Attribute> reflectionAttributes)
@@ -226,6 +230,7 @@ public class RegisteredSubjectProperty
     {
         get
         {
+            SubjectStructure.RecordChildrenRead(Parent.Subject);
             lock (_children)
             {
                 if (_childrenCache.IsDefault)
@@ -335,7 +340,27 @@ public class RegisteredSubjectProperty
     public RegisteredSubjectProperty[] Attributes
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => AttributesCache = (AttributesCache ?? Parent.GetPropertyAttributes(Name).ToArray());
+        get
+        {
+            // Recorded on every call, since a cached result reads the registered properties only to compare them.
+            SubjectStructure.RecordRead(Parent.Subject);
+            var properties = Parent.RegisteredProperties;
+            var cache = AttributesCache;
+            if (cache is null || cache.PropertyCount != properties.Count)
+            {
+                cache = new AttributesSnapshot(properties.Count, RegisteredSubject.GetPropertyAttributes(properties, Name).ToArray());
+                AttributesCache = cache;
+            }
+
+            return cache.Attributes;
+        }
+    }
+
+    internal sealed class AttributesSnapshot(int propertyCount, RegisteredSubjectProperty[] attributes)
+    {
+        public int PropertyCount { get; } = propertyCount;
+
+        public RegisteredSubjectProperty[] Attributes { get; } = attributes;
     }
     
     /// <summary>

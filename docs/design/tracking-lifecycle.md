@@ -217,6 +217,10 @@ Derived property tracking hooks into the lifecycle at two points: the lifecycle 
 
 **Cost.** See [Performance Characteristics](tracking-derived-properties.md#performance-characteristics). In addition, a write with consumers reads the lock count in `PropertyChangeInterceptor`, and a structural write counts its lock.
 
+## Structure Changes
+
+The lifecycle reports every change of a subject's structure and children it makes, listed in [Structure Cells](tracking-derived-properties.md#structure-cells), so the derived properties that read them are recalculated. On attach, the structure is reported before the subject's properties attach, so a derived property of the subject itself evaluates on the new state, and when the attach descends into the subtree, before the descent, so the attach evaluations in the subtree do too. The structure of a root attached to a context is reported at the descent into its first child. A change made under the lifecycle lock queues its recalculation requests in the [post-lock queue](#post-lock-queue) like a write does: they run after the lifecycle operation and take the anchor's timestamp. `RegisteredSubject.AddProperty` outside the lock runs them before it returns.
+
 ## Handler Order Around the Descent
 
 `ContextInheritanceHandler` is the handler that walks down into a newly attached subtree. Where a handler sits relative to it decides both the order it sees subjects in and what it can look up.
@@ -263,6 +267,8 @@ Were the registry behind the descent, `child` would see only part of that chain 
 A handler that records something other handlers read during attach therefore has to say so with `[RunsBefore(typeof(ContextInheritanceHandler))]`. Registration order alone is not enough, because an unrelated handler's ordering constraint can move it. `[RunsAfter(typeof(SubjectRegistry))]` is not a substitute: it constrains the handler only against the registry, leaving its position relative to the descent dependent on where it was registered.
 
 `SubjectRegistry` and `ParentTrackingHandler` both carry it, and the registry is additionally ordered ahead of parent tracking. Neither reads the other, so that direction only fixes what a handler placed between them sees; without it, which of the two had already run would depend on how the context was composed. The pre-descent segment therefore resolves the same way for every composition: registry, then parent tracking, then the descent. A handler asking for the slot between the two, with `[RunsAfter(typeof(ParentTrackingHandler))]` and `[RunsBefore(typeof(SubjectRegistry))]` together, now closes a cycle and is rejected when the chain resolves.
+
+The descent is also where the lifecycle reports the attaching subject's structure to derived property tracking (see [Structure Changes](#structure-changes)), and it reports it only once. So a handler that adds a fallback context to the attaching subject itself, which starts the descent where it runs, has to be ordered behind `SubjectRegistry` and `ParentTrackingHandler` (`[RunsAfter]` on both): ahead of them, the registration and the parents they set afterwards are never reported, and a derived property that read them keeps a stale value. No handler in the library does this; `ContextInheritanceHandler` is ordered behind both.
 
 There is a second boundary inside attach that the handler ordering cannot cross. A subject's `ILifecycleHandler` chain runs to completion first, and only then do its properties attach, which is where `SubjectRegistry` invokes every `ISubjectPropertyInitializer`. So a lifecycle handler never sees properties an initializer adds to the same subject, at any ordering position. A handler that needs initializer output has to observe `IPropertyLifecycleHandler` instead, ordered with `[RunsAfter(typeof(SubjectRegistry))]` so it resolves behind the registry.
 

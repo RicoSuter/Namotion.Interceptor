@@ -11,6 +11,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     private readonly Dictionary<IInterceptorSubject, PropertyReferenceSet> _attachedSubjects = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<PropertyReference, object?> _lastProcessedValues = new(PropertyReference.Comparer);
 
+    // The subject whose attach handlers run, until its structure change is reported, and the subject holding it. The
+    // root whose subtree is attached to a context, until its structure change is reported. Used under the lock.
+    private IInterceptorSubject? _structureChangePending;
+    private IInterceptorSubject? _structureChangePendingHolder;
+    private IInterceptorSubject? _contextAttachPending;
+
     [ThreadStatic]
     private static List<List<(IInterceptorSubject subject, PropertyReference property, object? index)>>? _listPool;
 
@@ -92,17 +98,58 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             lock (_attachedSubjects)
             {
-                using var suspension = SubjectLifecycleAttachments.SuspendDerivedRecording();
-                FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
-
-                foreach (var child in collectedSubjects)
+                if (ReferenceEquals(_structureChangePending, subject))
                 {
-                    AttachToProperty(child.subject, subject.Context, child.property, child.index);
+                    // A handler of the subject's attach descends into its subtree (ContextInheritanceHandler): the
+                    // structure and the holder's children are set, and are reported before the attach evaluations
+                    // below read them. So is the structure of a root attached to a context, at the descent into its
+                    // first child: the child's registry handler registered it.
+                    var holder = _structureChangePendingHolder!;
+                    var isHolderPending = ReferenceEquals(_contextAttachPending, holder);
+                    _structureChangePending = null;
+                    if (isHolderPending)
+                    {
+                        _contextAttachPending = null;
+                    }
+
+                    TrackingWriteObserver.OnStructureChanged(subject, holder, isHolderPending);
                 }
 
-                if (!_attachedSubjects.ContainsKey(subject))
+                var isRoot = !_attachedSubjects.ContainsKey(subject);
+                var outerContextAttachPending = _contextAttachPending;
+                if (isRoot)
                 {
-                    AttachToContext(subject, subject.Context);
+                    _contextAttachPending = subject;
+                }
+
+                try
+                {
+                    using var suspension = SubjectLifecycleAttachments.SuspendDerivedRecording();
+                    FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
+
+                    foreach (var child in collectedSubjects)
+                    {
+                        AttachToProperty(child.subject, subject.Context, child.property, child.index);
+                    }
+
+                    if (!_attachedSubjects.ContainsKey(subject))
+                    {
+                        AttachToContext(subject, subject.Context);
+                    }
+                }
+                finally
+                {
+                    // Still pending when a handler of a child threw before the root was reported, after a child's
+                    // registry handler may have registered it.
+                    if (isRoot && ReferenceEquals(_contextAttachPending, subject))
+                    {
+                        TrackingWriteObserver.OnStructureChanged(subject);
+                    }
+
+                    if (isRoot)
+                    {
+                        _contextAttachPending = outerContextAttachPending;
+                    }
                 }
             }
         }
@@ -160,7 +207,19 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         };
 
         var properties = subject.Properties.Keys;
-        InvokeAddedLifecycleHandlers(subject, context, change);
+        try
+        {
+            InvokeAddedLifecycleHandlers(subject, context, change);
+        }
+        finally
+        {
+            // Reported here unless the descent into the subtree reported it already.
+            if (ReferenceEquals(_contextAttachPending, subject))
+            {
+                _contextAttachPending = null;
+                TrackingWriteObserver.OnStructureChanged(subject);
+            }
+        }
 
         SubjectAttached?.Invoke(change);
         foreach (var propertyName in properties)
@@ -200,7 +259,25 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         };
 
         var properties = subject.Properties.Keys;
-        InvokeAddedLifecycleHandlers(subject, context, change);
+        var outerPending = _structureChangePending;
+        var outerPendingHolder = _structureChangePendingHolder;
+        _structureChangePending = subject;
+        _structureChangePendingHolder = property.Subject;
+        try
+        {
+            InvokeAddedLifecycleHandlers(subject, context, change);
+        }
+        finally
+        {
+            // Reported here unless the descent into the subtree reported them already.
+            if (ReferenceEquals(_structureChangePending, subject))
+            {
+                TrackingWriteObserver.OnStructureChanged(subject, property.Subject, isHolderStructureChanged: false);
+            }
+
+            _structureChangePending = outerPending;
+            _structureChangePendingHolder = outerPendingHolder;
+        }
 
         if (isFirstAttach)
         {
@@ -259,8 +336,15 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             IsContextDetach = true
         };
 
-        SubjectDetaching?.Invoke(change);
-        InvokeRemovedLifecycleHandlers(subject, context, change);
+        try
+        {
+            SubjectDetaching?.Invoke(change);
+            InvokeRemovedLifecycleHandlers(subject, context, change);
+        }
+        finally
+        {
+            TrackingWriteObserver.OnStructureChanged(subject);
+        }
     }
 
     /// <summary>
@@ -299,12 +383,19 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             Interceptor = this
         };
 
-        if (isLastDetach)
+        try
         {
-            SubjectDetaching?.Invoke(change);
-        }
+            if (isLastDetach)
+            {
+                SubjectDetaching?.Invoke(change);
+            }
 
-        InvokeRemovedLifecycleHandlers(subject, context, change);
+            InvokeRemovedLifecycleHandlers(subject, context, change);
+        }
+        finally
+        {
+            TrackingWriteObserver.OnStructureChanged(subject, property.Subject, isHolderStructureChanged: false);
+        }
 
         if (children is not null)
         {

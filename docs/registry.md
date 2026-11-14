@@ -137,6 +137,8 @@ registered.AddDerivedProperty("Status", typeof(string),
 
 Derived properties automatically participate in change tracking and will update when their dependencies change.
 
+The property name `"\0children"` (a null character followed by `children`) is reserved: `AddProperty` and `AddDerivedProperty` throw an `ArgumentException` for it, since derived property tracking records the children of a subject under it.
+
 ### Lifecycle tracking for dynamic properties
 
 Dynamic properties (including derived) fully participate in lifecycle tracking when `WithLifecycle()` or `WithFullPropertyTracking()` is enabled. If a dynamic property holds a reference to another subject, that subject is automatically attached to the lifecycle graph with proper reference counting. For example, a `AddDerivedProperty<Tire>("FirstTire", ...)` that returns the first tire from a collection would give that tire a reference count of 2, one from the collection property and one from the derived property. This holds because dynamic properties are intercepted. A generated non-partial `[Derived]` getter is not intercepted, so it never attaches the subject it returns and never adds a reference.

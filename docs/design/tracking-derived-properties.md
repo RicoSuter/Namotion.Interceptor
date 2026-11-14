@@ -40,10 +40,11 @@ The design rests on three rules:
 | `TrackingWriteObserver` | Tracking | The write observer: once per landed write, moves the written property's version and requests the recalculation of every derived property that read it. It also completes the anchor write of the post-lock queue. |
 | `PostLockQueue` | Tracking | Per thread, the recalculation requests and change deliveries that arise while the thread holds a lifecycle lock, run after the lifecycle operation, outside the lock. See [Post-Lock Queue](tracking-lifecycle.md#post-lock-queue). |
 | `DerivedPropertyData` | Tracking | Per-property state, created once and never removed or replaced. Stored in `Subject.Data` under key `"ni.dpd"`. |
-| `DerivedPropertyTypeGate` | Tracking | Per subject type, whether any `DerivedPropertyData` exists for a subject of the type. Raised before the first data of the type is stored, never lowered. Lets a write, and the detach of a subject, skip the data lookup for types nothing derived touches. |
+| `DerivedPropertyTypeGate` | Tracking | Per subject type, whether any `DerivedPropertyData` exists for a property of the type; [structure cells](#structure-cells) raise none. Raised before the first data of a property of the type is stored, never lowered. Lets a write, and the detach of a subject, skip the data lookup for types nothing derived touches. |
 | `PropertyReferenceCollection` | Tracking | Collection for used-by properties with lock-free snapshot reads and writes under its own leaf lock. See [Used-by properties collection](#used-by-properties-collection). |
 | `SubjectLifecycleAttachments` | Tracking | Per subject, the lifecycle interceptors the subject is attached to and its reference count, so a derived property stays attached while its subject is in any graph. See [Detach and Attachments](#detach-and-attachments). |
 | `DerivedPropertyChangeHandlerExtensions` | Tracking | `GetRequiredProperties`, `GetUsedByProperties`, `RecalculateDerivedProperty`, and access to `DerivedPropertyData` via `PropertyReference`. |
+| `SubjectStructure` | Tracking | Records a getter's reads of a subject's structure and reports changes of it, for the lifecycle, parent tracking and the registry. Public, `[EditorBrowsable(Never)]` infrastructure. See [Structure Cells](#structure-cells). |
 
 ## Access Taps
 
@@ -162,6 +163,10 @@ A write that did not land (vetoed, captured by a transaction, stopped by the equ
 
 A write without a context that found no write observer does not pay a fence: after W1 it reads the observer again (a volatile read) and, when one is set now, reports the write to it, which then runs W2 to W5. The first installation of an observer executes `Interlocked.MemoryBarrierProcessWide()`, a full barrier on every running thread at an instruction boundary: a W1 before that point is visible to every evaluation that starts after the installation completed, and a W1 after it is followed in program order by the read again, which then sees the observer. A writer that is not running during the barrier is covered too, since its context switch is a full barrier. `SetWriteObserver` returns only after the barrier completed, also to a caller that lost the race to install, so the guarantee holds for every evaluation that starts after any `SetWriteObserver` call returned.
 
+### Structure gate
+
+A [structure change](#structure-cells) that finds the structure gate not raised skips W2 to W5 for all of its cells: it pays neither the fence nor a data lookup. The gate (`SubjectStructure.IsGateRaised`) is process-wide and is raised by the first creation of the data of any cell, before that data is stored, and never lowered. As for the [observer installation](#observer-installation), the change reads the gate after W1 without a fence: whoever raises the gate executes `Interlocked.MemoryBarrierProcessWide()` after the store and before it marks the gate raised, and every creation of a cell's data, also one that lost the race to raise the gate, waits until the gate is marked raised before it stores the data and records the cell's version (R1, R2). A change counts the gate as raised from the compare-and-swap that starts raising it, while the barrier is still in progress, and the argument depends on it: a change that reads the gate after the barrier's point may find it not yet marked raised. A change that reads the gate before that barrier's point on its thread made its W1 before that point as well, since W1 precedes the read in program order, and the barrier makes W1 visible before any cell's data exists, so every evaluation that records a cell reads the changed structure or a later one. A change that reads the gate after that point finds it raised and runs W2 to W5 as usual, so the [proof](#proof-that-no-write-is-missed) applies. A thread that is not running during the barrier is covered too, since its context switch is a full barrier. A change that finds the gate not raised therefore misses no cell, like a write that finds its type gate not raised (W3). The gate is process-wide rather than per type because a change reports the cells of two subjects, the subject and the one holding it, and checking two per-type gates costs about what the two data lookups cost.
+
 ### Proof that no write is missed
 
 Take a read R3 of E and a write W1 of the same property:
@@ -184,6 +189,33 @@ A marked evaluation is evaluated exactly once more before it commits, so a value
 ### Throwing getters
 
 A getter that throws is not a failure of the protocol. The reads before the throw are the ones that decided the outcome, so they are linked (R4) and checked (R5) as usual, the previous value is kept, and the property is marked faulted, so the first successful evaluation afterwards is published even when no value was committed before (its old value is then the default of the property type). A success clears the mark.
+
+## Structure Cells
+
+The structure of a subject is whether it is attached and registered, its reference count, its parents with their keys or positions, and its registered properties with their attributes. Its children are the subjects attached through its properties, with their keys or positions. A getter that reads any part of either follows all of it: each is one dependency source per subject, a cell, and any change of it recalculates every derived property that read any part of it. They are two cells because an attach of a subtree adds the children of its subjects while it attaches them, after their structure is set.
+
+A cell is a `DerivedPropertyData`: it is stored like a property's data, under a reference that is not a property, without a property name for the structure (`SubjectStructure.Of`) and with the reserved name `"\0children"` for the children (`SubjectStructure.ChildrenOf`), which `RegisteredSubject.AddProperty` rejects as the name of an added property (a property added through `IInterceptorSubject.AddProperties` directly must not use it either), and has a version and a used-by collection like a property's. Recording, linking and the version check are therefore those of a property: a structure read records the cell and its version (R1, R2) before the state is read, the commit links it (R4) and checks its version (R5), and the [proof](#proof-that-no-write-is-missed) and the [own-write rule](#own-writes) apply unchanged. `GetRequiredProperties` lists properties only, not cells. A cell raises no [type gate](#components), since the structure is never written through the write observer; its creation raises the [structure gate](#structure-gate) instead.
+
+Recorded, only while a getter is recorded, by:
+
+| API | Records |
+|---|---|
+| `GetParents(S)` | S |
+| `TryGetFirstParent`, `TryGetFirstParentOrSelf` | every visited subject, through `GetParents` |
+| `GetReferenceCount(S)`, `RegisteredSubject.ReferenceCount` | S |
+| `subject.TryGetRegisteredSubject()`, `subject.TryGetRegisteredProperty(name)` and its expression overload | S (every subject on the path), before the registry is resolved, so a subject whose context has no registry yet is followed |
+| `ISubjectRegistry.TryGetRegisteredSubject(S)` | S |
+| `RegisteredSubject.Parents`, `Properties`, `TryGetProperty`, `GetPropertyAttributes`, `TryGetPropertyAttribute` of S, and `RegisteredSubjectProperty.Attributes` of a property of S, also when cached | S |
+| `RegisteredSubjectProperty.Children` of a property of S | the children of S |
+
+Changed by the following; a change updates the state first, then runs W2 to W5 on the cell (`TrackingWriteObserver.OnStructureChanged`). The cells one dispatch reports together share one fence (W2): every state change is stored before it and every data lookup follows it, so each lookup still comes after the change of its cell. While the [structure gate](#structure-gate) is not raised, a dispatch stops before the fence. The requests are queued while the thread holds a lifecycle lock (see [Structure Changes](tracking-lifecycle.md#structure-changes)) and run immediately otherwise:
+
+- `LifecycleInterceptor`, once per lifecycle change of S it dispatches (context attach or detach, reference added or removed), after all lifecycle handlers ran or one of them, or a `SubjectDetaching` subscriber, threw. When a handler of an attach descends into the subtree of S (`ContextInheritanceHandler`), the structure of S is reported once, when the descent starts, instead: the handlers that set it (the registry and parent tracking) run before the descent, and the attach evaluations in the subtree then read it at its new version. When a root attached to a context has children, its structure is reported at the descent into its first child instead of after its own handlers: the first child's registry handler registered it, and a context attach changes neither its reference count nor its parents. When a handler of a child throws before that, the root is reported as the exception leaves the attach. A handler that adds a fallback context to the attaching subject has to run behind the registry and parent tracking (see [Handler Order Around the Descent](tracking-lifecycle.md#handler-order-around-the-descent)). No handler changes the structure of S after the descent without reporting the change itself.
+- `LifecycleInterceptor`, for the children of the holding subject, once per such dispatch through a property, together with the structure of S: at the descent, since the registry adds S to the children before it, or after all lifecycle handlers ran or one of them threw.
+- `LifecycleInterceptor`, once per child whose key or position a write changed, and for the children of the written property's subject, after the `IChildIndexHandler` services ran or one of them threw.
+- `RegisteredSubject.AddProperty`, `AddDerivedProperty` and `AddAttribute`, once the new property is registered, attached and its initial value published, also when one of these threw: its exception then wins, and an exception of a recalculation is traced, as for a [failed write](#writes-that-never-reached-the-model-and-failed-writes). An added derived property whose getter reads the registered properties of its own subject is evaluated once more by this report: its attach evaluation already reads the new properties, but records the cell at the version before the report. Its value is unchanged, so a value with equality publishes nothing, and a value built anew is published again.
+
+A change of fallback contexts reaches the lifecycle as an attach or detach and is covered by the first point. Reads made while the lifecycle reconciles are not recorded (see [Derived Properties Under the Lock](tracking-lifecycle.md#derived-properties-under-the-lock)), so a getter whose side effect attaches a subject does not follow the structure that the reconciliation and its handlers read.
 
 ## Ownership Protocol
 
@@ -287,7 +319,7 @@ A getter is expected to read, not write. Writes in a getter are supported, at a 
 
 ## What Is Followed and What Is Not
 
-A derived property follows every intercepted property its getter reads, on any subject, however the getter reached it. [What a Derived Property Follows](../tracking.md#what-a-derived-property-follows) lists what is not followed; `RecalculateDerivedProperty` covers that, as it requests a recalculation like a write does.
+A derived property follows every intercepted property its getter reads, on any subject, however the getter reached it, and the structure of every subject whose structure it reads through the APIs listed in [Structure Cells](#structure-cells). [What a Derived Property Follows](../tracking.md#what-a-derived-property-follows) lists what is not followed; `RecalculateDerivedProperty` covers that, as it requests a recalculation like a write does.
 
 ## Concurrency Model
 
@@ -361,12 +393,13 @@ Every evaluation except the first at attach, and every publication, runs outside
 | `LastKnownValue`, `RecalculationSequence` | `lock(data)` (write) / `Volatile.Read` (stale-publication guard) | commit, detach, publication |
 | `IsDerived` | `Volatile.Write` once at attach / `Volatile.Read` | attach, request, write observer |
 | Type gate | `Volatile.Write` and a full fence before the first data of the type is stored / `Volatile.Read` | data creation, write observer (W3), lifecycle detach |
+| Structure gate | `Interlocked.CompareExchange`, a process-wide barrier and `Volatile.Write` before the first data of a cell is stored / `Volatile.Read` | cell data creation, structure changes |
 | Recorder frames | `[ThreadStatic]` (no sharing) | read tap, own writes, commit |
 | Subject attachments | compare-and-swap of an immutable value in a state object in the subject's data (writes) / lock-free read of the value | lifecycle attach and detach, derived detach |
 
 ### Value correctness
 
-After concurrent writes, attaches and detaches settle, every attached derived property's last committed and last published value equals what its getter returns on the current state, for every property it follows. A write of a followed property is never missed ([the proof above](#proof-that-no-write-is-missed)), every commit links exactly what its evaluation read, and only the owner publishes, in commit order. The exceptions are the documented bounds: a request dropped after a failure on the owner's own thread (a self-writing getter or observer), a publication that threw, and what is not followed.
+After concurrent writes, attaches and detaches settle, every attached derived property's last committed and last published value equals what its getter returns on the current state, for every property and structure it follows. A write of a followed property, or a change of a followed structure, is never missed ([the proof above](#proof-that-no-write-is-missed)), every commit links exactly what its evaluation read, and only the owner publishes, in commit order. The exceptions are the documented bounds: a request dropped after a failure on the owner's own thread (a self-writing getter or observer), a publication that threw, and what is not followed.
 
 ### No stale links
 
@@ -388,6 +421,9 @@ Every link belongs to an attached derived property: D's detach removes all of D'
 | Write of a property nobody read, on a type with derived property data | Zero | Above, plus one data lookup (W3) |
 | Write of a property with dependents | Zero | Above, plus `Interlocked.Increment` (W4), a used-by snapshot read, and a request per dependent |
 | Request for an owned property | Zero | One brief `lock(data)` |
+| Structure read outside an evaluation | Zero | One thread-static load and a type check |
+| Lifecycle change while no getter ever read any structure | Zero | A volatile read (the [structure gate](#structure-gate)) |
+| Lifecycle change of a subject whose structure no getter read | Zero | The gate, a full fence (W2) and one data lookup per cell: two through a property (structure and children) |
 | Request under a lifecycle lock | Zero in steady state (segments reused per thread) | One queue entry per derived property; a change delivery queued under the lock allocates its closure |
 | Recalculation, dependencies unchanged | Zero (beyond the getter) | Brief `lock(data)` for the request, the commit and after the publication, the getter, a full fence and a version read per dependency (R5) |
 | Recalculation, dependencies changed | One `PropertyReference[]` when the buffer grows | Above, plus used-by adds and removes |

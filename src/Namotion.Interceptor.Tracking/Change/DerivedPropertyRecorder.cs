@@ -3,7 +3,7 @@ using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
-/// <summary>A property read during an evaluation, with the source's version captured before the read.</summary>
+/// <summary>A property or subject structure read during an evaluation, with the source's version captured before the read.</summary>
 internal readonly record struct RecordedDependency(PropertyReference Property, DerivedPropertyData Data, long Version);
 
 /// <summary>
