@@ -315,10 +315,10 @@ public class DerivedPropertyRequiredPropertiesTests
     }
 
     [Fact]
-    public void WhenGetterReadsItsDependenciesInAnotherOrder_ThenEachLinkHasTheDataOfItsOwnProperty()
+    public void WhenGetterReadsItsDependenciesInAnotherOrder_ThenEachDependencyHasTheDataOfItsOwnProperty()
     {
         // Arrange: the getter reads Anchor and Value in an order that a flag outside the model decides, so the
-        // second evaluation reads at each position another property than the last commit's links.
+        // second evaluation reads at each position another property than the last commit's dependencies.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();

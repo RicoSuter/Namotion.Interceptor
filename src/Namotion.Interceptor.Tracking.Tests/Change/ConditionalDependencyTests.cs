@@ -43,7 +43,7 @@ public class ConditionalDependencyTests
     }
 
     [Fact]
-    public void WhenConditionChanges_ThenOldDependencyBacklinksAreRemoved()
+    public void WhenConditionChanges_ThenOldDependencyDependentsAreRemoved()
     {
         // Arrange
         var context = InterceptorSubjectContext

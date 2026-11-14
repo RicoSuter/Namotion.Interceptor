@@ -194,7 +194,7 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
     {
         // When a derived property's getter triggers recalculation of another derived property,
         // StartRecording() nests. Each frame must record only its own dependencies so that
-        // each commit links its property to exactly what its getter read.
+        // each commit sets the dependencies of its property to exactly what its getter read.
         // Without frame isolation, outer properties would incorrectly include inner dependencies.
 
         // Arrange

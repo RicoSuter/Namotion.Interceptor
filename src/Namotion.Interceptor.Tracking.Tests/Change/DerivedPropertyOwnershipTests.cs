@@ -19,7 +19,7 @@ public class DerivedPropertyOwnershipTests
     public async Task WhenGetterTakesLockWhileItsDependencyIsWrittenDuringAttach_ThenBothComplete()
     {
         // Arrange: Anchor is written while the first attach evaluation runs, so the version check makes the
-        // attach evaluate again after it linked Anchor. Once that second evaluation started, a writer takes the
+        // attach evaluate again after it committed Anchor as a dependency. Once that second evaluation started, a writer takes the
         // lock the evaluation waits for and writes Anchor, which requests the recalculation. The attach evaluates
         // without holding lock(data), so the request does not wait for the attach, and the attach does not wait
         // for the writer under lock(data).
@@ -175,8 +175,8 @@ public class DerivedPropertyOwnershipTests
     public void WhenGetterWritesWhatItReads_ThenAttachAndRecalculationEndAtTheLimitAndLaterWritesStillPublish()
     {
         // Arrange: the getter writes what it reads. Another thread writes Anchor during the first attach
-        // evaluation, so the attach evaluates again once it linked Anchor; from then on every own write of the
-        // linked Anchor requests a recalculation on the evaluating thread.
+        // evaluation, so the attach evaluates again once it committed Anchor as a dependency; from then on every own write of the
+        // dependency Anchor requests a recalculation on the evaluating thread.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
@@ -226,7 +226,7 @@ public class DerivedPropertyOwnershipTests
     public async Task WhenGetterWritesASubjectItCreates_ThenEachCommitTakesTwoEvaluationsAndLaterWritesPublish()
     {
         // Arrange: the getter reads and then writes a property of a subject it creates, a property no derived
-        // property is linked to, so the write requests nothing. Each evaluation writes after it read, so each
+        // property depends on, so the write requests nothing. Each evaluation writes after it read, so each
         // commit follows exactly one further evaluation.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new EvaluatorRoot(context);
@@ -289,9 +289,9 @@ public class DerivedPropertyOwnershipTests
     }
 
     [Fact]
-    public void WhenGetterWritesASourceItReadBeforeItIsLinkedAtAttach_ThenTheAttachCommitsTheValueOfAnotherEvaluation()
+    public void WhenGetterWritesASourceItReadBeforeItIsADependencyAtAttach_ThenTheAttachCommitsTheValueOfAnotherEvaluation()
     {
-        // Arrange: the first evaluation reads Anchor and then writes it. Anchor is not linked yet, so the write
+        // Arrange: the first evaluation reads Anchor and then writes it. Anchor is not a dependency yet, so the write
         // requests no recalculation.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new EvaluatorRoot(context);
@@ -320,7 +320,7 @@ public class DerivedPropertyOwnershipTests
     [Fact]
     public void WhenRecalculationNewlyReadsASourceAndWritesIt_ThenTheValueOfAnotherEvaluationIsPublished()
     {
-        // Arrange: once Data is set, the getter reads Anchor, which is not linked yet, and writes it once.
+        // Arrange: once Data is set, the getter reads Anchor, which is not a dependency yet, and writes it once.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
@@ -402,7 +402,7 @@ public class DerivedPropertyOwnershipTests
     public void WhenAttachFailsOutsideTheGetter_ThenThePropertyIsReleasedAndItsFirstSuccessIsPublished()
     {
         // Arrange: the time source writes Anchor and fails when the attach resolves the timestamp of its first
-        // value, before the attach committed its links or a value. The worker's second derived property attaches
+        // value, before the attach committed its dependencies or a value. The worker's second derived property attaches
         // after the first one.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new EvaluatorRoot(context);
