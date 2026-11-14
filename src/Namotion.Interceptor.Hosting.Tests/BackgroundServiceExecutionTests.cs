@@ -13,8 +13,6 @@ namespace Namotion.Interceptor.Hosting.Tests;
 /// </summary>
 public class BackgroundServiceExecutionTests
 {
-    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(30);
-
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -55,7 +53,7 @@ public class BackgroundServiceExecutionTests
     }
 
     [Fact]
-    public async Task WhenAnExecutionIsCancelledByItsOwnCode_ThenTheAttachmentSettlesToFaulted()
+    public async Task WhenAnExecutionIsCanceledByItsOwnCode_ThenTheAttachmentSettlesToFaulted()
     {
         // Arrange - a cancellation no stop asked for, such as an HttpClient timeout escaping the
         // execution, leaves the execute task Canceled rather than Faulted, and the service dead.
@@ -74,7 +72,7 @@ public class BackgroundServiceExecutionTests
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(
                 () => attachment.GetState(out _) is HostedServiceAttachmentState.Faulted,
-                message: "The cancelled execution was never observed: the attachment did not settle to Faulted.");
+                message: "The canceled execution was never observed: the attachment did not settle to Faulted.");
 
             Assert.Same(exception, attachment.Fault);
             Assert.Null(attachment.Current);
@@ -139,7 +137,7 @@ public class BackgroundServiceExecutionTests
                     throw exception;
                 }
             }));
-            await entered.Task.WaitAsync(WaitTimeout);
+            await entered.Task.WaitAsync(TestTimeouts.Default);
 
             // Act
             await person.DetachHostedServiceAsync(attachment, CancellationToken.None);
@@ -219,7 +217,7 @@ public class BackgroundServiceExecutionTests
             };
 
             parent.Child = subject;
-            await firstRunEntered.Task.WaitAsync(WaitTimeout);
+            await firstRunEntered.Task.WaitAsync(TestTimeouts.Default);
 
             // The execution can be entered before StartAsync has returned and assigned ExecuteTask, and
             // the start still counts as in flight until its transition has finished, which the count
@@ -256,7 +254,7 @@ public class BackgroundServiceExecutionTests
     }
 
     [Fact]
-    public async Task WhenTheAttachingCallersTokenIsAlreadyCancelled_ThenTheCallerIsCancelledAndTheExecutionStillRuns()
+    public async Task WhenTheAttachingCallersTokenIsAlreadyCanceled_ThenTheCallerIsCanceledAndTheExecutionStillRuns()
     {
         // Arrange - the token bounds the caller's wait and nothing else. Handed to the start instead,
         // it would make BackgroundService.StartAsync schedule an execution that is canceled before it
@@ -283,7 +281,7 @@ public class BackgroundServiceExecutionTests
             }
 
             // Assert
-            await entered.Task.WaitAsync(WaitTimeout);
+            await entered.Task.WaitAsync(TestTimeouts.Default);
 
             var attachment = Assert.Single(person.GetHostedServiceAttachments());
             await AsyncTestHelpers.WaitUntilAsync(() => attachment.Current is not null);

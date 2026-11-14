@@ -185,7 +185,7 @@ public class PrivateContextHostTests
     }
 
     [Fact]
-    public async Task WhenStartIsCancelledWhileTheSubjectsStartNeverReturns_ThenStartAsyncThrowsAndSubjectIsDetached()
+    public async Task WhenStartIsCanceledWhileTheSubjectsStartNeverReturns_ThenStartAsyncThrowsAndSubjectIsDetached()
     {
         // Arrange
         var subject = new ParkedStartHostedSubject();

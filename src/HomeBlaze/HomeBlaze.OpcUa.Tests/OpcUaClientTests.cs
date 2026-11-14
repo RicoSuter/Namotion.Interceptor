@@ -15,8 +15,6 @@ public class OpcUaClientTests
     private const string NotRunningMessage = "Not running in a host, so nothing was started";
     private const string FactoryFailureMessage = "The factory could not build a client source.";
 
-    private static readonly TimeSpan HoldTimeout = TimeSpan.FromSeconds(30);
-
     /// <summary>
     /// A diagnostics poll fast enough to observe. The production interval of ten seconds puts the poll
     /// out of reach of a suite that runs in seconds.
@@ -453,8 +451,8 @@ public class OpcUaClientTests
         // Armed before the client enters the graph, and the start left to the one the enabled client
         // issues from its own start rather than invoked here: the Start operation would be a second
         // start, which would queue on the gate behind the first one.
-        using var factoryReached = new ManualResetEventSlim();
-        using var releaseFactory = new ManualResetEventSlim();
+        var factoryReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFactory = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var held = 0;
         testHost.WriteSeam.ArmAfterWrite((property, value) =>
         {
@@ -466,22 +464,22 @@ public class OpcUaClientTests
                 return;
             }
 
-            factoryReached.Set();
-            releaseFactory.Wait(HoldTimeout);
+            factoryReached.TrySetResult();
+            releaseFactory.Task.Wait(TestTimeouts.Default);
         });
 
         try
         {
             // Act
             testHost.Container.Client = client;
-            Assert.True(factoryReached.Wait(HoldTimeout), "The start never reached the factory.");
+            await factoryReached.Task.WaitAsync(TestTimeouts.Default);
 
             // Nothing is observed while the gate is held. What this pins is liveness: a start parked in
             // its factory and a poll running against it both still finish.
         }
         finally
         {
-            releaseFactory.Set();
+            releaseFactory.TrySetResult();
         }
 
         // Assert
@@ -561,8 +559,8 @@ public class OpcUaClientTests
 
         // Holding the factory keeps the start inside the gate while the wrapper's own stop begins, and
         // the factory then returns a source the stop can no longer have seen.
-        using var rootWritten = new ManualResetEventSlim();
-        using var releaseFactory = new ManualResetEventSlim();
+        var rootWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFactory = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var held = 0;
         testHost.WriteSeam.ArmAfterWrite((property, value) =>
         {
@@ -574,15 +572,15 @@ public class OpcUaClientTests
                 return;
             }
 
-            rootWritten.Set();
-            releaseFactory.Wait(HoldTimeout);
+            rootWritten.TrySetResult();
+            releaseFactory.Task.Wait(TestTimeouts.Default);
         });
 
         Task start;
         try
         {
             start = client.StartAsync();
-            Assert.True(rootWritten.Wait(HoldTimeout), "The start never reached the factory.");
+            await rootWritten.Task.WaitAsync(TestTimeouts.Default);
 
             // Act
             testHost.Container.Client = null;
@@ -595,10 +593,10 @@ public class OpcUaClientTests
         }
         finally
         {
-            releaseFactory.Set();
+            releaseFactory.TrySetResult();
         }
 
-        await start.WaitAsync(HoldTimeout);
+        await start.WaitAsync(TestTimeouts.Default);
         await OpcUaTestHost.WaitForStatusAsync(() => client.Status, ServiceStatus.Stopped);
 
         // Assert

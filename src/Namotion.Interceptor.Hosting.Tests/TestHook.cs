@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Hosting.Tests.Models;
+using Namotion.Interceptor.Testing;
 
 namespace Namotion.Interceptor.Hosting.Tests;
 
@@ -13,12 +14,6 @@ namespace Namotion.Interceptor.Hosting.Tests;
 /// </remarks>
 internal sealed class TestHook : IDisposable
 {
-    /// <summary>
-    /// How long anything waits on this hook. Long enough that only a broken build reaches it, and
-    /// bounded so a broken build fails its test rather than hanging the run.
-    /// </summary>
-    private static readonly TimeSpan HookTimeout = TimeSpan.FromSeconds(30);
-
     private readonly Action _disarm;
     private readonly TaskCompletionSource _reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -42,7 +37,7 @@ internal sealed class TestHook : IDisposable
     /// <summary>Lets what is held at the seam past it, and everything that reaches it afterwards.</summary>
     public void Release() => _released.TrySetResult();
 
-    public Task WaitUntilReachedAsync() => _reached.Task.WaitAsync(HookTimeout);
+    public Task WaitUntilReachedAsync() => _reached.Task.WaitAsync(TestTimeouts.Default);
 
     /// <summary>
     /// Waits for the seam from a thread that cannot await, such as another seam's body. Throws on the
@@ -51,9 +46,9 @@ internal sealed class TestHook : IDisposable
     /// </summary>
     public void WaitUntilReached()
     {
-        if (!_reached.Task.Wait(HookTimeout))
+        if (!_reached.Task.Wait(TestTimeouts.Default))
         {
-            throw new TimeoutException($"The seam was not reached within {HookTimeout.TotalSeconds:0} seconds.");
+            throw new TimeoutException($"The seam was not reached within {TestTimeouts.Default.TotalSeconds:0} seconds.");
         }
     }
 
@@ -88,7 +83,7 @@ internal sealed class TestHook : IDisposable
     private void EnterAndBlock()
     {
         ReportReached();
-        _released.Task.Wait(HookTimeout);
+        _released.Task.Wait(TestTimeouts.Default);
     }
 
     /// <summary>

@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Luxtronik.Tests.Testing;
 using Namotion.Interceptor.Modbus.Client;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 
 namespace Namotion.Devices.Luxtronik.Tests;
 

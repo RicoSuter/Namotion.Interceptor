@@ -11,8 +11,6 @@ namespace Namotion.Interceptor.Hosting.Tests;
 
 public class AddSubjectTests
 {
-    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(30);
-
     [Fact]
     public async Task WhenSubjectHasGeneratedContextConstructor_ThenItStartsExactlyOnce()
     {
@@ -173,15 +171,15 @@ public class AddSubjectTests
         var context = CreateContextWithRegistry(builder);
         builder.Services.AddSingleton(context);
 
-        using var configureEntered = new ManualResetEventSlim();
-        using var releaseConfigure = new ManualResetEventSlim();
+        var configureEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseConfigure = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         SubjectWithDependencies? configuredSubject = null;
 
         builder.Services.AddSubject<SubjectWithDependencies>(subject =>
         {
             configuredSubject = subject;
-            configureEntered.Set();
-            releaseConfigure.Wait(WaitTimeout);
+            configureEntered.TrySetResult();
+            releaseConfigure.Task.Wait(TestTimeouts.Default);
             subject.Name = "configured";
         }, contextResolver: serviceProvider => serviceProvider.GetRequiredService<IInterceptorSubjectContext>());
 
@@ -189,12 +187,12 @@ public class AddSubjectTests
 
         // Act - the factory runs on the host's own start path, so configure has to be released from
         // another thread.
-        var startup = Task.Run(() => host.StartAsync());
-        Assert.True(configureEntered.Wait(WaitTimeout), "The configure callback was never invoked.");
+        var startup = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => host.StartAsync());
+        await configureEntered.Task.WaitAsync(TestTimeouts.Default);
 
         var attachedDuringConfigure = ((IInterceptorSubject)configuredSubject!).TryGetSubjectSlot() is not null;
-        releaseConfigure.Set();
-        await startup.WaitAsync(WaitTimeout);
+        releaseConfigure.TrySetResult();
+        await startup.WaitAsync(TestTimeouts.Default);
 
         try
         {
@@ -251,15 +249,15 @@ public class AddSubjectTests
         var context = CreateContextWithRegistry(builder);
         builder.Services.AddSingleton(context);
 
-        using var configureEntered = new ManualResetEventSlim();
-        using var releaseConfigure = new ManualResetEventSlim();
+        var configureEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseConfigure = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         SubjectIgnoringContextParameter? configuredSubject = null;
 
         builder.Services.AddSubject<SubjectIgnoringContextParameter>(subject =>
         {
             configuredSubject = subject;
-            configureEntered.Set();
-            releaseConfigure.Wait(WaitTimeout);
+            configureEntered.TrySetResult();
+            releaseConfigure.Task.Wait(TestTimeouts.Default);
             subject.Name = "configured";
         }, contextResolver: serviceProvider => serviceProvider.GetRequiredService<IInterceptorSubjectContext>());
 
@@ -267,14 +265,14 @@ public class AddSubjectTests
 
         // Act - the factory runs on the host's own start path, so configure has to be released from
         // another thread.
-        var startup = Task.Run(() => host.StartAsync());
-        Assert.True(configureEntered.Wait(WaitTimeout), "The configure callback was never invoked.");
+        var startup = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => host.StartAsync());
+        await configureEntered.Task.WaitAsync(TestTimeouts.Default);
 
         var subject = configuredSubject!;
         var attachedDuringConfigure = ((IInterceptorSubject)subject).TryGetSubjectSlot() is not null;
         var startCountDuringConfigure = subject.StartCount;
-        releaseConfigure.Set();
-        await startup.WaitAsync(WaitTimeout);
+        releaseConfigure.TrySetResult();
+        await startup.WaitAsync(TestTimeouts.Default);
 
         try
         {

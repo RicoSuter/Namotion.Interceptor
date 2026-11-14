@@ -12,14 +12,8 @@ namespace Namotion.Interceptor.Hosting.Tests;
 public class HostedServiceHandlerTests
 {
     /// <summary>
-    /// Shortened so a deadlocked shutdown ends the test rather than the run, and long enough that a
-    /// healthy shutdown (two transitions, each with the handler's start delay) is nowhere near half.
-    /// </summary>
-    private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(6);
-
-    /// <summary>
-    /// The deadline the wedged shutdown test spends in full, so it is as short as the handler's two
-    /// transition delays allow rather than as long as <see cref="ShutdownTimeout"/>.
+    /// A shutdown deadline a test spends in full, so it is as short as the handler's two transition
+    /// delays allow.
     /// </summary>
     private static readonly TimeSpan WedgedShutdownTimeout = TimeSpan.FromSeconds(2);
 
@@ -950,7 +944,7 @@ public class HostedServiceHandlerTests
         => throw new InvalidOperationException("factory failed");
 
     [Fact]
-    public async Task WhenTheAttachAwaitIsCancelled_ThenTheStartStillRunsToCompletion()
+    public async Task WhenTheAttachAwaitIsCanceled_ThenTheStartStillRunsToCompletion()
     {
         // Arrange - the token bounds the caller's wait, not the transition. Aborting the work instead
         // would leave a half started service behind and record the cancellation as a start failure,
@@ -971,7 +965,7 @@ public class HostedServiceHandlerTests
             var attachment = Assert.Single(person.GetHostedServiceAttachments());
             await AsyncTestHelpers.WaitUntilAsync(
                 () => attachment.Current is not null,
-                message: "The cancelled await aborted the start transition instead of only the wait.");
+                message: "The canceled await aborted the start transition instead of only the wait.");
 
             Assert.True(instance.IsStarted);
             Assert.Same(instance, attachment.Current);
@@ -1161,7 +1155,7 @@ public class HostedServiceHandlerTests
     }
 
     [Fact]
-    public async Task WhenAStopIsCancelled_ThenTheInstanceIsStillDisposed()
+    public async Task WhenAStopIsCanceled_ThenTheInstanceIsStillDisposed()
     {
         // Arrange - the stop clears Current before it runs the instance, so an instance whose
         // StopAsync is cut short by the token is unreachable afterwards. The handler created it, so
@@ -1182,7 +1176,7 @@ public class HostedServiceHandlerTests
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(
                 () => instance.IsDisposed,
-                message: "The cancelled stop escaped the transition body and skipped the dispose.");
+                message: "The canceled stop escaped the transition body and skipped the dispose.");
 
             Assert.False(instance.IsStopped);
             Assert.Null(attachment.Fault);
@@ -1190,7 +1184,7 @@ public class HostedServiceHandlerTests
     }
 
     [Fact]
-    public async Task WhenTheShutdownTokenIsAlreadyCancelled_ThenTheInstanceIsStillDisposed()
+    public async Task WhenTheShutdownTokenIsAlreadyCanceled_ThenTheInstanceIsStillDisposed()
     {
         // Arrange - the ordinary HostOptions.ShutdownTimeout path: the drain hands the stopping
         // token straight to every instance, so an expired timeout cancels each StopAsync it runs.
@@ -1222,10 +1216,11 @@ public class HostedServiceHandlerTests
     public async Task WhenASubjectOwningAnAttachmentIsStoppedByTheHost_ThenShutdownCompletesWellInsideTheTimeout()
     {
         // Arrange - the regression guard for the deadlock in which a subject that detaches its own
-        // attachment from its own unwind waits on a queue that is waiting on that unwind; the host
-        // recovers only when ShutdownTimeout expires, so the elapsed time is what tells the two apart.
+        // attachment from its own unwind waits on a queue that is waiting on that unwind. Without a
+        // shutdown deadline the host never recovers from it, so the bounded wait below fails on the
+        // deadlock rather than on a slow run.
         var builder = HostingTestHost.CreateBuilder();
-        builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = ShutdownTimeout);
+        builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = Timeout.InfiniteTimeSpan);
 
         var context = HostingTestHost.CreateContext(builder);
 
@@ -1238,16 +1233,9 @@ public class HostedServiceHandlerTests
             message: "The attachment never started, so the shutdown below would prove nothing.");
 
         // Act
-        var stopwatch = Stopwatch.StartNew();
-        await host.StopAsync();
-        stopwatch.Stop();
+        await host.StopAsync().WaitAsync(TestTimeouts.Default);
 
         // Assert
-        Assert.True(
-            stopwatch.Elapsed < ShutdownTimeout / 2,
-            $"Shutdown took {stopwatch.Elapsed.TotalSeconds:F1} seconds of a " +
-            $"{ShutdownTimeout.TotalSeconds:F1} second timeout, which is the deadlock signature.");
-
         Assert.True(subject.Instance!.IsStopped);
         Assert.True(subject.Instance!.IsDisposed);
     }
@@ -1257,9 +1245,10 @@ public class HostedServiceHandlerTests
     {
         // Arrange - the stopping token reaches the instance, but a service that ignores it is what
         // the drain's own barrier has to bound. Untokened, the barrier waits for a stop that never
-        // returns and the process never leaves StopAsync, whatever ShutdownTimeout says.
+        // returns and the process never leaves StopAsync, whatever the deadline says. The deadline
+        // is a token this test cancels, so it fires exactly once the stop is wedged.
         var builder = HostingTestHost.CreateBuilder();
-        builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = WedgedShutdownTimeout);
+        builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = Timeout.InfiniteTimeSpan);
 
         var context = HostingTestHost.CreateContext(builder);
 
@@ -1267,7 +1256,16 @@ public class HostedServiceHandlerTests
         await host.StartAsync();
 
         var wedged = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var subject = new CountingHostedSubject { StopHold = () => wedged.Task };
+        var stopReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var subject = new CountingHostedSubject
+        {
+            StopHold = () =>
+            {
+                stopReached.TrySetResult();
+                return wedged.Task;
+            }
+        };
+        using var deadline = new CancellationTokenSource();
 
         ((IInterceptorSubject)subject).Context.AddFallbackContext(context);
         await AsyncTestHelpers.WaitUntilAsync(
@@ -1277,15 +1275,13 @@ public class HostedServiceHandlerTests
         try
         {
             // Act - the outer wait is what turns an unbounded drain into a failure rather than a hang
-            var stopwatch = Stopwatch.StartNew();
-            await host.StopAsync().WaitAsync(TimeSpan.FromSeconds(30));
-            stopwatch.Stop();
+            var stopping = host.StopAsync(deadline.Token);
+            await stopReached.Task.WaitAsync(TestTimeouts.Default);
+            await deadline.CancelAsync();
 
             // Assert
-            Assert.True(
-                stopwatch.Elapsed < WedgedShutdownTimeout * 3,
-                $"Shutdown took {stopwatch.Elapsed.TotalSeconds:F1} seconds of a " +
-                $"{WedgedShutdownTimeout.TotalSeconds:F1} second timeout.");
+            await stopping.WaitAsync(TestTimeouts.Default);
+            Assert.False(wedged.Task.IsCompleted);
         }
         finally
         {
@@ -1688,7 +1684,7 @@ public class HostedServiceHandlerTests
             handler.LivenessWriteTestHook = () =>
             {
                 Volatile.Write(ref release, 1);
-                SpinWait.SpinUntil(() => Volatile.Read(ref moverEntered) == 1, TimeSpan.FromSeconds(30));
+                SpinWait.SpinUntil(() => Volatile.Read(ref moverEntered) == 1, TestTimeouts.Default);
 
                 // The assertion is on the move COMPLETING, not on the mover's thread state: a thread
                 // parked on its own start signal also reads as waiting, which would pass this whether
@@ -1711,7 +1707,7 @@ public class HostedServiceHandlerTests
             finally
             {
                 Volatile.Write(ref release, 1);
-                mover.Join(TimeSpan.FromSeconds(30));
+                mover.Join(TestTimeouts.Default);
             }
 
             // Assert
@@ -1755,7 +1751,7 @@ public class HostedServiceHandlerTests
         // adjacent statements.
         using var write = handler.HoldAtLivenessWrite();
 
-        var attaching = Task.Run(() => child.AttachHostedService(() => new TrackedBackgroundService()));
+        var attaching = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => child.AttachHostedService(() => new TrackedBackgroundService()));
         await write.WaitUntilReachedAsync();
 
         // Act - the drain runs to past its liveness clear while the write is held. Nothing on this
@@ -1767,7 +1763,7 @@ public class HostedServiceHandlerTests
             message: "The drain never reached its liveness clear.");
 
         write.Release();
-        await attaching.WaitAsync(TimeSpan.FromSeconds(30));
+        await attaching.WaitAsync(TestTimeouts.Default);
 
         // Assert - the write landed on a handler whose drain had already cleared the set, so the
         // re-read after it is the only thing that stops the entry outliving the handler.

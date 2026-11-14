@@ -13,9 +13,6 @@ public class OpcUaServerTests
     /// </summary>
     private static readonly TimeSpan UnloadedRootObservation = TimeSpan.FromMilliseconds(500);
 
-    /// <summary>How long a start or stop that must complete is given before the test fails rather than hangs.</summary>
-    private static readonly TimeSpan CompletionTimeout = TimeSpan.FromSeconds(30);
-
     [Fact]
     public async Task WhenTheConfiguredPathDoesNotResolve_ThenTheStartFailsWithoutAConnector()
     {
@@ -217,7 +214,7 @@ public class OpcUaServerTests
         // Assert
         // The wrapper's stop cancels the wait the start holds the gate across, so the start ends without
         // the root having loaded, rather than at the end of the wait's own bound.
-        await start.WaitAsync(CompletionTimeout);
+        await start.WaitAsync(TestTimeouts.Default);
         await OpcUaTestHost.WaitForStatusAsync(() => server.Status, ServiceStatus.Stopped);
         Assert.Null(server.StatusMessage);
         Assert.Null(server.Connector);
@@ -246,14 +243,14 @@ public class OpcUaServerTests
         // Act
         // The Start operation passes no token, and the start holds the gate the stop needs across this
         // wait, so only the wait's own bound ends it.
-        await server.StartAsync().WaitAsync(CompletionTimeout);
+        await server.StartAsync().WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.Equal(ServiceStatus.Error, server.Status);
         Assert.StartsWith("The root manager did not load", server.StatusMessage);
 
         // Act
-        await server.StopAsync().WaitAsync(CompletionTimeout);
+        await server.StopAsync().WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.Equal(ServiceStatus.Stopped, server.Status);
@@ -262,7 +259,7 @@ public class OpcUaServerTests
     }
 
     [Fact]
-    public async Task WhenAReconfigurationIsCancelledWhileItsStartWaitsForTheRoot_ThenTheServerReportsStopped()
+    public async Task WhenAReconfigurationIsCanceledWhileItsStartWaitsForTheRoot_ThenTheServerReportsStopped()
     {
         // Arrange
         await using var testHost = await OpcUaTestHost.StartAsync();
@@ -280,7 +277,7 @@ public class OpcUaServerTests
 
         // Act
         await cancellation.CancelAsync();
-        await reconfiguration.WaitAsync(CompletionTimeout);
+        await reconfiguration.WaitAsync(TestTimeouts.Default);
 
         // Assert
         // The canceled wait abandons the start without anything having stopped, so nothing but the

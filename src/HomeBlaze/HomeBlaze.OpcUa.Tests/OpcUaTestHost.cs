@@ -177,7 +177,7 @@ internal sealed class OpcUaTestHost : IAsyncDisposable
     }
 
     /// <summary>
-    /// Stops the host. Tests that need the drained host behaviour call this themselves; disposal is
+    /// Stops the host. Tests that need the drained host behavior call this themselves; disposal is
     /// idempotent against it.
     /// </summary>
     public async Task StopHostAsync()

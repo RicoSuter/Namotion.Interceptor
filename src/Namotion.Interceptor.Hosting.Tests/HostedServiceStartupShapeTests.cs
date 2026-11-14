@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Testing;
 
 namespace Namotion.Interceptor.Hosting.Tests;
 
@@ -56,7 +57,7 @@ public class HostedServiceStartupShapeTests
 
             // Assert - completes only when every subject is inside StartAsync at the same time.
             // Serialized starts never reach the second arrival, so this is the whole assertion.
-            await rendezvous.WaitForAllAsync(TimeSpan.FromSeconds(30));
+            await rendezvous.WaitForAllAsync(TestTimeouts.Default);
         }
         finally
         {
