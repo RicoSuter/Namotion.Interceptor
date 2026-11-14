@@ -94,6 +94,7 @@ public class DerivedRegistryStructureTests
     [InlineData("RegisteredSubject.TryGetProperty")]
     [InlineData("RegisteredSubject.GetPropertyAttributes")]
     [InlineData("RegisteredSubject.TryGetPropertyAttribute")]
+    [InlineData("RegisteredSubjectProperty.Attributes")]
     [InlineData("RegisteredSubjectProperty.Children")]
     [InlineData("MovedChild")]
     public void WhenStructureReadThroughApiChanges_ThenDerivedPropertyPublishesTheChange(string api)
@@ -239,6 +240,14 @@ public class DerivedRegistryStructureTests
         Action addReference = () => root.OtherTarget = target;
         Action addProperty = () => registered.AddProperty<int>("Added", _ => 1);
         Action addAttribute = () => registered.TryGetProperty(nameof(RegistryTarget.Value))!.AddAttribute<int>("Unit", _ => 1);
+        if (api == "RegisteredSubjectProperty.Attributes")
+        {
+            // The attributes are cached before the getter first reads them.
+            var property = registered.TryGetProperty(nameof(RegistryTarget.Value))!;
+            _ = property.Attributes;
+            return (() => property.Attributes.Length.ToString(), addAttribute);
+        }
+
         return api switch
         {
             "RegisteredSubject.Parents" => (() => registered.Parents.Length.ToString(), addReference),

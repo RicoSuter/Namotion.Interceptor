@@ -201,7 +201,7 @@ Recorded, only while a getter is recorded, by:
 | `GetReferenceCount(S)`, `RegisteredSubject.ReferenceCount` | S |
 | `subject.TryGetRegisteredSubject()`, `subject.TryGetRegisteredProperty(name)` and its expression overload | S (every subject on the path), before the registry is resolved, so a subject whose context has no registry yet is followed |
 | `ISubjectRegistry.TryGetRegisteredSubject(S)` | S |
-| `RegisteredSubject.Parents`, `Properties`, `TryGetProperty`, `GetPropertyAttributes`, `TryGetPropertyAttribute` of S | S |
+| `RegisteredSubject.Parents`, `Properties`, `TryGetProperty`, `GetPropertyAttributes`, `TryGetPropertyAttribute` of S, and `RegisteredSubjectProperty.Attributes` of a property of S, also when cached | S |
 | `RegisteredSubjectProperty.Children` of a property of S | the children of S |
 
 Changed by the following; a change updates the state first, then runs W2 to W5 on the cell (`TrackingWriteObserver.OnStructureChanged`), whose requests are queued while the thread holds a lifecycle lock (see [Structure Changes](tracking-lifecycle.md#structure-changes)) and run immediately otherwise:
