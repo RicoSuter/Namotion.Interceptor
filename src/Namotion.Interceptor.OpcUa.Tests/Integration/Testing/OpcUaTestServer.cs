@@ -24,6 +24,8 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
     private string _baseAddress = DefaultBaseAddress;
     private string? _alternateBaseAddress;
     private Action<ApplicationConfiguration>? _configureApplication;
+    private string? _applicationUri;
+    private bool _autoAcceptUntrustedCertificates = true;
     private string _certificateStoreBasePath = "pki";
     private TimeSpan _bufferTime = TimeSpan.FromMilliseconds(100);
     private int _disposed;
@@ -44,7 +46,9 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
         string? certificateStoreBasePath = null,
         TimeSpan? bufferTime = null,
         string? alternateBaseAddress = null,
-        Action<ApplicationConfiguration>? configureApplication = null)
+        Action<ApplicationConfiguration>? configureApplication = null,
+        string? applicationUri = null,
+        bool autoAcceptUntrustedCertificates = true)
     {
         _createRoot = createRoot;
         _initializeDefaults = initializeDefaults;
@@ -53,6 +57,8 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(100);
         _alternateBaseAddress = alternateBaseAddress;
         _configureApplication = configureApplication;
+        _applicationUri = applicationUri;
+        _autoAcceptUntrustedCertificates = autoAcceptUntrustedCertificates;
 
         return StartInternalAsync();
     }
@@ -99,12 +105,13 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
                 {
                     AlternateBaseAddress = _alternateBaseAddress,
                     ConfigureApplication = _configureApplication,
+                    ApplicationUri = _applicationUri,
                     RootName = "Root",
                     BaseAddress = _baseAddress,
                     ValueConverter = new OpcUaValueConverter(),
                     TelemetryContext = telemetryContext,
                     CleanCertificateStore = false,
-                    AutoAcceptUntrustedCertificates = true,
+                    AutoAcceptUntrustedCertificates = _autoAcceptUntrustedCertificates,
                     CertificateStoreBasePath = _certificateStoreBasePath,
 
                     BufferTime = _bufferTime
