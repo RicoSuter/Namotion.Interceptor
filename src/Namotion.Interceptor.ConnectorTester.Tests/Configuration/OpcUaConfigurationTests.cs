@@ -50,14 +50,23 @@ public class OpcUaConfigurationTests
         var securedSettings = LoadProfile("opcua-chaos-secured");
 
         // Act
-        var securedSettingsWithoutSecurity = securedSettings
-            .Where(setting => !setting.Key.StartsWith("ConnectorTester:OpcUa", StringComparison.Ordinal))
-            .ToDictionary();
+        var chaosSettingsWithoutOpcUa = chaosSettings.Where(setting => !IsOpcUaSetting(setting.Key)).ToDictionary();
+        var securedSettingsWithoutOpcUa = securedSettings.Where(setting => !IsOpcUaSetting(setting.Key)).ToDictionary();
+        var securedOpcUaSettings = securedSettings.Where(setting => IsOpcUaSetting(setting.Key)).ToDictionary();
 
         // Assert
-        Assert.Equal("SignAndEncrypt", securedSettings["ConnectorTester:OpcUa:MinimumSecurityMode"]);
-        Assert.Equal(chaosSettings, securedSettingsWithoutSecurity);
+        Assert.Equal(chaosSettingsWithoutOpcUa, securedSettingsWithoutOpcUa);
+        Assert.Equal(
+            new Dictionary<string, string?>
+            {
+                ["ConnectorTester:OpcUa"] = null,
+                ["ConnectorTester:OpcUa:MinimumSecurityMode"] = "SignAndEncrypt"
+            },
+            securedOpcUaSettings);
     }
+
+    private static bool IsOpcUaSetting(string key)
+        => key == "ConnectorTester:OpcUa" || key.StartsWith("ConnectorTester:OpcUa:", StringComparison.Ordinal);
 
     private static Dictionary<string, string?> LoadProfile(string environmentName)
         => new ConfigurationBuilder()

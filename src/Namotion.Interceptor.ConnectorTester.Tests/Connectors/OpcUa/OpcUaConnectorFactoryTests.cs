@@ -103,6 +103,7 @@ public class OpcUaConnectorFactoryTests
 
             // Assert
             Assert.Equal(60_000, application.ApplicationConfiguration.TransportQuotas.SecurityTokenLifetime);
+            Assert.Equal(60_000, EndpointConfiguration.Create(application.ApplicationConfiguration).SecurityTokenLifetime);
         }
         finally
         {

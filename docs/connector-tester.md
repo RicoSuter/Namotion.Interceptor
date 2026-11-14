@@ -273,7 +273,7 @@ Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfigur
 | Resource exhaustion (polling) | N/A | N/A | Circuit breaker (5 failures, 30s cooldown) |
 | Concurrent server + client chaos | Both engines run independently, overlapping disruptions possible | Same | Each connector recovers independently |
 | Bidirectional mutations during chaos | Server and clients mutate concurrently during disruptions | Same | WriteRetryQueue buffers outbound writes, full state sync on reconnect |
-| Secured transport (`opcua-chaos-secured`) | Certificates reloaded from the store on every restart and reconnect | Same | Secure channels renew their token every 45 seconds between disruptions |
+| Secured transport (`opcua-chaos-secured`) | Certificates reloaded from the store on every restart and manual reconnect | Same | Secure channels renew their token about every 45 seconds between disruptions |
 
 ### Covered (WebSocket)
 
