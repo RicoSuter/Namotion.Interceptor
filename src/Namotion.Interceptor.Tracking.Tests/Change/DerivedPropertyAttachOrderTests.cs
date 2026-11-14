@@ -386,12 +386,15 @@ public class DerivedPropertyAttachOrderTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void WhenDerivedPropertyBuildsItsValueAnew_ThenAttachPublishesNoChangeOfAnUnchangedValue(bool attachRootToContext)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void WhenDerivedPropertyBuildsItsValueAnew_ThenAttachPublishesNoChangeOfAnUnchangedValue(bool attachRootToContext, bool walkToTheRoot)
     {
         // Arrange: the getter walks two levels up, so it reads the parents of the worker and of the machine, which
-        // attaches the worker while it attaches itself.
+        // attaches the worker while it attaches itself. Searching a type that is not on the path also reads the
+        // parents of the root.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var machine = new EvaluatorMachine();
         var root = attachRootToContext ? new EvaluatorRoot { Machine = machine } : new EvaluatorRoot(context);
@@ -399,7 +402,12 @@ public class DerivedPropertyAttachOrderTests
         machine.Worker.ObjectEvaluator = worker =>
         {
             evaluations++;
-            return new[] { worker.TryGetFirstParent<EvaluatorRoot>() is not null };
+            return new[]
+            {
+                walkToTheRoot
+                    ? worker.TryGetFirstParent<EvaluatorWorker>() is null
+                    : worker.TryGetFirstParent<EvaluatorRoot>() is not null
+            };
         };
         var changes = SubscribeToChanges(context);
 
