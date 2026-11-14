@@ -97,6 +97,41 @@ public class OpcUaServerCertificateTests : IDisposable
         Assert.Contains("not replaced", Assert.Single(_logger.Warnings));
     }
 
+    [Fact]
+    public async Task WhenTheServerCertificateCannotBeLoaded_ThenTheFailureIsExplained()
+    {
+        // Arrange - a certificate for another application URI that is not replaced because automatic creation is off.
+        using var server = CreateServer(out var configuration, new NoCertificateCreationConfiguration());
+        var application = await configuration.CreateApplicationInstanceAsync();
+        using var stale = await AddSelfSignedCertificateAsync(application, ageInDays: 10, applicationUri: "urn:old-host:server");
+        var identifier = application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate;
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => server.LoadApplicationCertificateAsync(application, CancellationToken.None));
+        var inner = Assert.IsType<ServiceResultException>(exception.InnerException);
+        Assert.Contains(inner.Message.TrimEnd().TrimEnd('.'), exception.Message);
+        Assert.Contains($"'{Path.Combine(identifier.StorePath, "certs")}'", exception.Message);
+        Assert.Contains(identifier.SubjectName, exception.Message);
+        Assert.Contains("'urn:test:server'", exception.Message);
+        Assert.Contains(configuration.BaseAddress, exception.Message);
+        Assert.Contains("Automatic certificate creation is off", exception.Message);
+    }
+
+    [Fact]
+    public async Task WhenLoadingTheServerCertificateIsCanceled_ThenTheCancellationIsNotWrapped()
+    {
+        // Arrange
+        using var server = CreateServer(out var configuration);
+        var application = await configuration.CreateApplicationInstanceAsync();
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        // Act & Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => server.LoadApplicationCertificateAsync(application, cancellation.Token));
+    }
+
     private OpcUaSubjectServer CreateServer(out OpcUaServerConfiguration configuration, OpcUaServerConfiguration? baseConfiguration = null)
     {
         var context = InterceptorSubjectContext
@@ -115,14 +150,15 @@ public class OpcUaServerCertificateTests : IDisposable
         application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate!;
 
     /// <summary>
-    /// Adds a self-signed certificate for the server's host names, valid for 365 days and issued <paramref name="ageInDays"/> ago.
+    /// Adds a self-signed certificate for the server's host names, valid for 365 days and issued <paramref name="ageInDays"/> ago,
+    /// for <paramref name="applicationUri"/> or else the server's application URI.
     /// </summary>
-    private async Task<X509Certificate2> AddSelfSignedCertificateAsync(ApplicationInstance application, int ageInDays)
+    private async Task<X509Certificate2> AddSelfSignedCertificateAsync(ApplicationInstance application, int ageInDays, string? applicationUri = null)
     {
         var applicationConfiguration = application.ApplicationConfiguration;
         var certificate = CertificateFactory
             .CreateCertificate(
-                applicationConfiguration.ApplicationUri,
+                applicationUri ?? applicationConfiguration.ApplicationUri,
                 applicationConfiguration.ApplicationName,
                 applicationConfiguration.SecurityConfiguration.ApplicationCertificate.SubjectName,
                 applicationConfiguration.GetServerDomainNames())

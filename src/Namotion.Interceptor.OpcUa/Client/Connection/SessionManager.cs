@@ -783,9 +783,9 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         using var serverCertificate = ParseServerCertificate(endpoint, telemetryContext);
         var serverThumbprint = serverCertificate?.Thumbprint ?? "(unknown)";
         var clientCertificate = security.ApplicationCertificate?.Certificate;
-        var ownFolder = GetCertificateFolder(security.ApplicationCertificate?.StoreType, security.ApplicationCertificate?.StorePath);
-        var rejectedFolder = GetCertificateFolder(security.RejectedCertificateStore);
-        var trustedFolder = GetCertificateFolder(security.TrustedPeerCertificates);
+        var ownFolder = CertificateFolder.Get(security.ApplicationCertificate?.StoreType, security.ApplicationCertificate?.StorePath);
+        var rejectedFolder = CertificateFolder.Get(security.RejectedCertificateStore);
+        var trustedFolder = CertificateFolder.Get(security.TrustedPeerCertificates);
 
         // A server also reports an expired client certificate with BadCertificateTimeInvalid, and one that is not yet
         // valid when its clock is behind, so both certificates can be valid by this machine's clock.
@@ -819,7 +819,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 $"The server needs a valid certificate; also check that the clocks of the server and this client are correct.",
             StatusCodes.BadCertificateChainIncomplete =>
                 $"The OPC UA server certificate {serverThumbprint} is not trusted because its issuer chain is incomplete. " +
-                $"Add the certificates of the authorities that issued it to '{GetCertificateFolder(security.TrustedIssuerCertificates)}' " +
+                $"Add the certificates of the authorities that issued it to '{CertificateFolder.Get(security.TrustedIssuerCertificates)}' " +
                 $"and the root authority's certificate to '{trustedFolder}'; the server's certificate chain is written to '{rejectedFolder}'.",
             _ =>
                 $"The OPC UA server certificate {serverThumbprint} is not trusted. Move it from '{rejectedFolder}' to '{trustedFolder}', " +
@@ -840,7 +840,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         var identifier = applicationConfiguration.SecurityConfiguration.ApplicationCertificate;
         return new InvalidOperationException(
             $"Failed to load the OPC UA client application certificate from " +
-            $"'{GetCertificateFolder(identifier?.StoreType, identifier?.StorePath)}': {error.Message.TrimEnd().TrimEnd('.')}. " +
+            $"'{CertificateFolder.Get(identifier?.StoreType, identifier?.StorePath)}': {error.Message.TrimEnd().TrimEnd('.')}. " +
             $"A provisioned certificate needs the subject '{identifier?.SubjectName}' and the application URI " +
             $"'{applicationConfiguration.ApplicationUri}'; set {nameof(OpcUaClientConfiguration.ApplicationUri)} to match it. " +
             (autoCreate
@@ -853,15 +853,6 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private static string DescribeEndpoints(IEnumerable<EndpointDescription> endpoints) => string.Join(", ", endpoints
         .Select(endpoint => $"{endpoint.SecurityPolicyUri} ({endpoint.SecurityMode})")
         .Distinct(StringComparer.Ordinal));
-
-    // A directory store keeps its certificates in a certs subfolder; other store types are named by their path.
-    private static string GetCertificateFolder(string? storeType, string? storePath) =>
-        storeType == CertificateStoreType.Directory
-            ? Path.Combine(storePath ?? string.Empty, "certs")
-            : storePath ?? string.Empty;
-
-    private static string GetCertificateFolder(CertificateStoreIdentifier? store) =>
-        GetCertificateFolder(store?.StoreType, store?.StorePath);
 
     private static bool IsTimeValid(X509Certificate2 certificate)
     {

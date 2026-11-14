@@ -129,7 +129,7 @@ The server follows the client's [store layout](connectors-opcua-client.md#certif
 - An expired certificate is replaced only at the next start; until then clients reject it. An override that sets `DisableCertificateAutoCreation` turns off creation and replacement.
 - A stored certificate must match the application URI and the host of `BaseAddress`, where `localhost` stands for the host name. Both defaults contain the host name, so after a rename, such as a recreated container, the server fails to start. Keep the host name stable, or set `ApplicationUri` and an explicit host in `BaseAddress`. To start over, delete the certificate from `own/certs` and its key from `own/private`.
 - With `AutoAcceptUntrustedCertificates = false`, the default, an untrusted client certificate on a secured connection is written to `rejected/certs`; moving it to `trusted/certs` lets the client connect.
-- A failed start is logged, reported in `Diagnostics.LastError` and retried.
+- A failed start is logged, reported in `Diagnostics.LastError` and retried. A certificate that cannot be loaded is reported with its folder, the expected subject and application URI, and the remedies.
 
 ### User Authentication
 
