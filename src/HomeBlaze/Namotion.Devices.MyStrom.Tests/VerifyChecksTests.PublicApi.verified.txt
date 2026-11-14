@@ -5,7 +5,7 @@ namespace Namotion.Devices.MyStrom
 {
     public static class MyStromServiceCollectionExtensions
     {
-        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMyStromSwitch(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.MyStrom.MyStromSwitch>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null) { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMyStromSwitch(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.MyStrom.MyStromSwitch>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext>? contextResolver = null) { }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("Power")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]

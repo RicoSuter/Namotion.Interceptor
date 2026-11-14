@@ -500,7 +500,7 @@ namespace Namotion.Devices.Sonos
     }
     public static class SonosServiceCollectionExtensions
     {
-        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddSonosSystem(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.Sonos.SonosSystem>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null) { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddSonosSystem(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.Sonos.SonosSystem>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext>? contextResolver = null) { }
     }
     public enum SonosSource
     {

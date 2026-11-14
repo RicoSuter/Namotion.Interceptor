@@ -91,7 +91,7 @@ namespace Namotion.Devices.Gpio
     }
     public static class GpioServiceCollectionExtensions
     {
-        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddGpio(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.Gpio.GpioSubject>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null) { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddGpio(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.Gpio.GpioSubject>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext>? contextResolver = null) { }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("Memory")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]

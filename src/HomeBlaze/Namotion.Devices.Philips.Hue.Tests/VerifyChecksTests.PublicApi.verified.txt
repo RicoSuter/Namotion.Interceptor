@@ -291,6 +291,6 @@ namespace Namotion.Devices.Philips.Hue
     }
     public static class HueServiceCollectionExtensions
     {
-        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddPhilipsHue(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.Philips.Hue.HueBridge>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null) { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddPhilipsHue(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.Philips.Hue.HueBridge>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext>? contextResolver = null) { }
     }
 }

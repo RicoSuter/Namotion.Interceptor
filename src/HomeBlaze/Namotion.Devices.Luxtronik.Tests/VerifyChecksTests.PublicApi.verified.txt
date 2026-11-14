@@ -115,7 +115,7 @@ namespace Namotion.Devices.Luxtronik
     [System.ComponentModel.Description("Luxtronik 2.1 heat pump (Alpha Innotec, Novelan) via the Smart Home Interface, re" +
         "ad only")]
     [System.ComponentModel.DisplayName("Luxtronik heat pump")]
-    public class LuxtronikHeatPump : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Common.ISoftwareState, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, HomeBlaze.Abstractions.Networking.INetworkHost, HomeBlaze.Abstractions.Sensors.IPowerSensor, HomeBlaze.Abstractions.Sensors.IThermalPowerSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.Client.IModbusDiscovery, System.ComponentModel.INotifyPropertyChanged
+    public class LuxtronikHeatPump : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Common.ISoftwareState, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, HomeBlaze.Abstractions.Networking.INetworkHost, HomeBlaze.Abstractions.Sensors.IPowerSensor, HomeBlaze.Abstractions.Sensors.IThermalPowerSensor, Namotion.Interceptor.Hosting.IPrivateContextConfigurator, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.Client.IModbusDiscovery, System.ComponentModel.INotifyPropertyChanged
     {
         public const int MaximumPollingIntervalSeconds = 3600;
         public const int MinimumPollingIntervalSeconds = 10;
@@ -199,10 +199,12 @@ namespace Namotion.Devices.Luxtronik
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }
+        public override System.Threading.Tasks.Task StopAsync(System.Threading.CancellationToken cancellationToken) { }
     }
     public static class LuxtronikServiceCollectionExtensions
     {
-        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddLuxtronikHeatPump(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.Luxtronik.LuxtronikHeatPump>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null) { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddLuxtronikHeatPump(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.Luxtronik.LuxtronikHeatPump>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext>? contextResolver = null) { }
     }
 }
 namespace Namotion.Devices.Luxtronik.Model

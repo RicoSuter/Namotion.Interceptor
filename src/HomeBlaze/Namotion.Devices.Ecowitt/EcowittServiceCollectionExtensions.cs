@@ -9,6 +9,6 @@ public static class EcowittServiceCollectionExtensions
     public static IServiceCollection AddEcowittGateway(
         this IServiceCollection services,
         Action<EcowittGateway>? configure = null,
-        Func<IServiceProvider, IInterceptorSubjectContext?>? contextResolver = null)
-        => services.AddHostedSubject(configure, contextResolver);
+        Func<IServiceProvider, IInterceptorSubjectContext>? contextResolver = null)
+        => services.AddSubject(configure, contextResolver);
 }

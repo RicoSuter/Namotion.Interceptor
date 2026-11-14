@@ -10,7 +10,9 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Hosting;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
@@ -97,11 +99,8 @@ public sealed class MarkdownPageFixture
 
         // The storage is a hosted subject as well, and its start connects again, which replaces the in-memory
         // blobs with an empty store. That must be over before a test writes its first page.
-        await SettleHostedServicesAsync();
-        if (Storage.ExecuteTask is { } connect)
-        {
-            await connect;
-        }
+        await AsyncTestHelpers.WaitUntilAsync(() => Storage.ExecuteTask is not null);
+        await Storage.ExecuteTask!;
 
         await StopFollowingAsync(Storage);
     }
@@ -121,15 +120,15 @@ public sealed class MarkdownPageFixture
     }
 
     /// <summary>
-    /// Completes when every start and stop that was requested before this call has run.
-    /// Starts and stops run one after the other in the order they were requested, so a service
-    /// that is attached now starts after all of them.
+    /// Completes once no start is pending and the <see cref="TestHosted"/> subjects that run are exactly
+    /// those in the graph, so every start and stop the graph asked for has run.
     /// </summary>
-    public async Task SettleHostedServicesAsync()
+    public Task SettleHostedServicesAsync()
     {
-        var marker = new MarkerHostedService();
-        await Storage.AttachHostedServiceAsync(marker, CancellationToken.None);
-        await Storage.DetachHostedServiceAsync(marker, CancellationToken.None);
+        var registry = Services.GetRequiredService<IInterceptorSubjectContext>().GetService<ISubjectRegistry>();
+        return AsyncTestHelpers.WaitUntilAsync(() =>
+            HostedLog.PendingStarts == 0 &&
+            registry.KnownSubjects.Keys.OfType<TestHosted>().ToHashSet().SetEquals(HostedLog.Running));
     }
 
     public async Task<MarkdownFile> AddPageAsync(string name, string content)
@@ -190,11 +189,4 @@ public sealed class MarkdownPageFixture
 
     public Task<bool> ExistsAsync(string name) =>
         Storage.Connection.Client.ObjectExists(name, CancellationToken.None);
-
-    private sealed class MarkerHostedService : IHostedService
-    {
-        public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-
-        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-    }
 }

@@ -10,12 +10,14 @@ namespace Namotion.Devices.SunSpec;
 public static class SunSpecServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers a <see cref="SunSpecDevice"/> as a singleton and hosted service, as
-    /// <see cref="HostedSubjectServiceCollectionExtensions.AddHostedSubject{T}"/> does.
+    /// Registers a <see cref="SunSpecDevice"/> and runs it, as
+    /// <see cref="SubjectServiceCollectionExtensions.AddSubject{T}"/> does: without
+    /// <paramref name="contextResolver"/> in a private context, with it in the resolved context,
+    /// which must have hosting and the registry.
     /// </summary>
     public static IServiceCollection AddSunSpecDevice(
         this IServiceCollection services,
         Action<SunSpecDevice>? configure = null,
-        Func<IServiceProvider, IInterceptorSubjectContext?>? contextResolver = null)
-        => services.AddHostedSubject(configure, contextResolver);
+        Func<IServiceProvider, IInterceptorSubjectContext>? contextResolver = null)
+        => services.AddSubject(configure, contextResolver);
 }
