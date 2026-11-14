@@ -114,12 +114,16 @@ internal sealed class DerivedPropertyData
 
     /// <summary>
     /// Creates the data of <paramref name="property"/> and raises the gate of its subject's type first, so the
-    /// gate is raised before the data can be found. The data of a subject's structure raises no gate: the structure
-    /// is never written through the write observer.
+    /// gate is raised before the data can be found. The data of a subject's structure raises the structure gate
+    /// instead: the structure is never written through the write observer.
     /// </summary>
     internal static DerivedPropertyData Create(PropertyReference property)
     {
-        if (!SubjectStructure.IsStructure(property))
+        if (SubjectStructure.IsStructure(property))
+        {
+            SubjectStructure.RaiseGate();
+        }
+        else
         {
             DerivedPropertyTypeGate.Of(property.Subject).Raise();
         }
