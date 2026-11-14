@@ -8,12 +8,15 @@
     <div class="d-flex align-center gap-2 mb-1">
         <MudText Typo="Typo.subtitle2">@Label</MudText>
         <MudSpacer />
-        <MudButtonGroup Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined" OverrideStyles="false">
-            <MudButton Size="Size.Small" Color="Color.Primary" Variant="@(_model.IsAdvanced ? Variant.Outlined : Variant.Filled)"
-                       Disabled="@(!_model.CanShowSimple)" OnClick="ShowSimple" data-testid="@_testIds.Simple">Simple</MudButton>
-            <MudButton Size="Size.Small" Color="Color.Primary" Variant="@(_model.IsAdvanced ? Variant.Filled : Variant.Outlined)"
-                       OnClick="ShowAdvancedAsync" data-testid="@_testIds.Advanced">Advanced</MudButton>
-        </MudButtonGroup>
+        @if (Kind == ExpressionFieldKind.Condition)
+        {
+            <MudButtonGroup Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined" OverrideStyles="false">
+                <MudButton Size="Size.Small" Color="Color.Primary" Variant="@(_model.IsAdvanced ? Variant.Outlined : Variant.Filled)"
+                           Disabled="@(!_model.CanShowSimple)" OnClick="ShowSimple" data-testid="@_testIds.Simple">Simple</MudButton>
+                <MudButton Size="Size.Small" Color="Color.Primary" Variant="@(_model.IsAdvanced ? Variant.Filled : Variant.Outlined)"
+                           OnClick="ShowAdvancedAsync" data-testid="@_testIds.Advanced">Advanced</MudButton>
+            </MudButtonGroup>
+        }
     </div>
     @if (_model.IsAdvanced)
     {
@@ -115,6 +118,12 @@
     /// </summary>
     [Parameter] public EventCallback<string?> ValueChanged { get; set; }
 
+    /// <summary>
+    /// Gets or sets what the field edits: a condition, by default, or a value, which is edited as text only and shows the
+    /// text of its result.
+    /// </summary>
+    [Parameter] public ExpressionFieldKind Kind { get; set; }
+
     /// <summary>The caption above the field.</summary>
     [Parameter] public string Label { get; set; } = "Condition";
 
@@ -172,6 +181,12 @@
         _model.Variables = Variables;
         _model.SetValue(Value);
 
+        if (Kind == ExpressionFieldKind.Value)
+        {
+            _model.ShowAdvanced();
+        }
+
+        _preview.ShowsValue = Kind == ExpressionFieldKind.Value;
         Refresh();
         if (Preview is not null)
         {
