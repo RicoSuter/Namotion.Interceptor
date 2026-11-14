@@ -329,9 +329,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             IsContextDetach = true
         };
 
-        SubjectDetaching?.Invoke(change);
         try
         {
+            SubjectDetaching?.Invoke(change);
             InvokeRemovedLifecycleHandlers(subject, context, change);
         }
         finally
@@ -376,13 +376,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             Interceptor = this
         };
 
-        if (isLastDetach)
-        {
-            SubjectDetaching?.Invoke(change);
-        }
-
         try
         {
+            if (isLastDetach)
+            {
+                SubjectDetaching?.Invoke(change);
+            }
+
             InvokeRemovedLifecycleHandlers(subject, context, change);
         }
         finally

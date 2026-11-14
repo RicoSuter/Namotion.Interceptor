@@ -4,6 +4,7 @@ using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Registry.Tests;
 
@@ -206,7 +207,10 @@ public class DerivedRegistryStructureTests
     [Theory]
     [InlineData("ContextAttach")]
     [InlineData("ContextDetach")]
+    [InlineData("ReferenceAddedBeforeDescent")]
+    [InlineData("ReferenceAddedAfterDescent")]
     [InlineData("ReferenceRemoved")]
+    [InlineData("ReferenceRemovedBySubjectDetaching")]
     [InlineData("MovedChild")]
     public void WhenHandlerAfterTheRegistryThrows_ThenDerivedPropertyFollowsTheStructureTheRegistryChanged(string operation)
     {
@@ -214,15 +218,23 @@ public class DerivedRegistryStructureTests
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var root = new StructureHolder(context);
         var target = new RegistryTarget();
-        var handler = new ThrowingHandler(target);
+        ThrowingHandlerBase handler = operation switch
+        {
+            "ReferenceAddedBeforeDescent" => new ThrowingHandlerBeforeDescent(target),
+            "ReferenceAddedAfterDescent" => new ThrowingHandlerAfterDescent(target),
+            "ReferenceRemovedBySubjectDetaching" => new ThrowingHandler(new RegistryTarget()),
+            _ => new ThrowingHandler(target)
+        };
         context.WithService(() => handler);
         var targetContext = ((IInterceptorSubject)target).Context;
+        var registry = context.GetService<ISubjectRegistry>();
         Func<string?> read = () => (target.TryGetRegisteredSubject() is not null).ToString();
         Action act = operation switch
         {
             "ContextAttach" => () => targetContext.AddFallbackContext(context),
             "ContextDetach" => () => targetContext.RemoveFallbackContext(context),
-            "ReferenceRemoved" => () => root.Target = null,
+            "ReferenceAddedBeforeDescent" or "ReferenceAddedAfterDescent" => () => root.Target = target,
+            "ReferenceRemoved" or "ReferenceRemovedBySubjectDetaching" => () => root.Target = null,
             "MovedChild" => () => root.Targets = [new RegistryTarget(), target],
             _ => throw new ArgumentOutOfRangeException(nameof(operation))
         };
@@ -230,9 +242,26 @@ public class DerivedRegistryStructureTests
         {
             targetContext.AddFallbackContext(context);
         }
+        else if (operation is "ReferenceAddedBeforeDescent" or "ReferenceAddedAfterDescent")
+        {
+            // The target gains the registry only at the descent, so the context's registry is read.
+            read = () => (registry.TryGetRegisteredSubject(target) is not null).ToString();
+        }
         else if (operation == "ReferenceRemoved")
         {
             root.Target = target;
+        }
+        else if (operation == "ReferenceRemovedBySubjectDetaching")
+        {
+            root.Target = target;
+            read = () => target.GetReferenceCount().ToString();
+            context.GetService<LifecycleInterceptor>().SubjectDetaching += change =>
+            {
+                if (handler.IsArmed && change.Subject == target)
+                {
+                    throw new InvalidOperationException();
+                }
+            };
         }
         else if (operation == "MovedChild")
         {
@@ -377,7 +406,16 @@ public class DerivedRegistryStructureTests
     }
 
     [RunsAfter(typeof(SubjectRegistry))]
-    private sealed class ThrowingHandler(IInterceptorSubject subject) : ILifecycleHandler, IChildIndexHandler
+    private sealed class ThrowingHandler(IInterceptorSubject subject) : ThrowingHandlerBase(subject);
+
+    [RunsAfter(typeof(SubjectRegistry), typeof(ParentTrackingHandler))]
+    [RunsBefore(typeof(ContextInheritanceHandler))]
+    private sealed class ThrowingHandlerBeforeDescent(IInterceptorSubject subject) : ThrowingHandlerBase(subject);
+
+    [RunsAfter(typeof(ContextInheritanceHandler))]
+    private sealed class ThrowingHandlerAfterDescent(IInterceptorSubject subject) : ThrowingHandlerBase(subject);
+
+    private abstract class ThrowingHandlerBase(IInterceptorSubject subject) : ILifecycleHandler, IChildIndexHandler
     {
         public bool IsArmed { get; set; }
 
