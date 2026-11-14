@@ -320,6 +320,7 @@ public class RegisteredSubject
     /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> contains a null character.</exception>
     public RegisteredSubjectProperty AddProperty(
         string name,
         Type type,
@@ -327,6 +328,12 @@ public class RegisteredSubject
         Action<IInterceptorSubject, object?>? setValue,
         params Attribute[] attributes)
     {
+        // Reserved: derived property tracking records the children of a subject under a name with a null character.
+        if (name.Contains('\0'))
+        {
+            throw new ArgumentException("A property name must not contain a null character.", nameof(name));
+        }
+
         Subject.AddProperties(new SubjectPropertyMetadata(
             name,
             type,
