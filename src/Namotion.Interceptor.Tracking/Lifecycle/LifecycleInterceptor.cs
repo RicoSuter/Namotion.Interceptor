@@ -139,6 +139,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 }
                 finally
                 {
+                    // Still pending when a handler of a child threw before the root was reported, after a child's
+                    // registry handler may have registered it.
+                    if (isRoot && ReferenceEquals(_contextAttachPending, subject))
+                    {
+                        TrackingWriteObserver.OnStructureChanged(subject);
+                    }
+
                     if (isRoot)
                     {
                         _contextAttachPending = outerContextAttachPending;
