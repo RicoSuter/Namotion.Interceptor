@@ -60,9 +60,9 @@ public class DerivedPropertyProtocolTests
     }
 
     [Fact]
-    public async Task WhenStructureChangesBetweenReadAndLink_ThenEvaluationRunsAgain()
+    public async Task WhenStructureChangesBetweenReadAndCommit_ThenEvaluationRunsAgain()
     {
-        // Arrange: the getter reads the parents of the spare only once Data is set, so its structure is not linked
+        // Arrange: the getter reads the parents of the spare only once Data is set, so its structure is not a dependency
         // when the spare is attached.
         var context = CreateContext();
         var root = new EvaluatorRoot(context);
@@ -101,7 +101,7 @@ public class DerivedPropertyProtocolTests
     }
 
     [Fact]
-    public async Task WhenSourceIsDetachedWrittenAndAttachedAgainBetweenReadAndLink_ThenDerivedPropertyFollowsIt()
+    public async Task WhenSourceIsDetachedWrittenAndAttachedAgainBetweenReadAndCommit_ThenDerivedPropertyFollowsIt()
     {
         // Arrange: the getter reaches the spare configuration through a captured variable, not through Spare.
         var context = CreateContext();
