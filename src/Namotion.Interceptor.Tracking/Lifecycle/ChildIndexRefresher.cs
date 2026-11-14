@@ -55,6 +55,8 @@ internal static class ChildIndexRefresher
             {
                 TrackingWriteObserver.OnStructureChanged(child.Subject);
             }
+
+            TrackingWriteObserver.OnChildrenChanged(property.Subject);
         }
         finally
         {

@@ -11,6 +11,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     private readonly Dictionary<IInterceptorSubject, PropertyReferenceSet> _attachedSubjects = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<PropertyReference, object?> _lastProcessedValues = new(PropertyReference.Comparer);
 
+    // The subject whose attach handlers run, until its structure change is reported. Used under the lock.
+    private IInterceptorSubject? _structureChangePending;
+
     [ThreadStatic]
     private static List<List<(IInterceptorSubject subject, PropertyReference property, object? index)>>? _listPool;
 
@@ -92,6 +95,14 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             lock (_attachedSubjects)
             {
+                if (ReferenceEquals(_structureChangePending, subject))
+                {
+                    // A handler of the subject's attach descends into its subtree (ContextInheritanceHandler): the
+                    // structure is set, and is reported before the attach evaluations below read it.
+                    _structureChangePending = null;
+                    TrackingWriteObserver.OnStructureChanged(subject);
+                }
+
                 using var suspension = SubjectLifecycleAttachments.SuspendDerivedRecording();
                 FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
 
@@ -201,8 +212,23 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         };
 
         var properties = subject.Properties.Keys;
-        InvokeAddedLifecycleHandlers(subject, context, change);
-        TrackingWriteObserver.OnStructureChanged(subject);
+        var outerPending = _structureChangePending;
+        _structureChangePending = subject;
+        try
+        {
+            InvokeAddedLifecycleHandlers(subject, context, change);
+        }
+        finally
+        {
+            // Reported here unless the descent into the subtree reported it already.
+            if (ReferenceEquals(_structureChangePending, subject))
+            {
+                TrackingWriteObserver.OnStructureChanged(subject);
+            }
+
+            _structureChangePending = outerPending;
+            TrackingWriteObserver.OnChildrenChanged(property.Subject);
+        }
 
         if (isFirstAttach)
         {
@@ -309,6 +335,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         InvokeRemovedLifecycleHandlers(subject, context, change);
         TrackingWriteObserver.OnStructureChanged(subject);
+        TrackingWriteObserver.OnChildrenChanged(property.Subject);
 
         if (children is not null)
         {

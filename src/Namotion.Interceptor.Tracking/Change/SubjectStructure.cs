@@ -6,11 +6,12 @@ namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
 /// Structure reads and changes for derived property tracking: whether a subject is attached and registered, its
-/// reference count, its parents and its registered properties. Infrastructure for the lifecycle and the registry.
+/// reference count, its parents and its registered properties, and its children, the subjects attached through its
+/// properties. Infrastructure for the lifecycle and the registry.
 /// </summary>
 /// <remarks>
-/// The structure of a subject is one dependency source, linked and versioned like a property. See "Structure
-/// Cells" in docs/design/tracking-derived-properties.md.
+/// The structure and the children of a subject are two dependency sources, linked and versioned like a property. See
+/// "Structure Cells" in docs/design/tracking-derived-properties.md.
 /// </remarks>
 [EditorBrowsable(EditorBrowsableState.Never)]
 public static class SubjectStructure
@@ -26,12 +27,15 @@ public static class SubjectStructure
         }
     }
 
-    /// <summary>Records that the running derived getter reads <paramref name="property"/>, like a read of its value.</summary>
-    /// <param name="property">The property.</param>
+    /// <summary>Records that the running derived getter reads the children of <paramref name="subject"/>.</summary>
+    /// <param name="subject">The subject. Called before its children are read.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void RecordPropertyRead(PropertyReference property)
+    public static void RecordChildrenRead(IInterceptorSubject subject)
     {
-        PropertyAccessObservation.ReadObserver?.OnPropertyRead(property);
+        if (PropertyAccessObservation.ReadObserver is DerivedPropertyRecorder recorder)
+        {
+            recorder.OnPropertyRead(ChildrenOf(subject));
+        }
     }
 
     /// <summary>Recalculates the derived properties that read the structure of <paramref name="subject"/>.</summary>
@@ -47,5 +51,13 @@ public static class SubjectStructure
     /// </summary>
     internal static PropertyReference Of(IInterceptorSubject subject) => new(subject, null!);
 
-    internal static bool IsStructure(in PropertyReference reference) => reference.Name is null;
+    /// <summary>
+    /// The reference under which the children of <paramref name="subject"/> are recorded and linked: its name contains
+    /// a null character, which a property name does not.
+    /// </summary>
+    internal static PropertyReference ChildrenOf(IInterceptorSubject subject) => new(subject, ChildrenName);
+
+    internal static bool IsStructure(in PropertyReference reference) => reference.Name is null or ChildrenName;
+
+    private const string ChildrenName = "\0children";
 }

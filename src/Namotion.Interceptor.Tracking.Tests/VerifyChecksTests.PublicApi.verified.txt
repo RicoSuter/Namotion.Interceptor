@@ -98,7 +98,7 @@ namespace Namotion.Interceptor.Tracking.Change
     public static class SubjectStructure
     {
         public static void Changed(Namotion.Interceptor.IInterceptorSubject subject) { }
-        public static void RecordPropertyRead(Namotion.Interceptor.PropertyReference property) { }
+        public static void RecordChildrenRead(Namotion.Interceptor.IInterceptorSubject subject) { }
         public static void RecordRead(Namotion.Interceptor.IInterceptorSubject subject) { }
     }
 }

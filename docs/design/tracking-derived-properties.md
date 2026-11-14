@@ -188,9 +188,9 @@ A getter that throws is not a failure of the protocol. The reads before the thro
 
 ## Structure Cells
 
-The structure of a subject is whether it is attached and registered, its reference count, its parents with their keys or positions, and its registered properties with their attributes. A getter that reads any part of it follows all of it: the structure is one dependency source per subject, its cell, and any change of it recalculates every derived property that read any part of it.
+The structure of a subject is whether it is attached and registered, its reference count, its parents with their keys or positions, and its registered properties with their attributes. Its children are the subjects attached through its properties, with their keys or positions. A getter that reads any part of either follows all of it: each is one dependency source per subject, a cell, and any change of it recalculates every derived property that read any part of it. They are two cells because an attach of a subtree adds the children of its subjects while it attaches them, after their structure is set.
 
-A cell is the `DerivedPropertyData` of the subject's structure: it is stored like a property's data, under a reference without a property name (`SubjectStructure.Of`), and has a version and a used-by collection like a property's. Recording, linking and the version check are therefore those of a property: a structure read records the cell and its version (R1, R2) before the state is read, the commit links it (R4) and checks its version (R5), and the [proof](#proof-that-no-write-is-missed) and the [own-write rule](#own-writes) apply unchanged. `GetRequiredProperties` lists properties only, not cells. A cell raises no [type gate](#components), since the structure is never written through the write observer.
+A cell is a `DerivedPropertyData`: it is stored like a property's data, under a reference that is not a property, without a property name for the structure (`SubjectStructure.Of`) and with a name a property cannot have for the children (`SubjectStructure.ChildrenOf`), and has a version and a used-by collection like a property's. Recording, linking and the version check are therefore those of a property: a structure read records the cell and its version (R1, R2) before the state is read, the commit links it (R4) and checks its version (R5), and the [proof](#proof-that-no-write-is-missed) and the [own-write rule](#own-writes) apply unchanged. `GetRequiredProperties` lists properties only, not cells. A cell raises no [type gate](#components), since the structure is never written through the write observer.
 
 Recorded, only while a getter is recorded, by:
 
@@ -202,12 +202,13 @@ Recorded, only while a getter is recorded, by:
 | `subject.TryGetRegisteredSubject()` | S, before the registry is resolved, so a subject whose context has no registry yet is followed |
 | `ISubjectRegistry.TryGetRegisteredSubject(S)` | S |
 | `RegisteredSubject.Parents`, `Properties`, `TryGetProperty`, `GetPropertyAttributes`, `TryGetPropertyAttribute` of S | S |
-| `RegisteredSubjectProperty.Children` of a property P | P, and the cell of P's subject: the registry clears the children when that subject detaches, without a write of P |
+| `RegisteredSubjectProperty.Children` of a property of S | the children of S |
 
 Changed by the following; a change updates the state first, then runs W2 to W5 on the cell (`TrackingWriteObserver.OnStructureChanged`), whose requests are queued while the thread holds a lifecycle lock (see [Structure Changes](tracking-lifecycle.md#structure-changes)) and run immediately otherwise:
 
-- `LifecycleInterceptor`, once per lifecycle change of S it dispatches (context attach or detach, reference added or removed), after all lifecycle handlers ran.
-- `LifecycleInterceptor`, once per child whose key or position a write changed, after the `IChildIndexHandler` services ran.
+- `LifecycleInterceptor`, once per lifecycle change of S it dispatches (context attach or detach, reference added or removed), after all lifecycle handlers ran. When a handler of an attach descends into the subtree of S (`ContextInheritanceHandler`), the structure of S is reported once, when the descent starts, instead: the handlers that set it (the registry and parent tracking) run before the descent, and the attach evaluations in the subtree then read it at its new version. No handler changes the structure of S after the descent without reporting the change itself.
+- `LifecycleInterceptor`, for the children of the holding subject, once per such dispatch through a property, after all lifecycle handlers ran.
+- `LifecycleInterceptor`, once per child whose key or position a write changed, and for the children of the written property's subject, after the `IChildIndexHandler` services ran.
 - `RegisteredSubject.AddProperty`, `AddDerivedProperty` and `AddAttribute`, after the registered properties were replaced and before the new property attaches.
 
 A change of fallback contexts reaches the lifecycle as an attach or detach and is covered by the first point. Reads made while the lifecycle reconciles are not recorded (see [Derived Properties Under the Lock](tracking-lifecycle.md#derived-properties-under-the-lock)), so a getter whose side effect attaches a subject does not follow the structure that the reconciliation and its handlers read.
@@ -416,7 +417,7 @@ Every link belongs to an attached derived property: D's detach removes all of D'
 | Write of a property with dependents | Zero | Above, plus `Interlocked.Increment` (W4), a used-by snapshot read, and a request per dependent |
 | Request for an owned property | Zero | One brief `lock(data)` |
 | Structure read outside an evaluation | Zero | One thread-static load and a type check |
-| Lifecycle change of a subject whose structure no getter read | Zero | A full fence (W2) and one data lookup |
+| Lifecycle change of a subject whose structure no getter read | Zero | A full fence (W2) and one data lookup, twice through a property (structure and children) |
 | Request under a lifecycle lock | Zero in steady state (segments reused per thread) | One queue entry per derived property; a change delivery queued under the lock allocates its closure |
 | Recalculation, dependencies unchanged | Zero (beyond the getter) | Brief `lock(data)` for the request, the commit and after the publication, the getter, a full fence and a version read per dependency (R5) |
 | Recalculation, dependencies changed | One `PropertyReference[]` when the buffer grows | Above, plus used-by adds and removes |

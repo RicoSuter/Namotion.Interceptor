@@ -394,6 +394,40 @@ public class DerivedPropertyAttachOrderTests
         Assert.Equal(changes[0].ChangedTimestamp, changes[1].ChangedTimestamp);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenDerivedPropertyBuildsItsValueAnew_ThenAttachPublishesNoChangeOfAnUnchangedValue(bool attachRootToContext)
+    {
+        // Arrange: the getter walks two levels up, so it reads the parents of the worker and of the machine, which
+        // attaches the worker while it attaches itself.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var machine = new EvaluatorMachine();
+        var root = attachRootToContext ? new EvaluatorRoot { Machine = machine } : new EvaluatorRoot(context);
+        var evaluations = 0;
+        machine.Worker.ObjectEvaluator = worker =>
+        {
+            evaluations++;
+            return new[] { worker.TryGetFirstParent<EvaluatorRoot>() is not null };
+        };
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        if (attachRootToContext)
+        {
+            ((IInterceptorSubject)root).Context.AddFallbackContext(context);
+        }
+        else
+        {
+            root.Machine = machine;
+        }
+
+        // Assert
+        Assert.Equal(1, evaluations);
+        Assert.DoesNotContain(changes, change => change.Property.Name == nameof(EvaluatorWorker.ObjectResult));
+        Assert.Equal([true], (bool[])machine.Worker.ObjectResult!);
+    }
+
     [Fact]
     public void WhenFailedFirstEvaluationIsRecalculatedDuringTheAttach_ThenValueChangedAfterItIsPublished()
     {

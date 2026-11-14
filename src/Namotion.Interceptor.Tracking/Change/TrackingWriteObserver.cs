@@ -67,16 +67,23 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
     /// W2 to W5 for a change of the structure of <paramref name="subject"/> (<see cref="SubjectStructure"/>). Called
     /// after the structure changed.
     /// </summary>
-    internal static void OnStructureChanged(IInterceptorSubject subject)
+    internal static void OnStructureChanged(IInterceptorSubject subject) => OnCellChanged(SubjectStructure.Of(subject));
+
+    /// <summary>
+    /// W2 to W5 for a change of the children of <paramref name="subject"/> (<see cref="SubjectStructure"/>). Called
+    /// after a subject was attached or detached through one of its properties, or moved within one.
+    /// </summary>
+    internal static void OnChildrenChanged(IInterceptorSubject subject) => OnCellChanged(SubjectStructure.ChildrenOf(subject));
+
+    private static void OnCellChanged(PropertyReference cell)
     {
         // W2: the structure changed before its data is looked up.
         Interlocked.MemoryBarrier();
-        var structure = SubjectStructure.Of(subject);
-        var data = structure.TryGetDerivedPropertyData();
+        var data = cell.TryGetDerivedPropertyData();
         if (data is not null)
         {
             RequestRecalculations(
-                new PropertyWriteObservation(structure, isWritten: true, rawTimestamp: 0, isDerivedRecalculation: false, depth: 0, hasFailed: false),
+                new PropertyWriteObservation(cell, isWritten: true, rawTimestamp: 0, isDerivedRecalculation: false, depth: 0, hasFailed: false),
                 data, segment: null);
         }
     }
