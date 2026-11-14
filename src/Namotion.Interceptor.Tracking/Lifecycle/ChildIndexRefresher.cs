@@ -46,17 +46,22 @@ internal static class ChildIndexRefresher
             }
 
             var span = CollectionsMarshal.AsSpan(buffers.Changes);
-            for (var i = 0; i < handlers.Length; i++)
+            try
             {
-                handlers[i].HandleChildIndexChanges(property, span);
+                for (var i = 0; i < handlers.Length; i++)
+                {
+                    handlers[i].HandleChildIndexChanges(property, span);
+                }
             }
-
-            foreach (var child in span)
+            finally
             {
-                TrackingWriteObserver.OnStructureChanged(child.Subject);
-            }
+                foreach (var child in span)
+                {
+                    TrackingWriteObserver.OnStructureChanged(child.Subject);
+                }
 
-            TrackingWriteObserver.OnChildrenChanged(property.Subject);
+                TrackingWriteObserver.OnChildrenChanged(property.Subject);
+            }
         }
         finally
         {
