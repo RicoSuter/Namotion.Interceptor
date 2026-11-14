@@ -3,12 +3,12 @@ using Namotion.Interceptor.Tracking.Change;
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 /// <summary>
-/// The lifecycle interceptors a subject is attached to. A subject can be in several graphs; its
-/// derived properties stay attached while it is attached to any of them.
+/// The lifecycle interceptors a subject is attached to, and its reference count. A subject can be in several graphs;
+/// its derived properties stay attached while it is attached to any of them.
 /// </summary>
 internal static class SubjectLifecycleAttachments
 {
-    private const string Key = "ni.lca";
+    private const string Key = "ni.lc";
 
     // The subjects whose properties a lifecycle interceptor detaches on this thread, the innermost last.
     [ThreadStatic]
@@ -93,65 +93,105 @@ internal static class SubjectLifecycleAttachments
         }
     }
 
-    // The value under the key is null (attached to no interceptor) or an array of the interceptors the subject is
-    // attached to; a subject in one graph holds that interceptor's own one-element array. A value is never changed
-    // in place: each change replaces it by a compare-and-swap, so a lock-free reader sees either the old or the new
-    // set. Arrays do not override Equals, so the compare-and-swap compares by reference.
+    // The attachments and the reference count live in one state object per subject, created at its first attach and
+    // never removed, so an attach or detach finds it with a lock-free lookup in the subject's data and changes its
+    // fields without a lock. The attachments are null (attached to no interceptor) or an array of the interceptors
+    // the subject is attached to; a subject in one graph holds that interceptor's own one-element array. An array is
+    // never changed in place: each change replaces it by a compare-and-swap, so a lock-free reader sees either the old
+    // or the new set.
+    private sealed class State
+    {
+        public LifecycleInterceptor[]? Interceptors;
+        public int ReferenceCount;
+    }
+
     internal static void Add(IInterceptorSubject subject, LifecycleInterceptor interceptor)
     {
+        var state = GetOrCreateState(subject);
+
         // The common cases first: the subject's first graph, or a graph again after it left all of them.
-        var data = subject.Data;
         var single = interceptor.SingleAttachment;
-        if (data.TryAdd((null, Key), single) || data.TryUpdate((null, Key), single, null))
+        var current = Interlocked.CompareExchange(ref state.Interceptors, single, null);
+        while (current is not null && IndexOf(current, interceptor) < 0)
         {
-            return;
-        }
-
-        while (true)
-        {
-            if (!data.TryGetValue((null, Key), out var current))
-            {
-                if (data.TryAdd((null, Key), single))
-                {
-                    return;
-                }
-
-                continue;
-            }
-
-            var interceptors = (LifecycleInterceptor[]?)current;
-            if (IndexOf(interceptors, interceptor) >= 0 ||
-                data.TryUpdate((null, Key), With(interceptors, interceptor), current))
+            var observed = Interlocked.CompareExchange(ref state.Interceptors, With(current, interceptor), current);
+            if (ReferenceEquals(observed, current))
             {
                 return;
             }
+
+            current = observed;
         }
     }
 
     internal static void Remove(IInterceptorSubject subject, LifecycleInterceptor interceptor)
     {
-        // The common case first: the subject leaves its only graph.
-        var data = subject.Data;
-        if (data.TryUpdate((null, Key), null, interceptor.SingleAttachment))
+        if (TryGetState(subject) is not { } state)
         {
             return;
         }
 
-        while (true)
+        // The common case first: the subject leaves its only graph.
+        var single = interceptor.SingleAttachment;
+        var current = Interlocked.CompareExchange(ref state.Interceptors, null, single);
+        while (current is not null && !ReferenceEquals(current, single) && IndexOf(current, interceptor) >= 0)
         {
-            if (!data.TryGetValue((null, Key), out var current) ||
-                current is not LifecycleInterceptor[] interceptors ||
-                IndexOf(interceptors, interceptor) < 0 ||
-                data.TryUpdate((null, Key), Without(interceptors, interceptor), current))
+            var observed = Interlocked.CompareExchange(ref state.Interceptors, Without(current, interceptor), current);
+            if (ReferenceEquals(observed, current))
             {
                 return;
             }
+
+            current = observed;
         }
     }
 
     internal static bool IsAttached(IInterceptorSubject subject)
     {
-        return subject.Data.TryGetValue((null, Key), out var value) && value is not null;
+        return TryGetState(subject) is { } state && Volatile.Read(ref state.Interceptors) is not null;
+    }
+
+    internal static int GetReferenceCount(IInterceptorSubject subject)
+    {
+        return TryGetState(subject) is { } state ? Volatile.Read(ref state.ReferenceCount) : 0;
+    }
+
+    internal static int IncrementReferenceCount(IInterceptorSubject subject)
+    {
+        return Interlocked.Increment(ref GetOrCreateState(subject).ReferenceCount);
+    }
+
+    internal static int DecrementReferenceCount(IInterceptorSubject subject)
+    {
+        if (TryGetState(subject) is not { } state)
+        {
+            return 0;
+        }
+
+        // Never below zero.
+        var count = Volatile.Read(ref state.ReferenceCount);
+        while (count > 0)
+        {
+            var observed = Interlocked.CompareExchange(ref state.ReferenceCount, count - 1, count);
+            if (observed == count)
+            {
+                return count - 1;
+            }
+
+            count = observed;
+        }
+
+        return 0;
+    }
+
+    private static State? TryGetState(IInterceptorSubject subject)
+    {
+        return subject.Data.TryGetValue((null, Key), out var state) ? (State?)state : null;
+    }
+
+    private static State GetOrCreateState(IInterceptorSubject subject)
+    {
+        return TryGetState(subject) ?? (State)subject.Data.GetOrAdd((null, Key), static _ => new State())!;
     }
 
     // By reference: a subclass of LifecycleInterceptor may override Equals.

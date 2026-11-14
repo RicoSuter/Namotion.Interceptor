@@ -41,7 +41,7 @@ The design rests on three rules:
 | `DerivedPropertyData` | Tracking | Per-property state, created once and never removed or replaced. Stored in `Subject.Data` under key `"ni.dpd"`. |
 | `DerivedPropertyTypeGate` | Tracking | Per subject type, whether any `DerivedPropertyData` exists for a subject of the type. Raised before the first data of the type is stored, never lowered. Lets a write, and the detach of a subject, skip the data lookup for types nothing derived touches. |
 | `PropertyReferenceCollection` | Tracking | Collection for used-by properties with lock-free snapshot reads and writes under its own leaf lock. See [Used-by properties collection](#used-by-properties-collection). |
-| `SubjectLifecycleAttachments` | Tracking | Per subject, the lifecycle interceptors the subject is attached to, so a derived property stays attached while its subject is in any graph. See [Detach and Attachments](#detach-and-attachments). |
+| `SubjectLifecycleAttachments` | Tracking | Per subject, the lifecycle interceptors the subject is attached to and its reference count, so a derived property stays attached while its subject is in any graph. See [Detach and Attachments](#detach-and-attachments). |
 | `DerivedPropertyChangeHandlerExtensions` | Tracking | `GetRequiredProperties`, `GetUsedByProperties`, `RecalculateDerivedProperty`, and access to `DerivedPropertyData` via `PropertyReference`. |
 
 ## Access Taps
@@ -315,7 +315,7 @@ Because each add and remove is O(1) once the collection is large, attaching or d
 ### Lock ordering and deadlock freedom
 
 - **Lifecycle lock before `lock(data)`**: the attach and the detach of a derived property take `lock(data)` briefly under the lifecycle lock. Nothing under `lock(data)` takes the lifecycle lock, because getters and publications, which may write subject-typed properties and so enter the lifecycle, never run under `lock(data)`.
-- **`lock(data)` before the used-by leaf lock**: the commit and the detach change used-by collections under `lock(data)`, and the leaf lock takes nothing further. The detach also reads the subject's attachments under `lock(data)`, without their lock.
+- **`lock(data)` before the used-by leaf lock**: the commit and the detach change used-by collections under `lock(data)`, and the leaf lock takes nothing further. The detach also reads the subject's attachments under `lock(data)`, lock-free.
 - **No two data locks nest**: a commit links its sources without taking their locks, so dependency cycles between derived properties cannot form a lock cycle.
 
 The design avoids two lock-order inversions with the lifecycle lock that holding `lock(data)` during a getter or a publication would cause:
@@ -358,7 +358,7 @@ sequenceDiagram
 | `IsDerived` | `Volatile.Write` once at attach / `Volatile.Read` | attach, request, write observer |
 | Type gate | `Volatile.Write` and a full fence before the first data of the type is stored / `Volatile.Read` | data creation, write observer (W3), lifecycle detach |
 | Recorder frames | `[ThreadStatic]` (no sharing) | read tap, own writes, commit |
-| Subject attachments | compare-and-swap of an immutable value in the subject's data (writes) / lock-free read of the value | lifecycle attach and detach, derived detach |
+| Subject attachments | compare-and-swap of an immutable value in a state object in the subject's data (writes) / lock-free read of the value | lifecycle attach and detach, derived detach |
 
 ### Value correctness
 
