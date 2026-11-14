@@ -7,6 +7,7 @@ namespace HomeBlaze.Abstractions.Attributes
     {
         public ConfigurationAttribute() { }
         public bool IsSecret { get; set; }
+        public bool RecreateOnChange { get; set; }
     }
     [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Method, Inherited=true)]
     public sealed class ExcludeFromAttribute : System.Attribute

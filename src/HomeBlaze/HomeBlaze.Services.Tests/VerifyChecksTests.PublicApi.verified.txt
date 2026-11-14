@@ -32,6 +32,10 @@ namespace HomeBlaze.Services
         JsonProperty = 0,
         CSharpProperty = 1,
     }
+    public static class ConfigurationUpdatePolicy
+    {
+        public static bool CanUpdateInPlace(Namotion.Interceptor.IInterceptorSubject? existing, System.Type type, string json, string? appliedJson, System.Collections.Generic.IReadOnlyCollection<string>? appliedKeys, HomeBlaze.Services.ConfigurationNaming naming) { }
+    }
     public static class DataDirectorySeeder
     {
         public const string SeedRootFileName = "Root.json";

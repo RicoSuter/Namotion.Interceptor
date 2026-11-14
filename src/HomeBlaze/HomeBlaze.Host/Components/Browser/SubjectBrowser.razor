@@ -1,3 +1,4 @@
+@using System.Diagnostics.CodeAnalysis
 @using Microsoft.AspNetCore.WebUtilities
 @using HomeBlaze.Abstractions.Metadata
 @using HomeBlaze.Services.Metadata
@@ -68,6 +69,7 @@
                                           OnPropertyClick="@((args) => OnPropertyClick(pane, args.PropertyName, args.Index, args.Subject))"
                                           OnClose="@(() => OnPaneClose(pane))"
                                           OnDelete="@((MethodMetadata deleteOperation) => OnPaneDelete(pane, deleteOperation))"
+                                          OnSubjectReplaced="@OnSubjectReplaced"
                                           HighlightedProperty="@highlightedProperty" />
                 </MudPaper>
             </div>
@@ -232,16 +234,38 @@
             return;
         }
 
+        if (TryGetBrowserPath(uri, out var path))
+        {
+            Path = path;
+            RebuildFromPath();
+            InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static bool TryGetBrowserPath(Uri uri, [NotNullWhen(true)] out string? path)
+    {
         var segments = uri.AbsolutePath.TrimStart('/').Split('/');
         if (segments.Length > 0 && segments[0] == "browser")
         {
-            var decodedSegments = segments.Skip(1).Select(Uri.UnescapeDataString);
-            Path = string.Join("/", decodedSegments);
-           
-            RebuildFromPath();
-            
-            InvokeAsync(StateHasChanged);
+            path = string.Join("/", segments.Skip(1).Select(Uri.UnescapeDataString));
+            return true;
         }
+
+        path = null;
+        return false;
+    }
+
+    // The panes hold the replaced instance and the subjects below it, so they are built again from the current URL:
+    // Path is not updated by the navigation of the browser itself.
+    private void OnSubjectReplaced()
+    {
+        if (TryGetBrowserPath(new Uri(NavigationManager.Uri), out var path))
+        {
+            Path = path;
+        }
+
+        RebuildFromPath();
+        StateHasChanged();
     }
 
     private void RebuildFromPath()

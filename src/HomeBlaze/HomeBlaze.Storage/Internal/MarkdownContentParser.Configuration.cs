@@ -56,7 +56,7 @@ public sealed partial class MarkdownContentParser
         void RememberFirstSkipped(SkippedConfigurationProperty property) => skipped ??= property;
 
         IInterceptorSubject? subject;
-        if (CanUpdateInPlace(existing, type, configuration.Keys))
+        if (CanUpdateInPlace(existing, type, configuration))
         {
             // A block whose configuration did not change keeps the values of its subject. They can hold a change
             // that is about to be saved, which the reload inside the save of another block must not reset.
@@ -108,8 +108,9 @@ public sealed partial class MarkdownContentParser
     }
 
     /// <summary>
-    /// Records the configuration that was written to the page for a subject, so that the reload
-    /// which follows the write updates the subject in place. The JSON must have the naming of a page,
+    /// Records the configuration that was written to the page for a subject. The reload which follows the write
+    /// compares the page with these keys and the JSON applied before, so it updates the subject in place unless
+    /// the update policy says to recreate it. The JSON must have the naming of a page,
     /// <see cref="ConfigurationNaming.CSharpProperty"/>, because its keys are compared with those of the page.
     /// </summary>
     internal void RememberConfiguration(IInterceptorSubject subject, string configurationJson)
@@ -272,17 +273,18 @@ public sealed partial class MarkdownContentParser
             subject, new AppliedBlock(state.Source, start, length, innerSubjects.ToArray(), textSegments.ToArray()));
     }
 
-    // Updating in place only sets the keys that are present. A key that was removed from the page
-    // would keep its old value on the instance, unlike after a restart, so the subject is recreated then.
-    private bool CanUpdateInPlace([NotNullWhen(true)] IInterceptorSubject? existing, Type type, string[] keys)
+    // Recreates when ConfigurationUpdatePolicy says the subject cannot take the change in place.
+    private bool CanUpdateInPlace([NotNullWhen(true)] IInterceptorSubject? existing, Type type, BlockConfiguration configuration)
     {
-        if (existing is null || existing.GetType() != type)
+        if (existing is null)
         {
             return false;
         }
 
-        return !_appliedConfigurationKeys.TryGetValue(existing, out var previousKeys)
-            || Array.TrueForAll(previousKeys, previousKey => Array.IndexOf(keys, previousKey) >= 0);
+        var appliedJson = _appliedConfigurationJson.TryGetValue(existing, out var json) ? json : null;
+        var appliedKeys = _appliedConfigurationKeys.TryGetValue(existing, out var keys) ? keys : null;
+        return ConfigurationUpdatePolicy.CanUpdateInPlace(
+            existing, type, configuration.Json, appliedJson, appliedKeys, ConfigurationNaming.CSharpProperty);
     }
 
     private bool TryBuildConfiguration(

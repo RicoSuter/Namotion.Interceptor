@@ -12,4 +12,10 @@ public class ConfigurationAttribute : Attribute
     /// stores a secret value (e.g., API key, password) so it is not shown in the UI.
     /// </summary>
     public bool IsSecret { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether a change of this configuration creates the subject again instead of
+    /// updating the running instance, for a value that the subject cannot apply in place.
+    /// </summary>
+    public bool RecreateOnChange { get; set; }
 }

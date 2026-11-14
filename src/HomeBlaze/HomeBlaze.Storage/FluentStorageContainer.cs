@@ -548,7 +548,19 @@ public partial class FluentStorageContainer :
                 if (fileSubject is not IConfigurable || fileSubject is IStorageFile || entry is null)
                     return;
 
-                await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_serializer.Serialize(fileSubject)), token);
+                var json = _serializer.Serialize(fileSubject);
+                var bytes = Encoding.UTF8.GetBytes(json);
+                // No applied keys: the instance holds what is written, and the serializer drops null and unknown keys.
+                if (ConfigurationUpdatePolicy.CanUpdateInPlace(
+                        fileSubject, fileSubject.GetType(), json, entry.AppliedConfiguration, [], ConfigurationNaming.JsonProperty))
+                {
+                    await WriteAndRecordAsync(connection, entry, bytes, token);
+                }
+                else
+                {
+                    await WriteForRecreationAsync(connection, entry, bytes, token);
+                }
+
                 isWritten = true;
 
                 _logger?.LogDebug("Saved subject to storage: {Path}", entry.Path);
@@ -628,6 +640,11 @@ public partial class FluentStorageContainer :
         await WriteAsync(connection, entry.Path, content, cancellationToken);
 
         entry.Hash = StorageHash.Compute(content);
+        if (entry.Subject is IConfigurable && StoragePath.IsJson(entry.Path))
+        {
+            entry.AppliedConfiguration = Encoding.UTF8.GetString(content);
+        }
+
         try
         {
             entry.Version = await connection.Reconciler.GetVersionAsync(entry.Path, cancellationToken);
@@ -638,6 +655,37 @@ public partial class FluentStorageContainer :
             // compares the file by its hash and finds what was written.
             entry.Version = default;
             _logger?.LogDebug(exception, "Failed to read the version of the written file: {Path}", entry.Path);
+        }
+    }
+
+    // The running subject cannot take this configuration, so the file is written as by anyone else and its subject
+    // is created again from it, as after a restart. Called on the worker.
+    private async Task WriteForRecreationAsync(
+        StorageConnection connection, StorageEntry entry, byte[] content, CancellationToken cancellationToken)
+    {
+        // Recorded again only once the subject was replaced: whatever fails or is given up in between, the next
+        // pass then loads the file again, as for WriteBlobCoreAsync.
+        entry.Version = default;
+        entry.Hash = null;
+
+        await WriteAsync(connection, entry.Path, content, cancellationToken);
+
+        var leavesWorkForPass = true;
+        try
+        {
+            leavesWorkForPass = await connection.Reconciler.RefreshWrittenAsync(entry, content, cancellationToken);
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            // The configuration is written, so the caller gets no failure.
+            _logger?.LogWarning(exception, "Failed to recreate the subject after writing: {Path}", entry.Path);
+        }
+        finally
+        {
+            if (leavesWorkForPass)
+            {
+                connection.NotifyChanged(entry.Path);
+            }
         }
     }
 

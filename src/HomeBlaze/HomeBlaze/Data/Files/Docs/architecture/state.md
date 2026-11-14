@@ -59,6 +59,7 @@ Tracks the implementation status of building blocks described in [Architecture O
 | Building Block | Status | Notes |
 |---|---|---|
 | Automations | Implemented | `HomeBlaze.Automation` with rules on property conditions and events, named states, dry runs, Test now and a checkpoint, and `HomeBlaze.Automation.Blazor` with the page, the widget and the editor. See [Automations](../administration/automation.md) |
+| Virtual subjects | Implemented | `HomeBlaze.Virtual` with expression and binding properties and `HomeBlaze.Virtual.Blazor` with the editor. See [Virtual Subjects](../administration/virtual-subjects.md) |
 | Authorization of automations | Planned | Roles and rules for the principal of an automation |
 
 ## Platform

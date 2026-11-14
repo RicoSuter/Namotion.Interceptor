@@ -45,6 +45,12 @@ internal sealed class StorageEntry
     public string? Hash { get; set; }
 
     /// <summary>
+    /// The text of a JSON file that its configurable subject was created from or last took, so that the next change is
+    /// checked against it; null for any other entry and while it is not known.
+    /// </summary>
+    public string? AppliedConfiguration { get; set; }
+
+    /// <summary>
     /// The key in the parent folder that the entry holds or asked for. Null until the entry was first applied
     /// to the tree.
     /// </summary>

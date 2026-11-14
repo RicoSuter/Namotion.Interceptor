@@ -1,0 +1,122 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.Virtual.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace HomeBlaze.Virtual
+{
+    public enum VirtualDataType
+    {
+        Number = 0,
+        Boolean = 1,
+        Text = 2,
+        Duration = 3,
+        DateTime = 4,
+    }
+    public static class VirtualDataTypes
+    {
+        public static System.Type GetClrType(HomeBlaze.Virtual.VirtualDataType dataType) { }
+        public static bool TryGetDataType(System.Type type, out HomeBlaze.Virtual.VirtualDataType dataType) { }
+    }
+    public static class VirtualExpression
+    {
+        public static Namotion.Interceptor.Expressions.ExpressionValue Evaluate(Namotion.Interceptor.Expressions.ParsedExpression expression, HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject scope) { }
+        public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveProperty(HomeBlaze.Services.SubjectPathResolver resolver, string path, Namotion.Interceptor.IInterceptorSubject scope) { }
+        public static bool TryParse(string text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Expressions.ParsedExpression? expression, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class VirtualNode : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, System.ComponentModel.INotifyPropertyChanged
+    {
+        public string Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public sealed class VirtualProperty : System.IEquatable<HomeBlaze.Virtual.VirtualProperty>
+    {
+        public VirtualProperty() { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.Collections.Generic.IReadOnlyDictionary<string, HomeBlaze.Virtual.VirtualProperty>? Attributes { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public HomeBlaze.Virtual.VirtualDataType? DataType { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Expression { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Path { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.Collections.Generic.IReadOnlyDictionary<string, HomeBlaze.Virtual.VirtualProperty>? Properties { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public HomeBlaze.Virtual.VirtualState? State { get; init; }
+    }
+    [Namotion.Interceptor.Attributes.RunsAfter(new System.Type[] {
+            typeof(Namotion.Interceptor.Registry.SubjectRegistry)})]
+    public sealed class VirtualPropertyAwaiter : Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
+    {
+        public VirtualPropertyAwaiter(Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Virtual.VirtualPropertyAwaiter> logger) { }
+        public void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
+        public void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
+        public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }
+    }
+    public sealed class VirtualPropertyIssue : System.IEquatable<HomeBlaze.Virtual.VirtualPropertyIssue>
+    {
+        public VirtualPropertyIssue(string Path, string Message) { }
+        public string Message { get; init; }
+        public string Path { get; init; }
+    }
+    public static class VirtualPropertyValidator
+    {
+        public static System.Collections.Immutable.ImmutableArray<HomeBlaze.Virtual.VirtualPropertyIssue> Validate(System.Collections.Generic.IReadOnlyDictionary<string, HomeBlaze.Virtual.VirtualProperty>? properties, string? ownPath = null) { }
+    }
+    public static class VirtualServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddHomeBlazeVirtual(this Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
+    }
+    public sealed class VirtualState : System.IEquatable<HomeBlaze.Virtual.VirtualState>
+    {
+        public VirtualState() { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Category { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool? IsCumulative { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool? IsDiscrete { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool? IsEstimated { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int? Position { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Title { get; init; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public HomeBlaze.Abstractions.Attributes.StateUnit? Unit { get; init; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("AccountTree")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("Virtual")]
+    [System.ComponentModel.Description("Subject whose properties are computed from or bound to other subjects.")]
+    [System.ComponentModel.DisplayName("Virtual subject")]
+    public class VirtualSubject : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.IVirtualSubject, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, System.ComponentModel.INotifyPropertyChanged
+    {
+        public VirtualSubject(HomeBlaze.Services.SubjectPathResolver pathResolver, HomeBlaze.Virtual.VirtualPropertyAwaiter awaiter, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Virtual.VirtualSubject> logger) { }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        public string? IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration(RecreateOnChange=true)]
+        public System.Collections.Generic.IReadOnlyDictionary<string, HomeBlaze.Virtual.VirtualProperty>? Properties { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=910)]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=911)]
+        public string? StatusMessage { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Title { get; set; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+}

@@ -230,6 +230,7 @@ internal sealed class StorageReconciler
 
                 entry.Key = key;
                 entry.Subject = null;
+                entry.AppliedConfiguration = null;
                 continue;
             }
 
@@ -460,6 +461,7 @@ internal sealed class StorageReconciler
                 entry.Subject = null;
                 entry.Version = default;
                 entry.Hash = null;
+                entry.AppliedConfiguration = null;
             }
         }
     }
@@ -637,11 +639,14 @@ internal sealed class StorageReconciler
                 candidates[0].Parent != entry.Parent)
             {
                 entry.Subject = candidates[0].Subject;
+                entry.AppliedConfiguration = candidates[0].AppliedConfiguration;
                 _hasUnappliedMove = true;
             }
             else
             {
-                entry.Subject = CreateFromJson(listed.Path, DecodeText(content), listed.Version);
+                var json = DecodeText(content);
+                entry.Subject = CreateFromJson(listed.Path, json, listed.Version);
+                entry.AppliedConfiguration = entry.Subject is IConfigurable ? json : null;
             }
         }
         else
@@ -793,7 +798,7 @@ internal sealed class StorageReconciler
 
         // Text that is not valid JSON fails here for a configurable subject, which then keeps what it has:
         // a file that is being written is no reason to stop a device.
-        if (entry.Subject is IConfigurable configurable && (!StoragePath.IsJson(entry.Path) || FileSubjectFactory.DescribesTypeOf(entry.Subject, json)))
+        if (entry.Subject is IConfigurable configurable && (!StoragePath.IsJson(entry.Path) || CanUpdateInPlace(entry, json)))
         {
             // From here on the subject holds neither content until the configuration is applied. Not earlier:
             // text that was rejected above has not touched the subject.
@@ -805,6 +810,7 @@ internal sealed class StorageReconciler
                 var skipped = new List<SkippedConfigurationProperty>();
                 _serializer.UpdateConfiguration(entry.Subject, json, skipped.Add);
                 _subjectFactory.LogSkippedProperties(entry.Path, skipped);
+                entry.AppliedConfiguration = StoragePath.IsJson(entry.Path) ? json : null;
             }
 
             await configurable.ApplyConfigurationAsync(cancellationToken);
@@ -827,10 +833,24 @@ internal sealed class StorageReconciler
 
         _subjectFactory.Release(entry.Subject);
 
-        _index.Set(new StorageEntry { Path = entry.Path, IsFolder = false, Version = version, Hash = hash, Subject = subject });
+        _index.Set(new StorageEntry
+        {
+            Path = entry.Path,
+            IsFolder = false,
+            Version = version,
+            Hash = hash,
+            Subject = subject,
+            AppliedConfiguration = subject is IConfigurable ? json : null
+        });
         _logger?.LogInformation("Replaced the subject of: {Path}", entry.Path);
         return true;
     }
+
+    // Recreates when ConfigurationUpdatePolicy says the subject cannot take the change in place.
+    private static bool CanUpdateInPlace(StorageEntry entry, string json) =>
+        FileSubjectFactory.DescribesTypeOf(entry.Subject!, json) &&
+        ConfigurationUpdatePolicy.CanUpdateInPlace(
+            entry.Subject, entry.Subject!.GetType(), json, entry.AppliedConfiguration, null, ConfigurationNaming.JsonProperty);
 
     private static void SetMetadata(IStorageFile file, StorageVersion version)
     {
