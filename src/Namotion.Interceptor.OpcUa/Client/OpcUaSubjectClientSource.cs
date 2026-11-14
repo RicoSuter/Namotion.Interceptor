@@ -174,9 +174,17 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         _propertyWriter = propertyWriter;
         _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
 
-        _sessionManager = new SessionManager(
+        var sessionManager = new SessionManager(
             this, propertyWriter, _configuration, PollingMetrics, ReadAfterWriteMetrics, _logger);
-        _writer = new OutboundWriter(_sessionManager, _configuration, OpcUaNodeIdKey, OutgoingThroughput, _logger);
+        _sessionManager = sessionManager;
+        _writer = new OutboundWriter(
+            () => sessionManager.CurrentSession,
+            sessionManager.ReadAfterWriteManager,
+            sessionManager.ScheduleFullStateSyncAfterResponseMismatch,
+            _configuration,
+            OpcUaNodeIdKey,
+            OutgoingThroughput,
+            _logger);
 
         try
         {
@@ -286,12 +294,27 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                 });
             }
 
-            var readResponse = await session.ReadAsync(
-                requestHeader: null,
-                maxAge: 0,
-                timestampsToReturn: TimestampsToReturn.Source,
-                readValues,
-                cancellationToken).ConfigureAwait(false);
+            var requestHeader = new RequestHeader();
+            ReadResponse readResponse;
+            try
+            {
+                readResponse = await session.ReadAsync(
+                    requestHeader,
+                    maxAge: 0,
+                    timestampsToReturn: TimestampsToReturn.Source,
+                    readValues,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (InvalidCastException exception)
+            {
+                throw OpcUaResponseMismatchException.FromInvalidCast("Read", exception);
+            }
+
+            // Fails the whole load, whose callers reload on failure, so the session is resynced anyway.
+            if (OpcUaResponseMismatchException.Check("Read", requestHeader, readResponse.ResponseHeader) is { } mismatch)
+            {
+                throw mismatch;
+            }
 
             var resultCount = Math.Min(readResponse.Results.Count, readValues.Count);
             for (var i = 0; i < resultCount; i++)

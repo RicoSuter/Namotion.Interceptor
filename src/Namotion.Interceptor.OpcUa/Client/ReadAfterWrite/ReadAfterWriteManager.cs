@@ -339,68 +339,89 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         {
             try
             {
-                var readValues = new ReadValueIdCollection(dueCount);
-                for (var i = 0; i < dueCount; i++)
+                // Chunked to the server's read limit: past it the SDK splits the read itself and reuses the request
+                // header, so only its last split would be checked against the request handle.
+                var maxNodesPerRead = session.OperationLimits?.MaxNodesPerRead ?? 0;
+                var chunkSize = maxNodesPerRead > 0 && maxNodesPerRead < (uint)dueCount ? (int)maxNodesPerRead : dueCount;
+                var readValues = new ReadValueIdCollection(chunkSize);
+                for (var offset = 0; offset < dueCount; offset += chunkSize)
                 {
-                    readValues.Add(new ReadValueId
+                    var count = Math.Min(chunkSize, dueCount - offset);
+
+                    // Reused across chunks: the previous read has completed, so the SDK no longer holds it.
+                    readValues.Clear();
+                    for (var i = 0; i < count; i++)
                     {
-                        NodeId = _dueReadsList[i].NodeId,
-                        AttributeId = Opc.Ua.Attributes.Value
-                    });
-                }
-
-                ReadResponse response;
-                try
-                {
-                    response = await session.ReadAsync(
-                        requestHeader: null,
-                        maxAge: 0,
-                        timestampsToReturn: TimestampsToReturn.Source,
-                        readValues,
-                        _cts.Token).ConfigureAwait(false);
-                }
-                catch (Exception) when (_cts.IsCancellationRequested)
-                {
-                    return;
-                }
-
-                var receivedTimestamp = DateTimeOffset.UtcNow;
-
-                for (var i = 0; i < response.Results.Count && i < dueCount; i++)
-                {
-                    var result = response.Results[i];
-                    if (!StatusCode.IsGood(result.StatusCode))
-                    {
-                        failedCount++;
-                        continue;
+                        readValues.Add(new ReadValueId
+                        {
+                            NodeId = _dueReadsList[offset + i].NodeId,
+                            AttributeId = Opc.Ua.Attributes.Value
+                        });
                     }
 
-                    var (_, property, applyLock) = _dueReadsList[i];
-                    var sourceTimestamp = (DateTimeOffset)result.SourceTimestamp;
-
-                    // Skips a result that is already stale without converting it; the check under the lock decides.
-                    if (IsStale(property, sourceTimestamp))
+                    var requestHeader = new RequestHeader();
+                    ReadResponse response;
+                    try
                     {
-                        skippedCount++;
-                        continue;
+                        response = await session.ReadAsync(
+                            requestHeader,
+                            maxAge: 0,
+                            timestampsToReturn: TimestampsToReturn.Source,
+                            readValues,
+                            _cts.Token).ConfigureAwait(false);
+                    }
+                    catch (Exception) when (_cts.IsCancellationRequested)
+                    {
+                        return;
+                    }
+                    catch (InvalidCastException exception)
+                    {
+                        throw OpcUaResponseMismatchException.FromInvalidCast("Read", exception);
                     }
 
-                    var value = _configuration.ValueConverter.ConvertToPropertyValue(result.Value, property);
-
-                    // Checked and applied under the notifications' lock: a notification landing between a separate
-                    // check and apply would be overwritten by this older read until the value next changes on the server.
-                    lock (applyLock)
+                    if (OpcUaResponseMismatchException.Check("Read", requestHeader, response.ResponseHeader) is { } mismatch)
                     {
+                        throw mismatch;
+                    }
+
+                    var receivedTimestamp = DateTimeOffset.UtcNow;
+
+                    for (var i = 0; i < response.Results.Count && i < count; i++)
+                    {
+                        var result = response.Results[i];
+                        if (!StatusCode.IsGood(result.StatusCode))
+                        {
+                            failedCount++;
+                            continue;
+                        }
+
+                        var (_, property, applyLock) = _dueReadsList[offset + i];
+                        var sourceTimestamp = (DateTimeOffset)result.SourceTimestamp;
+
+                        // Skips a result that is already stale without converting it; the check under the lock decides.
                         if (IsStale(property, sourceTimestamp))
                         {
                             skippedCount++;
                             continue;
                         }
 
-                        property.SetValueFromSource(_source, sourceTimestamp, receivedTimestamp, value);
-                    }
+                        var value = _configuration.ValueConverter.ConvertToPropertyValue(result.Value, property);
 
-                    successCount++;
+                        // Checked and applied under the notifications' lock: a notification landing between a separate
+                        // check and apply would be overwritten by this older read until the value next changes on the server.
+                        lock (applyLock)
+                        {
+                            if (IsStale(property, sourceTimestamp))
+                            {
+                                skippedCount++;
+                                continue;
+                            }
+
+                            property.SetValueFromSource(_source, sourceTimestamp, receivedTimestamp, value);
+                        }
+
+                        successCount++;
+                    }
                 }
             }
             catch (Exception ex)
