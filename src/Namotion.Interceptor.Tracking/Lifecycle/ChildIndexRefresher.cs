@@ -55,12 +55,7 @@ internal static class ChildIndexRefresher
             }
             finally
             {
-                foreach (var child in span)
-                {
-                    TrackingWriteObserver.OnStructureChanged(child.Subject);
-                }
-
-                TrackingWriteObserver.OnChildrenChanged(property.Subject);
+                TrackingWriteObserver.OnChildrenMoved(span, property.Subject);
             }
         }
         finally
