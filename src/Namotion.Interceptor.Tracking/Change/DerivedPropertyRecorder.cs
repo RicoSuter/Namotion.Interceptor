@@ -41,7 +41,7 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
     /// Starts a recording frame for the getter of <paramref name="property"/> (reuses a pooled buffer; allocation-free in
     /// steady state). Reads of <paramref name="property"/> itself are filtered so a derived property never depends on
     /// itself: a dynamic derived getter reads its own property again through the interceptor chain.
-    /// <paramref name="previousReads"/> is the dependency data of the property's last committed links in read order:
+    /// <paramref name="previousReads"/> is the dependency data of the property's last committed dependencies in read order:
     /// a read at the same position of the same property takes its data from there instead of looking it up.
     /// </summary>
     public void StartRecording(in PropertyReference property, DerivedPropertyData?[]? previousReads = null)

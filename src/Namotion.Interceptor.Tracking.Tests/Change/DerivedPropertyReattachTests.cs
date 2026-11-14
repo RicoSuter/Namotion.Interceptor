@@ -121,7 +121,7 @@ public class DerivedPropertyReattachTests
         var observedProperty = new PropertyReference(holder, nameof(UntrackedReferenceHolder.Observed));
         var valueData = valueProperty.TryGetDerivedPropertyData()!;
 
-        // Act: Observed's recalculation recorded the leaf's Value and waits inside the read, before it links it,
+        // Act: Observed's recalculation recorded the leaf's Value and waits inside the read, before it commits it as a dependency,
         // while the leaf is detached and attached again.
         blocker.Arm();
         var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { holder.Trigger = 1; });
@@ -138,7 +138,7 @@ public class DerivedPropertyReattachTests
             .Subscribe(changes.Add);
         leaf.Value = 5;
 
-        // Assert: data is never removed or replaced, so the link lands on the leaf's current data.
+        // Assert: data is never removed or replaced, so the dependency lands on the leaf's current data.
         Assert.True(isReadEntered);
         Assert.False(blocker.HasTimedOut);
         Assert.True(isLeafDetached);
@@ -278,7 +278,7 @@ public class DerivedPropertyReattachTests
         var observedProperty = new PropertyReference(holder, nameof(UntrackedReferenceHolder.Observed));
         var observedData = observedProperty.TryGetDerivedPropertyData()!;
 
-        // Act: the leaf is detached while Observed's lock is held. Only a derived property changes its own links,
+        // Act: the leaf is detached while Observed's lock is held. Only a derived property changes its own dependencies,
         // so the detach completes without it. Observed then drops Value and reads it again.
         Task detach;
         Monitor.Enter(observedData);
@@ -399,7 +399,7 @@ public class DerivedPropertyReattachTests
         root.Source = source;
         source.Value = 2;
 
-        // Assert: only a derived property changes its own links, so the source's detach kept the field reader's link.
+        // Assert: only a derived property changes its own dependencies, so the source's detach kept the field reader's dependency.
         Assert.Equal(2, GetLastKnownValue(reader, nameof(ReferenceReader.ViaField)));
         Assert.Equal(2, GetLastKnownValue(reader, nameof(ReferenceReader.ViaTrackedPath)));
     }
@@ -437,7 +437,7 @@ public class DerivedPropertyReattachTests
     private static WeakReference AddCarSharingATireAndRemoveIt(Garage garage, bool moveBeforeRemoval)
     {
         // The shared tire joins the garage first, so its inherited context is the garage's,
-        // and the derived property is the only link from the tire back to the car.
+        // and the derived property is the only dependent entry from the tire back to the car.
         var car = new Car();
         garage.SpareTires = [car.Tires[0]];
         garage.Cars = [car];

@@ -5,7 +5,7 @@ using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
-public class DerivedPropertyLinkOwnershipTests
+public class DerivedPropertyDependencyOwnershipTests
 {
     [Fact]
     public void WhenSourceReachedThroughFieldIsDetached_ThenDerivedPropertyKeepsFollowingIt()

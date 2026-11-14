@@ -309,7 +309,7 @@ public class DerivedPropertyChangeHandlerTests
     }
 
     [Fact]
-    public void WhenBacklinkIsMaintained_ThenSourcePropertyKnowsItsUsedBy()
+    public void WhenDependentIsMaintained_ThenSourcePropertyKnowsItsUsedBy()
     {
         // Arrange
         var context = InterceptorSubjectContext

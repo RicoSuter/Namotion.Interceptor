@@ -116,7 +116,7 @@ public class DerivedPropertyRandomizedStressTests
     /// <summary>
     /// Once the writes settled, compares every attached derived property's committed value with its getter, then
     /// gives every attached person a new name and compares the last published values with the getters. Detached
-    /// people keep no links. Returns the number of attached people.
+    /// people keep no dependencies. Returns the number of attached people.
     /// </summary>
     /// <remarks>
     /// The last publication of a round is not comparable by itself: an attach commits its first value without
@@ -161,7 +161,7 @@ public class DerivedPropertyRandomizedStressTests
             if (property.GetRequiredProperties().Length > 0 ||
                 sources.Any(source => source.GetUsedByProperties().Items.ToArray().Contains(property)))
             {
-                mismatches.Add($"Round {round}: {property.Name} of detached {property.Subject} keeps a link.");
+                mismatches.Add($"Round {round}: {property.Name} of detached {property.Subject} keeps a dependency.");
             }
         }
 

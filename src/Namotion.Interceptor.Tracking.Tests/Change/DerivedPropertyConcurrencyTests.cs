@@ -141,7 +141,7 @@ public class DerivedPropertyConcurrencyTests
     }
 
     [Fact]
-    public async Task WhenSubjectAttachedAndDetachedRapidly_ThenNoStaleBacklinksAndGCEligible()
+    public async Task WhenSubjectAttachedAndDetachedRapidly_ThenNoStaleDependentsAndGCEligible()
     {
         for (var i = 0; i < DefaultIterations; i++)
         {
@@ -295,10 +295,10 @@ public class DerivedPropertyConcurrencyTests
     }
 
     [Fact]
-    public async Task WhenDependencyChangesWhileNewDependencyDetaches_ThenNoStaleBacklinksOrExceptions()
+    public async Task WhenDependencyChangesWhileNewDependencyDetaches_ThenNoStaleDependentsOrExceptions()
     {
         // Changes the dependency set to include FirstName while FirstName, a source property, is
-        // detached concurrently. A source detach leaves the links alone, so Display still follows
+        // detached concurrently. A source detach leaves the dependencies alone, so Display still follows
         // FirstName once it depends on it.
         for (var i = 0; i < DefaultIterations; i++)
         {

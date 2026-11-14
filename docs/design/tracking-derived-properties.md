@@ -22,10 +22,12 @@ The source generator detects `[Derived]` and sets `IsDerived = true` on `Subject
 
 Derived properties can also be added at runtime via `RegisteredSubject.AddDerivedProperty<T>(name, getValue, setValue)`. These work identically with the dependency tracking system: the getter and setter lambdas are wrapped in interception calls and dependencies are recorded on every evaluation.
 
+A **dependency** of a derived property D is a property that D's getter read, and D is a **dependent** of that property. A dependency is held on both sides: the property is in D's `RequiredProperties` (D's dependencies), and D is in the property's `UsedByProperties` (its dependents). A source is a property that some derived property depends on.
+
 The design rests on three rules:
 
 - **Every intercepted read and write is observed**, in the core, whatever the subject's context: a read through a thread-static read tap, a write through a process-wide write tap that runs once after the whole interceptor chain. Tracking is not part of the read or write interceptor chain at all.
-- **Only a derived property changes its own dependency links**, under its own lock, when it commits an evaluation or when it is detached. A write of a source, or a detach of a source, never touches a link.
+- **Only a derived property changes its own dependencies**, under its own lock, when it commits an evaluation or when it is detached. A write of a source, or a detach of a source, never touches a dependency.
 - **One owner at a time evaluates, commits and publishes a derived property.** A request that finds the property owned is left to the owner, which evaluates again before it commits or after it published.
 
 ## Components
@@ -69,7 +71,7 @@ Dependencies (RequiredProperties):      Used-by properties (UsedByProperties):
 - **Dependencies** (`data.RequiredPropertiesSpan`): Which properties a derived property read in its last committed evaluation. Stored as a private `PropertyReference[]` with a separate count, written under `lock(data)` of the derived property. The buffer is reused when capacity is sufficient. `GetRequiredProperties` reads it without the lock and clamps the count to the array length.
 - **Used-by properties** (`data.GetUsedByProperties()`): Which derived properties depend on this property. Stored as a private `PropertyReferenceCollection`, which synchronizes its own writes (see [Used-by properties collection](#used-by-properties-collection)).
 
-Both directions of a link between a derived property D and a source change only under `lock(D)`: D's commit sets them to exactly what the evaluation read (removes the stale ones, then adds the missing ones), and D's detach removes them all. A source's own lock is never taken, and a write or detach of a source never changes a link. The used-by collection of a source is still written by several derived properties, each under its own lock, so it synchronizes its writes with a leaf lock of its own and never relies on a caller's lock. The write observer reads it without any lock.
+Both sides of a dependency of a derived property D on a source change only under `lock(D)`: D's commit sets them to exactly what the evaluation read (removes the stale ones, then adds the missing ones), and D's detach removes them all. A source's own lock is never taken, and a write or detach of a source never changes a dependency. The used-by collection of a source is still written by several derived properties, each under its own lock, so it synchronizes its writes with a leaf lock of its own and never relies on a caller's lock. The write observer reads it without any lock.
 
 Both directions are needed:
 
@@ -101,11 +103,11 @@ sequenceDiagram
     participant Full as FullName (derived)
     participant Sub as Subscribers
 
-    Note over App,Sub: Attach - evaluate getter, link what it read
+    Note over App,Sub: Attach - evaluate getter, set dependencies to what it read
     App->>Full: AttachProperty(FullName)
     Full->>FN: reads FirstName (read tap records it with its version)
     Full->>LN: reads LastName (read tap records it with its version)
-    Note over Full: lock(FullName): link, check versions, commit first value
+    Note over Full: lock(FullName): set dependencies, check versions, commit first value
     Note over FN: UsedBy += [FullName]
     Note over LN: UsedBy += [FullName]
 
@@ -115,10 +117,10 @@ sequenceDiagram
     FN->>Full: write observer: Version++, UsedBy → request recalculation
     Full->>FN: evaluate getter (reads FirstName)
     Full->>LN: evaluate getter (reads LastName)
-    Note over Full: lock(FullName): link, check versions, commit new value
+    Note over Full: lock(FullName): set dependencies, check versions, commit new value
     Full->>Sub: publish(oldValue, newValue) while owning FullName
 
-    Note over App,Sub: Detach - only the derived property's own links
+    Note over App,Sub: Detach - only the derived property's own dependencies
     App->>Full: subject leaves its last graph
     Note over FN: UsedBy -= [FullName]
     Note over LN: UsedBy -= [FullName]
@@ -133,7 +135,7 @@ The version protocol guarantees that a write of a property an evaluation read is
 
 For every property E reads, before the value is read (the read tap runs first):
 
-- **R1**: get or create the property's `DerivedPropertyData`, followed by a full fence (`Interlocked.MemoryBarrier`) whether or not this call created it. Recording is not a hot path, and the unconditional fence keeps the proof independent of multi-copy atomicity (another evaluation may have created the data after a writer's W3). A recalculation gets the data from D's last committed links when the read at the same position is of the same property, instead of looking it up: data is never replaced, so that is the stored data, as a lookup would have found it.
+- **R1**: get or create the property's `DerivedPropertyData`, followed by a full fence (`Interlocked.MemoryBarrier`) whether or not this call created it. Recording is not a hot path, and the unconditional fence keeps the proof independent of multi-copy atomicity (another evaluation may have created the data after a writer's W3). A recalculation gets the data from D's last committed dependencies when the read at the same position is of the same property, instead of looking it up: data is never replaced, so that is the stored data, as a lookup would have found it.
 - **R2**: read its `Version` with acquire semantics (`Volatile.Read`), so R3 cannot move before it.
 - **R3**: read the value (the getter continues).
 
@@ -142,7 +144,7 @@ A property read twice in one evaluation keeps the version recorded at its first 
 When the getter has returned (or thrown), E commits under `lock(D)`:
 
 - If E no longer counts (it lost ownership of D, D was detached, or a newer attach superseded it), E discards its recording. A recalculation also discards it, and evaluates again, when a request arrived during E (see [Ownership Protocol](#ownership-protocol)).
-- **R4**: otherwise set D's links to exactly the recorded set.
+- **R4**: otherwise set D's dependencies to exactly the recorded set.
 - **R5**: one full fence, then read every recorded version again (`Volatile.Read`). If any differs, a write moved a source after E read it: E evaluates again. Otherwise E commits its value.
 
 ### Writing (W1 to W5)
@@ -167,7 +169,7 @@ Take a read R3 of E and a write W1 of the same property:
 
 - **W3 finds no data.** The data did not exist when W3 ran, and data is never removed, so R1 created it later. The fences at W2 and R1 order W1 before R3, so E reads W1's value or a later one. A gate that is not raised is the same case: whoever creates the first data of a type raises the gate, with a full fence after the store, before it stores the data, and the gate is never lowered. A gate that W3 finds not raised, after the fence of W2, therefore means that no data of the type was stored yet, this property's included.
 - **W4 precedes R2 in the version's order.** W1 precedes W4 (W2), and R3 follows R2, so E reads W1's value or a later one.
-- **W4 follows R2.** The recorded version is older than W4's. By the full fences on both sides (W4's interlocked increment before W5, R5's fence after R4), either R5 reads W4's version, and E evaluates again, or W5 reads D's link from R4, and requests a recalculation. That request takes `lock(D)`: if E has not committed yet, it finds E owning D and sets `RecalculationNeeded`, so E evaluates again before it commits; if E committed and still owns D, E evaluates again after it published; if E released D, the request takes ownership itself and evaluates. Every evaluation that follows starts after W1.
+- **W4 follows R2.** The recorded version is older than W4's. By the full fences on both sides (W4's interlocked increment before W5, R5's fence after R4), either R5 reads W4's version, and E evaluates again, or W5 finds D in the source's used-by set from R4, and requests a recalculation. That request takes `lock(D)`: if E has not committed yet, it finds E owning D and sets `RecalculationNeeded`, so E evaluates again before it commits; if E committed and still owns D, E evaluates again after it published; if E released D, the request takes ownership itself and evaluates. Every evaluation that follows starts after W1.
 - **W1 is E's own write**, made on E's thread after R3 (by the getter, or by a write it triggers on this thread). See [Own writes](#own-writes): the version check does not fire for it, and E is evaluated exactly once more, which reads W1's value.
 
 A version change that R5 detects without a request is therefore always another thread's write, which the owner loop treats as a foreign request (see [Failures and takeover](#failures-and-takeover)).
@@ -178,11 +180,11 @@ The proof relies on R5's own fence. `PropertyReferenceCollection.Add` additional
 
 A write on the evaluating thread moves the version of the written property. If a running recording on this thread read that property at exactly the version before this write, the recording takes the new version, so R5 does not fire for the thread's own write, and the recording is marked: its value may stem from before the write. A write of another thread in between moved the version further, so such a recording keeps its version and still fails R5. Every non-suspended frame of the thread is updated, so an outer evaluation is covered as well when a nested one writes.
 
-A marked evaluation is evaluated exactly once more before it commits, so a value computed before the getter's own write is not committed. The extra evaluation is not marked again in the same commit: it commits what it read, also when it wrote after reading once more. This bound is what lets a getter that writes a subject it creates on every evaluation still commit, at the cost of two evaluations per commit. A write of a property the derived property is already linked to also requests a recalculation through W5, which the owner answers by evaluating again, see [What a Getter's Side Effects Cost](#what-a-getters-side-effects-cost).
+A marked evaluation is evaluated exactly once more before it commits, so a value computed before the getter's own write is not committed. The extra evaluation is not marked again in the same commit: it commits what it read, also when it wrote after reading once more. This bound is what lets a getter that writes a subject it creates on every evaluation still commit, at the cost of two evaluations per commit. A write of a property the derived property already depends on also requests a recalculation through W5, which the owner answers by evaluating again, see [What a Getter's Side Effects Cost](#what-a-getters-side-effects-cost).
 
 ### Throwing getters
 
-A getter that throws is not a failure of the protocol. The reads before the throw are the ones that decided the outcome, so they are linked (R4) and checked (R5) as usual, the previous value is kept, and the property is marked faulted, so the first successful evaluation afterwards is published even when no value was committed before (its old value is then the default of the property type). A success clears the mark.
+A getter that throws is not a failure of the protocol. The reads before the throw are the ones that decided the outcome, so they are set as dependencies (R4) and checked (R5) as usual, the previous value is kept, and the property is marked faulted, so the first successful evaluation afterwards is published even when no value was committed before (its old value is then the default of the property type). A success clears the mark.
 
 ## Ownership Protocol
 
@@ -244,19 +246,19 @@ The takeover runs as another loop in the same stack frame, never recursively. A 
 
 `DerivedPropertyChangeHandler.AttachProperty` attaches a derived property when its subject attaches (under the lifecycle lock), or when a property is attached directly, such as one added at runtime. Under `lock(D)`:
 
-- D is already attached (through another graph, or by a second handler instance): it has its value and its links, and nothing happens.
+- D is already attached (through another graph, or by a second handler instance): it has its value and its dependencies, and nothing happens.
 - Otherwise mark D attached and derived, clear its value and fault, and set a new attach token. If nobody owns D, the attach takes ownership, clears any stale request flag (requests on a detached property are dropped) and its timestamp. If an evaluation from before a detach owns D, set `RecalculationNeeded` and leave its ownership alone.
 
 Then the attach evaluates outside `lock(D)`. Before each evaluation it resolves the changed timestamp, outside the lock, since a time source is user code. Under `lock(D)` after the evaluation:
 
 - The attach token was superseded (a newer attach, or a detach, also by a getter that detaches its own subject): discard the recording, release ownership if the attach holds it, and take over a request that is pending on an attached D nobody owns.
-- Otherwise set the links (R4, R5). If the attach owns D and a request arrived during the evaluation, or the evaluation is not stable (a source moved, or an own write after a read not evaluated again yet), evaluate again. Otherwise commit the first value with the attach's timestamp, without publishing it: consumers read it while the subject attaches. If the getter threw, D is marked faulted instead.
+- Otherwise set the dependencies (R4, R5). If the attach owns D and a request arrived during the evaluation, or the evaluation is not stable (a source moved, or an own write after a read not evaluated again yet), evaluate again. Otherwise commit the first value with the attach's timestamp, without publishing it: consumers read it while the subject attaches. If the getter threw, D is marked faulted instead.
 - When the attach commits while another evaluation owns D, it stores its timestamp as the pending timestamp unless a newer request stored one, so the owner, which answers the attach's request, publishes the change with the attach's time.
 - Clear the attach token and release ownership if held. If a request is pending and nobody owns D (the previous owner handed off), request a recalculation on this thread after the attach. It publishes from the attach's value.
 
 The attach evaluation is bounded like the owner loop: at the limit, the last evaluation is committed, a recalculation is requested after the attach, and a warning is traced outside the lock after that request, so a failing trace listener cannot lose it.
 
-An attach that fails outside the getter (a throwing time source) clears its attach token and its ownership, marks D faulted when it has no value (so the first success afterwards is published), marks a request when it was still the current attach (its links may be missing), and requests the recalculation when nobody owns D. The attach of a derived property never throws: its own exception, one from the recalculation it requests after the attach (an observer of that publication) and one from a trace listener are traced, so the remaining properties and lifecycle handlers of the subject still attach.
+An attach that fails outside the getter (a throwing time source) clears its attach token and its ownership, marks D faulted when it has no value (so the first success afterwards is published), marks a request when it was still the current attach (its dependencies may be missing), and requests the recalculation when nobody owns D. The attach of a derived property never throws: its own exception, one from the recalculation it requests after the attach (an observer of that publication) and one from a trace listener are traced, so the remaining properties and lifecycle handlers of the subject still attach.
 
 An attach that finds D owned by another attach treats it like a recalculation in flight: it does not take ownership, and the attach token decides which commit counts. The attach never waits for another thread, and a change from before a detach is never published after one of the new attachment: the previous owner either finished publishing before it could commit again, or handed off to the attach.
 
@@ -266,9 +268,9 @@ A request carries the raw changed timestamp of its trigger. A write with a conte
 
 ## Detach and Attachments
 
-**Detach of a derived property D.** Under `lock(D)`: mark it detached, clear its attach token, remove all its links, clear its value, its has-value flag and its fault, and increment `RecalculationSequence`, so a publication already past its commit but not past the stale-publication guard is skipped. An evaluation in flight discards its result at its next lock, and a request for the detached property is dropped. The data stays, so a later attach reuses it.
+**Detach of a derived property D.** Under `lock(D)`: mark it detached, clear its attach token, remove all its dependencies, clear its value, its has-value flag and its fault, and increment `RecalculationSequence`, so a publication already past its commit but not past the stale-publication guard is skipped. An evaluation in flight discards its result at its next lock, and a request for the detached property is dropped. The data stays, so a later attach reuses it.
 
-**Detach of a source.** Nothing happens. A derived property keeps following a detached subject for as long as its getter reads it. If the getter reached the subject through a tracked property, the write of that property recalculates the derived property, and its commit drops the link. Links never outlive the attachment of the derived property that owns them.
+**Detach of a source.** Nothing happens. A derived property keeps following a detached subject for as long as its getter reads it. If the getter reached the subject through a tracked property, the write of that property recalculates the derived property, and its commit removes the dependency. A dependency never outlives the attachment of the derived property it belongs to.
 
 **Attachments.** A subject can be in several graphs, one per lifecycle interceptor, and its derived properties stay attached while it is in any of them: a property detach issued by a lifecycle interceptor is ignored by `DerivedPropertyChangeHandler`, and the interceptor from which the subject leaves its last graph detaches the derived properties, see [Per-subject attachments](tracking-lifecycle.md#per-subject-attachments).
 
@@ -278,8 +280,8 @@ A direct call of the public `DetachSubjectProperty` on a derived property detach
 
 A getter is expected to read, not write. Writes in a getter are supported, at a cost:
 
-- **A write of a property the evaluation read before, not linked yet**, such as a property of a subject the getter creates: no request is raised, and the evaluation is evaluated exactly once more (see [Own writes](#own-writes)). A getter that does this on every evaluation costs two evaluations per commit.
-- **A write of a property the derived property is linked to, on every evaluation**, such as incrementing a counter it reads: the write requests a recalculation of the derived property on its own thread, which the owner answers by evaluating again, which writes again. The loop reaches `MaxStabilizationIterations`, traces a warning, and drops the request, since it was raised on the owner's thread; the value of the last commit stays. At attach, the last evaluation is committed and the recalculation requested after the attach ends the same way. Later writes of other threads, or of the sources outside the getter, recalculate the property as usual.
+- **A write of a property the evaluation read before, not a dependency yet**, such as a property of a subject the getter creates: no request is raised, and the evaluation is evaluated exactly once more (see [Own writes](#own-writes)). A getter that does this on every evaluation costs two evaluations per commit.
+- **A write of a property the derived property depends on, on every evaluation**, such as incrementing a counter it reads: the write requests a recalculation of the derived property on its own thread, which the owner answers by evaluating again, which writes again. The loop reaches `MaxStabilizationIterations`, traces a warning, and drops the request, since it was raised on the owner's thread; the value of the last commit stays. At attach, the last evaluation is committed and the recalculation requested after the attach ends the same way. Later writes of other threads, or of the sources outside the getter, recalculate the property as usual.
 - **A write that a lifecycle interceptor reconciles**, such as assigning a subject: the reconciliation runs on the evaluating thread under the lifecycle lock, with recording suspended (see [Lifecycle Interceptor Design](tracking-lifecycle.md)).
 - **A write of a property the getter does not read**: no effect on the evaluation; the write recalculates its own dependents as any write does.
 
@@ -291,7 +293,7 @@ A derived property follows every intercepted property its getter reads, on any s
 
 ### Per-property lock
 
-`lock(data)` on `DerivedPropertyData` serializes, for one derived property: requests against the owner, commits, attach and detach, and the links. It is held only for short state transitions. A getter and a publication never run under it, and no other property's data lock is taken inside it; only the used-by collection's leaf lock is, and getting or creating a source's data (a `ConcurrentDictionary` operation that runs no user code). Different derived properties evaluate and publish concurrently.
+`lock(data)` on `DerivedPropertyData` serializes, for one derived property: requests against the owner, commits, attach and detach, and its dependencies. It is held only for short state transitions. A getter and a publication never run under it, and no other property's data lock is taken inside it; only the used-by collection's leaf lock is, and getting or creating a source's data (a `ConcurrentDictionary` operation that runs no user code). Different derived properties evaluate and publish concurrently.
 
 ### Used-by properties collection
 
@@ -316,7 +318,7 @@ Because each add and remove is O(1) once the collection is large, attaching or d
 
 - **Lifecycle lock before `lock(data)`**: the attach and the detach of a derived property take `lock(data)` briefly under the lifecycle lock. Nothing under `lock(data)` takes the lifecycle lock, because getters and publications, which may write subject-typed properties and so enter the lifecycle, never run under `lock(data)`.
 - **`lock(data)` before the used-by leaf lock**: the commit and the detach change used-by collections under `lock(data)`, and the leaf lock takes nothing further. The detach also reads the subject's attachments under `lock(data)`, lock-free.
-- **No two data locks nest**: a commit links its sources without taking their locks, so dependency cycles between derived properties cannot form a lock cycle.
+- **No two data locks nest**: a commit sets its dependencies without taking the locks of their sources, so dependency cycles between derived properties cannot form a lock cycle.
 
 The design avoids two lock-order inversions with the lifecycle lock that holding `lock(data)` during a getter or a publication would cause:
 
@@ -336,7 +338,7 @@ sequenceDiagram
     A->>AL: getter writes Companion → lock/unlock
     B->>AL: holder.Person = null → lifecycle lock
     B->>DL: detach → lock(data)
-    Note over DL: IsAttached = false, links removed
+    Note over DL: IsAttached = false, dependencies removed
     B-->>DL: unlock
     B-->>AL: unlock
     A->>DL: commit: lock, detached → discard, release ownership
@@ -351,7 +353,7 @@ sequenceDiagram
 |-------|-----------|-------------|
 | Dependencies (`RequiredProperties`) | `lock(data)` of the derived property (write) / lock-free clamped read | commit (R4), detach, `GetRequiredProperties` |
 | Used-by collection contents | The collection's own leaf lock (writes) / lock-free snapshot (reads) | commit and detach of the derived properties (writes), write observer (W5) |
-| Used-by collection field | `Interlocked.CompareExchange` on first add, never cleared | first link of a source |
+| Used-by collection field | `Interlocked.CompareExchange` on first add, never cleared | first dependent of a source |
 | `Version` | `Interlocked.Increment` (writers) / `Volatile.Read` after a full fence | write observer (W4), recorder (R2), commit (R5) |
 | Ownership state, request flags, pending timestamp, `IsAttached`, `HasValue`, `IsFaulted` | `lock(data)` | requests, owner loop, attach, detach |
 | `LastKnownValue`, `RecalculationSequence` | `lock(data)` (write) / `Volatile.Read` (stale-publication guard) | commit, detach, publication |
@@ -362,24 +364,24 @@ sequenceDiagram
 
 ### Value correctness
 
-After concurrent writes, attaches and detaches settle, every attached derived property's last committed and last published value equals what its getter returns on the current state, for every property it follows. A write of a followed property is never missed ([the proof above](#proof-that-no-write-is-missed)), every commit links exactly what its evaluation read, and only the owner publishes, in commit order. The exceptions are the documented bounds: a request dropped after a failure on the owner's own thread (a self-writing getter or observer), a publication that threw, and what is not followed.
+After concurrent writes, attaches and detaches settle, every attached derived property's last committed and last published value equals what its getter returns on the current state, for every property it follows. A write of a followed property is never missed ([the proof above](#proof-that-no-write-is-missed)), every commit sets exactly what its evaluation read as the dependencies, and only the owner publishes, in commit order. The exceptions are the documented bounds: a request dropped after a failure on the owner's own thread (a self-writing getter or observer), a publication that threw, and what is not followed.
 
-### No stale links
+### No stale dependencies
 
-Every link belongs to an attached derived property: D's detach removes all of D's links under `lock(D)`, and an evaluation that finds D detached at its commit discards its recording without linking. A link to a detached source stays only while D's getter still reads that source, so it keeps alive nothing the getter does not reach anyway. When the getter stops reading it, the next commit of D removes the link.
+Every dependency belongs to an attached derived property: D's detach removes D from each dependency's dependents and clears D's dependencies under `lock(D)`, and an evaluation that finds D detached at its commit discards its recording without setting dependencies. A dependency on a detached source stays only while D's getter still reads that source, so it keeps alive nothing the getter does not reach anyway. When the getter stops reading it, the next commit of D removes the dependency.
 
 ### No memory leaks from cross-subject dependencies
 
 - **Source replacement** (replacing a tire): the write of the structural property recalculates `AveragePressure`, whose commit removes the old tire from its dependencies and itself from the old tire's used-by collection.
 - **Derived property detach** (the car leaves the graph): the detach removes `AveragePressure` from every tire's used-by collection and clears its dependencies and value, so the tires hold no reference to the car.
-- **Source detach** (a tire leaves the graph without a write the car reads): the link stays while `AveragePressure` still reads the tire, and goes with the car's next recalculation that no longer reads it, or with the car's detach.
+- **Source detach** (a tire leaves the graph without a write the car reads): the dependency stays while `AveragePressure` still reads the tire, and goes with the car's next recalculation that no longer reads it, or with the car's detach.
 
 ## Performance Characteristics
 
 | Scenario | Allocations | Cost |
 |----------|-------------|------|
 | Read outside an evaluation | Zero | One thread-static load and a null check (read tap) |
-| Read during an evaluation | Zero in steady state (pooled buffers) | Data lookup or creation (none when the read repeats the last committed links at its position), a full fence, a volatile read, and a scan of the frame for duplicates |
+| Read during an evaluation | Zero in steady state (pooled buffers) | Data lookup or creation (none when the read repeats the last committed dependencies at its position), a full fence, a volatile read, and a scan of the frame for duplicates |
 | Write to a subject of a type without derived property data | Zero | Write depth increment and decrement, the observer call, a full fence (W2), the type gate (W3): a thread-static load, a type comparison and a volatile read |
 | Write of a property nobody read, on a type with derived property data | Zero | Above, plus one data lookup (W3) |
 | Write of a property with dependents | Zero | Above, plus `Interlocked.Increment` (W4), a used-by snapshot read, and a request per dependent |

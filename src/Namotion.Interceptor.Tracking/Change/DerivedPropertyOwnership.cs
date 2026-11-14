@@ -34,7 +34,7 @@ internal static class DerivedPropertyOwnership
         bool ownsData;
         lock (data)
         {
-            // Attached through another graph already: it has its value and its links.
+            // Attached through another graph already: it has its value and its dependencies.
             if (data.IsAttached)
             {
                 return;
@@ -66,7 +66,7 @@ internal static class DerivedPropertyOwnership
     }
 
     /// <summary>
-    /// Detaches a derived property: removes its links, clears its value and makes an evaluation in flight
+    /// Detaches a derived property: removes its dependencies, clears its value and makes an evaluation in flight
     /// discard its result. With <paramref name="onlyIfSubjectIsDetached"/>, a subject that is attached again keeps
     /// the property attached.
     /// </summary>
@@ -89,7 +89,7 @@ internal static class DerivedPropertyOwnership
 
             data.IsAttached = false;
             data.AttachToken = 0;
-            data.RemoveAllLinks(property);
+            data.RemoveDependencies(property);
             data.LastKnownValue = null;
             data.HasValue = false;
             data.IsFaulted = false;
@@ -286,7 +286,7 @@ internal static class DerivedPropertyOwnership
                     break;
                 }
 
-                var isStable = CommitAttachLinks(data, property, ownsData, ref hasEvaluatedAfterOwnWrite);
+                var isStable = CommitAttachDependencies(data, property, ownsData, ref hasEvaluatedAfterOwnWrite);
                 if (!isStable && !isLastIteration)
                 {
                     continue;
@@ -302,13 +302,13 @@ internal static class DerivedPropertyOwnership
         return requestAfterAttach;
     }
 
-    // Called under lock(data). Sets the links and returns whether the evaluation is stable. When the attach owns
+    // Called under lock(data). Sets the dependencies and returns whether the evaluation is stable. When the attach owns
     // the property, it takes a request that arrived during the evaluation and answers it by evaluating again;
     // otherwise the flag belongs to the owner in flight.
-    private static bool CommitAttachLinks(
+    private static bool CommitAttachDependencies(
         DerivedPropertyData data, in PropertyReference property, bool ownsData, ref bool hasEvaluatedAfterOwnWrite)
     {
-        var isStable = IsStable(CommitLinks(data, property), ref hasEvaluatedAfterOwnWrite);
+        var isStable = IsStable(CommitDependencies(data, property), ref hasEvaluatedAfterOwnWrite);
         if (ownsData && data.RecalculationNeeded)
         {
             TakePendingRequest(data, out _);
@@ -354,7 +354,7 @@ internal static class DerivedPropertyOwnership
         {
             if (data.AttachToken == attachToken)
             {
-                // Failed before its first value and maybe its links were committed: a recalculation after the
+                // Failed before its first value and maybe its dependencies were committed: a recalculation after the
                 // failure evaluates again, and its success is published, as after a getter that threw.
                 data.AttachToken = 0;
                 if (!data.HasValue)
@@ -605,10 +605,10 @@ internal static class DerivedPropertyOwnership
                 return new Commit(CommitOutcome.EvaluateAgain);
             }
 
-            var check = CommitLinks(data, property);
+            var check = CommitDependencies(data, property);
             if (check == RecordingCheck.SourceMoved)
             {
-                // A source moved without a request (its writer read the used-by set before this link). The
+                // A source moved without a request (its writer read the used-by set before this dependency was committed). The
                 // recording follows this thread's own writes, so the writer is another thread.
                 state.Unanswered = UnansweredRequest.Foreign;
                 return new Commit(CommitOutcome.EvaluateAgain);
@@ -707,7 +707,7 @@ internal static class DerivedPropertyOwnership
 
     /// <summary>
     /// Runs the getter outside every lock and records what it read; the recording stays on the
-    /// recorder until <see cref="CommitLinks"/> or <see cref="DiscardRecording"/> clears it.
+    /// recorder until <see cref="CommitDependencies"/> or <see cref="DiscardRecording"/> clears it.
     /// </summary>
     private static Evaluation Evaluate(DerivedPropertyData data, in PropertyReference property)
     {
@@ -729,10 +729,10 @@ internal static class DerivedPropertyOwnership
     }
 
     /// <summary>
-    /// Sets the links to the recorded reads and reports whether a source moved since it was read. Called under
+    /// Sets the dependencies to the recorded reads and reports whether a source moved since it was read. Called under
     /// lock(data).
     /// </summary>
-    private static RecordingCheck CommitLinks(DerivedPropertyData data, in PropertyReference property)
+    private static RecordingCheck CommitDependencies(DerivedPropertyData data, in PropertyReference property)
     {
         var recorder = DerivedPropertyRecorder.Current;
         try
@@ -764,7 +764,7 @@ internal static class DerivedPropertyOwnership
 
         /// <summary>
         /// Only writes of the evaluating thread moved a source after the evaluation read it: the value may stem from
-        /// before such a write, and a write of a source not linked yet requests nothing.
+        /// before such a write, and a write of a source that is not a dependency yet requests nothing.
         /// </summary>
         OwnWriteAfterRead
     }
@@ -784,9 +784,9 @@ internal static class DerivedPropertyOwnership
 
     private static bool HasVersionChanged(ReadOnlySpan<RecordedDependency> recorded)
     {
-        // R5: a full fence between setting the links and reading the versions, paired with the writer's Interlocked
+        // R5: a full fence between setting the dependencies and reading the versions, paired with the writer's Interlocked
         // increment of the version (W4) before it reads the used-by set (W5): either a version read here sees the
-        // write, or the writer sees the link.
+        // write, or the writer finds the derived property in the used-by set.
         Interlocked.MemoryBarrier();
         foreach (ref readonly var dependency in recorded)
         {

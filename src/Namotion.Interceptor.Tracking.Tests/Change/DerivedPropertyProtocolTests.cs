@@ -18,9 +18,9 @@ public class DerivedPropertyProtocolTests
     private static readonly TimeSpan Timeout = TestTimeouts.Default;
 
     [Fact]
-    public async Task WhenWriteLandsBetweenReadAndLink_ThenEvaluationRunsAgain()
+    public async Task WhenWriteLandsBetweenReadAndCommit_ThenEvaluationRunsAgain()
     {
-        // Arrange: the getter reads Anchor only once Data is set, so Anchor is not linked when it is written.
+        // Arrange: the getter reads Anchor only once Data is set, so Anchor is not a dependency when it is written.
         var context = CreateContext();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
@@ -58,7 +58,7 @@ public class DerivedPropertyProtocolTests
     }
 
     [Fact]
-    public async Task WhenSourceIsDetachedWrittenAndAttachedAgainBetweenReadAndLink_ThenDerivedPropertyFollowsIt()
+    public async Task WhenSourceIsDetachedWrittenAndAttachedAgainBetweenReadAndCommit_ThenDerivedPropertyFollowsIt()
     {
         // Arrange: the getter reaches the spare configuration through a captured variable, not through Spare.
         var context = CreateContext();
@@ -84,7 +84,7 @@ public class DerivedPropertyProtocolTests
         using var subscription = RecordPublications(result, published);
 
         // Act: the source is detached, written without a context and attached again on another thread, after
-        // the getter read it and before the evaluation links it.
+        // the getter read it and before the evaluation commits it as a dependency.
         gate.Arm();
         var recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = 1; });
         var isPaused = gate.Paused.Wait(Timeout);
@@ -397,7 +397,7 @@ public class DerivedPropertyProtocolTests
         await recalculation.WaitAsync(Timeout);
         root.Anchor = 2;
 
-        // Assert: the evaluation discards its result and its reads, so no link keeps the detached subject.
+        // Assert: the evaluation discards its result and its reads, so no dependency keeps the detached subject.
         Assert.True(isPaused);
         Assert.False(gate.HasTimedOut);
         Assert.Empty(published);
@@ -451,10 +451,10 @@ public class DerivedPropertyProtocolTests
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
-    public void WhenGetterDetachesItsOwnSubjectDuringAttach_ThenAncestorKeepsNoLink(int detachingEvaluation)
+    public void WhenGetterDetachesItsOwnSubjectDuringAttach_ThenAncestorKeepsNoDependency(int detachingEvaluation)
     {
         // Arrange: for the second evaluation, another thread writes Anchor during the first one, so the attach
-        // links Anchor and evaluates again.
+        // commits Anchor as a dependency and evaluates again.
         var context = CreateContext();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();

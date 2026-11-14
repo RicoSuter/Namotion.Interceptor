@@ -44,7 +44,7 @@ internal sealed class DerivedPropertyData
 
     /// <summary>
     /// Incremented by every landed write of this property (source role), after the value landed and a full fence;
-    /// read by evaluations to detect a write between a read and its link.
+    /// read by evaluations to detect a write between a read and the commit of its dependency.
     /// </summary>
     internal long Version;
 
@@ -148,7 +148,7 @@ internal sealed class DerivedPropertyData
     }
 
     /// <summary>
-    /// The dependency data of the last committed links, in read order, or null. Read without the lock: the array
+    /// The dependency data of the last committed dependencies, in read order, or null. Read without the lock: the array
     /// can change while it is read, so an entry is only valid for the property it names.
     /// </summary>
     internal DerivedPropertyData?[]? RequiredData
@@ -177,7 +177,7 @@ internal sealed class DerivedPropertyData
     /// Removes this derived property from the used-by set of every dependency and clears its dependencies.
     /// Called under lock(this).
     /// </summary>
-    internal void RemoveAllLinks(in PropertyReference derivedProperty)
+    internal void RemoveDependencies(in PropertyReference derivedProperty)
     {
         foreach (ref readonly var dependency in RequiredPropertiesSpan)
         {

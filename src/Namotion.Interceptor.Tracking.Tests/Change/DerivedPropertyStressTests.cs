@@ -121,7 +121,7 @@ public class DerivedPropertyStressTests
             {
                 if (!isAttached && entry.Value.IsDerived && new PropertyReference(subject, entry.Key).GetRequiredProperties().Length > 0)
                 {
-                    mismatches.Add($"{graph.Label(subject)}.{entry.Key}: detached, but keeps a link");
+                    mismatches.Add($"{graph.Label(subject)}.{entry.Key}: detached, but keeps a dependency");
                 }
             }
         }
