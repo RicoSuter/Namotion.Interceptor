@@ -70,7 +70,8 @@ public readonly struct PropertyWriteObservation
 
 /// <summary>
 /// The read observer of the current thread, the write depth of the current thread, and the
-/// process-wide write observer. Infrastructure for derived property tracking.
+/// process-wide write observer. Infrastructure for derived property tracking in
+/// <c>Namotion.Interceptor.Tracking</c>, which installs both observers; not an extension point.
 /// </summary>
 [EditorBrowsable(EditorBrowsableState.Never)]
 public static class PropertyAccessObservation
@@ -105,12 +106,20 @@ public static class PropertyAccessObservation
     }
 
     /// <summary>
-    /// Installs the process-wide write observer once; later calls keep the first one. The first caller wins, so
-    /// code that installs an observer before Tracking does pre-empts derived property tracking.
+    /// Installs the process-wide write observer. Installing the same observer again does nothing.
     /// </summary>
+    /// <exception cref="InvalidOperationException">Another write observer is already installed.</exception>
     public static void SetWriteObserver(IPropertyWriteObserver observer)
     {
-        if (Interlocked.CompareExchange(ref _writeObserver, observer, null) is null)
+        var installed = Interlocked.CompareExchange(ref _writeObserver, observer, null);
+        if (installed is not null && !ReferenceEquals(installed, observer))
+        {
+            throw new InvalidOperationException(
+                $"The process-wide write observer is already installed ({installed.GetType().FullName}); " +
+                $"{observer.GetType().FullName} cannot replace it.");
+        }
+
+        if (installed is null)
         {
             // Pairs with the read again of a write without a context, see "Observer installation" in
             // docs/design/tracking-derived-properties.md.
