@@ -22,9 +22,15 @@ internal static class MqttHelper
     /// </summary>
     public static DateTimeOffset? DefaultDeserializeTimestamp(ReadOnlyMemory<byte> value)
     {
-        return Utf8Parser.TryParse(value.Span, out long unixMs, out _)
-            ? DateTimeOffset.FromUnixTimeMilliseconds(unixMs)
-            : null;
+        if (!Utf8Parser.TryParse(value.Span, out long unixMs, out var bytesConsumed) ||
+            bytesConsumed != value.Length ||
+            unixMs < -62135596800000 ||
+            unixMs > 253402300799999)
+        {
+            return null;
+        }
+
+        return DateTimeOffset.FromUnixTimeMilliseconds(unixMs);
     }
 
     public static DateTimeOffset? ExtractSourceTimestamp(
@@ -41,7 +47,15 @@ internal static class MqttHelper
         {
             if (property.Name == timestampPropertyName)
             {
-                return deserializer(property.ValueBuffer);
+                try
+                {
+                    return deserializer(property.ValueBuffer);
+                }
+                catch (Exception)
+                {
+                    // Invalid optional metadata must not prevent delivery of the MQTT value.
+                    return null;
+                }
             }
         }
 
