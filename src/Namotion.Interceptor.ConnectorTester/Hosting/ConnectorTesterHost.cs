@@ -93,7 +93,7 @@ public sealed class ConnectorTesterHost
         }
 
         var runModeSelection = RunModeSelector.Select(args, configuration);
-        var connectorFactory = ConnectorFactoryRegistry.Resolve(configuration.ConnectorKind);
+        var connectorFactory = ConnectorFactoryRegistry.Resolve(configuration, runDirectory);
 
         var participants = new Dictionary<string, TestNode>();
         var mutationEngines = new List<MutationEngine>();
@@ -128,7 +128,7 @@ public sealed class ConnectorTesterHost
 
             if (isServer)
             {
-                connectorFactory.RegisterServer(participantServices, root, connectorFactory.DefaultPort);
+                connectorFactory.RegisterServer(participantServices, root, participantConfiguration, connectorFactory.DefaultPort);
             }
             else
             {

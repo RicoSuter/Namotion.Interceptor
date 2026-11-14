@@ -31,9 +31,10 @@ public class ConnectorFactoryRegistrationTests
         var services = new ServiceCollection();
         services.AddLogging();
         var root = new TestNode(CreateContext());
+        var participantConfiguration = new ParticipantConfiguration { Name = "server" };
 
         // Act
-        connectorFactory.RegisterServer(services, root, connectorFactory.DefaultPort);
+        connectorFactory.RegisterServer(services, root, participantConfiguration, connectorFactory.DefaultPort);
         var provider = services.BuildServiceProvider();
         var connectors = provider.GetServices<IHostedService>().OfType<ISubjectConnector>().ToList();
 
@@ -62,7 +63,7 @@ public class ConnectorFactoryRegistrationTests
 
     public static IEnumerable<object[]> AllFactories()
     {
-        yield return [new OpcUaConnectorFactory()];
+        yield return [new OpcUaConnectorFactory(new OpcUaConfiguration(), "pki")];
         yield return [new MqttConnectorFactory()];
         yield return [new WebSocketConnectorFactory()];
     }
