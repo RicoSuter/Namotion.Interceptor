@@ -70,7 +70,7 @@ public class ConfigurableSubjectSerializer
     }
 
     // The configuration properties of the subject itself are matched by this name and not by the options.
-    private static string GetJsonName(string propertyName, ConfigurationNaming naming) =>
+    internal static string GetJsonName(string propertyName, ConfigurationNaming naming) =>
         naming == ConfigurationNaming.JsonProperty ? JsonNamingPolicy.CamelCase.ConvertName(propertyName) : propertyName;
 
     /// <summary>
