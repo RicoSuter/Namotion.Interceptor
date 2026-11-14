@@ -170,6 +170,39 @@ public class DerivedRegistryStructureTests
         Assert.Equal(10, change.GetNewValue<int>());
     }
 
+    [Fact]
+    public void WhenAddedPropertyAndAPropertyReaderBothThrow_ThenTheAddedPropertysExceptionPropagates()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new StructureHolder(context);
+        var target = new RegistryTarget();
+        root.Target = target;
+        var registered = target.TryGetRegisteredSubject()!;
+        root.Reader = new StructureReader { Read = () => registered.Properties.Length.ToString() };
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Name == "Doubled")
+            {
+                throw new ArgumentException("added property");
+            }
+        });
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Subject == root.Reader)
+            {
+                throw new InvalidOperationException("reader");
+            }
+        });
+
+        // Act
+        var exception = Record.Exception(() => registered.AddDerivedProperty<int>("Doubled", _ => target.Value * 2));
+
+        // Assert
+        Assert.IsType<ArgumentException>(exception);
+        Assert.Equal(registered.Properties.Length.ToString(), root.Reader.Value);
+    }
+
     [Theory]
     [InlineData("ContextAttach")]
     [InlineData("ContextDetach")]
