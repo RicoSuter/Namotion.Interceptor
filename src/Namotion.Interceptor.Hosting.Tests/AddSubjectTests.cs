@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Hosting.Tests.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Hosting.Tests;
@@ -125,7 +126,7 @@ public class AddSubjectTests
         var host = builder.Build();
 
         // Act
-        await host.StartAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        await host.StartAsync().WaitAsync(TestTimeouts.Default);
 
         try
         {

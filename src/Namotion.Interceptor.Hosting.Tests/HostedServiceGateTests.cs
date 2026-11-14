@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Testing;
+
 namespace Namotion.Interceptor.Hosting.Tests;
 
 public class HostedServiceGateTests
@@ -58,7 +60,7 @@ public class HostedServiceGateTests
         gate.BeginDraining();
 
         // Assert
-        await wait.WaitAsync(TimeSpan.FromSeconds(5));
+        await wait.WaitAsync(TestTimeouts.Default);
         Assert.Equal(HostedServiceGateState.Draining, gate.State);
     }
 }

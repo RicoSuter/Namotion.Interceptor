@@ -134,6 +134,9 @@ internal sealed class OwnedConnectorHost<TService>
 
         try
         {
+            // A connector a start published after a stop past its deadline gave up on the gate.
+            await StopInstanceAsync(CancellationToken.None);
+
             // Disposed here rather than in StopRunAsync, where a second stop's Cancel would throw.
             _run?.Dispose();
             Volatile.Write(ref _run, new CancellationTokenSource());
@@ -207,8 +210,9 @@ internal sealed class OwnedConnectorHost<TService>
         await StopAsync(cancellationToken);
 
         // Guarded here as in StartRunAsync rather than left to the caller: without it an edit that
-        // disables the wrapper stops it and starts it again in the same call.
-        if (_owner.IsEnabled)
+        // disables the wrapper stops it and starts it again in the same call. An edit landing while the
+        // wrapper itself stops leaves it stopped rather than reporting that nothing could start.
+        if (_owner.IsEnabled && Volatile.Read(ref _run) is { IsCancellationRequested: false })
         {
             await StartAsync(cancellationToken);
         }

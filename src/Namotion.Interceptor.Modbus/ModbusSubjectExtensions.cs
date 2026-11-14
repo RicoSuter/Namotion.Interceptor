@@ -13,9 +13,7 @@ namespace Microsoft.Extensions.DependencyInjection;
 public static class ModbusSubjectExtensions
 {
     /// <summary>
-    /// Creates a Modbus client source for <paramref name="subject"/>. Its owner starts, stops and disposes it, such as a hosted
-    /// subject for the duration of its own run, or a hosted service factory attached with
-    /// <c>subject.AttachHostedService(() => subject.CreateModbusClientSource(...))</c>, whose handler does so.
+    /// Creates a Modbus client source for <paramref name="subject"/>. The caller owns it: start, stop and dispose it.
     /// </summary>
     /// <exception cref="ArgumentException">A <paramref name="configuration"/> value is out of range.</exception>
     /// <exception cref="InvalidOperationException">The subject's context has no lifecycle tracking (<c>WithLifecycle()</c>).</exception>

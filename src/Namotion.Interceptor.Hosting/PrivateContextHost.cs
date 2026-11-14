@@ -57,7 +57,7 @@ internal sealed class PrivateContextHost
         catch
         {
             // The caller's token, so a stop that hangs cannot hold a host start past its own deadline,
-            // and an already cancelled one makes the drain give up at once rather than wait for a start
+            // and an already canceled one makes the drain give up at once rather than wait for a start
             // that has not returned. The stop queued behind that start still stops and disposes the
             // instance once the start returns.
             try
@@ -114,8 +114,7 @@ internal sealed class PrivateContextHost
 
     /// <summary>
     /// Stops and disposes everything the host started, then detaches the subject from the private
-    /// context. Later calls return the first call's task and ignore
-    /// their token.
+    /// context. Later calls return the first call's task and ignore their token.
     /// </summary>
     /// <remarks>
     /// The token bounds the wait for the services to stop. Once it expires the task still completes

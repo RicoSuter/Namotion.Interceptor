@@ -303,6 +303,7 @@ public partial class LuxtronikHeatPump :
 
     public override async Task StartAsync(CancellationToken cancellationToken)
     {
+        _startFailure = null;
         // Started here rather than from the run loop, which the base start only schedules: the source registers in its
         // own start, and inside this one that registration counts towards startup completion.
         if (!string.IsNullOrWhiteSpace(HostAddress) && TryValidateConfiguration(out _))
@@ -383,8 +384,6 @@ public partial class LuxtronikHeatPump :
     /// </summary>
     private async Task RunSourceAsync(string hostAddress, CancellationToken stoppingToken)
     {
-        // Captured once, so a configuration edit applies only through the restart it signals.
-        var pollingInterval = GetEffectivePollingInterval();
 
         var failure = Interlocked.Exchange(ref _startFailure, null);
         if (failure is null && Volatile.Read(ref _source) is null)
@@ -421,7 +420,7 @@ public partial class LuxtronikHeatPump :
             _logger.LogError(failure, "Luxtronik heat pump {HostAddress} failed.", hostAddress);
             Status = ServiceStatus.Error;
             StatusMessage = failure.Message;
-            await WaitForConfigurationChangeAsync(pollingInterval, stoppingToken).ConfigureAwait(false);
+            await WaitForConfigurationChangeAsync(GetEffectivePollingInterval(), stoppingToken).ConfigureAwait(false);
         }
     }
 
@@ -470,7 +469,7 @@ public partial class LuxtronikHeatPump :
     }
 
     /// <summary>
-    /// Stops and disposes the source, if this caller takes it. A cancelled token cuts the source's own stop short; the
+    /// Stops and disposes the source, if this caller takes it. A canceled token cuts the source's own stop short; the
     /// dispose still runs.
     /// </summary>
     private async Task StopSourceAsync(CancellationToken cancellationToken)
@@ -492,11 +491,17 @@ public partial class LuxtronikHeatPump :
         {
             _logger.LogWarning(exception, "Failed to stop the Modbus source of {HeatPump}.", Title);
         }
-        finally
+
+        try
         {
             await source.DisposeAsync().ConfigureAwait(false);
-            IsConnected = false;
         }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Failed to dispose the Modbus source of {HeatPump}.", Title);
+        }
+
+        IsConnected = false;
     }
 
     /// <summary>The running source. Test only.</summary>

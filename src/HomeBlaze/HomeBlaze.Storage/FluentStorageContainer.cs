@@ -199,7 +199,7 @@ public partial class FluentStorageContainer :
         }
         catch (Exception) when (!stoppingToken.IsCancellationRequested)
         {
-            // Not rethrown: a faulted execution ends the run, and the hosting stops a subject whose run ended.
+            // Not rethrown: the hosting stops a subject whose run faulted.
             // The connect has already reported this through Status and the log, a published connection
             // retries its pass, and a configuration edit connects again.
         }
@@ -293,13 +293,17 @@ public partial class FluentStorageContainer :
         {
             lock (_connectionLock)
             {
-                if (!_isDisposed)
+                // Only without a connection: a live one still follows its storage, and its next pass
+                // would report Connected over this anyway.
+                if (!_isDisposed && _connection is null)
                 {
                     Status = StorageStatus.Error;
                 }
             }
 
-            throw new InvalidOperationException("ConnectionString is not configured");
+            var exception = new InvalidOperationException("ConnectionString is not configured");
+            _logger?.LogError(exception, "Failed to connect to storage");
+            throw exception;
         }
 
         // One connect at a time: two of them would each end the same connection and both start a new one.
@@ -404,8 +408,8 @@ public partial class FluentStorageContainer :
                 }
             }
 
-            // The worker does not run an item whose caller has cancelled, so a first pass that was cancelled
-            // before it started has not asked for its retry, as one that is cancelled while it runs does.
+            // The worker does not run an item whose caller has canceled, so a first pass that was canceled
+            // before it started has not asked for its retry, as one that is canceled while it runs does.
             if (isCancelledByCaller && wasStillInitializing)
             {
                 connection?.NotifyPassFailed();
@@ -438,7 +442,7 @@ public partial class FluentStorageContainer :
             }
             catch (Exception exception)
             {
-                // Cancelled by the caller of the connect, or with the connection, whose status nobody reads.
+                // Canceled by the caller of the connect, or with the connection, whose status nobody reads.
                 SetStatus(connection, token.IsCancellationRequested ? StorageStatus.Disconnected : StorageStatus.Error);
 
                 // Also after a cancellation by the caller: unless the storage was stopped, the connection goes
@@ -943,7 +947,7 @@ public partial class FluentStorageContainer :
                 isPassNeeded = true;
                 await WriteAndRecordAsync(connection, entry, bytes, token);
 
-                // Not cancelled from here on: the file is written, and a cancel must not report that it was not.
+                // Not canceled from here on: the file is written, and a cancel must not report that it was not.
                 var hasVersion = entry.Version != default;
                 file.FileSize = hasVersion ? entry.Version.Size : bytes.Length;
                 file.LastModified = (hasVersion ? entry.Version.Modified?.UtcDateTime : null) ?? DateTime.UtcNow;
@@ -1166,7 +1170,7 @@ public partial class FluentStorageContainer :
             connection = _connection;
         }
 
-        // Ended outside the lock, because cancelling it runs code of the work it cancels.
+        // Ended outside the lock, because canceling it runs code of the work it cancels.
         connection?.Dispose();
         base.Dispose();
     }

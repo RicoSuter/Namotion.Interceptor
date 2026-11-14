@@ -48,7 +48,7 @@ public sealed class TrackedBackgroundService : IHostedService, IAsyncDisposable
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        // Honours the token like any real hosted service, which is what makes a cancelled stop
+        // Honours the token like any real hosted service, which is what makes a canceled stop
         // observable: the handler still has to dispose an instance whose stop was cut short.
         cancellationToken.ThrowIfCancellationRequested();
 

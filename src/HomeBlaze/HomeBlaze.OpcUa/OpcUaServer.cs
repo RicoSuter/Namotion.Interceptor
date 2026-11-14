@@ -30,6 +30,7 @@ public partial class OpcUaServer
       IConnectorOwner<IOpcUaSubjectServer>
 {
     private static readonly TimeSpan DefaultRootLoadWaitTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan DefaultDiagnosticsPollInterval = TimeSpan.FromSeconds(60);
 
     private readonly RootManager _rootManager;
     private readonly SubjectPathResolver _pathResolver;
@@ -190,7 +191,8 @@ public partial class OpcUaServer
         _pathResolver = pathResolver;
         _logger = logger;
         _rootLoadWaitTimeout = rootLoadWaitTimeout ?? DefaultRootLoadWaitTimeout;
-        _connectorHost = new OwnedConnectorHost<IOpcUaSubjectServer>(this, logger, diagnosticsPollInterval);
+        _connectorHost = new OwnedConnectorHost<IOpcUaSubjectServer>(
+            this, logger, diagnosticsPollInterval ?? DefaultDiagnosticsPollInterval);
 
         Name = string.Empty;
         Path = string.Empty;
@@ -239,7 +241,10 @@ public partial class OpcUaServer
         {
             // WaitAsync does not observe the token when the task is already complete, so the caller's
             // cancellation has to be checked in its own right.
-            cancellationToken.ThrowIfCancellationRequested();
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return false;
+            }
 
             // Bounded because the start holds the host's gate across this wait and the Start operation
             // passes no token, so an unbounded wait on a root that never loads keeps Stop out.
@@ -253,7 +258,13 @@ public partial class OpcUaServer
         catch (TimeoutException) when (!_rootManager.RootLoaded.IsFaulted)
         {
             // The root can finish loading between the timeout firing and this filter running.
-            return _rootManager.RootLoaded.IsCompletedSuccessfully ? true : throw CreateRootNotLoadedException();
+            if (!_rootManager.RootLoaded.IsCompletedSuccessfully)
+            {
+                throw new InvalidOperationException(
+                    $"The root manager did not load within {_rootLoadWaitTimeout.TotalSeconds:F0} seconds, so the path could not be resolved: {Path}");
+            }
+
+            return true;
         }
     }
 
@@ -291,12 +302,6 @@ public partial class OpcUaServer
         }
 
         return targetSubject.CreateOpcUaServer(configuration, _logger);
-    }
-
-    private InvalidOperationException CreateRootNotLoadedException()
-    {
-        return new InvalidOperationException(
-            $"The root manager did not load within {_rootLoadWaitTimeout.TotalSeconds:F0} seconds, so the path could not be resolved: {Path}");
     }
 
     void IConnectorOwner<IOpcUaSubjectServer>.ApplyDiagnostics(IOpcUaSubjectServer server)

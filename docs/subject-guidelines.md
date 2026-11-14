@@ -355,7 +355,7 @@ For each partial property `PropertyName`, the generator creates:
 ### Execution Order
 
 ```
-Setter: OnChanging → (if not cancelled) Interceptors → Field Update → OnChanged → PropertyChanged event
+Setter: OnChanging → (if not canceled) Interceptors → Field Update → OnChanged → PropertyChanged event
 Getter: Field Read → Interceptors → Return
 ```
 

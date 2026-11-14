@@ -160,7 +160,7 @@ public class PrivateContextHostTests
     public async Task WhenSubjectsOwnStartThrowsWhileItsAttachmentRuns_ThenStartAsyncThrowsOnlyOnceTheAttachmentIsStoppedAndDisposed()
     {
         // Arrange - the teardown after a failed start runs on the start's own token, so with one that is
-        // never cancelled it has to wait for every stop rather than give up on it. The subject's start
+        // never canceled it has to wait for every stop rather than give up on it. The subject's start
         // fails only once its attachment is running, and the attachment's stop is held, so a teardown
         // that did not wait would return with that instance still up.
         var instance = new TrackedBackgroundService();

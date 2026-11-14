@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Hosting.Tests;
 /// What the handler does with a <c>BackgroundService</c> once its <c>StartAsync</c> has returned.
 /// <c>BackgroundService.StartAsync</c> schedules the execution and returns at once, so nothing the
 /// execution does is part of the start: a fault in it is observed through the execute task instead,
-/// and the token a caller hands an attach must never reach the start, or a cancelled one would leave
+/// and the token a caller hands an attach must never reach the start, or a canceled one would leave
 /// the execution never entered.
 /// </summary>
 public class BackgroundServiceExecutionTests
@@ -228,7 +228,7 @@ public class BackgroundServiceExecutionTests
             await slot.DrainAsync();
             var firstExecuteTask = subject.ExecuteTask!;
 
-            // The second run parks until it is cancelled.
+            // The second run parks until it is canceled.
             subject.Run = null;
 
             // Act
@@ -259,9 +259,9 @@ public class BackgroundServiceExecutionTests
     public async Task WhenTheAttachingCallersTokenIsAlreadyCancelled_ThenTheCallerIsCancelledAndTheExecutionStillRuns()
     {
         // Arrange - the token bounds the caller's wait and nothing else. Handed to the start instead,
-        // it would make BackgroundService.StartAsync schedule an execution that is cancelled before it
+        // it would make BackgroundService.StartAsync schedule an execution that is canceled before it
         // is entered, and the start would still record the instance as running. The start deferral parks
-        // the start, so the wait is cancelled deterministically rather than by racing the transition.
+        // the start, so the wait is canceled deterministically rather than by racing the transition.
         await HostingTestHost.RunAsync(async context =>
         {
             var person = new Person(context);

@@ -16,7 +16,7 @@ public partial class ScriptedHostedSubject : BackgroundService
 
     public partial string? Name { get; set; }
 
-    /// <summary>The execution of the next run. Null parks the run until its token is cancelled.</summary>
+    /// <summary>The execution of the next run. Null parks the run until its token is canceled.</summary>
     public Func<CancellationToken, Task>? Run
     {
         get => Volatile.Read(ref _run);

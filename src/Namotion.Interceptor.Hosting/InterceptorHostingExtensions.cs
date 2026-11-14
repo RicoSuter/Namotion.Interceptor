@@ -57,7 +57,7 @@ public static class InterceptorHostingExtensions
     /// start faults, the attachment is removed before the exception propagates.
     /// </summary>
     /// <remarks>
-    /// The token bounds the wait and not the start, which runs to completion. A wait cancelled before
+    /// The token bounds the wait and not the start, which runs to completion. A wait canceled before
     /// the start faulted leaves the attachment on the subject with its fault recorded.
     /// </remarks>
     public static async Task<IHostedServiceAttachment<T>> AttachHostedServiceAsync<T>(
@@ -104,7 +104,7 @@ public static class InterceptorHostingExtensions
     /// <summary>
     /// Detaches a hosted service attachment and waits for the instance to stop and be disposed. The
     /// token is handed to the instance's own <c>StopAsync</c> as well as bounding the wait, so a
-    /// cancelled token cuts the stop short; the instance is disposed either way.
+    /// canceled token cuts the stop short; the instance is disposed either way.
     /// </summary>
     public static async Task<bool> DetachHostedServiceAsync(
         this IInterceptorSubject subject, IHostedServiceAttachment attachment, CancellationToken cancellationToken)
@@ -191,7 +191,7 @@ public static class InterceptorHostingExtensions
         var slot = attachment.GetSlot();
         stop = MarkDetachedAndEnqueueStop(subject, slot, handler, cancellationToken);
 
-        // Untracked without releasing, and before a caller awaits the stop so a cancelled wait cannot skip it:
+        // Untracked without releasing, and before a caller awaits the stop so a canceled wait cannot skip it:
         // docs/design/hosting-service-ownership.md#an-explicit-detach-untracks-the-slot-for-the-drain-without-releasing-ownership.
         handler?.UntrackForDrain(slot);
         return true;

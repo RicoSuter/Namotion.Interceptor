@@ -336,6 +336,7 @@ public partial class SunSpecDevice :
 
     public override async Task StartAsync(CancellationToken cancellationToken)
     {
+        _startFailure = null;
         // Started here rather than from the run loop, which the base start only schedules: the source registers in its
         // own start, and inside this one that registration counts towards startup completion.
         if (!string.IsNullOrWhiteSpace(HostAddress) && TryPrepareSource(SourceRestart.ConfigurationChanged, out _))
@@ -384,8 +385,6 @@ public partial class SunSpecDevice :
     /// </summary>
     private async Task<SourceRestart> RunSourceAsync(string hostAddress, SourceRestart previousRestart, CancellationToken stoppingToken)
     {
-        // Captured once, so a configuration edit applies only through the restart it signals.
-        var pollingInterval = GetEffectivePollingInterval();
         var isPlannedRediscovery = previousRestart == SourceRestart.Rediscovery;
 
         var failure = Interlocked.Exchange(ref _startFailure, null);
@@ -430,7 +429,7 @@ public partial class SunSpecDevice :
         // Awaited before the next source connects, which a device that accepts a single client needs.
         await StopSourceAsync(isConnectionStateKept: restart == SourceRestart.Rediscovery, stoppingToken).ConfigureAwait(false);
 
-        var reconnectDelay = GetReconnectDelay(restart, pollingInterval);
+        var reconnectDelay = GetReconnectDelay(restart, GetEffectivePollingInterval());
         if (reconnectDelay > TimeSpan.Zero &&
             await WaitForConfigurationChangeAsync(reconnectDelay, stoppingToken).ConfigureAwait(false))
         {
@@ -490,7 +489,7 @@ public partial class SunSpecDevice :
     }
 
     /// <summary>
-    /// Stops and disposes the source, if this caller takes it. A cancelled token cuts the source's own stop short; the
+    /// Stops and disposes the source, if this caller takes it. A canceled token cuts the source's own stop short; the
     /// dispose still runs.
     /// </summary>
     private async Task StopSourceAsync(bool isConnectionStateKept, CancellationToken cancellationToken)
@@ -512,13 +511,19 @@ public partial class SunSpecDevice :
         {
             _logger.LogWarning(exception, "Failed to stop the Modbus source of {Device}.", Title);
         }
-        finally
+
+        try
         {
             await source.DisposeAsync().ConfigureAwait(false);
-            if (!isConnectionStateKept)
-            {
-                IsConnected = false;
-            }
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Failed to dispose the Modbus source of {Device}.", Title);
+        }
+
+        if (!isConnectionStateKept)
+        {
+            IsConnected = false;
         }
     }
 

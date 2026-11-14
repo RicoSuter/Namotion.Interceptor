@@ -12,11 +12,10 @@ namespace Namotion.Interceptor.Hosting;
 internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler, IAsyncDisposable, IDisposable
 {
     /// <summary>
-    /// How long a disposal waits for the shutdown it runs on a handler that was never stopped. A stop still
-    /// running after it continues unobserved.
+    /// How long a disposal waits for the shutdown it runs on a handler that was never stopped. Bounded,
+    /// because the generic host disposes without stopping after a failed start and a stuck stop must not
+    /// hang the provider's disposal; a stop still running after it continues unobserved.
     /// </summary>
-    // Bounded, because the generic host disposes without stopping after a failed start, and a stuck stop
-    // must not hang the provider's disposal.
     internal static readonly TimeSpan DisposeStopTimeout = TimeSpan.FromSeconds(5);
 
     // A workaround, not a design choice: docs/design/hosting-service-ownership.md#the-50-ms-delay.
@@ -158,7 +157,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler, 
             _ = EnqueueStopIfOwned(subject, subjectSlot, waitFor: null, CancellationToken.None);
         }
 
-        var subjectStop = subjectSlot?.GetStopToAwait(this);
+        var subjectStop = attachments.IsEmpty ? null : subjectSlot?.GetStopToAwait(this);
         foreach (var attachment in attachments)
         {
             _ = EnqueueStopIfOwned(subject, attachment.GetSlot(), waitFor: subjectStop, CancellationToken.None);
@@ -180,7 +179,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler, 
     /// </summary>
     /// <remarks>
     /// The transition carries no cancellation token: a caller's token bounds its wait, never the
-    /// transition, or cancelling an <c>AttachHostedServiceAsync</c> await would abort a start already
+    /// transition, or canceling an <c>AttachHostedServiceAsync</c> await would abort a start already
     /// under way and record it as a failure.
     /// </remarks>
     internal Task? TryTakeOwnershipAndStart(IInterceptorSubject subject, HostedServiceSlot slot)
@@ -377,7 +376,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler, 
         private async Task RunAsync()
         {
             // Both checks: a subject restarts in place on the same instance with a new execute task, and
-            // every stop leaves Current before StopAsync, so a run its own stop cancelled never passes.
+            // every stop leaves Current before StopAsync, so a run its own stop canceled never passes.
             if (!ReferenceEquals(slot.Current, instance) || !ReferenceEquals(instance.ExecuteTask, executeTask))
             {
                 LogIgnoredFault();
@@ -560,7 +559,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler, 
                 // Below the return above, so a stop with nothing to do reports no window of its own.
                 slot.BeginStop();
 
-                // A cancelled token skips the delay, but the stop and the dispose below are still owed.
+                // A canceled token skips the delay, but the stop and the dispose below are still owed.
                 await Task.Delay(TransitionDelayMilliseconds, cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
 
                 try
@@ -569,7 +568,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler, 
                 }
                 catch (OperationCanceledException)
                 {
-                    // Caught rather than filtered out, and not recorded as a fault: a cancelled stop
+                    // Caught rather than filtered out, and not recorded as a fault: a canceled stop
                     // is the caller's token expiring, not a failure, but the dispose below still has
                     // to run, and Current is already cleared so an escape leaks the instance.
                 }
@@ -594,7 +593,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler, 
                 // its stop window.
                 slot.EndStop();
 
-                // Always signals, including on the cancelled path, or an attachment stop ordered behind
+                // Always signals, including on the canceled path, or an attachment stop ordered behind
                 // this one parks forever on a signal that is never set.
                 signal?.TrySetResult();
             }

@@ -283,7 +283,7 @@ public class OpcUaServerTests
         await reconfiguration.WaitAsync(CompletionTimeout);
 
         // Assert
-        // The cancelled wait abandons the start without anything having stopped, so nothing but the
+        // The canceled wait abandons the start without anything having stopped, so nothing but the
         // start itself can take the status off Starting.
         Assert.Equal(ServiceStatus.Stopped, server.Status);
         Assert.Null(server.StatusMessage);

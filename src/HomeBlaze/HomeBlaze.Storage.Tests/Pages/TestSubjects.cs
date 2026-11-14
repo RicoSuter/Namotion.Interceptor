@@ -58,7 +58,7 @@ public partial class TestFaulty : IConfigurable
     public partial string? Mode { get; set; }
 
     /// <summary>
-    /// Cancelled before <see cref="CancelMode"/> throws. With it the cancellation is the caller's,
+    /// Canceled before <see cref="CancelMode"/> throws. With it the cancellation is the caller's,
     /// without it the subject cancels on its own.
     /// </summary>
     public CancellationTokenSource? CancellationSource { get; set; }

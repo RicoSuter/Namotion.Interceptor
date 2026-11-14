@@ -42,7 +42,7 @@ public partial class HomeBlazeInstallation
             }
             catch (Exception exception) when (exception is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
             {
-                // The host never observes ExecuteTask, so an escaping exception would silently end the polling.
+                // An escaping exception would end the polling, and the hosting would stop the subject until it re-enters the graph.
                 if (!_hasPollFailed)
                 {
                     _logger.LogWarning(exception, "Reading the installation values failed");

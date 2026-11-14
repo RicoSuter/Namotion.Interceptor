@@ -34,7 +34,7 @@ public class HostedServiceHandlerTests
             var first = new ValueEqualityHostedSubject { Name = "same" };
             var second = new ValueEqualityHostedSubject { Name = "same" };
             container.First = first;
-            await first.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await first.Started.Task.WaitAsync(TestTimeouts.Default);
 
             // Act - the start deferral holds the second start until after the detach, which is the
             // shape the symptom has: one shared liveness entry means detaching either subject clears
@@ -48,7 +48,7 @@ public class HostedServiceHandlerTests
             // Assert
             Assert.False(handler.IsLive(first));
             Assert.True(handler.IsLive(second));
-            await second.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await second.Started.Task.WaitAsync(TestTimeouts.Default);
         });
     }
 
@@ -418,8 +418,7 @@ public class HostedServiceHandlerTests
     [Fact]
     public async Task WhenAnAttachmentIsDetachedSynchronously_ThenItIsStoppedDisposedAndForgotten()
     {
-        // Arrange - the synchronous overload is what the OPC UA wrappers call, and the removal is the
-        // half of it that decides whether a later context attach starts the factory again.
+        // Arrange - the removal is the half of the synchronous overload that decides whether a later context attach starts the factory again.
         await HostingTestHost.RunAsync(async context =>
         {
             var parent = new Parent(context);
@@ -639,8 +638,8 @@ public class HostedServiceHandlerTests
     [Fact]
     public async Task WhenATransitionFaultedEarlier_ThenTheNextSuccessfulOneClearsTheFault()
     {
-        // Arrange - a stale Fault would make a later successful attach throw, and the OPC UA wrappers
-        // would turn that into Status = Error with a stale message.
+        // Arrange - a stale Fault would make a later successful attach throw, and a consumer polling the
+        // handle would report a stale error.
         await HostingTestHost.RunAsync(async context =>
         {
             var parent = new Parent(context);
@@ -929,7 +928,7 @@ public class HostedServiceHandlerTests
     {
         // Arrange - the token bounds the caller's wait, not the transition. Aborting the work instead
         // would leave a half started service behind and record the cancellation as a start failure,
-        // which the OPC UA wrappers surface as a user visible error status.
+        // which a consumer polling the handle reports as an error.
         await HostingTestHost.RunAsync(async context =>
         {
             var person = new Person(context);
@@ -1196,10 +1195,9 @@ public class HostedServiceHandlerTests
     [Fact]
     public async Task WhenASubjectOwningAnAttachmentIsStoppedByTheHost_ThenShutdownCompletesWellInsideTheTimeout()
     {
-        // Arrange - the wrapper shape, and the regression guard for the deadlock the wrappers were
-        // migrated away from: a subject that detaches its own attachment from its own unwind waits on
-        // a queue that is waiting on that unwind, and the host recovers only when ShutdownTimeout
-        // expires, so the elapsed time is what tells the two apart.
+        // Arrange - the regression guard for the deadlock in which a subject that detaches its own
+        // attachment from its own unwind waits on a queue that is waiting on that unwind; the host
+        // recovers only when ShutdownTimeout expires, so the elapsed time is what tells the two apart.
         var builder = HostingTestHost.CreateBuilder();
         builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = ShutdownTimeout);
 

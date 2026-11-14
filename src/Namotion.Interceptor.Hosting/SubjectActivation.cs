@@ -110,10 +110,7 @@ internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, I
             .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
     }
 
-    /// <summary>
-    /// The synchronous form, for a provider disposed synchronously, which otherwise throws on a service
-    /// that is only asynchronously disposable.
-    /// </summary>
+    /// <inheritdoc cref="HostedServiceHandler.Dispose"/>
     /// <remarks>See <see cref="DisposeAsync"/> for the disposal ordering hazard this is subject to.</remarks>
     public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
 }
