@@ -137,6 +137,8 @@ registered.AddDerivedProperty("Status", typeof(string),
 
 Derived properties automatically participate in change tracking and will update when their dependencies change.
 
+A dynamic derived property, including one added with `AddDerivedAttribute`, whose getter is evaluated again while it evaluates on the same thread, because it reads itself through other properties, gives `default(T)` for that inner read. A trace warning is reported once, so a cycle in such getters does not end the process. The same applies to a read that a side effect of the getter causes on the same thread. The dependencies the cycle records still form a cycle, which tracking does not handle yet (#971): a host that lets users define getters should reject the cycles it can see.
+
 ### Lifecycle tracking for dynamic properties
 
 Dynamic properties (including derived) fully participate in lifecycle tracking when `WithLifecycle()` or `WithFullPropertyTracking()` is enabled. If a dynamic property holds a reference to another subject, that subject is automatically attached to the lifecycle graph with proper reference counting. For example, a `AddDerivedProperty<Tire>("FirstTire", ...)` that returns the first tire from a collection would give that tire a reference count of 2, one from the collection property and one from the derived property. This holds because dynamic properties are intercepted. A generated non-partial `[Derived]` getter is not intercepted, so it never attaches the subject it returns and never adds a reference.
@@ -172,7 +174,7 @@ pressureProperty.AddDerivedAttribute("DynamicMax", typeof(decimal),
     setValue: null);
 ```
 
-This pattern is useful for creating adaptive metadata that changes based on the current state of your properties.
+This pattern is useful for creating adaptive metadata that changes based on the current state of your properties. A derived attribute whose getter reads itself through other properties is handled as described under [Add properties](#add-properties).
 
 ## Custom property initializers
 

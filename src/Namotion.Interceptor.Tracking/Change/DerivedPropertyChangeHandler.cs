@@ -12,7 +12,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// </summary>
 /// <remarks>
 /// Deadlock safety: locks are acquired on per-property <see cref="DerivedPropertyData"/> objects.
-/// Nesting follows derived → dependency direction (DAG), so cycles are impossible.
+/// Nesting follows the derived → dependency direction, which cannot cycle while the dependency graph is acyclic; a cycle that includes a dynamic derived getter breaks that assumption (see #971).
 /// <see cref="DetachProperty"/> never holds lock(data) and lock(derivedData) at the same time;
 /// the used-by collection's leaf lock it may take acquires nothing further.
 /// See docs/design/tracking-derived-properties.md for full concurrency analysis.
