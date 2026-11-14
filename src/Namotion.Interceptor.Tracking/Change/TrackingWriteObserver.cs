@@ -68,11 +68,11 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
     /// W2 to W5 for a change of the structure of <paramref name="subject"/> (<see cref="SubjectStructure"/>). Called
     /// after the structure changed.
     /// </summary>
-    internal static void OnStructureChanged(IInterceptorSubject subject)
+    internal static void OnStructureChanged(IInterceptorSubject subject, bool hasFailed = false)
     {
         // W2: the structure changed before its data is looked up.
         Interlocked.MemoryBarrier();
-        RequestCellRecalculations(SubjectStructure.Of(subject));
+        RequestCellRecalculations(SubjectStructure.Of(subject), hasFailed);
     }
 
     /// <summary>
@@ -85,11 +85,11 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
     {
         // W2, once for every cell: all of them changed before the first data lookup.
         Interlocked.MemoryBarrier();
-        RequestCellRecalculations(SubjectStructure.Of(subject));
-        RequestCellRecalculations(SubjectStructure.ChildrenOf(holder));
+        RequestCellRecalculations(SubjectStructure.Of(subject), hasFailed: false);
+        RequestCellRecalculations(SubjectStructure.ChildrenOf(holder), hasFailed: false);
         if (isHolderStructureChanged)
         {
-            RequestCellRecalculations(SubjectStructure.Of(holder));
+            RequestCellRecalculations(SubjectStructure.Of(holder), hasFailed: false);
         }
     }
 
@@ -104,19 +104,19 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
         Interlocked.MemoryBarrier();
         foreach (var child in children)
         {
-            RequestCellRecalculations(SubjectStructure.Of(child.Subject));
+            RequestCellRecalculations(SubjectStructure.Of(child.Subject), hasFailed: false);
         }
 
-        RequestCellRecalculations(SubjectStructure.ChildrenOf(holder));
+        RequestCellRecalculations(SubjectStructure.ChildrenOf(holder), hasFailed: false);
     }
 
-    private static void RequestCellRecalculations(PropertyReference cell)
+    private static void RequestCellRecalculations(PropertyReference cell, bool hasFailed)
     {
         var data = cell.TryGetDerivedPropertyData();
         if (data is not null)
         {
             RequestRecalculations(
-                new PropertyWriteObservation(cell, isWritten: true, rawTimestamp: 0, isDerivedRecalculation: false, depth: 0, hasFailed: false),
+                new PropertyWriteObservation(cell, isWritten: true, rawTimestamp: 0, isDerivedRecalculation: false, depth: 0, hasFailed: hasFailed),
                 data, segment: null);
         }
     }

@@ -37,9 +37,11 @@ public static class SubjectStructure
 
     /// <summary>Recalculates the derived properties that read the structure of <paramref name="subject"/>.</summary>
     /// <param name="subject">The subject. Called after its structure changed.</param>
-    public static void Changed(IInterceptorSubject subject)
+    /// <param name="hasFailed">Whether the operation that changed the structure threw: its exception wins, and an
+    /// exception of a recalculation is traced instead of thrown.</param>
+    public static void Changed(IInterceptorSubject subject, bool hasFailed = false)
     {
-        TrackingWriteObserver.OnStructureChanged(subject);
+        TrackingWriteObserver.OnStructureChanged(subject, hasFailed);
     }
 
     /// <summary>
