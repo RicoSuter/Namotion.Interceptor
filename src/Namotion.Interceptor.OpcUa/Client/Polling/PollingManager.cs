@@ -335,13 +335,26 @@ internal sealed class PollingManager : IAsyncDisposable
                 });
             }
 
-            // Execute read
-            var response = await session.ReadAsync(
-                requestHeader: null,
-                maxAge: 0,
-                timestampsToReturn: TimestampsToReturn.Both,
-                nodesToRead,
-                cancellationToken).ConfigureAwait(false);
+            var requestHeader = new RequestHeader();
+            ReadResponse response;
+            try
+            {
+                response = await session.ReadAsync(
+                    requestHeader,
+                    maxAge: 0,
+                    timestampsToReturn: TimestampsToReturn.Both,
+                    nodesToRead,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (InvalidCastException exception)
+            {
+                throw OpcUaResponseMismatchException.FromInvalidCast("Read", exception);
+            }
+
+            if (OpcUaResponseMismatchException.Check("Read", requestHeader, response.ResponseHeader) is { } mismatch)
+            {
+                throw mismatch;
+            }
 
             // Process results - count metrics per item for accurate monitoring
             for (var i = 0; i < Math.Min(response.Results.Count, batch.Count); i++)

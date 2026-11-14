@@ -302,6 +302,54 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task WhenTheReadReceivesTheResponseToADifferentRequest_ThenNothingIsAppliedAndTheMismatchIsReported()
+    {
+        // Arrange
+        var subject = new TestPerson(InterceptorSubjectContext.Create().WithFullPropertyTracking());
+        var session = new Mock<ISession>();
+        session.SetupGet(value => value.Connected).Returns(true);
+        session
+            .Setup(value => value.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader requestHeader, double _, TimestampsToReturn _, ReadValueIdCollection _, CancellationToken _) =>
+            {
+                // Assigns the request handle as the SDK does while sending, and answers for another request.
+                requestHeader.RequestHandle = 7;
+                return new ReadResponse
+                {
+                    ResponseHeader = new ResponseHeader { RequestHandle = 8 },
+                    Results = new DataValueCollection([CreateDataValue("wrong", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1))]),
+                    DiagnosticInfos = []
+                };
+            });
+
+        var metrics = new ReadAfterWriteMetrics();
+        var reportedErrors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        await using var manager = new ReadAfterWriteManager(
+            () => session.Object,
+            new Mock<Connectors.ISubjectSource>().Object,
+            CreateConfiguration(TimeSpan.FromMilliseconds(250)),
+            metrics,
+            reportedErrors.Enqueue,
+            NullLogger.Instance);
+
+        RegisterAndSchedule(manager, new NodeId("FirstName", 2), CreateTestProperty(subject));
+
+        // Act
+        await manager.ProcessDueReadsAsync(DateTime.MaxValue);
+
+        // Assert
+        Assert.Equal(string.Empty, subject.FirstName);
+        Assert.Equal(0, metrics.Executed);
+        Assert.Equal(1, metrics.Failed);
+        Assert.Collection(reportedErrors, error => Assert.IsType<OpcUaResponseMismatchException>(error));
+    }
+
+    [Fact]
     public async Task WhenTheServerOmitsResults_ThenEachMissingResultIsCountedAsFailed()
     {
         // Arrange

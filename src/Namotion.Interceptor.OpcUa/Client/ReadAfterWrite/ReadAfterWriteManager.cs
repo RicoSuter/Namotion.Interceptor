@@ -349,11 +349,12 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                     });
                 }
 
+                var requestHeader = new RequestHeader();
                 ReadResponse response;
                 try
                 {
                     response = await session.ReadAsync(
-                        requestHeader: null,
+                        requestHeader,
                         maxAge: 0,
                         timestampsToReturn: TimestampsToReturn.Source,
                         readValues,
@@ -362,6 +363,15 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                 catch (Exception) when (_cts.IsCancellationRequested)
                 {
                     return;
+                }
+                catch (InvalidCastException exception)
+                {
+                    throw OpcUaResponseMismatchException.FromInvalidCast("Read", exception);
+                }
+
+                if (OpcUaResponseMismatchException.Check("Read", requestHeader, response.ResponseHeader) is { } mismatch)
+                {
+                    throw mismatch;
                 }
 
                 var receivedTimestamp = DateTimeOffset.UtcNow;

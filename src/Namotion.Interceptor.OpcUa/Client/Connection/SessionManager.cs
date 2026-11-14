@@ -21,6 +21,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private readonly SubjectPropertyWriter _propertyWriter;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
+    private readonly TimeProvider _timeProvider;
 
     private volatile SessionReconnectHandler _reconnectHandler;
 
@@ -41,6 +42,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private int _isReconnecting; // 0 = false, 1 = true (thread-safe via Interlocked)
     private int _pendingSdkReconnection; // 1 = an SDK auto-reconnect started (Total incremented by OnKeepAlive) but not yet resolved
     private int _needsFullStateSync; // 0 = false, 1 = true (thread-safe via Interlocked)
+    private int _responseMismatchSyncPending; // 0 = false, 1 = true (thread-safe via Interlocked)
+    private long? _lastFullStateSyncTimestamp; // Health check loop only
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     // Enqueued by SDK reconnection callbacks (sync), drained by health check loop via DisposePendingSessionsAsync (async).
     private readonly ConcurrentQueue<Session> _sessionsToDispose = new();
@@ -59,7 +62,13 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         (Volatile.Read(ref _session)?.Connected ?? false);
 
     /// <summary>
-    /// Performs a full state synchronization after SDK reconnection if needed.
+    /// The minimum time between two full state syncs scheduled by <see cref="ScheduleFullStateSyncAfterResponseMismatch"/>.
+    /// </summary>
+    internal static readonly TimeSpan ResponseMismatchSyncInterval = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Performs a full state synchronization if one is pending, after an SDK reconnection or after a
+    /// response to a different request was received.
     /// Buffers incoming notifications, reads all property values from the server,
     /// replays the buffer, and resumes normal operation.
     /// On failure, clears the session to trigger manual reconnection via the health check loop.
@@ -69,26 +78,51 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// </remarks>
     internal async Task PerformFullStateSyncIfNeededAsync(CancellationToken cancellationToken)
     {
-        if (Volatile.Read(ref _needsFullStateSync) != 1)
+        var afterReconnection = Volatile.Read(ref _needsFullStateSync) == 1;
+        if (!afterReconnection && !IsResponseMismatchSyncDue())
         {
             return;
         }
 
-        _logger.LogInformation("Performing full state sync after SDK reconnection...");
+        var reason = afterReconnection ? "after SDK reconnection" : "after a response to a different request was received";
+
+        // Cleared before the read, so a mismatch detected while it runs schedules the next sync.
+        Interlocked.Exchange(ref _responseMismatchSyncPending, 0);
+        _lastFullStateSyncTimestamp = _timeProvider.GetTimestamp();
+
+        _logger.LogInformation("Performing full state sync {Reason}...", reason);
         _propertyWriter.StartBuffering();
         try
         {
             await _propertyWriter.LoadInitialStateAndResumeAsync(cancellationToken).ConfigureAwait(false);
             Interlocked.Exchange(ref _needsFullStateSync, 0);
-            _logger.LogInformation("Full state sync completed successfully after SDK reconnection.");
+            _logger.LogInformation("Full state sync completed successfully {Reason}.", reason);
         }
         catch (Exception ex)
         {
             _source.ReportBackgroundError(ex, cancellationToken);
-            _logger.LogError(ex, "Full state sync failed after SDK reconnection. Clearing session for manual reconnection.");
+            _logger.LogError(ex, "Full state sync failed {Reason}. Clearing session for manual reconnection.", reason);
             await ClearSessionAsync(cancellationToken).ConfigureAwait(false);
         }
     }
+
+    /// <summary>
+    /// Schedules a full state sync after a response to a different request was received, which may have
+    /// cost this client the response to another of its requests, such as subscription notifications.
+    /// </summary>
+    /// <remarks>
+    /// Thread-safe. The sync runs on the health check loop once the session is healthy. Repeated calls
+    /// coalesce into one pending sync, which runs no sooner than <see cref="ResponseMismatchSyncInterval"/>
+    /// after the previous full state sync, so a server that keeps answering with wrong responses cannot
+    /// cause a sync storm.
+    /// </remarks>
+    internal void ScheduleFullStateSyncAfterResponseMismatch() =>
+        Interlocked.Exchange(ref _responseMismatchSyncPending, 1);
+
+    private bool IsResponseMismatchSyncDue() =>
+        Volatile.Read(ref _responseMismatchSyncPending) == 1 &&
+        (_lastFullStateSyncTimestamp is not { } lastTimestamp ||
+         _timeProvider.GetElapsedTime(lastTimestamp) >= ResponseMismatchSyncInterval);
 
     /// <summary>
     /// Gets a value indicating whether the session is currently reconnecting.
@@ -193,13 +227,27 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         OpcUaClientConfiguration configuration,
         PollingMetrics pollingMetrics,
         ReadAfterWriteMetrics readAfterWriteMetrics,
-        ILogger logger)
+        ILogger logger,
+        TimeProvider? timeProvider = null)
     {
         _source = source;
         _propertyWriter = propertyWriter;
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _configuration = configuration;
         _reconnectHandler = new SessionReconnectHandler(configuration.ResolvedTelemetryContext, false, (int)configuration.ReconnectHandlerTimeout.TotalMilliseconds);
+
+        // The polling and read-after-write reads report a response to a different request through their
+        // error callback, which therefore also schedules the full state sync.
+        Action<Exception> reportReadError = error =>
+        {
+            if (error is OpcUaResponseMismatchException)
+            {
+                ScheduleFullStateSyncAfterResponseMismatch();
+            }
+
+            source.ReportBackgroundError(error);
+        };
 
         if (_configuration.EnablePollingFallback)
         {
@@ -209,7 +257,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 propertyWriter,
                 _configuration,
                 pollingMetrics,
-                source.ReportBackgroundError,
+                reportReadError,
                 _logger);
 
             PollingDiagnostics = new PollingDiagnostics(PollingManager, pollingMetrics);
@@ -224,7 +272,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 source,
                 configuration,
                 readAfterWriteMetrics,
-                source.ReportBackgroundError,
+                reportReadError,
                 logger);
 
             ReadAfterWriteDiagnostics = new ReadAfterWriteDiagnostics(ReadAfterWriteManager, readAfterWriteMetrics);
