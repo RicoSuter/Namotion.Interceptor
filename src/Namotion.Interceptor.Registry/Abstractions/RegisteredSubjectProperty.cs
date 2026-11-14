@@ -227,9 +227,7 @@ public class RegisteredSubjectProperty
     {
         get
         {
-            // The children change with a write of this property, and are cleared when its subject detaches.
-            SubjectStructure.RecordPropertyRead(Reference);
-            SubjectStructure.RecordRead(Parent.Subject);
+            SubjectStructure.RecordChildrenRead(Parent.Subject);
             lock (_children)
             {
                 if (_childrenCache.IsDefault)
