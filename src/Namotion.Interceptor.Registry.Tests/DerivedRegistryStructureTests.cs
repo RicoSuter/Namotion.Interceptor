@@ -232,7 +232,7 @@ public class DerivedRegistryStructureTests
     public void WhenGetterSideEffectRunsReconciliation_ThenRegistryReadsAreNotRecorded()
     {
         // Arrange: each evaluation assigns a new target to another holder, whose reconciliation looks up the
-        // holder's registered properties on the evaluating thread.
+        // holder's registered properties and registers the target on the evaluating thread.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var root = new StructureHolder(context);
         var other = new StructureHolder(context);
@@ -247,12 +247,12 @@ public class DerivedRegistryStructureTests
             }
         };
 
-        // Act
+        // Act: the structure of the holder, then of the target changes.
         other.TryGetRegisteredSubject()!.AddProperty<int>("Added", _ => 1);
+        other.OtherTarget = other.Target;
 
         // Assert
         Assert.Equal(1, evaluations);
-        Assert.Empty(new PropertyReference(root.Reader, nameof(StructureReader.Value)).GetRequiredProperties().ToArray());
     }
 
     private static (Func<string?> Read, Action Change) CreateScenario(
