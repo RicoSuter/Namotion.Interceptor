@@ -1,5 +1,4 @@
-﻿using System.Collections.Frozen;
-using System.Collections.Immutable;
+﻿using System.Collections.Immutable;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
@@ -27,8 +26,9 @@ public class RegisteredSubjectProperty
     // 0: not computed yet, 1: no, 2: yes. Cached because segment lookups ask it for every matching property.
     private byte _isInlinePathsProperty;
 
-    // Published with one write and used only while the registered properties it was computed from are current, so a
-    // read that computed it before a property was added and stores it after the add does not keep it.
+    // Published with one write and used only while the number of registered properties equals the one it was computed
+    // from. Properties are only ever added, so a read that computed it before an add and stores it after the add
+    // does not keep it.
     internal AttributesSnapshot? AttributesCache;
 
     public RegisteredSubjectProperty(RegisteredSubject parent, string name,
@@ -346,9 +346,9 @@ public class RegisteredSubjectProperty
             SubjectStructure.RecordRead(Parent.Subject);
             var properties = Parent.RegisteredProperties;
             var cache = AttributesCache;
-            if (cache is null || !ReferenceEquals(cache.Properties, properties))
+            if (cache is null || cache.PropertyCount != properties.Count)
             {
-                cache = new AttributesSnapshot(properties, RegisteredSubject.GetPropertyAttributes(properties, Name).ToArray());
+                cache = new AttributesSnapshot(properties.Count, RegisteredSubject.GetPropertyAttributes(properties, Name).ToArray());
                 AttributesCache = cache;
             }
 
@@ -356,10 +356,9 @@ public class RegisteredSubjectProperty
         }
     }
 
-    internal sealed class AttributesSnapshot(
-        FrozenDictionary<string, RegisteredSubjectProperty> properties, RegisteredSubjectProperty[] attributes)
+    internal sealed class AttributesSnapshot(int propertyCount, RegisteredSubjectProperty[] attributes)
     {
-        public FrozenDictionary<string, RegisteredSubjectProperty> Properties { get; } = properties;
+        public int PropertyCount { get; } = propertyCount;
 
         public RegisteredSubjectProperty[] Attributes { get; } = attributes;
     }
