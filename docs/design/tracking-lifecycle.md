@@ -221,7 +221,7 @@ Derived property tracking hooks into the lifecycle at two points: the lifecycle 
 
 A derived getter can read the structure of a subject: whether it is attached and registered, its reference count, its parents, its registered properties. The lifecycle reports each change of it, so the derived properties that read it are recalculated (see [Structure Cells](tracking-derived-properties.md#structure-cells)):
 
-- once per lifecycle change of a subject it dispatches (context attach or detach, reference added or removed), after all lifecycle handlers ran, so parent tracking and the registry have updated their state. On attach, this is before the subject's properties attach, so a derived property of the subject itself evaluates on the new state. An attach whose handlers descend into the subtree reports it when the descent starts instead, so the attach evaluations in the subtree read the new state and are not requested again;
+- once per lifecycle change of a subject it dispatches (context attach or detach, reference added or removed), after all lifecycle handlers ran or one of them threw, so parent tracking and the registry have updated their state. On attach, this is before the subject's properties attach, so a derived property of the subject itself evaluates on the new state. An attach whose handlers descend into the subtree reports it when the descent starts instead, so the attach evaluations in the subtree read the new state and are not requested again;
 - for the children of the holding subject, once per such change through a property;
 - once per kept child whose key or position a write changed, and once for the children of the written property's subject, after the `IChildIndexHandler` services ran.
 

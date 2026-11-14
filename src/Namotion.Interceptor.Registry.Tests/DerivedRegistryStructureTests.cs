@@ -173,6 +173,61 @@ public class DerivedRegistryStructureTests
         Assert.Equal(10, change.GetNewValue<int>());
     }
 
+    [Theory]
+    [InlineData("ContextAttach")]
+    [InlineData("ContextDetach")]
+    [InlineData("ReferenceRemoved")]
+    [InlineData("MovedChild")]
+    public void WhenHandlerAfterTheRegistryThrows_ThenDerivedPropertyFollowsTheStructureTheRegistryChanged(string operation)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new StructureHolder(context);
+        var target = new RegistryTarget();
+        var handler = new ThrowingHandler(target);
+        context.WithService(() => handler);
+        var targetContext = ((IInterceptorSubject)target).Context;
+        Func<string?> read = () => (target.TryGetRegisteredSubject() is not null).ToString();
+        Action act = operation switch
+        {
+            "ContextAttach" => () => targetContext.AddFallbackContext(context),
+            "ContextDetach" => () => targetContext.RemoveFallbackContext(context),
+            "ReferenceRemoved" => () => root.Target = null,
+            "MovedChild" => () => root.Targets = [new RegistryTarget(), target],
+            _ => throw new ArgumentOutOfRangeException(nameof(operation))
+        };
+        if (operation == "ContextDetach")
+        {
+            targetContext.AddFallbackContext(context);
+        }
+        else if (operation == "ReferenceRemoved")
+        {
+            root.Target = target;
+        }
+        else if (operation == "MovedChild")
+        {
+            root.Targets = [target];
+            var registered = target.TryGetRegisteredSubject()!;
+            read = () => registered.Parents[0].Index?.ToString();
+        }
+
+        root.Reader = new StructureReader { Read = read };
+        var initialValue = root.Reader.Value;
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        handler.IsArmed = true;
+
+        // Act
+        var exception = Record.Exception(act);
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(exception);
+        var published = Assert.Single(changes, c => c.Property.Subject == root.Reader);
+        Assert.Equal(initialValue, published.GetOldValue<string?>());
+        Assert.Equal(read(), published.GetNewValue<string?>());
+        Assert.NotEqual(initialValue, read());
+    }
+
     [Fact]
     public void WhenGetterSideEffectRunsReconciliation_ThenRegistryReadsAreNotRecorded()
     {
@@ -259,5 +314,27 @@ public class DerivedRegistryStructureTests
             "RegisteredSubject.TryGetPropertyAttribute" => (() => (registered.TryGetPropertyAttribute(nameof(RegistryTarget.Value), "Unit") is not null).ToString(), addAttribute),
             _ => throw new ArgumentOutOfRangeException(nameof(api))
         };
+    }
+
+    [RunsAfter(typeof(SubjectRegistry))]
+    private sealed class ThrowingHandler(IInterceptorSubject subject) : ILifecycleHandler, IChildIndexHandler
+    {
+        public bool IsArmed { get; set; }
+
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (IsArmed && change.Subject == subject)
+            {
+                throw new InvalidOperationException();
+            }
+        }
+
+        public void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
+        {
+            if (IsArmed)
+            {
+                throw new InvalidOperationException();
+            }
+        }
     }
 }
