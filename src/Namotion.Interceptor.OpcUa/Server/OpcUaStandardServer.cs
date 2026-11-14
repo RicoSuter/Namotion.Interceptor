@@ -21,6 +21,30 @@ internal class OpcUaStandardServer : StandardServer
         AddNodeManager(_nodeManagerFactory);
     }
 
+    /// <inheritdoc />
+    public override void ScheduleIncomingRequest(IEndpointIncomingRequest request, CancellationToken cancellationToken = default)
+    {
+        // Works around an SDK defect: the request queue's disposal can complete a request that a worker
+        // still processes, and the endpoint completes it again when scheduling throws after the enqueue.
+        // A second completion lands on a pooled response slot that already belongs to a later request, so
+        // responses can be delivered to the wrong request. Reported to the OPC Foundation; remove this
+        // once the SDK completes each request only once.
+        var guardedRequest = new SingleCompletionIncomingRequest(request);
+        try
+        {
+            base.ScheduleIncomingRequest(guardedRequest, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            // Completed here and not rethrown, so the endpoint's own catch never adds a completion to one
+            // the queue may already have made.
+            _logger.LogDebug(exception, "Failed to schedule an incoming OPC UA request.");
+            guardedRequest.OperationCompleted(null, exception is ObjectDisposedException
+                ? new ServiceResult(StatusCodes.BadServerHalted)
+                : new ServiceResult(exception));
+        }
+    }
+
     /// <summary>
     /// Closes all transport listeners to stop accepting new connections.
     /// Must be called before closing sessions during shutdown to prevent

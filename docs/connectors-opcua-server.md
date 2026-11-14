@@ -325,6 +325,8 @@ The server automatically restarts on failure using exponential backoff with jitt
 
 The consecutive failure counter resets when the server starts successfully. Track failure count via `Diagnostics.ConsecutiveFailures`.
 
+The server completes each client request only once. In some shutdown races the OPC UA SDK completes a request a second time, which can deliver a response to the wrong request, so the server ignores every completion after the first.
+
 ## Lifecycle
 
 The OPC UA server hooks into the interceptor lifecycle system (see [Subject Lifecycle Tracking](tracking.md#subject-lifecycle-tracking)) to clean up resources when subjects are detached.
