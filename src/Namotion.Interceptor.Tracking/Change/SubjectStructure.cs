@@ -59,13 +59,13 @@ public static class SubjectStructure
     }
 
     /// <summary>
-    /// The reference under which the structure of <paramref name="subject"/> is recorded and linked: it has no
+    /// The reference under which the structure of <paramref name="subject"/> is recorded as a dependency: it has no
     /// property name, so it is never a property of the subject.
     /// </summary>
     internal static PropertyReference Of(IInterceptorSubject subject) => new(subject, null!);
 
     /// <summary>
-    /// The reference under which the children of <paramref name="subject"/> are recorded and linked: its name contains
+    /// The reference under which the children of <paramref name="subject"/> are recorded as a dependency: its name contains
     /// a name starting with a null character, which the registry rejects for an added property.
     /// </summary>
     internal static PropertyReference ChildrenOf(IInterceptorSubject subject) => new(subject, ChildrenName);
