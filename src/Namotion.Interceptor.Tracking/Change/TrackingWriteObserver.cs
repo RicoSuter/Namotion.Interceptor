@@ -80,7 +80,7 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
     /// </summary>
     internal static void OnStructureChanged(IInterceptorSubject subject, bool hasFailed = false)
     {
-        // No cell has data while the structure gate is not raised, see "Structure gate" in
+        // No structure dependency has data while the structure gate is not raised, see "Structure gate" in
         // docs/design/tracking-derived-properties.md.
         if (!SubjectStructure.IsGateRaised)
         {
@@ -89,7 +89,7 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
 
         // W2: the structure changed before its data is looked up.
         Interlocked.MemoryBarrier();
-        RequestCellRecalculations(SubjectStructure.Of(subject), hasFailed);
+        RequestStructureRecalculations(SubjectStructure.Of(subject), hasFailed);
     }
 
     /// <summary>
@@ -105,13 +105,13 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
             return;
         }
 
-        // W2, once for every cell: all of them changed before the first data lookup.
+        // W2, once for every structure dependency: all of them changed before the first data lookup.
         Interlocked.MemoryBarrier();
-        RequestCellRecalculations(SubjectStructure.Of(subject), hasFailed: false);
-        RequestCellRecalculations(SubjectStructure.ChildrenOf(holder), hasFailed: false);
+        RequestStructureRecalculations(SubjectStructure.Of(subject), hasFailed: false);
+        RequestStructureRecalculations(SubjectStructure.ChildrenOf(holder), hasFailed: false);
         if (isHolderStructureChanged)
         {
-            RequestCellRecalculations(SubjectStructure.Of(holder), hasFailed: false);
+            RequestStructureRecalculations(SubjectStructure.Of(holder), hasFailed: false);
         }
     }
 
@@ -127,23 +127,23 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
             return;
         }
 
-        // W2, once for every cell: all of them changed before the first data lookup.
+        // W2, once for every structure dependency: all of them changed before the first data lookup.
         Interlocked.MemoryBarrier();
         foreach (var child in children)
         {
-            RequestCellRecalculations(SubjectStructure.Of(child.Subject), hasFailed: false);
+            RequestStructureRecalculations(SubjectStructure.Of(child.Subject), hasFailed: false);
         }
 
-        RequestCellRecalculations(SubjectStructure.ChildrenOf(holder), hasFailed: false);
+        RequestStructureRecalculations(SubjectStructure.ChildrenOf(holder), hasFailed: false);
     }
 
-    private static void RequestCellRecalculations(PropertyReference cell, bool hasFailed)
+    private static void RequestStructureRecalculations(PropertyReference structure, bool hasFailed)
     {
-        var data = cell.TryGetDerivedPropertyData();
+        var data = structure.TryGetDerivedPropertyData();
         if (data is not null)
         {
             RequestRecalculations(
-                new PropertyWriteObservation(cell, isWritten: true, rawTimestamp: 0, isDerivedRecalculation: false, depth: 0, hasFailed: hasFailed),
+                new PropertyWriteObservation(structure, isWritten: true, rawTimestamp: 0, isDerivedRecalculation: false, depth: 0, hasFailed: hasFailed),
                 data, segment: null);
         }
     }
