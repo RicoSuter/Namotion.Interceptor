@@ -27,6 +27,7 @@ internal sealed class SingleCompletionIncomingRequest : IEndpointIncomingRequest
     {
         // Claimed on entry, not when the response is set: the forwarded call sets the response itself once
         // the service returns, so it cannot be dropped later, and a completion arriving meanwhile must be.
+        // This relies on the SDK's CallAsync completing the request on every path, success and failure.
         // For the same reason a failure of the forwarded call must not complete the request again here.
         return TryClaim() ? _request.CallAsync(cancellationToken) : default;
     }

@@ -730,6 +730,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             }
 
             Interlocked.Exchange(ref _needsFullStateSync, 0);
+            Interlocked.Exchange(ref _responseMismatchSyncPending, 0);
 
             // Read and clear session inside lock to prevent race with OnReconnectComplete
             sessionToDispose = Volatile.Read(ref _session);
@@ -986,6 +987,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
         SetSession(null);
         Interlocked.Exchange(ref _needsFullStateSync, 0);
+        Interlocked.Exchange(ref _responseMismatchSyncPending, 0);
         ReadAfterWriteManager?.ClearPendingReads();
         _source.ReconnectionMetrics.RecordAbandoned();
     }

@@ -33,7 +33,7 @@ public class OpcUaStandardServerRequestCompletionTests
         {
             foreach (var guardedRequest in guardedRequests)
             {
-                barrier.SignalAndWait();
+                Assert.True(barrier.SignalAndWait(TestTimeouts.Default), "The other race participant never reached the barrier.");
                 guardedRequest.CallAsync().AsTask().GetAwaiter().GetResult();
             }
         });
@@ -42,7 +42,7 @@ public class OpcUaStandardServerRequestCompletionTests
         {
             foreach (var guardedRequest in guardedRequests)
             {
-                barrier.SignalAndWait();
+                Assert.True(barrier.SignalAndWait(TestTimeouts.Default), "The other race participant never reached the barrier.");
                 guardedRequest.OperationCompleted(null, StatusCodes.BadServerHalted);
             }
         });

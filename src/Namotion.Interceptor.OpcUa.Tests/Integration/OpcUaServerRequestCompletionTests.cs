@@ -9,11 +9,19 @@ using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 
+[CollectionDefinition(nameof(OpcUaServerRequestCompletionTests), DisableParallelization = true)]
+public class OpcUaServerRequestCompletionCollection;
+
 /// <summary>
 /// A request completed a second time can hand its response to a later request. These pin that the server
 /// ignores the second completion, so later calls still receive the responses to their own requests.
 /// </summary>
+/// <remarks>
+/// Runs alone because, without the guard, the shifted response poisons the SDK's process-wide response
+/// pool, which every other server in the test process draws from.
+/// </remarks>
 [Trait("Category", "Integration")]
+[Collection(nameof(OpcUaServerRequestCompletionTests))]
 public class OpcUaServerRequestCompletionTests
 {
     private const string CompleteTwiceValue = "complete-twice";

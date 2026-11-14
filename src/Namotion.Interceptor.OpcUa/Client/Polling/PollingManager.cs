@@ -248,10 +248,17 @@ internal sealed class PollingManager : IAsyncDisposable
             // Get snapshot of items to poll
             var itemsToRead = _pollingItems.Values.ToArray();
 
+            // Capped at the server's read limit: past it the SDK splits the read itself and reuses the request
+            // header, so only its last split would be checked against the request handle.
+            var maxNodesPerRead = session.OperationLimits?.MaxNodesPerRead ?? 0;
+            var batchLimit = maxNodesPerRead > 0 && maxNodesPerRead < (uint)_configuration.PollingBatchSize
+                ? (int)maxNodesPerRead
+                : _configuration.PollingBatchSize;
+
             // Process in batches using direct indexing
-            for (int i = 0; i < itemsToRead.Length; i += _configuration.PollingBatchSize)
+            for (int i = 0; i < itemsToRead.Length; i += batchLimit)
             {
-                var batchSize = Math.Min(_configuration.PollingBatchSize, itemsToRead.Length - i);
+                var batchSize = Math.Min(batchLimit, itemsToRead.Length - i);
                 var batch = new ArraySegment<PollingItem>(itemsToRead, i, batchSize);
                 await ReadBatchAsync(session, batch, cancellationToken).ConfigureAwait(false);
             }

@@ -37,11 +37,12 @@ internal class OpcUaStandardServer : StandardServer
         catch (Exception exception)
         {
             // Completed here and not rethrown, so the endpoint's own catch never adds a completion to one
-            // the queue may already have made.
-            _logger.LogDebug(exception, "Failed to schedule an incoming OPC UA request.");
+            // the queue may already have made. Completed before logging, so a throwing logger cannot leave
+            // the request unclaimed.
             guardedRequest.OperationCompleted(null, exception is ObjectDisposedException
                 ? new ServiceResult(StatusCodes.BadServerHalted)
                 : new ServiceResult(exception));
+            _logger.LogDebug(exception, "Failed to schedule an incoming OPC UA request.");
         }
     }
 
