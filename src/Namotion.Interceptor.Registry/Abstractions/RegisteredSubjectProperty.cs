@@ -337,7 +337,12 @@ public class RegisteredSubjectProperty
     public RegisteredSubjectProperty[] Attributes
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => AttributesCache = (AttributesCache ?? Parent.GetPropertyAttributes(Name).ToArray());
+        get
+        {
+            // Recorded on every call, since the cache is cleared when a property is added.
+            SubjectStructure.RecordRead(Parent.Subject);
+            return AttributesCache ??= Parent.GetPropertyAttributes(Name).ToArray();
+        }
     }
     
     /// <summary>
