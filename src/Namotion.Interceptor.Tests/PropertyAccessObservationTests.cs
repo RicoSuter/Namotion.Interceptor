@@ -126,6 +126,18 @@ public sealed class PropertyAccessObservationTests : IDisposable
         Assert.Equal(0, PropertyAccessObservation.WriteDepth);
     }
 
+    [Fact]
+    public void WhenAnotherWriteObserverIsInstalled_ThenInstallingADifferentOneThrowsAndTheSameOneIsKept()
+    {
+        // Act
+        PropertyAccessObservation.SetWriteObserver(_observer);
+        var exception = Record.Exception(() => PropertyAccessObservation.SetWriteObserver(new RecordingObserver()));
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(exception);
+        Assert.Same(_observer, PropertyAccessObservation.WriteObserver);
+    }
+
     private sealed class RecordingObserver : IPropertyReadObserver, IPropertyWriteObserver
     {
         public List<PropertyReference> Reads { get; } = [];
