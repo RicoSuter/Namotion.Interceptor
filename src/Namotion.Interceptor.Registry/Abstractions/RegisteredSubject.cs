@@ -323,7 +323,7 @@ public class RegisteredSubject
     /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
-    /// <exception cref="ArgumentException"><paramref name="name"/> contains a null character.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is the reserved name of the children of a subject, <c>"\0children"</c>.</exception>
     public RegisteredSubjectProperty AddProperty(
         string name,
         Type type,
@@ -331,10 +331,10 @@ public class RegisteredSubject
         Action<IInterceptorSubject, object?>? setValue,
         params Attribute[] attributes)
     {
-        // Reserved: derived property tracking records the children of a subject under a name with a null character.
-        if (name.Contains('\0'))
+        // Derived property tracking records the children of a subject under this name (SubjectStructure.ChildrenName).
+        if (name == "\0children")
         {
-            throw new ArgumentException("A property name must not contain a null character.", nameof(name));
+            throw new ArgumentException("The property name is reserved for the children of a subject.", nameof(name));
         }
 
         Subject.AddProperties(new SubjectPropertyMetadata(
