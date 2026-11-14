@@ -336,23 +336,32 @@ public class RegisteredSubject
             isIntercepted: true,
             isDynamic: true));
 
-        var property = AddPropertyInternal(name, type, attributes);
-
-        // Fires a null→value transition for lifecycle tracking of subject-valued initial values.
-        if (property.Reference.Metadata.IsDerived)
+        try
         {
-            // TODO(perf): AttachProperty has already evaluated the getter and seeded LastKnownValue, yet
-            // publishing reads it again, and once more for the change notification when one is consumed.
-            // For derived-with-setter the write also re-enters RecalculateDerivedProperty, another
-            // evaluation. Consider a dedicated lifecycle notification for derived properties.
-            property.Reference.PublishInitialDerivedPropertyValue();
-        }
-        else
-        {
-            property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject), null, delegate { });
-        }
+            var property = AddPropertyInternal(name, type, attributes);
 
-        return property;
+            // Fires a null→value transition for lifecycle tracking of subject-valued initial values.
+            if (property.Reference.Metadata.IsDerived)
+            {
+                // TODO(perf): AttachProperty has already evaluated the getter and seeded LastKnownValue, yet
+                // publishing reads it again, and once more for the change notification when one is consumed.
+                // For derived-with-setter the write also re-enters RecalculateDerivedProperty, another
+                // evaluation. Consider a dedicated lifecycle notification for derived properties.
+                property.Reference.PublishInitialDerivedPropertyValue();
+            }
+            else
+            {
+                property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject), null, delegate { });
+            }
+
+            return property;
+        }
+        finally
+        {
+            // Reported once the property is attached: outside the lifecycle lock, this recalculates and publishes
+            // the derived properties that read the registered properties, which can throw.
+            SubjectStructure.Changed(Subject);
+        }
     }
 
     private RegisteredSubjectProperty AddPropertyInternal(string name, Type type, Attribute[] attributes)
@@ -373,7 +382,6 @@ public class RegisteredSubject
             }
         }
 
-        SubjectStructure.Changed(Subject);
         Subject.AttachSubjectProperty(subjectProperty.Reference);
         return subjectProperty;
     }

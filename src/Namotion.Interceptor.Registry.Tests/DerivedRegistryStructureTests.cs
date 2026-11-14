@@ -140,6 +140,37 @@ public class DerivedRegistryStructureTests
     }
 
     [Fact]
+    public void WhenObserverOfAPropertyReaderThrows_ThenAddedDerivedPropertyIsAttachedAndTheExceptionPropagates()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new StructureHolder(context);
+        var target = new RegistryTarget();
+        root.Target = target;
+        var registered = target.TryGetRegisteredSubject()!;
+        root.Reader = new StructureReader { Read = () => registered.Properties.Length.ToString() };
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Subject == root.Reader)
+            {
+                throw new InvalidOperationException();
+            }
+        });
+
+        // Act
+        var exception = Record.Exception(() => registered.AddDerivedProperty<int>("Doubled", _ => target.Value * 2));
+        changes.Clear();
+        target.Value = 5;
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(exception);
+        var change = Assert.Single(changes, c => c.Property.Name == "Doubled");
+        Assert.Equal(10, change.GetNewValue<int>());
+    }
+
+    [Fact]
     public void WhenGetterSideEffectRunsReconciliation_ThenRegistryReadsAreNotRecorded()
     {
         // Arrange: each evaluation assigns a new target to another holder, whose reconciliation looks up the
