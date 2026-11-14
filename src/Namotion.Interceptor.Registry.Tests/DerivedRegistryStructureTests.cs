@@ -206,6 +206,7 @@ public class DerivedRegistryStructureTests
 
     [Theory]
     [InlineData("ContextAttach")]
+    [InlineData("ContextAttachOfRootWithChild")]
     [InlineData("ContextDetach")]
     [InlineData("ReferenceAddedBeforeDescent")]
     [InlineData("ReferenceAddedAfterDescent")]
@@ -220,7 +221,7 @@ public class DerivedRegistryStructureTests
         var target = new RegistryTarget();
         ThrowingHandlerBase handler = operation switch
         {
-            "ReferenceAddedBeforeDescent" => new ThrowingHandlerBeforeDescent(target),
+            "ReferenceAddedBeforeDescent" or "ContextAttachOfRootWithChild" => new ThrowingHandlerBeforeDescent(target),
             "ReferenceAddedAfterDescent" => new ThrowingHandlerAfterDescent(target),
             "ReferenceRemovedBySubjectDetaching" => new ThrowingHandler(new RegistryTarget()),
             _ => new ThrowingHandler(target)
@@ -228,10 +229,12 @@ public class DerivedRegistryStructureTests
         context.WithService(() => handler);
         var targetContext = ((IInterceptorSubject)target).Context;
         var registry = context.GetService<ISubjectRegistry>();
+        var holder = new StructureHolder { Target = target };
         Func<string?> read = () => (target.TryGetRegisteredSubject() is not null).ToString();
         Action act = operation switch
         {
             "ContextAttach" => () => targetContext.AddFallbackContext(context),
+            "ContextAttachOfRootWithChild" => () => ((IInterceptorSubject)holder).Context.AddFallbackContext(context),
             "ContextDetach" => () => targetContext.RemoveFallbackContext(context),
             "ReferenceAddedBeforeDescent" or "ReferenceAddedAfterDescent" => () => root.Target = target,
             "ReferenceRemoved" or "ReferenceRemovedBySubjectDetaching" => () => root.Target = null,
@@ -241,6 +244,11 @@ public class DerivedRegistryStructureTests
         if (operation == "ContextDetach")
         {
             targetContext.AddFallbackContext(context);
+        }
+        else if (operation == "ContextAttachOfRootWithChild")
+        {
+            // The handler throws in the child's attach, after the child's registry handler registered the root.
+            read = () => (registry.TryGetRegisteredSubject(holder) is not null).ToString();
         }
         else if (operation is "ReferenceAddedBeforeDescent" or "ReferenceAddedAfterDescent")
         {
