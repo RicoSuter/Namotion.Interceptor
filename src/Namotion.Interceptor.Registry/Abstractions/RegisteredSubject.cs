@@ -86,6 +86,9 @@ public class RegisteredSubject
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void InvalidateParentsSnapshot() => Volatile.Write(ref _parentsSnapshot, null);
 
+    /// <summary>The registered properties, replaced as a whole when a property is added. Not recorded.</summary>
+    internal FrozenDictionary<string, RegisteredSubjectProperty> RegisteredProperties => _properties;
+
     /// <summary>
     /// Gets all registered properties.
     /// </summary>
@@ -108,7 +111,7 @@ public class RegisteredSubject
         return GetPropertyAttributes(_properties, propertyName);
     }
 
-    private static IEnumerable<RegisteredSubjectProperty> GetPropertyAttributes(
+    internal static IEnumerable<RegisteredSubjectProperty> GetPropertyAttributes(
         FrozenDictionary<string, RegisteredSubjectProperty> properties, string propertyName)
     {
         foreach (var property in properties.Values)
@@ -384,11 +387,6 @@ public class RegisteredSubject
                 .ToFrozenDictionary(p => p.Key, p => p.Value);
 
             _properties = newProperties;
-
-            foreach (var property in newProperties.Values)
-            {
-                property.AttributesCache = null;
-            }
         }
 
         Subject.AttachSubjectProperty(subjectProperty.Reference);

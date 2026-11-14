@@ -289,4 +289,22 @@ public class AttributeTests
         Assert.False((bool)computedAttribute.GetValue()!);
         Assert.Contains(changes, c => !c.GetNewValue<bool>());
     }
+
+    [Fact]
+    public void WhenAttributesComputedBeforeAnAddAreCachedAfterIt_ThenTheyListTheAddedAttribute()
+    {
+        // Arrange: a read on another thread computes the attributes, an attribute is added, then the read caches them.
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var person = new Person(context);
+        var property = person.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.FirstName))!;
+        var count = property.Attributes.Length;
+        var computedBeforeTheAdd = property.AttributesCache;
+
+        // Act
+        property.AddAttribute<int>("Added", _ => 1);
+        property.AttributesCache = computedBeforeTheAdd;
+
+        // Assert
+        Assert.Equal(count + 1, property.Attributes.Length);
+    }
 }
