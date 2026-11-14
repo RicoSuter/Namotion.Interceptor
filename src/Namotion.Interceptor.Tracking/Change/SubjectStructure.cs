@@ -9,17 +9,17 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// reference count, its parents and its registered properties, and its children, the subjects attached through its
 /// properties. Infrastructure for the lifecycle and the registry.
 /// </summary>
-/// <remarks>See "Structure Cells" in docs/design/tracking-derived-properties.md.</remarks>
+/// <remarks>See "Structure Dependencies" in docs/design/tracking-derived-properties.md.</remarks>
 [EditorBrowsable(EditorBrowsableState.Never)]
 public static class SubjectStructure
 {
-    // 0 while no cell was ever created, 1 while the first creation raises the gate, 2 once it is marked raised.
+    // 0 while no structure dependency was ever created, 1 while the first creation raises the gate, 2 once it is marked raised.
     // A change counts 1 as raised, which "Structure gate" in docs/design/tracking-derived-properties.md depends on: a
     // change that reads the gate after the barrier may still read 1. Only a creation waits for 2.
     private static int _gateState;
 
     /// <summary>
-    /// Whether a cell may have data. Not raised only while no cell of any subject was ever created; never lowered.
+    /// Whether a structure dependency may have data. Not raised only while no structure dependency of any subject was ever created; never lowered.
     /// </summary>
     internal static bool IsGateRaised
     {
@@ -73,7 +73,7 @@ public static class SubjectStructure
     internal static bool IsStructure(in PropertyReference reference) => reference.Name is null or ChildrenName;
 
     /// <summary>
-    /// Raises the structure gate. Called before the data of a cell is created, and returns only once the gate is
+    /// Raises the structure gate. Called before the data of a structure dependency is created, and returns only once the gate is
     /// raised, also to a caller that lost the race to raise it.
     /// </summary>
     internal static void RaiseGate()
