@@ -13,7 +13,9 @@ namespace Namotion.Interceptor.Tracking.Change;
 [EditorBrowsable(EditorBrowsableState.Never)]
 public static class SubjectStructure
 {
-    // 0 while no cell was ever created, 1 while the first creation raises the gate, 2 once it is raised.
+    // 0 while no cell was ever created, 1 while the first creation raises the gate, 2 once it is marked raised.
+    // A change counts 1 as raised, which "Structure gate" in docs/design/tracking-derived-properties.md depends on: a
+    // change that reads the gate after the barrier may still read 1. Only a creation waits for 2.
     private static int _gateState;
 
     /// <summary>
