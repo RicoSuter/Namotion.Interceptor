@@ -13,6 +13,18 @@ namespace Namotion.Interceptor.Tracking.Change;
 [EditorBrowsable(EditorBrowsableState.Never)]
 public static class SubjectStructure
 {
+    // 0 while no cell was ever created, 1 while the first creation raises the gate, 2 once it is raised.
+    private static int _gateState;
+
+    /// <summary>
+    /// Whether a cell may have data. Not raised only while no cell of any subject was ever created; never lowered.
+    /// </summary>
+    internal static bool IsGateRaised
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Volatile.Read(ref _gateState) != 0;
+    }
+
     /// <summary>Records that the running derived getter reads the structure of <paramref name="subject"/>.</summary>
     /// <param name="subject">The subject. Called before its structure is read.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -57,6 +69,36 @@ public static class SubjectStructure
     internal static PropertyReference ChildrenOf(IInterceptorSubject subject) => new(subject, ChildrenName);
 
     internal static bool IsStructure(in PropertyReference reference) => reference.Name is null or ChildrenName;
+
+    /// <summary>
+    /// Raises the structure gate. Called before the data of a cell is created, and returns only once the gate is
+    /// raised, also to a caller that lost the race to raise it.
+    /// </summary>
+    internal static void RaiseGate()
+    {
+        if (Volatile.Read(ref _gateState) == 2)
+        {
+            return;
+        }
+
+        if (Interlocked.CompareExchange(ref _gateState, 1, 0) == 0)
+        {
+            // Pairs with the gate read of a structure change, which has no fence before it, see "Structure gate" in
+            // docs/design/tracking-derived-properties.md.
+            try
+            {
+                Interlocked.MemoryBarrierProcessWide();
+            }
+            finally
+            {
+                Volatile.Write(ref _gateState, 2);
+            }
+
+            return;
+        }
+
+        SpinWait.SpinUntil(static () => Volatile.Read(ref _gateState) == 2);
+    }
 
     internal const string ChildrenName = "\0children";
 }

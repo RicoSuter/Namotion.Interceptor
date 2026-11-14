@@ -70,6 +70,13 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
     /// </summary>
     internal static void OnStructureChanged(IInterceptorSubject subject, bool hasFailed = false)
     {
+        // No cell has data while the structure gate is not raised, see "Structure gate" in
+        // docs/design/tracking-derived-properties.md.
+        if (!SubjectStructure.IsGateRaised)
+        {
+            return;
+        }
+
         // W2: the structure changed before its data is looked up.
         Interlocked.MemoryBarrier();
         RequestCellRecalculations(SubjectStructure.Of(subject), hasFailed);
@@ -83,6 +90,11 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
     /// </summary>
     internal static void OnStructureChanged(IInterceptorSubject subject, IInterceptorSubject holder, bool isHolderStructureChanged)
     {
+        if (!SubjectStructure.IsGateRaised)
+        {
+            return;
+        }
+
         // W2, once for every cell: all of them changed before the first data lookup.
         Interlocked.MemoryBarrier();
         RequestCellRecalculations(SubjectStructure.Of(subject), hasFailed: false);
@@ -100,6 +112,11 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
     /// </summary>
     internal static void OnChildrenMoved(ReadOnlySpan<SubjectChild> children, IInterceptorSubject holder)
     {
+        if (!SubjectStructure.IsGateRaised)
+        {
+            return;
+        }
+
         // W2, once for every cell: all of them changed before the first data lookup.
         Interlocked.MemoryBarrier();
         foreach (var child in children)
