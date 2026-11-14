@@ -1,0 +1,34 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.History.Mcp.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace HomeBlaze.History.Mcp
+{
+    public readonly struct HistoryCoverageSummary : System.IEquatable<HomeBlaze.History.Mcp.HistoryCoverageSummary>
+    {
+        public HistoryCoverageSummary(double Ratio, int Gaps, System.TimeSpan LargestGap) { }
+        public int Gaps { get; init; }
+        public System.TimeSpan LargestGap { get; init; }
+        public double Ratio { get; init; }
+    }
+    public class HistoryMcpToolProvider : Namotion.Interceptor.Mcp.Abstractions.IMcpToolProvider
+    {
+        public HistoryMcpToolProvider(System.Func<Namotion.Interceptor.IInterceptorSubject> rootSubjectProvider, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.History.Mcp.HistoryMcpToolProvider> logger) { }
+        public System.Collections.Generic.IEnumerable<Namotion.Interceptor.Mcp.McpToolInfo> GetTools() { }
+    }
+    public static class HistoryToolFormatting
+    {
+        public static string FormatDuration(System.TimeSpan duration) { }
+        public static string FormatTimestamp(System.DateTimeOffset value, System.TimeZoneInfo? timeZone = null) { }
+        public static HomeBlaze.History.Mcp.HistoryCoverageSummary Summarize(System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> ranges, System.DateTimeOffset from, System.DateTimeOffset to) { }
+    }
+    public static class HistoryToolParsing
+    {
+        public static readonly System.Collections.Generic.IReadOnlySet<string> AllAggregations;
+        public static string? NormalizeAggregation(string? raw) { }
+        public static System.TimeSpan? ParseBucket(string? raw) { }
+        public static HomeBlaze.History.Abstractions.HistoryCalendarUnit? ParseCalendarUnit(string? raw) { }
+        public static System.TimeZoneInfo ParseTimeZone(string id) { }
+        public static System.DateTimeOffset ParseTimestamp(string raw, System.TimeZoneInfo timeZone) { }
+        public static string ValueType(System.Type type) { }
+    }
+}

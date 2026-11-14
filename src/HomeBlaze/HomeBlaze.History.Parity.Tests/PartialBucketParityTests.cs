@@ -94,14 +94,25 @@ public class PartialBucketParityTests
 
     [Theory]
     [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
-    public async Task WhenABucketIsPartial_ThenCountAndSumAreNull(ParityStoreFactory factory)
+    public async Task WhenABucketIsPartial_ThenCountAndSumCoverItsCoveredPart(ParityStoreFactory factory)
     {
-        // Arrange - the partial bucket is served (Last), only Count and Sum would underreport it.
-        using var store = await CreateAsync(factory, (6, 1d), (12, 2d));
+        // Arrange - the sample at 2 lies before the coverage start, so the partial bucket counts 6 and 7 only.
+        using var store = await CreateAsync(factory, (2, 9d), (6, 1d), (7, 3d), (12, 2d));
 
         // Act & Assert
-        ParityAssert.NumbersEqual([1d, 2d], store.Query(Query(HistoryAggregations.Last)));
-        ParityAssert.NumbersEqual([null, 1d], store.Query(Query(HistoryAggregations.Count)));
+        ParityAssert.NumbersEqual([2d, 1d], store.Query(Query(HistoryAggregations.Count)));
+        ParityAssert.NumbersEqual([4d, 2d], store.Query(Query(HistoryAggregations.Sum)));
+    }
+
+    [Theory]
+    [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
+    public async Task WhenAPartialBucketHasNoCoveredSamples_ThenCountIsZeroAndSumIsNull(ParityStoreFactory factory)
+    {
+        // Arrange - the same as a fully covered bucket without samples.
+        using var store = await CreateAsync(factory, (12, 2d));
+
+        // Act & Assert
+        ParityAssert.NumbersEqual([0d, 1d], store.Query(Query(HistoryAggregations.Count)));
         ParityAssert.NumbersEqual([null, 2d], store.Query(Query(HistoryAggregations.Sum)));
     }
 

@@ -104,6 +104,66 @@ public class SubjectComponentRegistryTests
     }
 
     [Fact]
+    public void WhenOnlyAnInterfaceOfTheSubjectHasAnEditComponent_ThenHasComponentIsTrue()
+    {
+        // Arrange
+        var registry = CreateRegistryWithScanning();
+
+        // Act
+        var hasEditComponent = registry.HasComponent(typeof(TestConfigurableSubject), SubjectComponentType.Edit);
+
+        // Assert
+        Assert.True(hasEditComponent);
+    }
+
+    [Fact]
+    public void WhenOnlyABaseTypeOfTheSubjectHasAnEditComponent_ThenHasComponentIsTrue()
+    {
+        // Arrange
+        var registry = CreateRegistryWithScanning();
+
+        // Act
+        var hasEditComponent = registry.HasComponent(typeof(TestDerivedSubject), SubjectComponentType.Edit);
+
+        // Assert
+        Assert.True(hasEditComponent);
+    }
+
+    [Theory]
+    [InlineData(typeof(TestSubject))]
+    [InlineData(typeof(TestConfigurableSubject))]
+    [InlineData(typeof(TestBaseSubject))]
+    [InlineData(typeof(TestDerivedSubject))]
+    [InlineData(typeof(TestPageSubject))]
+    public void WhenComponentIsChecked_ThenHasComponentAgreesWithGetComponent(Type subjectType)
+    {
+        // Arrange
+        var registry = CreateRegistryWithScanning();
+
+        foreach (var componentType in Enum.GetValues<SubjectComponentType>())
+        {
+            // Act
+            var hasComponent = registry.HasComponent(subjectType, componentType);
+            var component = registry.GetComponent(subjectType, componentType);
+
+            // Assert
+            Assert.Equal(component is not null, hasComponent);
+        }
+    }
+
+    [Fact]
+    public void WhenSubjectHasOnlyAnInheritedEditComponent_ThenItHasNoPageComponent()
+    {
+        // Arrange
+        var registry = CreateRegistryWithScanning();
+
+        // Act & Assert
+        Assert.False(registry.HasComponent(typeof(TestConfigurableSubject), SubjectComponentType.Page));
+        Assert.False(registry.HasComponent(typeof(TestDerivedSubject), SubjectComponentType.Page));
+        Assert.True(registry.HasComponent(typeof(TestPageSubject), SubjectComponentType.Page));
+    }
+
+    [Fact]
     public void ScanAssemblies_FindsMultipleAttributes()
     {
         // Arrange
@@ -131,4 +191,23 @@ public class SubjectComponentRegistryTests
 
     [SubjectComponent(SubjectComponentType.Widget, typeof(TestSubject), Name = "temperature")]
     public class TestWidget2Component { }
+
+    public interface ITestConfigurable { }
+
+    public class TestConfigurableSubject : ITestConfigurable { }
+
+    [SubjectComponent(SubjectComponentType.Edit, typeof(ITestConfigurable))]
+    public class TestConfigurableEditComponent { }
+
+    public class TestBaseSubject { }
+
+    public class TestDerivedSubject : TestBaseSubject { }
+
+    [SubjectComponent(SubjectComponentType.Edit, typeof(TestBaseSubject))]
+    public class TestBaseEditComponent { }
+
+    public class TestPageSubject { }
+
+    [SubjectComponent(SubjectComponentType.Page, typeof(TestPageSubject))]
+    public class TestPageComponent { }
 }

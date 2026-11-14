@@ -44,6 +44,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
     internal WriteRetryQueue WriteRetryQueue { get; }
 
+    /// <summary>
+    /// The clock the connected processor measures its <see cref="ChangeQueueProcessor.TeardownFlushBound"/> on.
+    /// </summary>
+    internal TimeProvider TeardownTimeProvider { get; init; } = TimeProvider.System;
+
     protected SubjectSourceBase(
         IInterceptorSubjectContext context,
         ILogger logger,
@@ -168,7 +173,16 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             // unwind may have found nothing registered yet.
             if (State == SourceState.Stopped)
             {
-                UnwindRegistrations(monitors);
+                try
+                {
+                    UnwindRegistrations(monitors);
+                }
+                catch (Exception unwindException)
+                {
+                    // Logged, not thrown: it would replace the registration failure being propagated.
+                    _logger.LogError(unwindException, "Unwinding a failed source registration threw.");
+                }
+
                 throw;
             }
 
@@ -199,11 +213,17 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     private void UnwindRegistrations(ImmutableArray<SourceMonitor> monitors)
     {
         ImmutableInterlocked.InterlockedExchange(ref _registeredMonitors, ImmutableArray<SourceMonitor>.Empty);
-        foreach (var monitor in monitors)
-        {
-            monitor.Unregister(this);
-        }
+        UnregisterFromAll(monitors);
     }
+
+    /// <summary>
+    /// Unregisters from every monitor, even when one throws, then reports the failures together.
+    /// </summary>
+    // Unregister re-evaluates pending waits, so a poisoned anchor makes it throw, and both callers
+    // have already taken and cleared the field, so whatever a first throw skipped could never be
+    // unwound afterwards.
+    private void UnregisterFromAll(ImmutableArray<SourceMonitor> monitors)
+        => ExceptionAggregation.ForEach(monitors, monitor => monitor.Unregister(this));
 
     /// <inheritdoc />
     protected sealed override async Task RunAsync(CancellationToken stoppingToken)
@@ -297,7 +317,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                         completionHandler: async teardownToken =>
                         {
                             await WriteRetryQueue.FlushAsync(this, teardownToken).ConfigureAwait(false);
-                        });
+                        })
+                    {
+                        TeardownTimeProvider = TeardownTimeProvider
+                    };
 
                     // Declared after the processor so it is released first, which is what lets the
                     // retry loop's next attempt register its own: a second Register while one is
@@ -644,12 +667,23 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         // on a later call, and so the field is never read while another thread is writing it.
         var monitors = ImmutableInterlocked.InterlockedExchange(
             ref _registeredMonitors, ImmutableArray<SourceMonitor>.Empty);
-        foreach (var monitor in monitors)
-        {
-            monitor.Unregister(this);
-        }
 
-        WriteRetryQueue.Dispose();
-        base.Dispose();
+        try
+        {
+            UnregisterFromAll(monitors);
+        }
+        finally
+        {
+            // base.Dispose cancels the pump's token source, so nothing may skip it: a disposed
+            // source must not keep pumping.
+            try
+            {
+                WriteRetryQueue.Dispose();
+            }
+            finally
+            {
+                base.Dispose();
+            }
+        }
     }
 }

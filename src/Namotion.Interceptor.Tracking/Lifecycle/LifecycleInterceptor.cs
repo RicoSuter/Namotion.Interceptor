@@ -63,6 +63,15 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
     }
 
+    /// <summary>
+    /// The property references that hold the subject now. Read only while this interceptor dispatches a lifecycle
+    /// change, which holds its lock.
+    /// </summary>
+    internal PropertyReferenceSet GetPropertyReferences(IInterceptorSubject subject)
+    {
+        return _attachedSubjects.TryGetValue(subject, out var set) ? set : default;
+    }
+
     public void AttachSubjectToContext(IInterceptorSubject subject)
     {
         var collectedSubjects = GetList();
@@ -260,7 +269,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             Index = index,
             ReferenceCount = count,
             IsPropertyReferenceRemoved = true,
-            IsContextDetach = isLastDetach
+            IsContextDetach = isLastDetach,
+            Interceptor = this
         };
 
         if (isLastDetach)
@@ -420,15 +430,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 return;
             }
 
-            // Refresh child index metadata for retained subjects whose
-            // positions may have shifted in the new collection.
-            if (newValue is IEnumerable && oldTouchedSubjects.Overlaps(newTouchedSubjects))
+            // Report kept subjects whose key or position changed. A write between two single references
+            // keeps no subject, since writing the same one again returns early. The refresh uses
+            // newTouchedSubjects up, so nothing may read the set after it.
+            if (lastProcessed is IEnumerable || newValue is IEnumerable)
             {
-                var handlers = context.Property.Subject.Context.GetServices<IPropertyLifecycleHandler>();
-                for (var i = 0; i < handlers.Length; i++)
-                {
-                    handlers[i].RefreshCollectionProperty(context.Property, newValue);
-                }
+                ChildIndexRefresher.RefreshMovedChildren(context.Property,
+                    oldCollectedSubjects, newCollectedSubjects, oldTouchedSubjects, newTouchedSubjects);
             }
         }
         finally
@@ -549,13 +557,23 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
         HashSet<IInterceptorSubject>? touchedSubjects)
     {
-        foreach (DictionaryEntry entry in dictionary)
+        // IDictionaryEnumerator hands out key and value separately, where foreach
+        // would box a DictionaryEntry per entry.
+        var enumerator = dictionary.GetEnumerator();
+        try
         {
-            if (entry.Value is IInterceptorSubject subjectItem)
+            while (enumerator.MoveNext())
             {
-                touchedSubjects?.Add(subjectItem);
-                collectedSubjects.Add((subjectItem, property, entry.Key));
+                if (enumerator.Value is IInterceptorSubject subjectItem)
+                {
+                    touchedSubjects?.Add(subjectItem);
+                    collectedSubjects.Add((subjectItem, property, enumerator.Key));
+                }
             }
+        }
+        finally
+        {
+            (enumerator as IDisposable)?.Dispose();
         }
     }
 

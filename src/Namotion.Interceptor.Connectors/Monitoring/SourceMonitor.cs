@@ -217,7 +217,7 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletion
     /// <summary>
     /// Publishes under _lock, which is what keeps delivery ordered against a concurrent
     /// Register/Unregister/Subscribe. Cannot deadlock: Publish only enqueues onto a ConcurrentQueue
-    /// and at most schedules a Task.Run, never running a handler synchronously or calling back into
+    /// and at most queues a drain, never running a handler synchronously or calling back into
     /// anything that takes _lock.
     /// </summary>
     internal void PublishUnderLock(in SourceEvent sourceEvent)
@@ -431,7 +431,7 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletion
 
             // A throw from one wait's IsBranchSynchronized must not skip re-evaluating the rest -
             // that would be a lost wakeup for every wait after it. Written out rather than delegated to
-            // ExceptionAggregation.ForEach, unlike the two cold call sites: this runs on every
+            // ExceptionAggregation.ForEach, unlike the cold call sites: this runs on every
             // property-reference add/remove tree-wide while any wait is pending, and the helper's
             // IEnumerable<T> parameter would box the ImmutableArray, heap-allocate its enumerator,
             // and allocate a closure per pass, since the lambda captures this.

@@ -1,12 +1,21 @@
 @using HomeBlaze.Components.Abstractions
 @using HomeBlaze.Components.Abstractions.Attributes
+@using HomeBlaze.Components.Abstractions.TimeZones
 @using HomeBlaze.Storage.Internal
 @using Namotion.Interceptor
 
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(RenderExpression))]
 @implements ISubjectComponent
+@inject ITimeZoneDisplay TimeZone
 
-@Expression?.Value
+@if (Expression?.Error is { } error)
+{
+    @error
+}
+else
+{
+    @Expression?.GetText(TimeZone)
+}
 
 @code {
     [Parameter]

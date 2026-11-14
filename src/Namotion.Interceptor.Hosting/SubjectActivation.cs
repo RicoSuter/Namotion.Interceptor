@@ -10,14 +10,6 @@ namespace Namotion.Interceptor.Hosting;
 internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, IDisposable
     where T : class, IInterceptorSubject
 {
-    /// <summary>
-    /// The longest disposal waits for the stop of a host that was never stopped: five seconds, after
-    /// which disposal returns and a stop still running continues unobserved.
-    /// </summary>
-    // Bounded, because the generic host disposes without stopping after a failed start, and a stuck
-    // stop must not hang the provider's disposal.
-    private static readonly TimeSpan DisposeStopTimeout = TimeSpan.FromSeconds(5);
-
     private readonly IServiceProvider _serviceProvider;
     private readonly SubjectRegistration<T> _registration;
 
@@ -92,8 +84,24 @@ internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, I
         await subject.ActivateHostedServiceAsync(_serviceProvider, handler, cancellationToken).ConfigureAwait(false);
     }
 
-    public Task StopAsync(CancellationToken cancellationToken)
-        => _host?.StopAsync(cancellationToken) ?? Task.CompletedTask;
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        if (_host is not { } host)
+        {
+            return;
+        }
+
+        // The wait bounded as well as the stop: a stop that already began, after a failed start, returns
+        // its own task, which this call's token does not reach.
+        try
+        {
+            await host.StopAsync(cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Past the host's shutdown deadline, the stop continues unobserved.
+        }
+    }
 
     /// <summary>Stops the host this activation holds, a no-op once it has been stopped.</summary>
     /// <remarks>
@@ -112,7 +120,7 @@ internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, I
             return;
         }
 
-        using var timeout = new CancellationTokenSource(DisposeStopTimeout);
+        using var timeout = new CancellationTokenSource(HostedServiceHandler.DisposeStopTimeout);
 
         // The token bounds a first stop; the wait bounds a stop already running without a deadline,
         // whose task a later StopAsync returns. Suppressed rather than thrown: when this disposal's own
@@ -123,10 +131,7 @@ internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, I
             .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
     }
 
-    /// <summary>
-    /// The synchronous form, for a provider disposed synchronously, which otherwise throws on a service
-    /// that is only asynchronously disposable.
-    /// </summary>
+    /// <inheritdoc cref="HostedServiceHandler.Dispose"/>
     /// <remarks>See <see cref="DisposeAsync"/> for the disposal ordering hazard this is subject to.</remarks>
     public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
 }

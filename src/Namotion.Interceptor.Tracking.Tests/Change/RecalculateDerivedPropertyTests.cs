@@ -523,18 +523,18 @@ public class RecalculateDerivedPropertyTests
             .WithTransactions();
         var subject = new TransactionCascadeSubject(context) { Plain = "model" };
         var property = new PropertyReference(subject, nameof(TransactionCascadeSubject.Probe));
-        using var evaluationCompleted = new ManualResetEventSlim();
-        using var workStarted = new ManualResetEventSlim();
-        using var workCompleted = new ManualResetEventSlim();
-        string? queuedRead = null;
+
+        // Needs no disposal, so a work item still running after the test ends never touches disposed state.
+        var evaluationCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<string?>? queuedWork = null;
         subject.ProbeEvaluator = value =>
         {
-            ThreadPool.QueueUserWorkItem(_ =>
+            // Starting a thread captures the execution context like queuing a work item does, and a starved
+            // thread pool cannot delay a dedicated thread past the wait below.
+            queuedWork = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
             {
-                workStarted.Set();
-                evaluationCompleted.Wait();
-                queuedRead = value.Plain;
-                workCompleted.Set();
+                evaluationCompleted.Task.GetAwaiter().GetResult();
+                return value.Plain;
             });
             return value.Plain;
         };
@@ -546,14 +546,14 @@ public class RecalculateDerivedPropertyTests
             try
             {
                 property.RecalculateDerivedProperty();
-                Assert.True(workStarted.Wait(TimeSpan.FromSeconds(10)), "queued work did not start");
             }
             finally
             {
-                evaluationCompleted.Set();
+                evaluationCompleted.SetResult();
             }
 
-            Assert.True(workCompleted.Wait(TimeSpan.FromSeconds(10)), "queued work did not finish");
+            Assert.NotNull(queuedWork);
+            var queuedRead = await queuedWork.WaitAsync(TimeSpan.FromSeconds(10));
 
             // Assert
             Assert.Equal("pending", queuedRead);

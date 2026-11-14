@@ -59,7 +59,7 @@ public static class InterceptorHostingExtensions
     /// start faults, the attachment is removed before the exception propagates.
     /// </summary>
     /// <remarks>
-    /// The token bounds the wait and not the start, which runs to completion. A wait cancelled before
+    /// The token bounds the wait and not the start, which runs to completion. A wait canceled before
     /// the start faulted leaves the attachment on the subject with its fault recorded.
     /// </remarks>
     public static async Task<IHostedServiceAttachment<T>> AttachHostedServiceAsync<T>(
@@ -75,7 +75,6 @@ public static class InterceptorHostingExtensions
 
         if (start is not null)
         {
-            // The token bounds this wait only; the transition runs to completion either way.
             await start.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -96,18 +95,133 @@ public static class InterceptorHostingExtensions
     private static void ReleaseFaultedAttachmentAndThrow(
         IInterceptorSubject subject, IHostedServiceAttachment attachment, HostedServiceHandler handler, Exception fault)
     {
-        // Released rather than only retired, unlike an explicit detach, and the stop is enqueued
+        // Released rather than only untracked, unlike an explicit detach, and the stop is enqueued
         // rather than awaited: docs/design/hosting-service-ownership.md#a-faulted-awaited-attach-releases-instead.
-        var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+        var slot = attachment.GetSlot();
         RemoveAttachment(subject, attachment);
         _ = MarkDetachedAndEnqueueStop(subject, slot, handler, CancellationToken.None);
-        ClearActivationEntry(subject, attachment);
         slot.ReleaseOwnership(handler);
 
         // Captured rather than rethrown: the fault was raised on the transition thread, and a plain
         // throw overwrites its stack trace with this one, which is the stack a user reads when a
         // failing subject aborts host startup.
         ExceptionDispatchInfo.Throw(fault);
+    }
+
+    /// <summary>
+    /// Activates the subject's own hosted service: attaches
+    /// <see cref="ISubjectHostedServiceFactory.CreateHostedService"/> as a factory attachment, which then
+    /// runs while the subject is in a hosting graph like any attachment made with
+    /// <see cref="AttachHostedService{T}"/>. Idempotent across explicit and automatic activation: every
+    /// call returns the subject's one activation until it is detached explicitly, after which the next
+    /// call attaches a fresh one. On the idempotent path <paramref name="serviceProvider"/> is ignored.
+    /// </summary>
+    /// <remarks>
+    /// Must not be called from a hosted service's stop or dispose path, because it attaches a hosted
+    /// service: docs/hosting.md#keep-the-dispose-path-out-of-the-lifecycle-lock.
+    /// </remarks>
+    /// <returns>
+    /// The activation's attachment, or null when the subject is not an <see cref="ISubjectHostedServiceFactory"/>.
+    /// </returns>
+    public static IHostedServiceAttachment? ActivateHostedService(
+        this IInterceptorSubject subject, IServiceProvider serviceProvider)
+    {
+        ArgumentNullException.ThrowIfNull(serviceProvider);
+        if (subject is not ISubjectHostedServiceFactory factory)
+        {
+            return null;
+        }
+
+        // Resolved before the add, for the reason on Attach.
+        var handler = subject.Context.TryGetService<HostedServiceHandler>();
+        var activation = subject.GetOrAddActivation(factory, serviceProvider, out var published);
+        if (published)
+        {
+            _ = StartPublishedAttachment(subject, activation.Slot, openGate: false, ref handler);
+        }
+
+        return activation;
+    }
+
+    /// <summary>
+    /// Activates and, when <paramref name="handler"/> owns the activation, waits for its start. On a
+    /// recorded start fault the activation is removed before the fault propagates, as a faulted
+    /// <see cref="AttachHostedServiceAsync{T}"/> does. The caller has opened the handler's gate.
+    /// </summary>
+    internal static async Task ActivateHostedServiceAsync(
+        this IInterceptorSubject subject,
+        IServiceProvider serviceProvider,
+        HostedServiceHandler handler,
+        CancellationToken cancellationToken)
+    {
+        if (subject.ActivateHostedService(serviceProvider) is not { } activation)
+        {
+            return;
+        }
+
+        var slot = activation.GetSlot();
+        if (!ReferenceEquals(slot.Owner, handler))
+        {
+            return;
+        }
+
+        await handler.WaitForQueuedTransitionsAsync(slot, cancellationToken).ConfigureAwait(false);
+
+        // The start's own outcome rather than Fault, for the reason on StartFault.
+        if (slot.StartFault is { } fault)
+        {
+            ReleaseFaultedAttachmentAndThrow(subject, activation, handler, fault);
+        }
+    }
+
+    /// <summary>
+    /// Returns the subject's activation unless it was detached, or publishes a new one created with
+    /// <paramref name="serviceProvider"/>, null meaning the provider of the handler that starts it.
+    /// <paramref name="published"/> is true for the call that published.
+    /// </summary>
+    /// <remarks>
+    /// The entry's lock is held only around the publish, which takes no other lock and runs no user
+    /// code, so the automatic activation inside the lifecycle lock and an explicit one that takes the
+    /// lifecycle lock afterwards cannot order the two locks oppositely.
+    /// </remarks>
+    internal static HostedServiceAttachment<IHostedService> GetOrAddActivation(
+        this IInterceptorSubject subject, ISubjectHostedServiceFactory factory, IServiceProvider? serviceProvider, out bool published)
+    {
+        var entry = (ActivationEntry)subject.Data.GetOrAdd((null, ActivationKey), static _ => new ActivationEntry())!;
+        lock (entry.Lock)
+        {
+            if (entry.Activation is { Slot.IsDetached: false } existing)
+            {
+                published = false;
+                return existing;
+            }
+
+            var activation = CreateActivation(factory, serviceProvider);
+            PublishAttachment(subject, activation);
+            entry.Activation = activation;
+            published = true;
+            return activation;
+        }
+    }
+
+    private static HostedServiceAttachment<IHostedService> CreateActivation(
+        ISubjectHostedServiceFactory factory, IServiceProvider? serviceProvider)
+    {
+        // The provider of the slot's current owner, read when the service is created rather than
+        // captured: a subject moved into a second host's graph must not get the first host's container.
+        HostedServiceSlot? slot = null;
+        slot = new HostedServiceSlot(
+            () => factory.CreateHostedService(serviceProvider ?? slot?.Owner?.ServiceProvider ?? EmptyServiceProvider.Instance),
+            subject: null);
+
+        return new HostedServiceAttachment<IHostedService>(slot);
+    }
+
+    private sealed class ActivationEntry
+    {
+        public Lock Lock { get; } = new();
+
+        public HostedServiceAttachment<IHostedService>? Activation { get; set; }
     }
 
     /// <summary>
@@ -120,7 +234,7 @@ public static class InterceptorHostingExtensions
     /// <summary>
     /// Detaches a hosted service attachment and waits for the instance to stop and be disposed. The
     /// token is handed to the instance's own <c>StopAsync</c> as well as bounding the wait, so a
-    /// cancelled token cuts the stop short; the instance is disposed either way.
+    /// canceled token cuts the stop short; the instance is disposed either way.
     /// </summary>
     public static async Task<bool> DetachHostedServiceAsync(
         this IInterceptorSubject subject, IHostedServiceAttachment attachment, CancellationToken cancellationToken)
@@ -139,221 +253,6 @@ public static class InterceptorHostingExtensions
     }
 
     /// <summary>
-    /// Activates the subject's own hosted service: attaches
-    /// <see cref="ISubjectHostedServiceFactory.CreateHostedService"/> as a factory attachment, which the
-    /// handler then runs while the subject is in a hosting graph, exactly as an attachment made with
-    /// <see cref="AttachHostedService{T}"/>. Idempotent across explicit and automatic activation: every
-    /// call returns the one activation attachment on the subject until that attachment is detached
-    /// explicitly, after which the next call attaches a fresh one. On the idempotent path
-    /// <paramref name="serviceProvider"/> is ignored and the existing activation's provider is kept,
-    /// which for an automatic activation is the provider of the handler starting the service.
-    /// </summary>
-    /// <remarks>
-    /// Must not be called from a hosted service's stop or dispose path, because it attaches a hosted
-    /// service: docs/hosting.md#keep-the-dispose-path-out-of-the-lifecycle-lock.
-    /// </remarks>
-    /// <returns>
-    /// The activation's attachment, or null when the subject is not an <see cref="ISubjectHostedServiceFactory"/>.
-    /// </returns>
-    public static IHostedServiceAttachment? ActivateHostedService(
-        this IInterceptorSubject subject, IServiceProvider serviceProvider)
-    {
-        ArgumentNullException.ThrowIfNull(serviceProvider);
-        if (subject is not ISubjectHostedServiceFactory factory)
-        {
-            return null;
-        }
-
-        // Resolved before the entry is written, for the reason on Attach: the reservation is a
-        // mutation the next context attach acts on.
-        var handler = subject.Context.TryGetService<HostedServiceHandler>();
-        var activation = subject.GetOrAddActivation(factory, serviceProvider, out var published);
-        if (published)
-        {
-            StartPublishedAttachment(subject, activation.Slot, openGate: false, ref handler);
-            handler?.TrackActivation(subject, activation);
-        }
-
-        return activation;
-    }
-
-    /// <summary>
-    /// Activates and, when <paramref name="handler"/> owns the activation, waits for its start. On a
-    /// recorded start fault the activation is removed before the fault propagates, with the release a
-    /// faulted <see cref="AttachHostedServiceAsync{T}"/> uses; a cancelled wait leaves it in place.
-    /// Returns without waiting when the subject is not an <see cref="ISubjectHostedServiceFactory"/>
-    /// or another handler, or none, owns the activation. The caller has opened the handler with
-    /// <see cref="HostedServiceHandler.OpenGate"/>.
-    /// </summary>
-    /// <remarks>
-    /// On the idempotent path the start waited for is the existing activation's, so a start fault
-    /// already recorded on it is released and rethrown without a retry, the same reading of a fault
-    /// that <see cref="HostedServiceHandler.WaitForStartAsync"/> gives.
-    /// </remarks>
-    internal static async Task ActivateHostedServiceAsync(
-        this IInterceptorSubject subject,
-        IServiceProvider serviceProvider,
-        HostedServiceHandler handler,
-        CancellationToken cancellationToken)
-    {
-        var attachment = subject.ActivateHostedService(serviceProvider);
-        if (attachment is null)
-        {
-            return;
-        }
-
-        var slot = ((IHostedServiceSlotAccess)attachment).Slot;
-        if (!ReferenceEquals(slot.Owner, handler))
-        {
-            return;
-        }
-
-        await handler.WaitForQueuedTransitionsAsync(slot, cancellationToken).ConfigureAwait(false);
-
-        // The start's own outcome rather than Fault, for the reason on StartFault.
-        if (slot.StartFault is { } fault)
-        {
-            ReleaseFaultedAttachmentAndThrow(subject, attachment, handler, fault);
-        }
-    }
-
-    /// <summary>
-    /// The subject's activation attachment when one is on the subject and not explicitly detached, or
-    /// null. Reads only, so a context attach of an already activated subject allocates nothing.
-    /// </summary>
-    internal static HostedServiceAttachment<IHostedService>? TryGetLiveActivation(this IInterceptorSubject subject)
-        => subject.Data.TryGetValue((null, ActivationKey), out var value)
-            && value is HostedServiceAttachment<IHostedService> { Slot.IsDetached: false } activation
-            ? activation
-            : null;
-
-    /// <summary>
-    /// Returns the subject's live activation attachment, published, or reserves the entry with a new one
-    /// for <paramref name="factory"/> and publishes it to the subject's attachments.
-    /// <paramref name="published"/> is true for the call that published, which then starts it; every
-    /// other call returns the attachment that call has published. <paramref name="serviceProvider"/>
-    /// is what the service is created with; null means the provider of the handler starting it.
-    /// </summary>
-    /// <remarks>
-    /// Lock free, because the automatic activation runs inside the lifecycle lock and an explicit one
-    /// takes that lock on its way to the start, so a lock of the entry's own held across either would
-    /// give two threads opposite orders. The entry is reserved before the attachment is published, never
-    /// after: a loser that had already published would have to remove an attachment a context attach
-    /// may have started in between. Starting the winner's attachment is the winner's job, through the
-    /// same two lookups an attach makes around its add.
-    /// <para>
-    /// The detach mark rather than <see cref="HostedServiceAttachmentState.Removed"/> or membership in
-    /// the subject's attachments: the state reads Running and then Stopping for as long as the detach's
-    /// stop takes, and membership is false for the window between a winner's reservation and its publish.
-    /// </para>
-    /// </remarks>
-    internal static HostedServiceAttachment<IHostedService> GetOrAddActivation(
-        this IInterceptorSubject subject, ISubjectHostedServiceFactory factory, IServiceProvider? serviceProvider, out bool published)
-    {
-        HostedServiceAttachment<IHostedService>? candidate = null;
-        while (true)
-        {
-            var reserved = subject.Data.TryGetValue((null, ActivationKey), out var value);
-            if (value is HostedServiceAttachment<IHostedService> { Slot.IsDetached: false } activation)
-            {
-                // Waits for the winner's publish, so what this returns can be detached: a detach of an
-                // attachment the subject does not hold yet returns false and leaves the winner to
-                // publish and start it. Bounded, because the winner holds no lock and runs no user
-                // code between its reservation and its publish. An attachment detached meanwhile is
-                // read again, which reserves a fresh one.
-                var spinner = new SpinWait();
-                while (!activation.Slot.IsDetached && !subject.GetHostedServiceAttachments().Contains(activation))
-                {
-                    spinner.SpinOnce();
-                }
-
-                if (activation.Slot.IsDetached)
-                {
-                    continue;
-                }
-
-                published = false;
-                return activation;
-            }
-
-            // Built once per call, outside the exchange, for the reason on AddAttachment.
-            candidate ??= ActivationFactory.CreateAttachment(factory, serviceProvider);
-
-            var won = reserved
-                ? subject.Data.TryUpdate((null, ActivationKey), candidate, value)
-                : subject.Data.TryAdd((null, ActivationKey), candidate);
-            if (won)
-            {
-                try
-                {
-                    PublishAttachment(subject, candidate);
-                }
-                catch
-                {
-                    // A reservation that is never published holds every later activator in its wait
-                    // for good, an automatic one inside the lifecycle lock included. The mark is what
-                    // releases them; the entry is cleared so the next one reserves afresh.
-                    candidate.Slot.MarkDetached();
-                    subject.Data.TryRemove(KeyValuePair.Create<(string? property, string key), object?>((null, ActivationKey), candidate));
-                    throw;
-                }
-
-                published = true;
-                return candidate;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Drops a detached attachment from the activation entry when it is the activation, so the subject
-    /// does not retain it. Runs after the detach mark, which is what the next activation reads: an
-    /// empty entry and a detached one both make it reserve a fresh attachment.
-    /// </summary>
-    private static void ClearActivationEntry(IInterceptorSubject subject, IHostedServiceAttachment attachment)
-    {
-        // The type test first, because this runs on every explicit detach and only a factory subject
-        // can hold an entry. Removed only while it still holds this attachment, so a reservation that
-        // has already replaced it is left alone.
-        if (subject is ISubjectHostedServiceFactory)
-        {
-            subject.Data.TryRemove(KeyValuePair.Create<(string? property, string key), object?>((null, ActivationKey), attachment));
-        }
-    }
-
-    /// <summary>
-    /// The factory of an activation attachment. Creates the service with the provider the activation
-    /// was given, or, for an automatic activation, with the provider of the handler that is starting
-    /// it, read when the service is created.
-    /// </summary>
-    /// <remarks>
-    /// Reaches the handler through the slot's owner rather than capturing one: the activation
-    /// outlives the handler that published it, and a subject moved to a second host's graph is started
-    /// by that host's handler with that host's provider, where a captured handler would hand it the
-    /// first host's disposed container and root it. The start body reads the owner immediately before
-    /// the factory, so a release landing in between falls back to a provider that resolves nothing,
-    /// and the stop that release's detach enqueued disposes what was created.
-    /// </remarks>
-    private sealed class ActivationFactory(ISubjectHostedServiceFactory factory, IServiceProvider? serviceProvider)
-    {
-        // Assigned right after the slot is built, because the slot takes its factory delegate in
-        // the constructor. Published together with the attachment, so a start body reads it set.
-        private HostedServiceSlot? _slot;
-
-        public static HostedServiceAttachment<IHostedService> CreateAttachment(
-            ISubjectHostedServiceFactory factory, IServiceProvider? serviceProvider)
-        {
-            var activationFactory = new ActivationFactory(factory, serviceProvider);
-            var slot = new HostedServiceSlot(activationFactory.Create, subject: null, isActivation: true);
-            activationFactory._slot = slot;
-            return new HostedServiceAttachment<IHostedService>(slot);
-        }
-
-        private IHostedService Create()
-            => factory.CreateHostedService(
-                serviceProvider ?? _slot?.Owner?.ServiceProvider ?? EmptyServiceProvider.Instance);
-    }
-
-    /// <summary>
     /// Adds the attachment and, when a handler is reachable, takes ownership and enqueues its start.
     /// <paramref name="start"/> is null when nothing was enqueued.
     /// </summary>
@@ -369,7 +268,8 @@ public static class InterceptorHostingExtensions
         // docs/design/hosting-service-ownership.md#an-attach-and-a-context-entry-are-the-same-two-facts-in-opposite-orders.
         // Nothing ahead of the add may read subject.Data: DataGatedSubject gates on the first read.
         handler = subject.Context.TryGetService<HostedServiceHandler>();
-        var attachment = AddAttachment(subject, factory);
+        var attachment = new HostedServiceAttachment<T>(new HostedServiceSlot(factory, subject: null));
+        PublishAttachment(subject, attachment);
         start = StartPublishedAttachment(subject, attachment.Slot, openGate, ref handler);
         return attachment;
     }
@@ -428,11 +328,10 @@ public static class InterceptorHostingExtensions
             handler?.OpenGate();
         }
 
-        var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+        var slot = attachment.GetSlot();
         stop = MarkDetachedAndEnqueueStop(subject, slot, handler, cancellationToken);
-        ClearActivationEntry(subject, attachment);
 
-        // Untracked without releasing, and before a caller awaits the stop so a cancelled wait cannot skip it:
+        // Untracked without releasing, and before a caller awaits the stop so a canceled wait cannot skip it:
         // docs/design/hosting-service-ownership.md#an-explicit-detach-untracks-the-slot-for-the-drain-without-releasing-ownership.
         handler?.UntrackForDrain(slot);
         return true;
@@ -449,19 +348,7 @@ public static class InterceptorHostingExtensions
         // published this attachment but not yet enqueued its start either reads the mark and enqueues
         // nothing, or enqueues ahead of the stop below, which then stops and disposes what it created.
         slot.MarkDetached();
-        if (handler is null)
-        {
-            return null;
-        }
-
-        // An activation's stop takes the slot's signal while this handler owns it, so the stops of
-        // the subject's other attachments ordered behind it, and a signal they created on asking, are
-        // released. A refused enqueue means another handler, or none, owns the slot, so no signal
-        // was created for this one, and the plain stop still stops and disposes the instance.
-        return slot.CarriesStopSignal
-            ? handler.EnqueueStopIfOwned(subject, slot, waitFor: null, cancellationToken)
-                ?? handler.EnqueueAttachmentStop(subject, slot, cancellationToken)
-            : handler.EnqueueAttachmentStop(subject, slot, cancellationToken);
+        return handler?.EnqueueAttachmentStop(subject, slot, cancellationToken);
     }
 
     /// <summary>
@@ -483,24 +370,19 @@ public static class InterceptorHostingExtensions
         return handlers.Length == 1 ? handlers[0] : null;
     }
 
-    private static HostedServiceAttachment<T> AddAttachment<T>(IInterceptorSubject subject, Func<T> factory)
-        where T : class, IHostedService
-    {
-        // Outside the update delegate, which may run more than once with no rollback: building the
-        // record inside it can register a slot that loses the swap and is never seen again.
-        var attachment = new HostedServiceAttachment<T>(new HostedServiceSlot(factory, subject: null));
-        PublishAttachment(subject, attachment);
-        return attachment;
-    }
-
     /// <summary>Adds a built attachment to the subject's attachments, which is what a context attach reads.</summary>
+    /// <remarks>
+    /// The caller builds the attachment outside the update delegate, which may run more than once with no
+    /// rollback: building it inside can register a slot that loses the swap and is never seen again.
+    /// </remarks>
     private static void PublishAttachment(IInterceptorSubject subject, IHostedServiceAttachment attachment)
     {
         subject.Data.AddOrUpdate((null, AttachmentsKey),
-            _ => ImmutableArray.Create<IHostedServiceAttachment>(attachment),
-            (_, value) => value is ImmutableArray<IHostedServiceAttachment> attachments
-                ? attachments.Add(attachment)
-                : ImmutableArray.Create<IHostedServiceAttachment>(attachment));
+            static (_, added) => ImmutableArray.Create(added),
+            static (_, value, added) => value is ImmutableArray<IHostedServiceAttachment> attachments
+                ? attachments.Add(added)
+                : ImmutableArray.Create(added),
+            attachment);
     }
 
     private static bool RemoveAttachment(IInterceptorSubject subject, IHostedServiceAttachment attachment)

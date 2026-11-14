@@ -22,9 +22,11 @@ namespace Namotion.Interceptor.Tracking;
 /// completion from inside a lifecycle event and releases the deferral from that same place when the
 /// start it was taken for is refused. So neither may block on anything that needs that lock, and a
 /// lock of your own is allowed only where its order against the lifecycle lock is already fixed. An
-/// interlocked counter needs no lock at all, which is what SourceMonitor in
-/// Namotion.Interceptor.Connectors does. The cycle this avoids, and why its blast radius is every
-/// structural property write in the graph rather than the caller alone, is worked through in
+/// interlocked counter needs no lock at all. SourceMonitor in Namotion.Interceptor.Connectors counts
+/// with one and takes its own lock only on the release that completes the count, which is safe because
+/// its lifecycle handler already takes that lock inside the lifecycle lock. The cycle this avoids, and
+/// why its blast radius is every structural property write in the graph rather than the caller alone,
+/// is worked through in
 /// docs/design/hosting-service-ownership.md#4-a-startup-completion-that-takes-a-lock-of-its-own.
 /// </para>
 /// </remarks>

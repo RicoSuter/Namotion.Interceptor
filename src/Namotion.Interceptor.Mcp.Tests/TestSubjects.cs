@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Interceptor.Mcp.Tests;
 
@@ -26,5 +27,173 @@ public partial class TestContainer
     public TestContainer()
     {
         Children = new Dictionary<string, TestContainer>();
+    }
+}
+
+[InterceptorSubject]
+public partial class TestSensor
+{
+    public partial decimal Reading { get; internal set; }
+}
+
+[InterceptorSubject]
+public partial class TestSchedule
+{
+    public partial TimeSpan Interval { get; set; }
+    public partial DateTime CreatedAt { get; set; }
+    public partial DateTimeOffset StartsAt { get; set; }
+    public partial Guid Id { get; set; }
+    public partial DayOfWeek Day { get; set; }
+    public partial DayOfWeek? OptionalDay { get; set; }
+}
+
+[InterceptorSubject]
+public partial class TestNumbers
+{
+    public partial int IntValue { get; set; }
+    public partial long LongValue { get; set; }
+    public partial float FloatValue { get; set; }
+    public partial double DoubleValue { get; set; }
+}
+
+[InterceptorSubject]
+public partial class TestDeviceGroup
+{
+    public partial Dictionary<string, TestDevice> Devices { get; set; }
+
+    public TestDeviceGroup()
+    {
+        Devices = new Dictionary<string, TestDevice>();
+    }
+}
+
+[InterceptorSubject]
+public partial class TestMixedGroup
+{
+    public partial Dictionary<string, IInterceptorSubject> Items { get; set; }
+
+    public TestMixedGroup()
+    {
+        Items = new Dictionary<string, IInterceptorSubject>();
+    }
+}
+
+[InterceptorSubject]
+public partial class TestHouse
+{
+    public partial string Address { get; set; }
+    public partial TestDevice? Private { get; set; }
+    public partial TestDevice? Public { get; set; }
+}
+
+[InterceptorSubject]
+public partial class TestFolder
+{
+    public partial string Name { get; set; }
+    public partial string Secret { get; set; }
+
+    [InlinePaths]
+    public partial Dictionary<string, TestFolder> Children { get; set; }
+
+    public TestFolder()
+    {
+        Children = new Dictionary<string, TestFolder>();
+    }
+}
+
+[InterceptorSubject]
+public partial class TestNode
+{
+    public partial string Name { get; set; }
+    public partial TestNode? Secret { get; set; }
+    public partial TestNode? A { get; set; }
+    public partial TestNode? B { get; set; }
+    public partial TestNode? Child { get; set; }
+}
+
+[InterceptorSubject]
+public partial class TestDeviceList
+{
+    public partial TestDevice[] Devices { get; set; }
+
+    public TestDeviceList()
+    {
+        Devices = [];
+    }
+}
+
+/// <summary>
+/// A subject equal to every other instance of its type, so only a comparison by reference tells two apart.
+/// </summary>
+[InterceptorSubject]
+public partial class TestEqualItem
+{
+    public partial string Name { get; set; }
+
+    public TestEqualItem()
+    {
+        Name = string.Empty;
+    }
+
+    public override bool Equals(object? obj) => obj is TestEqualItem;
+
+    public override int GetHashCode() => 0;
+}
+
+/// <summary>
+/// A subject holding one device through an attribute of <see cref="Name"/> and another through a property.
+/// </summary>
+[InterceptorSubject]
+public partial class TestAttributedRoom
+{
+    public partial string Name { get; set; }
+
+    [Namotion.Interceptor.Registry.Attributes.PropertyAttribute(nameof(Name), "Spare")]
+    public partial TestDevice? Name_Spare { get; set; }
+
+    public partial TestDevice? Device { get; set; }
+
+    public TestAttributedRoom()
+    {
+        Name = string.Empty;
+    }
+}
+
+/// <summary>
+/// Two attributes that belong to each other, so neither belongs to a property that is no attribute.
+/// </summary>
+[InterceptorSubject]
+public partial class TestCyclicAttributes
+{
+    public partial string Name { get; set; }
+
+    [Namotion.Interceptor.Registry.Attributes.PropertyAttribute(nameof(Second), "First")]
+    public partial string? First { get; set; }
+
+    [Namotion.Interceptor.Registry.Attributes.PropertyAttribute(nameof(First), "Second")]
+    public partial string? Second { get; set; }
+
+    public TestCyclicAttributes()
+    {
+        Name = string.Empty;
+    }
+}
+
+/// <summary>
+/// A subject that returns a device through a derived property, a link the registry does not track as a parent.
+/// </summary>
+[InterceptorSubject]
+public partial class TestDerivedLink
+{
+    public partial string Name { get; set; }
+
+    public TestDevice? Untracked { get; set; }
+
+    [Derived]
+    public TestDevice? Device => Untracked;
+
+    public TestDerivedLink()
+    {
+        Name = string.Empty;
     }
 }

@@ -1,0 +1,688 @@
+@using BlazorMonaco
+@using BlazorMonaco.Editor
+@using HomeBlaze.Components.Dialogs
+@using HomeBlaze.Services
+@using HomeBlaze.Storage.Blazor.Models
+@using HomeBlaze.Storage.Pages
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.JSInterop
+@using MudBlazor
+@using Namotion.Interceptor
+
+@inject IJSRuntime JsRuntime
+@inject IDialogService DialogService
+@inject ConfigurableSubjectSerializer Serializer
+@inject SubjectFactory SubjectFactory
+@inject TypeProvider TypeProvider
+
+@implements IAsyncDisposable
+
+@* The editor of Markdown that the page editor and the text dialog share: the theme of the color mode, the outlines, colors
+   and names of the blocks, the region under the cursor, and Create. Where the text comes from and goes to is the business
+   of the component around it. Monaco does not support the browsers of phones, so a device with a coarse pointer gets a
+   plain text area without decorations. *@
+@if (_usesTextArea is null)
+{
+    <div class="@CssClass"></div>
+}
+else if (_usesTextArea.Value)
+{
+    <textarea @ref="_textArea"
+              class="markdown-source-text @CssClass"
+              value="@_initialText"
+              @oninput="_textAreaInputCallback"
+              spellcheck="false"
+              autocapitalize="off"
+              autocomplete="off"
+              autocorrect="off"
+              aria-label="Markdown"
+              data-testid="markdown-source-text"></textarea>
+}
+else
+{
+    <DisposeAwareCodeEditor @ref="_editor"
+                          Id="@_editorId"
+                          CssClass="@CssClass"
+                          ConstructionOptions="GetEditorOptions"
+                          OnDidInit="OnEditorInitAsync"
+                          OnDidChangeModelContent="_contentChangedCallback"
+                          OnDidChangeCursorPosition="_cursorPositionChangedCallback"/>
+
+    @* Not scoped, because Monaco creates the elements that the module decorates. A dialog renders outside of the page, so
+       every editor renders these. *@
+    <style>
+        /* The colors of the block depths, as red, green and blue for rgb() and rgba(). */
+        .monaco-editor.vs-dark .block-color-0 { --block-color: 108, 166, 240; }
+        .monaco-editor.vs-dark .block-color-1 { --block-color: 79, 201, 164; }
+        .monaco-editor.vs-dark .block-color-2 { --block-color: 179, 157, 245; }
+        .monaco-editor.vs-dark .block-color-3 { --block-color: 238, 143, 181; }
+        .monaco-editor.vs-dark .block-color-4 { --block-color: 150, 200, 90; }
+        .monaco-editor.vs .block-color-0 { --block-color: 37, 99, 200; }
+        .monaco-editor.vs .block-color-1 { --block-color: 13, 140, 105; }
+        .monaco-editor.vs .block-color-2 { --block-color: 110, 80, 210; }
+        .monaco-editor.vs .block-color-3 { --block-color: 200, 60, 120; }
+        .monaco-editor.vs .block-color-4 { --block-color: 70, 130, 30; }
+
+        .monaco-editor .block-fence { color: rgb(var(--block-color)) !important; }
+        .monaco-editor .block-name { font-weight: bold; }
+        .monaco-editor .block-closing-label { color: rgb(var(--block-color)) !important; font-style: italic; opacity: 0.6; }
+        .monaco-editor .block-head { background-color: rgba(var(--block-color), 0.16); border-radius: 3px; }
+        .monaco-editor.vs .block-head { background-color: rgba(var(--block-color), 0.12); }
+
+        .monaco-editor .expression-decoration { background-color: rgba(224, 160, 80, 0.22); border-radius: 3px; }
+        .monaco-editor.vs .expression-decoration { background-color: rgba(210, 130, 20, 0.18); }
+    </style>
+}
+
+@code {
+    private const string ModulePath = "./_content/HomeBlaze.Storage.Blazor/Files/MarkdownSourceEditor.razor.js";
+
+    private static int _editorCount;
+
+    private string _editorId = string.Empty;
+    private DisposeAwareCodeEditor? _editor;
+    private IJSObjectReference? _editorHandle;
+    private DotNetObjectReference<MarkdownSourceEditor>? _reference;
+    private ElementReference _textArea;
+    private Task<IJSObjectReference>? _moduleImport;
+    private bool _isDisposed;
+    private bool _previousDarkMode;
+
+    // Null until the client tells whether its pointer is coarse.
+    private bool? _usesTextArea;
+    private bool _isTextAreaInitialized;
+    private string _initialText = string.Empty;
+
+    // A text area gives every line with a line feed, so the line ending of the initial text is put back.
+    private bool _hasWindowsLineEndings;
+
+    // Raised for every typed character and every move of the cursor. The decorations go to the editor, and this component
+    // has nothing to render for them.
+    private EventCallback<ModelContentChangedEvent> _contentChangedCallback;
+    private EventCallback<CursorPositionChangedEvent> _cursorPositionChangedCallback;
+    private EventCallback<ChangeEventArgs> _textAreaInputCallback;
+
+    // The text that the decorations are computed from, with the version of the editor model that it was read with, or 0
+    // when it came another way. The module drops decorations of a version that is no longer current.
+    private string _text = string.Empty;
+    private int _version;
+
+    private List<DecorationRegion> _regions = [];
+    private List<BlockOutline> _outlines = [];
+    private DecorationRegion? _activeRegion;
+    private Task? _decorationRefresh;
+    private bool _isDecorationRefreshRequested;
+
+    /// <summary>
+    /// The id of the Monaco editor, unique among the editors that are open at the same time, or null for an id of its own.
+    /// </summary>
+    [Parameter]
+    public string? EditorId { get; set; }
+
+    /// <summary>The Markdown that the editor starts with.</summary>
+    [Parameter]
+    public string InitialText { get; set; } = string.Empty;
+
+    /// <summary>The CSS class of the element of the editor, which gives it its size.</summary>
+    [Parameter]
+    public string? CssClass { get; set; }
+
+    /// <summary>Whether the editor shows in the colors of the dark mode.</summary>
+    [Parameter]
+    public bool IsDarkMode { get; set; } = true;
+
+    /// <summary>Whether the editor shows the minimap.</summary>
+    [Parameter]
+    public bool HasMinimap { get; set; } = true;
+
+    /// <summary>Whether the editor takes the focus with the cursor at the end of its text when it opens.</summary>
+    [Parameter]
+    public bool FocusesEnd { get; set; }
+
+    /// <summary>Gets the subject that a block of the text created, by block index, or null for text without subjects.</summary>
+    [Parameter]
+    public Func<int, IInterceptorSubject?>? GetBlockSubject { get; set; }
+
+    /// <summary>The names that blocks outside of the text use, which a block that <see cref="CreateAsync"/> writes cannot take.</summary>
+    [Parameter]
+    public IReadOnlyCollection<string> ReservedNames { get; set; } = [];
+
+    /// <summary>
+    /// Called with the text after every change of the text in the editor. It does not render the component around the
+    /// editor, which is rendered for every typed character otherwise.
+    /// </summary>
+    [Parameter]
+    public Action<string>? TextChanged { get; set; }
+
+    /// <summary>Raised when the cursor enters or leaves the region of a block or an expression, with null outside of one.</summary>
+    [Parameter]
+    public EventCallback<DecorationRegion?> ActiveRegionChanged { get; set; }
+
+    /// <summary>Raised once the editor shows its text and <see cref="Regions"/> are those of the text.</summary>
+    [Parameter]
+    public EventCallback Initialized { get; set; }
+
+    /// <summary>Raised by Ctrl+S, or Cmd+S on a Mac, in the editor. Without a handler the editor does not take the keys.</summary>
+    [Parameter]
+    public EventCallback SaveRequested { get; set; }
+
+    /// <summary>Gets the regions of the blocks and the expressions of the text as the last refresh found them.</summary>
+    public IReadOnlyList<DecorationRegion> Regions => _regions;
+
+    /// <summary>Gets the outlines of the blocks of the text as the last refresh found them.</summary>
+    public IReadOnlyList<BlockOutline> Outlines => _outlines;
+
+    protected override void OnInitialized()
+    {
+        _editorId = EditorId ?? $"markdown-source-editor-{Interlocked.Increment(ref _editorCount)}";
+        // The constructor and not EventCallback.Factory, which takes the component that the method belongs to as the
+        // receiver, and the component renders after every call.
+        _contentChangedCallback = new EventCallback<ModelContentChangedEvent>(NonRenderingReceiver.Instance, (Func<ModelContentChangedEvent, Task>)OnContentChangedAsync);
+        _cursorPositionChangedCallback = new EventCallback<CursorPositionChangedEvent>(NonRenderingReceiver.Instance, (Func<CursorPositionChangedEvent, Task>)OnCursorPositionChangedAsync);
+        _textAreaInputCallback = new EventCallback<ChangeEventArgs>(NonRenderingReceiver.Instance, (Func<ChangeEventArgs, Task>)OnTextAreaInputAsync);
+    }
+
+    private StandaloneEditorConstructionOptions GetEditorOptions(StandaloneCodeEditor editor)
+    {
+        _previousDarkMode = IsDarkMode;
+        var options = new StandaloneEditorConstructionOptions
+        {
+            AutomaticLayout = true,
+            Language = "markdown",
+            Value = _initialText,
+            WordWrap = "on",
+            Theme = GetTheme(IsDarkMode),
+            Folding = true,
+            ShowFoldingControls = "always",
+            StickyScroll = new EditorStickyScrollOptions
+            {
+                Enabled = true,
+                DefaultModel = "foldingProviderModel",
+                MaxLineCount = 6
+            }
+        };
+
+        if (!HasMinimap)
+        {
+            options.Minimap = new EditorMinimapOptions { Enabled = false };
+        }
+
+        return options;
+    }
+
+    private static string GetTheme(bool isDarkMode) => isDarkMode ? "vs-dark" : "vs";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // A module that cannot be imported leaves Monaco, which works without it.
+            var module = await GetModuleAsync();
+            var usesTextArea = module is not null && await module.InvokeAsync<bool>("isCoarsePointer");
+            if (_isDisposed)
+                return;
+
+            _initialText = InitialText;
+            _text = InitialText;
+            _hasWindowsLineEndings = usesTextArea && MarkdownBlockWriter.GetLineEnding(InitialText) == "\r\n";
+            _usesTextArea = usesTextArea;
+
+            // The editor takes the theme of the color mode from its options, so no theme is set before it exists.
+            _previousDarkMode = IsDarkMode;
+            StateHasChanged();
+            return;
+        }
+
+        if (_usesTextArea == true && !_isTextAreaInitialized)
+        {
+            _isTextAreaInitialized = true;
+            await OnTextAreaInitAsync();
+        }
+
+        // Monaco has one theme for all of its editors.
+        if (_editor != null && _previousDarkMode != IsDarkMode)
+        {
+            _previousDarkMode = IsDarkMode;
+            await Global.SetTheme(JsRuntime, GetTheme(IsDarkMode));
+        }
+    }
+
+    private async Task OnEditorInitAsync()
+    {
+        if (_editor is null)
+            return;
+
+        if (await GetModuleAsync() is { } module)
+        {
+            await OwnEditorAsync(module);
+
+            // A dispose while the editor was owned has let go of the module.
+            if (_isDisposed)
+                return;
+
+            if (FocusesEnd)
+            {
+                await module.InvokeVoidAsync("focusEnd", _editorId);
+            }
+        }
+
+        await RefreshDecorationsAsync();
+        if (!_isDisposed)
+        {
+            await Initialized.InvokeAsync();
+        }
+    }
+
+    private async Task OnTextAreaInitAsync()
+    {
+        if (await GetModuleAsync() is { } module)
+        {
+            await WatchTextAreaAsync(module);
+            if (_isDisposed)
+                return;
+
+            if (FocusesEnd)
+            {
+                await module.InvokeVoidAsync("focusTextAreaEnd", _textArea);
+            }
+        }
+
+        await RefreshDecorationsAsync();
+        if (!_isDisposed)
+        {
+            await Initialized.InvokeAsync();
+        }
+    }
+
+    // A dispose while the text area is watched would miss the reference, so it is let go here then.
+    private async Task WatchTextAreaAsync(IJSObjectReference module)
+    {
+        var reference = SaveRequested.HasDelegate ? DotNetObjectReference.Create(this) : null;
+        try
+        {
+            await module.InvokeVoidAsync("watchTextArea", _textArea, reference);
+        }
+        catch
+        {
+            reference?.Dispose();
+            throw;
+        }
+
+        if (_isDisposed)
+        {
+            reference?.Dispose();
+            return;
+        }
+
+        _reference = reference;
+    }
+
+    /// <summary>Called by the module for Ctrl+S, or Cmd+S on a Mac, in the editor or the text area.</summary>
+    [JSInvokable]
+    public Task RequestSaveFromKeysAsync() => RequestSaveAsync();
+
+    // A dispose while the editor is taken would miss the handle and the reference, so both are let go here then.
+    private async Task OwnEditorAsync(IJSObjectReference module)
+    {
+        var reference = SaveRequested.HasDelegate ? DotNetObjectReference.Create(this) : null;
+        IJSObjectReference editorHandle;
+        try
+        {
+            editorHandle = await module.InvokeAsync<IJSObjectReference>("own", _editorId, reference);
+        }
+        catch
+        {
+            reference?.Dispose();
+            throw;
+        }
+
+        if (_isDisposed)
+        {
+            reference?.Dispose();
+            await DisposeEditorAsync(editorHandle);
+            return;
+        }
+
+        _reference = reference;
+        _editorHandle = editorHandle;
+    }
+
+    // Monaco and the module of the text area ask for the save outside of an event of a component. The callback renders its
+    // receiver as an event would, and a failure goes to the renderer the way the failure of an event handler does.
+    private async Task RequestSaveAsync()
+    {
+        try
+        {
+            await SaveRequested.InvokeAsync();
+        }
+        catch (Exception exception)
+        {
+            await DispatchExceptionAsync(exception);
+        }
+    }
+
+    // Awaited here and not run on the thread pool, because the decorations are refreshed on the dispatcher of the renderer
+    // only, see RefreshDecorationsAsync.
+    private async Task OnContentChangedAsync(ModelContentChangedEvent change)
+    {
+        // TODO: Add try-catch for ObjectDisposedException/JSDisconnectedException - component may be disposed during async operation
+        if (_editor is null || await ReadContentAsync(_editor) is not { } content)
+            return;
+
+        await OnTextChangedAsync(content.Text, content.Version);
+    }
+
+    private async Task OnTextAreaInputAsync(ChangeEventArgs change)
+    {
+        if (_isDisposed || change.Value is not string text)
+            return;
+
+        await OnTextChangedAsync(ToInitialLineEndings(text), version: 0);
+    }
+
+    private async Task OnTextChangedAsync(string text, int version)
+    {
+        _text = text;
+        _version = version;
+        TextChanged?.Invoke(text);
+        await RefreshDecorationsAsync();
+    }
+
+    private async Task OnCursorPositionChangedAsync(CursorPositionChangedEvent change)
+    {
+        var line = change.Position.LineNumber;
+        var column = change.Position.Column;
+        var region = _regions.FirstOrDefault(candidate => candidate.ContainsPosition(line, column));
+        if (region != _activeRegion)
+        {
+            _activeRegion = region;
+            await ActiveRegionChanged.InvokeAsync(region);
+        }
+    }
+
+    /// <summary>Gets the text of the editor, or null while the editor is not there or once it is gone.</summary>
+    public async Task<string?> GetTextAsync()
+    {
+        if (_isDisposed)
+            return null;
+
+        try
+        {
+            string? text;
+            if (_usesTextArea == true)
+            {
+                text = await GetModuleAsync() is { } module ? await module.InvokeAsync<string?>("getTextAreaText", _textArea) : null;
+                text = text is null ? null : ToInitialLineEndings(text);
+            }
+            else if (_editor is not null)
+            {
+                text = await _editor.GetValue();
+            }
+            else
+            {
+                return null;
+            }
+
+            return _isDisposed ? null : text;
+        }
+        catch (Exception exception) when (exception is JSException or JSDisconnectedException)
+        {
+            // The component around the editor closed it while the text was read, such as a dialog closed by Escape.
+            return null;
+        }
+    }
+
+    /// <summary>Replaces the text of the editor, which raises <see cref="TextChanged"/> as typing does.</summary>
+    public async Task SetTextAsync(string text)
+    {
+        if (_isDisposed)
+            return;
+
+        if (_usesTextArea == true)
+        {
+            if (await GetModuleAsync() is not { } module)
+                return;
+
+            // A text area raises no input for a value that is set, unlike Monaco for a value that is set.
+            await module.InvokeVoidAsync("setTextAreaText", _textArea, text);
+            await OnTextChangedAsync(text, version: 0);
+            return;
+        }
+
+        if (_editor is null)
+            return;
+
+        _text = text;
+        _version = 0;
+        await _editor.SetValue(text);
+    }
+
+    /// <summary>Selects the lines, scrolls them into view and focuses the editor. False when the editor cannot.</summary>
+    public async Task<bool> RevealAsync(int startLine, int endLine)
+    {
+        if (await GetModuleAsync() is not { } module)
+            return false;
+
+        if (_usesTextArea == true)
+        {
+            await module.InvokeVoidAsync("revealTextArea", _textArea, startLine, endLine);
+            return true;
+        }
+
+        if (_editor is null)
+            return false;
+
+        await module.InvokeVoidAsync("reveal", _editorId, startLine, endLine);
+        return true;
+    }
+
+    /// <summary>
+    /// Asks for a new widget with the setup dialog and writes its block into the text before the line of the cursor: after
+    /// the json block of the block around that line, inside it with one fence character more. Monaco has its cursor on the
+    /// first line until it had the focus, and a text area that never had the focus takes the block at the end. The
+    /// configured subject is discarded, so that only its text lives on.
+    /// </summary>
+    /// <returns>The new text, which the editor shows, or null when nothing was created.</returns>
+    public async Task<string?> CreateAsync()
+    {
+        // Read now, because the text that the component around holds follows the editor with a delay.
+        if (await GetTextAsync() is not { } text)
+            return null;
+
+        // The name becomes the #id of the block. It is checked while the dialog is open, because the subject that was
+        // configured in it is gone once the dialog has closed.
+        var result = await SubjectSetupDialog.ShowAsync(DialogService, new SubjectSetupOptions
+        {
+            NameField = MarkdownBlockNames.CreateNameOptions(text, ReservedNames)
+        });
+
+        if (result?.Name is null)
+            return null;
+
+        string json;
+        try
+        {
+            json = MarkdownBlockConfiguration.Serialize(Serializer, result.Subject, block: null);
+        }
+        finally
+        {
+            SubjectFactory.DiscardSubject(result.Subject);
+        }
+
+        if (_isDisposed)
+            return null;
+
+        // The editor gives the text with one line ending for all lines.
+        var lineEnding = MarkdownBlockWriter.GetLineEnding(text);
+        var typeName = result.Subject.GetType().FullName!;
+        var cursorLine = await GetCursorLineAsync();
+
+        // Inside a block, the new block goes after the json block of that block and gets one colon more than the block that
+        // it is then inside of. It always gets a closing line, so that the lines after it are not inside it.
+        var page = MarkdownPageParser.Parse(text);
+        var lineCount = text.Split(lineEnding).Length;
+        var insertLine = Math.Min(page.GetLineForNewBlock(cursorLine ?? lineCount), lineCount + 1);
+        var fenceLength = page.GetFenceLengthForNewBlock(
+            insertLine, name => TypeProvider.Types.FirstOrDefault(type => type.FullName == name));
+        var blockText = MarkdownBlockWriter.CreateBlock(typeName, result.Name, json, fenceLength, lineEnding);
+        var newText = MarkdownBlockWriter.InsertBlockText(text, insertLine, blockText, lineEnding);
+
+        await SetTextAsync(newText);
+        return newText;
+    }
+
+    // The 1-based line of the cursor, or null without one.
+    private async Task<int?> GetCursorLineAsync()
+    {
+        if (_usesTextArea == true)
+        {
+            return await GetModuleAsync() is { } module ? await module.InvokeAsync<int?>("getTextAreaCursorLine", _textArea) : null;
+        }
+
+        return _editor is null ? null : (await _editor.GetPosition())?.LineNumber;
+    }
+
+    /// <summary>
+    /// Computes the outlines, colors and regions of the text again and applies them, for example after the subjects of its
+    /// blocks changed.
+    /// </summary>
+    /// <remarks>
+    /// Called on the dispatcher of the renderer only. A refresh that is requested while one runs is one more run after it,
+    /// never a second one at the same time, so that the last text is decorated last. The returned task completes after a
+    /// run that started after the call, unless a run fails before.
+    /// </remarks>
+    public Task RefreshDecorationsAsync()
+    {
+        if (_decorationRefresh is { IsCompleted: false } runningRefresh)
+        {
+            _isDecorationRefreshRequested = true;
+            return runningRefresh;
+        }
+
+        _decorationRefresh = RunDecorationRefreshesAsync();
+        return _decorationRefresh;
+    }
+
+    private async Task RunDecorationRefreshesAsync()
+    {
+        do
+        {
+            _isDecorationRefreshRequested = false;
+            await ApplyDecorationsAsync();
+        }
+        while (_isDecorationRefreshRequested);
+    }
+
+    // A text area gets the regions without the decorations.
+    private async Task ApplyDecorationsAsync()
+    {
+        if (_isDisposed || (_editor is null && _usesTextArea != true))
+            return;
+
+        var version = _version;
+        var parsed = MarkdownDecorationParser.ParseDecorations(_text, GetBlockSubject);
+        _regions = parsed.Regions;
+        _outlines = parsed.Outlines;
+
+        if (_usesTextArea == true)
+            return;
+
+        var decorations = BlockOutlineDecorations.Create(parsed.Regions, parsed.Outlines);
+        if (await GetModuleAsync() is { } module)
+        {
+            await module.InvokeVoidAsync("update", _editorId, version, decorations.Values, decorations.Labels);
+        }
+    }
+
+    private string ToInitialLineEndings(string text) => _hasWindowsLineEndings ? text.Replace("\n", "\r\n") : text;
+
+    // Null once the component is disposed: another editor can get the same editor id, and a late call would decorate its model.
+    private async ValueTask<IJSObjectReference?> GetModuleAsync()
+    {
+        if (_isDisposed)
+            return null;
+
+        var moduleImport = _moduleImport ??= JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath).AsTask();
+        try
+        {
+            var module = await moduleImport;
+            return _isDisposed ? null : module;
+        }
+        catch (Exception exception) when (exception is JSException or OperationCanceledException)
+        {
+            // The next call imports again. Until then the editor has no decorations and reads its text without the module.
+            if (_moduleImport == moduleImport)
+            {
+                _moduleImport = null;
+            }
+
+            return null;
+        }
+    }
+
+    // The text with the version of the editor model, or with version 0 when the module is not available.
+    private async Task<EditorContent?> ReadContentAsync(StandaloneCodeEditor editor)
+    {
+        if (_isDisposed)
+            return null;
+
+        if (await GetModuleAsync() is { } module)
+            return await module.InvokeAsync<EditorContent?>("getContent", editor.Id);
+
+        // Checked again, because the component can have been disposed while the module was imported.
+        if (_isDisposed)
+            return null;
+
+        return new EditorContent(0, await editor.GetValue());
+    }
+
+    private static async Task DisposeEditorAsync(IJSObjectReference editorHandle)
+    {
+        await editorHandle.InvokeVoidAsync("dispose");
+        await editorHandle.DisposeAsync();
+    }
+
+    // BlazorMonaco keeps the editor with its model when its component is disposed, so the editor is disposed here. The module
+    // forgets the folds of a model when the model is disposed.
+    public async ValueTask DisposeAsync()
+    {
+        _isDisposed = true;
+        try
+        {
+            if (_editorHandle is not null)
+            {
+                await DisposeEditorAsync(_editorHandle);
+            }
+            else if (_usesTextArea == false && _moduleImport is { IsCompletedSuccessfully: true } moduleImport)
+            {
+                // Disposed between the creation of the editor and its handle. The call goes out in this dispose, before a
+                // render that can create another editor with the same id.
+                await moduleImport.Result.InvokeVoidAsync("disposeEditor", _editorId);
+            }
+
+            if (_moduleImport is not null)
+            {
+                await (await _moduleImport).DisposeAsync();
+            }
+        }
+        catch (Exception exception) when (exception is JSException or OperationCanceledException or JSDisconnectedException)
+        {
+            // The import failed or the circuit is gone, and there is nothing to dispose.
+        }
+        finally
+        {
+            _reference?.Dispose();
+        }
+    }
+
+    // The text of the editor together with the version of its model, as the module gives it.
+    private sealed record EditorContent(int Version, string Text);
+
+    // Runs a callback without rendering the component that created it.
+    private sealed class NonRenderingReceiver : IHandleEvent
+    {
+        public static readonly NonRenderingReceiver Instance = new();
+
+        public Task HandleEventAsync(EventCallbackWorkItem callback, object? argument) => callback.InvokeAsync(argument);
+    }
+}

@@ -40,6 +40,29 @@ public class MethodMetadataTests
     }
 
     [Fact]
+    public async Task WhenTheMethodIsAnAsyncMethodWithAResult_ThenItsResultIsReturned()
+    {
+        // Arrange
+        static async Task<string> ReadAsync()
+        {
+            await Task.Yield();
+            return "result-from-async-method";
+        }
+
+        var metadata = new MethodMetadata(_ => ReadAsync())
+        {
+            Kind = MethodKind.Query,
+            ResultType = typeof(string),
+        };
+
+        // Act
+        var result = await metadata.InvokeAsync(null, null, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("result-from-async-method", result);
+    }
+
+    [Fact]
     public async Task InvokeAsync_WithFuncConstructor_ResolvesParameters()
     {
         // Arrange
@@ -75,6 +98,28 @@ public class MethodMetadataTests
     {
         // Arrange
         var metadata = new MethodMetadata(_ => Task.FromResult<object?>("async-result"))
+        {
+            ResultType = typeof(string),
+        };
+
+        // Act
+        var result = await metadata.InvokeAsync(null, null, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("async-result", result);
+    }
+
+    [Fact]
+    public async Task WhenATrulyAsyncMethodReturnsAValue_ThenTheResultIsUnwrapped()
+    {
+        // Arrange
+        static async Task<string> ReturnAfterAwaitAsync()
+        {
+            await Task.Yield();
+            return "async-result";
+        }
+
+        var metadata = new MethodMetadata(_ => ReturnAfterAwaitAsync())
         {
             ResultType = typeof(string),
         };

@@ -62,6 +62,8 @@ team.Roles = new Dictionary<string, Person>(team.Roles) { ["leader"] = person };
 
 **Why?** Property interceptors hook into the setter. Collection mutations bypass the setter entirely.
 
+Treat a collection or dictionary as frozen once it is assigned: fill a new instance, then assign it. Assigning again after an in-place mutation does not repair it, because the next assignment is compared with the assigned instance as it reads now. A subject added in place is not attached, and one removed in place is not detached, while the values assigned after it still hold it or still lack it, and an index both values share is not corrected. Mutating a collection while another thread reads the graph is also a data race on a type that is not thread-safe.
+
 All of the following work when replaced entirely (assigning a new value to the property):
 
 **Supported collection types:**
@@ -291,6 +293,8 @@ public partial class Person
 }
 ```
 
+Read other subjects through partial properties, or through a field that holds an owner. Through a field that holds any other subject, a derived property stops following that subject once it is detached and attached again, see [Reaching Other Subjects](tracking.md#reaching-other-subjects).
+
 ### Data Annotations
 
 ```csharp
@@ -351,7 +355,7 @@ For each partial property `PropertyName`, the generator creates:
 ### Execution Order
 
 ```
-Setter: OnChanging → (if not cancelled) Interceptors → Field Update → OnChanged → PropertyChanged event
+Setter: OnChanging → (if not canceled) Interceptors → Field Update → OnChanged → PropertyChanged event
 Getter: Field Read → Interceptors → Return
 ```
 
@@ -504,8 +508,8 @@ public partial class Thermostat : ISubjectHostedServiceFactory
 {
     private ThermostatPoller? _activeService;
 
-    // Read by a derived getter but not device data, so a field: see the rules below.
-    internal ThermostatInformation? Information;
+    // Tracked, so that the derived properties that read it change when it is fetched or reset.
+    internal partial ThermostatInformation? Information { get; set; }
 
     public partial string? HostAddress { get; set; }
 
@@ -583,13 +587,13 @@ internal sealed class ThermostatPoller : BackgroundService
 What the pattern requires:
 
 - **No services in the subject's constructor.** Whatever creates the subject as data has none to give. `CreateHostedService` receives the activator's service provider, which may resolve nothing, so resolve with `GetService` and fall back.
-- **Service state is a field, never a property.** The generator registers every non-static property, internal ones included, as subject data, so state the service keeps for derived getters that is not device data goes in a field.
+- **State the service keeps for derived getters is an internal partial property**, so the derived properties that read it change when the service fetches or resets it.
 - **Operations live on the subject and forward to the running service**, throwing when none runs.
 - **The service clears connection state on stop**, so a stopped device does not read as connected and operations gated on it are disabled.
 - **The service keeps its own retry loop** and reports a lost connection through the subject's state. A fault escaping `ExecuteAsync` stops the service until the subject next enters the graph.
 - **Child subjects that have a service are activated by their creator.** A service that creates such children activates each one with `child.ActivateHostedService(serviceProvider)`, passing on the provider `CreateHostedService` received, because a context that opted out of automatic activation runs only what the creator activated.
-- **A subject that needs more in a private context implements `IPrivateContextConfigurator`**, for example with `context.WithRegistry()` when its service resolves registered properties. See [Running one without a host](hosting.md#running-one-without-a-host) for when it is called.
-- **A service that replaces child devices detaches each replaced child's activation**, with `child.DetachHostedService(attachment)` on the attachment `ActivateHostedService` returned. A child only dropped from the graph keeps its activation, and a self-contained host keeps tracking it until it stops.
+- **A subject that needs more in a private context implements `IPrivateContextConfigurator`**, for example with `context.WithRegistry()` when its service resolves registered properties. See [Configuring a private context](hosting.md#configuring-a-private-context) for when it is called.
+- **A service that replaces child devices detaches each replaced child's activation**, with `child.DetachHostedService(attachment)` on the attachment `ActivateHostedService` returned. A child only dropped from the graph keeps its activation, and runs again in the next hosting graph it joins.
 
 ### DI Extension Method
 
@@ -649,9 +653,8 @@ services.AddThermostat(thermostat => thermostat.HostAddress = "192.168.1.20");
 services.AddKeyedThermostat("living-room", thermostat => thermostat.HostAddress = "192.168.1.20");
 services.AddKeyedThermostat("bedroom", thermostat => thermostat.HostAddress = "192.168.1.21");
 
-// Without dependency injection
-var thermostat = new Thermostat { HostAddress = "192.168.1.20" };
-await using var running = await thermostat.StartAsync(cancellationToken);
+// In a shared context the application owns, which must have hosting
+services.AddThermostat(contextResolver: serviceProvider => serviceProvider.GetRequiredService<IInterceptorSubjectContext>());
 ```
 
 ### Context Support (Optional)

@@ -20,7 +20,7 @@ services.AddMcpServer()
         sp => resolveRootSubject(sp),
         sp => new McpServerConfiguration
         {
-            PathProvider = new DefaultPathProvider()
+            PathProvider = DefaultPathProvider.Instance
         });
 
 // 2. Map the MCP endpoint
@@ -59,8 +59,11 @@ Key conventions:
 - **Property:** `name: value | type` or `name: value | type, writable`
 - **Attribute:** `@name: value` (scalar) or `@name: {json}` (complex object)
 - **Collapsed collection:** `Name/ (Nx ItemType)` or `Name/ (N children)`
-- **Footer:** `[N subjects]` or `[N subjects, truncated]`
+- **Collapsed child subject:** `Name/ (ItemType)` for a single subject property beyond the depth limit (omitted when the property is null)
+- **Footer:** `[N subjects]`, or with a limit reached `[N subjects, truncated]` for `search` and `[N subjects, truncated: M more not shown, without their children]` for `browse`
+- **Warning:** `# warning: <text>` before the footer, see [Unknown property names](#unknown-property-names)
 - Special values: `null` for null, `""` for empty strings, `...` for truncated strings (>100 chars)
+- Collection values (arrays, lists, dictionaries of plain values) render as compact JSON, such as `[{"Title":"Radio","IsContainer":false}]`. Whole items are shown up to about 500 characters and the rest as `... +N more`; `get_property` returns the full value. Byte arrays render as their length, such as `<16 bytes>`.
 
 ## Tools
 
@@ -71,7 +74,7 @@ The MCP server provides 5 core tools:
 | `browse` | Browse the subject tree with depth control and property inclusion |
 | `search` | Search across all subjects by text and/or type names |
 | `get_property` | Read a property value by path (e.g., `Folder/Device/Temperature`) |
-| `set_property` | Write a property value by path (e.g., `Folder/Device/TargetSpeed`). Blocked when `IsReadOnly` |
+| `set_property` | Write a property value by path (e.g., `Folder/Device/TargetSpeed`). Blocked when `IsReadOnly`; refused per property by the access policy |
 | `list_types` | List available types with interface property and method schemas |
 
 ### Path Format
@@ -85,7 +88,9 @@ Items[myKey]                     (dictionary key)
 Folder/SubFolder/Device/Status   (property path)
 ```
 
-Properties marked with `[InlinePaths]` flatten dictionary keys into the path (e.g., `Demo/MyMotor` instead of `Demo/Children[MyMotor]`). See [Path Syntax](registry.md#path-syntax) for how keys are written and read, including keys that need the bracket form. A path that does not resolve is answered with `Path not found: <path>`, or with `Invalid path syntax: <reason>` when it is malformed.
+Properties marked with `[InlinePaths]` flatten dictionary keys into the path (e.g., `Demo/MyMotor` instead of `Demo/Children[MyMotor]`). See [Path Syntax](registry.md#path-syntax) for how keys are built and resolved, including keys that need the bracket form. A path that does not resolve is answered with `Path not found: <path>`, or with `Invalid path syntax: <reason>` when it is malformed.
+
+The tools see the graph only through the properties the path provider effectively includes, see [Included properties](registry.md#included-properties). `browse` shows only those properties, `search` returns a subject only when it has a path through them, and the paths `get_property`, `set_property`, `browse` and `where` take resolve only through them, so a path through an excluded property is answered as one that does not exist. A subject with several parents gets the path through the first parent, in parent order, from which such a path reaches the root, so a path a tool returns resolves back in the other tools within the limits described there.
 
 ### `browse`
 
@@ -101,6 +106,7 @@ Browse the subject tree starting at a path. Use `text` format (default) for over
   /Demo/MyDevice [MyApp.Device] "My Device"
     Temperature: 23.5 | number, writable
     Sensors/ (3x Sensor)
+    Controller/ (Controller)
 [2 subjects]
 ```
 
@@ -121,7 +127,8 @@ Browse the subject tree starting at a path. Use `text` format (default) for over
             "$type": "MyApp.Device",
             "properties": {
               "Temperature": { "kind": "value", "value": 23.5, "type": "number" },
-              "Sensors": { "kind": "collection", "count": 3, "itemType": "Sensor", "isCollapsed": true }
+              "Sensors": { "kind": "collection", "count": 3, "itemType": "Sensor", "isCollapsed": true },
+              "Controller": { "kind": "object", "child": null, "isCollapsed": true, "itemType": "Controller" }
             }
           }
         }
@@ -129,7 +136,8 @@ Browse the subject tree starting at a path. Use `text` format (default) for over
     }
   },
   "subjectCount": 1,
-  "truncated": false
+  "truncated": false,
+  "omittedCount": 0
 }
 ```
 
@@ -139,11 +147,14 @@ Browse the subject tree starting at a path. Use `text` format (default) for over
 | `path` | root | Starting path (e.g., `Folder/Device`) |
 | `depth` | 1 | Max traversal depth (0 = properties only) |
 | `includeProperties` | false | Include property values |
-| `includeAttributes` | false | Include registry attributes on properties |
+| `includeAttributes` | false | Include registry attributes on properties, as `get_property` lists them |
 | `includeMethods` | false | Include `$methods` in subject nodes |
 | `includeInterfaces` | false | Include `$interfaces` in subject nodes |
+| `properties` | (all) | Return only these properties, e.g. `["IsConnected", "BatteryLevel"]`; implies `includeProperties` |
 | `excludeTypes` | (none) | Exclude subjects matching these type/interface names |
 | `maxSubjects` | server limit | Maximum subjects to return |
+
+Subjects of a type in `ExcludeTypes` of the configuration, or matching `excludeTypes`, are left out of the tree. A property collapsed at the depth limit counts and types only the remaining children and is left out if none remain.
 
 ### `search`
 
@@ -186,37 +197,89 @@ Search across all subjects. Use `text` format (default) for overview, `json` for
 | `query` | (none) | Filter by path and enrichment values (e.g. `$title`, `$icon`); does not match types, interfaces, or property names |
 | `types` | all | Filter subjects by type/interface full names |
 | `path` | (none) | Scope search to a subtree path prefix |
+| `where` | (none) | Filter by property values, see [Filtering by value](#filtering-by-value) |
+| `properties` | (all) | Return only these properties, e.g. `["IsConnected", "BatteryLevel"]`; implies `includeProperties` |
 | `includeProperties` | false | Include property values |
-| `includeAttributes` | false | Include registry attributes on properties |
+| `includeAttributes` | false | Include registry attributes on properties, as `get_property` lists them |
 | `includeMethods` | false | Include `$methods` in subject nodes |
 | `includeInterfaces` | false | Include `$interfaces` in subject nodes |
 | `excludeTypes` | (none) | Exclude subjects matching these type/interface names |
 | `maxSubjects` | server limit | Maximum subjects to return |
 
+#### Filtering by value
+
+`where` takes one expression of the language described in [Expressions](expressions.md) over the properties of the subject:
+
+```text
+IsConnected == false || BatteryLevel < 0.2 && Status != "Running"
+```
+
+A property can also be reached through other subjects, `not` negates a condition, and values compute with `+ - * /` and durations such as `15m`:
+
+```text
+Device.IsOn == true and not (Device.Mode == Eco)
+Power - Offset > MaximumPower * 0.8
+```
+
+The grammar, [logic](expressions.md#grammar), [comparisons of values](expressions.md#comparisons), [missing values](expressions.md#truth-and-missing-values) and the limits of an expression are those of the language. What is specific to `where`:
+
+- **Properties**: a path from the subject through the path provider that uses the separator of the provider, such as `Device.IsOn`, or `subject.Device.IsOn`, where `subject` is the subject itself. A bare word on the right of a comparison, as in `Status != Running`, is a string, unless it holds the separator or an index, is `subject`, or is an operand of arithmetic, as `MaximumPower` is above: then it is a property. Only properties the path provider exposes can be filtered on, also on the way of a path. A value is also missing when an attribute is addressed.
+- **Refused paths**: a path starts at the subject and ends at a property: it cannot start with the separator, go up with `..` or end at an entry such as `Devices[a]`, and indexes use `[` and `]` whatever the separator. A property name holds no `+`, `*` or `/`, so outside an index one of them is an operator that lacks the spaces around it. A `-` is not refused, since a name such as `Room-1` can hold it, so `Power-Offset` is the path of that name: write `Power - Offset` to subtract. These paths and `subject.` without a name are refused when the expression is parsed, as `where: a path starts at the subject and cannot start with '.'`, `where: a path starts at the subject and cannot go up with '..'`, `where: a path ends at a property, not at an entry such as 'Devices[a]'`, `where: put spaces around '*' in 'Power*2'` and `where: expected a name after 'subject.'`, with the separator of the path provider.
+- **Properties that hold subjects**: a property that holds a subject, a collection or a dictionary has that value, so `Device == null` is true when no device is set and `Device != null` is true when one is. Every other comparison with it is unknown.
+- **Not available**: `value` and pipes (`|`) give the errors `where: 'value' is not available in where` and `where: a condition takes no pipes`.
+- **Errors**: an invalid expression returns an error that starts with `where: ` and names the zero-based position, for example `where: use '==' for equality at position 12`.
+
+`not Device` does not find subjects without a device: it is true when a device is set. Use `Device == null`.
+
+`browse` has no `where`; to filter a subtree, use `search` with `path` and `where`. Combine `where` with `properties` to return only the values the question needs.
+
+#### Unknown property names
+
+A path in `where` or a name in `properties` that no subject has is not an error, because subjects of different types have different properties. So that an empty answer is not mistaken for a negative one, `search` and `browse` add a warning for each such name. A name in `properties` counts as seen when a subject in scope has a scalar property of that name that the path provider exposes, so a property that holds subjects does not count. A path in `where` counts as seen when it leads from a subject in scope to any property the path provider exposes, also one that holds subjects, but not an attribute; the warning names the whole path, such as `Device.Missing`. For `search` the scope is every subject that passes `types`, `excludeTypes`, `path` and `query`, before `where` is applied; for `browse` it is every subject in the returned tree. A truncated result has no warnings, because it did not look at every subject.
+
+The `omittedCount` of `browse` says how many children a truncated tree left out where the limit cut it, without their own children. `search` stops at the limit and does not count further matches, so its result says only `truncated`.
+
+In JSON, the warnings are a `warnings` array of strings, omitted when there are none:
+
+```json
+{
+  "results": {},
+  "subjectCount": 0,
+  "truncated": false,
+  "warnings": ["No subject in scope has a property named 'IsOnline'."]
+}
+```
+
+In text, each warning is a `# warning: ` line before the footer, or after the "no subjects found" message of an empty search.
+
 ### `get_property`
 
-Read a property value by path. Returns the value, JSON schema type, and optional writeability flag.
+Read a property value by path. Returns the value, JSON schema type, optional writeability flag, and the registry attributes of the property, leaving out read-only ones without a value and ones that can hold subjects. As with a property that holds subjects, a subject an attribute holds is not listed as a value but reached through its own path, such as the one `search` lists for it.
 
 ### `set_property`
 
-Write a property value by path. Blocked when `IsReadOnly` is true.
+Write a property value by path. Blocked when `IsReadOnly` is true. The value is converted by `McpValueConverter`, which a custom tool can use for its own arguments: `TimeSpan`, `TimeOnly`, `DateOnly`, `DateTime`, `DateTimeOffset`, `Guid`, `Uri` and enums from their string form, enums by name (ignoring case) or by a defined number, and other values also from a string holding their JSON, such as `"0.5"`. An object binds its members in any case, rejects a member its type does not have, requires each constructor parameter without a default value, and reads an enum member, or an enum element of a collection, only by name. A value that cannot be converted returns an error and leaves the property unchanged.
+
+An application decides which properties may be written with the `AccessPolicy` of the configuration, see [Access Policy](#access-policy). `set_property` then returns the error `Property is not writable: <path>. The access policy does not allow it.` for a property the policy does not allow to write, and writes nothing. A refused property is not reported as writable by `get_property`, `browse` and `search`. To tell the client why a kind of property cannot be written, append it to the `set_property` description with `ToolDescriptionAdditions`.
 
 ### `list_types`
 
-List available types from registered type providers. Interface types include property and method schemas; concrete types list their implemented interfaces.
+List available types from registered type providers. Interface types include property and method schemas; concrete types list their implemented interfaces. The types in `ExcludeTypes` of the configuration, and the types derived from them, are not listed.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `kind` | `all` | Filter by kind: `interfaces`, `concrete`, or `all` |
 | `type` | (none) | Search type names (case-insensitive contains match) |
 
+Method parameters are listed as `McpMethodParameter` objects: `name` and JSON Schema `type`, plus the `format` of a string value: the standard JSON Schema name where one matches (`date-time`, `date`, `uuid`, `uri`), otherwise a short label: `hh:mm:ss` for `TimeSpan` (accepted as `[-][d.]hh:mm:ss[.fffffff]`) `HH:mm:ss` for `TimeOnly` (accepted as `HH:mm:ss[.fffffff]`) and `base64` for a byte array. `TimeSpan` is not `duration`, which means ISO 8601 (`PT1M30S`) and is not read by System.Text.Json. A parameter also has `enum` with the allowed names of an enum, `nullable`, and an optional `description`. An object parameter also has `schema`, the JSON Schema of its members as `McpValueConverter` binds them: camelCase names, the `required` members (the C# `required` modifier, `[JsonRequired]` or a constructor parameter without a default value), enum names, and the `[Description]` text of each member. `list_types` leaves `description` empty. A custom tool that lists methods can build the same shape with `McpMethodParameter.Create` and put a host-specific hint, such as a unit, into `description`.
+
 ## Configuration
 
 ```csharp
 var config = new McpServerConfiguration
 {
-    // Required: property filtering and path resolution
-    PathProvider = new DefaultPathProvider(),
+    // Required: property filtering and path resolution, a PathProviderBase
+    PathProvider = DefaultPathProvider.Instance,
 
     // Optional: subject-level metadata enrichment
     SubjectEnrichers = { new MySubjectEnricher() },
@@ -227,6 +290,15 @@ var config = new McpServerConfiguration
     // Optional: additional tools
     ToolProviders = { new MyToolProvider() },
 
+    // Optional: text appended to a tool's description, keyed by tool name
+    ToolDescriptionAdditions = { ["browse"] = "Subjects of type Document hold the manuals." },
+
+    // Optional: decide per member and action what the tools let a client read and change
+    AccessPolicy = new MyAccessPolicy(),
+
+    // Optional: subject types that browse, search and list_types leave out
+    ExcludeTypes = [typeof(MyInternalSubject)],
+
     // Safety limits
     MaxDepth = 10,
     MaxSubjectsPerResponse = 500,
@@ -234,14 +306,37 @@ var config = new McpServerConfiguration
 };
 ```
 
-### Access Control
+`ToolDescriptionAdditions` describes conventions of the application to the client without replacing the generic description of a tool, for example which subjects hold its documentation. Each text is appended after a space; names of tools that are not offered are ignored.
 
-| `IsReadOnly` | `set_property` |
-|--------------|----------------|
-| `true` | Blocked |
-| `false` | Allowed |
+### Access Policy
 
-Custom tools provided via `IMcpToolProvider` can inspect `IsReadOnly` on the configuration and apply the same convention to their own mutating operations.
+Two settings decide what a client may do. `IsReadOnly` is the mode of the whole server: when true, `set_property` is blocked, and custom tools provided via `IMcpToolProvider` can read it and apply the same convention to their own mutating operations. `AccessPolicy` decides per member, a property, an attribute or a method registered as a property, and per action. It is optional; without one every action is allowed. In short, a subject other than the root whose properties the path provider includes, attributes aside, the policy all denies to read is hidden from every property, collection and dictionary that holds it, as if it were missing; the rules below define this precisely.
+
+```csharp
+public sealed class MyAccessPolicy : IMcpAccessPolicy
+{
+    public bool IsAllowed(RegisteredSubjectProperty member, string action) =>
+        action != McpAccessActions.Write || member.Name != "Password";
+}
+```
+
+The tools ask for `McpAccessActions.Read` and `McpAccessActions.Write`. A custom tool may ask the same policy for actions of its own, for example `execute` before it runs a method, through `configuration.IsAllowed(member, action)`, which is true without a policy. `IsAllowed` may be called concurrently, so it must be thread-safe. An exception it throws fails the tool call.
+
+With a policy, the tools apply these rules. A policy that allows every read changes nothing about what the tools list or resolve, with one exception: a subject reached only through a link the registry does not track as a parent, such as a `[Derived]` property that returns it, has no registered parent and is therefore hidden with any policy, while without a policy the tools resolve paths through that link.
+
+- **Readable member**: the policy allows `read` on it; an attribute also needs its property to be readable, and attributes that belong to each other in a cycle are not readable. The read check never asks the path provider: the tools keep the [included properties](#path-format) they see without a policy and add the policy's `read`, so `browse` and `search` list, select and filter, and `get_property`, `set_property` and the helpers resolve, only properties the path provider effectively includes and the policy allows to read. The attributes listed with a property, by `browse` and `search` with `includeAttributes` and by `get_property`, are the exception: they are listed when the policy allows reading them, without asking the path provider.
+- **Empty for the policy**: a subject that has at least one property other than an attribute that the path provider effectively includes, where the policy denies `read` on every one of them. A subject without such properties is not empty, and the policy's answer on a property the path provider excludes never decides whether a subject is readable.
+- **Readable subject**: the root, or a subject that is not empty for the policy and has a readable path, one from the tool root through readable properties the path provider effectively includes. A subject is readable when at least one of its paths is readable, and hidden otherwise, also when no path reaches it from the tool root at all, as for a subject without a registered parent; hiding a link hides only that link. Its path is built through the first parent, in parent order, from which a readable path can be built. A path the tools build is checked on the chain it is built through, so a subject moved behind a hidden property while a call runs never gets a path naming that property: `search` leaves it out and `browse` lists it without `$path`.
+- **Resolving a path**: every property on the path must be readable and every subject the path passes, including the one owning the resolved property, must be readable, so a subject that is not readable does not lead to the subjects it holds. This holds for `get_property`, `set_property`, `browse`, `where` paths and the helpers; `browse` and `TryGetReadableSubject` also require the resolved subject to be readable.
+- **Lookup of a segment**: a member the policy does not allow to read is treated as absent. The segment then names the next readable member other than the `[InlinePaths]` property whose `TryGetPropertySegment` is that segment, for example an attribute of the same name, or else, on a subject with an `[InlinePaths]` dictionary, that property: the dictionary itself when the segment is its own segment, and otherwise a key of the dictionary, as `PathProviderBase` answers a name that does not exist. Paths are built as if the member did not exist. A path provider that overrides `TryGetPropertyFromSegment` must answer as `PathProviderBase` does, or a hidden name and a missing one can get different answers: match a segment by `TryGetPropertySegment`, fall back to the `[InlinePaths]` property for a name no other member has, and let that property yield its own segment to every other member with that segment.
+- **Hidden reads as missing**: a property or subject that is not readable gets the same answer as one that does not exist. `get_property`, `set_property` and `browse` give the answer of a missing path, which is `Path not found` and, on a subject with an `[InlinePaths]` dictionary, the answer for a dictionary key of that name; `browse` and `search` leave it out and count only what they list, also in the `omittedCount` of a truncated `browse`, a `where` path through it reads as a missing value, a reference in a `where` filter whose subject is not readable reads as null, and a name in `properties` or `where` that only hidden properties have gets the warning of an unknown name. `set_property` returns `Server is in read-only mode.` before it resolves the path. One difference remains: a subject in a collection keeps its position in the path the tools build, so that the path resolves back, and a position such as `Items[2]` on the first readable item tells the client that hidden items come before it. Dictionary keys reveal nothing of that kind.
+- **Writable property**: readable, `IsReadOnly` is false, the property has a public setter and the policy allows `write`.
+
+Without a policy nothing of this is evaluated or allocated.
+
+Declare properties that hold subjects with subject types, otherwise their values are listed as values and the policy is not asked about the subjects inside, for example the devices in a property typed as a dictionary of lists of devices.
+
+`list_types` is not filtered, because types are schema rather than data. Enrichments such as `$methods` come from the `IMcpSubjectEnricher` of the application, which filters them itself. A custom tool resolves paths the way the tools do with `configuration.TryGetReadableProperty(root, path)` and `configuration.TryGetReadableSubject(root, path)`, which return null for what is hidden. It builds the path `search` lists for a subject, which is also the `$path` `browse` returns for a subject it lists, with `configuration.TryGetSubjectPath(root, subject)`, which returns null for a subject that has no path, is not readable or is of a type in `ExcludeTypes`, so it lists exactly the subjects `search` can list. `TryGetReadableSubject` resolves a path it returns, for any subject but the root, back to that subject when the path provider resolves the path with the `PathPrefix`, as without a prefix or with the prefix `/` and the separator `/`. The three helpers take the tool root as `root`: it is readable, and paths are resolved and built from it.
 
 ## Extension Points
 
@@ -294,13 +389,56 @@ public class MyToolProvider : IMcpToolProvider
             Name = "my_tool",
             Description = "My custom tool",
             InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }),
-            Handler = async (input, ct) => new { result = "hello" }
+            Handler = async (input, ct) => new { result = "hello" },
+            Annotations = McpToolAnnotations.ReadOnly
         };
     }
 }
 ```
 
 Tools are transport-agnostic `McpToolInfo` instances registered via `WithSubjectRegistryTools`.
+
+`Annotations` carries the MCP tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) that clients may use to decide which calls need the user's approval. They are hints, not enforcement. `McpToolAnnotations.ReadOnly` marks a tool that only reads and `McpToolAnnotations.Destructive` one that can change state; both set `openWorldHint` to false. The core tools carry these: `set_property` is destructive, the other core tools are read-only.
+
+## Using the Tools In-Process
+
+The tools do not depend on the MCP transport, so an application can hand them to its own AI agent directly or serve a selection of them on another route.
+
+```csharp
+// The core tools and those of the tool providers, with ToolDescriptionAdditions applied
+var tools = new McpToolFactory(() => rootSubject, configuration).CreateTools();
+
+// Function calling with Microsoft.Extensions.AI
+var options = new ChatOptions { Tools = [.. tools.Select(tool => tool.ToAIFunction())] };
+var client = new FunctionInvokingChatClient(innerChatClient);
+var response = await client.GetResponseAsync(messages, options, cancellationToken);
+```
+
+`ToAIFunction()` wraps a tool as an `AIFunction` with the tool's name, description and input schema; invoking it calls the tool's handler with the arguments as a JSON object.
+
+`McpToolDispatcher` serves any list of tools through the MCP list and call requests, which `WithSubjectRegistryTools` uses as well. It lets a custom route offer a different tool list, for example only the tools one client may use, set in a stateless transport's `ConfigureSessionOptions` on `options.Handlers`:
+
+```csharp
+var handlers = options.Handlers;
+handlers.ListToolsHandler = (_, _) => ValueTask.FromResult(McpToolDispatcher.ListTools(tools));
+handlers.CallToolHandler = (request, cancellationToken) =>
+    McpToolDispatcher.CallToolAsync(tools, request.Params, logger, cancellationToken);
+```
+
+`ListTools` maps the annotations of each tool. `CallToolAsync` returns a string result as text and any other result as indented JSON that keeps non-ASCII characters and `<>&'` unescaped, and turns an unknown tool or a throwing handler into an error result. A call whose cancellation token is cancelled throws `OperationCanceledException` instead.
+
+To change one member of a tool, for example to wrap its handler with a budget or logging, copy it with the copy constructor, which keeps all other members including the annotations:
+
+```csharp
+var counted = new McpToolInfo(tool)
+{
+    Handler = async (input, cancellationToken) =>
+    {
+        Interlocked.Increment(ref callCount);
+        return await tool.Handler(input, cancellationToken);
+    }
+};
+```
 
 ## Connecting Claude Desktop (Local Development)
 

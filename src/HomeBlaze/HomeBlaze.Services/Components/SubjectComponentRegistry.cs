@@ -26,7 +26,10 @@ public class SubjectComponentRegistry
     /// </summary>
     public SubjectComponentRegistration? GetComponent(Type subjectType, SubjectComponentType type, string? name = null)
     {
-        return _resolvedCache.GetOrAdd((subjectType, type, name), key => ResolveComponent(key.Item1, key.Item2, key.Item3));
+        return _resolvedCache.GetOrAdd(
+            (subjectType, type, name),
+            static (key, registry) => registry.ResolveComponent(key.Item1, key.Item2, key.Item3),
+            this);
     }
 
     private SubjectComponentRegistration? ResolveComponent(Type subjectType, SubjectComponentType type, string? name)
@@ -66,12 +69,12 @@ public class SubjectComponentRegistry
     }
 
     /// <summary>
-    /// Checks if a component is registered for the given subject type and component type.
+    /// Checks whether <see cref="GetComponent"/> resolves a component for the given subject type and component type,
+    /// including the inheritance and interface fallback.
     /// </summary>
-    // TODO: Align HasComponent with GetComponent - currently only checks exact match while GetComponent supports inheritance/interface fallback
     public bool HasComponent(Type subjectType, SubjectComponentType type, string? name = null)
     {
-        return _components.Value.ContainsKey((subjectType, type, name));
+        return GetComponent(subjectType, type, name) is not null;
     }
 
     /// <summary>

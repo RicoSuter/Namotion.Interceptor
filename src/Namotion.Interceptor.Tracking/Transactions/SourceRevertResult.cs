@@ -6,8 +6,7 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// Result of reverting previously-written changes at their external sources during transaction rollback.
 /// </summary>
 /// <param name="Failed">
-/// The changes whose revert at the source failed, reported so the transaction can include them in the
-/// failure exception.
+/// The changes whose revert at the source failed.
 /// </param>
 /// <param name="Errors">
 /// The errors that occurred while reverting, typically one per source that failed to revert.

@@ -2,9 +2,7 @@ using System.Net;
 using System.Reactive.Concurrency;
 using System.Text;
 using HomeBlaze.Abstractions;
-using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Xunit;
@@ -18,11 +16,10 @@ public class MyStromPollerTests
     {
         // Arrange
         var handler = new StubMyStromHandler();
-        await using var provider = CreateProvider(handler);
         var subject = new MyStromSwitch { HostAddress = "192.168.1.59" };
 
         // Act
-        await using var running = await subject.StartAsync(provider);
+        await using var running = await MyStromTestHost.StartAsync(subject, handler);
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => subject.IsConnected && subject.Temperature == 21.5m);
@@ -36,9 +33,8 @@ public class MyStromPollerTests
     {
         // Arrange
         var handler = new StubMyStromHandler();
-        await using var provider = CreateProvider(handler);
         var subject = new MyStromSwitch { HostAddress = "192.168.1.59" };
-        await using var running = await subject.StartAsync(provider);
+        await using var running = await MyStromTestHost.StartAsync(subject, handler);
         await AsyncTestHelpers.WaitUntilAsync(() => subject.IsConnected);
 
         // Act
@@ -53,9 +49,8 @@ public class MyStromPollerTests
     {
         // Arrange
         var handler = new StubMyStromHandler();
-        await using var provider = CreateProvider(handler);
         var subject = new MyStromSwitch { HostAddress = "192.168.1.59" };
-        var running = await subject.StartAsync(provider);
+        var running = await MyStromTestHost.StartAsync(subject, handler);
         await AsyncTestHelpers.WaitUntilAsync(() => subject.IsConnected);
 
         // Act
@@ -70,9 +65,8 @@ public class MyStromPollerTests
     {
         // Arrange
         var handler = new StubMyStromHandler();
-        await using var provider = CreateProvider(handler);
         var subject = new MyStromSwitch { HostAddress = "192.168.1.59" };
-        var running = await subject.StartAsync(provider);
+        var running = await MyStromTestHost.StartAsync(subject, handler);
         await AsyncTestHelpers.WaitUntilAsync(() => subject.IsConnected && subject.IsOn == true);
 
         // Act
@@ -91,9 +85,8 @@ public class MyStromPollerTests
         // Arrange
         var firstReport = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var handler = new StubMyStromHandler(failingReportGate: firstReport.Task);
-        await using var provider = CreateProvider(handler);
         var subject = new MyStromSwitch { HostAddress = "192.168.1.59" };
-        await using var running = await subject.StartAsync(provider);
+        await using var running = await MyStromTestHost.StartAsync(subject, handler);
 
         // The poller reconnects right after a failed poll, so Error is transient and is recorded
         // synchronously from the change stream rather than sampled.
@@ -133,9 +126,8 @@ public class MyStromPollerTests
     {
         // Arrange
         var handler = new StubMyStromHandler(failInformation: true);
-        await using var provider = CreateProvider(handler);
         var subject = new MyStromSwitch { HostAddress = "192.168.1.59", RetryInterval = TimeSpan.FromHours(1) };
-        var running = await subject.StartAsync(provider);
+        var running = await MyStromTestHost.StartAsync(subject, handler);
 
         // Error is set right before the retry wait, and the long interval keeps the poller in it.
         await AsyncTestHelpers.WaitUntilAsync(() =>
@@ -148,16 +140,6 @@ public class MyStromPollerTests
         Assert.Equal(ServiceStatus.Stopped, subject.Status);
         Assert.False(subject.IsConnected);
         Assert.Equal(1, handler.InformationRequestCount);
-    }
-
-    private static ServiceProvider CreateProvider(HttpMessageHandler handler)
-        => new ServiceCollection()
-            .AddSingleton<IHttpClientFactory>(new StubHttpClientFactory(handler))
-            .BuildServiceProvider();
-
-    private sealed class StubHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
     }
 
     /// <summary>

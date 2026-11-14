@@ -4,14 +4,13 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Hosting.Tests.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Hosting.Tests;
 
 public class AddSubjectTests
 {
-    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(30);
-
     [Fact]
     public async Task WhenSubjectHasGeneratedContextConstructor_ThenItStartsExactlyOnce()
     {
@@ -63,6 +62,29 @@ public class AddSubjectTests
             var registry = context.GetService<ISubjectRegistry>();
             Assert.Contains(registry.KnownSubjects, known => ReferenceEquals(known.Key, subject));
             Assert.Equal(1, subject.StartCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenTwoConstructorsTakeTheContext_ThenTheOneWithTheDependencyIsUsed()
+    {
+        // Arrange
+        var builder = HostingTestHost.CreateBuilder();
+        builder.Services.AddSubject<SubjectWithTwoContextConstructors>();
+        var host = builder.Build();
+        await host.StartAsync();
+
+        try
+        {
+            // Act
+            var subject = host.Services.GetRequiredService<SubjectWithTwoContextConstructors>();
+
+            // Assert
+            Assert.NotNull(subject.Logger);
         }
         finally
         {
@@ -125,7 +147,7 @@ public class AddSubjectTests
         var host = builder.Build();
 
         // Act
-        await host.StartAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        await host.StartAsync().WaitAsync(TestTimeouts.Default);
 
         try
         {
@@ -149,15 +171,15 @@ public class AddSubjectTests
         var context = CreateContextWithRegistry(builder);
         builder.Services.AddSingleton(context);
 
-        using var configureEntered = new ManualResetEventSlim();
-        using var releaseConfigure = new ManualResetEventSlim();
+        var configureEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseConfigure = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         SubjectWithDependencies? configuredSubject = null;
 
         builder.Services.AddSubject<SubjectWithDependencies>(subject =>
         {
             configuredSubject = subject;
-            configureEntered.Set();
-            releaseConfigure.Wait(WaitTimeout);
+            configureEntered.TrySetResult();
+            releaseConfigure.Task.Wait(TestTimeouts.Default);
             subject.Name = "configured";
         }, contextResolver: serviceProvider => serviceProvider.GetRequiredService<IInterceptorSubjectContext>());
 
@@ -165,12 +187,12 @@ public class AddSubjectTests
 
         // Act - the factory runs on the host's own start path, so configure has to be released from
         // another thread.
-        var startup = Task.Run(() => host.StartAsync());
-        Assert.True(configureEntered.Wait(WaitTimeout), "The configure callback was never invoked.");
+        var startup = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => host.StartAsync());
+        await configureEntered.Task.WaitAsync(TestTimeouts.Default);
 
         var attachedDuringConfigure = ((IInterceptorSubject)configuredSubject!).TryGetSubjectSlot() is not null;
-        releaseConfigure.Set();
-        await startup.WaitAsync(WaitTimeout);
+        releaseConfigure.TrySetResult();
+        await startup.WaitAsync(TestTimeouts.Default);
 
         try
         {
@@ -227,15 +249,15 @@ public class AddSubjectTests
         var context = CreateContextWithRegistry(builder);
         builder.Services.AddSingleton(context);
 
-        using var configureEntered = new ManualResetEventSlim();
-        using var releaseConfigure = new ManualResetEventSlim();
+        var configureEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseConfigure = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         SubjectIgnoringContextParameter? configuredSubject = null;
 
         builder.Services.AddSubject<SubjectIgnoringContextParameter>(subject =>
         {
             configuredSubject = subject;
-            configureEntered.Set();
-            releaseConfigure.Wait(WaitTimeout);
+            configureEntered.TrySetResult();
+            releaseConfigure.Task.Wait(TestTimeouts.Default);
             subject.Name = "configured";
         }, contextResolver: serviceProvider => serviceProvider.GetRequiredService<IInterceptorSubjectContext>());
 
@@ -243,14 +265,14 @@ public class AddSubjectTests
 
         // Act - the factory runs on the host's own start path, so configure has to be released from
         // another thread.
-        var startup = Task.Run(() => host.StartAsync());
-        Assert.True(configureEntered.Wait(WaitTimeout), "The configure callback was never invoked.");
+        var startup = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => host.StartAsync());
+        await configureEntered.Task.WaitAsync(TestTimeouts.Default);
 
         var subject = configuredSubject!;
         var attachedDuringConfigure = ((IInterceptorSubject)subject).TryGetSubjectSlot() is not null;
         var startCountDuringConfigure = subject.StartCount;
-        releaseConfigure.Set();
-        await startup.WaitAsync(WaitTimeout);
+        releaseConfigure.TrySetResult();
+        await startup.WaitAsync(TestTimeouts.Default);
 
         try
         {

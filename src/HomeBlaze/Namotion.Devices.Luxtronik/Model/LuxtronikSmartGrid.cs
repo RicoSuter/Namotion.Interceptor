@@ -27,14 +27,15 @@ public partial class LuxtronikSmartGrid : IModbusBaseAddressProvider, ILuxtronik
     public int BaseAddress => 10360;
 
     /// <summary>
-    /// Gets whether the EVU1 input (SG 1) is active.
+    /// Gets whether the EVU1 input (SG 1) is on. With Smart Grid switched off in the controller this is the
+    /// utility lock contact, which is on while the heat pump is released and off during a lock time.
     /// </summary>
     [LuxtronikInputRegister(0, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 1)]
     public partial bool? IsEvu1Active { get; internal set; }
 
     /// <summary>
-    /// Gets whether the EVU2 input (SG 2) is active.
+    /// Gets whether the EVU2 input (SG 2) is on.
     /// </summary>
     [LuxtronikInputRegister(1, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 2)]
@@ -43,6 +44,9 @@ public partial class LuxtronikSmartGrid : IModbusBaseAddressProvider, ILuxtronik
     /// <summary>
     /// Gets the Smart Grid state from both EVU signals, or <c>null</c> when either is unknown.
     /// </summary>
+    /// <remarks>
+    /// Only meaningful while Smart Grid is switched on in the controller, which the SHI does not report.
+    /// </remarks>
     [Derived]
     [State(IsDiscrete = true, Position = 3)]
     public LuxtronikSmartGridState? State => (IsEvu1Active, IsEvu2Active) switch

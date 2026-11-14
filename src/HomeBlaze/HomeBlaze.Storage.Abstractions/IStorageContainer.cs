@@ -19,6 +19,13 @@ public interface IStorageContainer
     StorageStatus Status { get; }
 
     /// <summary>
+    /// Gets a snapshot of the names under which the direct children of this container are stored: a subject
+    /// stored as a JSON file without the file extension, any other file with its extension, and a folder
+    /// with its folder name.
+    /// </summary>
+    IReadOnlyCollection<string> ChildNames { get; }
+
+    /// <summary>
     /// Gets metadata about a blob at the specified path.
     /// </summary>
     /// <param name="path">The relative path to the blob.</param>
@@ -46,6 +53,15 @@ public interface IStorageContainer
     Task WriteBlobAsync(string path, Stream content, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Writes content to a blob at the specified path, atomically as
+    /// <see cref="WriteBlobAsync(string, Stream, CancellationToken)"/> does.
+    /// </summary>
+    /// <param name="path">The relative path to the blob.</param>
+    /// <param name="content">The content to write. The caller may change it once the returned task has completed.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task WriteBlobAsync(string path, ReadOnlyMemory<byte> content, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Deletes a blob from storage.
     /// </summary>
     /// <param name="path">The relative path to the blob.</param>
@@ -63,9 +79,9 @@ public interface IStorageContainer
     /// <summary>
     /// Deletes a subject from storage. Removes the file and unregisters it from the hierarchy.
     /// The path is resolved from the internal registry - subjects must be registered before deletion.
+    /// A folder is deleted as well, but only an empty one.
     /// </summary>
     /// <param name="subject">The subject to delete.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task DeleteSubjectAsync(IInterceptorSubject subject, CancellationToken cancellationToken);
-    // TODO: Do we need to add path in DeleteSubjectAsync as well for symmetry with AddSubjectAsync? will this help delete? or not necessary?
 }

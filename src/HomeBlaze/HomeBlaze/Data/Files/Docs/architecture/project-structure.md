@@ -1,7 +1,6 @@
 ---
 title: Project Structure
 navTitle: Project Structure
-position: 2
 ---
 
 # Project Structure
@@ -62,7 +61,7 @@ Storage.Abs.   Components.Abs.   Abstractions
 | `HomeBlaze.Services` | Microsoft.NET.Sdk | Backend domain services (no UI) |
 | `HomeBlaze.Host.Services` | Microsoft.NET.Sdk | UI-agnostic services (no MudBlazor) |
 | `HomeBlaze.Storage` | Microsoft.NET.Sdk | File storage domain logic (no UI) |
-| `HomeBlaze.Components` | Microsoft.NET.Sdk.Razor | Shared UI components (no MudBlazor) |
+| `HomeBlaze.Components` | Microsoft.NET.Sdk.Razor | Shared UI components |
 | `HomeBlaze.Storage.Blazor` | Microsoft.NET.Sdk.Razor | Storage UI (Monaco editor, icons) |
 | `HomeBlaze.Host` | Microsoft.NET.Sdk.Razor | Blazor application host (MudBlazor) |
 | `HomeBlaze.Plugins` | Microsoft.NET.Sdk | Runtime NuGet plugin loading integration |
@@ -106,6 +105,7 @@ Storage.Abs.   Components.Abs.   Abstractions
 - `IStorageContainer` - Blob storage abstraction
 - `IStorageFile` - File subject interface
 - `IConfigurationWriter` - Configuration persistence
+- `IMetadataStore`, `IMetadataContainer`, `IMetadataNotesFormat`, `MetadataKeys` - Metadata persistence, the order of children, the checking and rendering of notes and the known keys, in the namespace `HomeBlaze.Storage.Abstractions.Metadata`
 - `IConfigurable` - Subjects with persistent config
 - `StorageStatus` - Storage connection status
 - `[Configuration]` - Property persistence marker
@@ -153,6 +153,9 @@ Storage.Abs.   Components.Abs.   Abstractions
 - **Method Discovery**: Find `[Operation]` and `[Query]` methods on subjects
 - **Method Invocation**: Execute operations with parameter conversion
 - **Method Properties**: `MethodPropertyInitializer` creates virtual properties for methods, enabling `[PropertyAttribute]` on operations (e.g., `IsEnabled`)
+- **Metadata**: Read and search the metadata of subjects and properties, order children and resolve metadata links to what the browser opens, in the namespace `HomeBlaze.Services.Metadata`
+- **Display Helpers**: Subject titles and whether the browser shows a property as a value (`HomeBlaze.Services.Display`), and the URLs of the subject browser (`HomeBlaze.Services.Navigation`)
+- **Developer Mode**: Toggle developer features (`DeveloperModeService`)
 
 **Dependencies**: `HomeBlaze.Abstractions`, `HomeBlaze.Storage.Abstractions`, `HomeBlaze.Components.Abstractions`
 
@@ -165,10 +168,9 @@ Storage.Abs.   Components.Abs.   Abstractions
 **Purpose**: UI rendering support without MudBlazor dependency.
 
 **Features**:
-- **Navigation Tree**: Build navigation from subject graph
-- **Route Resolution**: Subjects to URL-friendly paths
-- **Display Helpers**: Title, icon, formatted state values
-- **Developer Mode**: Toggle developer features
+- **Navigation Tree**: The items of the sidebar and the top bar from the subject graph (`NavigationItemResolver`)
+- **Property Panel Layout**: The row layout of the property panel that a browser chose (`PropertyRowLayoutService`) and the grouping of the values and methods of a subject by category (`SubjectMemberGrouping`), in the namespace `HomeBlaze.Host.Services.Display`
+- **Registration**: `AddHomeBlazeHostServices` adds these, the component registry and `MetadataLinkResolver` to the base services
 
 **Dependencies**: `HomeBlaze.Services`
 
@@ -186,7 +188,8 @@ Storage.Abs.   Components.Abs.   Abstractions
 - **Blob Storage**: Local or cloud via FluentStorage
 - **Virtual File System**: Folders and files as subjects
 - **File Types**: Generic, JSON, Markdown with frontmatter
-- **Change Detection**: FileSystemWatcher integration
+- **Change Detection**: reconcile passes that FileSystemWatcher events and a periodic timer trigger
+- **Metadata**: Metadata files of folders and JSON files, applied to the subjects and written through `IMetadataStore`, and the checking and rendering of notes, in the namespace `HomeBlaze.Storage.Metadata`
 
 **Dependencies**: `HomeBlaze.Services`, `FluentStorage`, `YamlDotNet`
 
@@ -213,11 +216,17 @@ Storage.Abs.   Components.Abs.   Abstractions
 
 ### HomeBlaze.Components
 
-**Purpose**: Shared UI components without MudBlazor.
+**Purpose**: Shared UI components.
 
-**Dependencies**: `HomeBlaze.Services`, `HomeBlaze.Components.Abstractions`
+**Features**:
+- **Widgets and Layouts**: The widgets and layouts that pages place
+- **Dialogs and Editors**: Subject setup and edit dialogs and the dialogs of operations, in the namespaces `HomeBlaze.Components.Dialogs` and `HomeBlaze.Components.Editors`
+- **Inputs**: The expression field, the subject path picker and `MarkdownField`, the Markdown source beside a live preview, in the namespace `HomeBlaze.Components.Inputs`
+- **Metadata**: `MetadataSummary`, `MetadataEditDialog`, `MetadataSummaryDialog`, `MetadataTagFilterDialog` and `MetadataEditing`, in the namespace `HomeBlaze.Components.Metadata`
 
-**Use when**: Building cross-framework UI components.
+**Dependencies**: `HomeBlaze.Abstractions`, `HomeBlaze.Services`, `HomeBlaze.Storage.Abstractions`, `HomeBlaze.Components.Abstractions`, `MudBlazor`
+
+**Use when**: Building MudBlazor based UI that several HomeBlaze libraries share.
 
 ---
 
@@ -231,6 +240,7 @@ Storage.Abs.   Components.Abs.   Abstractions
 - **Operations UI**: Execute `[Operation]` methods with parameter dialogs
 - **Navigation Menu**: Sidebar from subject tree
 - **Layout**: Standard application layout
+- **Browser Preferences**: Settings a browser remembers across reloads (navigation drawer, property row layout, display time zone), one `homeblaze.<key>` cookie each, read during the prerender so the first paint is already right (`BrowserPreferences`)
 
 **Dependencies**: `HomeBlaze.Host.Services`, `HomeBlaze.Storage.Blazor`, `MudBlazor`
 

@@ -1,0 +1,57 @@
+using HomeBlaze.Abstractions.Devices.Locks;
+using HomeBlaze.Abstractions.Sensors;
+
+namespace HomeBlaze.Abstractions.Tests;
+
+public class DoorAbstractionTests
+{
+    [Theory]
+    [InlineData(DoorState.Closed, true)]
+    [InlineData(DoorState.Open, false)]
+    [InlineData(DoorState.PartiallyOpen, false)]
+    [InlineData(DoorState.Opening, false)]
+    [InlineData(DoorState.Closing, false)]
+    [InlineData(null, null)]
+    public void WhenDoorStateIsSet_ThenIsDoorClosedFollowsIt(DoorState? doorState, bool? expected)
+    {
+        // Arrange
+        IDoorSensor sensor = new TestDoorSensor { DoorState = doorState };
+
+        // Act
+        var isDoorClosed = sensor.IsDoorClosed;
+
+        // Assert
+        Assert.Equal(expected, isDoorClosed);
+    }
+
+    [Theory]
+    [InlineData(DoorLockState.Locked, true)]
+    [InlineData(DoorLockState.Unlocked, false)]
+    [InlineData(DoorLockState.Unlatched, false)]
+    [InlineData(DoorLockState.Unlatching, false)]
+    [InlineData(DoorLockState.Locking, false)]
+    [InlineData(DoorLockState.Unlocking, false)]
+    [InlineData(DoorLockState.Jammed, false)]
+    [InlineData(null, null)]
+    public void WhenLockStateIsSet_ThenIsLockedFollowsIt(DoorLockState? lockState, bool? expected)
+    {
+        // Arrange
+        IDoorLockState doorLock = new TestDoorLock { LockState = lockState };
+
+        // Act
+        var isLocked = doorLock.IsLocked;
+
+        // Assert
+        Assert.Equal(expected, isLocked);
+    }
+
+    private sealed class TestDoorSensor : IDoorSensor
+    {
+        public DoorState? DoorState { get; init; }
+    }
+
+    private sealed class TestDoorLock : IDoorLockState
+    {
+        public DoorLockState? LockState { get; init; }
+    }
+}

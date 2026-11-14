@@ -1,0 +1,5 @@
+{
+  "$type": "HomeBlaze.AI.Agents.ClaudeCli.ClaudeCliAgent",
+  "name": "Typing Agent",
+  "cliPath": "claude-not-configured"
+}

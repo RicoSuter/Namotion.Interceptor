@@ -68,7 +68,7 @@ public class RegistryAttributeMigrationIntegrationTests
         var configProperties = subject.GetConfigurationProperties().ToList();
         Assert.Contains(configProperties, p => p.Name == nameof(FullIntegrationSubject.ApiKey));
 
-        var allMethods = registered.GetAllMethods();
+        var allMethods = registered.GetAllMethods(ExclusionTarget.UserInterface);
         Assert.Equal(2, allMethods.Count);
     }
 

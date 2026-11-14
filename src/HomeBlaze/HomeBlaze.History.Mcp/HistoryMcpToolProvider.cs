@@ -1,5 +1,8 @@
-using System.Globalization;
+using System.Collections.Immutable;
 using System.Text.Json;
+using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.History.Abstractions;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -31,20 +34,48 @@ public class HistoryMcpToolProvider : IMcpToolProvider
                 items = new { type = "string" },
                 description = "One or more canonical property paths, e.g. /Devices/Sensor/Temperature."
             },
-            from = new { type = "string", description = "Range start, ISO 8601. A bare timestamp is treated as UTC." },
-            to = new { type = "string", description = "Range end, ISO 8601. Defaults to now." },
-            bucket = new { type = "string", description = "Bucket size for downsampling, e.g. 5m, 30s, 1h, 7d. Omit for raw samples." },
+            from = new
+            {
+                type = "string",
+                description = "Range start, ISO 8601. Without an offset it is local time in time_zone, e.g. 2026-03-01 is " +
+                              "local midnight; an explicit Z or offset is honored."
+            },
+            to = new { type = "string", description = "Range end, ISO 8601, read like from. Defaults to now." },
+            bucket = new
+            {
+                type = "string",
+                description = "Bucket for downsampling: a fixed size such as 5m, 30s, 1h, 7d (aligned to the Unix epoch), " +
+                              "or day, week, month or year (aligned to local midnight in time_zone; weeks start Monday). " +
+                              "Omit for raw samples."
+            },
+            time_zone = new
+            {
+                type = "string",
+                description = "IANA time zone, e.g. Europe/Zurich: reads from and to without an offset, formats the response " +
+                              "timestamps, and aligns day, week, month and year buckets. Defaults to the server's local zone, " +
+                              "which the response names."
+            },
             aggregation = new
             {
                 type = "string",
                 description = "Last, First, SampleAverage, TimeWeightedAverage, Minimum, Maximum, Sum, Count, " +
-                              "or StandardDeviation. Case-insensitive. Defaults to Last."
+                              "StandardDeviation, or Delta (increase of a cumulative counter per bucket; a drop counts as " +
+                              "a restart from zero, recording gaps are bridged; needs a bucket; only for properties marked cumulative). " +
+                              "Case-insensitive. Defaults to Last."
             },
             max_points = new
             {
                 type = "integer",
                 description = "Maximum points per path. Defaults to (and is capped at) 10000 for raw samples " +
-                              "and 1000 for bucketed ones. Lower it to keep the response small."
+                              "and 1000 for bucketed ones. A series with more keeps its newest points and drops the oldest " +
+                              "(marked by truncated and complete_from). Lower it to keep the response small."
+            },
+            coverage = new
+            {
+                type = "string",
+                description = "summary (default) or ranges. The response always carries a coverage summary (ratio, gaps, " +
+                              "largest_gap, and partial for bucketed queries); ranges also lists the covered ranges, which raw state timelines need when ratio < 1, " +
+                              "because raw samples do not show gaps."
             }
         },
         required = new[] { "paths", "from" }
@@ -70,39 +101,57 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         {
             Name = "get_property_history",
             Description = "Query recorded history for one or more [State] property paths over a time range. " +
-                          "Supports raw samples or bucketed downsampling with an aggregation. Returns a 'series' " +
-                          "map keyed by path, each with a value_type hint, effective coverage ranges, the points " +
-                          "(a null value means a gap, an unknown value, or the Count or Sum of a partly covered bucket), " +
-                          "and a truncated flag; a path that cannot be served carries its " +
-                          "own error and the others still return data. " +
-                          "All input and output timestamps are UTC. " +
+                          "Supports raw samples or bucketed downsampling with an aggregation. Returns the resolved from, to and time_zone, " +
+                          "a coverage summary for the whole response (covered ratio, gap count, largest gap; ranges on request), " +
+                          "and a 'series' map keyed by path, each with a value_type hint, a unit when the property declares one " +
+                          "(a StateUnit name such as WattHour), and points as [timestamp, value] pairs " +
+                          "(a null value means no coverage or no known value). For bucketed queries, coverage.partial lists " +
+                          "the buckets the coverage covers only partly, in the form of the points' first element; their Count " +
+                          "and Sum are lower bounds over the covered part. The point limit keeps the newest points and drops " +
+                          "the oldest: a cut series carries truncated and complete_from, the timestamp from which it is complete; " +
+                          "narrow from and to, or use a coarser bucket, to see older data. A series whose coverage differs " +
+                          "from the response's carries its own ranges when ranges are requested. A path that cannot be " +
+                          "served carries its own error and the others still return data. " +
+                          "Timestamps carry the offset of time_zone (named in the response); compare instants, not strings. " +
+                          "Points of day, week, month and year buckets carry their period in time_zone instead of a " +
+                          "timestamp: 2026-03-29, 2026-W13 (ISO week), 2026-03, 2026. " +
+                          "Computed bucket values (averages, Sum, StandardDeviation, Delta) are rounded to 12 significant digits; recorded values are not. For energy per month, use bucket=month " +
+                          "with aggregation=Delta on the energy counter; Delta returns the counter's unit, so a WattHour " +
+                          "counter yields Wh per bucket. " +
                           "Use browse or search to discover paths first.",
             InputSchema = GetPropertyHistorySchema,
-            Handler = HandleGetPropertyHistoryAsync
+            Handler = HandleGetPropertyHistoryAsync,
+            Annotations = McpToolAnnotations.ReadOnly
         };
     }
 
     private const int MaxHistoryPaths = 10;
 
-    // Recorded timestamps keep whatever offset their source supplied, so formatting them verbatim can
-    // emit mixed offsets and break a caller that compares or sorts the strings, as the documented
-    // all-UTC contract invites.
-    private static string FormatUtc(DateTimeOffset value) =>
-        value.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture);
-
     /// <summary>
-    /// Returns a structured error when an optional parameter is present but is neither a string nor
-    /// null, so a wrong-typed value is reported rather than silently falling back to its default.
+    /// Reads an optional string parameter: absent or null yields a null <paramref name="value"/>. Returns a structured
+    /// error when the parameter is any other non-string kind, so a wrong-typed value is reported rather than silently
+    /// falling back to its default.
     /// </summary>
-    private static object? HasWrongType(JsonElement input, string name) =>
-        input.TryGetProperty(name, out var element) &&
-        element.ValueKind is not (JsonValueKind.String or JsonValueKind.Null)
-            ? new { error = $"Parameter '{name}' must be a string." }
-            : null;
+    private static object? TryReadOptionalString(JsonElement input, string name, out string? value)
+    {
+        value = null;
+        if (!input.TryGetProperty(name, out var element))
+        {
+            return null;
+        }
+
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            value = element.GetString();
+            return null;
+        }
+
+        return element.ValueKind == JsonValueKind.Null ? null : new { error = $"Parameter '{name}' must be a string." };
+    }
 
     private async Task<object?> HandleGetPropertyHistoryAsync(JsonElement input, CancellationToken cancellationToken)
     {
-        // Mirrors invoke_method: anything unexpected becomes a structured error rather than reaching the
+        // Mirrors invoke_query and invoke_operation: anything unexpected becomes a structured error rather than reaching the
         // MCP layer, which returns the raw exception message and so leaks internals to the caller.
         try
         {
@@ -154,33 +203,50 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         // A present-but-wrong-typed parameter is rejected rather than ignored. Silently dropping a
         // numeric 'bucket' turned a bucketed request into a raw one with ten times the point budget,
         // and a numeric 'to' silently extended the range, both with no signal to the caller.
-        if (HasWrongType(input, "to") is { } toTypeError)
+        if (TryReadOptionalString(input, "to", out var toText) is { } toTypeError)
         {
             return toTypeError;
         }
 
-        if (HasWrongType(input, "bucket") is { } bucketTypeError)
+        if (TryReadOptionalString(input, "bucket", out var bucketText) is { } bucketTypeError)
         {
             return bucketTypeError;
         }
 
-        if (HasWrongType(input, "aggregation") is { } aggregationTypeError)
+        if (TryReadOptionalString(input, "aggregation", out var aggregationText) is { } aggregationTypeError)
         {
             return aggregationTypeError;
         }
 
-        DateTimeOffset from;
-        DateTimeOffset to;
-        TimeSpan? bucket;
+        if (TryReadOptionalString(input, "time_zone", out var timeZoneText) is { } timeZoneTypeError)
+        {
+            return timeZoneTypeError;
+        }
+
+        var calendarUnit = HistoryToolParsing.ParseCalendarUnit(bucketText);
+
+        // The zone reads offset-less timestamps, formats every response timestamp and aligns calendar buckets. Blank
+        // counts as absent, as for bucket and aggregation.
+        TimeZoneInfo timeZone;
         try
         {
-            from = HistoryToolParsing.ParseTimestamp(fromElement.GetString()!);
-            to = input.TryGetProperty("to", out var toElement) && toElement.ValueKind == JsonValueKind.String
-                ? HistoryToolParsing.ParseTimestamp(toElement.GetString()!)
-                : DateTimeOffset.UtcNow;
-            bucket = input.TryGetProperty("bucket", out var bucketElement) && bucketElement.ValueKind == JsonValueKind.String
-                ? HistoryToolParsing.ParseBucket(bucketElement.GetString())
-                : null;
+            timeZone = string.IsNullOrWhiteSpace(timeZoneText) ? TimeZoneInfo.Local : HistoryToolParsing.ParseTimeZone(timeZoneText);
+        }
+        catch (FormatException exception)
+        {
+            return new { error = exception.Message };
+        }
+
+        DateTimeOffset from;
+        DateTimeOffset to;
+        HistoryBucket? bucket;
+        try
+        {
+            from = HistoryToolParsing.ParseTimestamp(fromElement.GetString()!, timeZone);
+            to = toText is not null ? HistoryToolParsing.ParseTimestamp(toText, timeZone) : DateTimeOffset.UtcNow;
+            bucket = calendarUnit is { } unit
+                ? HistoryBucket.Calendar(unit, timeZone)
+                : HistoryToolParsing.ParseBucket(bucketText);
         }
         catch (FormatException exception)
         {
@@ -195,8 +261,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             return new { error = "Parameter 'from' must be earlier than 'to'." };
         }
 
-        var aggregation = HistoryToolParsing.NormalizeAggregation(
-            input.TryGetProperty("aggregation", out var aggregationElement) ? aggregationElement.GetString() : null);
+        var aggregation = HistoryToolParsing.NormalizeAggregation(aggregationText);
         if (aggregation is null)
         {
             return new
@@ -204,6 +269,23 @@ public class HistoryMcpToolProvider : IMcpToolProvider
                 error = "Unknown aggregation.",
                 available = HistoryToolParsing.AllAggregations.OrderBy(name => name).ToArray()
             };
+        }
+
+        // Raw samples ignore the aggregation, so Delta would return the cumulative readings as if they were increases.
+        if (aggregation == HistoryAggregations.Delta && bucket is null)
+        {
+            return new { error = "Delta needs a bucket." };
+        }
+
+        if (TryReadOptionalString(input, "coverage", out var coverageMode) is { } coverageTypeError)
+        {
+            return coverageTypeError;
+        }
+
+        var includeRanges = string.Equals(coverageMode, "ranges", StringComparison.OrdinalIgnoreCase);
+        if (!includeRanges && coverageMode is not null && !string.Equals(coverageMode, "summary", StringComparison.OrdinalIgnoreCase))
+        {
+            return new { error = "Parameter 'coverage' must be 'summary' or 'ranges'." };
         }
 
         var defaultMaxPoints = bucket is null ? 10_000 : 1_000;
@@ -224,24 +306,186 @@ public class HistoryMcpToolProvider : IMcpToolProvider
                 stores, rootRegistered, path, from, to, bucket, aggregation, maxPoints, cancellationToken)))
             .ConfigureAwait(false);
 
+        // The response coverage is the first served series'. In the normal case every series shares it, and
+        // repeating it per series dominated the response size. A bucketed series covers its whole oldest bucket,
+        // which can start before from, but the summary and the listed ranges describe the requested range.
+        var requested = new HistoryCoverage(from, to);
+        var responseCoverage = results.FirstOrDefault(result => result.Series is not null)?.Series!.CoverageRanges;
+        var requestedCoverage = responseCoverage is { } shared ? HistoryCoverage.Clip(shared, requested) : default;
+
         var series = new Dictionary<string, object?>(StringComparer.Ordinal);
-        foreach (var (path, payload) in results)
+        foreach (var result in results)
         {
-            series[path] = payload;
+            if (result.Series is not { } served)
+            {
+                series[result.Path] = result.ErrorPayload;
+                continue;
+            }
+
+            ImmutableArray<HistoryCoverage>? ownRanges = null;
+            if (includeRanges)
+            {
+                var clipped = HistoryCoverage.Clip(served.CoverageRanges, requested);
+                ownRanges = clipped.SequenceEqual(requestedCoverage) ? null : clipped;
+            }
+
+            series[result.Path] = BuildSeriesPayload(result.ValueType, result.Unit, served, timeZone, bucket, aggregation, ownRanges);
         }
 
         // Nested rather than returned as the top-level map: a path is caller-supplied, so a bare map
         // keyed by path cannot be told apart from the tool's own { error = ... } shape.
-        return new { series };
+        var response = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["from"] = HistoryToolFormatting.FormatTimestamp(from, timeZone),
+            ["to"] = HistoryToolFormatting.FormatTimestamp(to, timeZone),
+            ["time_zone"] = HistoryToolParsing.GetIanaId(timeZone)
+        };
+
+        if (responseCoverage is { } coverage)
+        {
+            response["coverage"] = BuildCoveragePayload(coverage, requestedCoverage, from, to, timeZone, bucket, maxPoints, includeRanges);
+        }
+
+        response["series"] = series;
+        return response;
     }
 
-    private async Task<(string Path, object? Payload)> QueryOnePathAsync(
+    private static Dictionary<string, object?> BuildCoveragePayload(
+        ImmutableArray<HistoryCoverage> ranges,
+        ImmutableArray<HistoryCoverage> requestedRanges,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        TimeZoneInfo timeZone,
+        HistoryBucket? bucket,
+        int maxPoints,
+        bool includeRanges)
+    {
+        var summary = HistoryToolFormatting.Summarize(requestedRanges, from, to);
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["ratio"] = summary.Ratio,
+            ["gaps"] = summary.Gaps
+        };
+
+        if (summary.Gaps > 0)
+        {
+            payload["largest_gap"] = HistoryToolFormatting.FormatDuration(summary.LargestGap);
+        }
+
+        if (includeRanges)
+        {
+            payload["ranges"] = FormatRanges(requestedRanges, timeZone);
+        }
+
+        if (bucket is { } grid && FindPartialBuckets(ranges, from, to, grid, maxPoints, timeZone) is { } partial)
+        {
+            payload["partial"] = partial;
+        }
+
+        return payload;
+    }
+
+    /// <summary>
+    /// Labels the buckets of the returned grid that <paramref name="ranges"/> covers only partly, or returns null when
+    /// there are none (partial buckets: history.md).
+    /// </summary>
+    private static List<string>? FindPartialBuckets(
+        ImmutableArray<HistoryCoverage> ranges,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        HistoryBucket bucket,
+        int maxPoints,
+        TimeZoneInfo timeZone)
+    {
+        List<string>? partial = null;
+        var bucketStart = BucketAlignment.FirstBucketStart(from, to, bucket, maxPoints);
+        while (bucketStart < to)
+        {
+            var bucketEnd = BucketAlignment.Next(bucketStart, bucket);
+            var window = new HistoryCoverage(bucketStart, bucketEnd < to ? bucketEnd : to);
+            var covered = HistoryCoverage.CoveredDuration(ranges, window);
+            if (covered > TimeSpan.Zero && covered < window.To - window.From)
+            {
+                (partial ??= []).Add(FormatPointTime(bucketStart, timeZone, bucket));
+            }
+
+            bucketStart = bucketEnd;
+        }
+
+        return partial;
+    }
+
+    private static Dictionary<string, object?> BuildSeriesPayload(
+        string? valueType, string? unit, HistorySeries series, TimeZoneInfo timeZone, HistoryBucket? bucket, string aggregation,
+        ImmutableArray<HistoryCoverage>? ownRanges)
+    {
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal) { ["value_type"] = valueType };
+        if (unit is not null)
+        {
+            payload["unit"] = unit;
+        }
+
+        if (series.IsTruncated)
+        {
+            payload["truncated"] = true;
+            if (series.Points.Length > 0)
+            {
+                // The point limit keeps the newest points, so the series is complete from its first returned point.
+                payload["complete_from"] = HistoryToolFormatting.FormatTimestamp(series.Points[0].Timestamp, timeZone);
+            }
+        }
+
+        if (ownRanges is { } ranges)
+        {
+            payload["ranges"] = FormatRanges(ranges, timeZone);
+        }
+
+        var roundNumbers = bucket is not null && ComputesNewValue(aggregation);
+        var points = new object?[series.Points.Length][];
+        for (var i = 0; i < points.Length; i++)
+        {
+            points[i] = ToPair(series.Points[i], timeZone, bucket, roundNumbers);
+        }
+
+        payload["points"] = points;
+        return payload;
+    }
+
+    // Values an aggregation computes carry floating point noise that is rounded away; raw samples and the aggregations
+    // that pick a recorded sample are returned as recorded.
+    private static bool ComputesNewValue(string aggregation) =>
+        aggregation is HistoryAggregations.SampleAverage or HistoryAggregations.TimeWeightedAverage
+            or HistoryAggregations.Sum or HistoryAggregations.StandardDeviation or HistoryAggregations.Delta;
+
+    private static object?[] ToPair(HistoryPoint point, TimeZoneInfo timeZone, HistoryBucket? bucket, bool roundNumbers) =>
+    [
+        FormatPointTime(point.Timestamp, timeZone, bucket),
+        point.Number is { } number
+            ? roundNumbers ? HistoryToolFormatting.RoundToSignificantDigits(number) : number
+            : point.Json
+    ];
+
+    private static string FormatPointTime(DateTimeOffset timestamp, TimeZoneInfo timeZone, HistoryBucket? bucket) =>
+        bucket is { CalendarUnit: not null } calendar
+            ? HistoryToolFormatting.FormatPeriodLabel(timestamp, calendar)
+            : HistoryToolFormatting.FormatTimestamp(timestamp, timeZone);
+
+    private static string[][] FormatRanges(ImmutableArray<HistoryCoverage> ranges, TimeZoneInfo timeZone) =>
+        ranges.Select(range => new[]
+        {
+            HistoryToolFormatting.FormatTimestamp(range.From, timeZone),
+            HistoryToolFormatting.FormatTimestamp(range.To, timeZone)
+        }).ToArray();
+
+    private sealed record PathResult(string Path, string? ValueType, string? Unit, HistorySeries? Series, object? ErrorPayload);
+
+    private async Task<PathResult> QueryOnePathAsync(
         IReadOnlyList<IHistoryStore> stores,
         RegisteredSubject? rootRegistered,
         string path,
         DateTimeOffset from,
         DateTimeOffset to,
-        TimeSpan? bucket,
+        HistoryBucket? bucket,
         string aggregation,
         int maxPoints,
         CancellationToken cancellationToken)
@@ -249,6 +493,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         // Resolution runs inside the boundary too: walking a path invokes property getters, so one
         // throwing getter would otherwise fault the whole fan-out before any query started.
         string? valueType = null;
+        string? unit = null;
         HistorySeries result;
         try
         {
@@ -264,6 +509,30 @@ public class HistoryMcpToolProvider : IMcpToolProvider
                 valueType = HistoryToolParsing.ValueType(match.Property.Type);
             }
 
+            var state = resolved?.Property.TryGetAttribute(KnownAttributes.State)?.GetValue() as StateMetadata;
+            if (state is { Unit: not StateUnit.Default })
+            {
+                unit = state.Unit.ToString();
+            }
+
+            if (aggregation == HistoryAggregations.Delta && resolved is null)
+            {
+                return new PathResult(path, valueType, null, null, new
+                {
+                    value_type = valueType,
+                    error = "Property not found; Delta needs the property to check that it is cumulative."
+                });
+            }
+
+            if (aggregation == HistoryAggregations.Delta && state is not { IsCumulative: true })
+            {
+                return new PathResult(path, valueType, null, null, new
+                {
+                    value_type = valueType,
+                    error = "Delta requires a cumulative property (a State attribute with IsCumulative)."
+                });
+            }
+
             result = await stores
                 .QueryHistoryAsync(
                     new HistoryQuery(path, from, to, bucket, aggregation, maxPoints), cancellationToken)
@@ -271,7 +540,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         }
         catch (HistoryAggregationNotSupportedException exception)
         {
-            return (path, new
+            return new PathResult(path, valueType, null, null, new
             {
                 value_type = valueType,
                 error = exception.Message,
@@ -290,30 +559,14 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             // whole fan-out and discarded the results for every sibling path that had already
             // succeeded, which is exactly what this tool promises not to do.
             _logger.LogError(exception, "Reading history for '{PropertyPath}' failed.", path);
-            return (path, new
+            return new PathResult(path, valueType, null, null, new
             {
                 value_type = valueType,
                 error = "Could not read history for this path. Check server logs for details."
             });
         }
 
-        return (path, new
-        {
-            value_type = valueType,
-            truncated = result.IsTruncated,
-            coverage = result.CoverageRanges.Select(range => new
-            {
-                from = FormatUtc(range.From),
-                to = FormatUtc(range.To)
-            }).ToArray(),
-            points = result.Points.Select(point => new
-            {
-                t = FormatUtc(point.Timestamp),
-                value = point.Number is { } number ? (object?)number
-                      : point.Json is { } json ? json
-                      : null
-            }).ToArray()
-        });
+        return new PathResult(path, valueType, unit, result, null);
     }
 
     /// <summary>

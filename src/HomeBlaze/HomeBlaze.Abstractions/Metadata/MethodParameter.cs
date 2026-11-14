@@ -28,7 +28,8 @@ public class MethodParameter
     public bool IsFromServices { get; init; }
 
     /// <summary>
-    /// Whether this parameter accepts null (nullable reference type or <see cref="Nullable{T}"/>).
+    /// Whether this parameter accepts null: a <see cref="Nullable{T}"/>, a reference type annotated as nullable, which an
+    /// app that cannot read annotations, such as a trimmed one, does not see, or a parameter that defaults to null.
     /// </summary>
     public bool IsNullable { get; init; }
 

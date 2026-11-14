@@ -15,5 +15,6 @@ public interface IColorTemperatureState
     /// The current color temperature (0 = warm, 1 = cool).
     /// </summary>
     [State(Unit = StateUnit.Percent, Position = 112)]
+    [Category("Light")]
     decimal? ColorTemperature { get; }
 }

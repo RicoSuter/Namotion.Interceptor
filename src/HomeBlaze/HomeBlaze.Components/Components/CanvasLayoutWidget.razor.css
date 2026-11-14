@@ -1,0 +1,8 @@
+/* CanvasExtent.AngleProperty, registered so that WebKit computes it (see CanvasExtent.Factor). It lives here because a
+   registration cannot be inline and Razor reads <angle> as a tag. 45deg (tangent 1) draws an unset canvas at design
+   size. */
+@property --canvas-scale-angle {
+    syntax: '<angle>';
+    inherits: true;
+    initial-value: 45deg;
+}

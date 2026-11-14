@@ -1,0 +1,68 @@
+@using System.Globalization
+@using HomeBlaze.Abstractions.Attributes
+@using HomeBlaze.Services.Diagnostics
+@using HomeBlaze.Services.Display
+
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(HostSystem))]
+@implements ISubjectComponent
+
+@if (Subject is HostSystem host)
+{
+    <MudPaper Class="pa-4" data-testid="host-system-widget">
+        <MudStack Spacing="2">
+            <MudStack Row="true" AlignItems="AlignItems.Center">
+                <MudIcon Icon="@Icons.Material.Filled.Computer" Class="mr-2" />
+                <MudStack Spacing="0">
+                    <MudText Typo="Typo.h6">@host.Title</MudText>
+                    <MudText Typo="Typo.caption">@host.OperatingSystemName (@host.Architecture)</MudText>
+                </MudStack>
+                <MudSpacer />
+                @if (host.ContainerCpuLimit is { } cpuLimit)
+                {
+                    <MudChip T="string" Size="Size.Small">@cpuLimit.ToString("0.##", CultureInfo.InvariantCulture) cores</MudChip>
+                }
+                @if (host.ContainerMemoryLimit is { } memoryLimit)
+                {
+                    <MudChip T="string" Size="Size.Small">@StateUnitExtensions.FormatWithUnit(memoryLimit, StateUnit.Byte) limit</MudChip>
+                }
+            </MudStack>
+
+            <MudDivider />
+
+            <MudText Typo="Typo.caption">CPU @FormatPercent(host.CpuUsage)</MudText>
+            <MudProgressLinear Value="@(ValueReader.GetProgressPercent(host.CpuUsage, 0, 1) ?? 0)" Min="0" Max="100" Rounded="true" />
+
+            <MudText Typo="Typo.caption">Memory @FormatMemory(host.TotalMemory, host.AvailableMemory, host.MemoryUsage)</MudText>
+            <MudProgressLinear Value="@(ValueReader.GetProgressPercent(host.MemoryUsage, 0, 1) ?? 0)" Min="0" Max="100" Rounded="true" />
+
+            <MudText Typo="Typo.caption">Uptime @FormatUptime(host.Uptime)</MudText>
+            <MudText Typo="Typo.caption">
+                Process: CPU @FormatPercent(host.Process.CpuUsage),
+                memory @FormatBytes(host.Process.WorkingSet),
+                allocations @FormatRate(host.Process.AllocationRate)
+            </MudText>
+        </MudStack>
+    </MudPaper>
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private static string FormatPercent(decimal? fraction) =>
+        fraction is { } value ? StateUnitExtensions.FormatPercent(value) : ValueReader.MissingText;
+
+    private static string FormatBytes(long? bytes) =>
+        bytes is { } value ? StateUnitExtensions.FormatWithUnit(value, StateUnit.Byte) : ValueReader.MissingText;
+
+    private static string FormatRate(decimal? kilobytesPerSecond) =>
+        kilobytesPerSecond is { } value ? StateUnitExtensions.FormatWithUnit(value, StateUnit.KilobytePerSecond) : ValueReader.MissingText;
+
+    private static string FormatMemory(long? total, long? available, decimal? usage) =>
+        total is { } totalValue && available is { } availableValue
+            ? $"{FormatBytes(totalValue - availableValue)} of {FormatBytes(totalValue)} ({FormatPercent(usage)})"
+            : ValueReader.MissingText;
+
+    private static string FormatUptime(TimeSpan? uptime) =>
+        uptime is { } value ? $"{(int)value.TotalDays}d {value.Hours}h {value.Minutes}m" : ValueReader.MissingText;
+}

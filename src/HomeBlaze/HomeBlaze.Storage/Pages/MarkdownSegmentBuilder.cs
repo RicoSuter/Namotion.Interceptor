@@ -1,0 +1,678 @@
+using System.Collections.Immutable;
+using System.Globalization;
+using System.Net;
+using System.Text;
+using System.Text.RegularExpressions;
+using Markdig.Extensions.Tables;
+using Markdig.Renderers;
+using Markdig.Renderers.Html;
+using Markdig.Renderers.Html.Inlines;
+using Markdig.Syntax;
+using Markdig.Syntax.Inlines;
+
+namespace HomeBlaze.Storage.Pages;
+
+public abstract record MarkdownSegment;
+
+/// <param name="Html">The HTML of the segment.</param>
+/// <param name="BlockStarts">
+/// The offsets into <paramref name="Html"/>, in ascending order, at which a top-level block of the page starts, so that the
+/// HTML from there on does not depend on the HTML before it. An offset of 0 means that a block starts with the segment, not
+/// joined to an expression before it, and an offset of <c>Html.Length</c> that one starts after the segment, so the
+/// HTML between two offsets is a complete block. Default when there is none; an empty array is stored as default.
+/// </param>
+public sealed record HtmlMarkdownSegment(string Html, ImmutableArray<int> BlockStarts = default) : MarkdownSegment
+{
+    private readonly ImmutableArray<int> _blockStarts = Normalize(BlockStarts);
+
+    public ImmutableArray<int> BlockStarts
+    {
+        get => _blockStarts;
+        init => _blockStarts = Normalize(value);
+    }
+
+    private static ImmutableArray<int> Normalize(ImmutableArray<int> blockStarts) =>
+        blockStarts.IsDefaultOrEmpty ? default : blockStarts;
+
+    /// <summary>The text block that this HTML starts, when the page was built with its text blocks marked, or null.</summary>
+    internal MarkdownTextBlock? TextBlock { get; init; }
+
+    // By content, because the equality of an immutable array compares the array it wraps.
+    public bool Equals(HtmlMarkdownSegment? other) =>
+        other is not null && Html == other.Html && BlockStarts.AsSpan().SequenceEqual(other.BlockStarts.AsSpan()) &&
+        Equals(TextBlock, other.TextBlock);
+
+    public override int GetHashCode() => HashCode.Combine(Html, BlockStarts.IsDefault ? 0 : BlockStarts.Length);
+}
+
+public sealed record ExpressionMarkdownSegment(string Text) : MarkdownSegment;
+
+public sealed record BlockMarkdownSegment(MarkdownBlock Block, IReadOnlyList<MarkdownSegment> Content) : MarkdownSegment;
+
+/// <summary>One {{ … }} expression in the text of a page: where it stands, and the text between the braces without the white space around it.</summary>
+public readonly record struct MarkdownExpression(MarkdownSpan Span, string Text);
+
+public static class MarkdownErrorBox
+{
+    public static string Render(int line, string message) =>
+        $"<div class=\"markdown-block-error\" role=\"alert\">Line {line}: {WebUtility.HtmlEncode(message)}</div>\n";
+}
+
+/// <summary>Renders a parsed page to HTML and cuts it into segments per block.</summary>
+public static partial class MarkdownSegmentBuilder
+{
+    // The text takes no brace and no '<'. Without that, an opening pair of braces that is never closed would take
+    // everything up to the closing pair of a later expression, and in the rendered HTML also the markers in between.
+    // It finds the expressions in HTML that the page writes; those in running text are markers already.
+    private const string ExpressionPattern = @"\{\{\s*([^{}<]+?)\s*\}\}";
+
+    // The source is searched with '<' allowed, because running text has the operators of an expression as written.
+    [GeneratedRegex(@"\{\{\s*([^{}]+?)\s*\}\}")]
+    private static partial Regex SourceExpressionRegex();
+
+    [GeneratedRegex(@"<!--(/?)BLOCK:([0-9a-f]{32}):(\d+)-->|<!--EXPR:([0-9a-f]{32}):(\d+)-->|<!--TEXT:([0-9a-f]{32}):(\d+)-->|" + ExpressionPattern + @"|<!--BREAK:([0-9a-f]{32})-->")]
+    private static partial Regex MarkerRegex();
+
+    private static readonly char[] Braces = ['{', '}'];
+
+    // A comment, whose content opens nothing, or the name of an opening tag, each with whether it is never ended.
+    // "<!-->" and "<!--->" are complete comments.
+    [GeneratedRegex(@"<!--(?:-?>|[\s\S]*?(?:-->|(?<unended>$)))|<(?<name>[A-Za-z][A-Za-z0-9-]*)(?<unended>(?>[^>]*)$)?")]
+    private static partial Regex OpeningTagRegex();
+
+    private static readonly HashSet<string> VoidElements = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"
+    };
+
+    private static readonly string OldSubjectFenceError =
+        "The subject(name) fence is no longer supported. Write the subject as a block: a line with " +
+        $"{MarkdownBlockFence.Create(MarkdownBlockFence.MinimumLength)} Full.Type.Name#name key=value, " +
+        $"then a closing {MarkdownBlockFence.Create(MarkdownBlockFence.MinimumLength)} line.";
+
+    // A brace that the HTML has as a character reference comes from markdown code, and encloses no expression.
+    private static readonly char[] ExcludedFromText = ['{', '}'];
+
+    /// <summary>
+    /// Gets the expressions in the text of the page in document order: the text between two pairs of braces that
+    /// contains no brace. A brace inside markdown code neither opens nor closes one. The head line of a block and its json block are skipped.
+    /// </summary>
+    /// <remarks>
+    /// The search reads the text and not the rendered page, so it also returns an expression that
+    /// <see cref="Build(MarkdownPage, Func{string, string})"/> does not turn into a segment: one in the front matter, in the content of an invalid
+    /// block, and one whose braces enclose markdown markup or the border of a block.
+    /// An expression with a character reference in it, such as <c>&amp;amp;</c>, is returned as written, except one
+    /// in HTML that the page writes: its text has the character, like its segment, and one whose character
+    /// is a brace is skipped. The segment of an expression in running text keeps it as written.
+    /// </remarks>
+    public static IEnumerable<MarkdownExpression> FindExpressions(MarkdownPage page)
+    {
+        var source = page.Source;
+        foreach (Match match in SourceExpressionRegex().Matches(HideBracesInCode(page)))
+        {
+            if (IsInBlockArguments(page, match.Index))
+            {
+                continue;
+            }
+
+            var group = match.Groups[1];
+            var text = source.Substring(group.Index, group.Length);
+
+            // Raw HTML is HTML to the page, which reads a character reference in it, so a '<' is written as &lt;.
+            if (page.IsInsideRawHtml(match.Index))
+            {
+                text = WebUtility.HtmlDecode(text);
+                if (text.AsSpan().IndexOfAny(ExcludedFromText) >= 0)
+                {
+                    continue;
+                }
+            }
+
+            yield return new MarkdownExpression(new MarkdownSpan(match.Index, match.Length), text);
+        }
+    }
+
+    // The head line and the json block of a block hold its arguments, whose expressions the widget evaluates itself.
+    private static bool IsInBlockArguments(MarkdownPage page, int position)
+    {
+        foreach (var block in page.AllBlocks)
+        {
+            if (IsInside(block.HeadSpan, position) || (block.ConfigurationSpan is { } configuration && IsInside(configuration, position)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsInside(MarkdownSpan span, int position) => position >= span.Start && position < span.End;
+
+    /// <summary>Gets the text of the page with every brace inside markdown code replaced. All offsets stay the same.</summary>
+    private static string HideBracesInCode(MarkdownPage page)
+    {
+        var source = page.Source;
+        char[]? hidden = null;
+        for (var index = source.IndexOfAny(Braces); index >= 0; index = source.IndexOfAny(Braces, index + 1))
+        {
+            if (page.IsInsideCode(index))
+            {
+                hidden ??= source.ToCharArray();
+                hidden[index] = '\0';
+            }
+        }
+
+        return hidden is null ? source : new string(hidden);
+    }
+
+    /// <summary>Gets whether a block is a fenced code block of the old <c>subject(name)</c> form, which is shown as an error.</summary>
+    internal static bool IsOldSubjectFence(Block block) =>
+        block is FencedCodeBlock { Info: { } info } && info.StartsWith("subject(", StringComparison.Ordinal);
+
+    public static IReadOnlyList<MarkdownSegment> Build(MarkdownPage page, Func<string, string>? linkRewriter = null) =>
+        Build(page, linkRewriter, markTextBlocks: false);
+
+    /// <summary>
+    /// Renders the page and cuts it into segments per block. With <paramref name="markTextBlocks"/>, every text block of the
+    /// page (see <see cref="MarkdownTextBlocks"/>) starts an <see cref="HtmlMarkdownSegment"/> of its own that carries it,
+    /// and the HTML of all segments together is the same as without. A link, which is not a picture, whose URL as written
+    /// <paramref name="opensInNewTab"/> accepts gets <c>target="_blank"</c> and <c>rel="noopener noreferrer"</c>, as does an
+    /// autolink that is not an e-mail address.
+    /// </summary>
+    internal static IReadOnlyList<MarkdownSegment> Build(
+        MarkdownPage page, Func<string, string>? linkRewriter, bool markTextBlocks, Func<string, bool>? opensInNewTab = null)
+    {
+        // Page text may contain marker-shaped comments, so only markers carrying this token count.
+        var token = Guid.NewGuid().ToString("N");
+        using var writer = new StringWriter();
+        var renderer = new HtmlRenderer(writer) { LinkRewriter = linkRewriter };
+        MarkdownPageParser.Pipeline.Setup(renderer);
+        renderer.ObjectRenderers.Insert(0, new BlockMarkerRenderer(page, token));
+        var expressions = new List<string>();
+        renderer.ObjectRenderers.Insert(0, new ExpressionMarkerRenderer(token, expressions));
+
+        // Extensions configure the code renderers by exact type during Setup, so the
+        // replacements are put in afterwards and take over what they configured.
+        var literalCode = new LiteralCodeWriter();
+        var codeBlockRenderer = renderer.ObjectRenderers.FindExact<CodeBlockRenderer>();
+        if (codeBlockRenderer is not null)
+        {
+            var literalRenderer = new LiteralCodeBlockRenderer(literalCode)
+            {
+                OutputAttributesOnPre = codeBlockRenderer.OutputAttributesOnPre
+            };
+            literalRenderer.BlocksAsDiv.UnionWith(codeBlockRenderer.BlocksAsDiv);
+            foreach (var (language, tag) in codeBlockRenderer.BlockMapping)
+            {
+                literalRenderer.BlockMapping[language] = tag;
+            }
+
+            literalRenderer.TryWriters.AddRange(codeBlockRenderer.TryWriters);
+            renderer.ObjectRenderers.Replace<CodeBlockRenderer>(literalRenderer);
+        }
+
+        var codeInlineRenderer = renderer.ObjectRenderers.FindExact<CodeInlineRenderer>();
+        if (codeInlineRenderer is not null)
+        {
+            var literalRenderer = new LiteralCodeInlineRenderer(literalCode);
+            literalRenderer.TryWriters.AddRange(codeInlineRenderer.TryWriters);
+            renderer.ObjectRenderers.Replace<CodeInlineRenderer>(literalRenderer);
+        }
+
+        var tableRenderer = renderer.ObjectRenderers.FindExact<HtmlTableRenderer>();
+        if (tableRenderer is not null)
+        {
+            var scrollableRenderer = new ScrollableTableRenderer();
+            scrollableRenderer.TryWriters.AddRange(tableRenderer.TryWriters);
+            renderer.ObjectRenderers.Replace<HtmlTableRenderer>(scrollableRenderer);
+        }
+
+        if (opensInNewTab is not null)
+        {
+            ReplaceRenderer<LinkInlineRenderer, LinkInline>(renderer, new NewTabLinkInlineRenderer(opensInNewTab));
+            ReplaceRenderer<AutolinkInlineRenderer, AutolinkInline>(renderer, new NewTabAutolinkInlineRenderer());
+        }
+
+        WriteBreaksBetweenBlocks(renderer, page, writer, token);
+
+        IReadOnlyList<MarkdownTextBlock>? textBlocks = null;
+        if (markTextBlocks)
+        {
+            textBlocks = MarkdownTextBlocks.Find(page);
+            var markers = new Dictionary<Block, int>(textBlocks.Count, ReferenceEqualityComparer.Instance);
+            for (var index = 0; index < textBlocks.Count; index++)
+            {
+                markers[textBlocks[index].FirstBlock] = index;
+            }
+
+            // Straight to the writer and not through the renderer, which would take the marker for text on the line and write
+            // other line breaks around the block, so that the HTML would differ once Split takes the markers out. Added after
+            // the breaks, so that a block that starts both has its break first and its segment starts with the block.
+            renderer.ObjectWriteBefore += (_, markdownObject) =>
+            {
+                if (markdownObject is Block block && markers.TryGetValue(block, out var markerIndex))
+                {
+                    writer.Write($"<!--TEXT:{token}:{markerIndex.ToString(CultureInfo.InvariantCulture)}-->");
+                }
+            };
+        }
+
+        renderer.Render(page.Document);
+        writer.Flush();
+
+        return Split(writer.ToString(), page, token, expressions, textBlocks);
+    }
+
+    /// <summary>Writes a break marker before each top-level block of the page that may start a markup string of its own.</summary>
+    private static void WriteBreaksBetweenBlocks(HtmlRenderer renderer, MarkdownPage page, StringWriter writer, string token)
+    {
+        // Blazor parses each markup string on its own, in a fresh context. So raw HTML stays with the block before it,
+        // and after a block whose raw HTML opens an element, which would be closed early, the rest stays joined.
+        var document = page.Document;
+        var marker = $"<!--BREAK:{token}-->";
+        var isJoined = false;
+        renderer.ObjectWriteBefore += (_, markdownObject) =>
+        {
+            if (markdownObject is not Block block || !ReferenceEquals(block.Parent, document))
+            {
+                return;
+            }
+
+            // Hooked into the rendering of the whole document, so that each block renders as it does there. The marker
+            // is written past the renderer, which then still knows whether the HTML before it ended a line.
+            if (!isJoined && block is not HtmlBlock && writer.GetStringBuilder().Length > 0)
+            {
+                writer.Write(marker);
+            }
+
+            isJoined = isJoined || OpensAnElement(page, block);
+        };
+    }
+
+    // The content of a widget block is markup of its own, so only the content of a style block counts for the page.
+    private static bool OpensAnElement(MarkdownPage page, Block block) => block switch
+    {
+        HtmlBlock html => OpensAnElement(html.Lines.ToString()),
+        LeafBlock { Inline: { } inline } => inline.Descendants<HtmlInline>().Any(tag => OpensAnElement(tag.Tag)),
+        MarkdownBlockContainer container when page.GetBlock(container).Kind != MarkdownBlockKind.Style => false,
+        ContainerBlock container => container.Any(child => OpensAnElement(page, child)),
+        _ => false
+    };
+
+    private static bool OpensAnElement(string rawHtml)
+    {
+        foreach (Match match in OpeningTagRegex().Matches(rawHtml))
+        {
+            var name = match.Groups["name"];
+            if (match.Groups["unended"].Success || (name.Success && !VoidElements.Contains(name.Value)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    internal static List<MarkdownSegment> Split(
+        string html, MarkdownPage page, string token, IReadOnlyList<string> expressions, IReadOnlyList<MarkdownTextBlock>? textBlocks = null)
+    {
+        var root = new List<MarkdownSegment>();
+        var stack = new Stack<(MarkdownBlock Block, List<MarkdownSegment> Outer)>();
+        var current = root;
+        var lastIndex = 0;
+
+        // A break marker does not end a segment: the HTML around it is one run, and the break is kept as an offset into it.
+        var run = new StringBuilder();
+        var blockStarts = new List<int>();
+        var hasBreak = false;
+
+        // The text block whose marker came last, which the next segment starts.
+        MarkdownTextBlock? pendingTextBlock = null;
+
+        foreach (Match match in MarkerRegex().Matches(html))
+        {
+            var isForgedMarker =
+                (match.Groups[2].Success && match.Groups[2].Value != token) ||
+                (match.Groups[4].Success && match.Groups[4].Value != token) ||
+                (match.Groups[6].Success && (match.Groups[6].Value != token || textBlocks is null)) ||
+                (match.Groups[9].Success && match.Groups[9].Value != token);
+            if (isForgedMarker)
+            {
+                continue;
+            }
+
+            // An expression in HTML that the page writes is HTML, so a quote or an ampersand in it is a character reference.
+            var expression = match.Groups[4].Success
+                ? expressions[int.Parse(match.Groups[5].Value, CultureInfo.InvariantCulture)]
+                : match.Groups[8].Success ? WebUtility.HtmlDecode(match.Groups[8].Value) : null;
+
+            if (match.Groups[8].Success && expression!.AsSpan().IndexOfAny(ExcludedFromText) >= 0)
+            {
+                continue;
+            }
+
+            AppendToRun(html, lastIndex, match.Index, root, current, run, blockStarts, ref hasBreak);
+            lastIndex = match.Index + match.Length;
+
+            if (match.Groups[9].Success)
+            {
+                hasBreak = true;
+                continue;
+            }
+
+            // A widget on the page ends the markup string in any case.
+            var isTextMarker = match.Groups[6].Success;
+            var opensWidget = expression is null && !isTextMarker && match.Groups[1].Length == 0;
+            if ((hasBreak || (opensWidget && ReferenceEquals(current, root))) && run.Length > 0)
+            {
+                blockStarts.Add(run.Length);
+            }
+
+            // A text block starts a segment of its own, which still starts with the block that a break before it started.
+            hasBreak = isTextMarker && hasBreak;
+            EndRun(current, run, blockStarts, ref pendingTextBlock);
+
+            if (isTextMarker)
+            {
+                pendingTextBlock = textBlocks![int.Parse(match.Groups[7].Value, CultureInfo.InvariantCulture)];
+                continue;
+            }
+
+            if (expression is not null)
+            {
+                current.Add(new ExpressionMarkdownSegment(expression));
+            }
+            else if (match.Groups[1].Length == 0)
+            {
+                stack.Push((page.AllBlocks[int.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture)], current));
+                current = [];
+            }
+            else if (stack.Count > 0)
+            {
+                var (block, outer) = stack.Pop();
+                outer.Add(new BlockMarkdownSegment(block, current));
+                current = outer;
+            }
+        }
+
+        AppendToRun(html, lastIndex, html.Length, root, current, run, blockStarts, ref hasBreak);
+        if (ReferenceEquals(current, root) && run.Length > 0)
+        {
+            blockStarts.Add(run.Length);
+        }
+
+        EndRun(current, run, blockStarts, ref pendingTextBlock);
+
+        // A closing marker that was not found must not take the content of its block out of the result.
+        while (stack.Count > 0)
+        {
+            var (block, outer) = stack.Pop();
+            outer.Add(new BlockMarkdownSegment(block, current));
+            current = outer;
+        }
+
+        return root;
+    }
+
+    private static void AppendToRun(
+        string html,
+        int start,
+        int end,
+        List<MarkdownSegment> root,
+        List<MarkdownSegment> current,
+        StringBuilder run,
+        List<int> blockStarts,
+        ref bool hasBreak)
+    {
+        if (end <= start)
+        {
+            return;
+        }
+
+        // The start of the page and the end of a widget on it start a block in any case.
+        var isAfterWidgetOrStartOfPage = run.Length == 0 && ReferenceEquals(current, root) && current is [] or [.., BlockMarkdownSegment];
+        if ((hasBreak && (run.Length > 0 || current.Count > 0)) || isAfterWidgetOrStartOfPage)
+        {
+            blockStarts.Add(run.Length);
+        }
+
+        hasBreak = false;
+        run.Append(html, start, end - start);
+    }
+
+    private static void EndRun(
+        List<MarkdownSegment> current, StringBuilder run, List<int> blockStarts, ref MarkdownTextBlock? pendingTextBlock)
+    {
+        // A text block that starts without HTML of its own still starts a segment, so that its content can tell it.
+        if (run.Length == 0 && pendingTextBlock is null)
+        {
+            return;
+        }
+
+        current.Add(new HtmlMarkdownSegment(run.ToString(), blockStarts.Count > 0 ? [.. blockStarts] : default) { TextBlock = pendingTextBlock });
+        pendingTextBlock = null;
+        run.Clear();
+        blockStarts.Clear();
+    }
+
+    // The marker holds an index and not the text, so that no text of an expression, such as "-->", can end the comment.
+    private sealed class ExpressionMarkerRenderer(string token, List<string> expressions) : HtmlObjectRenderer<MarkdownExpressionInline>
+    {
+        protected override void Write(HtmlRenderer renderer, MarkdownExpressionInline expression)
+        {
+            renderer.Write($"<!--EXPR:{token}:{expressions.Count}-->");
+            expressions.Add(expression.Text);
+        }
+    }
+
+    private sealed class BlockMarkerRenderer(MarkdownPage page, string token) : HtmlObjectRenderer<MarkdownBlockContainer>
+    {
+        protected override void Write(HtmlRenderer renderer, MarkdownBlockContainer container)
+        {
+            var block = page.GetBlock(container);
+            switch (block.Kind)
+            {
+                case MarkdownBlockKind.Style:
+                    renderer.EnsureLine();
+                    renderer.Write("<div").WriteAttributes(container).Write('>');
+                    renderer.WriteChildren(container);
+                    renderer.WriteLine("</div>");
+                    break;
+
+                case MarkdownBlockKind.Invalid:
+                    renderer.EnsureLine();
+                    renderer.Write(MarkdownErrorBox.Render(block.Line, block.Error!));
+                    break;
+
+                default:
+                    renderer.EnsureLine();
+                    renderer.Write($"<!--BLOCK:{token}:{block.Index}-->");
+                    for (var i = 0; i < container.Count; i++)
+                    {
+                        if (i == 0 && block.ConfigurationSpan is not null)
+                        {
+                            continue;
+                        }
+
+                        renderer.Render(container[i]);
+                    }
+
+                    renderer.Write($"<!--/BLOCK:{token}:{block.Index}-->");
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Collects what a code renderer writes and passes it on with every brace as a character reference.
+    /// A browser shows the braces, and the expression pattern does not match them.
+    /// </summary>
+    private sealed class LiteralCodeWriter
+    {
+        private readonly StringWriter _code = new();
+
+        public TextWriter Begin(HtmlRenderer renderer)
+        {
+            var output = renderer.Writer;
+            renderer.Writer = _code;
+            return output;
+        }
+
+        // With breakAfterDots the content may break after each dot, so that a type name in a narrow table column breaks
+        // between its segments and not inside one.
+        public void End(HtmlRenderer renderer, TextWriter output, bool breakAfterDots = false)
+        {
+            renderer.Writer = output;
+
+            var code = _code.GetStringBuilder();
+            code.Replace("{", "&#123;").Replace("}", "&#125;");
+            if (breakAfterDots)
+            {
+                // Between the end of the opening tag and the closing tag, so that no attribute changes.
+                var text = code.ToString();
+                var contentStart = text.IndexOf('>') + 1;
+                var contentEnd = text.LastIndexOf('<');
+                if (contentStart > 0 && contentEnd > contentStart)
+                {
+                    code.Replace(".", ".<wbr>", contentStart, contentEnd - contentStart);
+                }
+            }
+
+            foreach (var chunk in code.GetChunks())
+            {
+                output.Write(chunk.Span);
+            }
+
+            code.Clear();
+        }
+    }
+
+    private sealed class LiteralCodeBlockRenderer(LiteralCodeWriter literalCode) : CodeBlockRenderer
+    {
+        protected override void Write(HtmlRenderer renderer, CodeBlock block)
+        {
+            if (IsOldSubjectFence(block))
+            {
+                renderer.EnsureLine();
+                renderer.Write(MarkdownErrorBox.Render(block.Line + 1, OldSubjectFenceError));
+            }
+            else
+            {
+                var output = literalCode.Begin(renderer);
+                base.Write(renderer, block);
+                literalCode.End(renderer, output);
+            }
+        }
+    }
+
+    // The box, and not the table, scrolls sideways (see MarkdownFilePageComponent.razor.css of HomeBlaze.Storage.Blazor):
+    // a table whose display is changed loses its table semantics in some browsers.
+    private sealed class ScrollableTableRenderer : HtmlTableRenderer
+    {
+        protected override void Write(HtmlRenderer renderer, Table table)
+        {
+            renderer.EnsureLine();
+            renderer.WriteLine("<div class=\"markdown-table\">");
+            base.Write(renderer, table);
+            renderer.EnsureLine();
+            renderer.WriteLine("</div>");
+        }
+    }
+
+    private static void ReplaceRenderer<TOriginal, TObject>(HtmlRenderer renderer, HtmlObjectRenderer<TObject> replacement)
+        where TOriginal : HtmlObjectRenderer<TObject>
+        where TObject : MarkdownObject
+    {
+        var original = renderer.ObjectRenderers.FindExact<TOriginal>();
+        if (original is not null)
+        {
+            replacement.TryWriters.AddRange(original.TryWriters);
+            renderer.ObjectRenderers.Replace<TOriginal>(replacement);
+        }
+    }
+
+    private const string NewTabAttributes = " target=\"_blank\" rel=\"noopener noreferrer\"";
+
+    /// <summary>
+    /// Writes a link that opens in a new tab as <see cref="LinkInlineRenderer"/> of Markdig 0.45 does, with the attributes of
+    /// a new tab added, and every other link and every picture as Markdig does.
+    /// </summary>
+    /// <remarks>
+    /// The attributes are written here and not added to the attributes of the link, because the document of the page is
+    /// kept and rendered again by callers without the rule.
+    /// </remarks>
+    private sealed class NewTabLinkInlineRenderer(Func<string, bool> opensInNewTab) : LinkInlineRenderer
+    {
+        protected override void Write(HtmlRenderer renderer, LinkInline link)
+        {
+            var url = link.GetDynamicUrl?.Invoke() ?? link.Url;
+            if (link.IsImage || !renderer.EnableHtmlForInline || url is null || !opensInNewTab(url))
+            {
+                base.Write(renderer, link);
+                return;
+            }
+
+            renderer.Write("<a href=\"");
+            renderer.WriteEscapeUrl(url);
+            renderer.Write('"');
+            renderer.WriteAttributes(link);
+            if (!string.IsNullOrEmpty(link.Title))
+            {
+                renderer.Write(" title=\"");
+                renderer.WriteEscape(link.Title);
+                renderer.Write('"');
+            }
+
+            renderer.Write(NewTabAttributes);
+            renderer.Write('>');
+            renderer.WriteChildren(link);
+            renderer.Write("</a>");
+        }
+    }
+
+    /// <summary>
+    /// Writes an autolink that is not an e-mail address, which always has a scheme, as <see cref="AutolinkInlineRenderer"/>
+    /// of Markdig 0.45 does, with the attributes of a new tab added.
+    /// </summary>
+    private sealed class NewTabAutolinkInlineRenderer : AutolinkInlineRenderer
+    {
+        protected override void Write(HtmlRenderer renderer, AutolinkInline link)
+        {
+            if (link.IsEmail || !renderer.EnableHtmlForInline)
+            {
+                base.Write(renderer, link);
+                return;
+            }
+
+            renderer.Write("<a href=\"");
+            renderer.WriteEscapeUrl(link.Url);
+            renderer.Write('"');
+            renderer.WriteAttributes(link);
+            renderer.Write(NewTabAttributes);
+            renderer.Write('>');
+            renderer.WriteEscape(link.Url);
+            renderer.Write("</a>");
+        }
+    }
+
+    private sealed class LiteralCodeInlineRenderer(LiteralCodeWriter literalCode) : CodeInlineRenderer
+    {
+        protected override void Write(HtmlRenderer renderer, CodeInline code)
+        {
+            var output = literalCode.Begin(renderer);
+            base.Write(renderer, code);
+            literalCode.End(renderer, output, breakAfterDots: IsInTableCell(code));
+        }
+
+        private static bool IsInTableCell(Inline inline)
+        {
+            var container = inline.Parent;
+            while (container?.Parent is not null)
+            {
+                container = container.Parent;
+            }
+
+            return container?.ParentBlock?.Parent is TableCell;
+        }
+    }
+}

@@ -223,7 +223,7 @@ public class HostedSubjectActivationTests
 
         // Act & Assert
         Assert.Throws<ArgumentNullException>(() => subject.ActivateHostedService(null!));
-        Assert.Null(subject.TryGetLiveActivation());
+        Assert.Empty(subject.GetHostedServiceAttachments());
     }
 
     [Fact]
@@ -646,203 +646,112 @@ public class HostedSubjectActivationTests
     }
 
     [Fact]
-    public async Task WhenAContextEntryLandsBetweenAnActivationsReservationAndItsPublish_ThenTheActivationStartsTheService()
-    {
-        // Arrange - the entry reads the reservation and an empty attachment list, so it starts nothing,
-        // and without the lookup after the publish the subject would sit in the graph holding an
-        // activation nothing invokes.
-        await HostingTestHost.RunAsync(async context =>
-        {
-            var subject = new DataGatedFactorySubject();
-
-            var attachmentsAtContextEntry = -1;
-            var reservedAtContextEntry = false;
-
-            // The third read: the entry read, the reservation, then the publish.
-            subject.GateDataRead(3, () =>
-            {
-                subject.Context.AddFallbackContext(context);
-                attachmentsAtContextEntry = subject.GetHostedServiceAttachments().Length;
-                reservedAtContextEntry = subject.TryGetLiveActivation() is not null;
-            });
-
-            // Act
-            var attachment = subject.ActivateHostedService(EmptyServiceProvider.Instance)!;
-
-            // Assert - the premise first: the entry found the reservation and nothing to start
-            Assert.True(reservedAtContextEntry);
-            Assert.Equal(0, attachmentsAtContextEntry);
-
-            await attachment.DrainAsync();
-
-            Assert.Same(attachment, Assert.Single(subject.GetHostedServiceAttachments()));
-            Assert.Equal(HostedServiceAttachmentState.Running, attachment.GetState(out _));
-            Assert.Equal(1, subject.CreateCount);
-        });
-    }
-
-    [Fact]
-    public async Task WhenAContextEntryLandsBeforeAnActivationsSlotRead_ThenTheActivationReturnsTheAutomaticOne()
+    public async Task WhenAddSubjectRunsItInAPrivateContext_ThenTheServiceRunsWithTheApplicationsProvider()
     {
         // Arrange
-        await HostingTestHost.RunAsync(async context =>
-        {
-            var subject = new DataGatedFactorySubject();
-
-            IHostedServiceAttachment? automatic = null;
-            subject.GateDataRead(1, () =>
-            {
-                subject.Context.AddFallbackContext(context);
-                automatic = Assert.Single(subject.GetHostedServiceAttachments());
-            });
-
-            // Act
-            var attachment = subject.ActivateHostedService(EmptyServiceProvider.Instance)!;
-
-            // Assert
-            Assert.NotNull(automatic);
-            Assert.Same(automatic, attachment);
-            await attachment.DrainAsync();
-
-            Assert.Same(attachment, Assert.Single(subject.GetHostedServiceAttachments()));
-            Assert.Equal(HostedServiceAttachmentState.Running, attachment.GetState(out _));
-            Assert.Equal(1, subject.CreateCount);
-        });
-    }
-
-    [Fact]
-    public async Task WhenActivatedSubjectLeavesTheGraph_ThenItsServiceStopsBeforeTheAttachmentsItMade()
-    {
-        // Arrange
-        var (host, context) = await HostingTestHost.StartAsync();
-        GatedStopService? service = null;
-        var subject = new ActivatableSubject { ServiceFactory = s => service = new GatedStopService(s) };
+        var builder = HostingTestHost.CreateBuilder();
+        builder.Services.AddSubject<ActivatableSubject>();
+        var host = builder.Build();
 
         try
         {
-            ((IInterceptorSubject)subject).Context.AddFallbackContext(context);
-            await AsyncTestHelpers.WaitUntilAsync(() =>
-                service?.ChildAttachment?.GetState(out _) == HostedServiceAttachmentState.Running);
-
             // Act
-            ((IInterceptorSubject)subject).Context.RemoveFallbackContext(context);
-            await service!.StopEntered.Task;
+            await host.StartAsync();
+            var subject = host.Services.GetRequiredService<ActivatableSubject>();
 
-            // Assert - an unordered child stop enters its stop window without the delay the service's
-            // stop waits out before reaching the gate, so it would already read Stopping here.
-            Assert.Equal(HostedServiceAttachmentState.Running, service.ChildAttachment!.GetState(out _));
-            Assert.Equal(0, service.Child!.StopCount);
-            Assert.False(service.Child.IsDisposed);
-
-            service.StopRelease.SetResult();
-            await service.ChildAttachment!.DrainAsync();
-            Assert.True(service.Child.IsDisposed);
-            Assert.True(service.ChildStopBeganAfterThisStopReturned);
+            // Assert
+            Assert.Equal(1, subject.CreateCount);
+            Assert.Same(host.Services.GetRequiredService<ILoggerFactory>(), subject.LastServiceProvider!.GetRequiredService<ILoggerFactory>());
+            var attachment = Assert.Single(subject.GetHostedServiceAttachments());
+            Assert.Equal(HostedServiceAttachmentState.Running, attachment.GetState(out _));
         }
         finally
         {
-            service?.StopRelease.TrySetResult();
             await host.StopAsync();
         }
     }
 
     [Fact]
-    public async Task WhenHostStopsAnActivatedSubject_ThenItsServiceStopsBeforeTheAttachmentsItMade()
+    public async Task WhenSharedContextOptedOutOfActivation_ThenAddSubjectStillActivatesTheService()
     {
-        // Arrange
-        var (host, context) = await HostingTestHost.StartAsync();
-        GatedStopService? service = null;
-        var subject = new ActivatableSubject { ServiceFactory = s => service = new GatedStopService(s) };
-        ((IInterceptorSubject)subject).Context.AddFallbackContext(context);
-        await AsyncTestHelpers.WaitUntilAsync(() =>
-            service?.ChildAttachment?.GetState(out _) == HostedServiceAttachmentState.Running);
+        // Arrange - the context does not activate on attach, so the registration's explicit
+        // activation is the only thing that can run the service.
+        var builder = HostingTestHost.CreateBuilder();
+        var sharedContext = HostingTestHost.CreateContext(builder, activateSubjectHostedServices: false);
+        builder.Services.AddSubject<ActivatableSubject>(contextResolver: _ => sharedContext);
+        var host = builder.Build();
 
         try
         {
             // Act
-            var stopping = host.StopAsync();
-            await service!.StopEntered.Task;
-
-            // Assert - an unordered child stop enters its stop window without the delay the service's
-            // stop waits out before reaching the gate, so it would already read Stopping here.
-            Assert.Equal(HostedServiceAttachmentState.Running, service.ChildAttachment!.GetState(out _));
-            Assert.Equal(0, service.Child!.StopCount);
-            Assert.False(service.Child.IsDisposed);
-
-            service.StopRelease.SetResult();
-            await stopping;
-            Assert.True(service.Child.IsDisposed);
-            Assert.True(service.ChildStopBeganAfterThisStopReturned);
-            Assert.Equal(1, subject.CreateCount);
-        }
-        finally
-        {
-            service?.StopRelease.TrySetResult();
-        }
-    }
-
-    [Fact]
-    public async Task WhenTheActivationWasDetachedExplicitly_ThenAContextDetachStopsTheOtherAttachmentsWithoutWaitingForIt()
-    {
-        // Arrange - the explicit detach's stop is held inside the service, so a child stop ordered
-        // behind it, or parked on a signal that stop never sets, cannot run before the release.
-        var (host, context) = await HostingTestHost.StartAsync();
-        GatedStopService? service = null;
-        var subject = new ActivatableSubject { ServiceFactory = s => service = new GatedStopService(s) };
-
-        try
-        {
-            ((IInterceptorSubject)subject).Context.AddFallbackContext(context);
-            await AsyncTestHelpers.WaitUntilAsync(() =>
-                service?.ChildAttachment?.GetState(out _) == HostedServiceAttachmentState.Running);
-
-            var activation = subject.TryGetLiveActivation()!;
-            Assert.True(subject.DetachHostedService(activation));
-            await service!.StopEntered.Task;
-
-            // Act
-            ((IInterceptorSubject)subject).Context.RemoveFallbackContext(context);
-            await service.ChildAttachment!.DrainAsync().WaitAsync(TimeSpan.FromSeconds(30));
+            await host.StartAsync();
+            var subject = host.Services.GetRequiredService<ActivatableSubject>();
 
             // Assert
-            Assert.True(service.Child!.IsDisposed);
-            Assert.False(service.ChildStopBeganAfterThisStopReturned);
-            Assert.False(service.IsDisposed);
-
-            service.StopRelease.SetResult();
-            await activation.DrainAsync();
-            Assert.True(service.IsDisposed);
+            Assert.Equal(1, subject.CreateCount);
+            var attachment = Assert.Single(subject.GetHostedServiceAttachments());
+            Assert.Equal(HostedServiceAttachmentState.Running, attachment.GetState(out _));
         }
         finally
         {
-            service?.StopRelease.TrySetResult();
             await host.StopAsync();
         }
     }
 
     [Fact]
-    public async Task WhenTheActivationWasDetachedExplicitly_ThenShutdownStopsTheOtherAttachmentsWithoutWaitingForIt()
+    public async Task WhenHostStops_ThenTheServiceAddSubjectActivatedIsStoppedAndDisposed()
     {
         // Arrange
-        var (host, context) = await HostingTestHost.StartAsync();
-        var handler = context.TryGetService<HostedServiceHandler>()!;
-        GatedStopService? service = null;
-        var subject = new ActivatableSubject { ServiceFactory = s => service = new GatedStopService(s) };
-        ((IInterceptorSubject)subject).Context.AddFallbackContext(context);
-        await AsyncTestHelpers.WaitUntilAsync(() =>
-            service?.ChildAttachment?.GetState(out _) == HostedServiceAttachmentState.Running);
-
-        var activation = subject.TryGetLiveActivation()!;
-        service!.StopRelease.SetResult();
-        Assert.True(await subject.DetachHostedServiceAsync(activation, CancellationToken.None));
+        var builder = HostingTestHost.CreateBuilder();
+        builder.Services.AddSubject<ActivatableSubject>();
+        var host = builder.Build();
+        await host.StartAsync();
+        var subject = host.Services.GetRequiredService<ActivatableSubject>();
+        var service = (ScriptedBackgroundService)subject.LastService!;
 
         // Act
         await host.StopAsync();
 
-        // Assert - a child stop parked on a signal nothing sets stays counted past the drain's deadline.
-        Assert.Equal(0, handler.InFlightTransitionCount);
+        // Assert
+        Assert.Equal(1, service.StopCount);
         Assert.True(service.IsDisposed);
-        Assert.True(service.Child!.IsDisposed);
-        Assert.Equal(HostedServiceAttachmentState.Removed, activation.GetState(out _));
+    }
+
+    [Fact]
+    public async Task WhenTheServiceAddSubjectActivatedFailsToStart_ThenHostStartThrows()
+    {
+        // Arrange
+        var builder = HostingTestHost.CreateBuilder();
+        builder.Services.AddSubject<ActivatableSubject>(subject =>
+            subject.ServiceFactory = _ => new ThrowingStartService());
+        var host = builder.Build();
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => host.StartAsync());
+        Assert.Equal("start failed", exception.Message);
+    }
+
+    [Fact]
+    public async Task WhenAddSubjectRunsASubjectThatIsAndHasAHostedService_ThenBothStartOnce()
+    {
+        // Arrange
+        var builder = HostingTestHost.CreateBuilder();
+        builder.Services.AddSubject<HostedActivatableSubject>();
+        var host = builder.Build();
+
+        try
+        {
+            // Act
+            await host.StartAsync();
+            var subject = host.Services.GetRequiredService<HostedActivatableSubject>();
+
+            // Assert
+            Assert.Equal(1, subject.StartCount);
+            Assert.Equal(1, subject.CreateCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
     }
 }

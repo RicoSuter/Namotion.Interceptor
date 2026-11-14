@@ -172,4 +172,46 @@ public class AggregationParityTests
         Assert.Equal(DateTimeOffset.UnixEpoch.AddSeconds(-10), point.Timestamp);
         Assert.Equal(42d, point.Number);
     }
+
+    [Theory]
+    [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
+    public async Task WhenLongSumOfSquaresExceedsLongRange_ThenNumericAggregationsSucceedAcrossStores(ParityStoreFactory factory)
+    {
+        // Arrange - process memory in bytes: each square is below long.MaxValue, their sum is not.
+        using var store = factory.Create();
+        store.Record("/a/Value", Base.AddSeconds(1), 2_790_854_656L, typeof(long));
+        store.Record("/a/Value", Base.AddSeconds(3), 2_800_000_000L, typeof(long));
+        await store.FlushAsync();
+
+        // Act
+        var average = store.Query(Bucketed(HistoryAggregations.SampleAverage)).Points.Single();
+        var minimum = store.Query(Bucketed(HistoryAggregations.Minimum)).Points.Single();
+        var maximum = store.Query(Bucketed(HistoryAggregations.Maximum)).Points.Single();
+        var standardDeviation = store.Query(Bucketed(HistoryAggregations.StandardDeviation)).Points.Single();
+
+        // Assert
+        Assert.Equal(2_795_427_328d, average.Number!.Value, 6);
+        Assert.Equal(2_790_854_656d, minimum.Number!.Value, 6);
+        Assert.Equal(2_800_000_000d, maximum.Number!.Value, 6);
+        Assert.Equal(9_145_344d / Math.Sqrt(2), standardDeviation.Number!.Value, 3);
+    }
+
+    [Theory]
+    [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
+    public async Task WhenLongSumExceedsLongRange_ThenSumAndAverageSucceedAcrossStores(ParityStoreFactory factory)
+    {
+        // Arrange
+        using var store = factory.Create();
+        store.Record("/a/Value", Base.AddSeconds(1), long.MaxValue, typeof(long));
+        store.Record("/a/Value", Base.AddSeconds(3), long.MaxValue, typeof(long));
+        await store.FlushAsync();
+
+        // Act
+        var sum = store.Query(Bucketed(HistoryAggregations.Sum)).Points.Single();
+        var average = store.Query(Bucketed(HistoryAggregations.SampleAverage)).Points.Single();
+
+        // Assert
+        Assert.Equal(2d * long.MaxValue, sum.Number!.Value);
+        Assert.Equal((double)long.MaxValue, average.Number!.Value);
+    }
 }

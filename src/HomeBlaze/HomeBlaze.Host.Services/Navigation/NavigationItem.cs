@@ -34,14 +34,17 @@ public class NavigationItem
     public bool IsPage { get; init; }
 
     /// <summary>
-    /// Whether this item represents a folder (can be expanded).
+    /// Whether this item has a descendant page in any location. The sidebar shows an item as a folder by
+    /// <see cref="HasNavigationBarPages"/> instead.
     /// </summary>
     public bool IsFolder { get; init; }
 
     /// <summary>
-    /// The sort order for the navigation item.
+    /// Whether the sidebar shows this item as a folder: it has a descendant page whose location is
+    /// <see cref="NavigationLocation.NavBar"/>, reached only through descendants whose location is that as well.
+    /// Implies <see cref="IsFolder"/>.
     /// </summary>
-    public int Order { get; init; }
+    public bool HasNavigationBarPages { get; init; }
 
     /// <summary>
     /// Where this item should appear (NavBar or AppBar).
@@ -49,7 +52,7 @@ public class NavigationItem
     public NavigationLocation Location { get; init; }
 
     /// <summary>
-    /// AppBar alignment (Left or Right). Only used when Location is AppBar.
+    /// AppBar alignment (Left, Right or Menu). Only used when Location is AppBar.
     /// </summary>
     public AppBarAlignment Alignment { get; init; }
 
@@ -57,4 +60,15 @@ public class NavigationItem
     /// Gets the full page URL for navigation.
     /// </summary>
     public string PageUrl => $"pages{Path}";
+
+    /// <summary>
+    /// Whether a URL relative to the base URI, as the browser has it, opens this page: escaped characters are compared
+    /// unescaped, and the query and the fragment are ignored.
+    /// </summary>
+    public bool IsPageUrlOf(string baseRelativeUrl)
+    {
+        var end = baseRelativeUrl.AsSpan().IndexOfAny('?', '#');
+        var path = end < 0 ? baseRelativeUrl : baseRelativeUrl[..end];
+        return Uri.UnescapeDataString(path).Equals(PageUrl, StringComparison.OrdinalIgnoreCase);
+    }
 }

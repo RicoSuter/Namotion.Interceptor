@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","session_id":"092f9bc1-48cf-497c-907e-16d8204f387c","tools":[],"mcp_servers":[],"apiKeySource":"none"}
+{"type":"assistant","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"Not logged in · Please run /login"}]},"error":"authentication_failed","session_id":"092f9bc1-48cf-497c-907e-16d8204f387c"}
+{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login","terminal_reason":"api_error","session_id":"092f9bc1-48cf-497c-907e-16d8204f387c","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}

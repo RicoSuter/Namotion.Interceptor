@@ -1,7 +1,6 @@
 ﻿---
 title: Demo Setup Guide
 navTitle: Demo Setup
-position: 1
 ---
 
 # Demo Setup Guide
@@ -33,13 +32,16 @@ These properties are persisted to JSON files and can be edited:
 ### State Properties
 These properties are updated in real-time during simulation:
 - **CurrentSpeed** - Current RPM (gradually approaches target)
-- **Temperature** - Simulated temperature based on speed
+- **Temperature** - Simulated temperature based on speed and load
 - **Status** - Running state (Stopped, Starting, Running, Stopping)
+- **IsPowered** - Whether the motor is powered; while off it slows down to 0 and keeps its target speed (Power On and Power Off switch it, Emergency Stop powers it off at once)
+- **Mode** - Eco, Normal or Boost, which scales the speed the motor aims at
+- **Load** - Mechanical load in percent, which raises the temperature
 
 ### Derived Properties
 These properties auto-calculate when dependencies change:
-- **SpeedDelta** - Difference between target and current speed
-- **IsAtTargetSpeed** - True when within 50 RPM of target
+- **SpeedDelta** - Difference between the speed the motor aims at (the target scaled by the mode, 0 while not powered) and the current speed
+- **IsAtTargetSpeed** - True when within 50 RPM of the speed the motor aims at
 
 ## File Structure
 
@@ -122,7 +124,7 @@ To add a new motor to the demo:
 }
 ```
 
-2. The motor appears immediately in the UI (file watching)
+2. The motor appears in the UI after about a second (file watching)
 3. It's automatically tracked and exposed via protocols
 
 ## Removing the Demo

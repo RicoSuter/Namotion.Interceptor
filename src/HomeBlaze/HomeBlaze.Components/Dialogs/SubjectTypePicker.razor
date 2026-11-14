@@ -1,0 +1,350 @@
+<div class="subject-type-picker" data-testid="subject-type-picker">
+    <MudTextField T="string"
+                  @ref="_searchField"
+                  Value="_searchText"
+                  ValueChanged="OnSearchChanged"
+                  Placeholder="Search types"
+                  Immediate="true"
+                  Class="subject-type-search"
+                  Variant="Variant.Outlined"
+                  Margin="Margin.Dense"
+                  Adornment="Adornment.Start"
+                  AdornmentIcon="@Icons.Material.Filled.Search"
+                  aria-label="Search types"
+                  data-testid="type-search-input" />
+
+    <div class="subject-type-picker-body">
+        <div class="subject-type-groups" role="group" aria-label="Type groups">
+            <button type="button"
+                    class="subject-type-group"
+                    aria-pressed="@GetAriaPressed(null)"
+                    aria-label="@GetGroupLabel("All", MatchCount)"
+                    @onclick="() => SelectGroup(null)"
+                    data-testid="type-group-all">
+                <span>All</span>
+                <span>@MatchCount</span>
+            </button>
+            @foreach (var group in _groups)
+            {
+                var groupName = group.Name;
+                <button type="button"
+                        class="subject-type-group"
+                        aria-pressed="@GetAriaPressed(groupName)"
+                        aria-label="@GetGroupLabel(groupName, group.Matches.Count)"
+                        @onclick="() => SelectGroup(groupName)"
+                        data-testid="@($"type-group-{groupName.ToLowerInvariant()}")">
+                    <span>@groupName</span>
+                    <span>@group.Matches.Count</span>
+                </button>
+            }
+        </div>
+
+        <div class="subject-type-list">
+            @if (!_groups.Any(IsListed))
+            {
+                <div class="subject-type-empty" role="status" data-testid="type-empty-state">
+                    <MudText Typo="Typo.body2">No types match</MudText>
+                    @if (!string.IsNullOrWhiteSpace(_searchText))
+                    {
+                        <MudButton Variant="Variant.Text"
+                                   Color="Color.Primary"
+                                   OnClick="ClearSearch"
+                                   data-testid="type-clear-search-button">Clear search</MudButton>
+                    }
+                </div>
+            }
+            @foreach (var group in _groups)
+            {
+                @if (IsListed(group))
+                {
+                    @if (_selectedGroup is null)
+                    {
+                        <MudText Typo="Typo.caption"
+                                 Class="subject-type-section-header"
+                                 role="heading"
+                                 aria-level="3">@group.Name</MudText>
+                    }
+                    @foreach (var descriptor in group.Matches)
+                    {
+                        <button type="button"
+                                class="subject-type-row"
+                                @onclick="() => OnTypeSelected.InvokeAsync(descriptor)"
+                                data-testid="@($"type-row-{descriptor.Type.Name.ToLowerInvariant()}")">
+                            <MudIcon Icon="@MudBlazorIconResolver.Resolve(descriptor.IconName)" />
+                            <span class="subject-type-row-text">
+                                <span>@descriptor.DisplayName</span>
+                                @if (descriptor.Description is not null)
+                                {
+                                    <span class="subject-type-row-description">@descriptor.Description</span>
+                                }
+                            </span>
+                        </button>
+                    }
+                }
+            }
+        </div>
+    </div>
+</div>
+
+<style>
+    .subject-type-picker {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        gap: 12px;
+        min-height: 0;
+    }
+
+    /* MudBlazor lets an input grow, which would share the height with the list. */
+    .subject-type-picker > .subject-type-search {
+        flex: 0 0 auto;
+    }
+
+    .subject-type-picker-body {
+        display: flex;
+        flex: 1 1 auto;
+        gap: 16px;
+        min-height: 0;
+    }
+
+    .subject-type-groups {
+        display: flex;
+        flex-direction: column;
+        flex-shrink: 0;
+        gap: 2px;
+        width: 170px;
+        overflow-y: auto;
+    }
+
+    .subject-type-group {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 6px 10px;
+        border: 0;
+        border-radius: 4px;
+        background: transparent;
+        color: var(--mud-palette-text-secondary);
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+    }
+
+    .subject-type-group:hover,
+    .subject-type-group:focus-visible {
+        background: var(--mud-palette-action-default-hover);
+    }
+
+    /* MudBlazor removes the outline of every button, and the selected group already has the hover background. */
+    .subject-type-group:focus-visible,
+    .subject-type-row:focus-visible {
+        outline: 2px solid var(--mud-palette-primary);
+        outline-offset: -2px;
+    }
+
+    .subject-type-group[aria-pressed="true"] {
+        background: var(--mud-palette-action-default-hover);
+        color: var(--mud-palette-primary);
+    }
+
+    .subject-type-list {
+        flex: 1;
+        min-width: 0;
+        min-height: 0;
+        overflow-y: auto;
+    }
+
+    .subject-type-section-header {
+        display: block;
+        margin: 12px 0 2px;
+        color: var(--mud-palette-text-secondary);
+    }
+
+    .subject-type-row {
+        display: flex;
+        align-items: center;
+        /* MudBlazor centres the content of every button. */
+        justify-content: flex-start;
+        gap: 12px;
+        width: 100%;
+        padding: 8px;
+        border: 0;
+        border-top: 1px solid var(--mud-palette-lines-default);
+        background: transparent;
+        color: var(--mud-palette-text-primary);
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+    }
+
+    .subject-type-row:hover,
+    .subject-type-row:focus-visible {
+        background: var(--mud-palette-action-default-hover);
+    }
+
+    .subject-type-row-text {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+    }
+
+    .subject-type-row-description {
+        color: var(--mud-palette-text-secondary);
+        font-size: 0.875rem;
+    }
+
+    .subject-type-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 24px 8px;
+        color: var(--mud-palette-text-secondary);
+    }
+
+    /* A phone in landscape: one line per type, so that the list still shows several of them. */
+    @@media (max-height: 500px) {
+        .subject-type-picker {
+            gap: 8px;
+        }
+
+        .subject-type-picker > .mud-input-control.subject-type-search,
+        .subject-type-section-header {
+            margin-top: 0;
+        }
+
+        .subject-type-picker > .mud-input-control.subject-type-search {
+            margin-bottom: 0;
+        }
+
+        .subject-type-row-text {
+            flex-direction: row;
+            align-items: baseline;
+            gap: 8px;
+        }
+
+        .subject-type-row-text > span {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .subject-type-row-text > span:first-child {
+            flex-shrink: 0;
+        }
+    }
+
+    @@media (max-width: 600px) {
+        .subject-type-picker-body {
+            flex-direction: column;
+        }
+
+        .subject-type-groups {
+            flex-direction: row;
+            width: auto;
+            overflow-x: auto;
+            overflow-y: hidden;
+        }
+
+        .subject-type-group {
+            border: 1px solid var(--mud-palette-lines-default);
+            border-radius: 16px;
+            white-space: nowrap;
+        }
+    }
+</style>
+
+@code {
+    /// <summary>
+    /// The creatable types, in the order they are listed.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<SubjectTypeDescriptor> Types { get; set; } = [];
+
+    /// <summary>
+    /// Raised when the user picks a type.
+    /// </summary>
+    [Parameter]
+    public EventCallback<SubjectTypeDescriptor> OnTypeSelected { get; set; }
+
+    private MudTextField<string>? _searchField;
+    private IReadOnlyList<SubjectTypeDescriptor>? _refreshedTypes;
+    private string _searchText = "";
+    private string? _selectedGroup;
+    private IReadOnlyList<SubjectTypeGroup> _groups = [];
+    private bool _isRenderPending;
+
+    private int MatchCount => _groups.Sum(group => group.Matches.Count);
+
+    /// <summary>
+    /// Moves the focus to the search field.
+    /// </summary>
+    public ValueTask FocusSearchAsync()
+    {
+        return _searchField?.FocusAsync() ?? ValueTask.CompletedTask;
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(Types, _refreshedTypes))
+        {
+            _refreshedTypes = Types;
+            Refresh();
+        }
+    }
+
+    // The host renders on every keystroke of its own fields, also while the picker is hidden.
+    protected override bool ShouldRender()
+    {
+        var isRenderPending = _isRenderPending;
+        _isRenderPending = false;
+        return isRenderPending;
+    }
+
+    private void OnSearchChanged(string? searchText)
+    {
+        _searchText = searchText ?? "";
+
+        // A search spans all groups, so a match is never hidden behind a group that was selected before it.
+        // Selecting a group afterwards narrows the matches on purpose.
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            _selectedGroup = null;
+        }
+
+        Refresh();
+    }
+
+    private void SelectGroup(string? group)
+    {
+        _selectedGroup = group;
+        _isRenderPending = true;
+    }
+
+    private void ClearSearch()
+    {
+        _searchText = "";
+        Refresh();
+    }
+
+    private void Refresh()
+    {
+        _groups = SubjectTypeCatalog.GetGroups(Types, _searchText);
+        _isRenderPending = true;
+    }
+
+    private bool IsListed(SubjectTypeGroup group)
+    {
+        return group.Matches.Count > 0 && (_selectedGroup is null || group.Name == _selectedGroup);
+    }
+
+    private string GetAriaPressed(string? group)
+    {
+        return group == _selectedGroup ? "true" : "false";
+    }
+
+    private static string GetGroupLabel(string groupName, int matchCount)
+    {
+        return matchCount == 1 ? $"{groupName}, 1 type" : $"{groupName}, {matchCount} types";
+    }
+}

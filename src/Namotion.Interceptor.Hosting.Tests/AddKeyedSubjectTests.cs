@@ -11,22 +11,22 @@ public class AddKeyedSubjectTests
     {
         // Arrange
         var builder = HostingTestHost.CreateBuilder();
-        builder.Services.AddKeyedSubject<ActivatableSubject>("a", subject => subject.Name = "a");
-        builder.Services.AddKeyedSubject<ActivatableSubject>("b", subject => subject.Name = "b");
+        builder.Services.AddKeyedSubject<CountingHostedSubject>("a", subject => subject.Name = "a");
+        builder.Services.AddKeyedSubject<CountingHostedSubject>("b", subject => subject.Name = "b");
         var host = builder.Build();
 
         try
         {
             // Act
             await host.StartAsync();
-            var a = host.Services.GetRequiredKeyedService<ActivatableSubject>("a");
-            var b = host.Services.GetRequiredKeyedService<ActivatableSubject>("b");
+            var a = host.Services.GetRequiredKeyedService<CountingHostedSubject>("a");
+            var b = host.Services.GetRequiredKeyedService<CountingHostedSubject>("b");
 
             // Assert
             Assert.Equal("a", a.Name);
             Assert.Equal("b", b.Name);
-            Assert.Equal(1, a.CreateCount);
-            Assert.Equal(1, b.CreateCount);
+            Assert.Equal(1, a.StartCount);
+            Assert.Equal(1, b.StartCount);
             Assert.NotSame(
                 ((IInterceptorSubject)a).Context.TryGetService<HostedServiceHandler>(),
                 ((IInterceptorSubject)b).Context.TryGetService<HostedServiceHandler>());
@@ -43,23 +43,23 @@ public class AddKeyedSubjectTests
         // Arrange
         var builder = HostingTestHost.CreateBuilder();
         var sharedContext = HostingTestHost.CreateContext(builder);
-        builder.Services.AddKeyedSubject<ActivatableSubject>("a", contextResolver: _ => sharedContext);
-        builder.Services.AddKeyedSubject<ActivatableSubject>("b", contextResolver: _ => sharedContext);
+        builder.Services.AddKeyedSubject<CountingHostedSubject>("a", contextResolver: _ => sharedContext);
+        builder.Services.AddKeyedSubject<CountingHostedSubject>("b", contextResolver: _ => sharedContext);
         var host = builder.Build();
 
         try
         {
             // Act
             await host.StartAsync();
-            var a = host.Services.GetRequiredKeyedService<ActivatableSubject>("a");
-            var b = host.Services.GetRequiredKeyedService<ActivatableSubject>("b");
+            var a = host.Services.GetRequiredKeyedService<CountingHostedSubject>("a");
+            var b = host.Services.GetRequiredKeyedService<CountingHostedSubject>("b");
 
             // Assert
             var sharedHandler = sharedContext.TryGetService<HostedServiceHandler>();
             Assert.Same(sharedHandler, ((IInterceptorSubject)a).Context.TryGetService<HostedServiceHandler>());
             Assert.Same(sharedHandler, ((IInterceptorSubject)b).Context.TryGetService<HostedServiceHandler>());
-            Assert.Equal(1, a.CreateCount);
-            Assert.Equal(1, b.CreateCount);
+            Assert.Equal(1, a.StartCount);
+            Assert.Equal(1, b.StartCount);
         }
         finally
         {
@@ -118,10 +118,10 @@ public class AddKeyedSubjectTests
     {
         // Arrange
         var services = new ServiceCollection();
-        services.AddKeyedSubject<ActivatableSubject>("a");
+        services.AddKeyedSubject<CountingHostedSubject>("a");
 
         // Act & Assert
-        Assert.Throws<InvalidOperationException>(() => services.AddKeyedSubject<ActivatableSubject>("a"));
+        Assert.Throws<InvalidOperationException>(() => services.AddKeyedSubject<CountingHostedSubject>("a"));
     }
 
     [Fact]
@@ -129,10 +129,10 @@ public class AddKeyedSubjectTests
     {
         // Arrange
         var services = new ServiceCollection();
-        services.AddSubject<ActivatableSubject>();
+        services.AddSubject<CountingHostedSubject>();
 
         // Act
-        var exception = Record.Exception(() => services.AddKeyedSubject<ActivatableSubject>("a"));
+        var exception = Record.Exception(() => services.AddKeyedSubject<CountingHostedSubject>("a"));
 
         // Assert
         Assert.Null(exception);
@@ -145,7 +145,7 @@ public class AddKeyedSubjectTests
         var services = new ServiceCollection();
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => services.AddKeyedSubject<ActivatableSubject>(KeyedService.AnyKey));
+        Assert.Throws<ArgumentException>(() => services.AddKeyedSubject<CountingHostedSubject>(KeyedService.AnyKey));
     }
 
     [Fact]
@@ -153,16 +153,16 @@ public class AddKeyedSubjectTests
     {
         // Arrange
         var builder = HostingTestHost.CreateBuilder();
-        builder.Services.AddKeyedSubject<ContextConfiguratorFactorySubject>("a", subject => subject.AddsRegistry = true);
-        builder.Services.AddKeyedSubject<ContextConfiguratorFactorySubject>("b", subject => subject.AddsRegistry = true);
+        builder.Services.AddKeyedSubject<ContextConfiguratorHostedSubject>("a");
+        builder.Services.AddKeyedSubject<ContextConfiguratorHostedSubject>("b");
         var host = builder.Build();
 
         try
         {
             // Act
             await host.StartAsync();
-            var a = host.Services.GetRequiredKeyedService<ContextConfiguratorFactorySubject>("a");
-            var b = host.Services.GetRequiredKeyedService<ContextConfiguratorFactorySubject>("b");
+            var a = host.Services.GetRequiredKeyedService<ContextConfiguratorHostedSubject>("a");
+            var b = host.Services.GetRequiredKeyedService<ContextConfiguratorHostedSubject>("b");
 
             // Assert
             Assert.Equal(1, a.ConfigureContextCount);

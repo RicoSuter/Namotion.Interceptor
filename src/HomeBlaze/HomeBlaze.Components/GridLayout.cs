@@ -8,8 +8,11 @@ namespace HomeBlaze.Components;
 /// <summary>
 /// Grid layout with configurable rows and columns.
 /// </summary>
-[Category("Layouts")]
+[Category("Dashboard")]
 [Description("Grid layout with configurable rows and columns")]
+[DisplayName("Grid layout")]
+[SubjectIcon("GridView")]
+[PageLayout]
 [InterceptorSubject]
 public partial class GridLayout : IConfigurable, ITitleProvider
 {
@@ -26,10 +29,17 @@ public partial class GridLayout : IConfigurable, ITitleProvider
     public partial int Columns { get; set; }
 
     /// <summary>
-    /// Collection of cells in the grid.
+    /// The width and the height of a cell in the form W:H, for example 1:1 for square cells. With it, a row is as high as
+    /// a column is wide times H/W, so the grid follows the width of the page. Without it, the rows share the height.
     /// </summary>
-    [Configuration, State]
-    public partial List<GridCell> Cells { get; set; }
+    [Configuration]
+    public partial string? CellAspectRatio { get; set; }
+
+    /// <summary>
+    /// The cells of the grid. On a page one <c>Cell</c> block each, in a configuration file a list.
+    /// </summary>
+    [Configuration, State, Slot("Cell")]
+    public partial GridCell[] Cells { get; set; }
 
     public string? Title => "Grid";
 

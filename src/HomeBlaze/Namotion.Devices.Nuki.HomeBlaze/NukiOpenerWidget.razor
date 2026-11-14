@@ -1,0 +1,46 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(NukiOpener))]
+@implements ISubjectComponent
+@inject ITimeZoneDisplay TimeZone
+
+@if (Subject is NukiOpener opener)
+{
+    var isRinging = opener.IsRinging == true;
+    <MudPaper Class="pa-4">
+        <MudStack Spacing="2">
+            <MudStack Row="true" AlignItems="AlignItems.Center">
+                <MudIcon Icon="@(isRinging ? Icons.Material.Filled.NotificationsActive : Icons.Material.Filled.Notifications)"
+                         Color="@NukiWidgetColors.FromIconColor(opener.IconColor)" Class="mr-2" />
+                <MudText Typo="Typo.h6">@opener.Title</MudText>
+                <MudSpacer />
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled">@GetStateText(opener.OpenerState)</MudChip>
+            </MudStack>
+
+            <MudDivider />
+
+            @if (opener.IsContinuousModeActive == true)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning">Continuous mode</MudChip>
+            }
+
+            @if (opener.LastRingTime is { } lastRingTime)
+            {
+                <MudText Typo="Typo.body2" Color="@(isRinging ? Color.Warning : Color.Default)">
+                    @(isRinging ? "Ringing, since " : "Last ring: ")@TimeZone.Format(lastRingTime)
+                </MudText>
+            }
+        </MudStack>
+    </MudPaper>
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private static string GetStateText(NukiOpenerState? state) => state switch
+    {
+        NukiOpenerState.RingToOpenActive => "Ring to open",
+        NukiOpenerState.BootRun => "Booting",
+        { } other => other.ToString(),
+        null => "Unknown"
+    };
+}

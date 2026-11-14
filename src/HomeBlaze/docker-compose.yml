@@ -4,12 +4,13 @@
 services:
   homeblaze:
     image: ghcr.io/ricosuter/homeblaze:latest
+    hostname: homeblaze  # stable across recreated containers, so the OPC UA certificates kept in data/OpcUa stay valid
     restart: unless-stopped
     ports:
       - "8080:8080"   # UI and MCP
       - "4840:4840"   # OPC UA server subject
     volumes:
-      - ./data:/data  # Root.json, Files/, History/, OpcUa/; filled with defaults on first start
+      - ./data:/data  # Root.json, Files/, History/, OpcUa/, DataProtection-Keys/; filled with defaults on first start, Files/Docs is replaced on every start
     environment:
       TZ: Europe/Zurich
       McpServer__Enabled: "true"

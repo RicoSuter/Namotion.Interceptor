@@ -1,5 +1,10 @@
 using HomeBlaze.AI;
+using HomeBlaze.AI.Agents;
+using HomeBlaze.AI.Agents.ClaudeCli;
+using HomeBlaze.AI.Mcp;
+using HomeBlaze.Automation;
 using HomeBlaze.Components;
+using HomeBlaze.History.Blazor;
 using HomeBlaze.History.InMemory.Blazor;
 using HomeBlaze.History.Mcp;
 using HomeBlaze.History.Sqlite.Blazor;
@@ -9,6 +14,7 @@ using HomeBlaze.OpcUa;
 using HomeBlaze.OpcUa.Blazor;
 using HomeBlaze.Plugins;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Diagnostics;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Blazor;
 using HomeBlaze.Storage.Blazor.Files;
@@ -16,8 +22,16 @@ using Namotion.Devices.Gpio;
 using Namotion.Devices.Gpio.HomeBlaze;
 using Namotion.Devices.MyStrom;
 using Namotion.Devices.MyStrom.HomeBlaze;
+using Namotion.Devices.Nuki;
+using Namotion.Devices.Nuki.HomeBlaze;
+using Namotion.Services.Pushover;
+using Namotion.Services.Pushover.HomeBlaze;
 using Namotion.Devices.Shelly;
 using Namotion.Devices.Shelly.HomeBlaze;
+using Namotion.Devices.Sonos;
+using Namotion.Devices.Sonos.HomeBlaze;
+using Namotion.Devices.FritzBox;
+using Namotion.Devices.FritzBox.HomeBlaze;
 using Namotion.Devices.SunSpec;
 using Namotion.Devices.SunSpec.HomeBlaze;
 using Namotion.Devices.Wallbox;
@@ -39,28 +53,34 @@ builder.Services.AddHomeBlazeHost();
 builder.Services.AddHomeBlazeStorage();
 
 // Seeding must run before AddHomeBlazePlugins, which reads the plugin configuration during registration.
-var seededFileCount = DataDirectorySeeder.SeedIfMissing(
-    HomeBlazePaths.GetRootConfigurationPath(builder.Configuration),
-    builder.Configuration[HomeBlazePaths.SeedDirectoryKey]);
+var rootConfigurationPath = HomeBlazePaths.GetRootConfigurationPath(builder.Configuration);
+var seedDirectory = builder.Configuration[HomeBlazePaths.SeedDirectoryKey];
+var seededFileCount = DataDirectorySeeder.SeedIfMissing(rootConfigurationPath, seedDirectory);
+
+builder.Services.AddHomeBlazeDataProtection(builder.Configuration);
 
 var pluginConfigPath = HomeBlazePaths.GetPluginConfigurationPath(builder.Configuration);
 
 builder.Services.AddHomeBlazePlugins(pluginConfigPath);
 builder.Services.AddHotKeys2();
+builder.Services.AddScoped<HomeBlaze.Components.Pages.PageEditModeChoice>();
 
-// Optionally add the MCP subject server (default: false, enabled in Development)
+// The history package contributes its own tool; the AI package knows nothing about it. Registered once so
+// both the external MCP server and the built-in agents get it.
+builder.Services.AddHomeBlazeMcpToolProvider(context => new HistoryMcpToolProvider(
+    context.RootSubjectProvider,
+    context.PathProvider,
+    context.Services.GetRequiredService<ILoggerFactory>().CreateLogger<HistoryMcpToolProvider>()));
+builder.Services.AddHomeBlazeAgents();
+builder.Services.AddHomeBlazeAutomation();
+
+// The external MCP server at /mcp (default: off, enabled in Development). The built-in agents do not use it.
 var mcpEnabled = builder.Configuration.GetValue("McpServer:Enabled", false);
 if (mcpEnabled)
 {
     builder.Services.AddMcpServer()
         .WithHttpTransport(options => options.Stateless = true)
-        .WithHomeBlazeMcpTools(
-            isReadOnly: builder.Configuration.GetValue("McpServer:ReadOnly", true),
-            // The history package contributes its own tool; the AI package knows nothing about it.
-            context => new HistoryMcpToolProvider(
-                context.RootSubjectProvider,
-                context.PathProvider,
-                context.Services.GetRequiredService<ILoggerFactory>().CreateLogger<HistoryMcpToolProvider>()));
+        .WithHomeBlazeMcpTools(isReadOnly: builder.Configuration.GetValue("McpServer:ReadOnly", true));
 }
 
 // Add services to the container.
@@ -78,10 +98,27 @@ if (seededFileCount > 0)
     app.Logger.LogInformation("Seeded the data directory with {Count} default files.", seededFileCount);
 }
 
+// Replaced on every start, unlike the seeded files, so the documentation always matches the running version.
+// It must stay before app.Run, which starts the storage file watcher. Outdated documentation must not keep
+// the application down, so a failure is only logged.
+try
+{
+    var replacedFileCount = DataDirectorySeeder.ReplaceDocumentation(rootConfigurationPath, seedDirectory);
+    if (replacedFileCount > 0)
+    {
+        app.Logger.LogInformation("Replaced the documentation with {Count} files from the seed directory.", replacedFileCount);
+    }
+}
+catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+{
+    app.Logger.LogWarning(exception, "Could not replace the documentation from the seed directory. It may be outdated or incomplete until the next start.");
+}
+
 // Configure TypeProvider with application-specific assemblies
 // This must happen before any service that depends on TypeProvider is used
 var typeProvider = app.Services.GetRequiredService<TypeProvider>();
 typeProvider
+    .AddAssembly(typeof(HostSystem).Assembly)                  // HomeBlaze.Services
     .AddAssembly(typeof(FluentStorageContainer).Assembly)      // HomeBlaze.Storage
     .AddAssembly(typeof(MarkdownFilePageComponent).Assembly)   // HomeBlaze.Storage.Blazor
     .AddAssembly(typeof(Widget).Assembly)                      // HomeBlaze.Components
@@ -94,6 +131,10 @@ typeProvider
     .AddAssembly(typeof(HueBridgeSetupComponent).Assembly)
     .AddAssembly(typeof(MyStromSwitch).Assembly)
     .AddAssembly(typeof(MyStromSwitchWidget).Assembly)
+    .AddAssembly(typeof(NukiBridge).Assembly)
+    .AddAssembly(typeof(NukiBridgeWidget).Assembly)
+    .AddAssembly(typeof(PushoverService).Assembly)
+    .AddAssembly(typeof(PushoverServiceWidget).Assembly)
     .AddAssembly(typeof(ShellyDevice).Assembly)
     .AddAssembly(typeof(ShellyDeviceWidget).Assembly)
     .AddAssembly(typeof(SunSpecDevice).Assembly)
@@ -106,8 +147,19 @@ typeProvider
     .AddAssembly(typeof(InMemoryHistoryStoreEditComponent).Assembly)                        // HomeBlaze.History.InMemory.Blazor
     .AddAssembly(typeof(HomeBlaze.History.Sqlite.SqliteHistoryStoreSubject).Assembly)       // HomeBlaze.History.Sqlite
     .AddAssembly(typeof(SqliteHistoryStoreEditComponent).Assembly)                          // HomeBlaze.History.Sqlite.Blazor
+    .AddAssembly(typeof(HistoryChart).Assembly)                                             // HomeBlaze.History.Blazor
+    .AddAssembly(typeof(HomeBlaze.Installation.HomeBlazeInstallation).Assembly)             // HomeBlaze.Installation
+    .AddAssembly(typeof(HomeBlaze.Installation.Blazor.InstallationWidget).Assembly)         // HomeBlaze.Installation.Blazor
     .AddAssembly(typeof(LuxtronikHeatPump).Assembly)                                        // Namotion.Devices.Luxtronik
-    .AddAssembly(typeof(LuxtronikHeatPumpWidget).Assembly);                                 // Namotion.Devices.Luxtronik.HomeBlaze
+    .AddAssembly(typeof(LuxtronikHeatPumpWidget).Assembly)                                  // Namotion.Devices.Luxtronik.HomeBlaze
+    .AddAssembly(typeof(SonosSystem).Assembly)                                              // Namotion.Devices.Sonos
+    .AddAssembly(typeof(SonosSystemWidget).Assembly)                                        // Namotion.Devices.Sonos.HomeBlaze
+    .AddAssembly(typeof(FritzBox).Assembly)                                                 // Namotion.Devices.FritzBox
+    .AddAssembly(typeof(FritzBoxWidget).Assembly)                                           // Namotion.Devices.FritzBox.HomeBlaze
+    .AddAssembly(typeof(HomeBlaze.Automation.Automation).Assembly)                          // HomeBlaze.Automation
+    .AddAssembly(typeof(HomeBlaze.Automation.Blazor.AutomationPage).Assembly)               // HomeBlaze.Automation.Blazor
+    .AddAssembly(typeof(ClaudeCliAgent).Assembly)                                           // HomeBlaze.AI
+    .AddAssembly(typeof(HomeBlaze.AI.Blazor.AgentPage).Assembly);                           // HomeBlaze.AI.Blazor
 
 // Register HomeBlaze.Plugins subject types
 typeProvider.AddAssembly(typeof(PluginManager).Assembly);
@@ -131,16 +183,12 @@ if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
     app.UseHsts();
-}
-
-if (!app.Environment.IsDevelopment())
-{
     app.UseHttpsRedirection();
 }
 
 app.UseAntiforgery();
 
-// Map MCP server endpoint if enabled
+// Map the external MCP server endpoint if enabled
 if (mcpEnabled)
 {
     app.MapMcp("/mcp");
@@ -148,6 +196,7 @@ if (mcpEnabled)
 
 app.MapDefaultEndpoints();
 app.MapStaticAssets();
+app.MapStorageFiles();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

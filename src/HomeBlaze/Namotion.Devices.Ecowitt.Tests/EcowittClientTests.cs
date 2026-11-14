@@ -66,20 +66,87 @@ public class EcowittClientTests
         Assert.Equal(1008.3m, data.Indoor.RelativePressure);
     }
 
+    // Rain and piezoRain sections returned by a GW2000A (firmware V3.3.2), which sends neither
+    // 0x0F nor 0x14. The zero readings of the rain section are replaced so every bucket differs.
+    internal const string Gw2000RainJson = """
+        {
+            "rain": [
+                {"id":"0x0D","val":"1.2 mm"},
+                {"id":"0x0E","val":"0.6 mm/Hr"},
+                {"id":"0x7D","val":"0.3 mm"},
+                {"id":"0x7C","val":"2.4 mm"},
+                {"id":"0x10","val":"0.9 mm"},
+                {"id":"0x11","val":"14.8 mm"},
+                {"id":"0x12","val":"20.5 mm"},
+                {"id":"0x13","val":"506.1 mm","battery":"2","voltage":"1.3"}
+            ],
+            "piezoRain": [
+                {"id":"srain_piezo","val":"0"},
+                {"id":"0x0D","val":"0.0 mm"},
+                {"id":"0x0E","val":"0.0 mm/Hr"},
+                {"id":"0x7D","val":"0.0 mm"},
+                {"id":"0x7C","val":"0.0 mm"},
+                {"id":"0x10","val":"0.0 mm"},
+                {"id":"0x11","val":"10.4 mm"},
+                {"id":"0x12","val":"12.9 mm"},
+                {"id":"0x13","val":"294.9 mm","battery":"1","voltage":"0.28","ws90cap_volt":"5.1","ws90_ver":"156"}
+            ]
+        }
+        """;
+
     [Fact]
-    public void WhenRainSectionPresent_ThenParsesRainData()
+    public void WhenGw2000RainSectionPresent_ThenMapsEachItemIdToItsBucket()
+    {
+        // Arrange
+        var json = JsonSerializer.Deserialize<JsonElement>(Gw2000RainJson);
+
+        // Act
+        var data = EcowittClient.ParseLiveData(json);
+
+        // Assert
+        Assert.NotNull(data.Rain);
+        Assert.Equal(1.2m, data.Rain!.RainEvent);
+        Assert.Equal(0.6m, data.Rain.RainRate);
+        Assert.Equal(0.3m, data.Rain.HourlyRain);
+        Assert.Equal(2.4m, data.Rain.Last24HoursRain);
+        Assert.Equal(0.9m, data.Rain.DailyRain);
+        Assert.Equal(14.8m, data.Rain.WeeklyRain);
+        Assert.Equal(20.5m, data.Rain.MonthlyRain);
+        Assert.Equal(506.1m, data.Rain.YearlyRain);
+        Assert.Null(data.Rain.TotalRain);
+    }
+
+    [Fact]
+    public void WhenGw2000PiezoRainSectionPresent_ThenMapsEachItemIdToItsBucket()
+    {
+        // Arrange
+        var json = JsonSerializer.Deserialize<JsonElement>(Gw2000RainJson);
+
+        // Act
+        var data = EcowittClient.ParseLiveData(json);
+
+        // Assert
+        Assert.NotNull(data.PiezoRain);
+        Assert.Equal(0.0m, data.PiezoRain!.RainEvent);
+        Assert.Equal(0.0m, data.PiezoRain.RainRate);
+        Assert.Equal(0.0m, data.PiezoRain.HourlyRain);
+        Assert.Equal(0.0m, data.PiezoRain.Last24HoursRain);
+        Assert.Equal(0.0m, data.PiezoRain.DailyRain);
+        Assert.Equal(10.4m, data.PiezoRain.WeeklyRain);
+        Assert.Equal(12.9m, data.PiezoRain.MonthlyRain);
+        Assert.Equal(294.9m, data.PiezoRain.YearlyRain);
+        Assert.Null(data.PiezoRain.TotalRain);
+    }
+
+    [Fact]
+    public void WhenRainSectionHasTotalsItem_ThenParsesTotalRain()
     {
         // Arrange
         var json = JsonSerializer.Deserialize<JsonElement>("""
         {
             "rain": [
-                {"id":"0x0D","val":"0.0 mm"},
-                {"id":"0x0E","val":"0.0 mm/Hr"},
-                {"id":"0x10","val":"0.0 mm"},
-                {"id":"0x11","val":"3.8 mm"},
-                {"id":"0x12","val":"3.8 mm"},
-                {"id":"0x13","val":"56.5 mm"},
-                {"id":"0x14","val":"56.5 mm"}
+                {"id":"0x13","val":"506.1 mm"},
+                {"id":"0x14","val":"1834.7 mm"}
             ]
         }
         """);
@@ -89,38 +156,8 @@ public class EcowittClientTests
 
         // Assert
         Assert.NotNull(data.Rain);
-        Assert.Equal(0.0m, data.Rain!.RainEvent);
-        Assert.Equal(0.0m, data.Rain.RainRate);
-        Assert.Equal(0.0m, data.Rain.HourlyRain);
-        Assert.Equal(3.8m, data.Rain.DailyRain);
-        Assert.Equal(3.8m, data.Rain.WeeklyRain);
-        Assert.Equal(56.5m, data.Rain.MonthlyRain);
-        Assert.Equal(56.5m, data.Rain.YearlyRain);
-    }
-
-    [Fact]
-    public void WhenPiezoRainPresent_ThenParsesPiezoRainData()
-    {
-        // Arrange
-        var json = JsonSerializer.Deserialize<JsonElement>("""
-        {
-            "piezoRain": [
-                {"id":"0x0D","val":"0.0 mm"},
-                {"id":"0x0E","val":"1.5 mm/Hr"},
-                {"id":"0x11","val":"3.4 mm"},
-                {"id":"0x14","val":"50.9 mm"}
-            ]
-        }
-        """);
-
-        // Act
-        var data = EcowittClient.ParseLiveData(json);
-
-        // Assert
-        Assert.NotNull(data.PiezoRain);
-        Assert.Equal(1.5m, data.PiezoRain!.RainRate);
-        Assert.Equal(3.4m, data.PiezoRain.DailyRain);
-        Assert.Equal(50.9m, data.PiezoRain.YearlyRain);
+        Assert.Equal(506.1m, data.Rain!.YearlyRain);
+        Assert.Equal(1834.7m, data.Rain.TotalRain);
     }
 
     [Fact]
@@ -145,7 +182,6 @@ public class EcowittClientTests
         Assert.Equal("Living Room", data.Channels[0].Name);
         Assert.Equal(21.3m, data.Channels[0].Temperature);
         Assert.Equal(0.44m, data.Channels[0].Humidity);
-        Assert.Equal(6, data.Channels[0].Battery);
         Assert.Equal(3, data.Channels[1].Channel);
     }
 
@@ -167,7 +203,6 @@ public class EcowittClientTests
         Assert.Equal(15m, data.Lightning!.Distance);
         Assert.Equal(3, data.Lightning.StrikeCount);
         Assert.NotNull(data.Lightning.LastStrikeTime);
-        Assert.Equal(5, data.Lightning.Battery);
     }
 
     [Fact]
@@ -359,8 +394,8 @@ public class EcowittClientTests
             "rain": [
                 {"id":"0x0D","val":"0.0 mm"},
                 {"id":"0x0E","val":"0.0 mm/Hr"},
-                {"id":"0x11","val":"3.8 mm"},
-                {"id":"0x13","val":"175.1 mm","battery":"2"}
+                {"id":"0x10","val":"3.8 mm"},
+                {"id":"0x12","val":"175.1 mm"}
             ]
         }
         """);
@@ -373,7 +408,7 @@ public class EcowittClientTests
         Assert.Equal(3.8m, data.Rain!.DailyRain);
         Assert.Equal(175.1m, data.Rain.MonthlyRain);
         Assert.Null(data.Rain.YearlyRain);
-        Assert.Equal(2, data.Rain.Battery);
+        Assert.Null(data.Rain.TotalRain);
     }
 
     [Fact]
@@ -383,9 +418,9 @@ public class EcowittClientTests
         var json = JsonSerializer.Deserialize<JsonElement>("""
         {
             "rain": [
-                {"id":"0x7C","val":"0.1 mm"},
+                {"id":"0x0F","val":"0.0 mm"},
                 {"id":"srain_piezo","val":"0"},
-                {"id":"0x11","val":"3.8 mm"}
+                {"id":"0x10","val":"3.8 mm"}
             ]
         }
         """);
@@ -442,6 +477,26 @@ public class EcowittClientTests
 
         // Assert
         Assert.Empty(result);
+    }
+
+    [Fact]
+    public void WhenGw2000aSensorPagesParsed_ThenOnlyPairedSensorsRemainWithTheirStatus()
+    {
+        // Act
+        var result = EcowittSamples.ParseSensorsInfo();
+
+        // Assert
+        Assert.Equal(["0x9637", "0x51B", "0x1C183"], result.Select(sensor => sensor.SensorId));
+        Assert.Equal(48, result[0].TypeCode);
+        Assert.Equal("Temp & Humidity & Solar & Wind & Rain", result[0].Name);
+        Assert.Equal(9, result[0].Battery);
+        Assert.Null(result[0].Rssi);
+        Assert.Null(result[0].SignalLevel);
+        Assert.Equal(1, result[1].TypeCode);
+        Assert.Equal("wh68", result[1].SensorType);
+        Assert.Equal(5, result[1].Battery);
+        Assert.Equal(-75, result[1].Rssi);
+        Assert.Equal(4, result[1].SignalLevel);
     }
 
     [Fact]

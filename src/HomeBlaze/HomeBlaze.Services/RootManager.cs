@@ -22,6 +22,10 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
     // Continuations run off the loading thread so a UI waiter cannot resume inline inside the load.
     private readonly TaskCompletionSource<IInterceptorSubject> _rootLoaded = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    // Serializes the writes of the root configuration file. Two at once would both open the file, and the one that
+    // serialized the earlier state could write last.
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
+
     /// <summary>
     /// The root subject loaded from configuration.
     /// </summary>
@@ -119,10 +123,18 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
 
         var json = await File.ReadAllTextAsync(ConfigurationPath, cancellationToken);
         using var startup = _context.DeferHostedServiceStarts();
-        var root = _serializer.Deserialize(json);
+        var skipped = new List<SkippedConfigurationProperty>();
 
         // All IConfigurable implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
-        Root = root as IInterceptorSubject ?? throw new InvalidOperationException("Failed to deserialize root configuration");
+        Root = _serializer.Deserialize(json, created: null, skipped.Add) as IInterceptorSubject ??
+            throw new InvalidOperationException("Failed to deserialize root configuration");
+        if (skipped.Count > 0)
+        {
+            _logger?.LogWarning(
+                "The root configuration has issues that saving it would lose; correct them in the file and restart HomeBlaze: {Issues}",
+                ConfigurableSubjectSerializer.DescribeSkippedProperties(skipped));
+        }
+
         Root.Context.AddFallbackContext(_context);
 
         _logger?.LogInformation("Root loaded: {Type}", Root.GetType().FullName);
@@ -135,20 +147,30 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
     }
 
     /// <summary>
-    /// Writes the root subject configuration to disk if this is the root subject.
-    /// Called by ConfigurationManager when [Configuration] properties change.
+    /// Writes the root configuration to disk when the subject is the root or nested in its configuration.
+    /// Writes run one after the other.
     /// </summary>
     public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
-        if (subject != Root)
+        var root = Root;
+        if (root == null || subject.TryGetConfigurationOwner(candidate => ReferenceEquals(candidate, root)) == null)
             return false;
 
-        _logger?.LogInformation("Saving root configuration to: {Path}", ConfigurationPath);
+        await _writeLock.WaitAsync(cancellationToken);
+        try
+        {
+            _logger?.LogInformation("Saving root configuration to: {Path}", ConfigurationPath);
 
-        var json = _serializer.Serialize(Root);
-        await File.WriteAllTextAsync(ConfigurationPath, json, cancellationToken);
+            var json = _serializer.Serialize(root);
+            await File.WriteAllTextAsync(ConfigurationPath, json, cancellationToken);
 
-        _logger?.LogInformation("Root configuration saved successfully");
+            _logger?.LogInformation("Root configuration saved successfully");
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+
         return true;
     }
 }

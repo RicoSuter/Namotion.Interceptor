@@ -1,6 +1,8 @@
 using Namotion.Interceptor.Connectors.Mapping;
+using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Paths;
 using Xunit;
 
 namespace Namotion.Interceptor.Connectors.Tests.Paths;
@@ -22,8 +24,7 @@ public class FluentPathProviderTests
         var property = registered.TryGetProperty("Temperature")!;
 
         // Act
-        var included = provider.IsPropertyIncluded(property);
-        var segment = provider.TryGetPropertySegment(property);
+        var included = provider.TryGetPropertySegment(property, out var segment);
 
         // Assert
         Assert.True(included);
@@ -43,9 +44,10 @@ public class FluentPathProviderTests
         var property = registered.TryGetProperty("Temperature")!;
 
         // Act
-        var segment = provider.TryGetPropertySegment(property);
+        var included = provider.TryGetPropertySegment(property, out var segment);
 
         // Assert
+        Assert.True(included);
         Assert.Equal("Temperature", segment);
     }
 
@@ -61,12 +63,41 @@ public class FluentPathProviderTests
         var property = registered.TryGetProperty("Temperature")!;
 
         // Act
-        var included = provider.IsPropertyIncluded(property);
-        var segment = provider.TryGetPropertySegment(property);
+        var included = provider.TryGetPropertySegment(property, out var segment);
 
         // Assert
         Assert.False(included);
         Assert.Null(segment);
+    }
+
+    [Fact]
+    public void WhenPathsAreBuiltAndResolved_ThenTheyPassOnlyMappedPropertiesWithTheirSegments()
+    {
+        // Arrange
+        var registry = new FluentMappingRegistry<Meta>();
+        registry.AddPropertyMetadata(typeof(Person), nameof(Person.FirstName), "first", new Meta());
+        registry.AddPropertyMetadata(typeof(Person), nameof(Person.LastName), segment: null, new Meta());
+        var provider = new FluentPathProvider<Meta>(registry);
+
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var member = new Person { FirstName = "Ann" };
+        var root = new InlineRoot(context) { Members = new Dictionary<int, Person> { [1] = member } };
+        var registeredRoot = root.TryGetRegisteredSubject()!;
+
+        // Act
+        var paths = member.TryGetRegisteredSubject()!.Properties
+            .Select(property => property.TryGetPath(provider, root))
+            .OfType<string>()
+            .ToList();
+        var firstName = provider.TryGetPropertyFromPath(registeredRoot, "1.first");
+        var lastName = provider.TryGetPropertyFromPath(registeredRoot, "1.LastName");
+        var unmapped = provider.TryGetPropertyFromPath(registeredRoot, "1.Father");
+
+        // Assert
+        Assert.Equal(["1.first", "1.LastName"], paths.Order());
+        Assert.Equal(nameof(Person.FirstName), firstName?.Property.Name);
+        Assert.Equal(nameof(Person.LastName), lastName?.Property.Name);
+        Assert.Null(unmapped);
     }
 
     [Fact]

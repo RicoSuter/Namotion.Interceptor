@@ -81,7 +81,7 @@ public sealed class SqliteHistoryStoreCoverageTests : IDisposable
     public async Task WhenARestartGapIsInsideABucket_ThenBothCoveredPartsAreAggregatedWithoutCarryingAcrossIt()
     {
         // Arrange - coverage [0,3] and [5,9]; 10 holds [1,3], then nothing is known until 30 at 8.
-        // Carrying 10 across the gap would add [5,8) and give 13.33 instead of 16.67.
+        // Carrying 10 across the gap would add [5,8) and give 13.33 instead of 16.67. Count covers both parts.
         using var reopened = await ReopenAfterRestartInsideABucketAsync(
             secondSessionSample: 30d, secondSessionEndSecond: 9, reopenSecond: 20);
 
@@ -93,7 +93,7 @@ public sealed class SqliteHistoryStoreCoverageTests : IDisposable
         Assert.Equal(30d, QuerySingle(HistoryAggregations.Last).Number);
         Assert.Equal(10d, QuerySingle(HistoryAggregations.First).Number);
         Assert.Equal(10d, QuerySingle(HistoryAggregations.Minimum).Number);
-        Assert.Null(QuerySingle(HistoryAggregations.Count).Number);
+        Assert.Equal(2d, QuerySingle(HistoryAggregations.Count).Number);
     }
 
     [Fact]

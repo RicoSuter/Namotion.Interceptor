@@ -21,6 +21,7 @@
     </ItemGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\HomeBlaze.History\HomeBlaze.History.csproj" />
         <ProjectReference Include="..\HomeBlaze.History.Abstractions\HomeBlaze.History.Abstractions.csproj" />
         <ProjectReference Include="..\HomeBlaze.History.InMemory\HomeBlaze.History.InMemory.csproj" />
         <ProjectReference Include="..\HomeBlaze.History.Sqlite\HomeBlaze.History.Sqlite.csproj" />

@@ -9,6 +9,7 @@
     </ItemGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\Namotion.Interceptor.Expressions\Namotion.Interceptor.Expressions.csproj" />
         <ProjectReference Include="..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
     </ItemGroup>
 

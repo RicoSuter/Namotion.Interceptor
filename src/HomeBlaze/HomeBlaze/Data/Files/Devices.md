@@ -2,7 +2,6 @@
 title: Devices
 icon: Settings
 location: AppBar
-position: 20
 alignment: Left
 ---
 
@@ -10,16 +9,8 @@ alignment: Left
 
 Sample plugin widgets:
 
-```subject(widget1)
-{
-  "$type": "HomeBlaze.Components.Widget",
-  "path": "/Devices/SampleDevice1"
-}
-```
+:: HomeBlaze.Components.Widget#widget1 Path=/Devices/SampleDevice1
+::
 
-```subject(widget2)
-{
-  "$type": "HomeBlaze.Components.Widget",
-  "path": "/Devices/SampleDevice2"
-}
-```
+:: HomeBlaze.Components.Widget#widget2 Path=/Devices/SampleDevice2
+::

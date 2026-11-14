@@ -11,7 +11,12 @@ public enum AppBarAlignment
     Left,
 
     /// <summary>
-    /// Display on the right side of the AppBar (before system icons).
+    /// Display on the right side of the AppBar (before the menu button).
     /// </summary>
-    Right
+    Right,
+
+    /// <summary>
+    /// Display as an entry of the menu behind the button at the right end of the AppBar.
+    /// </summary>
+    Menu
 }

@@ -99,6 +99,7 @@ The library uses a fluent configuration API:
 
 - **Global Settings**: `Directory.Build.props` with nullable enabled, warnings as errors
 - **Target Frameworks**: `net10.0` for every project, set once in `src/Directory.Build.props`; the Generator assembly alone targets `netstandard2.0` because compilers built on .NET Framework load it. Package versions live in `src/Directory.Packages.props`.
+- **SDK**: `global.json` selects the newest installed .NET 10 SDK (`latestFeature`) and never a .NET 11 SDK, also where one is preinstalled.
 - **Package Version**: released on NuGet, breaking changes are fine when justified but need user approval
 - **CI/CD**: GitHub Actions with xUnit testing, coverage reporting, and NuGet publishing
 - **Native AOT**: full compatibility where possible is the target (#516). New code prefers static alternatives to runtime code generation and reflection, and existing sites are fixed when a change already touches them.
@@ -107,6 +108,8 @@ The library uses a fluent configuration API:
 ## Analyzer Policy
 
 Sonar diagnostics (`S`-prefixed IDs) may appear as build errors under warnings-as-errors. Preserve correctness, performance, and intentional test scenarios over analyzer suggestions. Do not add complexity, allocations, or CPU overhead merely to satisfy a rule; propose a narrow, documented exception instead. Compiler errors and correctness defects still require fixes. Get user approval before adding or broadening exceptions; prior approval remains valid. Document shared exceptions and reuse guidance in [src/.editorconfig](src/.editorconfig), and findings or deferred work in the main rollout issue.
+
+New projects reference `SonarAnalyzer.CSharp` with `PrivateAssets="all"`, as `Namotion.Interceptor.Tracking` does; Sonar is opt-in per project, not global.
 
 ## Key Dependencies
 
@@ -136,6 +139,7 @@ The library has specialized support for:
 ## Coding Style
 
 - **Avoid abbreviations** in variable and parameter names unless the name is very long. Use descriptive names (e.g., `attribute` not `attr`).
+- **US English spelling** in code, comments and documentation (e.g., `color`, `behavior`, `canceled`, `center`).
 - **No em dashes** in docs, READMEs, or PR descriptions. Restructure into plain sentences instead.
 - **No hard wrapping** in markdown. Keep a paragraph on one line instead of breaking at a column.
 - **Inline comments: the why a reader cannot derive.** Length is earned by preventing a plausible wrong edit, such as a lock discipline, a pooled buffer that must not be read after release, or an ordering constraint. It is not earned by defending a decision against alternatives, which belongs in the pull request or `docs/design/`. Never restate the line below.
@@ -158,6 +162,9 @@ The library has specialized support for:
 - **Naming**: `When<Condition>_Then<ExpectedBehavior>` (e.g., `WhenDepthIsZero_ThenReturnsNoChildren`)
 - **Structure**: Explicit `// Arrange`, `// Act`, `// Assert` comments separating each phase (use `// Act & Assert` for exception tests)
 - **No hardcoded waits**: Use `AsyncTestHelpers.WaitUntilAsync(() => condition)` or event-based synchronization (`ManualResetEventSlim`, `CountdownEvent`) instead of `Task.Delay`/`Thread.Sleep`. Hardcoded delays are either too long (slow CI) or too short (flaky CI).
+- **Timing on small CI runners**: A positive wait on background work uses `TestTimeouts.Default` (the default of `AsyncTestHelpers.WaitUntilAsync`), and only a check that something does not happen gets a short bound. A race participant that blocks runs through `DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync`, and a deadline is asserted on a `TimeProvider` the test advances, not with a `Stopwatch`.
+- **Nothing a late thread uses is disposed early**: Prefer a `TaskCompletionSource` as a gate; an `ObjectDisposedException` on a background thread crashes the test host.
+- **E2E tests act on a ready page**: Wait for the observable state that means the page handles a key or click, such as `ToBeFocusedAsync()` on the element a dialog focuses itself.
 
 ## Public API Tracking
 

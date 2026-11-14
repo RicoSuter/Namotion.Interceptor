@@ -2,4 +2,4 @@
 # Use get_property for exact values or browse with format=json for structured data.
 
 / [MyApp.Root]
-[3 subjects, truncated]
+[3 subjects, truncated: 4 more not shown, without their children]

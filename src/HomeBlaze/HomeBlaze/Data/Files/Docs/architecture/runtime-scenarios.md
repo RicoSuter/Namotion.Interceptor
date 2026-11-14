@@ -1,7 +1,6 @@
 ---
 title: Runtime Scenarios
 navTitle: Runtime Scenarios
-position: 3
 ---
 
 # Runtime Scenarios
@@ -70,16 +69,17 @@ Satellite                              Central
 When a JSON file is loaded from storage:
 
 ```
-FluentStorageContainer.ScanAsync()
+FluentStorageContainer reconcile pass
   -> Finds demo/motor.json
-  -> ConfigurableSubjectSerializer.DeserializeAsync()
+  -> ConfigurableSubjectSerializer.Deserialize()
      -> Reads $type discriminator
-     -> SubjectTypeRegistry resolves type name to CLR type
-     -> Creates instance via InterceptorSubjectContext
+     -> TypeProvider resolves type name to CLR type
+     -> Creates instance with services from dependency injection
      -> Deserializes [Configuration] properties from JSON
   -> Subject attached as child of folder
-  -> IConfigurable.ApplyConfigurationAsync() called
 ```
+
+`IConfigurable.ApplyConfigurationAsync()` is not called for a new subject. It is called after the configuration of an existing subject was changed, from its file or in the UI.
 
 ## Operation Invocation
 
@@ -88,7 +88,7 @@ When an operation is executed from the UI:
 ```
 User clicks "Emergency Stop" button
   -> SubjectPropertyPanel reads [Operation] metadata from registry (MethodMetadata)
-  -> If RequiresConfirmation: shows confirmation dialog
+  -> OperationInvoker shows the parameter dialog, or the confirmation dialog if RequiresConfirmation
   -> MethodMetadata.InvokeAsync(parameters)
      -> Parameter conversion (string inputs -> typed values)
      -> Method invoked via delegate

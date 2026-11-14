@@ -16,9 +16,9 @@ public interface ISubjectHostedServiceFactory
     /// because a detach disposes the instance and a re-attach asks for a fresh one.
     /// </summary>
     /// <remarks>
-    /// The service must not detach an attachment it made on its subject from its own stop path or the
-    /// unwinding of its <c>ExecuteAsync</c>: that attachment's stop waits for the service's stop, so the
-    /// detach waits on itself. See docs/hosting.md#do-not-detach-from-your-own-stop-path.
+    /// The service runs as a factory attachment of the subject, so its stops are not ordered against
+    /// the subject's other attachments. A connector it starts for its own run, it owns directly:
+    /// docs/hosting.md#a-service-a-hosted-subject-owns.
     /// </remarks>
     /// <param name="serviceProvider">The activator's service provider. Never null; may resolve nothing.</param>
     IHostedService CreateHostedService(IServiceProvider serviceProvider);

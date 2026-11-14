@@ -1,0 +1,17 @@
+{
+  "order": [
+    "installation.md",
+    "configuration.md",
+    "subjects.md",
+    "pages.md",
+    "page-errors.md",
+    "metadata.md",
+    "paths.md",
+    "monitoring.md",
+    "opc-ua.md",
+    "updates.md",
+    "ai-agents.md",
+    "automation.md",
+    "widgets"
+  ]
+}

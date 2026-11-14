@@ -133,12 +133,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             // permanently stale. An extra entry costs a spurious invalidation and lets the
             // invalidation walk arrive out of chain order, which is why no walk may trust what a
             // context further down recorded (see ResolveDelegationChain).
-            var usedByContexts = contextImpl.GetOrCreateUsedByContexts();
-            lock (usedByContexts)
-            {
-                usedByContexts.Add(this);
-            }
-
+            RegisterAsUserOf(contextImpl);
             PublishState(new ContextState(state.Services, state.FallbackContexts.Add(contextImpl)));
         }
 
@@ -146,7 +141,15 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return true;
     }
 
-    protected bool HasFallbackContext(IInterceptorSubjectContext context)
+    /// <summary>
+    /// The fallback contexts of this context in the order they were added, as one snapshot that a
+    /// concurrent add or remove does not change.
+    /// </summary>
+    public ImmutableArray<IInterceptorSubjectContext> FallbackContexts =>
+        ImmutableArray<IInterceptorSubjectContext>.CastUp(Volatile.Read(ref _state).FallbackContexts);
+
+    /// <summary>Whether <paramref name="context"/> is one of the fallback contexts of this context.</summary>
+    public bool HasFallbackContext(IInterceptorSubjectContext context)
     {
         return context is InterceptorSubjectContext contextImpl &&
                Volatile.Read(ref _state).FallbackContexts.Contains(contextImpl);
@@ -170,17 +173,113 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             // R4: unregister from the fallback only AFTER publishing so that its _usedByContexts
             // stays a superset of the true using set for the whole transition (see
             // AddFallbackContext).
-            var usedByContexts = Volatile.Read(ref contextImpl._usedByContexts);
-            if (usedByContexts is not null)
+            UnregisterAsUserOf(contextImpl);
+        }
+
+        InvalidateUsingContexts();
+        return true;
+    }
+
+    /// <summary>
+    /// Replaces a fallback context by another one in a single publish, without notifying lifecycle interceptors or
+    /// handlers. When <paramref name="newContext"/> is a fallback context already, only <paramref name="oldContext"/> is
+    /// removed.
+    /// </summary>
+    /// <param name="oldContext">The fallback context to replace.</param>
+    /// <param name="newContext">The context that takes its place.</param>
+    /// <returns>
+    /// True if replaced, false if <paramref name="oldContext"/> is not a fallback context, <paramref name="newContext"/>
+    /// falls back on this context, or the two reach different lifecycle interceptors.
+    /// </returns>
+    public bool ReplaceFallbackContext(IInterceptorSubjectContext oldContext, IInterceptorSubjectContext newContext)
+    {
+        var oldContextImpl = (InterceptorSubjectContext)oldContext;
+        var newContextImpl = (InterceptorSubjectContext)newContext;
+
+        lock (_mutationLock)
+        {
+            var state = Volatile.Read(ref _state);
+            var index = state.FallbackContexts.IndexOf(oldContextImpl);
+            if (index < 0 ||
+                !HaveSameItems(oldContext.GetServices<ILifecycleInterceptor>(), newContext.GetServices<ILifecycleInterceptor>()) ||
+                newContextImpl.FallsBackOn(this))
             {
-                lock (usedByContexts)
+                return false;
+            }
+
+            // R4, as in AddFallbackContext and RemoveFallbackContext.
+            RegisterAsUserOf(newContextImpl);
+            var fallbackContexts = state.FallbackContexts.Contains(newContextImpl)
+                ? state.FallbackContexts.RemoveAt(index)
+                : state.FallbackContexts.SetItem(index, newContextImpl);
+            PublishState(new ContextState(state.Services, fallbackContexts));
+            UnregisterAsUserOf(oldContextImpl);
+        }
+
+        InvalidateUsingContexts();
+        return true;
+    }
+
+    private void RegisterAsUserOf(InterceptorSubjectContext fallbackContext)
+    {
+        var usedByContexts = fallbackContext.GetOrCreateUsedByContexts();
+        lock (usedByContexts)
+        {
+            usedByContexts.Add(this);
+        }
+    }
+
+    private void UnregisterAsUserOf(InterceptorSubjectContext fallbackContext)
+    {
+        var usedByContexts = Volatile.Read(ref fallbackContext._usedByContexts);
+        if (usedByContexts is not null)
+        {
+            lock (usedByContexts)
+            {
+                usedByContexts.Remove(this);
+            }
+        }
+    }
+
+    private bool FallsBackOn(InterceptorSubjectContext context)
+    {
+        var visited = new HashSet<InterceptorSubjectContext>(ReferenceEqualityComparer.Instance);
+        var pending = new Stack<InterceptorSubjectContext>();
+        pending.Push(this);
+        while (pending.TryPop(out var current))
+        {
+            if (ReferenceEquals(current, context))
+            {
+                return true;
+            }
+
+            if (visited.Add(current))
+            {
+                foreach (var fallbackContext in Volatile.Read(ref current._state).FallbackContexts)
                 {
-                    usedByContexts.Remove(this);
+                    pending.Push(fallbackContext);
                 }
             }
         }
 
-        InvalidateUsingContexts();
+        return false;
+    }
+
+    private static bool HaveSameItems(ImmutableArray<ILifecycleInterceptor> first, ImmutableArray<ILifecycleInterceptor> second)
+    {
+        if (first.Length != second.Length)
+        {
+            return false;
+        }
+
+        foreach (var item in first)
+        {
+            if (!second.Contains(item))
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 

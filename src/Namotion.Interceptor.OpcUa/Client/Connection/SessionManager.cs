@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.Polling;
@@ -272,28 +273,63 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 ex);
         }
 
-        var endpointDescription = CoreClientUtils.SelectEndpoint(
+        var endpointDescription = SelectEndpoint(
             application.ApplicationConfiguration,
             serverUri,
             endpoints,
-            useSecurity: configuration.UseSecurity,
+            configuration.MinimumSecurityMode,
             configuration.ResolvedTelemetryContext);
+
+        // Discovery needs no client certificate, and an unsecured endpoint never does.
+        if (endpointDescription.SecurityMode != MessageSecurityMode.None)
+        {
+            // Read before loading, because after a rejected certificate the identifier reports that certificate's subject.
+            var subjectName = application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.SubjectName;
+            try
+            {
+                await ApplicationCertificateLoader.EnsureLoadedAsync(
+                    application,
+                    configuration.AutoCreateApplicationCertificate,
+                    configuration.ApplicationCertificateLifetimeInMonths,
+                    configuration.ResolvedTelemetryContext,
+                    _logger,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            // The SDK can report a cancellation as another exception type, so the token is checked too.
+            catch (Exception error) when (error is not OperationCanceledException && !cancellationToken.IsCancellationRequested)
+            {
+                throw CreateCertificateLoadException(
+                    error, application.ApplicationConfiguration, subjectName, configuration.AutoCreateApplicationCertificate);
+            }
+        }
 
         var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
         var oldSession = Volatile.Read(ref _session);
 
+        // Resolved before the try so a ServiceResultException from user code is not reported as a certificate error.
+        var identity = configuration.CreateUserIdentity != null
+            ? await configuration.CreateUserIdentity(cancellationToken).ConfigureAwait(false)
+            : new UserIdentity();
+
         var sessionFactory = configuration.ActualSessionFactory;
-        var sessionResult = await sessionFactory.CreateAsync(
-            application.ApplicationConfiguration,
-            endpoint,
-            updateBeforeConnect: false,
-            sessionName: application.ApplicationName,
-            sessionTimeout: (uint)configuration.SessionTimeout.TotalMilliseconds,
-            identity: configuration.CreateUserIdentity != null
-                ? await configuration.CreateUserIdentity(cancellationToken).ConfigureAwait(false)
-                : new UserIdentity(),
-            preferredLocales: null,
-            cancellationToken).ConfigureAwait(false);
+        ISession sessionResult;
+        try
+        {
+            sessionResult = await sessionFactory.CreateAsync(
+                application.ApplicationConfiguration,
+                endpoint,
+                updateBeforeConnect: false,
+                sessionName: application.ApplicationName,
+                sessionTimeout: (uint)configuration.SessionTimeout.TotalMilliseconds,
+                identity: identity,
+                preferredLocales: null,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (ServiceResultException error) when (IsCertificateError(error, endpointDescription))
+        {
+            throw CreateCertificateErrorException(
+                error, endpointDescription, application.ApplicationConfiguration, configuration.ResolvedTelemetryContext);
+        }
 
         var newSession = sessionResult as Session
             ?? throw new InvalidOperationException(
@@ -471,12 +507,11 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                         reconnectedSession.SessionId,
                         reconnectedSession.Connected);
 
-                    // Check if subscriptions transferred BEFORE accepting the new session,
-                    // to avoid having two sessions that need disposal with only one pending slot.
+                    // Checked BEFORE accepting the new session, to avoid having two sessions that need
+                    // disposal with only one pending slot.
                     var transferredSubscriptions = reconnectedSession.Subscriptions.ToList();
                     if (transferredSubscriptions.Count > 0)
                     {
-                        // Transfer succeeded - accept new session, defer old session disposal
                         if (oldSession is not null)
                         {
                             oldSession.KeepAlive -= OnKeepAlive;
@@ -498,16 +533,17 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                         transferSucceeded = true;
 
                         _logger.LogInformation(
-                            "OPC UA session reconnected: Transferred {Count} subscriptions. Full state sync pending.",
+                            "OPC UA session reconnected with {Count} subscriptions. Full state sync pending.",
                             transferredSubscriptions.Count);
                     }
                     else
                     {
-                        // Transfer failed - reject new session, abandon old session.
+                        // Only reached when the client had no subscriptions: the SDK carries every one over, by
+                        // transfer or recreation, or fails the reconnect. Reject it and abandon the old session, so
+                        // the health check reconnects manually with a fresh session and subscriptions.
                         // The reconnected session has a live TCP connection so it must be disposed.
-                        // The old session's connection is already dead (server restarted) and will be GC'd.
                         _logger.LogWarning(
-                            "OPC UA session reconnected but subscription transfer failed (server restart). " +
+                            "OPC UA session reconnected without subscriptions. " +
                             "Clearing session to trigger full reconnection via health check.");
                         AbandonCurrentSession();
                         reconnectedSession.KeepAlive -= OnKeepAlive;
@@ -516,9 +552,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 }
                 else
                 {
-                    // Same Session object reference — SDK "preserved" the session.
-                    // After server restart, the SDK reconnects transport but may not create a new session.
-                    // The old session ID doesn't exist on the restarted server.
+                    // Same Session object reference: the SDK reactivated ("preserved") the session, which
+                    // happens when the server still held it, for example after a network partition.
 
                     // Preserved sessions are unreliable: subscriptions may have been silently
                     // deleted by the server (lifetime expired during disconnect), leaving no
@@ -534,7 +569,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
                 Interlocked.Exchange(ref _isReconnecting, 0);
 
-                // Notifications resume as soon as the transfer succeeds, and the only other rise on
+                // Notifications resume as soon as the SDK reconnect completes with a new session, and the only other rise on
                 // this path is the health check loop's, so without this the connector reports itself
                 // down for seconds while values update. Must stay after the reconnecting flag was
                 // cleared above, and is guarded by IsConnected rather than the branch's own knowledge
@@ -668,6 +703,189 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         }
     }
 
+    /// <summary>
+    /// Selects the endpoint to connect to among those with at least <paramref name="minimumSecurityMode"/>. With
+    /// <see cref="MessageSecurityMode.None"/> an unsecured endpoint is preferred; otherwise, or when the server offers
+    /// none, the most secure endpoint with a security policy the client supports is selected.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No endpoint matches the scheme, none has the minimum security mode,
+    /// or those that have it use only security policies the client does not support.</exception>
+    internal static EndpointDescription SelectEndpoint(
+        ApplicationConfiguration applicationConfiguration,
+        Uri serverUri,
+        EndpointDescriptionCollection endpoints,
+        MessageSecurityMode minimumSecurityMode,
+        ITelemetryContext telemetryContext)
+    {
+        var schemeEndpoints = endpoints
+            .Where(endpoint => endpoint.EndpointUrl?.StartsWith(serverUri.Scheme, StringComparison.Ordinal) == true)
+            .ToArray();
+
+        if (schemeEndpoints.Length == 0)
+        {
+            throw new InvalidOperationException(
+                $"The OPC UA server at '{serverUri}' offers no endpoint for the '{serverUri.Scheme}' scheme.");
+        }
+
+        // The SDK falls back to the first endpoint whatever its mode and policy, so weaker ones are filtered out first.
+        var candidates = new EndpointDescriptionCollection(
+            schemeEndpoints.Where(endpoint => endpoint.SecurityMode >= minimumSecurityMode));
+
+        if (candidates.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"The OPC UA server at '{serverUri}' offers no endpoint with the security mode {minimumSecurityMode} or stronger, " +
+                $"which {nameof(OpcUaClientConfiguration.MinimumSecurityMode)} requires. " +
+                $"The server offers {DescribeEndpoints(schemeEndpoints)}.");
+        }
+
+        if (minimumSecurityMode == MessageSecurityMode.None &&
+            candidates.FirstOrDefault(endpoint => endpoint.SecurityMode == MessageSecurityMode.None) is { } unsecuredEndpoint)
+        {
+            return unsecuredEndpoint;
+        }
+
+        var supportedPolicies = applicationConfiguration.SecurityConfiguration.SupportedSecurityPolicies;
+        var securedEndpoint = CoreClientUtils.SelectEndpoint(applicationConfiguration, serverUri, candidates, true, telemetryContext);
+        if (securedEndpoint is null || !supportedPolicies.Contains(securedEndpoint.SecurityPolicyUri))
+        {
+            var requirement = minimumSecurityMode == MessageSecurityMode.None
+                ? "no unsecured endpoint and no secured endpoint with"
+                : $"no endpoint with the security mode {minimumSecurityMode} or stronger (required by " +
+                  $"{nameof(OpcUaClientConfiguration.MinimumSecurityMode)}) and";
+
+            throw new InvalidOperationException(
+                $"The OPC UA server at '{serverUri}' offers {requirement} a security policy this client supports. " +
+                $"The server offers {DescribeEndpoints(schemeEndpoints)}; the client supports " +
+                $"{string.Join(", ", supportedPolicies.Where(policy => policy != SecurityPolicies.None))}.");
+        }
+
+        return securedEndpoint;
+    }
+
+    /// <summary>
+    /// Gets whether <see cref="CreateCertificateErrorException"/> explains a failed session creation: the client rejected
+    /// the server certificate, or the server rejected the secure channel of a secured endpoint.
+    /// </summary>
+    internal static bool IsCertificateError(ServiceResultException error, EndpointDescription endpoint) =>
+        error.StatusCode is StatusCodes.BadCertificateUntrusted or StatusCodes.BadCertificateChainIncomplete or StatusCodes.BadCertificateTimeInvalid ||
+        (error.StatusCode == StatusCodes.BadSecurityChecksFailed && endpoint.SecurityMode != MessageSecurityMode.None);
+
+    /// <summary>
+    /// Creates the exception thrown for an error <see cref="IsCertificateError"/> accepts. The message names the
+    /// certificate at fault and the folders or option that resolve it.
+    /// </summary>
+    internal static InvalidOperationException CreateCertificateErrorException(
+        ServiceResultException error,
+        EndpointDescription endpoint,
+        ApplicationConfiguration applicationConfiguration,
+        ITelemetryContext telemetryContext)
+    {
+        var security = applicationConfiguration.SecurityConfiguration;
+        using var serverCertificate = ParseServerCertificate(endpoint, telemetryContext);
+        var serverThumbprint = serverCertificate?.Thumbprint ?? "(unknown)";
+        var clientCertificate = security.ApplicationCertificate?.Certificate;
+        var ownFolder = CertificateFolder.Get(security.ApplicationCertificate?.StoreType, security.ApplicationCertificate?.StorePath);
+        var rejectedFolder = CertificateFolder.Get(security.RejectedCertificateStore);
+        var trustedFolder = CertificateFolder.Get(security.TrustedPeerCertificates);
+
+        // A server also reports an expired client certificate with BadCertificateTimeInvalid, and one that is not yet
+        // valid when its clock is behind, so both certificates can be valid by this machine's clock.
+        var isClientCertificateSent = endpoint.SecurityMode != MessageSecurityMode.None && clientCertificate is not null;
+        var isServerCertificateTimeValid = serverCertificate is not null && IsTimeValid(serverCertificate);
+        var isClientCertificateTimeInvalid =
+            isClientCertificateSent && !IsTimeValid(clientCertificate!) && (serverCertificate is null || isServerCertificateTimeValid);
+        var areBothCertificatesTimeValid = isClientCertificateSent && IsTimeValid(clientCertificate!) && isServerCertificateTimeValid;
+
+        // Auto-accept only covers an untrusted server certificate, so only that message suggests it.
+        var message = error.StatusCode switch
+        {
+            // Servers report an untrusted, revoked or invalid client certificate, or one whose issuer chain is incomplete,
+            // with this code. The client otherwise raises it only for a failed message signature or decryption, or a
+            // mismatched endpoint list.
+            StatusCodes.BadSecurityChecksFailed =>
+                $"The OPC UA server rejected the secure channel, most likely because it does not trust this client's certificate " +
+                $"{clientCertificate?.Thumbprint ?? "(unknown)"} in '{ownFolder}'. Trust it on the server; for a certificate issued " +
+                $"by a certificate authority, the server also needs the authority's certificates.",
+            StatusCodes.BadCertificateTimeInvalid when isClientCertificateTimeInvalid =>
+                $"The OPC UA server rejected this client's certificate {clientCertificate!.Thumbprint} in '{ownFolder}' because it " +
+                $"is expired or not yet valid{FormatValidity(clientCertificate)}. Provide a valid certificate there and trust it " +
+                $"on the server, and check that the clocks of the server and this client are correct.",
+            StatusCodes.BadCertificateTimeInvalid when areBothCertificatesTimeValid =>
+                $"The OPC UA server rejected a certificate as expired or not yet valid, but this client's certificate " +
+                $"{clientCertificate!.Thumbprint}{FormatValidity(clientCertificate)} and the server's certificate " +
+                $"{serverThumbprint}{FormatValidity(serverCertificate)} are both valid by this machine's clock. " +
+                $"Check that the clocks of the server and this client are correct.",
+            StatusCodes.BadCertificateTimeInvalid =>
+                $"The OPC UA server certificate {serverThumbprint} is expired or not yet valid{FormatValidity(serverCertificate)}. " +
+                $"The server needs a valid certificate; also check that the clocks of the server and this client are correct.",
+            StatusCodes.BadCertificateChainIncomplete =>
+                $"The OPC UA server certificate {serverThumbprint} is not trusted because its issuer chain is incomplete. " +
+                $"Add the certificates of the authorities that issued it to '{CertificateFolder.Get(security.TrustedIssuerCertificates)}' " +
+                $"and the root authority's certificate to '{trustedFolder}'; the server's certificate chain is written to '{rejectedFolder}'.",
+            _ =>
+                $"The OPC UA server certificate {serverThumbprint} is not trusted. Move it from '{rejectedFolder}' to '{trustedFolder}', " +
+                $"or set {nameof(OpcUaClientConfiguration.AutoAcceptUntrustedCertificates)} = true to accept any server certificate."
+        };
+
+        return new InvalidOperationException(message, error);
+    }
+
+    /// <summary>
+    /// Creates the exception thrown when the client application certificate cannot be loaded, created or replaced.
+    /// </summary>
+    internal static InvalidOperationException CreateCertificateLoadException(
+        Exception error,
+        ApplicationConfiguration applicationConfiguration,
+        string? subjectName,
+        bool autoCreate)
+    {
+        var identifier = applicationConfiguration.SecurityConfiguration.ApplicationCertificate;
+        return new InvalidOperationException(
+            $"Failed to load the OPC UA client application certificate from " +
+            $"'{CertificateFolder.Get(identifier?.StoreType, identifier?.StorePath)}': {error.Message.TrimEnd().TrimEnd('.')}. " +
+            $"A provisioned certificate needs the subject '{subjectName}' and the application URI " +
+            $"'{applicationConfiguration.ApplicationUri}'; set {nameof(OpcUaClientConfiguration.ApplicationUri)} to match it. " +
+            (autoCreate
+                ? $"Deleting the certificate with its private key from '{identifier?.StorePath}' makes the client create a new " +
+                  "self-signed one, which the server then has to trust."
+                : $"Or set {nameof(OpcUaClientConfiguration.AutoCreateApplicationCertificate)} = true to create one."),
+            error);
+    }
+
+    private static string DescribeEndpoints(IEnumerable<EndpointDescription> endpoints) => string.Join(", ", endpoints
+        .Select(endpoint => $"{endpoint.SecurityPolicyUri} ({endpoint.SecurityMode})")
+        .Distinct(StringComparer.Ordinal));
+
+    private static bool IsTimeValid(X509Certificate2 certificate)
+    {
+        var now = DateTime.UtcNow;
+        return certificate.NotBefore.ToUniversalTime() <= now && now <= certificate.NotAfter.ToUniversalTime();
+    }
+
+    private static string FormatValidity(X509Certificate2? certificate) => certificate is null
+        ? string.Empty
+        : $" (valid from {certificate.NotBefore.ToUniversalTime():u} to {certificate.NotAfter.ToUniversalTime():u})";
+
+    // Called while wrapping an error, so it must not throw and hide that error.
+    private static X509Certificate2? ParseServerCertificate(EndpointDescription endpoint, ITelemetryContext telemetryContext)
+    {
+        if (endpoint.ServerCertificate is not { Length: > 0 } data)
+        {
+            return null;
+        }
+
+        try
+        {
+            // The server may send its whole chain; this parses the first certificate, which is its own.
+            return Utils.ParseCertificateBlob(data, telemetryContext);
+        }
+        catch (ServiceResultException)
+        {
+            return null;
+        }
+    }
+
     private void ConfigureSession(Session session)
     {
         session.TransferSubscriptionsOnReconnect = true;
@@ -681,7 +899,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// <summary>
     /// Disposes the transport channel without clearing the session.
     /// This triggers keep-alive failure -> OnKeepAlive -> SessionReconnectHandler.BeginReconnect,
-    /// exercising the SDK's session preservation/transfer reconnection path.
+    /// which reactivates the session on a new channel (a preserved session, then a manual reconnect).
     /// </summary>
     internal async Task DisconnectTransportAsync(CancellationToken cancellationToken)
     {

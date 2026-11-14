@@ -401,26 +401,18 @@ internal sealed class PollingManager : IAsyncDisposable
                 return;
             }
 
-            // Create update record (same pattern as subscription manager)
-            var update = new PropertyUpdate
-            {
-                Property = pollingItem.Property,
-                Value = newValue,
-                Timestamp = dataValue.SourceTimestamp
-            };
-
-            // Queue update using same pattern as subscriptions
-            var state = (source: _source, manager: this, update, receivedTimestamp, logger: _logger);
+            var state = (source: _source, manager: this, property: pollingItem.Property, value: newValue,
+                timestamp: (DateTimeOffset)dataValue.SourceTimestamp, receivedTimestamp, logger: _logger);
             _propertyWriter.Write(state, static s =>
             {
                 try
                 {
-                    s.update.Property.SetValueFromSource(s.source, s.update.Timestamp, s.receivedTimestamp, s.update.Value);
+                    s.property.SetValueFromSource(s.source, s.timestamp, s.receivedTimestamp, s.value);
                 }
                 catch (Exception e)
                 {
                     s.manager.ReportErrorIfRunning(e);
-                    s.logger.LogError(e, "Failed to apply polled value change for {Path}", s.update.Property.Name);
+                    s.logger.LogError(e, "Failed to apply polled value change for {Path}", s.property.Name);
                 }
             });
 

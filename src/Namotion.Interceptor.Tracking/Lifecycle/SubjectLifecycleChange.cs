@@ -12,6 +12,10 @@ public readonly struct SubjectLifecycleChange
     public PropertyReference? Property { get; init; }
 
     /// <summary>Gets the index defining the place of the subject in the property's dictionary or collection.</summary>
+    /// <remarks>
+    /// On detach, this need not be the index last reported for the subject, so remove a stored index
+    /// by subject and property.
+    /// </remarks>
     public object? Index { get; init; }
 
     /// <summary>Gets the number of properties pointing to the referenced subject.</summary>
@@ -28,4 +32,7 @@ public readonly struct SubjectLifecycleChange
 
     /// <summary>True when the subject is leaving the graph.</summary>
     public bool IsContextDetach { get; init; }
+
+    /// <summary>The interceptor that dispatches the removal of a property reference.</summary>
+    internal LifecycleInterceptor? Interceptor { get; init; }
 }

@@ -135,9 +135,18 @@ In addition to functional correctness, the system tester should validate perform
 | Welcome snapshot | Generate a complete SubjectUpdate for the full graph, measure serialization time and payload size |
 | WebSocket sync under load | Satellite generates changes at target rate, measure sync latency and reconnect recovery time |
 | Multi-connector independence | Attach multiple connectors under load, verify a slow connector does not block others |
-| Registry and path resolution | Measure `GetAllProperties()`, MCP `query`, and path segment lookup at each scale tier |
+| Registry and path resolution | Measure `GetAllProperties()`, MCP `search` and `browse`, and path segment lookup at each scale tier |
 
 Concrete performance targets should be established after initial baseline measurements — the goal of the first round is to understand where the actual limits are, not to hit predetermined numbers. See [Scalability](scalability.md) for known bottlenecks to validate.
+
+## UI End-to-End Tests [Implemented]
+
+`HomeBlaze.E2E.Tests` drives the Blazor UI with Playwright against a host that runs in the test process. Pages are prerendered, so an element is visible before its circuit is connected. A link works at that point because it is a plain navigation, but a click that needs a Blazor event handler is lost. A test therefore waits for something that only interactive rendering produces before such a click, as `SubjectSetupDialogTests` does with the automatic timezone label.
+
+Follow-ups:
+
+- `NavigationTests.OpenWithDemoFolderExpandedAsync` clicks the folder header as soon as it is visible, without that wait. A click before the page is interactive would be lost and the test would time out. No failing run is known.
+- `PageEditTests`, `PageSaveTests` and `MarkdownEditorTests` click the prerendered edit mode menu as soon as it is visible, without that wait.
 
 ## Open Questions
 

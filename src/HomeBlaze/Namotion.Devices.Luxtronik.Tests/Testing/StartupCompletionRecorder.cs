@@ -14,6 +14,22 @@ internal sealed class StartupCompletionRecorder : IStartupCompletion
     private int _outstanding;
     private int _deferralCount;
     private int? _deferralCountWhenFirstSettled;
+    private bool? _probeWhenFirstSettled;
+
+    /// <summary>Read once, when no deferral is outstanding for the first time.</summary>
+    public Func<bool>? Probe { get; set; }
+
+    /// <summary>What <see cref="Probe"/> returned when none was outstanding for the first time, or null before that.</summary>
+    public bool? ProbeWhenFirstSettled
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _probeWhenFirstSettled;
+            }
+        }
+    }
 
     public int Outstanding
     {
@@ -65,9 +81,10 @@ internal sealed class StartupCompletionRecorder : IStartupCompletion
         lock (_lock)
         {
             _outstanding--;
-            if (_outstanding == 0)
+            if (_outstanding == 0 && _deferralCountWhenFirstSettled is null)
             {
-                _deferralCountWhenFirstSettled ??= _deferralCount;
+                _deferralCountWhenFirstSettled = _deferralCount;
+                _probeWhenFirstSettled = Probe?.Invoke();
             }
         }
     }

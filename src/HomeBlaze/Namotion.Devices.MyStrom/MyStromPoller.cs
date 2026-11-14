@@ -108,11 +108,24 @@ internal sealed class MyStromPoller : BackgroundService
 
     private async Task RunPollingLoopAsync(HttpClient client, CancellationToken stoppingToken)
     {
+        // Local to this loop, so that reports read by the turn on and off operations do not move the baseline.
+        long? previousTimeSinceBoot = null;
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                await RefreshReportAsync(client, stoppingToken);
+                var report = await RefreshReportAsync(client, stoppingToken);
+                if (report != null)
+                {
+                    // The device restarted, for example after a firmware update, so its information may have changed.
+                    if (report.TimeSinceBoot < previousTimeSinceBoot)
+                    {
+                        await FetchInformationAsync(client, stoppingToken);
+                    }
+
+                    previousTimeSinceBoot = report.TimeSinceBoot;
+                }
+
                 await RefreshTemperatureAsync(client, stoppingToken);
                 _device.LastUpdated = DateTimeOffset.UtcNow;
             }
@@ -153,7 +166,7 @@ internal sealed class MyStromPoller : BackgroundService
         _device.Information = await response.Content.ReadFromJsonAsync<MyStromSwitchInformation>(cancellationToken);
     }
 
-    private async Task RefreshReportAsync(HttpClient client, CancellationToken cancellationToken)
+    private async Task<MyStromSwitchReport?> RefreshReportAsync(HttpClient client, CancellationToken cancellationToken)
     {
         var response = await client.GetAsync($"http://{_device.HostAddress}/report", cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -167,6 +180,8 @@ internal sealed class MyStromPoller : BackgroundService
             _device.Uptime = TimeSpan.FromSeconds(report.TimeSinceBoot);
             _device.IsConnected = true;
         }
+
+        return report;
     }
 
     private async Task RefreshTemperatureAsync(HttpClient client, CancellationToken cancellationToken)

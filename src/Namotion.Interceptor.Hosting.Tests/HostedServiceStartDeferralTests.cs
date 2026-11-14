@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Hosting.Tests.Models;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Hosting.Tests;
@@ -46,14 +47,14 @@ public class HostedServiceStartDeferralTests
         {
             subject.AttachHostedService(() => scoped);
             proceed.SetResult();
-            await independentFlow.WaitAsync(TimeSpan.FromSeconds(10));
+            await independentFlow.WaitAsync(TestTimeouts.Default);
 
             // Assert
-            Assert.Equal("independent", await independent.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Equal("independent", await independent.Started.Task.WaitAsync(TestTimeouts.Default));
             Assert.False(scoped.Started.Task.IsCompleted);
         }
 
-        Assert.Equal("scoped", await scoped.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("scoped", await scoped.Started.Task.WaitAsync(TestTimeouts.Default));
     }
 
     [Fact]
@@ -82,7 +83,7 @@ public class HostedServiceStartDeferralTests
         }
 
         // Assert
-        Assert.Equal("configured", await service.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("configured", await service.Started.Task.WaitAsync(TestTimeouts.Default));
     }
 
     [Theory]
@@ -113,11 +114,11 @@ public class HostedServiceStartDeferralTests
 
         // Assert
         Assert.Null(irregular);
-        Assert.Equal("captured", await captured.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("captured", await captured.Started.Task.WaitAsync(TestTimeouts.Default));
 
         var later = new ProbeService(() => "later");
-        await subject.AttachHostedServiceAsync(() => later, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.Equal("later", await later.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+        await subject.AttachHostedServiceAsync(() => later, CancellationToken.None).WaitAsync(TestTimeouts.Default);
+        Assert.Equal("later", await later.Started.Task.WaitAsync(TestTimeouts.Default));
     }
 
     [Fact]
@@ -141,12 +142,12 @@ public class HostedServiceStartDeferralTests
             // dispatched, which declines at the gate and never reaches the park at all.
             await AssertDoesNotStartAsync(deferred, "this deferral is still open");
 
-            await fixture.Handler.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+            await fixture.Handler.StopAsync(CancellationToken.None).WaitAsync(TestTimeouts.Default);
 
             // Assert - a released start declines rather than starting, because the drain re-reads the
             // gate, and its completion deferral is released either way.
             Assert.False(deferred.Started.Task.IsCompleted);
-            await fixture.AllCompletionDeferralsReleased.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await fixture.AllCompletionDeferralsReleased.Task.WaitAsync(TestTimeouts.Default);
         }
     }
 
@@ -161,7 +162,7 @@ public class HostedServiceStartDeferralTests
         var first = new ProbeService(() => "first", stopped: () => subject.AttachHostedService(() => second));
         var attachment = await subject
             .AttachHostedServiceAsync(() => first, CancellationToken.None)
-            .WaitAsync(TimeSpan.FromSeconds(10));
+            .WaitAsync(TestTimeouts.Default);
 
         // Act - the detach is not awaited, which is what this deferral's own rules ask of a caller, so
         // its stop body runs while the deferral is still open and with the execution context of this
@@ -171,7 +172,7 @@ public class HostedServiceStartDeferralTests
             subject.DetachHostedService(attachment);
 
             // Assert - what a stop path attaches belongs to no deferral this caller opened.
-            Assert.Equal("second", await second.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Equal("second", await second.Started.Task.WaitAsync(TestTimeouts.Default));
         }
     }
 
@@ -188,7 +189,7 @@ public class HostedServiceStartDeferralTests
         attachFromStop = () => subject.AttachHostedServiceAsync(() => second, CancellationToken.None);
         var attachment = await subject
             .AttachHostedServiceAsync(() => first, CancellationToken.None)
-            .WaitAsync(TimeSpan.FromSeconds(10));
+            .WaitAsync(TestTimeouts.Default);
 
         // Act - this stop is not captured by the deferral, having been attached and started before it
         // opened, so awaiting the detach inside the deferral is not the hazard awaiting a captured start
@@ -199,8 +200,8 @@ public class HostedServiceStartDeferralTests
 
             // Assert - the stop body returns rather than holding its queue for as long as this deferral
             // stays open.
-            Assert.True(await detachment.WaitAsync(TimeSpan.FromSeconds(10)));
-            Assert.Equal("second", await second.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.True(await detachment.WaitAsync(TestTimeouts.Default));
+            Assert.Equal("second", await second.Started.Task.WaitAsync(TestTimeouts.Default));
         }
     }
 

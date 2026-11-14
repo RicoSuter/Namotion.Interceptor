@@ -1,0 +1,335 @@
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(ClaudeCliAgent))]
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(AnthropicAgent))]
+@implements ISubjectEditComponent
+
+@inject IAgentToolSource ToolSource
+
+@if (Agent is not null)
+{
+    <MudForm>
+        <MudTextField T="string" Label="Name" @bind-Value="_name" @bind-Value:after="OnChanged" Immediate="true"
+                      HelperText="Shown as the agent's title. Empty: the type name." />
+        <MudTextField T="string" Label="Instructions" @bind-Value="_instructions" @bind-Value:after="OnChanged" Lines="6" Immediate="true"
+                      HelperText="What the agent watches for and how it should react." Class="mt-4" />
+
+        <MudText Typo="Typo.subtitle2" Class="mt-6">Models</MudText>
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" Label="Model" @bind-Value="_model" @bind-Value:after="OnChanged" Immediate="true" HelperText="@ModelHelperText" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="AgentEffort?" Label="Effort" @bind-Value="_effort" @bind-Value:after="OnChanged"
+                           ToStringFunc="@(effort => effort?.ToString() ?? "Default")">
+                    @foreach (var effort in EffortValues)
+                    {
+                        <MudSelectItem T="AgentEffort?" Value="@effort">@(effort?.ToString() ?? "Default")</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" Label="Background model" @bind-Value="_backgroundModel" @bind-Value:after="OnChanged" Immediate="true"
+                              HelperText="Used for background runs. Empty: same as model." />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="AgentEffort?" Label="Background effort" @bind-Value="_backgroundEffort" @bind-Value:after="OnChanged"
+                           ToStringFunc="@(effort => effort?.ToString() ?? "Same as effort")">
+                    @foreach (var effort in EffortValues)
+                    {
+                        <MudSelectItem T="AgentEffort?" Value="@effort">@(effort?.ToString() ?? "Same as effort")</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+        </MudGrid>
+
+        <MudText Typo="Typo.subtitle2" Class="mt-6">Triggers and limits</MudText>
+        <MudTextField T="string" Label="Watch paths" @bind-Value="_watchPaths" @bind-Value:after="OnChanged" Lines="3" Immediate="true"
+                      HelperText="One path per line. Changes below these paths trigger a run, and their state is included in it." />
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="6" md="3">
+                <MudTextField T="string" Label="Poll interval" @bind-Value="_pollInterval" @bind-Value:after="OnChanged" Immediate="true"
+                              HelperText="[d.]hh:mm:ss, empty for none" Validation="@(new Func<string?, string?>(ValidateOptionalTimeSpan))" />
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudTextField T="string" Label="Minimum run interval" @bind-Value="_minRunInterval" @bind-Value:after="OnChanged" Immediate="true"
+                              HelperText="[d.]hh:mm:ss" Validation="@(new Func<string?, string?>(ValidateTimeSpan))" />
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudTextField T="string" Label="Turn timeout" @bind-Value="_turnTimeout" @bind-Value:after="OnChanged" Immediate="true"
+                              HelperText="[d.]hh:mm:ss, 00:00:00 for none" Validation="@(new Func<string?, string?>(ValidateTurnTimeout))" />
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudNumericField T="int" Label="Tool calls per turn" @bind-Value="_maxToolCalls" @bind-Value:after="OnChanged" Min="1" Max="1000" />
+            </MudItem>
+        </MudGrid>
+
+        <MudText Typo="Typo.subtitle2" Class="mt-6">Allowed tools</MudText>
+        <MudText Typo="Typo.body2" Class="mb-2">
+            The tools the agent may use. update_memory is always available, so the agent can keep its notes.
+        </MudText>
+        <MudGrid Spacing="2">
+            @foreach (var tool in _toolOptions)
+            {
+                <MudItem xs="12" md="6" data-testid="@($"agent-edit-tool-{tool.Name}")">
+                    <MudSwitch T="bool" Value="@_allowedTools.Contains(tool.Name)" ValueChanged="@((bool isAllowed) => ToggleTool(tool.Name, isAllowed))"
+                               Disabled="@(tool.ChangesPageLayout && !HasPageTool)" Color="Color.Primary">
+                        <MudStack Spacing="0" Class="py-1">
+                            <MudText Typo="Typo.body1">@tool.Name</MudText>
+                            @if (!tool.IsOffered)
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Warning">@tool.Description</MudText>
+                            }
+                            else if (tool.Description is not null)
+                            {
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary"
+                                         Style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">@tool.Description</MudText>
+                            }
+                            @if (tool.ChangesPageLayout)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Dashboard"
+                                         Class="ml-0" data-testid="agent-edit-tool-page-layout-warning">Changes page layout</MudChip>
+                            }
+                            else if (tool.ChangesPages)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.EditNote"
+                                         Class="ml-0" data-testid="agent-edit-tool-pages-warning">Changes pages and documents</MudChip>
+                            }
+                            else if (tool.CanChangeState)
+                            {
+                                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                    <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Size="Size.Small" />
+                                    <MudText Typo="Typo.caption" Color="Color.Warning">Can change devices and send notifications</MudText>
+                                </MudStack>
+                            }
+                            @if (tool.LoadsWebContent)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Public"
+                                         Class="ml-0" data-testid="agent-edit-tool-web-warning">Loads untrusted web content</MudChip>
+                            }
+                        </MudStack>
+                    </MudSwitch>
+                </MudItem>
+            }
+        </MudGrid>
+
+        @if (Agent is ClaudeCliAgent)
+        {
+            <MudText Typo="Typo.subtitle2" Class="mt-6">Claude CLI</MudText>
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="6">
+                    <MudTextField T="string" Label="Claude CLI path" @bind-Value="_cliPath" @bind-Value:after="OnChanged" Immediate="true"
+                                  HelperText="The claude executable of the user HomeBlaze runs as; it must be logged in."
+                                  Required="true" RequiredError="The CLI path is required" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudTextField T="string" Label="Fallback model" @bind-Value="_fallbackModel" @bind-Value:after="OnChanged" Immediate="true"
+                                  HelperText="Used when the model is overloaded. Empty: none." />
+                </MudItem>
+            </MudGrid>
+        }
+
+        @if (Agent is AnthropicAgent)
+        {
+            <MudText Typo="Typo.subtitle2" Class="mt-6">Anthropic API</MudText>
+            @* The stored key is never loaded into the form; an empty field keeps it. *@
+            <MudTextField T="string" Label="API key" @bind-Value="_apiKey" @bind-Value:after="OnChanged" InputType="InputType.Password" Immediate="true"
+                          HelperText="@(_hasStoredApiKey ? "A key is stored. Leave empty to keep it." : "Required.")" autocomplete="new-password" />
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="6">
+                    <MudNumericField T="int" Label="Max output tokens" @bind-Value="_maxTokens" @bind-Value:after="OnChanged" Min="MinimumMaxTokens"
+                                     HelperText="Per model request, including thinking." />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudNumericField T="int" Label="History token budget" @bind-Value="_historyTokenBudget" @bind-Value:after="OnChanged" Min="0"
+                                     HelperText="When a chat request exceeds this many input tokens, older messages are summarized to about half of it. 0: never." />
+                </MudItem>
+            </MudGrid>
+        }
+    </MudForm>
+}
+
+@code {
+    private const string TimeSpanErrorText = "Use [d.]hh:mm:ss, at most 365 days";
+    private const int MinimumMaxTokens = 256;
+    private const string TurnTimeoutErrorText = "Use [d.]hh:mm:ss, at most 24 days; 00:00:00 for none";
+
+    private static readonly AgentEffort?[] EffortValues = [null, .. Enum.GetValues<AgentEffort>().Cast<AgentEffort?>()];
+
+    private string? _name;
+    private string? _instructions;
+    private string? _model;
+    private AgentEffort? _effort;
+    private string? _backgroundModel;
+    private AgentEffort? _backgroundEffort;
+    private string _watchPaths = string.Empty;
+    private string? _pollInterval;
+    private string _minRunInterval = string.Empty;
+    private string _turnTimeout = string.Empty;
+    private HashSet<string> _allowedTools = new(StringComparer.Ordinal);
+    private IReadOnlyList<AgentToolOption> _toolOptions = [];
+    private int _maxToolCalls;
+    private string _cliPath = string.Empty;
+    private string? _fallbackModel;
+    private string? _apiKey;
+    private bool _hasStoredApiKey;
+    private int _maxTokens;
+    private int _historyTokenBudget;
+    private bool _isDirty;
+    private bool _wasValid = true;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    public event Action<bool>? IsValidChanged;
+
+    public event Action<bool>? IsDirtyChanged;
+
+    public string PreferredDialogSize => "Medium";
+
+    public bool IsDirty => _isDirty;
+
+    public bool IsValid =>
+        ValidateOptionalTimeSpan(_pollInterval) is null &&
+        AgentTimeSpanInput.TryParse(_minRunInterval, out _) &&
+        AgentTimeSpanInput.TryParseTurnTimeout(_turnTimeout, out _) &&
+        _maxToolCalls > 0 &&
+        (Agent is not ClaudeCliAgent || !string.IsNullOrWhiteSpace(_cliPath)) &&
+        (Agent is not AnthropicAgent ||
+            ((_hasStoredApiKey || !string.IsNullOrWhiteSpace(_apiKey)) && !string.IsNullOrWhiteSpace(_model) && _maxTokens >= MinimumMaxTokens && _historyTokenBudget >= 0));
+
+    private LlmAgentBase? Agent => Subject as LlmAgentBase;
+
+    // Registered only for the CLI and the Anthropic agent.
+    private string ModelHelperText => Agent is AnthropicAgent
+        ? "Required. A model id such as claude-sonnet-5."
+        : "Empty: CLI default. Aliases such as opus, sonnet or haiku work.";
+
+    protected override void OnInitialized()
+    {
+        if (Agent is not { } agent)
+        {
+            return;
+        }
+
+        _name = agent.Name;
+        _instructions = agent.Instructions;
+        _model = agent.Model;
+        _effort = agent.Effort;
+        _backgroundModel = agent.BackgroundModel;
+        _backgroundEffort = agent.BackgroundEffort;
+        _watchPaths = string.Join('\n', agent.WatchPaths);
+        _pollInterval = agent.PollInterval is { } pollInterval ? AgentTimeSpanInput.Format(pollInterval) : null;
+        _minRunInterval = AgentTimeSpanInput.Format(agent.GetEffectiveMinRunInterval());
+        // The form writes no limit as 00:00:00.
+        _turnTimeout = AgentTimeSpanInput.Format(agent.GetEffectiveTurnTimeout() ?? TimeSpan.Zero);
+        _allowedTools = new HashSet<string>(agent.AllowedTools, StringComparer.Ordinal);
+        _toolOptions = AgentToolOptions.Create(ToolSource, agent.AllowedTools, agent.SupportedBackendTools);
+        _maxToolCalls = agent.MaxToolCallsPerTurn;
+        if (agent is ClaudeCliAgent cliAgent)
+        {
+            _cliPath = cliAgent.CliPath;
+            _fallbackModel = cliAgent.FallbackModel;
+        }
+
+        if (agent is AnthropicAgent anthropicAgent)
+        {
+            _hasStoredApiKey = !string.IsNullOrWhiteSpace(anthropicAgent.ApiKey);
+            _maxTokens = anthropicAgent.MaxTokens;
+            _historyTokenBudget = anthropicAgent.HistoryTokenBudget;
+        }
+
+        _wasValid = IsValid;
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (Agent is not { } agent || !IsValid)
+        {
+            return Task.CompletedTask;
+        }
+
+        agent.Name = NullIfBlank(_name);
+        agent.Instructions = NullIfBlank(_instructions);
+        agent.Model = NullIfBlank(_model);
+        agent.Effort = _effort;
+        agent.BackgroundModel = NullIfBlank(_backgroundModel);
+        agent.BackgroundEffort = _backgroundEffort;
+        agent.WatchPaths = _watchPaths.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        agent.PollInterval = AgentTimeSpanInput.TryParse(_pollInterval, out var pollInterval) && pollInterval > TimeSpan.Zero ? pollInterval : null;
+        AgentTimeSpanInput.TryParse(_minRunInterval, out var minRunInterval);
+        agent.MinRunInterval = minRunInterval;
+        AgentTimeSpanInput.TryParseTurnTimeout(_turnTimeout, out var turnTimeout);
+        agent.TurnTimeout = turnTimeout;
+        // The permission to edit page layout has no effect without a Markdown tool, so it is not kept without one.
+        agent.AllowedTools = _toolOptions
+            .Where(tool => _allowedTools.Contains(tool.Name) && (!tool.ChangesPageLayout || HasPageTool))
+            .Select(tool => tool.Name)
+            .ToArray();
+        agent.MaxToolCallsPerTurn = _maxToolCalls;
+        if (agent is ClaudeCliAgent cliAgent)
+        {
+            cliAgent.CliPath = _cliPath.Trim();
+            cliAgent.FallbackModel = NullIfBlank(_fallbackModel);
+        }
+
+        if (agent is AnthropicAgent anthropicAgent)
+        {
+            if (!string.IsNullOrWhiteSpace(_apiKey))
+            {
+                anthropicAgent.ApiKey = _apiKey.Trim();
+                _apiKey = null;
+                _hasStoredApiKey = true;
+            }
+
+            anthropicAgent.MaxTokens = _maxTokens;
+            anthropicAgent.HistoryTokenBudget = _historyTokenBudget;
+        }
+
+        _isDirty = false;
+        IsDirtyChanged?.Invoke(false);
+        return Task.CompletedTask;
+    }
+
+    private bool HasPageTool => AgentToolSet.HasMarkdownTool(_allowedTools);
+
+    private void ToggleTool(string name, bool isAllowed)
+    {
+        if (isAllowed)
+        {
+            _allowedTools.Add(name);
+        }
+        else
+        {
+            _allowedTools.Remove(name);
+        }
+
+        OnChanged();
+    }
+
+    private void OnChanged()
+    {
+        if (!_isDirty)
+        {
+            _isDirty = true;
+            IsDirtyChanged?.Invoke(true);
+        }
+
+        // Raised on transitions only, because the host re-renders its save button on each event.
+        var isValid = IsValid;
+        if (isValid != _wasValid)
+        {
+            _wasValid = isValid;
+            IsValidChanged?.Invoke(isValid);
+        }
+    }
+
+    private static string? ValidateTimeSpan(string? text) => AgentTimeSpanInput.TryParse(text, out _) ? null : TimeSpanErrorText;
+
+    private static string? ValidateTurnTimeout(string? text) => AgentTimeSpanInput.TryParseTurnTimeout(text, out _) ? null : TurnTimeoutErrorText;
+
+    private static string? ValidateOptionalTimeSpan(string? text) => string.IsNullOrWhiteSpace(text) ? null : ValidateTimeSpan(text);
+
+    private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+}

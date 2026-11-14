@@ -14,7 +14,7 @@ internal static class InMemoryHistoryAggregation
     public static bool IsNumeric(string aggregation) =>
         aggregation is HistoryAggregations.SampleAverage or HistoryAggregations.TimeWeightedAverage
             or HistoryAggregations.Minimum or HistoryAggregations.Maximum
-            or HistoryAggregations.Sum or HistoryAggregations.StandardDeviation;
+            or HistoryAggregations.Sum or HistoryAggregations.StandardDeviation or HistoryAggregations.Delta;
 
     public static HistoryPoint AggregateBucket(
         string aggregation,
@@ -44,6 +44,9 @@ internal static class InMemoryHistoryAggregation
                 return samples.Length > 0
                     ? ToPoint(samples[0], isUlong) with { Timestamp = bucketStart }
                     : new HistoryPoint(bucketStart, null, null);
+
+            case HistoryAggregations.Delta:
+                return Delta(bucketStart, samples, isUlong, ref carriedNumber);
 
             case HistoryAggregations.TimeWeightedAverage:
                 return TimeWeightedAverage(
@@ -117,6 +120,32 @@ internal static class InMemoryHistoryAggregation
             null);
     }
 
+    private static HistoryPoint Delta(
+        DateTimeOffset bucketStart, ReadOnlySpan<Sample> samples, bool isUlong, ref double? carriedNumber)
+    {
+        // Without a held value the first sample is the baseline and adds nothing. A NaN or infinite reading is no
+        // counter reading, as in the SQLite store, which cannot hold NaN as a number.
+        var hasValue = carriedNumber is not null;
+        var increase = 0d;
+        foreach (var sample in samples)
+        {
+            if (Numeric(sample, isUlong) is not { } value || !double.IsFinite(value))
+            {
+                continue;
+            }
+
+            if (carriedNumber is { } previous)
+            {
+                increase += HistoryDelta.Step(previous, value);
+            }
+
+            carriedNumber = value;
+            hasValue = true;
+        }
+
+        return new HistoryPoint(bucketStart, hasValue ? increase : null, null);
+    }
+
     // One pass over the bucket's samples, accumulating everything the numeric aggregations need. The
     // previous version materialized a List<double> of the numeric values for every bucket, which for a
     // 1000-bucket query is 1000 list allocations plus the LINQ chain that fills them.
@@ -180,7 +209,7 @@ internal static class InMemoryHistoryAggregation
         return new HistoryPoint(bucketStart, result, null);
     }
 
-    private static double? Numeric(Sample sample, bool isUlong)
+    internal static double? Numeric(Sample sample, bool isUlong)
     {
         if (sample.Double is { } doubleValue)
         {

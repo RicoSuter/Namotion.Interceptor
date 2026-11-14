@@ -38,6 +38,7 @@ else
     private int _glowCounter;
     private volatile int _disposed;
     private volatile int _rerenderPending;
+    private volatile int _isRecording;
 
     private ConcurrentDictionary<PropertyReference, bool> _collectingProperties = [];
     private ConcurrentDictionary<PropertyReference, bool> _properties = [];
@@ -83,8 +84,36 @@ else
         {
             return builder =>
             {
-                using var recorder = ReadPropertyRecorder.Start(_collectingProperties);
-                ChildContent?.Invoke(builder);
+                // Reset before anything is read: a change that arrives from now on must render again, because this
+                // render may already have read the old value.
+                Interlocked.Exchange(ref _rerenderPending, 0);
+
+                // The fragment runs in the async flow that renders the batch, which can differ from the flow that asked
+                // for the render, and the descendants render later in the same synchronous loop of that flow. The scope
+                // therefore stays open until OnAfterRender, which runs once the whole batch has rendered.
+                if (_currentScope is null)
+                {
+                    _collectingProperties.Clear();
+                }
+                else
+                {
+                    // Rendered again before OnAfterRender: either later in the same batch, which runs in the same flow,
+                    // or in a later batch, after the earlier one has rendered completely. Replacing the scope loses no read.
+                    _currentScope.Dispose();
+                }
+
+                _currentScope = ReadPropertyRecorder.Start(_collectingProperties);
+                Interlocked.Exchange(ref _isRecording, 1);
+                try
+                {
+                    ChildContent?.Invoke(builder);
+                }
+                catch
+                {
+                    // A failed render never reaches OnAfterRender, which would otherwise close the scope.
+                    StopRecording();
+                    throw;
+                }
             };
         }
     }
@@ -117,18 +146,21 @@ else
 
                         try
                         {
-                            // Check if any change in the batch requires a rerender
+                            ConcurrentDictionary<PropertyReference, bool> properties;
+                            ConcurrentDictionary<PropertyReference, bool>? collectingProperties;
+                            lock (_lock)
+                            {
+                                // Until OnAfterRender swaps them in, the reads of an open recording are only in the
+                                // collecting set, and a change of one of them must render again as well.
+                                properties = _properties;
+                                collectingProperties = _isRecording != 0 ? _collectingProperties : null;
+                            }
+
                             foreach (var change in changes)
                             {
-                                // Check if this property is directly tracked
-                                if (_properties.TryGetValue(change.Property, out _))
-                                {
-                                    TriggerRerender();
-                                    return;
-                                }
-
-                                // Check if the changed subject is a descendant of any tracked subject
-                                if (IsDescendantOfTrackedSubject(change.Property.Subject))
+                                if (properties.ContainsKey(change.Property) ||
+                                    collectingProperties?.ContainsKey(change.Property) == true ||
+                                    IsDescendantOfTrackedSubject(change.Property.Subject))
                                 {
                                     TriggerRerender();
                                     return;
@@ -148,44 +180,22 @@ else
                 Logger.LogWarning(exception, "Failed to subscribe to property change observable.");
             }
         }
-        
-        StartRecording();
+
         base.OnParametersSet();
-    }
-    
-    protected override bool ShouldRender()
-    {
-        if (_disposed != 0) return false;
-
-        StartRecording();
-        return base.ShouldRender();
-    }
-
-    private void StartRecording()
-    {
-        if (_disposed != 0) return;
-
-        if (_currentScope == null)
-        {
-            _collectingProperties.Clear();
-            _currentScope = ReadPropertyRecorder.Start(_collectingProperties);
-        }
     }
 
     protected override void OnAfterRender(bool firstRender)
     {
         if (_disposed != 0) return;
 
-        StopRecording();
-
-        // Only swap if we collected properties during this render.
-        // This prevents losing tracking when a spurious render happens without executing RenderFragments.
-        if (_collectingProperties.Count > 0)
+        // Without an open scope the fragment did not run since the last swap, and the tracked properties still hold.
+        if (_currentScope is not null)
         {
             lock (_lock)
             {
+                // The previous set is cleared when the next render starts, not here, because the change callback
+                // may still be reading it.
                 (_properties, _collectingProperties) = (_collectingProperties, _properties);
-                _collectingProperties.Clear();
 
                 // Update tracked subjects from the new properties
                 _trackedSubjects = new HashSet<IInterceptorSubject>(
@@ -194,22 +204,19 @@ else
                 // Clear ancestor cache when tracked subjects change
                 _ancestorCache.Clear();
             }
+
+            // After the swap, so that the change callback finds the reads of this render in one of the two sets.
+            StopRecording();
         }
 
-        // Reset rerender flag after render completes
-        Interlocked.Exchange(ref _rerenderPending, 0);
-
         base.OnAfterRender(firstRender);
-        
-        if (firstRender)
+
+        if (firstRender && _disposed == 0)
         {
-            // WORKAROUND: Properties accessed during first render are not collected.
-            // This may be due to Blazor's render tree initialization timing - the recording
-            // scope may not be fully active when BuildRenderTree first executes.
-            // Triggering a second render ensures properties are properly tracked.
-            // TODO: Investigate root cause - check if recording scope starts too late
-            // or if Blazor's first render has special behavior that bypasses interception.
-            Task.Run(async () => await Task.Yield()).ContinueWith(_ => InvokeAsync(StateHasChanged));
+            // Renders once more to record what the first recording missed: content that a descendant renders in a batch
+            // of its own after its first render, and a change that arrived before the recorded properties were active.
+            // Posted from outside the dispatcher, so that it runs after the OnAfterRender calls of the descendants.
+            _ = Task.Run(() => InvokeAsync(StateHasChanged));
         }
     }
 
@@ -220,6 +227,8 @@ else
             _currentScope.Dispose();
             _currentScope = null;
         }
+
+        _isRecording = 0;
     }
 
     /// <summary>

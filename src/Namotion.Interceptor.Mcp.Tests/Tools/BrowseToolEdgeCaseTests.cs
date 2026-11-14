@@ -11,6 +11,33 @@ namespace Namotion.Interceptor.Mcp.Tests.Tools;
 public class BrowseToolEdgeCaseTests
 {
     [Fact]
+    public async Task WhenTwoChildrenAreEqual_ThenBothAreBrowsed()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var group = new TestMixedGroup(context);
+        group.Items = new Dictionary<string, IInterceptorSubject>
+        {
+            ["First"] = new TestEqualItem { Name = "First" },
+            ["Second"] = new TestEqualItem { Name = "Second" }
+        };
+
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
+        var tool = new McpToolFactory(group, config).CreateTools().First(t => t.Name == "browse");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 1 });
+        var result = await tool.Handler(input, CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert
+        Assert.Equal(2, json.GetProperty("subjectCount").GetInt32());
+    }
+
+    [Fact]
     public async Task WhenInvalidStartPath_ThenReturnsError()
     {
         // Arrange

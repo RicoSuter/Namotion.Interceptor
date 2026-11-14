@@ -1,0 +1,26 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(ValueRow))]
+@implements ISubjectComponent
+
+@* A row of a value list as a widget of its own, so that it can be selected while the page is edited inline. The list
+   reads the values of all rows and passes them in. *@
+@if (Subject is ValueRow row)
+{
+    <ValueListRow Row="@row" Path="@Path" Reading="@Reading" Icon="@Icon" AnyIcon="@AnyIcon" />
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public string? Path { get; set; }
+
+    [Parameter]
+    public ValueReading? Reading { get; set; }
+
+    [Parameter]
+    public string? Icon { get; set; }
+
+    [Parameter]
+    public bool AnyIcon { get; set; }
+}

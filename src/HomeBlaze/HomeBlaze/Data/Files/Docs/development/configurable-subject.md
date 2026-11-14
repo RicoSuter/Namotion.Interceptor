@@ -1,7 +1,6 @@
 ---
 title: Configurable Subject Serialization
 navTitle: Configurable Subjects
-position: 1
 ---
 
 # Configurable Subject Serialization
@@ -68,13 +67,22 @@ public class Mcp3008Configuration  // Value object - all saved
 
 ## Implementation
 
-Uses `System.Text.Json` with custom `ConfigurationJsonTypeInfoResolver`:
+Uses `System.Text.Json` with custom `ConfigurationJsonTypeInfoResolver`. The options for configuration files:
 
 ```csharp
 var options = new JsonSerializerOptions
 {
-    TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(),
+    TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(typeProvider, serviceProvider),
     PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     WriteIndented = true
 };
 ```
+
+The serializer has a second set of options for the blocks of a markdown page, which name every property by its C# property name, like `TargetSpeed`. Each method of `ConfigurableSubjectSerializer` that reads or writes JSON takes a `ConfigurationNaming`: `JsonProperty` is the default and the naming of configuration files, and `CSharpProperty` is the naming of pages. See [Markdown Pages](../administration/pages.md#names) for the page side.
+
+## Values That Cannot Be Read
+
+A value whose JSON does not convert to the type of its property, such as text for a number, is skipped: the property keeps its default, or its value when a file is read again, and the other properties are read. `Deserialize` and `UpdateConfiguration` hand each skipped property to a caller that passes a callback for them, and `DescribeSkippedProperties` names each by its key. The storage and the root configuration log them as a warning. Saving writes the configuration as it was loaded, so the file loses the values that could not be read, see [Values That Cannot Be Read](../administration/subjects.md#values-that-cannot-be-read) for how an administrator corrects the file.
+
+A key at the top level of a configuration file that names none of the configuration properties is ignored, so a file can keep the key of a property that a type no longer has. A configurable subject nested in a configuration that collects the keys it does not know in a `[JsonExtensionData]` property, as an automation rule does, gets there the keys of its properties without `[Configuration]` as well.
+

@@ -87,6 +87,8 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         ILogger logger)
         : base(new ConnectorMetrics(new ThroughputCounter(), new ThroughputCounter()))
     {
+        configuration.Validate();
+
         _subject = subject;
         _context = subject.Context;
         _logger = logger;
@@ -226,12 +228,6 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                 var linkedToken = attempt.Token;
 
                 var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
-
-                if (_configuration.CleanCertificateStore)
-                {
-                    CleanCertificateStore(application);
-                }
-
                 var server = new OpcUaStandardServer(_subject, this, _configuration, _logger);
 
                 try
@@ -250,7 +246,15 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                         using var outboundRegistration = Metrics.OutboundChanges.Register(
                             () => changeQueueProcessor.QueueDepth, capacity: null);
 
-                        await application.CheckApplicationInstanceCertificatesAsync(true, ct: linkedToken).ConfigureAwait(false);
+                        if (_configuration.CleanCertificateStore)
+                        {
+                            await ApplicationCertificateLoader.CleanStoreAsync(
+                                application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate,
+                                _logger,
+                                linkedToken).ConfigureAwait(false);
+                        }
+
+                        await LoadApplicationCertificateAsync(application, linkedToken).ConfigureAwait(false);
                         await application.StartAsync(server).ConfigureAwait(false);
 
                         ResetConsecutiveFailures();
@@ -336,6 +340,54 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         }
     }
 
+    internal async Task LoadApplicationCertificateAsync(ApplicationInstance application, CancellationToken cancellationToken)
+    {
+        var autoCreate = !application.DisableCertificateAutoCreation;
+
+        // Read before loading, because after a rejected certificate the identifier reports that certificate's subject.
+        var subjectName = application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.SubjectName;
+        try
+        {
+            await ApplicationCertificateLoader.EnsureLoadedAsync(
+                application,
+                autoCreate,
+                CertificateFactory.DefaultLifeTime,
+                _configuration.ResolvedTelemetryContext,
+                _logger,
+                cancellationToken).ConfigureAwait(false);
+        }
+        // The SDK can report a cancellation as another exception type, so the token is checked too.
+        catch (Exception error) when (error is not OperationCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            throw CreateCertificateLoadException(error, application.ApplicationConfiguration, subjectName, _configuration.BaseAddress, autoCreate);
+        }
+    }
+
+    /// <summary>
+    /// Creates the exception thrown when the server application certificate cannot be loaded, created or replaced.
+    /// </summary>
+    internal static InvalidOperationException CreateCertificateLoadException(
+        Exception error,
+        ApplicationConfiguration applicationConfiguration,
+        string? subjectName,
+        string baseAddress,
+        bool autoCreate)
+    {
+        var identifier = applicationConfiguration.SecurityConfiguration.ApplicationCertificate;
+        return new InvalidOperationException(
+            $"Failed to load the OPC UA server application certificate from " +
+            $"'{CertificateFolder.Get(identifier?.StoreType, identifier?.StorePath)}': {error.Message.TrimEnd().TrimEnd('.')}. " +
+            $"The certificate needs the subject '{subjectName}', and a kept certificate must match the application URI " +
+            $"'{applicationConfiguration.ApplicationUri}' and the host of {nameof(OpcUaServerConfiguration.BaseAddress)} " +
+            $"'{baseAddress}', where localhost stands for the host name. Give the server a stable host name, or set " +
+            $"{nameof(OpcUaServerConfiguration.ApplicationUri)} and an explicit host in {nameof(OpcUaServerConfiguration.BaseAddress)}. " +
+            (autoCreate
+                ? $"Or delete the certificate with its private key from '{identifier?.StorePath}' so a new one is created, " +
+                  "which clients then have to trust."
+                : "Automatic certificate creation is off, so a matching certificate has to be provided there."),
+            error);
+    }
+
     private async Task ShutdownServerAsync(ApplicationInstance application)
     {
         try
@@ -371,34 +423,6 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         catch (ServiceResultException e) when (e.StatusCode == StatusCodes.BadServerHalted)
         {
             // Server already halted
-        }
-    }
-
-    private void CleanCertificateStore(ApplicationInstance application)
-    {
-        var path = application
-            .ApplicationConfiguration
-            .SecurityConfiguration
-            .ApplicationCertificate
-            .StorePath;
-
-        if (string.IsNullOrEmpty(path))
-        {
-            _logger.LogWarning("Certificate store path is empty, skipping cleanup.");
-            return;
-        }
-
-        try
-        {
-            if (Directory.Exists(path))
-            {
-                Directory.Delete(path, true);
-                _logger.LogDebug("Cleaned certificate store at {Path}.", path);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to clean certificate store at {Path}. Continuing with existing certificates.", path);
         }
     }
 

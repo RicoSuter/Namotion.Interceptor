@@ -4,7 +4,7 @@ using Namotion.Interceptor.Attributes;
 namespace Namotion.Interceptor.Hosting.Tests.Models;
 
 /// <summary>
-/// The shape both OPC UA wrappers have: a subject that is its own hosted service and owns a factory
+/// A subject that is its own hosted service and owns a factory
 /// attachment it creates from <see cref="ExecuteAsync"/>. The unwind deliberately does not detach that
 /// attachment. It runs inside the handler's stop transition for this subject, and the attachment's stop
 /// is queued behind that transition, so a detach from here waits on a queue that is waiting on this

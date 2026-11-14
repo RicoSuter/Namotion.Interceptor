@@ -43,7 +43,7 @@ public class SourceRegistrationHostingTests
 
         var root = new Person(context);
         var monitor = context.GetSourceMonitor();
-        using var startRelease = new StartRelease();
+        var startRelease = new StartRelease();
 
         // Attached before the host starts, so its start is queued and drains asynchronously while
         // the host's own startup runs to completion.
@@ -65,7 +65,7 @@ public class SourceRegistrationHostingTests
         startRelease.ReleaseStart();
 
         await AsyncTestHelpers.WaitUntilAsync(() => monitor.IsRegistrationComplete);
-        await wait.WaitAsync(TimeSpan.FromSeconds(5));
+        await wait.WaitAsync(TestTimeouts.Default);
 
         await host.StopAsync();
     }
@@ -86,7 +86,7 @@ public class SourceRegistrationHostingTests
 
         var root = new Person(context);
         var monitor = context.GetSourceMonitor();
-        using var startRelease = new StartRelease();
+        var startRelease = new StartRelease();
 
         // Gated, then throwing: a start that failed immediately would let this test pass with no
         // completion deferral ever taken, since registration would simply have completed at host start.
@@ -103,7 +103,7 @@ public class SourceRegistrationHostingTests
         startRelease.ReleaseStart();
 
         await AsyncTestHelpers.WaitUntilAsync(() => monitor.IsRegistrationComplete);
-        await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeouts.Default);
 
         await host.StopAsync();
     }
@@ -164,7 +164,7 @@ public class SourceRegistrationHostingTests
         await host.StartAsync();
         Assert.True(monitor.IsRegistrationComplete);
 
-        using var startRelease = new StartRelease();
+        var startRelease = new StartRelease();
 
         // Act - startup completion is deferred synchronously, before the returned task is handed back.
         var attach = root.AttachHostedServiceAsync(
@@ -174,7 +174,7 @@ public class SourceRegistrationHostingTests
         Assert.False(monitor.IsRegistrationComplete);
 
         startRelease.ReleaseStart();
-        var attachment = await attach.WaitAsync(TimeSpan.FromSeconds(10));
+        var attachment = await attach.WaitAsync(TestTimeouts.Default);
         Assert.NotNull(attachment.Current);
         await AsyncTestHelpers.WaitUntilAsync(() => monitor.IsRegistrationComplete);
 
@@ -203,7 +203,7 @@ public class SourceRegistrationHostingTests
         await host.StartAsync();
         Assert.True(monitor.IsRegistrationComplete);
 
-        using var childRelease = new StartRelease();
+        var childRelease = new StartRelease();
 
         // Act - the awaiting overload returns only once the parent's own start transition has run to
         // completion, so the parent's completion deferrals have provably been released by the time the
@@ -247,7 +247,7 @@ public class SourceRegistrationHostingTests
 
         // Assert
         Assert.True(monitor.IsRegistrationComplete);
-        await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TestTimeouts.Default);
 
         await host.StopAsync();
     }
@@ -258,26 +258,21 @@ public class SourceRegistrationHostingTests
 /// the service, because the attach API takes a factory: the handler constructs the instance, so a
 /// test has no reference to one that is still inside StartAsync.
 /// </summary>
-internal sealed class StartRelease : IDisposable
+internal sealed class StartRelease
 {
-    private readonly ManualResetEventSlim _release = new(false);
+    private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public void ReleaseStart() => _release.Set();
+    public void ReleaseStart() => _release.TrySetResult();
 
-    public void WaitForRelease(CancellationToken cancellationToken)
-    {
-        // Bounded, so a mechanism that never releases fails the test instead of hanging the run.
-        _release.Wait(TimeSpan.FromSeconds(10), cancellationToken);
-    }
-
-    public void Dispose() => _release.Dispose();
+    // Bounded, so a mechanism that never releases fails the test instead of hanging the run.
+    public Task WaitForReleaseAsync(CancellationToken cancellationToken)
+        => _release.Task.WaitAsync(TestTimeouts.Default, cancellationToken);
 }
 
-/// <summary>A hosted service whose StartAsync blocks until the test releases it.</summary>
+/// <summary>A hosted service whose StartAsync completes only once the test releases it.</summary>
 internal sealed class GatedStartHostedService(StartRelease release) : IHostedService
 {
-    public Task StartAsync(CancellationToken cancellationToken)
-        => Task.Run(() => release.WaitForRelease(cancellationToken), cancellationToken);
+    public Task StartAsync(CancellationToken cancellationToken) => release.WaitForReleaseAsync(cancellationToken);
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
@@ -287,7 +282,7 @@ internal sealed class ThrowingStartHostedService(StartRelease release) : IHosted
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        await Task.Run(() => release.WaitForRelease(cancellationToken), cancellationToken);
+        await release.WaitForReleaseAsync(cancellationToken);
         throw new InvalidOperationException("start failed");
     }
 

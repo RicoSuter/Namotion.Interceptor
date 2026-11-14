@@ -5,7 +5,11 @@ namespace HomeBlaze.History.Abstractions
     public static class BucketAlignment
     {
         public static System.DateTimeOffset BucketStart(System.DateTimeOffset ts, System.TimeSpan bucket) { }
+        public static System.DateTimeOffset FirstBucketStart(System.DateTimeOffset from, System.DateTimeOffset to, HomeBlaze.History.Abstractions.HistoryBucket bucket, int maxBuckets) { }
         public static System.DateTimeOffset FirstBucketStart(System.DateTimeOffset from, System.DateTimeOffset to, System.TimeSpan bucket, int maxBuckets) { }
+        public static System.DateTimeOffset LocalTimeToInstant(System.DateTime localTime, System.TimeZoneInfo timeZone) { }
+        public static System.DateTimeOffset Next(System.DateTimeOffset bucketStart, HomeBlaze.History.Abstractions.HistoryBucket bucket) { }
+        public static System.DateTimeOffset Start(System.DateTimeOffset timestamp, HomeBlaze.History.Abstractions.HistoryBucket bucket) { }
     }
     public class HistoryAggregationNotSupportedException : System.Exception
     {
@@ -16,6 +20,7 @@ namespace HomeBlaze.History.Abstractions
     public static class HistoryAggregations
     {
         public const string Count = "Count";
+        public const string Delta = "Delta";
         public const string First = "First";
         public const string Last = "Last";
         public const string Maximum = "Maximum";
@@ -26,6 +31,23 @@ namespace HomeBlaze.History.Abstractions
         public const string TimeWeightedAverage = "TimeWeightedAverage";
         public static readonly System.Collections.Immutable.ImmutableArray<string> All;
         public static readonly System.Collections.Generic.IReadOnlySet<string> AlwaysAvailable;
+    }
+    public readonly struct HistoryBucket : System.IEquatable<HomeBlaze.History.Abstractions.HistoryBucket>
+    {
+        public HomeBlaze.History.Abstractions.HistoryCalendarUnit? CalendarUnit { get; }
+        public System.TimeSpan? FixedSize { get; }
+        public System.TimeZoneInfo? TimeZone { get; }
+        public override string ToString() { }
+        public static HomeBlaze.History.Abstractions.HistoryBucket Calendar(HomeBlaze.History.Abstractions.HistoryCalendarUnit unit, System.TimeZoneInfo timeZone) { }
+        public static HomeBlaze.History.Abstractions.HistoryBucket Fixed(System.TimeSpan size) { }
+        public static HomeBlaze.History.Abstractions.HistoryBucket op_Implicit(System.TimeSpan size) { }
+    }
+    public enum HistoryCalendarUnit
+    {
+        Day = 0,
+        Week = 1,
+        Month = 2,
+        Year = 3,
     }
     public readonly struct HistoryChainLeg : System.IEquatable<HomeBlaze.History.Abstractions.HistoryChainLeg>
     {
@@ -52,6 +74,10 @@ namespace HomeBlaze.History.Abstractions
         public static System.TimeSpan CoveredDuration(System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> ranges, HomeBlaze.History.Abstractions.HistoryCoverage window) { }
         public static System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> Normalize(System.Collections.Generic.IEnumerable<HomeBlaze.History.Abstractions.HistoryCoverage> ranges) { }
     }
+    public static class HistoryDelta
+    {
+        public static double Step(double previous, double current) { }
+    }
     public readonly struct HistoryMove : System.IEquatable<HomeBlaze.History.Abstractions.HistoryMove>
     {
         public HistoryMove(System.DateTimeOffset Timestamp, string FromPath, string ToPath) { }
@@ -72,9 +98,9 @@ namespace HomeBlaze.History.Abstractions
     }
     public class HistoryQuery : System.IEquatable<HomeBlaze.History.Abstractions.HistoryQuery>
     {
-        public HistoryQuery(string PropertyPath, System.DateTimeOffset From, System.DateTimeOffset To, System.TimeSpan? Bucket = default, string Aggregation = "Last", int MaxPoints = 10000, HomeBlaze.History.Abstractions.HistoryPoint? CarrySeed = null) { }
+        public HistoryQuery(string PropertyPath, System.DateTimeOffset From, System.DateTimeOffset To, HomeBlaze.History.Abstractions.HistoryBucket? Bucket = default, string Aggregation = "Last", int MaxPoints = 10000, HomeBlaze.History.Abstractions.HistoryPoint? CarrySeed = null) { }
         public string Aggregation { get; init; }
-        public System.TimeSpan? Bucket { get; init; }
+        public HomeBlaze.History.Abstractions.HistoryBucket? Bucket { get; init; }
         public HomeBlaze.History.Abstractions.HistoryPoint? CarrySeed { get; init; }
         public System.DateTimeOffset From { get; init; }
         public int MaxPoints { get; init; }
@@ -100,6 +126,7 @@ namespace HomeBlaze.History.Abstractions
         System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> CoverageRanges { get; }
         int Priority { get; }
         System.Collections.Generic.IReadOnlySet<string> SupportedAggregations { get; }
+        System.Threading.Tasks.ValueTask<HomeBlaze.History.Abstractions.HistoryPoint?> GetLastNumericSampleBeforeAsync(string propertyPath, System.DateTimeOffset before, System.Threading.CancellationToken cancellationToken);
         System.Threading.Tasks.ValueTask<HomeBlaze.History.Abstractions.HistoryPoint?> GetSampleAtOrBeforeAsync(string propertyPath, System.DateTimeOffset asOf, System.Threading.CancellationToken cancellationToken);
         System.Threading.Tasks.Task<HomeBlaze.History.Abstractions.HistorySeries> QueryAsync(HomeBlaze.History.Abstractions.HistoryQuery query, System.Threading.CancellationToken cancellationToken);
     }

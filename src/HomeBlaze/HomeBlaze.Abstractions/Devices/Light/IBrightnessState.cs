@@ -15,5 +15,6 @@ public interface IBrightnessState
     /// The current brightness level (0..1).
     /// </summary>
     [State(Unit = StateUnit.Percent, Position = 110)]
+    [Category("Light")]
     decimal? Brightness { get; }
 }

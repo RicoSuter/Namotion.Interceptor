@@ -29,11 +29,15 @@ public partial class Person
     [Derived]
     public string FullName => $"{FirstName} {LastName}";
 
+    [Path("test", "Father")]
     public partial Person? Father { get; set; }
 
+    [Path("test", "Mother")]
     public partial Person? Mother { get; set; }
 
+    [Path("test", "Children")]
     public partial List<Person> Children { get; set; }
 
+    [Path("test", "Relationships")]
     public partial Dictionary<string, Person>? Relationships { get; set; }
 }

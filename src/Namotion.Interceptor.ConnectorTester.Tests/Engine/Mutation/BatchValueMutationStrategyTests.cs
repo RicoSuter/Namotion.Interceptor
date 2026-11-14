@@ -1,9 +1,12 @@
 using Xunit;
+using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Engine;
 using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.ConnectorTester.Tests.Engine.Mutation;
@@ -30,7 +33,8 @@ public class BatchValueMutationStrategyTests
             graph, coordinator, context, counters,
             new ParticipantConfiguration { Name = "test", ValueMutationRate = 1000, UseTransactions = false },
             numberOfBatches: 10,
-            participantIndex: 0);
+            participantIndex: 0,
+            NullLogger.Instance);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 
@@ -50,12 +54,18 @@ public class BatchValueMutationStrategyTests
         // Arrange: install a custom GetTimestampFunction that records every call. If propagation is
         // broken, parallel workers fall through to GetTimestampFunction and record DateTimeOffset.UtcNow
         // (multiple distinct values). If propagation works, GetTimestampFunction is never called inside
-        // the parallel block.
+        // the parallel block. The function is process-global, so only calls from this test's flow, which
+        // the parallel workers inherit, are counted: writes of tests running in parallel call it too.
         var fallbackCallCount = 0;
+        var isThisTestsFlow = new AsyncLocal<bool> { Value = true };
         var originalGetter = SubjectChangeContext.GetTimestampFunction;
         SubjectChangeContext.GetTimestampFunction = () =>
         {
-            Interlocked.Increment(ref fallbackCallCount);
+            if (isThisTestsFlow.Value)
+            {
+                Interlocked.Increment(ref fallbackCallCount);
+            }
+
             return DateTimeOffset.UtcNow;
         };
 
@@ -76,12 +86,16 @@ public class BatchValueMutationStrategyTests
                 graph, coordinator, context, counters,
                 new ParticipantConfiguration { Name = "test", ValueMutationRate = 100, UseTransactions = false },
                 numberOfBatches: 1,    // one batch per second; batch size = 100.
-                participantIndex: 0);
+                participantIndex: 0,
+                NullLogger.Instance);
 
-            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(1500));
+            using var cts = new CancellationTokenSource();
 
             // Act
-            try { await strategy.RunAsync(cts.Token); }
+            var run = strategy.RunAsync(cts.Token);
+            await AsyncTestHelpers.WaitUntilAsync(() => counters.ValueMutationCount >= 100);
+            await cts.CancelAsync();
+            try { await run; }
             catch (OperationCanceledException) { }
 
             // Assert: GetTimestampFunction must NOT be called from inside the parallel mutations,
@@ -94,5 +108,39 @@ public class BatchValueMutationStrategyTests
         {
             SubjectChangeContext.GetTimestampFunction = originalGetter;
         }
+    }
+
+    [Fact]
+    public async Task WhenSourceWritesFail_ThenStrategyKeepsRunningAndCountsSourceWriteFailures()
+    {
+        // Arrange: every property is owned by a source that fails every write, as a disconnected
+        // chaos target would, so each batch's CommitAsync throws SubjectTransactionException.
+        var context = CreateContext().WithSourceTransactions();
+        var root = new TestNode(context);
+        FailingSource.AttachTo(root);
+
+        var graph = new KnownNodeGraph();
+        graph.Rebuild(root);
+        var counters = new MutationCounters();
+        var coordinator = new TestCycleCoordinator();
+        var strategy = new BatchValueMutationStrategy(
+            graph, coordinator, context, counters,
+            new ParticipantConfiguration { Name = "test", ValueMutationRate = 100, UseTransactions = true },
+            numberOfBatches: 100,
+            participantIndex: 0,
+            NullLogger.Instance);
+        using var cts = new CancellationTokenSource();
+
+        // Act
+        var run = strategy.RunAsync(cts.Token);
+        await AsyncTestHelpers.WaitUntilAsync(() => counters.SourceWriteFailedCommitCount >= 1, timeout: TimeSpan.FromSeconds(10));
+        await cts.CancelAsync();
+        try { await run; }
+        catch (OperationCanceledException) { }
+
+        // Assert
+        Assert.Equal(0, counters.UnexpectedFailedCommitCount);
+        Assert.True(counters.CommitCount >= counters.SourceWriteFailedCommitCount);
+        Assert.True(counters.ValueMutationCount >= 1);
     }
 }

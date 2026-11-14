@@ -1,5 +1,7 @@
+using System.Net;
+using System.Text;
 using HomeBlaze.Abstractions;
-using Namotion.Interceptor;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace Namotion.Devices.MyStrom.Tests;
@@ -191,6 +193,45 @@ public class MyStromSwitchTests
     }
 
     [Fact]
+    public async Task WhenTheUptimeFalls_ThenTheInformationIsReadAgain()
+    {
+        // Arrange
+        var device = new FakeDevice(uptimes: [100, 101, 5, 6], versions: ["4.0.7", "4.0.14"]);
+        var subject = new MyStromSwitch
+        {
+            HostAddress = "switch.test",
+            PollingInterval = TimeSpan.FromMilliseconds(1)
+        };
+
+        // Act
+        await using var running = await MyStromTestHost.StartAsync(subject, device);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => subject.FirmwareVersion == "4.0.14");
+        Assert.Equal(2, device.InformationRequestCount);
+    }
+
+    [Fact]
+    public async Task WhenTheUptimeRises_ThenTheInformationIsNotReadAgain()
+    {
+        // Arrange
+        var device = new FakeDevice(uptimes: [100, 101, 102, 103], versions: ["4.0.7", "4.0.14"]);
+        var subject = new MyStromSwitch
+        {
+            HostAddress = "switch.test",
+            PollingInterval = TimeSpan.FromMilliseconds(1)
+        };
+
+        // Act
+        await using var running = await MyStromTestHost.StartAsync(subject, device);
+        await AsyncTestHelpers.WaitUntilAsync(() => device.ReportRequestCount >= 6);
+
+        // Assert
+        Assert.Equal(1, device.InformationRequestCount);
+        Assert.Equal("4.0.7", subject.FirmwareVersion);
+    }
+
+    [Fact]
     public async Task WhenNotStarted_ThenTurnOnThrows()
     {
         // Arrange
@@ -200,14 +241,36 @@ public class MyStromSwitchTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => subject.TurnOnAsync(CancellationToken.None));
     }
 
-    [Fact]
-    public void WhenCreated_ThenDeviceInformationIsNotASubjectProperty()
+    /// <summary>
+    /// Answers /info with the next of its versions and /report with the next of its uptimes, repeating the last one.
+    /// </summary>
+    private sealed class FakeDevice(long[] uptimes, string[] versions) : HttpMessageHandler
     {
-        // Act
-        IInterceptorSubject subject = CreateSwitch();
+        private int _informationRequestCount;
+        private int _reportRequestCount;
 
-        // Assert
-        Assert.DoesNotContain("Information", subject.Properties.Keys);
-        Assert.Contains(nameof(MyStromSwitch.MacAddress), subject.Properties.Keys);
+        public int InformationRequestCount => Volatile.Read(ref _informationRequestCount);
+
+        public int ReportRequestCount => Volatile.Read(ref _reportRequestCount);
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var json = request.RequestUri!.AbsolutePath switch
+            {
+                "/info" => $$"""{"version":"{{Next(versions, ref _informationRequestCount)}}"}""",
+                "/report" => $$"""{"power":0,"relay":true,"energy_since_boot":0,"time_since_boot":{{Next(uptimes, ref _reportRequestCount)}}}""",
+                _ => """{"measured":20,"compensation":0,"compensated":20}"""
+            };
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            });
+        }
+
+        private static T Next<T>(T[] values, ref int count)
+        {
+            var index = Interlocked.Increment(ref count) - 1;
+            return values[Math.Min(index, values.Length - 1)];
+        }
     }
 }

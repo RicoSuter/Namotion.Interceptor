@@ -15,8 +15,10 @@ using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Devices.MyStrom;
 
-[Category("Devices")]
+[Category("Switches")]
 [Description("myStrom WiFi Switch with power metering, temperature sensing, and relay control")]
+[DisplayName("myStrom switch")]
+[SubjectIcon("Power")]
 [InterceptorSubject]
 public partial class MyStromSwitch :
     IConfigurable,
@@ -29,15 +31,14 @@ public partial class MyStromSwitch :
     IPowerMeter,
     ITemperatureSensor,
     INetworkAdapter,
+    INetworkHost,
+    IUptimeState,
     ISubjectHostedServiceFactory
 {
     // Waited on by the poller. A subject nobody activated has no waiter.
     internal readonly SemaphoreSlim ConfigurationChanged = new(0, 1);
 
     private MyStromPoller? _activeService;
-
-    // A field, because the generator registers every property, internal ones too, as subject data.
-    internal MyStromSwitchInformation? Information;
 
     [Configuration]
     public partial string Name { get; set; }
@@ -60,6 +61,9 @@ public partial class MyStromSwitch :
     [State(IsDiscrete = true)]
     public partial ServiceStatus Status { get; internal set; }
 
+    // Tracked, so that the derived properties that read it change when it is fetched or reset.
+    internal partial MyStromSwitchInformation? Information { get; set; }
+
     [State]
     public partial string? StatusMessage { get; internal set; }
 
@@ -81,7 +85,7 @@ public partial class MyStromSwitch :
     [State(Unit = StateUnit.DegreeCelsius)]
     public partial decimal? Temperature { get; internal set; }
 
-    [State(Position = 400)]
+    [Category("Device")]
     public partial TimeSpan? Uptime { get; internal set; }
 
     [Derived]
@@ -116,10 +120,12 @@ public partial class MyStromSwitch :
 
     [Derived]
     [State(Position = 401)]
+    [Category("Device")]
     public string? DeviceType => Information?.Type;
 
     [Derived]
     [State(Position = 402)]
+    [Category("Device")]
     public string? FirmwareVersion => Information?.Version;
 
     public bool? IsWireless => true;

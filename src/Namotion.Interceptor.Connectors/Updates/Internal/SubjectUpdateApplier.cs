@@ -1,5 +1,6 @@
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Performance;
@@ -12,6 +13,10 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 internal static class SubjectUpdateApplier
 {
     private static readonly ObjectPool<SubjectUpdateApplyContext> ContextPool = new(() => new SubjectUpdateApplyContext());
+
+    // Serializers may write enum values as names (the WebSocket JSON serializer writes camel case names).
+    // The converter reads names in any case and still accepts numbers.
+    private static readonly JsonSerializerOptions ValueOptions = new() { Converters = { new JsonStringEnumConverter() } };
 
     public static void ApplyUpdate(
         IInterceptorSubject subject,
@@ -198,7 +203,7 @@ internal static class SubjectUpdateApplier
         return value switch
         {
             null => null,
-            JsonElement jsonElement => jsonElement.Deserialize(targetType),
+            JsonElement jsonElement => jsonElement.Deserialize(targetType, ValueOptions),
             _ => value
         };
     }

@@ -7,7 +7,7 @@ namespace HomeBlaze.Abstractions.Media;
 /// Controller interface for devices with adjustable volume.
 /// </summary>
 [SubjectAbstraction]
-[Description("Controls volume level.")]
+[Description("Controls volume level and mute.")]
 public interface IVolumeController
 {
     /// <summary>
@@ -16,7 +16,22 @@ public interface IVolumeController
     /// <param name="volume">Volume level (0..1).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     [Operation]
+    [Category("Volume")]
     Task SetVolumeAsync(
         [OperationParameter(Unit = StateUnit.Percent)] decimal volume,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Mutes the audio.
+    /// </summary>
+    [Operation]
+    [Category("Volume")]
+    Task MuteAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Unmutes the audio.
+    /// </summary>
+    [Operation]
+    [Category("Volume")]
+    Task UnmuteAsync(CancellationToken cancellationToken);
 }

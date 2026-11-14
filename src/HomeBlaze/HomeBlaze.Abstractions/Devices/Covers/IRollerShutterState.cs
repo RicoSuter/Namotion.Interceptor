@@ -1,6 +1,7 @@
 using System.ComponentModel;
 
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Abstractions.Devices.Covers;
 
@@ -32,12 +33,14 @@ public interface IRollerShutterState : IPositionState
     /// <summary>
     /// Whether the shutter is fully open (position = 0).
     /// </summary>
+    [Derived]
     [State(Position = 124)]
     bool? IsFullyOpen => Position.HasValue ? Position.Value == 0m : null;
 
     /// <summary>
     /// Whether the shutter is fully closed (position = 1).
     /// </summary>
+    [Derived]
     [State(Position = 125)]
     bool? IsFullyClosed => Position.HasValue ? Position.Value == 1m : null;
 }

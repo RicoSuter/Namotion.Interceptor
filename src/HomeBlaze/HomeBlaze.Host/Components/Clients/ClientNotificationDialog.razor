@@ -1,0 +1,50 @@
+@using HomeBlaze.Abstractions.Messaging
+
+<MudDialog data-testid="client-notification-dialog">
+    <DialogContent>
+        <MudText Style="white-space: pre-wrap" data-testid="client-notification-message">@Notification.Message</MudText>
+        @if (LinkAddress is not null)
+        {
+            <MudLink Href="@LinkAddress" Target="_blank" rel="noopener noreferrer" Class="d-block mt-3">
+                @(string.IsNullOrWhiteSpace(Notification.UrlTitle) ? LinkAddress : Notification.UrlTitle)
+            </MudLink>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton Color="Color.Primary" OnClick="Close" data-testid="client-notification-close">OK</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+
+    /// <summary>The notification to show.</summary>
+    [Parameter, EditorRequired] public Notification Notification { get; set; } = null!;
+
+    // Only http and https addresses are links, as the Notification contract requires.
+    private string? LinkAddress =>
+        Uri.TryCreate(Notification.Url, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+            ? uri.AbsoluteUri
+            : null;
+
+    private void Close() => MudDialog?.Close();
+
+    /// <summary>Shows a notification; an emergency stays until its button is clicked.</summary>
+    public static Task<IDialogReference> ShowAsync(IDialogService dialogService, Notification notification)
+    {
+        var isEmergency = notification.Priority == NotificationPriority.Emergency;
+        var parameters = new DialogParameters<ClientNotificationDialog> { { x => x.Notification, notification } };
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true,
+            CloseButton = !isEmergency,
+            BackdropClick = !isEmergency,
+            CloseOnEscapeKey = !isEmergency,
+            CloseOnNavigation = !isEmergency
+        };
+
+        var title = string.IsNullOrWhiteSpace(notification.Title) ? "Notification" : notification.Title;
+        return dialogService.ShowAsync<ClientNotificationDialog>(title, parameters, options);
+    }
+}

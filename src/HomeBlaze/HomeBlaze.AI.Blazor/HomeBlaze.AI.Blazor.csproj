@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+    <PropertyGroup>
+        <!-- S8970: Sonar reads Razor-generated code as nullable-disabled, but the compiler reports CS8618/CS8625 without the null-forgiving operator; .editorconfig sections do not reach source-generated Razor files. -->
+        <NoWarn>$(NoWarn);S8970</NoWarn>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="HomeBlaze.AI.Tests" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\HomeBlaze.AI\HomeBlaze.AI.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Components.Abstractions\HomeBlaze.Components.Abstractions.csproj" />
+        <PackageReference Include="Markdig" />
+        <PackageReference Include="MudBlazor" />
+        <PackageReference Include="SonarAnalyzer.CSharp" PrivateAssets="all" />
+    </ItemGroup>
+
+</Project>

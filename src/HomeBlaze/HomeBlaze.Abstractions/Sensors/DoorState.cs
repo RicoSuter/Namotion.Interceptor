@@ -1,7 +1,7 @@
 namespace HomeBlaze.Abstractions.Sensors;
 
 /// <summary>
-/// Represents the state of a door.
+/// Represents the state of a door. An unknown state is null.
 /// </summary>
 public enum DoorState
 {
@@ -9,6 +9,5 @@ public enum DoorState
     Opening,
     PartiallyOpen,
     Closing,
-    Closed,
-    Unknown
+    Closed
 }

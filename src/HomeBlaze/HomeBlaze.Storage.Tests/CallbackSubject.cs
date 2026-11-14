@@ -1,0 +1,49 @@
+using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor.Attributes;
+
+namespace HomeBlaze.Storage.Tests;
+
+/// <summary>
+/// A configurable subject whose next <see cref="ApplyConfigurationAsync"/> a test can replace, to call back
+/// into the storage from code that runs on the storage worker.
+/// </summary>
+[InterceptorSubject]
+public partial class CallbackSubject : IConfigurable
+{
+    private static Func<CancellationToken, Task>? _nextApply;
+
+    [Configuration]
+    public partial string Name { get; set; }
+
+    public CallbackSubject()
+    {
+        Name = string.Empty;
+    }
+
+    /// <summary>
+    /// Makes the next configuration that is applied to any instance run the callback.
+    /// </summary>
+    public static void RunOnNextApply(Func<CancellationToken, Task> callback)
+        => Volatile.Write(ref _nextApply, callback);
+
+    public static void Reset()
+        => Volatile.Write(ref _nextApply, null);
+
+    public static string Serialize(string name)
+        => $$"""
+            {
+              "$type": "{{typeof(CallbackSubject).FullName}}",
+              "name": "{{name}}"
+            }
+            """;
+
+    /// <summary>The block of a markdown page that embeds an instance under the name of the block.</summary>
+    public static string SerializeBlock(string blockName, string name)
+        => $":: {typeof(CallbackSubject).FullName}#{blockName}\n```json\n{{ \"Name\": \"{name}\" }}\n```\n::\n";
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
+        => Interlocked.Exchange(ref _nextApply, null) is { } callback
+            ? callback(cancellationToken)
+            : Task.CompletedTask;
+}

@@ -1,0 +1,50 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(FritzBoxClient))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@(Client?.IsWireless == true ? Icons.Material.Filled.Wifi : Icons.Material.Filled.SettingsEthernet)" Class="mr-2" />
+            <MudText Typo="Typo.h6">@(Client?.Title ?? "Client")</MudText>
+            <MudSpacer />
+            <MudChip T="string"
+                     Size="Size.Small"
+                     Color="@(Client?.IsPresent == true ? Color.Success : Color.Default)"
+                     Variant="Variant.Filled">
+                @(Client?.IsPresent == true ? "Present" : "Absent")
+            </MudChip>
+        </MudStack>
+
+        <MudDivider />
+
+        @if (Client?.IpAddress != null)
+        {
+            <MudText Typo="Typo.body2">@Client.IpAddress</MudText>
+        }
+        @if (Client?.AccessPointName != null)
+        {
+            <MudText Typo="Typo.body2">
+                @Client.AccessPointName
+                @GetBandOrPort(Client)
+                @(Client.LinkSpeed != null ? $" {Client.LinkSpeed:F0} Mbit/s" : string.Empty)
+            </MudText>
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private FritzBoxClient? Client => Subject as FritzBoxClient;
+
+    private static string GetBandOrPort(FritzBoxClient client)
+    {
+        if (client.Band != null)
+        {
+            return $" {client.Band}";
+        }
+
+        return client.Port != null ? $" LAN {client.Port}" : string.Empty;
+    }
+}

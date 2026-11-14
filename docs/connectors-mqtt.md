@@ -192,6 +192,8 @@ The simple DI overloads (`AddMqttSubjectClientSource<T>(brokerHost, connectorNam
 
 `MqttAttributeMapper` contributes only QoS and Retain; it relies on `MqttPathProviderMapper` to resolve the topic in both directions, so it must always be paired with one (the default composite does this). On its own it resolves no topics. This differs from the OPC UA attribute mapper, which is self-sufficient because OPC UA browses hierarchically and matches each node against a single level, whereas MQTT resolves a flat topic that needs full-path composition by the path provider.
 
+A custom mapper or path provider whose answers change while the connector runs raises its `Version` after each change, see [Property Mappers](connectors.md#property-mappers); otherwise the topic caches keep using its earlier answers.
+
 ## Topic Mapping
 
 ### [Path] attribute
@@ -206,13 +208,12 @@ public partial class Sensor
     // Topic: home/living-room/Temperature
     [Path("mqtt", "Temperature")]
     public partial decimal Temperature { get; set; }
-
-    // Nested paths supported:
-    // Topic: home/living-room/metrics/Humidity
-    [Path("mqtt", "metrics/Humidity")]
-    public partial decimal Humidity { get; set; }
 }
 ```
+
+A `[Path]` segment should not contain `/`. A property with `[Path("mqtt", "metrics/Humidity")]` is published to `home/living-room/metrics/Humidity`, but the MQTT server cannot resolve that topic back to the property, so values clients publish on it are not applied to the property (see [Path Syntax](registry.md#path-syntax)). For a nested topic, put the property on a child subject with its own segment.
+
+Every property holding a subject on the way to a mapped property needs a segment of its own: `[Path("mqtt", ...)]`, `[MqttTopic]`, or a fluent mapping on the type that declares it, such as `ForType<Room>().Map(r => r.Sensor, ...)`. The segments of every level must come from the same mapper as the leaf's mapping, so an attribute holding property above a fluent leaf, or the reverse, gives no topic. A property below a holding property without a segment has no topic, so neither the client nor the server publishes or subscribes it, because paths go only through [included properties](registry.md#included-properties). With `Room.Sensor` annotated as `[Path("mqtt", "sensor")]`, `Room.Sensor.Temperature` has the topic `home/living-room/sensor/Temperature`; without it, `Temperature` is neither published nor subscribed. An `[InlinePaths]` dictionary is included without an attribute. A property attribute (a property declared with `[PropertyAttribute]`) belongs to its property: with `[Path("mqtt", ...)]` or `[MqttTopic]` it has a topic only when the property it belongs to has a segment too, so an annotated attribute of an unannotated property is neither published nor subscribed (see [Included properties](registry.md#included-properties)).
 
 Dictionary keys become topic levels or bracketed indices as described in [Path Syntax](registry.md#path-syntax). MQTT reserves `+` and `#` as wildcards, so a key containing either produces a topic that cannot be published to.
 
@@ -235,7 +236,7 @@ public partial class Sensor
 }
 ```
 
-Multi-level topics are built by annotating each level of the object graph (parent reference properties carry their own segment), the same way `[Path]` composes nested paths. Because the path is split on the topic separator for reverse lookup (inbound messages), a single `[MqttTopic]` value should be one segment without embedded separators.
+Multi-level topics are built by annotating each level of the object graph (parent reference properties carry their own segment), the same way `[Path]` composes nested paths; a property below an unannotated level is neither published nor subscribed. Because the path is split on the topic separator for reverse lookup (inbound messages), a single `[MqttTopic]` value should be one segment without embedded separators.
 
 Since `[MqttTopic]` already provides the `mqtt` `[Path]` segment for a property, use one attribute per property rather than combining `[Path]` and `[MqttTopic]` on the same property.
 
@@ -258,9 +259,11 @@ var fluentMapper = new MqttFluentMapperBuilder<Plant>()
     .Build('/');
 ```
 
-Because `Motor` is configured once at the type level, all motors in the graph (direct properties, collection elements, nested references) resolve the same topic segments without repeating configuration.
+Because `Motor` is configured once at the type level, all motors in the graph (direct properties, collection elements, nested references) resolve the same topic segments without repeating configuration. As with attributes, every property holding a subject on the way needs a segment, such as `Pump.Motor` and `Plant.Motors` above; a property below a holding property whose declaring type maps no segment for it is neither published nor subscribed.
 
 `ForType<T>()` registrations apply to all types derived from `T` and all types implementing `T` when `T` is an interface. The most specific registration wins.
+
+Register every mapping before the mapper is used: the registrations are not safe to change while a connector reads them.
 
 #### Composing with the connector
 
@@ -309,7 +312,7 @@ public class CustomMqttValueConverter : IMqttValueConverter
 
 ### Write Retry Queue
 
-Write retry queue behavior (ring buffer, reconcile by commit order on reconnection) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
+Write retry queue behavior (ring buffer, reconcile by commit order when the connection loop restarts; the client's internal reconnect does not reconcile, see [Connectors: Known Limitations](connectors.md#known-limitations)) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
 
 ```csharp
 new MqttClientConfiguration
@@ -348,7 +351,7 @@ Both built-in MQTT connectors implement liveness monitoring and report through t
 
 **`IsOperational` for the client means the connection to the broker is up.** It is set as soon as the connect returns, before the property subscriptions are established, so on the first connect it leads them by the duration of the subscribe. After a reconnect it is raised only once resubscription and the initial-state reload have both succeeded, because a client that reconnected but could not resubscribe is not serving anything. It drops on every disconnect, including one the connection monitor is about to recover from, and on teardown.
 
-**`IsOperational` for the server means the broker is listening.**
+**`IsOperational` for the server means the broker is listening.** It is false while the server restarts the broker after a failure, which first waits up to 5 seconds for the old connections to close, because MQTTnet can keep the session of a connection still closing referenced for good when the broker starts again. A wait that runs out logs a warning with the number of connections still open.
 
 Neither connector measures throughput, so `Throughput.IncomingPerSecond` and `Throughput.OutgoingPerSecond` are both `null` rather than `0.0`.
 
@@ -358,7 +361,7 @@ The server's diagnostics are an `MqttServerDiagnostics`, which adds one member:
 
 | Member | Meaning |
 |---|---|
-| `ConnectedClientCount` | Clients currently connected to the broker. |
+| `ConnectedClientCount` | Client connections currently open on the broker. |
 
 A server has no inbound buffer or retry queue, so only `OutboundChanges` applies there. It is registered while the change queue processor is running and its capacity is `null`, because that queue is unbounded.
 
@@ -379,22 +382,15 @@ The MQTT integration hooks into the interceptor lifecycle system (see [Subject L
 
 ### Automatic Cleanup on Subject Detach
 
-**Client behavior:**
-- Cache entries in `_topicToProperty` and `_propertyToTopic` are removed for detached subjects
-- Cleanup happens both proactively (on detach event) and lazily (when stale entries are accessed)
+The client and the server cache the topic of each property and the property of each topic. Every entry carries the registry's [`StructureVersion`](registry.md#structure-version) and the mapper's `Version`, both read before the entry was computed, and is used only while both are current. A lookup after a structural change (attach, detach, another parent, a new position or key, a property added at run time) or after a mapper change computes the entry again, so a change is published under the topic its property has at that moment and an inbound topic that no longer maps to a property is not applied. A derived property that returns another subject, or a collection or dictionary mutated in place, also when the same instance is assigned again afterwards, changes no structure version, so a cached topic does not follow it (see [Structure version](registry.md#structure-version)). The server's change filter and its publish share one cache, so they always agree.
 
-**Server behavior:**
-- Cache entries in `_propertyToTopic` and `_pathToProperty` are removed for detached subjects
-- Same dual cleanup strategy as client
-
-**Race condition prevention:**
-- Cache lookups validate subject attachment AFTER cache access
-- Stale entries are detected and removed even if the detach event already fired
-- This ensures we never return stale data even with concurrent attach/detach
+- The caches are cleared on every detach, since every detach makes all entries stale. An entry for a subject that is detached or detaching (no references left) is dropped right after it is added, and the client's subscribe step then also releases the claim it took on the property. As a result, the caches hold no detached subject.
+- A value change or an inbound message concurrent with a structural change may be handled as if it came just before it.
 
 ## Known Limitations
 
-- **Client structural changes**: The client subscribes to the topics of the subject graph and claims their properties when it connects, and does not follow [structural changes](connectors.md#structural-changes) after that. A subject attached later gets no subscription, so its values are not received and its local writes are not published until the next reconnect binds the current graph. Detached subjects are released immediately, see [Automatic Cleanup on Subject Detach](#automatic-cleanup-on-subject-detach).
+- **Client structural changes**: The client subscribes to the topics of the subject graph and claims their properties when it connects, and does not follow [structural changes](connectors.md#structural-changes) after that. A subject attached later gets no subscription, so its values are not received and its local writes are not published until the next reconnect binds the current graph. This includes a subject that replaces another at the same topic: the topic is still subscribed, but the client applies inbound values only to properties it claimed. Detached subjects are released immediately, see [Automatic Cleanup on Subject Detach](#automatic-cleanup-on-subject-detach).
+- **Server structural changes**: The server publishes a property's value when it changes, not when its topic changes. After a subject moves to another holding property, or a collection is reordered or a dictionary re-keyed, the new topic has no value until the property changes next, and with retained messages the old topic keeps the last value published there (for a reordered collection, the previous occupant's value). A newly attached subject's values are published when they change.
 
 ## Performance
 
@@ -403,7 +399,7 @@ The library includes optimizations:
 - Batched message publishing with configurable buffer time
 - Object pooling for change buffers and user property lists
 - Fast path for retained message handling
-- Efficient topic-to-property caching with lazy cleanup
+- Efficient topic-to-property caching, validated against the registry's structure version and the mapper's version
 
 ## Benchmark Results
 

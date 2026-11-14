@@ -164,6 +164,50 @@ public class LifecycleInterceptorTests
     }
 
     [Fact]
+    public void WhenFallbackContextIsReplacedByOneThatReachesTheSameInterceptor_ThenSubjectAndItsChildrenStayAttached()
+    {
+        // Arrange
+        var handler = new TestLifecycleHandler();
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        context.AddService(handler);
+        var interceptor = context.GetServices<LifecycleInterceptor>().Single();
+        var first = InterceptorSubjectContext.Create();
+        var second = InterceptorSubjectContext.Create();
+        first.AddFallbackContext(context);
+        second.AddFallbackContext(context);
+
+        var child = new Person { FirstName = "Child" };
+        var person = new Person(first) { Mother = child };
+        var eventCount = handler.GetEvents().Length;
+
+        // Act
+        var isReplaced = ((InterceptorSubjectContext)((IInterceptorSubject)person).Context).ReplaceFallbackContext(first, second);
+
+        // Assert
+        Assert.True(isReplaced);
+        Assert.Equal(eventCount, handler.GetEvents().Length);
+        Assert.True(interceptor.TryRunWhileAttached(person, () => { }));
+        Assert.True(interceptor.TryRunWhileAttached(child, () => { }));
+    }
+
+    [Fact]
+    public void WhenFallbackContextIsReplacedByOneThatReachesAnotherInterceptor_ThenItIsKept()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        var otherContext = InterceptorSubjectContext.Create().WithLifecycle();
+        var interceptor = context.GetServices<LifecycleInterceptor>().Single();
+        var person = new Person(context) { FirstName = "Person" };
+
+        // Act
+        var isReplaced = ((InterceptorSubjectContext)((IInterceptorSubject)person).Context).ReplaceFallbackContext(context, otherContext);
+
+        // Assert
+        Assert.False(isReplaced);
+        Assert.True(interceptor.TryRunWhileAttached(person, () => { }));
+    }
+
+    [Fact]
     public Task WhenRemovingInterceptors_ThenAllArrayChildrenAreDetached()
     {
         // Arrange
@@ -408,6 +452,39 @@ public class LifecycleInterceptorTests
         var events = handler.GetEvents();
         Assert.Contains(events, e => e.Contains("Car1") && e.Contains("detached"));
         Assert.Contains(events, e => e.Contains("Car3") && e.Contains("attached"));
+    }
+
+    [Fact]
+    public void WhenDictionaryEnumeratorIsDisposable_ThenScanningTheDictionaryDisposesIt()
+    {
+        // Arrange
+        var handler = new TestLifecycleHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => handler)
+            .WithContextInheritance();
+
+        var holder = new BroadlyDeclaredHolder(context);
+        var car1 = new Car { Name = "Car1" };
+        var car2 = new Car { Name = "Car2" };
+        var first = new EnumeratorCountingDictionary(new Dictionary<string, Car> { ["first"] = car1 });
+        var second = new EnumeratorCountingDictionary(new Dictionary<string, Car> { ["second"] = car2 });
+
+        // Act: the second write scans both the old and the new value.
+        holder.BroadCars = first;
+        holder.BroadCars = second;
+
+        // Assert
+        var events = handler.GetEvents();
+        Assert.Contains(events, e => e.Contains("BroadCars[first] -> Car1") && e.Contains("attached"));
+        Assert.Contains(events, e => e.Contains("BroadCars[first] -> Car1") && e.Contains("detached"));
+        Assert.Contains(events, e => e.Contains("BroadCars[second] -> Car2") && e.Contains("attached"));
+
+        Assert.True(first.CreatedEnumerators > 0);
+        Assert.True(second.CreatedEnumerators > 0);
+        Assert.Equal(first.CreatedEnumerators, first.DisposedEnumerators);
+        Assert.Equal(second.CreatedEnumerators, second.DisposedEnumerators);
     }
 
     [Fact]

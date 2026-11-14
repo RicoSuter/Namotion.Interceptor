@@ -73,13 +73,13 @@ public class MqttClientDiagnosticsTests
         Assert.True(source.Ownership.ClaimSource(property));
 
         await using var executionGate = HostedExecutionGate.Install(source);
-        await executionGate.Started.WaitAsync(TimeSpan.FromSeconds(5));
+        await executionGate.Started.WaitAsync(TestTimeouts.Default);
 
         // Act
         var disposal = source.DisposeAsync().AsTask();
         try
         {
-            await executionGate.CancellationObserved.WaitAsync(TimeSpan.FromSeconds(5));
+            await executionGate.CancellationObserved.WaitAsync(TestTimeouts.Default);
 
             // Assert
             Assert.False(disposal.IsCompleted);

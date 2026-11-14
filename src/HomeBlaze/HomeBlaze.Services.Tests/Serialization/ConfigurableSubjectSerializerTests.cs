@@ -12,6 +12,7 @@ public class ConfigurableSubjectSerializerTests
 {
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly TypeProvider _typeProvider;
+    private readonly TestConstructorDependency _constructorDependency = new();
 
     public ConfigurableSubjectSerializerTests()
     {
@@ -30,15 +31,27 @@ public class ConfigurableSubjectSerializerTests
             typeof(Level2Subject),
             typeof(Level3Subject),
             typeof(SubjectWithMixedProperties),
+            typeof(SubjectWithConstructorDependency),
+            typeof(SubjectWithAnyChild),
             typeof(ActivatableTestSubject),
             typeof(ActivatableTestParent)
         ]);
 
         var services = new ServiceCollection();
+        services.AddSingleton(_constructorDependency);
         var serviceProvider = services.BuildServiceProvider();
 
         _serializer = new ConfigurableSubjectSerializer(_typeProvider, serviceProvider);
     }
+
+    // The serializer finds the configuration properties of a registered subject by their attributes in the registry.
+    private static IInterceptorSubjectContext CreateContextWithConfigurationAttributes() =>
+        InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithService<IPropertyLifecycleHandler>(
+                () => new PropertyAttributeInitializer(),
+                handler => handler is PropertyAttributeInitializer);
 
     #region Serialize Tests
 
@@ -241,6 +254,90 @@ public class ConfigurableSubjectSerializerTests
         Assert.Contains("42", json);
         Assert.DoesNotContain("stateOne", json);
         Assert.DoesNotContain("stateTwo", json);
+    }
+
+    [Theory]
+    [InlineData(ConfigurationNaming.JsonProperty)]
+    [InlineData(ConfigurationNaming.CSharpProperty)]
+    public void WhenNoPropertyIsExcluded_ThenTheJsonEqualsThatOfSerialize(ConfigurationNaming naming)
+    {
+        // Arrange
+        var context = CreateContextWithConfigurationAttributes();
+        var subject = new SubjectWithList(context)
+        {
+            Items = [new ChildSubject(context) { ChildConfig = "a", ChildState = "s" }, new ChildSubject(context) { ChildConfig = "b" }]
+        };
+        var mixed = new SubjectWithMixedProperties(context) { ConfigOne = "one \"quoted\"", ConfigTwo = 2, StateOne = "state" };
+
+        // Act
+        var list = _serializer.Serialize(subject, static _ => false, naming);
+        var scalars = _serializer.Serialize(mixed, static _ => false, naming);
+
+        // Assert
+        Assert.Equal(_serializer.Serialize(subject, naming), list);
+        Assert.Equal(_serializer.Serialize(mixed, naming), scalars);
+    }
+
+    [Theory]
+    [InlineData(ConfigurationNaming.CSharpProperty, "\"ConfigTwo\": 2")]
+    [InlineData(ConfigurationNaming.JsonProperty, "\"configTwo\": 2")]
+    public void WhenPropertyIsExcludedByItsDeclaredName_ThenItIsNotWrittenAndTheOthersAre(ConfigurationNaming naming, string expectedOther)
+    {
+        // Arrange
+        var context = CreateContextWithConfigurationAttributes();
+        var subject = new SubjectWithMixedProperties(context) { ConfigOne = "one", ConfigTwo = 2 };
+
+        // Act
+        var json = _serializer.Serialize(subject, static property => property.Name == nameof(SubjectWithMixedProperties.ConfigOne), naming);
+
+        // Assert
+        Assert.DoesNotContain("ConfigOne", json);
+        Assert.DoesNotContain("configOne", json);
+        Assert.Contains(expectedOther, json);
+        Assert.Contains($"\"$type\": \"{typeof(SubjectWithMixedProperties).FullName}\"", json);
+    }
+
+    [Fact]
+    public void WhenExcludedPropertyHoldsASubjectThatCannotBeWritten_ThenItsValueIsNotRead()
+    {
+        // Arrange
+        var context = CreateContextWithConfigurationAttributes();
+        var subject = new SubjectWithAnyChild(context) { Child = new PlainSubject(context) };
+
+        // Act
+        var json = _serializer.Serialize(subject, static property => property.Name == nameof(SubjectWithAnyChild.Child));
+
+        // Assert
+        Assert.DoesNotContain("child", json);
+        Assert.Contains($"\"$type\": \"{typeof(SubjectWithAnyChild).FullName}\"", json);
+        Assert.ThrowsAny<Exception>(() => _serializer.Serialize(subject));
+    }
+
+    [Fact]
+    public void WhenExclusionNamesAPropertyOfANestedSubject_ThenTheNestedSubjectIsWrittenInFull()
+    {
+        // Arrange
+        var context = CreateContextWithConfigurationAttributes();
+        var subject = new ParentWithChildSubject(context) { Name = "parent", Child = new ChildSubject(context) { ChildConfig = "kept" } };
+
+        // Act
+        var json = _serializer.Serialize(
+            subject, static property => property.Name is nameof(ParentWithChildSubject.Name) or nameof(ChildSubject.ChildConfig), ConfigurationNaming.CSharpProperty);
+
+        // Assert
+        Assert.DoesNotContain("\"Name\"", json);
+        Assert.Contains("\"ChildConfig\": \"kept\"", json);
+    }
+
+    [Fact]
+    public void WhenSubjectIsNotRegistered_ThenSerializingWithAnExclusionThrows()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        var subject = new SubjectWithMixedProperties(context) { ConfigOne = "one" };
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => _serializer.Serialize(subject, static _ => false));
     }
 
     #endregion
@@ -474,6 +571,43 @@ public class ConfigurableSubjectSerializerTests
         Assert.Single(device.GetHostedServiceAttachments());
     }
 
+    [Theory]
+    [InlineData("[1, 2, 3]")]
+    [InlineData("42")]
+    [InlineData("\"text\"")]
+    [InlineData("null")]
+    public void WhenJsonIsNotAnObject_ThenDeserializeReturnsNull(string json)
+    {
+        // Act
+        var result = _serializer.Deserialize(json);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void WhenNestedSubjectHasConstructorDependency_ThenDeserializeCreatesItThroughTheServiceProvider()
+    {
+        // Arrange
+        var json = """
+        {
+            "$type": "HomeBlaze.Services.Tests.Serialization.SubjectWithAnyChild",
+            "child": {
+                "$type": "HomeBlaze.Services.Tests.Serialization.SubjectWithConstructorDependency",
+                "config": "configured"
+            }
+        }
+        """;
+
+        // Act
+        var result = _serializer.Deserialize(json) as SubjectWithAnyChild;
+
+        // Assert
+        var child = Assert.IsType<SubjectWithConstructorDependency>(result?.Child);
+        Assert.Same(_constructorDependency, child.GetDependency());
+        Assert.Equal("configured", child.Config);
+    }
+
     #endregion
 
     #region UpdateConfiguration Tests
@@ -548,6 +682,36 @@ public class ConfigurableSubjectSerializerTests
     }
 
     [Fact]
+    public void WhenNestedSubjectHasConstructorDependency_ThenUpdateConfigurationCreatesItThroughTheServiceProvider()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithService<IPropertyLifecycleHandler>(
+                () => new PropertyAttributeInitializer(),
+                handler => handler is PropertyAttributeInitializer);
+        var subject = new SubjectWithAnyChild(context);
+        var json = """
+        {
+            "child": {
+                "$type": "HomeBlaze.Services.Tests.Serialization.SubjectWithConstructorDependency",
+                "config": "configured"
+            }
+        }
+        """;
+
+        // Act
+        _serializer.UpdateConfiguration(subject, json);
+
+        // Assert
+        var child = Assert.IsType<SubjectWithConstructorDependency>(subject.Child);
+        Assert.Same(_constructorDependency, child.GetDependency());
+        Assert.Equal("configured", child.Config);
+    }
+
+    [Fact]
     public void WhenUpdatedConfigurationReplacesASubjectWithAHostedService_ThenTheNewSubjectIsActivated()
     {
         // Arrange
@@ -568,6 +732,23 @@ public class ConfigurableSubjectSerializerTests
         Assert.NotNull(parent.Child);
         Assert.Equal("updated", parent.Child.ConfigProperty);
         Assert.Single(parent.Child.GetHostedServiceAttachments());
+    }
+
+    [Fact]
+    public void WhenAValueIsOnlyCheckedToConvert_ThenTheSubjectItCreatesIsNotActivated()
+    {
+        // Arrange
+        var json = """{ "configProperty": "x" }""";
+
+        // Act
+        var canDeserialize = _serializer.CanDeserialize(json, typeof(CheckedActivatableTestSubject));
+
+        // Assert
+        Assert.True(canDeserialize);
+        var created = CheckedActivatableTestSubject.LastCreated;
+        Assert.NotNull(created);
+        Assert.Equal("x", created.ConfigProperty);
+        Assert.Empty(created.GetHostedServiceAttachments());
     }
 
     #endregion
@@ -676,6 +857,30 @@ public class ConfigurableSubjectSerializerTests
         Assert.Equal("level-2", deserialized.Child.Level2Config);
         Assert.NotNull(deserialized.Child.Child);
         Assert.Equal("level-3", deserialized.Child.Child.Level3Config);
+    }
+
+    #endregion
+
+    #region CanDeserialize Tests
+
+    [Theory]
+    [InlineData("5", typeof(int), true)]
+    [InlineData("1.5", typeof(int), false)]
+    [InlineData("1.5", typeof(double), true)]
+    [InlineData("5", typeof(int?), true)]
+    [InlineData("\"00:00:01.500\"", typeof(TimeSpan), true)]
+    [InlineData("\"abc\"", typeof(TimeSpan), false)]
+    [InlineData("\"Monday\"", typeof(DayOfWeek), true)]
+    [InlineData("\"Someday\"", typeof(DayOfWeek), false)]
+    [InlineData("\"text\"", typeof(string), true)]
+    [InlineData("true", typeof(string), false)]
+    public void WhenValueIsChecked_ThenTheResultMatchesWhatDeserializationAccepts(string json, Type propertyType, bool expected)
+    {
+        // Act
+        var canDeserialize = _serializer.CanDeserialize(json, propertyType);
+
+        // Assert
+        Assert.Equal(expected, canDeserialize);
     }
 
     #endregion

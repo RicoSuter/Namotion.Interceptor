@@ -1,5 +1,13 @@
 using System.ComponentModel;
 using System.Globalization;
+using System.Runtime.CompilerServices;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
+using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Services.Display;
+using Namotion.Interceptor;
 
 namespace HomeBlaze.Services;
 
@@ -23,6 +31,19 @@ public static class ParameterConverter
         typeof(TimeSpan)
     ];
 
+    private static readonly JsonSerializerOptions ObjectSerializerOptions = new()
+    {
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+        PropertyNameCaseInsensitive = true,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        RespectRequiredConstructorParameters = true,
+        NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
+        Converters = { new JsonStringEnumConverter(allowIntegerValues: false) }
+    };
+
+    // Weak keys do not hold the type, but the shared serializer options cache its metadata for the process lifetime.
+    private static readonly ConditionalWeakTable<Type, ObjectParameterMember[]> ObjectMembersByType = new();
+
     /// <summary>
     /// Checks if a type is supported for UI parameter input.
     /// </summary>
@@ -30,6 +51,227 @@ public static class ParameterConverter
     {
         var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
         return SupportedPrimitives.Contains(underlyingType) || underlyingType.IsEnum;
+    }
+
+    /// <summary>
+    /// Checks if a type is an object whose members are all supported for UI input, so that it can be entered member by
+    /// member. A collection or array has no members; it stays enterable as JSON through <see cref="IsJsonObject"/>.
+    /// </summary>
+    public static bool IsSupportedObject(Type type)
+    {
+        if (!IsJsonObject(type))
+        {
+            return false;
+        }
+
+        var members = GetObjectMembers(type);
+        return members.Count > 0 && members.All(member => IsSupported(member.Type));
+    }
+
+    /// <summary>
+    /// Checks if a value of the type can be entered as JSON: a concrete, non-delegate type that is no supported
+    /// simple value, no by-ref, pointer or by-ref-like type and has no open generic parameters.
+    /// </summary>
+    public static bool IsJsonObject(Type type)
+    {
+        var actualType = Nullable.GetUnderlyingType(type) ?? type;
+        return IsSerializable(actualType) && !IsSupported(actualType) && actualType != typeof(object) && !actualType.IsPrimitive &&
+               !actualType.IsAbstract && !actualType.IsInterface && !typeof(Delegate).IsAssignableFrom(actualType) &&
+               !typeof(IInterceptorSubject).IsAssignableFrom(actualType);
+    }
+
+    // System.Text.Json throws an ArgumentException for any other type instead of describing it.
+    private static bool IsSerializable(Type type) =>
+        !type.IsByRef && !type.IsPointer && !type.IsByRefLike && !type.ContainsGenericParameters;
+
+    /// <summary>
+    /// Gets the members System.Text.Json sets when it reads an object type, including init-only members and members set
+    /// only through the constructor, or none for
+    /// a type that is not read as a JSON object or that System.Text.Json cannot describe. The result is cached per type.
+    /// </summary>
+    public static IReadOnlyList<ObjectParameterMember> GetObjectMembers(Type type) =>
+        ObjectMembersByType.GetValue(Nullable.GetUnderlyingType(type) ?? type, BuildObjectMembers);
+
+    private static ObjectParameterMember[] BuildObjectMembers(Type type)
+    {
+        if (!IsSerializable(type))
+        {
+            return [];
+        }
+
+        JsonTypeInfo typeInfo;
+        try
+        {
+            typeInfo = ObjectSerializerOptions.GetTypeInfo(type);
+        }
+        // Such as colliding member names; the JSON input it falls back to reports the error when parsing.
+        catch (InvalidOperationException)
+        {
+            return [];
+        }
+
+        return typeInfo.Kind != JsonTypeInfoKind.Object ? [] : typeInfo.Properties
+            .Where(property => property.Set is not null || property.AssociatedParameter is not null)
+            .Select(property => new ObjectParameterMember(property.Name, property.PropertyType, IsRequired(property)))
+            .ToArray();
+    }
+
+    // Mirrors how RespectRequiredConstructorParameters requires a constructor parameter.
+    private static bool IsRequired(JsonPropertyInfo property) =>
+        property.IsRequired || property.AssociatedParameter is { HasDefaultValue: false, IsMemberInitializer: false };
+
+    /// <summary>
+    /// Tries to create an object from the string inputs of its members, keyed by <see cref="ObjectParameterMember.Name"/>.
+    /// A member without input keeps its default value; a required member without input fails.
+    /// </summary>
+    public static bool TryCreateObject(
+        Type type, IReadOnlyDictionary<string, string?> inputs, out object? value, out string? error)
+    {
+        value = null;
+        var values = new Dictionary<string, object?>();
+        foreach (var member in GetObjectMembers(type))
+        {
+            var input = inputs.GetValueOrDefault(member.Name);
+            if (string.IsNullOrEmpty(input))
+            {
+                if (member.IsRequired)
+                {
+                    error = $"{member.Name} is required";
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (!TryConvert(input, member.Type, out var memberValue))
+            {
+                error = $"Invalid value for {member.Name}";
+                return false;
+            }
+
+            values[member.Name] = memberValue;
+        }
+
+        return TryCreateObject(type, values, out value, out error);
+    }
+
+    /// <summary>
+    /// Tries to create an object from the values of its members, keyed by <see cref="ObjectParameterMember.Name"/>. A
+    /// value is of the type of its member or null. A member without value keeps its default value; a required member
+    /// without value fails.
+    /// </summary>
+    public static bool TryCreateObject(
+        Type type, IReadOnlyDictionary<string, object?> values, out object? value, out string? error)
+    {
+        value = null;
+        var json = new JsonObject();
+        foreach (var member in GetObjectMembers(type))
+        {
+            if (!values.TryGetValue(member.Name, out var memberValue))
+            {
+                if (member.IsRequired)
+                {
+                    error = $"{member.Name} is required";
+                    return false;
+                }
+
+                continue;
+            }
+
+            try
+            {
+                json[member.Name] = JsonSerializer.SerializeToNode(memberValue, member.Type, ObjectSerializerOptions);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                error = $"Invalid value for {member.Name}";
+                return false;
+            }
+        }
+
+        return TryDeserialize(json, static (node, type) => node.Deserialize(type, ObjectSerializerOptions), type, out value, out error);
+    }
+
+    /// <summary>
+    /// Tries to read an object from JSON text. Member names match in any case, an unknown member is rejected and enums
+    /// are read by name only. Empty text, and a JSON <c>null</c> literal, are null, which only a nullable parameter
+    /// accepts.
+    /// </summary>
+    public static bool TryParseJson(string? input, Type type, bool isNullable, out object? value, out string? error)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            value = null;
+            error = isNullable ? null : "This field is required";
+            return isNullable;
+        }
+
+        if (!TryDeserialize(input, static (text, type) => JsonSerializer.Deserialize(text, type, ObjectSerializerOptions), type, out value, out error))
+        {
+            return false;
+        }
+
+        if (value is null && !isNullable)
+        {
+            error = "This field is required";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryDeserialize<TJson>(
+        TJson json, Func<TJson, Type, object?> deserialize, Type type, out object? value, out string? error)
+    {
+        try
+        {
+            value = deserialize(json, type);
+            error = null;
+            return true;
+        }
+        // Setters and constructors run during deserialization and may throw anything; a Try method must not let it escape.
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            value = null;
+            error = exception.Message;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Tries to convert a string input to the value of a parameter with the given unit. A
+    /// <see cref="StateUnit.Percent"/> input is entered from 0 to 100 and returned as the fraction from 0 to 1 the
+    /// parameter expects; integer types cannot hold a fraction and are returned unscaled.
+    /// </summary>
+    public static bool TryConvert(string? input, Type targetType, StateUnit? unit, out object? value)
+    {
+        if (!TryConvert(input, targetType, out value))
+        {
+            return false;
+        }
+
+        if (unit != StateUnit.Percent)
+        {
+            return true;
+        }
+
+        try
+        {
+            // Through decimal, so 33.3 becomes 0.333 and not 0.33299999999999996.
+            value = value switch
+            {
+                decimal percent => percent / 100m,
+                double percent => (double)((decimal)percent / 100m),
+                float percent => (float)((decimal)percent / 100m),
+                _ => value
+            };
+            return true;
+        }
+        catch (OverflowException)
+        {
+            value = null;
+            return false;
+        }
     }
 
     /// <summary>
@@ -119,4 +361,134 @@ public static class ParameterConverter
             return false;
         }
     }
+
+    /// <summary>
+    /// Tries to convert a value that is not text input, such as the result of an expression, to the target type: a value
+    /// of the type as it is, except a non-finite <see cref="double"/> or <see cref="float"/>, which fails; a text or an
+    /// enum to an enum by the name of a defined member, by the number of one as text, or by the names of defined members
+    /// separated by commas only for a flags enum; a finite number to another number type in its range (rounded half away
+    /// from zero for an integral type); a <see cref="DateTimeOffset"/> to a <see cref="DateTime"/> in UTC; a
+    /// <see cref="DateTime"/> to a <see cref="DateTimeOffset"/> by its kind (unspecified is UTC); and any value to a text
+    /// as pages write it raw.
+    /// </summary>
+    public static bool TryConvertValue(object value, Type targetType, out object? converted)
+    {
+        var type = Nullable.GetUnderlyingType(targetType) ?? targetType;
+        if (type.IsInstanceOfType(value) && IsFinite(value))
+        {
+            converted = value;
+            return true;
+        }
+
+        if (type.IsEnum)
+        {
+            return TryConvertEnumValue(value, type, out converted);
+        }
+
+        if (type == typeof(string))
+        {
+            converted = RawValueFormatter.Format(value);
+            return true;
+        }
+
+        if (IsNumber(type) && IsNumber(value.GetType()))
+        {
+            return TryChangeNumberType(value, type, out converted);
+        }
+
+        return TryConvertInstant(value, type, out converted);
+    }
+
+    private static bool TryConvertInstant(object value, Type type, out object? converted)
+    {
+        converted = null;
+        if (value is DateTimeOffset instant && type == typeof(DateTime))
+        {
+            converted = instant.UtcDateTime;
+            return true;
+        }
+
+        if (value is DateTime dateTime && type == typeof(DateTimeOffset))
+        {
+            try
+            {
+                converted = dateTime.Kind == DateTimeKind.Local
+                    ? new DateTimeOffset(dateTime)
+                    : new DateTimeOffset(DateTime.SpecifyKind(dateTime, DateTimeKind.Utc));
+                return true;
+            }
+            // A local time near the limits of DateTime can be beyond them in UTC.
+            catch (ArgumentOutOfRangeException)
+            {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryConvertEnumValue(object value, Type type, out object? converted)
+    {
+        var name = value is string or Enum ? value.ToString() : null;
+        if (name is not null && (!name.Contains(',') || type.IsDefined(typeof(FlagsAttribute), false)) &&
+            Enum.TryParse(type, name, ignoreCase: true, out var parsed) && NamesMembers(parsed))
+        {
+            converted = parsed;
+            return true;
+        }
+
+        converted = null;
+        return false;
+    }
+
+    // A number that names no member, such as 7 for an enum of three members, formats as that number; a combination of
+    // flags formats as the names of its members.
+    private static bool NamesMembers(object value) => value.ToString() is { Length: > 0 } text && !char.IsAsciiDigit(text[0]) && text[0] != '-';
+
+    private static bool IsNumber(Type type) => !type.IsEnum && Type.GetTypeCode(type) is >= TypeCode.SByte and <= TypeCode.Decimal;
+
+    private static bool TryChangeNumberType(object value, Type type, out object? converted)
+    {
+        converted = null;
+        if (!IsFinite(value))
+        {
+            return false;
+        }
+
+        try
+        {
+            var number = IsIntegral(type) ? RoundHalfAwayFromZero(value) : value;
+            converted = Convert.ChangeType(number, type, CultureInfo.InvariantCulture);
+        }
+        catch (OverflowException)
+        {
+            return false;
+        }
+
+        // A double beyond the range of float becomes infinity instead of overflowing.
+        if (!IsFinite(converted))
+        {
+            converted = null;
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsFinite(object value) => value switch
+    {
+        double number => double.IsFinite(number),
+        float number => float.IsFinite(number),
+        _ => true
+    };
+
+    private static bool IsIntegral(Type type) => Type.GetTypeCode(type) is >= TypeCode.SByte and <= TypeCode.UInt64;
+
+    private static object RoundHalfAwayFromZero(object value) => value switch
+    {
+        decimal number => Math.Round(number, MidpointRounding.AwayFromZero),
+        double number => Math.Round(number, MidpointRounding.AwayFromZero),
+        float number => MathF.Round(number, MidpointRounding.AwayFromZero),
+        _ => value
+    };
 }

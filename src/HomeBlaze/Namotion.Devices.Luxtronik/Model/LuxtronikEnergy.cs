@@ -28,34 +28,34 @@ public partial class LuxtronikEnergy
     /// Gets the current heat output (manual: Heizleistung IST).
     /// </summary>
     [LuxtronikInputRegister(10300, ModbusDataType.S16, Scale = 100)]
-    [State(Unit = StateUnit.Watt, Position = 1)]
+    [State(Unit = StateUnit.Watt, IsEstimated = true, Position = 1)]
     public partial decimal? ThermalPower { get; internal set; }
 
     /// <summary>
     /// Gets the electrical power currently consumed.
     /// </summary>
     [LuxtronikInputRegister(10301, ModbusDataType.U16, Scale = 100)]
-    [State(Unit = StateUnit.Watt, Position = 2)]
+    [State(Unit = StateUnit.Watt, IsEstimated = true, Position = 2)]
     public partial decimal? ElectricalPower { get; internal set; }
 
     /// <summary>
     /// Gets the predicted minimum electrical power consumption.
     /// </summary>
     [LuxtronikInputRegister(10302, ModbusDataType.U16, Scale = 100)]
-    [State(Unit = StateUnit.Watt, Position = 3)]
+    [State(Unit = StateUnit.Watt, IsEstimated = true, Position = 3)]
     public partial decimal? MinimumPredictedElectricalPower { get; internal set; }
 
     /// <summary>
     /// Gets the total electrical energy consumed.
     /// </summary>
     [LuxtronikInputRegister(10310, ModbusDataType.S32, Scale = 100)]
-    [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 4)]
+    [State(Unit = StateUnit.WattHour, IsCumulative = true, IsEstimated = true, Position = 4)]
     public partial decimal? TotalElectricalEnergy { get; internal set; }
 
     /// <summary>
     /// Gets the total thermal energy produced.
     /// </summary>
     [LuxtronikInputRegister(10320, ModbusDataType.S32, Scale = 100, MinimumFirmware = "3.92.0")]
-    [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 5)]
+    [State(Unit = StateUnit.WattHour, IsCumulative = true, IsEstimated = true, Position = 5)]
     public partial decimal? TotalThermalEnergy { get; internal set; }
 }

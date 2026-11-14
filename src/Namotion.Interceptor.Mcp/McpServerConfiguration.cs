@@ -1,4 +1,6 @@
 using Namotion.Interceptor.Mcp.Abstractions;
+using Namotion.Interceptor.Mcp.Tools;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mcp;
@@ -9,9 +11,10 @@ namespace Namotion.Interceptor.Mcp;
 public class McpServerConfiguration
 {
     /// <summary>
-    /// Property filtering and path resolution. Reuses existing IPathProvider from Registry.
+    /// Property filtering and path resolution. The tools list, filter on, resolve and build paths only through the
+    /// properties it effectively includes (see <see cref="PathProviderExtensions.IsPropertyEffectivelyIncluded"/>).
     /// </summary>
-    public required IPathProvider PathProvider { get; init; }
+    public required PathProviderBase PathProvider { get; init; }
 
     /// <summary>
     /// Subject-level JSON enrichment for query responses (e.g., $title, $icon, $type).
@@ -24,9 +27,16 @@ public class McpServerConfiguration
     public IList<IMcpTypeProvider> TypeProviders { get; init; } = [];
 
     /// <summary>
-    /// Additional tools beyond the 5 core tools (e.g., list_methods, invoke_method).
+    /// Additional tools beyond the 5 core tools, for example tools that call methods of subjects.
     /// </summary>
     public IList<IMcpToolProvider> ToolProviders { get; init; } = [];
+
+    /// <summary>
+    /// Text appended to the description of a tool, keyed by tool name, separated by a space. Lets an application
+    /// describe its own conventions, for example which subjects hold its documentation, while keeping the generic
+    /// description. Names of tools that are not offered are ignored.
+    /// </summary>
+    public IDictionary<string, string> ToolDescriptionAdditions { get; init; } = new Dictionary<string, string>();
 
     /// <summary>
     /// Maximum subject tree traversal depth (default: 10).
@@ -46,12 +56,31 @@ public class McpServerConfiguration
     public string PathPrefix { get; init; } = "";
 
     /// <summary>
-    /// Subject types to exclude from browse and search results.
+    /// Subject types, and the types derived from them, to exclude from browse and search results and from list_types.
     /// </summary>
     public Type[] ExcludeTypes { get; init; } = [];
 
     /// <summary>
-    /// When true, set_property is blocked and invoke_method only allows Query methods.
+    /// Decides per member and action what the tools let a client read and change, see "Access Policy" in the MCP documentation. A
+    /// member the policy does not allow to read reads as missing, and set_property refuses a member it does not allow
+    /// to write. Null (the default) allows every action. Applies in addition to <see cref="IsReadOnly"/>.
+    /// </summary>
+    public IMcpAccessPolicy? AccessPolicy { get; init; }
+
+    /// <summary>
+    /// When true, set_property is blocked.
     /// </summary>
     public bool IsReadOnly { get; init; } = true;
+
+    private PathProviderBase? _toolPathProvider;
+
+    /// <summary>
+    /// The path provider the tools list, select, filter and resolve through and build the paths they return with:
+    /// <see cref="PathProvider"/> restricted to what <see cref="AccessPolicy"/> allows to read, or
+    /// <see cref="PathProvider"/> itself without a policy.
+    /// </summary>
+    // Racing first calls create equal providers, so whichever one is kept is correct.
+    internal PathProviderBase ToolPathProvider => _toolPathProvider ??= AccessPolicy is { } policy
+        ? new McpAccessPathProvider(PathProvider, policy)
+        : PathProvider;
 }

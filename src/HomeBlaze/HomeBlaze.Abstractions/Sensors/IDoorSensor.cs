@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Abstractions.Sensors;
 
@@ -11,20 +12,17 @@ namespace HomeBlaze.Abstractions.Sensors;
 public interface IDoorSensor
 {
     /// <summary>
-    /// The current door state.
+    /// The current door state, or null when it is unknown.
     /// </summary>
     [State(Position = 230)]
-    DoorState? State { get; }
+    [Category("Door")]
+    DoorState? DoorState { get; }
 
     /// <summary>
-    /// Whether the door is closed.
+    /// Whether the door is closed. A door that is moving is not closed.
     /// </summary>
+    [Derived]
     [State(Position = 231)]
-    bool? IsClosed => State switch
-    {
-        DoorState.Closed => true,
-        DoorState.Open => false,
-        DoorState.PartiallyOpen => false,
-        _ => null
-    };
+    [Category("Door")]
+    bool? IsDoorClosed => DoorState is { } state ? state == Sensors.DoorState.Closed : null;
 }

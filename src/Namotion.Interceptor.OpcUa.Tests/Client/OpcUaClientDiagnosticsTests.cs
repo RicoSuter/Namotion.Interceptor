@@ -304,13 +304,13 @@ public class OpcUaClientDiagnosticsTests
         Assert.True(source.Ownership.ClaimSource(property));
 
         await using var executionGate = HostedExecutionGate.Install(source);
-        await executionGate.Started.WaitAsync(TimeSpan.FromSeconds(5));
+        await executionGate.Started.WaitAsync(TestTimeouts.Default);
 
         // Act
         var disposal = source.DisposeAsync().AsTask();
         try
         {
-            await executionGate.CancellationObserved.WaitAsync(TimeSpan.FromSeconds(5));
+            await executionGate.CancellationObserved.WaitAsync(TestTimeouts.Default);
 
             // Assert
             Assert.False(disposal.IsCompleted);
@@ -390,10 +390,10 @@ public class OpcUaClientDiagnosticsTests
                 lock (GetFirstConcurrentDictionaryLock(testCase.Owner, testCase.FieldName))
                 {
                     locksAcquired.Signal();
-                    if (!releaseLocks.Wait(TimeSpan.FromSeconds(5)))
-                    {
-                        throw new TimeoutException("The test did not release a ConcurrentDictionary lock.");
-                    }
+
+                    // Unbounded because the finally below always releases it, and a holder that gave up early
+                    // would let a blocking getter complete as if it had not waited.
+                    releaseLocks.Wait();
                 }
             }))
             .ToArray();
@@ -402,7 +402,7 @@ public class OpcUaClientDiagnosticsTests
         bool completedWhileLocked;
         try
         {
-            Assert.True(locksAcquired.Wait(TimeSpan.FromSeconds(5)), "The dictionary locks were not acquired.");
+            Assert.True(locksAcquired.Wait(TestTimeouts.Default), "The dictionary locks were not acquired.");
             getterTasks = cases
                 .Select(testCase => DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
                 {
@@ -418,8 +418,8 @@ public class OpcUaClientDiagnosticsTests
                 }))
                 .ToArray();
 
-            Assert.True(gettersStarted.Wait(TimeSpan.FromSeconds(5)), "The diagnostics getters did not start.");
-            completedWhileLocked = gettersCompleted.Wait(TimeSpan.FromSeconds(5));
+            Assert.True(gettersStarted.Wait(TestTimeouts.Default), "The diagnostics getters did not start.");
+            completedWhileLocked = gettersCompleted.Wait(TestTimeouts.Default);
         }
         finally
         {

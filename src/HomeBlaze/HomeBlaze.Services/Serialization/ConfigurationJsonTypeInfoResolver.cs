@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Registry;
@@ -15,40 +16,63 @@ namespace HomeBlaze.Services.Serialization;
 /// - Sets up polymorphism for IConfigurable with $type discriminator
 /// - Filters properties to only [Configuration] for IConfigurable types
 /// - Allows all properties for plain value objects
-/// - Activates the hosted service of every ISubjectHostedServiceFactory subject it deserializes, at any depth, when constructed with a service provider
+/// - Writes a [JsonExtensionData] property, which holds the keys a type read without a property of its own, back unfiltered
+/// - Reads a key that names a property without [Configuration] into the [JsonExtensionData] property of an IConfigurable
+///   type that has one, instead of reading it without effect
+/// - Creates IConfigurable types that have no parameterless constructor through the service provider
+/// - Names every property by its declared name when the naming is <see cref="ConfigurationNaming.CSharpProperty"/>
+/// - Activates the hosted service of every ISubjectHostedServiceFactory subject it deserializes inside
+///   <see cref="ActivateHostedServices"/>, at any depth
 /// </summary>
 public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
 {
     private readonly TypeProvider _typeProvider;
-    private readonly IServiceProvider? _serviceProvider;
+    private readonly IServiceProvider _serviceProvider;
+    private readonly ConfigurationNaming _naming;
 
     /// <summary>
-    /// Creates a resolver that, when <paramref name="serviceProvider"/> is given, activates with it the
-    /// hosted service of every <see cref="ISubjectHostedServiceFactory"/> subject it deserializes.
+    /// Whether a subject deserialized on this thread has its hosted service activated. Per thread, because a
+    /// conversion that only checks whether a value converts must not leave a running service behind.
     /// </summary>
-    public ConfigurationJsonTypeInfoResolver(TypeProvider typeProvider, IServiceProvider? serviceProvider = null)
+    [ThreadStatic]
+    private static bool _activatesHostedServices;
+
+    /// <param name="typeProvider">The types that a <c>$type</c> discriminator can name.</param>
+    /// <param name="serviceProvider">Creates the configurable types that have no parameterless constructor.</param>
+    /// <param name="naming">
+    /// With <see cref="ConfigurationNaming.CSharpProperty"/> every property gets its declared name, whatever the
+    /// naming policy of the options is. With <see cref="ConfigurationNaming.JsonProperty"/> the names are left
+    /// to the options.
+    /// </param>
+    public ConfigurationJsonTypeInfoResolver(
+        TypeProvider typeProvider,
+        IServiceProvider serviceProvider,
+        ConfigurationNaming naming = ConfigurationNaming.JsonProperty)
     {
         _typeProvider = typeProvider;
         _serviceProvider = serviceProvider;
+        _naming = naming;
     }
 
     public override JsonTypeInfo GetTypeInfo(Type type, JsonSerializerOptions options)
     {
         var typeInfo = base.GetTypeInfo(type, options);
 
-        // Set up polymorphism on IConfigurable and IInterceptorSubject base types
-        if (type == typeof(IConfigurable) || type == typeof(IInterceptorSubject))
+        // Set up polymorphism on IConfigurable and IInterceptorSubject base types, and on abstract configurable classes,
+        // which a property can only hold through one of their concrete subclasses.
+        if (type == typeof(IConfigurable) || type == typeof(IInterceptorSubject) || IsAbstractConfigurableClass(type))
         {
             typeInfo.PolymorphismOptions = new JsonPolymorphismOptions
             {
-                TypeDiscriminatorPropertyName = "$type",
+                TypeDiscriminatorPropertyName = ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName,
                 IgnoreUnrecognizedTypeDiscriminators = false,
                 UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization
             };
 
-            // Register all IConfigurable implementations from TypeProvider
+            // Register all IConfigurable implementations from TypeProvider that the property can hold
             foreach (var derivedType in _typeProvider.Types
                 .Where(t => typeof(IConfigurable).IsAssignableFrom(t)
+                            && type.IsAssignableFrom(t)
                             && t is { IsAbstract: false, IsInterface: false }))
             {
                 typeInfo.PolymorphismOptions.DerivedTypes.Add(
@@ -56,27 +80,59 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
             }
         }
 
+        // CreateObject is null for a type without a parameterless constructor. The serializer then binds the
+        // constructor parameters to JSON properties and throws on a parameter that is a dependency, so a
+        // subject nested in the configuration of another one is created the way the root of a configuration is.
+        if (typeInfo is { Kind: JsonTypeInfoKind.Object, CreateObject: null } &&
+            type is { IsAbstract: false, IsInterface: false } &&
+            typeof(IConfigurable).IsAssignableFrom(type))
+        {
+            typeInfo.CreateObject = () => ActivatorUtilities.CreateInstance(_serviceProvider, type);
+        }
+
+        if (typeInfo.Kind == JsonTypeInfoKind.Object &&
+            typeof(ISubjectHostedServiceFactory).IsAssignableFrom(type) &&
+            typeof(IInterceptorSubject).IsAssignableFrom(type))
+        {
+            // OnDeserialized runs once the object's properties are populated, so the service the activation
+            // creates reads configured values. Chained, because the default resolver puts a type's
+            // IJsonOnDeserialized callback here.
+            var onDeserialized = typeInfo.OnDeserialized;
+            var serviceProvider = _serviceProvider;
+            typeInfo.OnDeserialized = subject =>
+            {
+                onDeserialized?.Invoke(subject);
+                if (_activatesHostedServices)
+                {
+                    ((IInterceptorSubject)subject).ActivateHostedService(serviceProvider);
+                }
+            };
+        }
+
+        if (typeInfo.Kind == JsonTypeInfoKind.Object && typeof(IConfigurable).IsAssignableFrom(type) &&
+            typeInfo.Properties.Any(property => property.IsExtensionData))
+        {
+            RemovePropertiesWithoutConfiguration(typeInfo);
+        }
+
+        // Filter [Configuration] properties for all object types
         if (typeInfo.Kind == JsonTypeInfoKind.Object)
         {
-            if (_serviceProvider is { } serviceProvider &&
-                typeof(ISubjectHostedServiceFactory).IsAssignableFrom(type) &&
-                typeof(IInterceptorSubject).IsAssignableFrom(type))
-            {
-                // OnDeserialized runs once the object's properties are populated, so the service the
-                // activation creates reads configured values. Chained, because the default resolver
-                // puts a type's IJsonOnDeserialized callback here.
-                var onDeserialized = typeInfo.OnDeserialized;
-                typeInfo.OnDeserialized = subject =>
-                {
-                    onDeserialized?.Invoke(subject);
-                    ((IInterceptorSubject)subject).ActivateHostedService(serviceProvider);
-                };
-            }
-
-            // Filter [Configuration] properties for all object types
             foreach (var property in typeInfo.Properties)
             {
                 var propertyName = (property.AttributeProvider as MemberInfo)?.Name ?? property.Name;
+
+                // Also replaces an explicit JSON name, which options without a naming policy would keep.
+                if (_naming == ConfigurationNaming.CSharpProperty)
+                {
+                    property.Name = propertyName;
+                }
+
+                if (property.IsExtensionData)
+                {
+                    continue;
+                }
+
                 var ignoreNulls = options.DefaultIgnoreCondition == JsonIgnoreCondition.WhenWritingNull;
                 property.ShouldSerialize = (parent, value) =>
                 {
@@ -95,15 +151,47 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
                     }
 
                     // For non-subject types (value objects) or subjects without registry, fall back to reflection
-                    var hasConfigurationAttribute = property.AttributeProvider?
-                        .GetCustomAttributes(typeof(ConfigurationAttribute), true)
-                        .Any() ?? false;
-
-                    return hasConfigurationAttribute;
+                    return HasConfigurationAttribute(property);
                 };
             }
         }
 
         return typeInfo;
     }
+
+    /// <summary>
+    /// Runs <paramref name="deserialize"/> so that the subjects with a hosted service it deserializes on this
+    /// thread are activated.
+    /// </summary>
+    internal static T ActivateHostedServices<T>(Func<T> deserialize)
+    {
+        var previous = _activatesHostedServices;
+        _activatesHostedServices = true;
+        try
+        {
+            return deserialize();
+        }
+        finally
+        {
+            _activatesHostedServices = previous;
+        }
+    }
+
+    private static void RemovePropertiesWithoutConfiguration(JsonTypeInfo typeInfo)
+    {
+        for (var index = typeInfo.Properties.Count - 1; index >= 0; index--)
+        {
+            var property = typeInfo.Properties[index];
+            if (!property.IsExtensionData && !HasConfigurationAttribute(property))
+            {
+                typeInfo.Properties.RemoveAt(index);
+            }
+        }
+    }
+
+    private static bool HasConfigurationAttribute(JsonPropertyInfo property) =>
+        property.AttributeProvider?.GetCustomAttributes(typeof(ConfigurationAttribute), true).Length > 0;
+
+    private static bool IsAbstractConfigurableClass(Type type) =>
+        type is { IsClass: true, IsAbstract: true } && typeof(IConfigurable).IsAssignableFrom(type);
 }

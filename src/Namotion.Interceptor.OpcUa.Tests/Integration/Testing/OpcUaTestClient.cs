@@ -39,7 +39,8 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         Func<IInterceptorSubjectContext, TRoot> createRoot,
         Func<TRoot, bool> isConnected,
         string serverUrl = DefaultServerUrl,
-        string? certificateStoreBasePath = null)
+        string? certificateStoreBasePath = null,
+        bool waitUntilConnected = true)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var builder = Host.CreateApplicationBuilder();
@@ -54,7 +55,10 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         {
             logging.ClearProviders();
             logging.SetMinimumLevel(LogLevel.Debug);
-            logging.AddXunit(_logger, "Client", LogLevel.Information);
+            // Debug only for the OPC UA client, which logs a skipped stale notification at that level.
+            logging.AddXunit(_logger, "Client", LogLevel.Debug);
+            logging.AddFilter<XunitLoggerProvider>(null, LogLevel.Information);
+            logging.AddFilter<XunitLoggerProvider>("Namotion.Interceptor.OpcUa.Client", LogLevel.Debug);
         });
 
         _context = InterceptorSubjectContext
@@ -113,6 +117,11 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
 
         await _host.StartAsync();
         _logger.Log($"Client host started in {sw.ElapsedMilliseconds}ms");
+
+        if (!waitUntilConnected)
+        {
+            return;
+        }
 
         // First wait for OPC UA infrastructure (subscriptions set up) - this is reliable
         // because it's based on actual OPC UA state, not property propagation

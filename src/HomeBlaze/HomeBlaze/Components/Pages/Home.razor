@@ -1,11 +1,13 @@
 @page "/"
 
 @using HomeBlaze.Components.Abstractions.Pages
+@using Microsoft.Extensions.Logging
 
 @inherits HomeBlazorComponentBase
 
 @inject NavigationItemResolver NavigationResolver
 @inject NavigationManager Navigation
+@inject ILogger<Home> Logger
 
 @code {
     protected override void OnInitialized()
@@ -19,34 +21,34 @@
         if (Root == null)
             return;
 
-        var items = NavigationResolver.GetChildItems(Root).Where(i => i.IsPage).ToList();
+        // Outside the try: during prerendering a navigation throws to redirect the response.
+        Navigation.NavigateTo(GetDefaultPageUrl(Root), replace: true);
+    }
 
-        // Try first AppBar page (left aligned first, then right)
-        var appBarPage = items
-            .Where(i => i.Location == NavigationLocation.AppBar)
-            .OrderBy(i => i.Alignment == AppBarAlignment.Left ? 0 : 1)
-            .ThenBy(i => i.Order)
-            .FirstOrDefault();
-
-        if (appBarPage != null)
+    private string GetDefaultPageUrl(IInterceptorSubject root)
+    {
+        try
         {
-            Navigation.NavigateTo(appBarPage.PageUrl);
-            return;
+            // The first page of the top bar as it shows it: left aligned first, then right, then the menu, each in
+            // navigation order.
+            var appBarItems = NavigationResolver.GetAppBarItems(root);
+            var appBarPage = appBarItems.FirstOrDefault(i => i.Alignment == AppBarAlignment.Left) ??
+                appBarItems.FirstOrDefault(i => i.Alignment == AppBarAlignment.Right) ??
+                appBarItems.FirstOrDefault();
+            if (appBarPage != null)
+                return appBarPage.PageUrl;
+
+            var navBarPage = NavigationResolver.GetChildItems(root)
+                .FirstOrDefault(i => i is { IsPage: true, Location: NavigationLocation.NavBar });
+            if (navBarPage != null)
+                return navBarPage.PageUrl;
+        }
+        catch (Exception exception)
+        {
+            // The graph changes on other threads while this reads it, and the browser always opens.
+            Logger.LogWarning(exception, "Error getting the default page");
         }
 
-        // Try first NavBar page
-        var navBarPage = items
-            .Where(i => i.Location == NavigationLocation.NavBar)
-            .OrderBy(i => i.Order)
-            .FirstOrDefault();
-
-        if (navBarPage != null)
-        {
-            Navigation.NavigateTo(navBarPage.PageUrl);
-            return;
-        }
-
-        // Fallback to browser
-        Navigation.NavigateTo("/browser");
+        return "/browser";
     }
 }

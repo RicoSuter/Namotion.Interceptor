@@ -30,24 +30,19 @@ public sealed class FakeHistoryStore : IHistoryStore
     }
 
     public IReadOnlySet<string> SupportedAggregations { get; set; } =
-        new HashSet<string>(StringComparer.Ordinal)
-        {
-            HistoryAggregations.Last,
-            HistoryAggregations.First,
-            HistoryAggregations.SampleAverage,
-            HistoryAggregations.TimeWeightedAverage,
-            HistoryAggregations.Minimum,
-            HistoryAggregations.Maximum,
-            HistoryAggregations.Sum,
-            HistoryAggregations.Count,
-            HistoryAggregations.StandardDeviation
-        };
+        new HashSet<string>(HistoryAggregations.All, StringComparer.Ordinal);
 
     /// <summary>Records the queries this store received, for routing assertions.</summary>
     public List<HistoryQuery> ReceivedQueries { get; } = new();
 
     /// <summary>When true, both query methods throw, simulating a misconfigured store.</summary>
     public bool ThrowOnQuery { get; set; }
+
+    /// <summary>
+    /// Runs after <see cref="GetSampleAtOrBeforeAsync"/> searched with the coverage it read and before it returns,
+    /// simulating a flush that publishes new coverage while the lookup runs.
+    /// </summary>
+    public Action? AfterSampleLookup { get; set; }
 
     public FakeHistoryStore AddSample(DateTimeOffset timestamp, double value)
     {
@@ -112,7 +107,22 @@ public sealed class FakeHistoryStore : IHistoryStore
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        return new ValueTask<HistoryPoint?>(SampleAtOrBefore(asOf));
+        var sample = SampleAtOrBefore(asOf);
+        AfterSampleLookup?.Invoke();
+        return new ValueTask<HistoryPoint?>(sample);
+    }
+
+    public ValueTask<HistoryPoint?> GetLastNumericSampleBeforeAsync(
+        string propertyPath, DateTimeOffset before, CancellationToken cancellationToken)
+    {
+        if (ThrowOnQuery)
+        {
+            throw new InvalidOperationException("Fake store failure.");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var sample = _samples.LastOrDefault(point => point.Timestamp < before && point.Number is not null);
+        return new ValueTask<HistoryPoint?>(sample is null ? null : sample with { Json = null });
     }
 
     private HistoryPoint? SampleAtOrBefore(DateTimeOffset asOf)
@@ -172,7 +182,7 @@ public sealed class FakeHistoryStore : IHistoryStore
         // across a gap this store does not vouch for.
         if (carryDependent && query.CarrySeed is null)
         {
-            var prior = SampleAtOrBefore(BucketAlignment.BucketStart(query.From, bucket));
+            var prior = SampleAtOrBefore(BucketAlignment.Start(query.From, bucket));
             if (prior is not null)
             {
                 carriedNumber = prior.Number;
@@ -181,10 +191,10 @@ public sealed class FakeHistoryStore : IHistoryStore
         }
 
         var points = new List<HistoryPoint>();
-        var bucketStart = BucketAlignment.BucketStart(query.From, bucket);
+        var bucketStart = BucketAlignment.Start(query.From, bucket);
         while (bucketStart < query.To)
         {
-            var bucketEnd = bucketStart + bucket;
+            var bucketEnd = BucketAlignment.Next(bucketStart, bucket);
 
             // Clipped to the query window, matching the real engines: a trailing bucket that runs past
             // To must not aggregate samples from after To into its point.

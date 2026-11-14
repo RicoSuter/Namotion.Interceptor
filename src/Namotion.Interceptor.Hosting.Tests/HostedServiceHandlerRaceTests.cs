@@ -135,7 +135,7 @@ public class HostedServiceHandlerRaceTests
                 : child.AttachHostedService(Factory);
 
             // Assert
-            var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+            var slot = attachment.GetSlot();
             await slot.DrainAsync();
 
             Assert.All(await Task.WhenAll(detaches), Assert.True);
@@ -163,7 +163,7 @@ public class HostedServiceHandlerRaceTests
         parent.Child = child;
         await AsyncTestHelpers.WaitUntilAsync(() => instance.IsStarted);
 
-        var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+        var slot = attachment.GetSlot();
         using var drainStop = slot.HoldAtTransition();
 
         // Act
@@ -251,7 +251,7 @@ public class HostedServiceHandlerRaceTests
         // Assert - read while the drain is still held. Once it is let go it happens to release this
         // slot too, because a take this early is still inside the snapshot it takes next, so the
         // ownership is only observable here.
-        Assert.Null(((IHostedServiceSlotAccess)attachment).Slot.Owner);
+        Assert.Null(attachment.GetSlot().Owner);
 
         drain.Release();
         await stopping;
@@ -379,7 +379,7 @@ public class HostedServiceHandlerRaceTests
             + "barrier missed it and that stop would run against a disposed service provider.");
 
         subjectStop.Release();
-        await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+        await stopping.WaitAsync(TestTimeouts.Default);
 
         Assert.Equal(1, child.StopCount);
         Assert.True(created.ToArray() is [{ IsStopped: true, IsDisposed: true }]);
@@ -407,22 +407,22 @@ public class HostedServiceHandlerRaceTests
             return instance;
         });
 
-        var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+        var slot = attachment.GetSlot();
         using var take = slot.HoldAtQueueLock();
 
         // Act
         var parent = new Parent(context);
-        var attaching = Task.Run(() => { parent.Child = child; });
+        var attaching = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { parent.Child = child; });
         await take.WaitUntilReachedAsync();
 
-        var stopping = Task.Run(() => host.StopAsync());
+        var stopping = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => host.StopAsync());
 
         // Assert - a drain whose snapshot missed this slot has nothing to enqueue and returns here.
         var returnedEarly = await Task.WhenAny(stopping, Task.Delay(DrainMustNotReturnWithin)) == stopping;
 
         take.Release();
-        await attaching.WaitAsync(TimeSpan.FromSeconds(30));
-        await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+        await attaching.WaitAsync(TestTimeouts.Default);
+        await stopping.WaitAsync(TestTimeouts.Default);
 
         Assert.False(
             returnedEarly,
@@ -462,7 +462,7 @@ public class HostedServiceHandlerRaceTests
         parent.Child = child;
         await AsyncTestHelpers.WaitUntilAsync(() => attachment.Fault is not null);
 
-        var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+        var slot = attachment.GetSlot();
         using var start = slot.HoldAtTransition();
 
         var handler = context.TryGetService<HostedServiceHandler>()!;
@@ -583,7 +583,7 @@ public class HostedServiceHandlerRaceTests
         remainingParent.Child = remaining;
         await AsyncTestHelpers.WaitUntilAsync(() => remainingInstance.IsStarted);
 
-        var remainingSlot = ((IHostedServiceSlotAccess)remainingAttachment).Slot;
+        var remainingSlot = remainingAttachment.GetSlot();
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var ownerWhenTheQueuedStopRan =
             new TaskCompletionSource<HostedServiceHandler?>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -606,7 +606,7 @@ public class HostedServiceHandlerRaceTests
         await stopping;
 
         // Assert
-        var owner = await ownerWhenTheQueuedStopRan.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        var owner = await ownerWhenTheQueuedStopRan.Task.WaitAsync(TestTimeouts.Default);
         Assert.NotNull(owner);
         Assert.Equal(1, detaching.StopCount);
     }
@@ -625,7 +625,7 @@ public class HostedServiceHandlerRaceTests
             var child = new Person();
             var attachment = child.AttachHostedService(() => new TrackedBackgroundService());
 
-            var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+            var slot = attachment.GetSlot();
             using var start = slot.HoldAtTransition();
 
             // Act - the start is enqueued while the graph write runs, and its body is held at the
@@ -665,7 +665,7 @@ public class HostedServiceHandlerRaceTests
             return new TrackedBackgroundService();
         });
 
-        using var start = ((IHostedServiceSlotAccess)attachment).Slot.HoldAtTransition();
+        using var start = attachment.GetSlot().HoldAtTransition();
 
         parent.Child = child;
         Assert.Equal(1, startupCompletion.Outstanding);
@@ -704,7 +704,7 @@ public class HostedServiceHandlerRaceTests
                 return new TrackedBackgroundService();
             });
 
-            var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+            var slot = attachment.GetSlot();
             using var start = slot.HoldAtTransition();
 
             parent.Child = child;
@@ -807,7 +807,7 @@ public class HostedServiceHandlerRaceTests
             });
 
             // Assert
-            var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+            var slot = attachment.GetSlot();
             Assert.Equal(1, startupCompletion.DeferralCount);
             Assert.Null(slot.Owner);
 
@@ -872,7 +872,7 @@ public class HostedServiceHandlerRaceTests
         // Assert - read while the drain is still held. Once it is let go the drain releases every
         // slot its snapshot held, so a take that survived here would be released a moment later for
         // an unrelated reason and the window would be unobservable.
-        var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+        var slot = attachment.GetSlot();
         Assert.True(drain.WasReached, "The attach did not land its writes inside the drain window.");
         Assert.True(handler.IsLive(child), "The drain cleared liveness early, so the take was refused for another reason.");
         Assert.Null(slot.Owner);
@@ -913,7 +913,7 @@ public class HostedServiceHandlerRaceTests
 
         // Act - the attach runs on its own task, because it parks on the seam when the read on entry
         // is gone and returns without touching it when it is there.
-        var attaching = Task.Run(() => child.AttachHostedService(() => new TrackedBackgroundService()));
+        var attaching = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => child.AttachHostedService(() => new TrackedBackgroundService()));
         await Task.WhenAny(take.Reached, attaching);
 
         // A stand-in for the live handler that takes over from a draining one. It only has to win the
@@ -994,7 +994,7 @@ public class HostedServiceHandlerRaceTests
             return new TrackedBackgroundService();
         });
 
-        var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+        var slot = attachment.GetSlot();
         var takeReached = new ManualResetEventSlim(false);
         var detachRunning = new ManualResetEventSlim(false);
         var detachFinished = 0;
@@ -1003,7 +1003,7 @@ public class HostedServiceHandlerRaceTests
         // to release, and a pool thread carries work the round knows nothing about.
         var detaching = new Thread(() =>
         {
-            takeReached.Wait(TimeSpan.FromSeconds(30));
+            takeReached.Wait(TestTimeouts.Default);
             detachRunning.Set();
             child.DetachHostedService(attachment);
             Volatile.Write(ref detachFinished, 1);
@@ -1019,7 +1019,7 @@ public class HostedServiceHandlerRaceTests
         slot.QueueLockTestHook = () =>
         {
             takeReached.Set();
-            detachStarted = detachRunning.Wait(TimeSpan.FromSeconds(30));
+            detachStarted = detachRunning.Wait(TestTimeouts.Default);
             if (!detachStarted)
             {
                 return;
@@ -1028,7 +1028,7 @@ public class HostedServiceHandlerRaceTests
             detachSettled = SpinWait.SpinUntil(
                 () => Volatile.Read(ref detachFinished) == 1
                       || (detaching.ThreadState & ThreadState.WaitSleepJoin) != 0,
-                TimeSpan.FromSeconds(30));
+                TestTimeouts.Default);
         };
 
         detaching.Start();
@@ -1080,14 +1080,14 @@ public class HostedServiceHandlerRaceTests
         using var take = handler.HoldAtOwnershipTake();
 
         // Act - the repeat take lands, the drain begins under it, and only then does it re-read.
-        var attaching = Task.Run(() => ((IInterceptorSubject)subject).Context.AddFallbackContext(secondContext));
+        var attaching = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => ((IInterceptorSubject)subject).Context.AddFallbackContext(secondContext));
         await take.WaitUntilReachedAsync();
 
-        var stopping = Task.Run(() => host.StopAsync());
+        var stopping = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => host.StopAsync());
         await drain.WaitUntilReachedAsync();
 
         take.Release();
-        await attaching.WaitAsync(TimeSpan.FromSeconds(30));
+        await attaching.WaitAsync(TestTimeouts.Default);
 
         // Assert - read while the drain is still held, which is before its snapshot. Once it is let go
         // the drain releases everything it covered, and the difference is unobservable.
@@ -1098,7 +1098,7 @@ public class HostedServiceHandlerRaceTests
         Assert.Same(handler, slot.Owner);
 
         drain.Release();
-        await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+        await stopping.WaitAsync(TestTimeouts.Default);
 
         Assert.Equal(1, subject.StartCount);
         Assert.Equal(1, subject.StopCount);
@@ -1130,10 +1130,10 @@ public class HostedServiceHandlerRaceTests
         Assert.True(created.ToArray() is [{ IsStarted: true }]);
 
         // Holds the detach's stop body, so a drain that missed it returns while it has provably not run.
-        using var stop = ((IHostedServiceSlotAccess)attachment).Slot.HoldAtTransition();
+        using var stop = attachment.GetSlot().HoldAtTransition();
         using var snapshot = handler.HoldAtDrainEnqueue();
 
-        var stopping = Task.Run(() => host.StopAsync());
+        var stopping = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => host.StopAsync());
         await snapshot.WaitUntilReachedAsync();
 
         // Act - the whole detach, enqueued and released, lands here.
@@ -1144,7 +1144,7 @@ public class HostedServiceHandlerRaceTests
         var returnedEarly = await Task.WhenAny(stopping, Task.Delay(DrainMustNotReturnWithin)) == stopping;
 
         stop.Release();
-        await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+        await stopping.WaitAsync(TestTimeouts.Default);
 
         Assert.False(
             returnedEarly,
@@ -1179,7 +1179,7 @@ public class HostedServiceHandlerRaceTests
             // Reached only after the gate read, the liveness read, the ownership read and the one
             // instance guard, so a start parked here cannot refuse itself afterwards.
             factoryReached.TrySetResult();
-            releaseFactory.Task.Wait(TimeSpan.FromSeconds(30));
+            releaseFactory.Task.Wait(TestTimeouts.Default);
 
             var instance = new TrackedBackgroundService();
             created.Enqueue(instance);
@@ -1189,26 +1189,26 @@ public class HostedServiceHandlerRaceTests
         using var take = handler.HoldAtOwnershipTake();
 
         var parent = new Parent(context);
-        var attaching = Task.Run(() => { parent.Child = child; });
+        var attaching = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { parent.Child = child; });
 
         await take.WaitUntilReachedAsync();
-        await factoryReached.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await factoryReached.Task.WaitAsync(TestTimeouts.Default);
 
         using var drain = handler.HoldAtDrain();
 
-        var stopping = Task.Run(() => host.StopAsync());
+        var stopping = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => host.StopAsync());
         await drain.WaitUntilReachedAsync();
 
         // Act - the enqueuing thread reaches its re-read, sees Draining, and undoes a take whose start
         // is parked in its factory.
         take.Release();
-        await attaching.WaitAsync(TimeSpan.FromSeconds(30));
+        await attaching.WaitAsync(TestTimeouts.Default);
 
         drain.Release();
         releaseFactory.SetResult();
 
         // Assert - the drain has to wait for that start and for the stop behind it.
-        await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+        await stopping.WaitAsync(TestTimeouts.Default);
 
         Assert.True(
             created.ToArray() is [{ IsStarted: true, IsStopped: true, IsDisposed: true }],
@@ -1242,7 +1242,7 @@ public class HostedServiceHandlerRaceTests
         var instance = new TrackedBackgroundService();
         using var take = handler.HoldAtOwnershipTake();
 
-        var attaching = Task.Run(() => child.AttachHostedService(() => instance));
+        var attaching = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => child.AttachHostedService(() => instance));
         await take.WaitUntilReachedAsync();
 
         // The start is enqueued ahead of the seam and the host is running, so the instance is up
@@ -1253,13 +1253,13 @@ public class HostedServiceHandlerRaceTests
         using var attachmentStop = instance.HoldAtStop();
         using var snapshot = handler.HoldAtDrainEnqueue();
 
-        var stopping = Task.Run(() => host.StopAsync());
+        var stopping = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => host.StopAsync());
         await snapshot.WaitUntilReachedAsync();
 
         // Act - the enqueuing thread reads Draining, enqueues the undo's stop and releases the slot,
         // all before the drain enqueues its own stops.
         take.Release();
-        var attachment = await attaching.WaitAsync(TimeSpan.FromSeconds(30));
+        var attachment = await attaching.WaitAsync(TestTimeouts.Default);
         snapshot.Release();
 
         await subjectStop.WaitUntilReachedAsync();
@@ -1278,7 +1278,7 @@ public class HostedServiceHandlerRaceTests
         subjectStop.Release();
         await attachmentStop.WaitUntilReachedAsync();
         attachmentStop.Release();
-        await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+        await stopping.WaitAsync(TestTimeouts.Default);
 
         Assert.Equal(1, child.StopCount);
         Assert.True(instance.IsStopped);
@@ -1313,10 +1313,10 @@ public class HostedServiceHandlerRaceTests
             using var take = firstHandler.HoldAtOwnershipTake();
 
             var firstParent = new Parent(firstContext);
-            var attaching = Task.Run(() => { firstParent.Child = child; });
+            var attaching = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { firstParent.Child = child; });
             await take.WaitUntilReachedAsync();
 
-            await firstHost.StopAsync().WaitAsync(TimeSpan.FromSeconds(30));
+            await firstHost.StopAsync().WaitAsync(TestTimeouts.Default);
 
             var secondParent = new Parent(secondContext);
             secondParent.Child = child;
@@ -1328,7 +1328,7 @@ public class HostedServiceHandlerRaceTests
 
             // Act - the attaching thread reads Draining and undoes its take.
             take.Release();
-            await attaching.WaitAsync(TimeSpan.FromSeconds(30));
+            await attaching.WaitAsync(TestTimeouts.Default);
 
             // Assert - an empty transition behind whatever the undo enqueued, so the reads below are
             // deterministic rather than timed.
@@ -1342,65 +1342,6 @@ public class HostedServiceHandlerRaceTests
         {
             await secondHost.StopAsync();
         }
-    }
-
-    [Fact]
-    public async Task WhenTheGateReReadUndoesAnAttachmentTakeOnAnActivatedSubject_ThenItsStopWaitsForTheActivationsStop()
-    {
-        // Arrange - the same undo as above on a subject that is not a hosted service itself but has an
-        // activated one, so the only stop the undo's stop can be ordered behind is the activation's.
-        // The undo asks the activation slot for its signal before the drain has enqueued that
-        // slot's stop, so this pins that the signal is created on the asking side there too.
-        var (host, context) = await HostingTestHost.StartAsync();
-        var handler = context.TryGetService<HostedServiceHandler>()!;
-
-        GatedStopService? service = null;
-        var subject = new ActivatableSubject { ServiceFactory = _ => service = new GatedStopService() };
-        ((IInterceptorSubject)subject).Context.AddFallbackContext(context);
-        var activation = Assert.Single(subject.GetHostedServiceAttachments());
-        await AsyncTestHelpers.WaitUntilAsync(() => activation.GetState(out _) == HostedServiceAttachmentState.Running);
-
-        var instance = new TrackedBackgroundService();
-        using var take = handler.HoldAtOwnershipTake();
-
-        var attaching = Task.Run(() => subject.AttachHostedService(() => instance));
-        await take.WaitUntilReachedAsync();
-        await AsyncTestHelpers.WaitUntilAsync(() => instance.IsStarted);
-
-        using var attachmentStop = instance.HoldAtStop();
-        using var snapshot = handler.HoldAtDrainEnqueue();
-
-        var stopping = Task.Run(() => host.StopAsync());
-        await snapshot.WaitUntilReachedAsync();
-
-        // Act - the enqueuing thread reads Draining, enqueues the undo's stop and releases the slot,
-        // all before the drain enqueues its own stops.
-        take.Release();
-        var attachment = await attaching.WaitAsync(TimeSpan.FromSeconds(30));
-        snapshot.Release();
-
-        await service!.StopEntered.Task;
-
-        // Assert - the activated service is held inside its stop, so an attachment stop that waits
-        // for it cannot reach the instance however long it is watched.
-        var stoppedUnderneathTheActivation =
-            await Task.WhenAny(attachmentStop.Reached, Task.Delay(DrainMustNotReturnWithin)) == attachmentStop.Reached;
-
-        Assert.False(
-            stoppedUnderneathTheActivation,
-            "The undo's stop reached the attachment while the subject's activated service was still inside its own stop.");
-
-        Assert.NotNull(attachment.Current);
-
-        service.StopRelease.SetResult();
-        await attachmentStop.WaitUntilReachedAsync();
-        attachmentStop.Release();
-        await stopping.WaitAsync(TimeSpan.FromSeconds(30));
-
-        Assert.True(service.IsDisposed);
-        Assert.True(instance.IsStopped);
-        Assert.True(instance.IsDisposed);
-        Assert.Null(attachment.Current);
     }
 
     [Fact]
@@ -1440,14 +1381,14 @@ public class HostedServiceHandlerRaceTests
                     if (Interlocked.Increment(ref factoryCalls) == 1)
                     {
                         faultingStartReachedFactory.SetResult();
-                        releaseFaultingStart.Task.Wait(TimeSpan.FromSeconds(30));
+                        releaseFaultingStart.Task.Wait(TestTimeouts.Default);
                         throw new InvalidOperationException("the awaited start fails");
                     }
 
                     // Reached only after the gate read, the liveness read, the ownership read and the
                     // one instance guard, so a start parked here cannot refuse itself afterwards.
                     queuedStartReachedFactory.SetResult();
-                    releaseQueuedStart.Task.Wait(TimeSpan.FromSeconds(30));
+                    releaseQueuedStart.Task.Wait(TestTimeouts.Default);
 
                     var instance = new TrackedBackgroundService();
                     created.Enqueue(instance);
@@ -1455,7 +1396,7 @@ public class HostedServiceHandlerRaceTests
                 },
                 CancellationToken.None);
 
-            await faultingStartReachedFactory.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            await faultingStartReachedFactory.Task.WaitAsync(TestTimeouts.Default);
 
             // Read while the attachment is still published and before the seam below is armed: the
             // removal takes the attachment out of the subject's data, and the assertions need the
@@ -1474,7 +1415,7 @@ public class HostedServiceHandlerRaceTests
             // it has read and not yet acted on, and passes every guard of its own before that caller
             // marks the slot detached and releases it.
             Assert.NotNull(handler.TryTakeOwnershipAndStart(subject, slot));
-            await queuedStartReachedFactory.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            await queuedStartReachedFactory.Task.WaitAsync(TestTimeouts.Default);
 
             removal.Release();
             await Assert.ThrowsAsync<InvalidOperationException>(() => attaching);
@@ -1547,7 +1488,7 @@ public class HostedServiceHandlerRaceTests
                 message: "The second host never started its own instance, so the drain below proves nothing.");
 
             snapshot.Release();
-            await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+            await stopping.WaitAsync(TestTimeouts.Default);
 
             // Assert - an empty transition behind whatever the drain enqueued, so the reads below are
             // deterministic rather than timed.
@@ -1590,7 +1531,7 @@ public class HostedServiceHandlerRaceTests
         Assert.True(instance.IsStarted);
         Assert.Equal(0, handler.InFlightTransitionCount);
 
-        using var stop = ((IHostedServiceSlotAccess)attachment).Slot.HoldAtTransition();
+        using var stop = attachment.GetSlot().HoldAtTransition();
 
         // Act
         var stopping = host.StopAsync();
@@ -1599,7 +1540,7 @@ public class HostedServiceHandlerRaceTests
         var returnedEarly = await Task.WhenAny(stopping, Task.Delay(DrainMustNotReturnWithin)) == stopping;
 
         stop.Release();
-        await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+        await stopping.WaitAsync(TestTimeouts.Default);
 
         Assert.False(
             returnedEarly,
@@ -1629,7 +1570,7 @@ public class HostedServiceHandlerRaceTests
         await attachment.DrainAsync();
         Assert.True(instance.IsStarted);
 
-        var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+        var slot = attachment.GetSlot();
         using var firstWait = handler.HoldAtDrainRelease();
 
         // Armed from inside the seam, so the drain's own stop ran unheld and the count provably reached
@@ -1649,7 +1590,7 @@ public class HostedServiceHandlerRaceTests
         var returnedEarly = await Task.WhenAny(stopping, Task.Delay(DrainMustNotReturnWithin)) == stopping;
 
         stop!.Release();
-        await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+        await stopping.WaitAsync(TestTimeouts.Default);
         stop.Dispose();
 
         Assert.False(
@@ -1675,7 +1616,7 @@ public class HostedServiceHandlerRaceTests
         parent.Child = child;
         await AsyncTestHelpers.WaitUntilAsync(() => attachment.Fault is not null);
 
-        var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+        var slot = attachment.GetSlot();
         Assert.Same(handler, slot.Owner);
         Assert.True(handler.IsTrackedForDrain(slot), "The take tracked nothing, so the drain has nothing to release.");
 

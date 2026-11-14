@@ -32,7 +32,7 @@ internal static class HostingTestHost
     /// <see cref="DrainAsync(HostedServiceSlot)"/>.
     /// </summary>
     public static Task DrainAsync(this IHostedServiceAttachment attachment)
-        => ((IHostedServiceSlotAccess)attachment).Slot.DrainAsync();
+        => attachment.GetSlot().DrainAsync();
 
     /// <summary>
     /// Creates the host builder every test in this suite builds on.

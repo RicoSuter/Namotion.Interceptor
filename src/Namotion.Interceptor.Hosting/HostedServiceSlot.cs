@@ -57,22 +57,21 @@ internal sealed class HostedServiceSlot
     private bool _detached;
 
     /// <summary>
-    /// For a slot that <see cref="CarriesStopSignal"/>, the completion of the stop that ends the
-    /// current ownership, which the stops ordered behind it await. Created by whichever comes first,
-    /// the owner's own stop enqueue or one of those stops asking to wait for it, and set by every stop
-    /// body enqueued on this slot while it is current. Guarded by <see cref="_queueLock"/>; reset on
-    /// every install, so a stop from an earlier ownership cannot release the stops of a later one.
+    /// For a subject slot, the completion of the stop that ends the current ownership, which the
+    /// stops of the subject's attachments await. Created by whichever comes first, the owner's own
+    /// stop enqueue or one of its attachment stops asking to wait for it, and set by every subject stop
+    /// body enqueued while it is current. Guarded by <see cref="_queueLock"/>; reset on every install,
+    /// so a stop from an earlier ownership cannot release the attachments of a later one.
     /// </summary>
     private TaskCompletionSource? _stopSignal;
 
     /// <summary>The owner <see cref="_stopSignal"/> was created for, so no other handler's stops wait on it.</summary>
     private HostedServiceHandler? _stopSignalOwner;
 
-    public HostedServiceSlot(Func<IHostedService>? factory, IHostedService? subject, bool isActivation = false)
+    public HostedServiceSlot(Func<IHostedService>? factory, IHostedService? subject)
     {
         Factory = factory;
         Subject = subject;
-        IsActivation = isActivation;
     }
 
     /// <summary>The factory for an attachment, or null when this slot is a subject.</summary>
@@ -80,19 +79,6 @@ internal sealed class HostedServiceSlot
 
     /// <summary>The subject when this slot is a subject, or null when it is an attachment.</summary>
     public IHostedService? Subject { get; }
-
-    /// <summary>
-    /// True when this attachment is the activation of an <see cref="ISubjectHostedServiceFactory"/>
-    /// subject. Fixed at construction, so every stop enqueued on it is routed the same way whatever
-    /// the subject's activation entry holds at the time.
-    /// </summary>
-    public bool IsActivation { get; }
-
-    /// <summary>
-    /// Whether the stops of other slots are ordered behind this one's, which is what its stops take
-    /// the stop signal for: a subject slot and an activation slot.
-    /// </summary>
-    public bool CarriesStopSignal => Subject is not null || IsActivation;
 
     /// <summary>True when the handler created the current instance, so it owns its disposal.</summary>
     public bool IsFactoryAttachment => Factory is not null;
@@ -116,13 +102,10 @@ internal sealed class HostedServiceSlot
 
     public HostedServiceHandler? Owner => Volatile.Read(ref _owner);
 
-    /// <summary>
-    /// Whether <see cref="MarkDetached"/> has run, after which no start enqueued is accepted. Read
-    /// outside the queue lock, like the read in <see cref="GetState"/> and for the same reason.
-    /// </summary>
+    /// <summary>Whether <see cref="MarkDetached"/> has run. Read outside the queue lock, as in <see cref="GetState"/>.</summary>
     public bool IsDetached => Volatile.Read(ref _detached);
 
-    public void SetFault(Exception? fault) => Volatile.Write(ref _fault, fault);
+    public void SetFault(Exception fault) => Volatile.Write(ref _fault, fault);
 
     /// <summary>Records a failed start, as the slot's fault and as the start's own outcome.</summary>
     public void SetStartFault(Exception fault)
@@ -190,7 +173,6 @@ internal sealed class HostedServiceSlot
     /// </summary>
     public HostedServiceAttachmentState GetState(out IHostedService? current)
     {
-        // The instance and the phase come out of this one load, so no transition can land between them.
         var snapshot = Volatile.Read(ref _snapshot);
         current = snapshot.Instance;
 
@@ -292,12 +274,12 @@ internal sealed class HostedServiceSlot
     }
 
     /// <summary>
-    /// Enqueues a stop for a slot that <see cref="CarriesStopSignal"/> while <paramref name="handler"/>
-    /// still owns it, as on <see cref="EnqueueIfOwnedAsync"/>, and hands the body the signal it must set
-    /// when it has run, chosen under the same lock acquisition as the enqueue so a stop asking for it in
+    /// Enqueues a stop for a subject slot while <paramref name="handler"/> still owns it, as on
+    /// <see cref="EnqueueIfOwnedAsync"/>, and hands the body the signal it must set when it has run,
+    /// chosen under the same lock acquisition as the enqueue so an attachment stop asking for it in
     /// between is handed the signal this stop will set. A refused enqueue leaves the signal alone.
     /// </summary>
-    public Task? EnqueueStopWithSignalIfOwnedAsync(HostedServiceHandler handler, Func<TaskCompletionSource, Func<Task>> createBody)
+    public Task? EnqueueSubjectStopIfOwnedAsync(HostedServiceHandler handler, Func<TaskCompletionSource, Func<Task>> createBody)
     {
         lock (_queueLock)
         {
@@ -306,16 +288,16 @@ internal sealed class HostedServiceSlot
     }
 
     /// <summary>
-    /// The stop of this slot that a stop enqueued by <paramref name="handler"/> and ordered behind
-    /// it has to wait for, or null when there is none: the stop <paramref name="handler"/> has enqueued
-    /// for the current ownership and that has not finished, or, while it owns the slot and has
-    /// enqueued none, the one it is going to enqueue. Null once that stop has finished and when the
-    /// ownership is another handler's, so the wait is never on a stop this handler is not going to enqueue.
+    /// The stop of this subject that an attachment stop enqueued by <paramref name="handler"/> has to
+    /// wait for, or null when there is none: the stop <paramref name="handler"/> has enqueued for the
+    /// current ownership and that has not finished, or, while it owns the slot and has enqueued none,
+    /// the one it is going to enqueue. Null once that stop has finished and when the ownership is
+    /// another handler's, so the wait is never on a stop this handler is not going to enqueue.
     /// </summary>
     /// <remarks>
     /// The signal is created here only for the owner, because every ownership ends with a stop enqueued
     /// by its owner ahead of the release, which is what guarantees a signal created here is set:
-    /// docs/design/hosting-service-ownership.md#the-stop-signal.
+    /// docs/design/hosting-service-ownership.md#the-subject-stop-signal.
     /// </remarks>
     public Task? GetStopToAwait(HostedServiceHandler handler)
     {
@@ -415,28 +397,39 @@ internal sealed class HostedServiceSlot
         // between here and the enqueue may throw, because a leaked increment never comes back.
         handler.EnterTransition();
 
-        // The lock the callers hold is required: "_tail = _tail.ContinueWith(...)" is a
-        // read-modify-write, and two racing enqueuers lose an assignment and run both transitions
-        // concurrently. TaskScheduler.Default is required: ContinueWith otherwise captures
-        // TaskScheduler.Current, which can be a scheduler the enqueuing task is itself occupying.
-        _tail = _tail
-            .ContinueWith(
-                _ => RunAsync(body, handler),
-                CancellationToken.None,
-                TaskContinuationOptions.None,
-                TaskScheduler.Default)
-            .Unwrap();
+        // Without the enqueuing flow's execution context: a body, and a service it starts for the rest of
+        // that service's life, would otherwise carry the AsyncLocals of whatever flow changed the graph,
+        // such as a request's activity and logging scopes, or a start deferral a stop body must not join.
+        // Guarded because suppressing an already suppressed flow throws, and nothing here may throw.
+        var suppressesFlow = !ExecutionContext.IsFlowSuppressed();
+        var flowControl = suppressesFlow ? ExecutionContext.SuppressFlow() : default;
+        try
+        {
+            // The lock the callers hold is required: "_tail = _tail.ContinueWith(...)" is a
+            // read-modify-write, and two racing enqueuers lose an assignment and run both transitions
+            // concurrently. TaskScheduler.Default is required: ContinueWith otherwise captures
+            // TaskScheduler.Current, which can be a scheduler the enqueuing task is itself occupying.
+            _tail = _tail
+                .ContinueWith(
+                    _ => RunAsync(body, handler),
+                    CancellationToken.None,
+                    TaskContinuationOptions.None,
+                    TaskScheduler.Default)
+                .Unwrap();
+        }
+        finally
+        {
+            if (suppressesFlow)
+            {
+                flowControl.Undo();
+            }
+        }
 
         return _tail;
     }
 
     private async Task RunAsync(Func<Task> body, HostedServiceHandler handler)
     {
-        // A body inherits the execution context of the flow that enqueued it, start deferral included.
-        // A stop body does not wait for that deferral, so an attach it makes would be captured by a
-        // deferral belonging to a caller it has nothing to do with and park until that caller closes it.
-        handler.ClearAmbientStartDeferral();
-
         // Bodies never throw. A faulted tail would raise UnobservedTaskException for every dropped
         // fire and forget transition and would be retained until the slot transitions again.
         try

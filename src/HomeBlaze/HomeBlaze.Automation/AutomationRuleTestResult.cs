@@ -1,0 +1,48 @@
+namespace HomeBlaze.Automation;
+
+/// <summary>
+/// What <see cref="AutomationRule.TestNow"/> found with the current values: the result of each trigger and of Only if,
+/// with the paths that led to no value, and the actions with their rendered arguments.
+/// </summary>
+public sealed record AutomationRuleTestResult
+{
+    /// <summary>Why the rule cannot be evaluated, such as an invalid expression; the other members are empty then.</summary>
+    public string? Error { get; init; }
+
+    /// <summary>
+    /// Whether the rule observes its triggers now: its mode is not Off and its automation is enabled and in its state, which
+    /// is a state of the automation.
+    /// </summary>
+    public bool IsActive { get; init; }
+
+    /// <summary>The result of each trigger, in the order of the triggers of the rule.</summary>
+    public IReadOnlyList<AutomationTriggerTestResult> Triggers { get; init; } = [];
+
+    /// <summary>Whether the rule has an Only if condition.</summary>
+    public bool HasOnlyIf { get; init; }
+
+    /// <summary>True, false or null for unknown; true without Only if.</summary>
+    public bool? OnlyIfResult { get; init; }
+
+    /// <summary>The distinct paths that led to no value when <see cref="OnlyIfResult"/> is unknown, else empty.</summary>
+    public IReadOnlyList<string> OnlyIfMissingPaths { get; init; } = [];
+
+    /// <summary>The actions as a run would execute them now, such as <c>/Living/Blinds/MoveTo(position: 40)</c>.</summary>
+    public IReadOnlyList<string> Actions { get; init; } = [];
+}
+
+/// <summary>The result of one trigger in an <see cref="AutomationRuleTestResult"/>.</summary>
+public sealed record AutomationTriggerTestResult
+{
+    /// <summary>The position of the trigger in its rule, from 1.</summary>
+    public required int Number { get; init; }
+
+    /// <summary>The expression of a property trigger: true, false or null for unknown. Null for an event trigger.</summary>
+    public bool? Result { get; init; }
+
+    /// <summary>The distinct paths that led to no value when the expression of a property trigger is unknown, else empty.</summary>
+    public IReadOnlyList<string> MissingPaths { get; init; } = [];
+
+    /// <summary>The hold a property trigger needs, or what an event trigger waits for.</summary>
+    public string? Note { get; init; }
+}

@@ -63,7 +63,9 @@ public class SubjectHierarchyBenchmark
     [Benchmark] public string DerivedDeclaredGet() => _leaf.LeafValue;
     [Benchmark] public void DerivedDeclaredSet() => _leaf.LeafValue = "x";
     [Benchmark] public int PropertiesAccess() => ((IInterceptorSubject)_leaf).Properties.Count;
-    [Benchmark] public BenchmarkLeaf ConstructThreeLevel() => new(_context);
+    // Without a context, as subjects that inherit one on attach are constructed. Passing _context would
+    // register each subject with it, keeping every subject ever constructed alive.
+    [Benchmark] public BenchmarkLeaf ConstructThreeLevel() => new();
 
     // The representative shape for Properties, and the reason the row above is not sufficient on its
     // own: PropertyReference.Metadata is one member in Namotion.Interceptor, so its Subject.Properties

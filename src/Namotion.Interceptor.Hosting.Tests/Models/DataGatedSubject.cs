@@ -19,7 +19,7 @@ namespace Namotion.Interceptor.Hosting.Tests.Models;
 /// subject to a context and dispatch the event this seam is here to interleave with.
 /// </para>
 /// </remarks>
-internal class DataGatedSubject : IInterceptorSubject
+internal sealed class DataGatedSubject : IInterceptorSubject
 {
     private static readonly IReadOnlyDictionary<string, SubjectPropertyMetadata> NoProperties =
         new Dictionary<string, SubjectPropertyMetadata>();

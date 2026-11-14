@@ -1,0 +1,51 @@
+{
+  "schema_version": "5.7.1",
+  "nodes": [
+    {
+      "uid": "n-1", "device_name": "fritz.box", "device_model": "FRITZ!Box 7590", "device_manufacturer": "AVM",
+      "device_firmware_version": "154.07.57", "device_mac_address": "BB:BB:BB:00:00:01", "is_meshed": true, "mesh_role": "master",
+      "node_interfaces": [
+        { "uid": "ni-1", "name": "LAN:1", "type": "LAN", "mac_address": "BB:BB:BB:00:00:01",
+          "node_links": [ { "uid": "nl-3", "type": "LAN", "state": "CONNECTED", "node_1_uid": "n-1", "node_2_uid": "n-4", "node_interface_1_uid": "ni-1", "node_interface_2_uid": "ni-7", "cur_data_rate_rx": 1000000, "cur_data_rate_tx": 1000000 } ] },
+        { "uid": "ni-2", "name": "AP:2G:0", "type": "WLAN", "mac_address": "BB:BB:BB:00:00:21",
+          "node_links": [ { "uid": "nl-4", "type": "WLAN", "state": "DISCONNECTED", "node_1_uid": "n-1", "node_2_uid": "n-5", "node_interface_1_uid": "ni-2", "node_interface_2_uid": "ni-8", "cur_data_rate_rx": 0, "cur_data_rate_tx": 0 } ] },
+        { "uid": "ni-3", "name": "AP:5G:0", "type": "WLAN", "mac_address": "BB:BB:BB:00:00:51",
+          "node_links": [ { "uid": "nl-1", "type": "WLAN", "state": "CONNECTED", "node_1_uid": "n-1", "node_2_uid": "n-2", "node_interface_1_uid": "ni-3", "node_interface_2_uid": "ni-4", "cur_data_rate_rx": 866000, "cur_data_rate_tx": 780000 } ] }
+      ]
+    },
+    {
+      "uid": "n-2", "device_name": "FRITZ!Repeater", "device_model": "FRITZ!Repeater 2400", "device_manufacturer": "AVM",
+      "device_firmware_version": "7.57", "device_mac_address": "BB:BB:BB:00:00:02", "is_meshed": true, "mesh_role": "slave",
+      "node_interfaces": [
+        { "uid": "ni-4", "name": "UPLINK:5G:0", "type": "WLAN", "mac_address": "BB:BB:BB:00:00:02",
+          "node_links": [ { "uid": "nl-1", "type": "WLAN", "state": "CONNECTED", "node_1_uid": "n-1", "node_2_uid": "n-2", "node_interface_1_uid": "ni-3", "node_interface_2_uid": "ni-4", "cur_data_rate_rx": 866000, "cur_data_rate_tx": 780000 } ] },
+        { "uid": "ni-5", "name": "AP:2G:0", "type": "WLAN", "mac_address": "BB:BB:BB:00:00:12",
+          "node_links": [ { "uid": "nl-2", "type": "WLAN", "state": "CONNECTED", "node_1_uid": "n-2", "node_2_uid": "n-3", "node_interface_1_uid": "ni-5", "node_interface_2_uid": "ni-6", "cur_data_rate_rx": 144000, "cur_data_rate_tx": 72000 } ] }
+      ]
+    },
+    {
+      "uid": "n-3", "device_name": "laptop", "device_model": "", "device_manufacturer": "", "device_firmware_version": "",
+      "device_mac_address": "AA:AA:AA:00:00:01", "is_meshed": false, "mesh_role": "unknown",
+      "node_interfaces": [
+        { "uid": "ni-6", "name": "", "type": "WLAN", "mac_address": "AA:AA:AA:00:00:01",
+          "node_links": [ { "uid": "nl-2", "type": "WLAN", "state": "CONNECTED", "node_1_uid": "n-2", "node_2_uid": "n-3", "node_interface_1_uid": "ni-5", "node_interface_2_uid": "ni-6", "cur_data_rate_rx": 144000, "cur_data_rate_tx": 72000 } ] }
+      ]
+    },
+    {
+      "uid": "n-4", "device_name": "desktop", "device_model": "", "device_manufacturer": "", "device_firmware_version": "",
+      "device_mac_address": "AA:AA:AA:00:00:02", "is_meshed": false, "mesh_role": "unknown",
+      "node_interfaces": [
+        { "uid": "ni-7", "name": "", "type": "LAN", "mac_address": "AA:AA:AA:00:00:02",
+          "node_links": [ { "uid": "nl-3", "type": "LAN", "state": "CONNECTED", "node_1_uid": "n-1", "node_2_uid": "n-4", "node_interface_1_uid": "ni-1", "node_interface_2_uid": "ni-7", "cur_data_rate_rx": 1000000, "cur_data_rate_tx": 1000000 } ] }
+      ]
+    },
+    {
+      "uid": "n-5", "device_name": "phone", "device_model": "", "device_manufacturer": "", "device_firmware_version": "",
+      "device_mac_address": "AA:AA:AA:00:00:03", "is_meshed": false, "mesh_role": "unknown",
+      "node_interfaces": [
+        { "uid": "ni-8", "name": "", "type": "WLAN", "mac_address": "AA:AA:AA:00:00:03",
+          "node_links": [ { "uid": "nl-4", "type": "WLAN", "state": "DISCONNECTED", "node_1_uid": "n-1", "node_2_uid": "n-5", "node_interface_1_uid": "ni-2", "node_interface_2_uid": "ni-8", "cur_data_rate_rx": 0, "cur_data_rate_tx": 0 } ] }
+      ]
+    }
+  ]
+}

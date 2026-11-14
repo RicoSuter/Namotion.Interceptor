@@ -23,6 +23,8 @@ namespace HomeBlaze.History.Sqlite;
 /// </summary>
 [Category("History")]
 [Description("Persists [State] history to partitioned SQLite files (priority 50).")]
+[DisplayName("SQLite history")]
+[SubjectIcon("History")]
 [InterceptorSubject]
 public partial class SqliteHistoryStoreSubject :
     BackgroundService, IConfigurable, ITitleProvider, IHistoryStore, ILifecycleHandler
@@ -114,12 +116,14 @@ public partial class SqliteHistoryStoreSubject :
     /// Total number of samples recorded since start.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial long RecordedCount { get; set; }
 
     /// <summary>
     /// Number of oversize string values replaced with a placeholder.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial long OversizeCount { get; set; }
 
     /// <summary>
@@ -132,6 +136,7 @@ public partial class SqliteHistoryStoreSubject :
     /// Cumulative number of samples dropped after the pending persistence queue reached its limit.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial long DropCount { get; set; }
 
     /// <summary>
@@ -156,12 +161,14 @@ public partial class SqliteHistoryStoreSubject :
     /// Average incoming changes per second (eligible [State] changes observed).
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial double IncomingChangesPerSecond { get; set; }
 
     /// <summary>
     /// Average recorded changes per second (samples written to the engine).
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial double RecordedChangesPerSecond { get; set; }
 
     // IHistoryStore
@@ -197,6 +204,14 @@ public partial class SqliteHistoryStoreSubject :
     {
         cancellationToken.ThrowIfCancellationRequested();
         return new ValueTask<HistoryPoint?>(_engine?.GetSampleAtOrBefore(propertyPath, asOf));
+    }
+
+    /// <inheritdoc />
+    public ValueTask<HistoryPoint?> GetLastNumericSampleBeforeAsync(
+        string propertyPath, DateTimeOffset before, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return new ValueTask<HistoryPoint?>(_engine?.GetLastNumericSampleBefore(propertyPath, before));
     }
 
     /// <summary>

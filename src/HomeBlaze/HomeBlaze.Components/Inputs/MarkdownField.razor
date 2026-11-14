@@ -1,0 +1,105 @@
+@* Markdown source and its preview side by side; on a narrow width the preview wraps below the source. The host passes
+   how its Markdown becomes HTML, so the preview shows what the host will show. *@
+
+<div class="@Class" data-testid="markdown-field">
+    <div class="d-flex align-baseline gap-2 mb-1">
+        <MudText Typo="Typo.subtitle2">@Label</MudText>
+        <MudSpacer />
+        @if (MaxSize is { } maxSize)
+        {
+            <MudText Typo="Typo.caption" Color="@(_model.IsTooLarge ? Color.Error : Color.Default)" Class="@(_model.IsTooLarge ? null : "mud-text-secondary")" Style="font-variant-numeric: tabular-nums;"
+                     data-testid="markdown-field-size">@_model.Size.ToString("N0") / @maxSize.ToString("N0") bytes</MudText>
+        }
+    </div>
+    <div class="markdown-field-box d-flex flex-wrap">
+        <div class="markdown-field-column">
+            <div class="markdown-field-header mud-typography-caption mud-text-secondary">@Hint</div>
+            @* Taken on each keystroke, so that the preview, the size and the error follow the typing. Attributes the host sets on
+               the field, such as a test id, land here. *@
+            <textarea class="markdown-field-source" value="@Value" @oninput="OnInputAsync" aria-label="@Label" spellcheck="true" @attributes="InputAttributes"></textarea>
+        </div>
+        <div class="markdown-field-column">
+            <div class="markdown-field-header mud-typography-caption mud-text-secondary">Preview</div>
+            <div class="markdown-field-preview mud-typography-body2" data-testid="markdown-field-preview">
+                @if (_model.Html is { } html)
+                {
+                    @* Only HTML that ToHtml returned, which the host renders the same way. *@
+                    @((MarkupString)html)
+                }
+                else if (string.IsNullOrEmpty(Value))
+                {
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">Nothing to preview.</MudText>
+                }
+            </div>
+        </div>
+    </div>
+    @if (_model.Error is { } error)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Error" Class="d-block mt-1" data-testid="markdown-field-error">@error</MudText>
+    }
+</div>
+
+@code {
+    private MarkdownFieldModel _model = MarkdownFieldModel.Empty;
+    private string? _modelValue;
+    private Func<string, string?>? _modelToHtml;
+    private Func<string, string?>? _modelGetError;
+    private int? _modelMaxSize;
+
+    /// <summary>The Markdown text.</summary>
+    [Parameter] public string? Value { get; set; }
+
+    /// <summary>Raised with the new text on each keystroke.</summary>
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    /// <summary>The caption above the field.</summary>
+    [Parameter] public string? Label { get; set; }
+
+    /// <summary>The text above the source, such as which Markdown the field takes.</summary>
+    [Parameter] public string? Hint { get; set; }
+
+    /// <summary>Renders the text to HTML that is safe to insert into the page, or returns null when it cannot.</summary>
+    /// <remarks>Returns the same HTML for the same text: the field renders a text again only when it or a parameter changed.</remarks>
+    [Parameter, EditorRequired] public Func<string, string?> ToHtml { get; set; } = null!;
+
+    /// <summary>Gets why the text is refused, or null when it is accepted.</summary>
+    /// <remarks>Returns the same error for the same text: the field checks a text again only when it or a parameter changed.</remarks>
+    [Parameter] public Func<string, string?> GetError { get; set; } = static _ => null;
+
+    /// <summary>The largest text in bytes of UTF-8, or null for no limit.</summary>
+    [Parameter] public int? MaxSize { get; set; }
+
+    /// <summary>The CSS classes of the field.</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>Attributes of the text area, such as a <c>data-testid</c>.</summary>
+    [Parameter(CaptureUnmatchedValues = true)] public IReadOnlyDictionary<string, object>? InputAttributes { get; set; }
+
+    /// <summary>Whether the text can be saved: no error and not too large.</summary>
+    public bool IsValid => _model.Error is null;
+
+    // The host renders again after each ValueChanged and passes the same text back, which needs no second rendering of
+    // the Markdown. The delegates are compared with Delegate.Equals, so a method group of the same instance is unchanged.
+    protected override void OnParametersSet() => Update();
+
+    private Task OnInputAsync(ChangeEventArgs args)
+    {
+        Value = args.Value as string;
+        Update();
+        return ValueChanged.InvokeAsync(Value);
+    }
+
+    private void Update()
+    {
+        if (_modelValue == Value && Equals(_modelToHtml, ToHtml) && Equals(_modelGetError, GetError) && _modelMaxSize == MaxSize)
+        {
+            return;
+        }
+
+        _model = MarkdownFieldModel.Create(Value, ToHtml, GetError, MaxSize);
+        _modelValue = Value;
+        _modelToHtml = ToHtml;
+        _modelGetError = GetError;
+        _modelMaxSize = MaxSize;
+    }
+}

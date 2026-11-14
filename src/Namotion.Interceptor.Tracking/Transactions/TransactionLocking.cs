@@ -6,9 +6,8 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 public enum TransactionLocking
 {
     /// <summary>
-    /// Acquires an exclusive lock at the start of the transaction.
-    /// Only one transaction can be active at a time per context.
-    /// Other transactions wait until the current one completes.
+    /// Acquires the lock when the transaction begins and holds it until disposal, so only one transaction per context
+    /// is active at a time and others wait.
     /// </summary>
     Exclusive,
 
