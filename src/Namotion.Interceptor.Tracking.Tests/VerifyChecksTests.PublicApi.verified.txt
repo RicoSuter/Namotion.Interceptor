@@ -81,6 +81,10 @@ namespace Namotion.Interceptor.Tracking.Change
 }
 namespace Namotion.Interceptor.Tracking.Derived
 {
+    public static class DerivedEvaluation
+    {
+        public static int Depth { get; }
+    }
     public static class DerivedGraphDependencies
     {
         public static void Changed(Namotion.Interceptor.IInterceptorSubject subject, bool hasFailed = false) { }
