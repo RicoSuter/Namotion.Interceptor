@@ -76,18 +76,48 @@ public class ApplicationCertificateLoaderTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenTheCertificateCarriesAnotherApplicationUri_ThenLoadingFailsUntilTheUriMatches()
+    public async Task WhenASelfSignedCertificateCarriesAnotherApplicationUri_ThenItIsReplacedWithAWarning()
     {
         // Arrange - a host name change otherwise leaves the stored certificate with a stale URI.
-        var original = CreateConfiguration();
-        original.ApplicationUri = "urn:old-host:client";
-        await LoadAsync(await original.CreateApplicationInstanceAsync(), original);
-        var changed = CreateConfiguration();
-        changed.ApplicationUri = "urn:new-host:client";
+        var configuration = CreateConfiguration();
+        configuration.ApplicationUri = "urn:new-host:client";
+        using var stale = await AddSelfSignedCertificateAsync(configuration, ageInDays: 10, applicationUri: "urn:old-host:client");
+        var application = await configuration.CreateApplicationInstanceAsync();
+        var logger = new RecordingLogger();
+
+        // Act
+        await LoadAsync(application, configuration, logger);
+
+        // Assert
+        var certificate = GetCertificate(application);
+        Assert.NotEqual(stale.Thumbprint, certificate.Thumbprint);
+        Assert.True(certificate.HasPrivateKey);
+        Assert.True(X509Utils.CompareApplicationUriWithCertificate(certificate, "urn:new-host:client"));
+        Assert.Contains(certificate.Thumbprint, Path.GetFileName(Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "certs")))));
+        Assert.DoesNotContain(stale.Thumbprint, Path.GetFileName(Assert.Single(Directory.GetFiles(PrivatePath))));
+        var warning = Assert.Single(logger.Warnings);
+        Assert.Contains(stale.Thumbprint, warning);
+        Assert.Contains(certificate.Thumbprint, warning);
+        Assert.Contains("urn:old-host:client", warning);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenACertificateThatIsNotReplacedCarriesAnotherApplicationUri_ThenItIsKeptAndLoadingFails(bool isCaIssued)
+    {
+        // Arrange - a CA-issued certificate, or a self-signed one with automatic creation off.
+        var configuration = CreateConfiguration();
+        configuration.ApplicationUri = "urn:new-host:client";
+        configuration.AutoCreateApplicationCertificate = isCaIssued;
+        using var stale = isCaIssued
+            ? await AddCaIssuedCertificateAsync(configuration, ageInDays: 10, applicationUri: "urn:old-host:client")
+            : await AddSelfSignedCertificateAsync(configuration, ageInDays: 10, applicationUri: "urn:old-host:client");
+        var application = await configuration.CreateApplicationInstanceAsync();
 
         // Act & Assert
-        await Assert.ThrowsAsync<ServiceResultException>(async () => await LoadAsync(await changed.CreateApplicationInstanceAsync(), changed));
-        await LoadAsync(await original.CreateApplicationInstanceAsync(), original);
+        await Assert.ThrowsAsync<ServiceResultException>(() => LoadAsync(application, configuration));
+        Assert.Contains(stale.Thumbprint, Path.GetFileName(Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "certs")))));
     }
 
     [Fact]
@@ -392,12 +422,13 @@ public class ApplicationCertificateLoaderTests : IDisposable
         application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate!;
 
     /// <summary>
-    /// Adds a self-signed certificate valid for 365 days that was issued <paramref name="ageInDays"/> ago.
+    /// Adds a self-signed certificate valid for 365 days that was issued <paramref name="ageInDays"/> ago, for
+    /// <paramref name="applicationUri"/> or else the configured application URI.
     /// </summary>
-    private async Task<X509Certificate2> AddSelfSignedCertificateAsync(OpcUaClientConfiguration configuration, int ageInDays)
+    private async Task<X509Certificate2> AddSelfSignedCertificateAsync(OpcUaClientConfiguration configuration, int ageInDays, string? applicationUri = null)
     {
         var certificate = CertificateFactory
-            .CreateCertificate(configuration.ApplicationUri, configuration.ApplicationName, $"CN={configuration.ApplicationName}, O=Namotion", null)
+            .CreateCertificate(applicationUri ?? configuration.ApplicationUri, configuration.ApplicationName, $"CN={configuration.ApplicationName}, O=Namotion", null)
             .SetNotBefore(DateTime.UtcNow.AddDays(-ageInDays))
             .SetLifeTime(TimeSpan.FromDays(365))
             .CreateForRSA();
@@ -407,9 +438,10 @@ public class ApplicationCertificateLoaderTests : IDisposable
 
     /// <summary>
     /// Adds a certificate valid for 365 days, issued <paramref name="ageInDays"/> ago by an authority whose certificate
-    /// is in the issuer store, which completes the chain so the SDK accepts the certificate on load.
+    /// is in the issuer store, which completes the chain so the SDK accepts the certificate on load. It carries
+    /// <paramref name="applicationUri"/> or else the configured application URI.
     /// </summary>
-    private async Task<X509Certificate2> AddCaIssuedCertificateAsync(OpcUaClientConfiguration configuration, int ageInDays)
+    private async Task<X509Certificate2> AddCaIssuedCertificateAsync(OpcUaClientConfiguration configuration, int ageInDays, string? applicationUri = null)
     {
         using var authority = CertificateBuilder.Create("CN=Test Authority")
             .SetNotBefore(DateTime.UtcNow.AddDays(-500))
@@ -418,7 +450,7 @@ public class ApplicationCertificateLoaderTests : IDisposable
             .CreateForRSA();
         await AddToStoreAsync("issuer", authority);
         var certificate = CertificateFactory
-            .CreateCertificate(configuration.ApplicationUri, configuration.ApplicationName, $"CN={configuration.ApplicationName}, O=Namotion", null)
+            .CreateCertificate(applicationUri ?? configuration.ApplicationUri, configuration.ApplicationName, $"CN={configuration.ApplicationName}, O=Namotion", null)
             .SetNotBefore(DateTime.UtcNow.AddDays(-ageInDays))
             .SetLifeTime(TimeSpan.FromDays(365))
             .SetIssuer(authority)

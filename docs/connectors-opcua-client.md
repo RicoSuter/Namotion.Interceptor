@@ -138,7 +138,7 @@ Beyond the settings shown above, the following properties are available on `OpcU
 | `ApplicationName` | "Namotion.Interceptor.Client" | Application name for identification and certificate generation |
 | `MinimumSecurityMode` | None | Minimum security mode of the endpoint: `None`, `Sign` or `SignAndEncrypt` (see [Transport Security](#transport-security)) |
 | `AutoAcceptUntrustedCertificates` | false | Accept server certificates that are not in the trusted store |
-| `AutoCreateApplicationCertificate` | true | Create a self-signed client certificate for secured connections, and replace it once it has expired |
+| `AutoCreateApplicationCertificate` | true | Create a self-signed client certificate for secured connections, and replace it once it has expired or no longer matches the application URI |
 | `ApplicationUri` | null | Application URI the client certificate carries (derived from host and application name when null) |
 | `ApplicationCertificateLifetimeInMonths` | 12 | Lifetime of a certificate the client creates, at least 1 |
 | `CreateUserIdentity` | null | Async factory for user credentials (see [Authentication](#authentication)) |
@@ -215,7 +215,7 @@ Both default to `pki`, so a client and a server in one process share their store
 
 Only secured connections need one. With `AutoCreateApplicationCertificate = true`, the default, the client creates a self-signed certificate on its first secured connect; otherwise a missing certificate fails the connection. A provisioned certificate must carry the application URI `urn:{host name}:Namotion.Interceptor:{ApplicationName}` or the value of `ApplicationUri`, and should have the subject `CN={ApplicationName}, O=Namotion`. A password-protected key needs a `CertificatePasswordProvider` (see [Custom Application Configuration](#custom-application-configuration)).
 
-The default application URI contains the host name, so after a rename, such as a recreated container, the stored certificate fails every connect. Set `ApplicationUri` where the host name can change.
+The default application URI contains the host name, so after a rename, such as a recreated container, the stored certificate no longer matches. A self-signed one is then replaced, as described below, and the server has to trust the new one; any other fails every connect. Set `ApplicationUri` where the host name can change.
 
 #### Certificate Expiry
 
@@ -223,6 +223,7 @@ When the client or the server loads its certificate:
 
 - within 30 days of expiry, it logs a warning;
 - an expired self-signed certificate, created or provisioned, is replaced with a warning, and peers have to trust the new one;
+- so is a self-signed certificate that does not carry the application URI or, for the server, does not cover the host of `BaseAddress`;
 - a CA-issued certificate, any certificate while automatic creation is off, and one an override provides (see [Custom Application Configuration](#custom-application-configuration)) are never replaced.
 
 The client loads it each time it creates a secured session itself, on the initial connect and on manual reconnects (see [Connection Loss Recovery](#connection-loss-recovery)). A session that outlives the certificate fails once the server rejects it, and the next connect replaces it.
