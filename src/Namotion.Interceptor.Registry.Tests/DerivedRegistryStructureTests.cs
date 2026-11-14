@@ -36,6 +36,7 @@ public partial class StructureHolder
     public StructureHolder()
     {
         Targets = [];
+        TargetsByKey = [];
     }
 
     public partial StructureReader? Reader { get; set; }
@@ -47,6 +48,8 @@ public partial class StructureHolder
     public partial RegistryTarget[] Targets { get; set; }
 
     public partial StructureHolder? Child { get; set; }
+
+    public partial Dictionary<string, RegistryTarget> TargetsByKey { get; set; }
 }
 
 /// <summary>
@@ -97,6 +100,9 @@ public class DerivedRegistryStructureTests
     [InlineData("RegisteredSubjectProperty.Attributes")]
     [InlineData("RegisteredSubjectProperty.Children")]
     [InlineData("MovedChild")]
+    [InlineData("RekeyedChild")]
+    [InlineData("ContextDetach")]
+    [InlineData("AddPropertyUnderLifecycleLock")]
     public void WhenStructureReadThroughApiChanges_ThenDerivedPropertyPublishesTheChange(string api)
     {
         // Arrange
@@ -283,6 +289,19 @@ public class DerivedRegistryStructureTests
             return (() => targets.Children.Length.ToString(), () => root.Child = null);
         }
 
+        if (api == "RekeyedChild")
+        {
+            root.TargetsByKey = new Dictionary<string, RegistryTarget> { ["first"] = target };
+            var parents = target.TryGetRegisteredSubject()!;
+            return (() => parents.Parents[0].Index?.ToString(), () => root.TargetsByKey = new Dictionary<string, RegistryTarget> { ["second"] = target });
+        }
+
+        if (api == "ContextDetach")
+        {
+            ((IInterceptorSubject)target).Context.AddFallbackContext(context);
+            return (() => (target.TryGetRegisteredSubject() is not null).ToString(), () => ((IInterceptorSubject)target).Context.RemoveFallbackContext(context));
+        }
+
         if (api == "MovedChild")
         {
             root.Targets = [target];
@@ -295,6 +314,19 @@ public class DerivedRegistryStructureTests
         Action addReference = () => root.OtherTarget = target;
         Action addProperty = () => registered.AddProperty<int>("Added", _ => 1);
         Action addAttribute = () => registered.TryGetProperty(nameof(RegistryTarget.Value))!.AddAttribute<int>("Unit", _ => 1);
+        if (api == "AddPropertyUnderLifecycleLock")
+        {
+            var other = new RegistryTarget();
+            context.GetService<LifecycleInterceptor>().SubjectAttached += change =>
+            {
+                if (change.Subject == other)
+                {
+                    registered.AddProperty<int>("Added", _ => 1);
+                }
+            };
+            return (() => registered.Properties.Length.ToString(), () => root.OtherTarget = other);
+        }
+
         if (api == "RegisteredSubjectProperty.Attributes")
         {
             // The attributes are cached before the getter first reads them.
