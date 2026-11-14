@@ -101,17 +101,18 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 if (ReferenceEquals(_structureChangePending, subject))
                 {
                     // A handler of the subject's attach descends into its subtree (ContextInheritanceHandler): the
-                    // structure is set, and is reported before the attach evaluations below read it. So is the
-                    // structure of a root attached to a context, at the descent into its first child: the child's
-                    // registry handler registered it.
+                    // structure and the holder's children are set, and are reported before the attach evaluations
+                    // below read them. So is the structure of a root attached to a context, at the descent into its
+                    // first child: the child's registry handler registered it.
+                    var holder = _structureChangePendingHolder!;
+                    var isHolderPending = ReferenceEquals(_contextAttachPending, holder);
                     _structureChangePending = null;
-                    TrackingWriteObserver.OnStructureChanged(subject);
-                    if (_contextAttachPending is not null &&
-                        ReferenceEquals(_contextAttachPending, _structureChangePendingHolder))
+                    if (isHolderPending)
                     {
                         _contextAttachPending = null;
-                        TrackingWriteObserver.OnStructureChanged(_structureChangePendingHolder);
                     }
+
+                    TrackingWriteObserver.OnStructureChanged(subject, holder, isHolderPending);
                 }
 
                 var isRoot = !_attachedSubjects.ContainsKey(subject);
@@ -261,15 +262,14 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
         finally
         {
-            // Reported here unless the descent into the subtree reported it already.
+            // Reported here unless the descent into the subtree reported them already.
             if (ReferenceEquals(_structureChangePending, subject))
             {
-                TrackingWriteObserver.OnStructureChanged(subject);
+                TrackingWriteObserver.OnStructureChanged(subject, property.Subject, isHolderStructureChanged: false);
             }
 
             _structureChangePending = outerPending;
             _structureChangePendingHolder = outerPendingHolder;
-            TrackingWriteObserver.OnChildrenChanged(property.Subject);
         }
 
         if (isFirstAttach)
@@ -387,8 +387,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
         finally
         {
-            TrackingWriteObserver.OnStructureChanged(subject);
-            TrackingWriteObserver.OnChildrenChanged(property.Subject);
+            TrackingWriteObserver.OnStructureChanged(subject, property.Subject, isHolderStructureChanged: false);
         }
 
         if (children is not null)

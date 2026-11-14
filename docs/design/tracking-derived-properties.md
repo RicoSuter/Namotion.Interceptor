@@ -204,10 +204,10 @@ Recorded, only while a getter is recorded, by:
 | `RegisteredSubject.Parents`, `Properties`, `TryGetProperty`, `GetPropertyAttributes`, `TryGetPropertyAttribute` of S, and `RegisteredSubjectProperty.Attributes` of a property of S, also when cached | S |
 | `RegisteredSubjectProperty.Children` of a property of S | the children of S |
 
-Changed by the following; a change updates the state first, then runs W2 to W5 on the cell (`TrackingWriteObserver.OnStructureChanged`), whose requests are queued while the thread holds a lifecycle lock (see [Structure Changes](tracking-lifecycle.md#structure-changes)) and run immediately otherwise:
+Changed by the following; a change updates the state first, then runs W2 to W5 on the cell (`TrackingWriteObserver.OnStructureChanged`). The cells one dispatch reports together share one fence (W2): every state change is stored before it and every data lookup follows it, so each lookup still comes after the change of its cell. The requests are queued while the thread holds a lifecycle lock (see [Structure Changes](tracking-lifecycle.md#structure-changes)) and run immediately otherwise:
 
 - `LifecycleInterceptor`, once per lifecycle change of S it dispatches (context attach or detach, reference added or removed), after all lifecycle handlers ran or one of them threw. When a handler of an attach descends into the subtree of S (`ContextInheritanceHandler`), the structure of S is reported once, when the descent starts, instead: the handlers that set it (the registry and parent tracking) run before the descent, and the attach evaluations in the subtree then read it at its new version. When a root attached to a context has children, its structure is reported at the descent into its first child instead of after its own handlers: the first child's registry handler registered it, and a context attach changes neither its reference count nor its parents. No handler changes the structure of S after the descent without reporting the change itself.
-- `LifecycleInterceptor`, for the children of the holding subject, once per such dispatch through a property, after all lifecycle handlers ran or one of them threw.
+- `LifecycleInterceptor`, for the children of the holding subject, once per such dispatch through a property, together with the structure of S: at the descent, since the registry adds S to the children before it, or after all lifecycle handlers ran or one of them threw.
 - `LifecycleInterceptor`, once per child whose key or position a write changed, and for the children of the written property's subject, after the `IChildIndexHandler` services ran or one of them threw.
 - `RegisteredSubject.AddProperty`, `AddDerivedProperty` and `AddAttribute`, once the new property is registered, attached and its initial value published, also when one of these threw.
 
@@ -417,7 +417,7 @@ Every link belongs to an attached derived property: D's detach removes all of D'
 | Write of a property with dependents | Zero | Above, plus `Interlocked.Increment` (W4), a used-by snapshot read, and a request per dependent |
 | Request for an owned property | Zero | One brief `lock(data)` |
 | Structure read outside an evaluation | Zero | One thread-static load and a type check |
-| Lifecycle change of a subject whose structure no getter read | Zero | A full fence (W2) and one data lookup, twice through a property (structure and children) |
+| Lifecycle change of a subject whose structure no getter read | Zero | A full fence (W2) and one data lookup per cell: two through a property (structure and children) |
 | Request under a lifecycle lock | Zero in steady state (segments reused per thread) | One queue entry per derived property; a change delivery queued under the lock allocates its closure |
 | Recalculation, dependencies unchanged | Zero (beyond the getter) | Brief `lock(data)` for the request, the commit and after the publication, the getter, a full fence and a version read per dependency (R5) |
 | Recalculation, dependencies changed | One `PropertyReference[]` when the buffer grows | Above, plus used-by adds and removes |

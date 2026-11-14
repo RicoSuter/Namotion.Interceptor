@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
@@ -67,18 +68,50 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
     /// W2 to W5 for a change of the structure of <paramref name="subject"/> (<see cref="SubjectStructure"/>). Called
     /// after the structure changed.
     /// </summary>
-    internal static void OnStructureChanged(IInterceptorSubject subject) => OnCellChanged(SubjectStructure.Of(subject));
-
-    /// <summary>
-    /// W2 to W5 for a change of the children of <paramref name="subject"/> (<see cref="SubjectStructure"/>). Called
-    /// after a subject was attached or detached through one of its properties, or moved within one.
-    /// </summary>
-    internal static void OnChildrenChanged(IInterceptorSubject subject) => OnCellChanged(SubjectStructure.ChildrenOf(subject));
-
-    private static void OnCellChanged(PropertyReference cell)
+    internal static void OnStructureChanged(IInterceptorSubject subject)
     {
         // W2: the structure changed before its data is looked up.
         Interlocked.MemoryBarrier();
+        RequestCellRecalculations(SubjectStructure.Of(subject));
+    }
+
+    /// <summary>
+    /// W2 to W5 for a change of the structure of <paramref name="subject"/>, of the children of
+    /// <paramref name="holder"/>, and of the structure of <paramref name="holder"/> when
+    /// <paramref name="isHolderStructureChanged"/> (<see cref="SubjectStructure"/>). Called after a subject was attached
+    /// or detached through a property of <paramref name="holder"/>, once all of these changed.
+    /// </summary>
+    internal static void OnStructureChanged(IInterceptorSubject subject, IInterceptorSubject holder, bool isHolderStructureChanged)
+    {
+        // W2, once for every cell: all of them changed before the first data lookup.
+        Interlocked.MemoryBarrier();
+        RequestCellRecalculations(SubjectStructure.Of(subject));
+        RequestCellRecalculations(SubjectStructure.ChildrenOf(holder));
+        if (isHolderStructureChanged)
+        {
+            RequestCellRecalculations(SubjectStructure.Of(holder));
+        }
+    }
+
+    /// <summary>
+    /// W2 to W5 for a change of the structure of every subject in <paramref name="children"/> and of the children of
+    /// <paramref name="holder"/> (<see cref="SubjectStructure"/>). Called after the children moved within a property
+    /// of <paramref name="holder"/>.
+    /// </summary>
+    internal static void OnChildrenMoved(ReadOnlySpan<SubjectChild> children, IInterceptorSubject holder)
+    {
+        // W2, once for every cell: all of them changed before the first data lookup.
+        Interlocked.MemoryBarrier();
+        foreach (var child in children)
+        {
+            RequestCellRecalculations(SubjectStructure.Of(child.Subject));
+        }
+
+        RequestCellRecalculations(SubjectStructure.ChildrenOf(holder));
+    }
+
+    private static void RequestCellRecalculations(PropertyReference cell)
+    {
         var data = cell.TryGetDerivedPropertyData();
         if (data is not null)
         {
