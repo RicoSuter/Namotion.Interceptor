@@ -9,10 +9,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// reference count, its parents and its registered properties, and its children, the subjects attached through its
 /// properties. Infrastructure for the lifecycle and the registry.
 /// </summary>
-/// <remarks>
-/// The structure and the children of a subject are two dependency sources, linked and versioned like a property. See
-/// "Structure Cells" in docs/design/tracking-derived-properties.md.
-/// </remarks>
+/// <remarks>See "Structure Cells" in docs/design/tracking-derived-properties.md.</remarks>
 [EditorBrowsable(EditorBrowsableState.Never)]
 public static class SubjectStructure
 {
