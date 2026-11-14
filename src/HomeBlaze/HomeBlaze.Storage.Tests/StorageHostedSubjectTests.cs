@@ -144,7 +144,7 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
             Assert.Equal(1, _recorder.CountAttachesOf(device));
             Assert.Equal(1, _recorder.CountDetachesOf(device));
             Assert.False(IsAttached(device));
-            Assert.True(device.IsStopped);
+            Assert.False(device.IsRunning);
         }
     }
 
@@ -393,13 +393,13 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
             var devices = RecordingDevice.Created;
             await WaitUntilHostHasHandledEveryChangeAsync();
             Assert.Empty(parent.Children);
-            Assert.True(old.IsStopped);
+            Assert.False(old.IsRunning);
             Assert.Equal(2, devices.Count);
             var late = devices[1];
             Assert.Equal(1, _recorder.CountAttachesOf(late));
             Assert.Equal(1, _recorder.CountDetachesOf(late));
             Assert.False(IsAttached(late));
-            Assert.True(late.IsStopped);
+            Assert.False(late.IsRunning);
         }
         finally
         {
@@ -431,7 +431,7 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
             Assert.Equal(1, _recorder.CountAttachesOf(device));
             Assert.Equal(1, _recorder.CountDetachesOf(device));
             Assert.False(IsAttached(device));
-            Assert.True(device.IsStopped);
+            Assert.False(device.IsRunning);
         }
     }
 
@@ -457,7 +457,7 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
             Assert.Equal(1, _recorder.CountAttachesOf(device));
             Assert.Equal(1, _recorder.CountDetachesOf(device));
             Assert.False(IsAttached(device));
-            Assert.True(device.IsStopped);
+            Assert.False(device.IsRunning);
         }
     }
 
@@ -487,7 +487,7 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
             Assert.Equal(1, _recorder.CountAttachesOf(device));
             Assert.Equal(1, _recorder.CountDetachesOf(device));
             Assert.False(IsAttached(device));
-            Assert.True(device.IsStopped);
+            Assert.False(device.IsRunning);
         }
     }
 
@@ -675,12 +675,17 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
     }
 
     /// <summary>
-    /// Waits until every device the graph attached runs while attached and is stopped once detached. Each
+    /// Waits until every device the graph attached runs while attached and no longer runs once detached. Each
     /// subject has its own start and stop queue, so no later start can serve as a barrier for earlier ones.
     /// </summary>
     private Task WaitUntilHostHasHandledEveryChangeAsync()
-        => AsyncTestHelpers.WaitUntilAsync(() => RecordingDevice.Created.All(device =>
-            _recorder.CountAttachesOf(device) == 0 || (IsAttached(device) ? device.IsStarted : device.IsStopped)));
+        => AsyncTestHelpers.WaitUntilAsync(
+            () => RecordingDevice.Created.All(IsSettled),
+            () => "Not settled: " + string.Join(", ", RecordingDevice.Created.Where(device => !IsSettled(device)).Select(device =>
+                $"{device.Name} (attached {IsAttached(device)}, started {device.IsStarted}, stopped {device.IsStopped})")));
+
+    private bool IsSettled(RecordingDevice device)
+        => _recorder.CountAttachesOf(device) == 0 || (IsAttached(device) ? device.IsStarted : !device.IsRunning);
 
     private bool IsAttached(IInterceptorSubject subject)
         => Context!.TryGetLifecycleInterceptor()!.TryRunWhileAttached(subject, static () => { });

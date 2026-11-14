@@ -37,6 +37,12 @@ public partial class RecordingDevice : BackgroundService, IConfigurable
 
     public bool IsStopped => _stopped.Task.IsCompleted;
 
+    /// <summary>
+    /// Whether the device was started and not stopped since. A device that leaves the graph before the host
+    /// ran its start is never started, so it is never stopped either.
+    /// </summary>
+    public bool IsRunning => IsStarted && !IsStopped;
+
     public Task WhenStartedAsync() => _started.Task.WaitAsync(Timeout);
 
     public Task WhenStoppedAsync() => _stopped.Task.WaitAsync(Timeout);
