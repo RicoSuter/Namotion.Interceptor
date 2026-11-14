@@ -95,6 +95,8 @@ public static class SubjectRegistryExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static RegisteredSubjectProperty? TryGetRegisteredProperty(this IInterceptorSubject subject, string propertyName, ISubjectRegistry? registry = null)
     {
+        // Recorded before the registry is resolved: a subject without a registry gains one when it is attached.
+        SubjectStructure.RecordRead(subject);
         registry ??= subject.Context.TryGetService<ISubjectRegistry>();
         return registry?
             .TryGetRegisteredSubject(subject)?
