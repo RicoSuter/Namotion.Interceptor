@@ -17,8 +17,8 @@ public class OpcUaSecurityTests
     private const string ServerApplicationUri = "urn:test:Namotion.Interceptor.Server";
     private const string OtherServerApplicationUri = "urn:test:Namotion.Interceptor.Server.Renamed";
 
-    // A server restart is detected through keep-alives and recovered by the reconnect handler or a manual reconnect,
-    // whichever applies, so the wait covers several reconnect intervals plus a manual reconnect.
+    // Covers up to 15 s of MaxReconnectDuration before a manual reconnect, the 5 s health check, the 1 s retry and the
+    // secured handshake, with the margin of the existing reconnection tests, which use 90 s.
     private static readonly TimeSpan ReconnectTimeout = TimeSpan.FromSeconds(90);
 
     private readonly ITestOutputHelper _output;
@@ -73,7 +73,7 @@ public class OpcUaSecurityTests
         Assert.Null(client.Source.CurrentSession);
 
         // Act
-        TrustRejectedCertificates(test.ClientStore);
+        await TrustRejectedCertificatesAsync(test.ClientStore);
 
         // Assert
         await WaitUntilConnectedAsync(client);
@@ -92,18 +92,20 @@ public class OpcUaSecurityTests
             config.AutoAcceptUntrustedCertificates = true;
         });
         await AsyncTestHelpers.WaitUntilAsync(
-            () => GetFiles(Path.Combine(test.ServerStore, "rejected", "certs")).Length > 0,
-            message: "The server should write the untrusted client certificate to its rejected store");
+            () => GetFiles(Path.Combine(test.ClientStore, "own", "certs")).Length > 0,
+            message: "The client should create its certificate for the secured endpoint");
+        using var clientCertificate = LoadOwnCertificate(test.ClientStore);
+        await WaitForRejectedCertificateAsync(test.ServerStore, clientCertificate,
+            "The server should write the untrusted client certificate to its rejected store");
         await WaitForStatusCodeAsync(client, test.Logger, StatusCodes.BadSecurityChecksFailed);
 
-        using var clientCertificate = LoadOwnCertificate(test.ClientStore);
-        Assert.Contains(clientCertificate.Thumbprint, Path.GetFileName(Assert.Single(GetFiles(Path.Combine(test.ServerStore, "rejected", "certs")))));
         var error = Assert.IsType<InvalidOperationException>(client.Source!.Diagnostics.LastError);
         Assert.Contains(clientCertificate.Thumbprint, error.Message);
+        Assert.DoesNotContain(nameof(OpcUaClientConfiguration.AutoAcceptUntrustedCertificates), error.Message);
         Assert.Null(client.Source.CurrentSession);
 
         // Act
-        TrustRejectedCertificates(test.ServerStore);
+        await TrustRejectedCertificatesAsync(test.ServerStore);
 
         // Assert
         await WaitUntilConnectedAsync(client);
@@ -125,7 +127,7 @@ public class OpcUaSecurityTests
         Assert.Null(client.Source!.CurrentSession);
 
         // Act
-        TrustRejectedCertificates(test.ClientStore);
+        await TrustRejectedCertificatesAsync(test.ClientStore);
 
         // Assert
         await WaitUntilConnectedAsync(client);
@@ -152,7 +154,7 @@ public class OpcUaSecurityTests
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
-            () => client.Source!.Diagnostics.LastError is not null,
+            () => client.Source!.Diagnostics.LastError is InvalidOperationException,
             message: "The client should refuse to fall back to an unsecured endpoint");
         var error = Assert.IsType<InvalidOperationException>(client.Source!.Diagnostics.LastError);
         Assert.Contains(nameof(OpcUaClientConfiguration.MinimumSecurityMode), error.Message);
@@ -214,7 +216,6 @@ public class OpcUaSecurityTests
         var client = await test.StartClientAsync(config =>
         {
             config.MinimumSecurityMode = MessageSecurityMode.Sign;
-            config.SessionTimeout = TimeSpan.FromSeconds(30);
             config.KeepAliveInterval = TimeSpan.FromSeconds(2);
             config.ReconnectInterval = TimeSpan.FromSeconds(2);
         });
@@ -255,7 +256,8 @@ public class OpcUaSecurityTests
         var endpoint = client.Source!.CurrentSession!.Endpoint;
         Assert.Equal(ServerApplicationUri, endpoint.Server.ApplicationUri);
         Assert.True(X509Utils.CompareApplicationUriWithCertificate(serverCertificate, ServerApplicationUri));
-        Assert.Equal(serverCertificate.Thumbprint, ParseServerCertificate(endpoint).Thumbprint);
+        using var endpointCertificate = ParseServerCertificate(endpoint);
+        Assert.Equal(serverCertificate.Thumbprint, endpointCertificate.Thumbprint);
     }
 
     [Fact]
@@ -283,7 +285,11 @@ public class OpcUaSecurityTests
         await WaitForRejectedCertificateAsync(test.ClientStore, replacementCertificate,
             "The client should reject the replacement certificate it does not trust yet");
         await WaitForStatusCodeAsync(client, test.Logger, StatusCodes.BadCertificateUntrusted);
-        TrustRejectedCertificates(test.ClientStore);
+
+        // Act
+        await TrustRejectedCertificatesAsync(test.ClientStore);
+
+        // Assert
         await WaitUntilConnectedAsync(client);
         Assert.Equal(OtherServerApplicationUri, client.Source!.CurrentSession!.Endpoint.Server.ApplicationUri);
     }
@@ -331,6 +337,7 @@ public class OpcUaSecurityTests
     private static X509Certificate2 ParseServerCertificate(EndpointDescription endpoint) =>
         X509CertificateLoader.LoadCertificate(endpoint.ServerCertificate);
 
+    // A server's certificate exists once StartServerAsync returns, because the connector start runs inline up to the bind.
     /// <summary>
     /// Loads the one application certificate in the own store, which holds a single certificate in these tests.
     /// </summary>
@@ -340,14 +347,32 @@ public class OpcUaSecurityTests
     private static string[] GetFiles(string path) =>
         Directory.Exists(path) ? Directory.GetFiles(path, "*", SearchOption.AllDirectories) : [];
 
-    private static void TrustRejectedCertificates(string storePath)
+    /// <summary>
+    /// Moves every rejected certificate to the trusted folder. A move that fails because the SDK is rewriting the file
+    /// after another rejection, which happens on Windows, is retried.
+    /// </summary>
+    private static Task TrustRejectedCertificatesAsync(string storePath)
     {
         var trusted = Path.Combine(storePath, "trusted", "certs");
         Directory.CreateDirectory(trusted);
-        foreach (var file in GetFiles(Path.Combine(storePath, "rejected", "certs")))
-        {
-            File.Move(file, Path.Combine(trusted, Path.GetFileName(file)), overwrite: true);
-        }
+        return AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                try
+                {
+                    foreach (var file in GetFiles(Path.Combine(storePath, "rejected", "certs")))
+                    {
+                        File.Move(file, Path.Combine(trusted, Path.GetFileName(file)), overwrite: true);
+                    }
+
+                    return true;
+                }
+                catch (IOException)
+                {
+                    return false;
+                }
+            },
+            message: "The rejected certificates should be moved to the trusted folder");
     }
 
     /// <summary>
