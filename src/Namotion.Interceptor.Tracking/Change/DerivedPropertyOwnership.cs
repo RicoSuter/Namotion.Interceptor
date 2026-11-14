@@ -423,7 +423,7 @@ internal static class DerivedPropertyOwnership
                 return TakePendingRequestIfUnowned(data, out pendingTimestamp);
             }
 
-            // Failed before its first value and maybe its links were committed: a recalculation after the failure
+            // Failed before its first value and maybe its dependencies were committed: a recalculation after the failure
             // evaluates again, and its success is published, as after a getter that threw.
             data.AttachToken = 0;
             if (!data.HasValue)
@@ -704,7 +704,7 @@ internal static class DerivedPropertyOwnership
                 return new Commit(CommitOutcome.Released);
             }
 
-            var check = CommitLinks(data, property);
+            var check = CommitDependencies(data, property);
             if (check == RecordingCheck.SourceMoved)
             {
                 // A source moved without a request (its writer read the used-by set before this dependency was committed). The
