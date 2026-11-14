@@ -4,6 +4,10 @@
       "commandName": "Project",
       "environmentVariables": { "DOTNET_ENVIRONMENT": "opcua-chaos" }
     },
+    "opcua-chaos-secured": {
+      "commandName": "Project",
+      "environmentVariables": { "DOTNET_ENVIRONMENT": "opcua-chaos-secured" }
+    },
     "mqtt-chaos": {
       "commandName": "Project",
       "environmentVariables": { "DOTNET_ENVIRONMENT": "mqtt-chaos" }

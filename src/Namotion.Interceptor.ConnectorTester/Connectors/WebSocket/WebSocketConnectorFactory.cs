@@ -11,7 +11,7 @@ public sealed class WebSocketConnectorFactory : IConnectorFactory
     public ConnectorKind Kind => ConnectorKind.WebSocket;
     public int DefaultPort => 8080;
 
-    public void RegisterServer(IServiceCollection services, TestNode root, int port)
+    public void RegisterServer(IServiceCollection services, TestNode root, ParticipantConfiguration participantConfiguration, int port)
     {
         services.AddSingleton(root);
         services.AddWebSocketSubjectServer(

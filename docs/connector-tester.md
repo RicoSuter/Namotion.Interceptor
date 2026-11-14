@@ -15,6 +15,7 @@ Run all commands from the repository root. Each run creates a timestamped direct
 ```bash
 # Chaos test: correctness under kill/disconnect disruptions (exits with code 1 on failure)
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-chaos --configuration Release
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-chaos-secured --configuration Release
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt-chaos --configuration Release
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-chaos --configuration Release
 
@@ -128,6 +129,8 @@ The ChaosEngine picks an action based on the configured `Mode` ("kill", "disconn
 ### Connector-Specific Behaviors
 
 **OPC UA**: Uses `OpcUaValueConverter` for type mapping. `decimal` values lose precision beyond ~15 significant digits due to `decimal` -> `double` -> `decimal` round-trip. `BufferTime=100ms` batches changes. Server chaos closes transport listeners before dispose, so clients get an immediate TCP RST rather than waiting for keep-alive timeout. Client chaos disposes the session without `CloseAsync`, simulating an abrupt disconnection.
+
+**OPC UA secured** (`opcua-chaos-secured`): the `opcua-chaos` profile with `OpcUa.MinimumSecurityMode` set to `SignAndEncrypt`, so the clients load or create their certificates and all traffic is signed and encrypted. Each participant keeps its certificate store in `logs/{run}/pki/{participant}` for the whole run, so certificates survive chaos restarts, and both sides accept the other's certificate. Clients request a one minute security token lifetime, so secure channels renew within a cycle, and log `OPC UA session created on ... with security mode SignAndEncrypt` for every new session.
 
 **MQTT**: Uses server-authoritative relay pattern where client publishes are intercepted, applied to the server model, and re-published to all clients. Ticks-based timestamp serialization (`UtcTicks`) for full precision. QoS=AtLeastOnce with retained messages.
 
@@ -250,8 +253,9 @@ See `appsettings.opcua-chaos.json` and `appsettings.opcua-load.json` for example
 | `Clients[].Chaos.IntervalMin/Max` | `00:01:00`/`00:05:00` | Time between disruptions |
 | `Clients[].Chaos.DurationMin/Max` | `00:00:05`/`00:00:30` | Disruption hold time |
 | `ChaosProfiles` | `[]` | Named profiles that rotate round-robin. Empty = all chaos always active |
+| `OpcUa.MinimumSecurityMode` | `"None"` | `"None"`, `"Sign"` or `"SignAndEncrypt"`, see [OPC UA secured](#connector-specific-behaviors) |
 
-Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfiguration.cs`, and `ChaosConfiguration.cs`. Chaos intervals must be shorter than `MutatePhaseDuration`. Set `IntervalMax` to at most half of `MutatePhaseDuration`.
+Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfiguration.cs`, `ChaosConfiguration.cs`, and `OpcUaConfiguration.cs`. Chaos intervals must be shorter than `MutatePhaseDuration`. Set `IntervalMax` to at most half of `MutatePhaseDuration`.
 
 ## Failure Scenario Coverage
 
@@ -269,6 +273,7 @@ Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfigur
 | Resource exhaustion (polling) | N/A | N/A | Circuit breaker (5 failures, 30s cooldown) |
 | Concurrent server + client chaos | Both engines run independently, overlapping disruptions possible | Same | Each connector recovers independently |
 | Bidirectional mutations during chaos | Server and clients mutate concurrently during disruptions | Same | WriteRetryQueue buffers outbound writes, full state sync on reconnect |
+| Secured transport (`opcua-chaos-secured`) | Certificates reloaded from the store on every restart and reconnect | Same | Secure channels renew their token every 45 seconds between disruptions |
 
 ### Covered (WebSocket)
 
