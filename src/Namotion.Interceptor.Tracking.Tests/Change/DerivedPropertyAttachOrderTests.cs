@@ -227,11 +227,9 @@ public class DerivedPropertyAttachOrderTests
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
-        var comparisons = 0;
 
         // Recalculated when the configuration is attached, so that the values are compared.
-        machine.Worker.ObjectEvaluator = worker => new ValueThatCannotBeCompared(
-            EvaluatorWorker.ReadConfigurationOnceAttached(worker), () => comparisons++);
+        machine.Worker.ObjectEvaluator = worker => new ValueThatCannotBeCompared(EvaluatorWorker.ReadConfigurationOnceAttached(worker));
         machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
         var changes = SubscribeToChanges(context);
 
@@ -241,7 +239,6 @@ public class DerivedPropertyAttachOrderTests
         // Assert: the exception of the comparison propagates from the write after the queued work ran.
         Assert.IsType<InvalidOperationException>(exception);
         Assert.Same(machine, root.Machine);
-        Assert.True(comparisons > 0);
         AssertSingleChange(changes, machine.Worker, nameof(EvaluatorWorker.Result), 1);
     }
 
@@ -358,10 +355,12 @@ public class DerivedPropertyAttachOrderTests
         Assert.Equal(1, machine.Worker.Result);
     }
 
-    [Fact]
-    public void WhenValueTypeThatEnumeratesSubjectsIsAssigned_ThenItIsAnnouncedBeforeItsChangedDerivedValue()
+    [Theory]
+    [InlineData(nameof(EvaluatorRoot.Machine))]
+    [InlineData(nameof(EvaluatorRoot.MachineSet))]
+    public void WhenSubtreeIsAssigned_ThenItIsAnnouncedBeforeItsChangedDerivedValue(string property)
     {
-        // Arrange
+        // Arrange: the machine set is a value type that enumerates subjects.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
@@ -369,31 +368,18 @@ public class DerivedPropertyAttachOrderTests
         var changes = SubscribeToChanges(context);
 
         // Act
-        root.MachineSet = EvaluatorMachineSet.Create(machine);
+        if (property == nameof(EvaluatorRoot.Machine))
+        {
+            root.Machine = machine;
+        }
+        else
+        {
+            root.MachineSet = EvaluatorMachineSet.Create(machine);
+        }
 
         // Assert
         Assert.Equal(2, changes.Count);
-        Assert.Equal(new PropertyReference(root, nameof(EvaluatorRoot.MachineSet)), changes[0].Property);
-        Assert.Equal(new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)), changes[1].Property);
-        Assert.Equal(changes[0].ChangedTimestamp, changes[1].ChangedTimestamp);
-    }
-
-    [Fact]
-    public void WhenSubtreeIsAssigned_ThenItIsAnnouncedBeforeItsChangedDerivedValue()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
-        var root = new EvaluatorRoot(context);
-        var machine = new EvaluatorMachine();
-        machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
-        var changes = SubscribeToChanges(context);
-
-        // Act
-        root.Machine = machine;
-
-        // Assert
-        Assert.Equal(2, changes.Count);
-        Assert.Equal(new PropertyReference(root, nameof(EvaluatorRoot.Machine)), changes[0].Property);
+        Assert.Equal(new PropertyReference(root, property), changes[0].Property);
         Assert.Equal(new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)), changes[1].Property);
         Assert.Equal(1, changes[1].GetNewValue<int>());
         Assert.Equal(changes[0].ChangedTimestamp, changes[1].ChangedTimestamp);
@@ -827,47 +813,39 @@ public class DerivedPropertyAttachOrderTests
         Assert.True(Assert.Single(lifecycleLockWasFree));
     }
 
-    [Fact]
-    public void WhenRootIsInTwoContexts_ThenChangedDerivedValueIsPublishedOutsideBothLifecycleLocks()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenRootIsInTwoContexts_ThenChangedDerivedValueIsPublishedOutsideBothLifecycleLocks(bool attachGraphToBothContextsAtOnce)
     {
         // Arrange
         var firstContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var secondContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var machine = new EvaluatorMachine();
         var root = new EvaluatorRoot();
-        ((IInterceptorSubject)root).Context.AddFallbackContext(firstContext);
-        ((IInterceptorSubject)root).Context.AddFallbackContext(secondContext);
-        var machine = new EvaluatorMachine();
-        machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
+        Action act;
+        if (attachGraphToBothContextsAtOnce)
+        {
+            // Outside a write, the attach of one interceptor is nested in the attach of the other.
+            var bothContexts = InterceptorSubjectContext.Create();
+            bothContexts.AddFallbackContext(firstContext);
+            bothContexts.AddFallbackContext(secondContext);
+            root.Machine = machine;
+            act = () => ((IInterceptorSubject)root).Context.AddFallbackContext(bothContexts);
+        }
+        else
+        {
+            ((IInterceptorSubject)root).Context.AddFallbackContext(firstContext);
+            ((IInterceptorSubject)root).Context.AddFallbackContext(secondContext);
+            act = () => root.Machine = machine;
+        }
 
+        machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
         var lifecycleLocksWereFree = RecordWhetherLifecycleLocksAreFree(
             firstContext, machine.Worker, root, firstContext.GetService<LifecycleInterceptor>(), secondContext.GetService<LifecycleInterceptor>());
 
         // Act
-        root.Machine = machine;
-
-        // Assert
-        Assert.NotEmpty(lifecycleLocksWereFree);
-        Assert.All(lifecycleLocksWereFree, Assert.True);
-    }
-
-    [Fact]
-    public void WhenGraphIsAttachedToTwoContextsAtOnce_ThenChangedDerivedValueIsPublishedOutsideBothLifecycleLocks()
-    {
-        // Arrange: outside a write, the attach of one interceptor is nested in the attach of the other.
-        var firstContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
-        var secondContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
-        var bothContexts = InterceptorSubjectContext.Create();
-        bothContexts.AddFallbackContext(firstContext);
-        bothContexts.AddFallbackContext(secondContext);
-        var machine = new EvaluatorMachine();
-        var root = new EvaluatorRoot { Machine = machine };
-        machine.Worker.Evaluator = EvaluatorWorker.ReadConfigurationOnceAttached;
-
-        var lifecycleLocksWereFree = RecordWhetherLifecycleLocksAreFree(
-            firstContext, machine.Worker, root, firstContext.GetService<LifecycleInterceptor>(), secondContext.GetService<LifecycleInterceptor>());
-
-        // Act
-        ((IInterceptorSubject)root).Context.AddFallbackContext(bothContexts);
+        act();
 
         // Assert
         Assert.NotEmpty(lifecycleLocksWereFree);
@@ -906,14 +884,13 @@ public class DerivedPropertyAttachOrderTests
         return lifecycleLocksWereFree;
     }
 
-    private sealed class ValueThatCannotBeCompared(int value, Action onCompared)
+    private sealed class ValueThatCannotBeCompared(int value)
     {
         public int Value { get; } = value;
 
 #pragma warning disable S3877 // An Equals that throws is what the test is about.
         public override bool Equals(object? obj)
         {
-            onCompared();
             throw new InvalidOperationException();
         }
 #pragma warning restore S3877

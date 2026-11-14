@@ -8,26 +8,9 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 namespace Namotion.Interceptor.Registry.Tests;
 
 [InterceptorSubject]
-public partial class RegistryReader
-{
-    public RegistryTarget? Target;
-
-    [Derived]
-    public bool IsTargetRegistered => Target?.TryGetRegisteredSubject() is not null;
-}
-
-[InterceptorSubject]
 public partial class RegistryTarget
 {
     public partial int Value { get; set; }
-}
-
-[InterceptorSubject]
-public partial class RegistryHolder
-{
-    public partial RegistryReader? Reader { get; set; }
-
-    public partial RegistryTarget? Target { get; set; }
 }
 
 [InterceptorSubject]
@@ -66,27 +49,8 @@ public partial class StructureReader
 
 public class DerivedRegistryStructureTests
 {
-    [Fact]
-    public void WhenSubjectReadThroughRegistryIsAttachedLater_ThenDerivedPropertyPublishesTheChange()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var holder = new RegistryHolder(context);
-        var target = new RegistryTarget();
-        holder.Reader = new RegistryReader { Target = target };
-        var changes = new List<SubjectPropertyChange>();
-        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
-
-        // Act
-        holder.Target = target;
-
-        // Assert
-        var change = Assert.Single(changes, c => c.Property.Subject == holder.Reader);
-        Assert.False(change.GetOldValue<bool>());
-        Assert.True(change.GetNewValue<bool>());
-    }
-
     [Theory]
+    [InlineData("TryGetRegisteredSubject")]
     [InlineData("ISubjectRegistry.TryGetRegisteredSubject")]
     [InlineData("TryGetRegisteredProperty")]
     [InlineData("TryGetRegisteredProperty(expression)")]
@@ -264,10 +228,14 @@ public class DerivedRegistryStructureTests
     private static (Func<string?> Read, Action Change) CreateScenario(
         string api, IInterceptorSubjectContext context, StructureHolder root, RegistryTarget target)
     {
-        if (api == "ISubjectRegistry.TryGetRegisteredSubject")
+        if (api is "TryGetRegisteredSubject" or "ISubjectRegistry.TryGetRegisteredSubject")
         {
+            // The target is reached without a tracked property and has no registry until it is attached.
             var registry = context.GetService<ISubjectRegistry>();
-            return (() => (registry.TryGetRegisteredSubject(target) is not null).ToString(), () => root.Target = target);
+            Func<RegisteredSubject?> getRegistered = api == "TryGetRegisteredSubject"
+                ? target.TryGetRegisteredSubject
+                : () => registry.TryGetRegisteredSubject(target);
+            return (() => (getRegistered() is not null).ToString(), () => root.Target = target);
         }
 
         if (api == "TryGetRegisteredProperty")
