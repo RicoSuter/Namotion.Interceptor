@@ -85,6 +85,8 @@ public class DerivedRegistryStructureTests
 
     [Theory]
     [InlineData("ISubjectRegistry.TryGetRegisteredSubject")]
+    [InlineData("TryGetRegisteredProperty")]
+    [InlineData("TryGetRegisteredProperty(expression)")]
     [InlineData("RegisteredSubject.Parents")]
     [InlineData("RegisteredSubject.ReferenceCount")]
     [InlineData("GetReferenceCount")]
@@ -204,6 +206,16 @@ public class DerivedRegistryStructureTests
         {
             var registry = context.GetService<ISubjectRegistry>();
             return (() => (registry.TryGetRegisteredSubject(target) is not null).ToString(), () => root.Target = target);
+        }
+
+        if (api == "TryGetRegisteredProperty")
+        {
+            return (() => (target.TryGetRegisteredProperty(nameof(RegistryTarget.Value)) is not null).ToString(), () => root.Target = target);
+        }
+
+        if (api == "TryGetRegisteredProperty(expression)")
+        {
+            return (() => (target.TryGetRegisteredProperty(t => t.Value) is not null).ToString(), () => root.Target = target);
         }
 
         if (api == "RegisteredSubjectProperty.Children")
