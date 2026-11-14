@@ -296,6 +296,62 @@ public class DerivedRegistryStructureTests
     }
 
     [Fact]
+    public void WhenPrebuiltRootWithChildIsAttachedToContext_ThenReaderOfItsRegistrationFollowsIt()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new StructureHolder(context);
+        var registry = context.GetService<ISubjectRegistry>();
+        var holder = new StructureHolder { Target = new RegistryTarget() };
+        root.Reader = new StructureReader { Read = () => (registry.TryGetRegisteredSubject(holder) is not null).ToString() };
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+
+        // Act
+        ((IInterceptorSubject)holder).Context.AddFallbackContext(context);
+
+        // Assert
+        var published = Assert.Single(changes, c => c.Property.Subject == root.Reader);
+        Assert.Equal("False", published.GetOldValue<string?>());
+        Assert.Equal("True", published.GetNewValue<string?>());
+    }
+
+    [Fact]
+    public void WhenSubjectDetachingSubscriberThrowsOnContextDetach_ThenDerivedPropertyReadingTheStructureIsEvaluatedAgain()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new StructureHolder(context);
+        var target = new RegistryTarget();
+        var targetContext = ((IInterceptorSubject)target).Context;
+        targetContext.AddFallbackContext(context);
+        var evaluations = 0;
+        root.Reader = new StructureReader
+        {
+            Read = () =>
+            {
+                evaluations++;
+                return (target.TryGetRegisteredSubject() is not null).ToString();
+            }
+        };
+        var evaluationsBefore = evaluations;
+        context.GetService<LifecycleInterceptor>().SubjectDetaching += change =>
+        {
+            if (change.Subject == target)
+            {
+                throw new InvalidOperationException();
+            }
+        };
+
+        // Act
+        var exception = Record.Exception(() => targetContext.RemoveFallbackContext(context));
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(exception);
+        Assert.Equal(evaluationsBefore + 1, evaluations);
+    }
+
+    [Fact]
     public void WhenAddedPropertyNameIsTheReservedChildrenName_ThenAddPropertyThrowsAndAddsNothing()
     {
         const string name = "\0children";
