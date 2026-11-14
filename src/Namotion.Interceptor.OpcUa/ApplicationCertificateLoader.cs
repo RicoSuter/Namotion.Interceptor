@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.OpcUa;
 
 /// <summary>
 /// Loads or creates the application certificate of a client or server, warns before it expires and replaces it
-/// once it has expired, or no longer matches the application, when it is self-signed and automatic creation is on.
+/// once it has expired or fails the application URI or host check, when it is self-signed and automatic creation is on.
 /// </summary>
 internal static class ApplicationCertificateLoader
 {
@@ -24,8 +24,8 @@ internal static class ApplicationCertificateLoader
     /// <summary>
     /// Ensures the application certificate of <paramref name="application"/> is loaded with its private key, creating
     /// one when none exists and <paramref name="autoCreate"/> is true. A certificate already set with its private key
-    /// is left as is. Within 30 days of expiry a warning is logged. A self-signed certificate that has expired, does not
-    /// carry the application URI or, for a server, does not cover the host names of its base addresses is deleted from
+    /// is left as is. Within 30 days of expiry a warning is logged. A self-signed certificate that has expired, or fails
+    /// the SDK's application URI check or, for a server, its host check against the base addresses, is deleted from
     /// the own store with its private key and replaced when <paramref name="autoCreate"/> is true; any other
     /// certificate is never replaced. A failure to load, create or replace the certificate propagates.
     /// </summary>
@@ -50,17 +50,16 @@ internal static class ApplicationCertificateLoader
         try
         {
             application.DisableCertificateAutoCreation = !autoCreate;
-            var mismatched = autoCreate
-                ? await DeleteMismatchedCertificatesAsync(application, telemetryContext, cancellationToken).ConfigureAwait(false)
-                : null;
+            var hasDeletedMismatched = autoCreate &&
+                await DeleteMismatchedCertificatesAsync(application, telemetryContext, logger, cancellationToken).ConfigureAwait(false);
 
             var certificate = await LoadOrCreateAsync(application, lifetimeInMonths, cancellationToken).ConfigureAwait(false);
-            foreach (var (thumbprint, reason) in mismatched ?? [])
+            if (hasDeletedMismatched)
             {
-                logger.LogWarning(
-                    "Replaced the OPC UA application certificate {Thumbprint} in the store '{StorePath}' with the certificate " +
-                    "{NewThumbprint} because {Reason}. Peers that trusted the old certificate have to trust the replacement.",
-                    thumbprint, identifier.StorePath, certificate.Thumbprint, reason);
+                logger.LogInformation(
+                    "Loaded the OPC UA application certificate {Thumbprint} from the store '{StorePath}' after deleting the " +
+                    "certificates that did not match the application.",
+                    certificate.Thumbprint, identifier.StorePath);
             }
 
             // The store can hold several expired certificates for the application, and each reload finds the next one,
@@ -168,12 +167,13 @@ internal static class ApplicationCertificateLoader
     }
 
     /// <summary>
-    /// Deletes the self-signed certificates that the SDK would load for the application but then reject because they do
-    /// not match it, and returns their thumbprints with the reason, or null when none was deleted.
+    /// Deletes, one by one, the self-signed certificate that the SDK would load for the application while it fails the
+    /// SDK's application URI or host check, logging each deletion, and returns whether any was deleted.
     /// </summary>
-    private static async Task<List<(string Thumbprint, string Reason)>?> DeleteMismatchedCertificatesAsync(
+    private static async Task<bool> DeleteMismatchedCertificatesAsync(
         ApplicationInstance application,
         ITelemetryContext telemetryContext,
+        ILogger logger,
         CancellationToken cancellationToken)
     {
         var configuration = application.ApplicationConfiguration;
@@ -182,13 +182,14 @@ internal static class ApplicationCertificateLoader
         // A pinned thumbprint makes the SDK refuse to create a certificate, so deleting the pinned one would only fail.
         if (!string.IsNullOrEmpty(identifier.Thumbprint))
         {
-            return null;
+            return false;
         }
 
-        List<(string Thumbprint, string Reason)>? deleted = null;
+        var deletionsLeft = -1;
         while (true)
         {
-            // A copy, because finding sets the certificate of the identifier, which the SDK must load with its private key.
+            // A copy, because loading sets the certificate of the identifier. The SDK selects with these two calls, which
+            // take the first certificate whose key loads rather than the best one, so they are mirrored exactly.
             var lookup = new CertificateIdentifier
             {
                 StoreType = identifier.StoreType,
@@ -197,15 +198,37 @@ internal static class ApplicationCertificateLoader
                 CertificateType = identifier.CertificateType
             };
 
-            var stored = await lookup.FindAsync(false, configuration.ApplicationUri, telemetryContext, cancellationToken).ConfigureAwait(false);
+            using var stored =
+                await lookup.LoadPrivateKeyExAsync(
+                    configuration.SecurityConfiguration.CertificatePasswordProvider,
+                    configuration.ApplicationUri,
+                    telemetryContext,
+                    cancellationToken).ConfigureAwait(false) ??
+                await lookup.FindAsync(true, configuration.ApplicationUri, telemetryContext, cancellationToken).ConfigureAwait(false);
+
             if (stored is null || !X509Utils.IsSelfSigned(stored) ||
                 await GetMismatchAsync(configuration, stored, cancellationToken).ConfigureAwait(false) is not { } reason)
             {
-                return deleted;
+                return deletionsLeft >= 0;
+            }
+
+            if (deletionsLeft < 0)
+            {
+                deletionsLeft = await CountCertificatesAsync(identifier, telemetryContext, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (deletionsLeft-- == 0)
+            {
+                throw new InvalidOperationException(
+                    $"The certificate {stored.Thumbprint} in the store '{identifier.StorePath}', which does not match the application, " +
+                    "could not be replaced.");
             }
 
             await DeleteAsync(identifier, stored, telemetryContext, cancellationToken).ConfigureAwait(false);
-            (deleted ??= []).Add((stored.Thumbprint, reason));
+            logger.LogWarning(
+                "Deleted the self-signed OPC UA application certificate {Thumbprint} and its private key from the store '{StorePath}' " +
+                "because {Reason}, so a new one is created. Peers that trusted it have to trust the new one.",
+                stored.Thumbprint, identifier.StorePath, reason);
         }
     }
 

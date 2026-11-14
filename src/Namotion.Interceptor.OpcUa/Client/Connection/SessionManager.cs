@@ -283,6 +283,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         // Discovery needs no client certificate, and an unsecured endpoint never does.
         if (endpointDescription.SecurityMode != MessageSecurityMode.None)
         {
+            // Read before loading, because after a rejected certificate the identifier reports that certificate's subject.
+            var subjectName = application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.SubjectName;
             try
             {
                 await ApplicationCertificateLoader.EnsureLoadedAsync(
@@ -297,7 +299,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             catch (Exception error) when (error is not OperationCanceledException && !cancellationToken.IsCancellationRequested)
             {
                 throw CreateCertificateLoadException(
-                    error, application.ApplicationConfiguration, configuration.AutoCreateApplicationCertificate);
+                    error, application.ApplicationConfiguration, subjectName, configuration.AutoCreateApplicationCertificate);
             }
         }
 
@@ -835,17 +837,18 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     internal static InvalidOperationException CreateCertificateLoadException(
         Exception error,
         ApplicationConfiguration applicationConfiguration,
+        string? subjectName,
         bool autoCreate)
     {
         var identifier = applicationConfiguration.SecurityConfiguration.ApplicationCertificate;
         return new InvalidOperationException(
             $"Failed to load the OPC UA client application certificate from " +
             $"'{CertificateFolder.Get(identifier?.StoreType, identifier?.StorePath)}': {error.Message.TrimEnd().TrimEnd('.')}. " +
-            $"A provisioned certificate needs the subject '{identifier?.SubjectName}' and the application URI " +
+            $"A provisioned certificate needs the subject '{subjectName}' and the application URI " +
             $"'{applicationConfiguration.ApplicationUri}'; set {nameof(OpcUaClientConfiguration.ApplicationUri)} to match it. " +
             (autoCreate
-                ? $"A certificate the client created is created again when it is deleted with its private key from " +
-                  $"'{identifier?.StorePath}', and the server then has to trust the new one."
+                ? $"Deleting the certificate with its private key from '{identifier?.StorePath}' makes the client create a new " +
+                  "self-signed one, which the server then has to trust."
                 : $"Or set {nameof(OpcUaClientConfiguration.AutoCreateApplicationCertificate)} = true to create one."),
             error);
     }

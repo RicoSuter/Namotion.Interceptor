@@ -574,11 +574,10 @@ public class OpcUaClientSecurityConfigurationTests
         // Arrange
         var applicationConfiguration = CreateApplicationConfiguration();
         applicationConfiguration.ApplicationUri = "urn:test:client";
-        applicationConfiguration.SecurityConfiguration.ApplicationCertificate.SubjectName = "CN=Client, O=Namotion";
         var innerException = new InvalidOperationException("The private key is missing.");
 
         // Act
-        var error = SessionManager.CreateCertificateLoadException(innerException, applicationConfiguration, autoCreate);
+        var error = SessionManager.CreateCertificateLoadException(innerException, applicationConfiguration, "CN=Client, O=Namotion", autoCreate);
 
         // Assert
         Assert.Same(innerException, error.InnerException);
@@ -586,7 +585,7 @@ public class OpcUaClientSecurityConfigurationTests
         Assert.Contains(Path.Combine("store/own", "certs"), error.Message);
         Assert.Contains("'CN=Client, O=Namotion'", error.Message);
         Assert.Contains("'urn:test:client'", error.Message);
-        Assert.Equal(autoCreate, error.Message.Contains("deleted with its private key from 'store/own'"));
+        Assert.Equal(autoCreate, error.Message.Contains("with its private key from 'store/own'"));
         Assert.Equal(!autoCreate, error.Message.Contains(nameof(OpcUaClientConfiguration.AutoCreateApplicationCertificate)));
     }
 

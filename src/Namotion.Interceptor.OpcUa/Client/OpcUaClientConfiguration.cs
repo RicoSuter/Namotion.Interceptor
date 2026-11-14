@@ -321,8 +321,8 @@ public class OpcUaClientConfiguration
 
     /// <summary>
     /// Gets or sets whether the client creates a self-signed application certificate in <c>{CertificateStoreBasePath}/own</c> when none
-    /// exists for a secured connection, and replaces a self-signed certificate once it has expired or no longer carries
-    /// the application URI. When false, a secured connection requires a provisioned certificate and nothing is ever
+    /// exists for a secured connection, and replaces a self-signed certificate once it has expired or fails the
+    /// application URI check. When false, a secured connection requires a provisioned certificate and nothing is ever
     /// replaced. Default is true.
     /// </summary>
     public bool AutoCreateApplicationCertificate { get; set; } = true;

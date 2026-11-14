@@ -32,8 +32,9 @@ public class OpcUaServerConfiguration
     /// </summary>
     /// <remarks>
     /// A kept certificate must also carry the host of <see cref="BaseAddress"/>, where localhost stands for the host
-    /// name. When the host name changes, such as for a recreated container, a self-signed certificate is replaced and
-    /// clients have to trust the new one, while any other certificate fails the start. A stable host name, or an explicit
+    /// name. When the host name changes, such as for a recreated container, a self-signed certificate that then fails the
+    /// application URI or host check is replaced and clients have to trust the new one, while any other certificate fails
+    /// the start. A stable host name, or an explicit
     /// host in <see cref="BaseAddress"/> together with this property, avoids both.
     /// </remarks>
     public string? ApplicationUri { get; set; }

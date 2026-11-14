@@ -343,6 +343,9 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
     internal async Task LoadApplicationCertificateAsync(ApplicationInstance application, CancellationToken cancellationToken)
     {
         var autoCreate = !application.DisableCertificateAutoCreation;
+
+        // Read before loading, because after a rejected certificate the identifier reports that certificate's subject.
+        var subjectName = application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.SubjectName;
         try
         {
             await ApplicationCertificateLoader.EnsureLoadedAsync(
@@ -356,7 +359,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         // The SDK can report a cancellation as another exception type, so the token is checked too.
         catch (Exception error) when (error is not OperationCanceledException && !cancellationToken.IsCancellationRequested)
         {
-            throw CreateCertificateLoadException(error, application.ApplicationConfiguration, _configuration.BaseAddress, autoCreate);
+            throw CreateCertificateLoadException(error, application.ApplicationConfiguration, subjectName, _configuration.BaseAddress, autoCreate);
         }
     }
 
@@ -366,6 +369,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
     internal static InvalidOperationException CreateCertificateLoadException(
         Exception error,
         ApplicationConfiguration applicationConfiguration,
+        string? subjectName,
         string baseAddress,
         bool autoCreate)
     {
@@ -373,13 +377,13 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         return new InvalidOperationException(
             $"Failed to load the OPC UA server application certificate from " +
             $"'{CertificateFolder.Get(identifier?.StoreType, identifier?.StorePath)}': {error.Message.TrimEnd().TrimEnd('.')}. " +
-            $"The certificate needs the subject '{identifier?.SubjectName}', and a kept certificate must match the application URI " +
+            $"The certificate needs the subject '{subjectName}', and a kept certificate must match the application URI " +
             $"'{applicationConfiguration.ApplicationUri}' and the host of {nameof(OpcUaServerConfiguration.BaseAddress)} " +
             $"'{baseAddress}', where localhost stands for the host name. Give the server a stable host name, or set " +
             $"{nameof(OpcUaServerConfiguration.ApplicationUri)} and an explicit host in {nameof(OpcUaServerConfiguration.BaseAddress)}. " +
             (autoCreate
-                ? $"Or delete the certificate with its private key from '{identifier?.StorePath}', or set " +
-                  $"{nameof(OpcUaServerConfiguration.CleanCertificateStore)} = true, so a new one is created; clients then have to trust it again."
+                ? $"Or delete the certificate with its private key from '{identifier?.StorePath}' so a new one is created, " +
+                  "which clients then have to trust."
                 : "Automatic certificate creation is off, so a matching certificate has to be provided there."),
             error);
     }

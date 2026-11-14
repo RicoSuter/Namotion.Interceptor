@@ -1,4 +1,5 @@
 using System.Security.Cryptography.X509Certificates;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
@@ -117,7 +118,7 @@ public class OpcUaServerCertificateTests : IDisposable
         Assert.Contains(certificate.Thumbprint, Path.GetFileName(Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "certs")))));
         var warning = Assert.Single(_logger.Warnings);
         Assert.Contains(stale.Thumbprint, warning);
-        Assert.Contains(certificate.Thumbprint, warning);
+        Assert.Contains(_logger.Entries, entry => entry.Level == LogLevel.Information && entry.Message.Contains(certificate.Thumbprint));
     }
 
     [Fact]
@@ -138,7 +139,7 @@ public class OpcUaServerCertificateTests : IDisposable
         Assert.Contains(Utils.GetHostName(), X509Utils.GetDomainsFromCertificate(certificate), StringComparer.OrdinalIgnoreCase);
         var warning = Assert.Single(_logger.Warnings);
         Assert.Contains(stale.Thumbprint, warning);
-        Assert.Contains(certificate.Thumbprint, warning);
+        Assert.Contains(_logger.Entries, entry => entry.Level == LogLevel.Information && entry.Message.Contains(certificate.Thumbprint));
         Assert.Contains(Utils.GetHostName(), warning);
     }
 
@@ -156,7 +157,7 @@ public class OpcUaServerCertificateTests : IDisposable
             () => server.LoadApplicationCertificateAsync(application, CancellationToken.None));
         Assert.IsType<ServiceResultException>(exception.InnerException);
         Assert.Contains($"'{identifier.StorePath}'", exception.Message);
-        Assert.Contains(nameof(OpcUaServerConfiguration.CleanCertificateStore), exception.Message);
+        Assert.Contains("with its private key", exception.Message);
         Assert.Contains(issued.Thumbprint, Path.GetFileName(Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "certs")))));
     }
 
@@ -175,7 +176,7 @@ public class OpcUaServerCertificateTests : IDisposable
         var inner = Assert.IsType<ServiceResultException>(exception.InnerException);
         Assert.Contains(inner.Message.TrimEnd().TrimEnd('.'), exception.Message);
         Assert.Contains($"'{Path.Combine(identifier.StorePath, "certs")}'", exception.Message);
-        Assert.Contains(identifier.SubjectName, exception.Message);
+        Assert.Contains($"'CN={configuration.ApplicationName}, O=Namotion'", exception.Message);
         Assert.Contains("'urn:test:server'", exception.Message);
         Assert.Contains(configuration.BaseAddress, exception.Message);
         Assert.Contains("Automatic certificate creation is off", exception.Message);

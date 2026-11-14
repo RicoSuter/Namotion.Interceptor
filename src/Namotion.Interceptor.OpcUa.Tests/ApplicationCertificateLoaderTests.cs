@@ -97,8 +97,30 @@ public class ApplicationCertificateLoaderTests : IDisposable
         Assert.DoesNotContain(stale.Thumbprint, Path.GetFileName(Assert.Single(Directory.GetFiles(PrivatePath))));
         var warning = Assert.Single(logger.Warnings);
         Assert.Contains(stale.Thumbprint, warning);
-        Assert.Contains(certificate.Thumbprint, warning);
+        Assert.Contains(logger.Entries, entry => entry.Level == LogLevel.Information && entry.Message.Contains(certificate.Thumbprint));
         Assert.Contains("urn:old-host:client", warning);
+    }
+
+    [Fact]
+    public async Task WhenAMatchingAndAStaleCertificateShareTheSubject_ThenTheMatchingOneIsLoaded()
+    {
+        // Arrange - the SDK takes the first file whose key loads, so the stale one is deleted only when it comes first.
+        var configuration = CreateConfiguration();
+        configuration.ApplicationUri = "urn:new-host:client";
+        using var stale = await AddSelfSignedCertificateAsync(configuration, ageInDays: 10, applicationUri: "urn:old-host:client");
+        using var matching = await AddSelfSignedCertificateAsync(configuration, ageInDays: 1);
+        var application = await configuration.CreateApplicationInstanceAsync();
+        var logger = new RecordingLogger();
+
+        // Act
+        await LoadAsync(application, configuration, logger);
+
+        // Assert
+        Assert.Equal(matching.Thumbprint, GetCertificate(application).Thumbprint);
+        Assert.True(GetCertificate(application).HasPrivateKey);
+        var files = Directory.GetFiles(Path.Combine(_storePath, "own", "certs")).Select(Path.GetFileName).ToArray();
+        Assert.Contains(files, file => file!.Contains(matching.Thumbprint));
+        Assert.Equal(files.Length == 1, logger.Warnings.Any(warning => warning.Contains(stale.Thumbprint)));
     }
 
     [Theory]
