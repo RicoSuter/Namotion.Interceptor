@@ -191,6 +191,14 @@ namespace Namotion.Interceptor.Interceptors
     {
         object? InvokeMethod(Namotion.Interceptor.Interceptors.MethodInvocationContext context, Namotion.Interceptor.Interceptors.InvokeMethodInterceptionDelegate next);
     }
+    public interface IPropertyReadObserver
+    {
+        void OnPropertyRead(in Namotion.Interceptor.PropertyReference property);
+    }
+    public interface IPropertyWriteObserver
+    {
+        void OnPropertyWritten(in Namotion.Interceptor.Interceptors.PropertyWriteObservation write);
+    }
     public interface IReadInterceptor
     {
         TProperty ReadProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext<TProperty> context, Namotion.Interceptor.Interceptors.ReadInterceptionDelegate<TProperty> next);
@@ -208,6 +216,8 @@ namespace Namotion.Interceptor.Interceptors
         public override bool RemoveFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> writeValue) { }
         public static Namotion.Interceptor.Interceptors.IInterceptorExecutor GetOrCreate(ref Namotion.Interceptor.Interceptors.IInterceptorExecutor? context, Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static TProperty GetPropertyValueWithoutContext<TProperty>(Namotion.Interceptor.IInterceptorSubject subject, string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        public static bool SetPropertyValueWithoutContext<TProperty>(Namotion.Interceptor.IInterceptorSubject subject, string propertyName, TProperty newValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }
     public delegate object? InvokeMethodInterceptionDelegate(ref Namotion.Interceptor.Interceptors.MethodInvocationContext context);
     public struct MethodInvocationContext
@@ -215,6 +225,13 @@ namespace Namotion.Interceptor.Interceptors
         public string MethodName { get; }
         public object?[] Parameters { get; }
         public Namotion.Interceptor.IInterceptorSubject Subject { get; }
+    }
+    public static class PropertyAccessObservation
+    {
+        public static Namotion.Interceptor.Interceptors.IPropertyReadObserver? ReadObserver { get; set; }
+        public static int WriteDepth { get; }
+        public static Namotion.Interceptor.Interceptors.IPropertyWriteObserver? WriteObserver { get; }
+        public static void SetWriteObserver(Namotion.Interceptor.Interceptors.IPropertyWriteObserver observer) { }
     }
     public struct PropertyReadContext<TProperty>
     {
@@ -230,6 +247,16 @@ namespace Namotion.Interceptor.Interceptors
         public Namotion.Interceptor.PropertyReference Property { get; }
         public System.DateTimeOffset? WriteTimestamp { get; }
         public TProperty GetFinalValue() { }
+    }
+    public readonly struct PropertyWriteObservation
+    {
+        public PropertyWriteObservation(Namotion.Interceptor.PropertyReference property, bool isWritten, long rawTimestamp, bool isDerivedRecalculation, int depth, bool hasFailed) { }
+        public int Depth { get; }
+        public bool HasFailed { get; }
+        public bool IsDerivedRecalculation { get; }
+        public bool IsWritten { get; }
+        public Namotion.Interceptor.PropertyReference Property { get; }
+        public long RawTimestamp { get; }
     }
     public delegate TProperty ReadInterceptionDelegate<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext<TProperty> context);
     public delegate void WriteInterceptionDelegate<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context);

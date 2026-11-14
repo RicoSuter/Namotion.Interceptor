@@ -40,20 +40,7 @@ public static class DerivedPropertyChangeHandlerExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void RecalculateDerivedProperty(this PropertyReference property)
     {
-        var data = property.TryGetDerivedPropertyData();
-        if (data is null || !Volatile.Read(ref data.IsDerived))
-        {
-            return;
-        }
-
-        // Pass storage timestamp as both storage and raw. For positive and no scope this is a
-        // positive value that seeds the dependent context's cache directly. For null scope it
-        // is 0 (the cache's uninitialized sentinel), which makes the dependent's terminal
-        // write lazy-resolve once; the resolved value then threads through any further
-        // cascade dependents via WriteTimestampRaw, so every change event from this recalc
-        // still shares a single publishing time (verified by mock-now tests in this file).
-        var storageTimestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
-        DerivedPropertyChangeHandler.RecalculateDerivedProperty(ref property, storageTimestamp, storageTimestamp);
+        DerivedPropertyOwnership.RequestRecalculation(property, SubjectChangeContext.Current.ResolveChangedTimestamp());
     }
 
     /// <summary>
@@ -62,7 +49,8 @@ public static class DerivedPropertyChangeHandlerExtensions
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static DerivedPropertyData GetDerivedPropertyData(this PropertyReference property) =>
-        property.GetOrAddPropertyData(DataKey, static () => new DerivedPropertyData());
+        (DerivedPropertyData)property.Subject.Data.GetOrAdd(
+            (property.Name, DataKey), static (key, subject) => DerivedPropertyData.Create(new PropertyReference(subject, key.Item1!)), property.Subject)!;
 
     /// <summary>
     /// Tries to get the consolidated tracking data without allocating if not present.
@@ -71,10 +59,4 @@ public static class DerivedPropertyChangeHandlerExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static DerivedPropertyData? TryGetDerivedPropertyData(this PropertyReference property) =>
         property.TryGetPropertyData(DataKey, out var value) ? value as DerivedPropertyData : null;
-
-    /// <summary>
-    /// Removes the tracking data if it is still the given instance.
-    /// </summary>
-    internal static void RemoveDerivedPropertyData(this PropertyReference property, DerivedPropertyData data) =>
-        property.TryRemovePropertyData(DataKey, data);
 }

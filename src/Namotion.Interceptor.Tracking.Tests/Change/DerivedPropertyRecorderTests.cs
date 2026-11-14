@@ -1,13 +1,32 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
-public class DerivedPropertyRecorderTests
+public sealed class DerivedPropertyRecorderTests : IDisposable
 {
+    public void Dispose()
+    {
+        // A recording that a test leaves open keeps the recorder installed as the thread's read observer.
+        PropertyAccessObservation.ReadObserver = null;
+    }
+
     private static DerivedPropertyRecorder CreateRecorder() => new();
+
+    private static PropertyReference[] GetProperties(ReadOnlySpan<RecordedDependency> recorded)
+    {
+        var properties = new PropertyReference[recorded.Length];
+        for (var i = 0; i < recorded.Length; i++)
+        {
+            properties[i] = recorded[i].Property;
+        }
+
+        return properties;
+    }
 
     private static PropertyReference CreateSelf(IInterceptorSubject subject) =>
         new(subject, "__SelfUnderTest");
@@ -44,7 +63,7 @@ public class DerivedPropertyRecorderTests
     }
 
     [Fact]
-    public void TouchProperty_RecordsProperty()
+    public void OnPropertyRead_RecordsProperty()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
@@ -55,37 +74,42 @@ public class DerivedPropertyRecorderTests
         recorder.StartRecording(CreateSelf(person));
 
         // Act
-        recorder.TouchProperty(ref property);
+        recorder.OnPropertyRead(in property);
         var recorded = recorder.FinishRecording();
 
         // Assert
-        Assert.Single(recorded.ToArray());
-        Assert.Equal(property, recorded[0]);
+        Assert.Single(GetProperties(recorded));
+        Assert.Equal(property, recorded[0].Property);
     }
 
     [Fact]
-    public void TouchProperty_DeduplicatesSameProperty()
+    public void OnPropertyRead_DeduplicatesSamePropertyAndKeepsFirstVersion()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
         var recorder = CreateRecorder();
         var property = new PropertyReference(person, nameof(Person.FirstName));
+        var data = property.GetDerivedPropertyData();
 
         recorder.StartRecording(CreateSelf(person));
 
-        // Act - touch same property multiple times
-        recorder.TouchProperty(ref property);
-        recorder.TouchProperty(ref property);
-        recorder.TouchProperty(ref property);
+        // Act - read the same property multiple times, with a write between the reads
+        recorder.OnPropertyRead(in property);
+        Interlocked.Increment(ref data.Version);
+        recorder.OnPropertyRead(in property);
+        recorder.OnPropertyRead(in property);
         var recorded = recorder.FinishRecording();
 
-        // Assert - should only appear once
-        Assert.Single(recorded.ToArray());
+        // Assert - should only appear once, with the version of the first read
+        var dependency = Assert.Single(recorded.ToArray());
+        Assert.Equal(property, dependency.Property);
+        Assert.Same(data, dependency.Data);
+        Assert.Equal(0, dependency.Version);
     }
 
     [Fact]
-    public void TouchProperty_RecordsMultipleDistinctProperties()
+    public void OnPropertyRead_RecordsMultipleDistinctProperties()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
@@ -97,20 +121,20 @@ public class DerivedPropertyRecorderTests
         recorder.StartRecording(CreateSelf(person));
 
         // Act
-        recorder.TouchProperty(ref firstNameProperty);
-        recorder.TouchProperty(ref lastNameProperty);
+        recorder.OnPropertyRead(in firstNameProperty);
+        recorder.OnPropertyRead(in lastNameProperty);
         var recorded = recorder.FinishRecording();
 
         // Assert
         Assert.Equal(2, recorded.Length);
-        Assert.Contains(firstNameProperty, recorded.ToArray());
-        Assert.Contains(lastNameProperty, recorded.ToArray());
+        Assert.Contains(firstNameProperty, GetProperties(recorded));
+        Assert.Contains(lastNameProperty, GetProperties(recorded));
     }
 
     [Fact]
-    public void TouchProperty_SkipsSelfReference()
+    public void OnPropertyRead_SkipsSelfReference()
     {
-        // The derived property's outer interceptor-chain read fires ReadProperty on itself,
+        // The derived property's outer interceptor-chain read reports a read of the property itself,
         // which must not be recorded as a dependency.
 
         // Arrange
@@ -122,14 +146,14 @@ public class DerivedPropertyRecorderTests
 
         recorder.StartRecording(selfProperty);
 
-        // Act - touch both the self-ref and a real dependency
-        recorder.TouchProperty(ref selfProperty);
-        recorder.TouchProperty(ref firstNameProperty);
+        // Act - read both the property itself and a real dependency
+        recorder.OnPropertyRead(in selfProperty);
+        recorder.OnPropertyRead(in firstNameProperty);
         var recorded = recorder.FinishRecording();
 
         // Assert - only the real dependency is recorded
-        Assert.Single(recorded.ToArray());
-        Assert.Equal(firstNameProperty, recorded[0]);
+        Assert.Single(GetProperties(recorded));
+        Assert.Equal(firstNameProperty, recorded[0].Property);
     }
 
     [Fact]
@@ -146,23 +170,23 @@ public class DerivedPropertyRecorderTests
         var innerSelf = new PropertyReference(person, "InnerDerived");
         var firstNameProperty = new PropertyReference(person, nameof(Person.FirstName));
 
-        // Act: the outer frame touches the inner derived property, while the inner frame touches itself.
+        // Act: the outer frame reads the inner derived property, while the inner frame reads itself.
         recorder.StartRecording(outerSelf);
-        recorder.TouchProperty(ref innerSelf);
+        recorder.OnPropertyRead(in innerSelf);
 
         recorder.StartRecording(innerSelf);
-        recorder.TouchProperty(ref innerSelf);       // filtered (inner's self)
-        recorder.TouchProperty(ref firstNameProperty);
+        recorder.OnPropertyRead(in innerSelf);       // filtered (inner's self)
+        recorder.OnPropertyRead(in firstNameProperty);
         var innerRecorded = recorder.FinishRecording();
 
         var outerRecorded = recorder.FinishRecording();
 
         // Assert
-        Assert.Single(innerRecorded.ToArray());
-        Assert.Equal(firstNameProperty, innerRecorded[0]);
+        Assert.Single(GetProperties(innerRecorded));
+        Assert.Equal(firstNameProperty, innerRecorded[0].Property);
 
-        Assert.Single(outerRecorded.ToArray());
-        Assert.Equal(innerSelf, outerRecorded[0]);
+        Assert.Single(GetProperties(outerRecorded));
+        Assert.Equal(innerSelf, outerRecorded[0].Property);
     }
 
     [Fact]
@@ -170,7 +194,7 @@ public class DerivedPropertyRecorderTests
     {
         // When a derived property's getter triggers recalculation of another derived property,
         // StartRecording() nests. Each frame must record only its own dependencies so that
-        // StoreRecordedTouchedProperties builds the correct RequiredProperties per property.
+        // each commit links its property to exactly what its getter read.
         // Without frame isolation, outer properties would incorrectly include inner dependencies.
 
         // Arrange
@@ -183,22 +207,22 @@ public class DerivedPropertyRecorderTests
 
         // Act - nested recording
         recorder.StartRecording(CreateSelf(person));
-        recorder.TouchProperty(ref firstNameProperty);
+        recorder.OnPropertyRead(in firstNameProperty);
 
         recorder.StartRecording(CreateSelf(person)); // Nested
-        recorder.TouchProperty(ref lastNameProperty);
-        recorder.TouchProperty(ref fatherProperty);
+        recorder.OnPropertyRead(in lastNameProperty);
+        recorder.OnPropertyRead(in fatherProperty);
         var innerRecorded = recorder.FinishRecording();
 
         var outerRecorded = recorder.FinishRecording();
 
         // Assert
         Assert.Equal(2, innerRecorded.Length);
-        Assert.Contains(lastNameProperty, innerRecorded.ToArray());
-        Assert.Contains(fatherProperty, innerRecorded.ToArray());
+        Assert.Contains(lastNameProperty, GetProperties(innerRecorded));
+        Assert.Contains(fatherProperty, GetProperties(innerRecorded));
 
-        Assert.Single(outerRecorded.ToArray());
-        Assert.Contains(firstNameProperty, outerRecorded.ToArray());
+        Assert.Single(GetProperties(outerRecorded));
+        Assert.Contains(firstNameProperty, GetProperties(outerRecorded));
     }
 
     [Fact]
@@ -217,7 +241,7 @@ public class DerivedPropertyRecorderTests
         {
             var property = new PropertyReference(person, $"Prop{i}");
             properties.Add(property);
-            recorder.TouchProperty(ref property);
+            recorder.OnPropertyRead(in property);
         }
 
         var recorded = recorder.FinishRecording();
@@ -226,7 +250,7 @@ public class DerivedPropertyRecorderTests
         Assert.Equal(20, recorded.Length);
         for (var i = 0; i < properties.Count; i++)
         {
-            Assert.Equal(properties[i], recorded[i]);
+            Assert.Equal(properties[i], recorded[i].Property);
         }
     }
 
@@ -240,7 +264,7 @@ public class DerivedPropertyRecorderTests
 
         // Act - the first session is the one that rents the pooled buffer
         recorder.StartRecording(CreateSelf(person));
-        TouchProperties(recorder, person, count: 5);
+        ReadProperties(recorder, person, count: 5);
         var firstRecording = recorder.FinishRecording();
 
         // Identity of the backing storage is what proves reuse. Asserting on the recorded
@@ -254,7 +278,7 @@ public class DerivedPropertyRecorderTests
         for (var session = 1; session < 10; session++)
         {
             recorder.StartRecording(CreateSelf(person));
-            TouchProperties(recorder, person, count: 5);
+            ReadProperties(recorder, person, count: 5);
             var recording = recorder.FinishRecording();
 
             // Assert
@@ -268,12 +292,12 @@ public class DerivedPropertyRecorderTests
         Assert.False(recorder.IsRecording);
     }
 
-    private static void TouchProperties(DerivedPropertyRecorder recorder, IInterceptorSubject subject, int count)
+    private static void ReadProperties(DerivedPropertyRecorder recorder, IInterceptorSubject subject, int count)
     {
         for (var i = 0; i < count; i++)
         {
             var property = new PropertyReference(subject, $"Prop{i}");
-            recorder.TouchProperty(ref property);
+            recorder.OnPropertyRead(in property);
         }
     }
 
@@ -287,7 +311,7 @@ public class DerivedPropertyRecorderTests
         var property = new PropertyReference(person, nameof(Person.FirstName));
 
         recorder.StartRecording(CreateSelf(person));
-        recorder.TouchProperty(ref property);
+        recorder.OnPropertyRead(in property);
         _ = recorder.FinishRecording();
 
         // Act
@@ -297,5 +321,92 @@ public class DerivedPropertyRecorderTests
         recorder.StartRecording(CreateSelf(person));
         var recorded = recorder.FinishRecording();
         Assert.Equal(0, recorded.Length);
+    }
+
+    [Fact]
+    public void WhenRecordingIsSuspended_ThenReadsAreNotRecordedUntilItResumes()
+    {
+        // Arrange
+        var person = new Person(InterceptorSubjectContext.Create());
+        var recorder = DerivedPropertyRecorder.Current;
+        recorder.StartRecording(CreateSelf(person));
+        _ = person.FirstName;
+
+        // Act
+        var isSuspended = DerivedPropertyRecorder.TrySuspend();
+        var isRecordingWhileSuspended = recorder.IsRecording;
+        var isEvaluatingWhileSuspended = DerivedPropertyRecorder.IsEvaluatingOnThisThread;
+        _ = person.LastName;
+        DerivedPropertyRecorder.Resume();
+        _ = person.Father;
+        var recorded = GetProperties(recorder.FinishRecording());
+        recorder.ClearLastRecording();
+
+        // Assert
+        Assert.True(isSuspended);
+        Assert.False(isRecordingWhileSuspended);
+        Assert.True(isEvaluatingWhileSuspended);
+        Assert.Equal(
+            [new PropertyReference(person, nameof(Person.FirstName)), new PropertyReference(person, nameof(Person.Father))],
+            recorded);
+        Assert.Null(PropertyAccessObservation.ReadObserver);
+    }
+
+    [Fact]
+    public void WhenRecordingStartsWhileSuspended_ThenItRecordsItsReads()
+    {
+        // Arrange
+        var person = new Person(InterceptorSubjectContext.Create());
+        var recorder = DerivedPropertyRecorder.Current;
+        recorder.StartRecording(new PropertyReference(person, "OuterDerived"));
+        var isSuspended = DerivedPropertyRecorder.TrySuspend();
+
+        // Act
+        recorder.StartRecording(new PropertyReference(person, "InnerDerived"));
+        _ = person.FirstName;
+        var innerRecorded = GetProperties(recorder.FinishRecording());
+        recorder.ClearLastRecording();
+        _ = person.LastName;
+        DerivedPropertyRecorder.Resume();
+        var outerRecorded = GetProperties(recorder.FinishRecording());
+        recorder.ClearLastRecording();
+
+        // Assert
+        Assert.True(isSuspended);
+        Assert.Equal([new PropertyReference(person, nameof(Person.FirstName))], innerRecorded);
+        Assert.Empty(outerRecorded);
+    }
+
+    [Fact]
+    public void WhenNothingIsRecorded_ThenSuspendingDoesNothing()
+    {
+        // Act
+        var isSuspended = DerivedPropertyRecorder.TrySuspend();
+
+        // Assert
+        Assert.False(isSuspended);
+        Assert.False(DerivedPropertyRecorder.IsEvaluatingOnThisThread);
+        Assert.Null(PropertyAccessObservation.ReadObserver);
+    }
+
+    [Fact]
+    public void WhenGetterThrows_ThenTheReadObserverIsCleared()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = _ => root.Anchor == int.MinValue ? 0 : throw new InvalidOperationException("Getter failed.");
+
+        // Act
+        root.Machine = machine;
+        var readObserverAfterAttach = PropertyAccessObservation.ReadObserver;
+        root.Anchor = 1;
+        var readObserverAfterRecalculation = PropertyAccessObservation.ReadObserver;
+
+        // Assert
+        Assert.Null(readObserverAfterAttach);
+        Assert.Null(readObserverAfterRecalculation);
+        Assert.False(DerivedPropertyRecorder.IsEvaluatingOnThisThread);
     }
 }

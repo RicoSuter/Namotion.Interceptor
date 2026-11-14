@@ -18,7 +18,7 @@ namespace Namotion.Interceptor.Validation;
 /// <see cref="SubjectTransaction.TryConsumeCommitWrite"/> is not validated again.
 /// </summary>
 [RunsAfter(typeof(SubjectTransactionInterceptor))]
-[RunsBefore(typeof(DerivedPropertyChangeHandler), typeof(PropertyChangeInterceptor), typeof(LifecycleInterceptor))]
+[RunsBefore(typeof(PropertyChangeInterceptor), typeof(LifecycleInterceptor))]
 public sealed class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
 {
     private static readonly ConcurrentDictionary<Type, ITypedValidation> TypedValidations = new();

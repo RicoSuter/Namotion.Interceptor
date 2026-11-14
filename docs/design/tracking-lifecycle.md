@@ -24,6 +24,12 @@ The lifecycle's **private ledger** of what it has actually processed for each st
 
 Both dictionaries are accessed exclusively under `lock (_attachedSubjects)`.
 
+### Per-subject attachments
+
+A subject can be attached to several lifecycle interceptors at once, one per graph. `SubjectLifecycleAttachments` keeps, in a state object in the subject's data that also holds the subject's reference count, the set of lifecycle interceptors the subject is attached to, as an immutable value (none, or an array of the interceptors, where a subject in one graph holds that interceptor's own one-element array) that every change replaces by compare-and-swap, compared by reference, so neither reads nor changes take a lock. The state object is created at the subject's first attach and never removed, so an attach or detach finds it with one lock-free lookup. An interceptor adds itself before it attaches the subject's properties (when the subject is attached as a root, or on its first reference), and removes itself before it detaches them (when the subject is detached as a root, or loses its last reference).
+
+Derived properties use it to stay attached while their subject is in any graph. While an interceptor detaches a subject's properties, the property detaches it issues do not detach derived properties. Afterwards, also when a lifecycle handler threw, the interceptor checks whether the subject left its last graph, and if so detaches every derived property of the subject, whether or not its own context has derived change detection. A subject of a type without any derived property data (`DerivedPropertyTypeGate`) has nothing to detach and skips both steps. Each of those detaches checks again under the derived property's lock, because another interceptor may attach the subject in between. See [Detach and Attachments](tracking-derived-properties.md#detach-and-attachments).
+
 ## The Concurrency Model
 
 ### The constraint
@@ -177,6 +183,16 @@ Acquisition order is always: `_attachedSubjects` → `_knownSubjects`. The `Subj
 Below those two sit the registry's per-object locks: `_children` on each `RegisteredSubjectProperty` and `_lock` on each `RegisteredSubject`. Every change to children and parent entries takes them inside `_knownSubjects`, on attach and detach and when a write moved a kept subject (`IChildIndexHandler`, implemented by `SubjectRegistry`). A `_lock` may be taken while `_children` is held, never the reverse. Readers take each of these locks on its own and never nest them.
 
 The `_attachedSubjects` lock is re-entrant (C# `Monitor`). `WriteProperty` may trigger lifecycle handlers that write to *other* properties, re-entering the lock. Each property has its own `_lastProcessedValues` entry, so there is no interference. Handlers must NOT write to the *same* property being reconciled. This is a documented contract requirement.
+
+Under `_attachedSubjects` the lifecycle also takes a leaf-level lock: the per-property lock of a derived property, which its attach and detach take briefly. Nothing that runs under a derived property's lock takes `_attachedSubjects`, because derived getters and publications never run under it (see [Lock ordering](tracking-derived-properties.md#lock-ordering-and-deadlock-freedom)).
+
+## Derived Properties Under the Lock
+
+Derived property tracking hooks into the lifecycle at two points: the lifecycle attaches and detaches derived properties, and a derived getter can write a property that the lifecycle reconciles.
+
+**Recording is suspended while the lifecycle reconciles.** A getter's write of a subject-typed property is reconciled on the evaluating thread: `WriteProperty` reconciles it, and attaching a subject runs its handlers. The reads of that reconciliation and of the handlers it calls (registry lookups, parent tracking) are not dependencies of the getter. `AttachSubjectToContext`, `DetachSubjectFromContext` and the reconciliation in `WriteProperty` therefore suspend the derived recording of the thread while they hold the lock, by pushing an inert recorder frame when a recording runs. `TryRunWhileAttached` does not, since its callback reads nothing on behalf of a getter. A derived property attached during the reconciliation pushes its own frame, so its first evaluation records its own reads normally.
+
+**What runs under the lock.** The first evaluation of a derived property at attach runs under `_attachedSubjects`, because consumers read the value while the subject attaches. A recalculation requested under the lock also runs immediately, on the same thread and still under the lock, and publishes its change there: for example one requested by a write that a lifecycle handler makes, or by a getter's side-effect write during an attach. A handler's writes are announced through the write chain under the lock as well, so they are announced before the structural write that caused them. The dependents of a structural write made outside the lock are recalculated after its chain completed, when the lock is already released. Getters and observers that run under the lock must therefore not block or take locks, see [Handler Requirements](../tracking.md#handler-requirements).
 
 ## Handler Order Around the Descent
 

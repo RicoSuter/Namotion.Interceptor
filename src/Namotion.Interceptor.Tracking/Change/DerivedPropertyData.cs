@@ -4,7 +4,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
 /// Consolidated per-property data for derived property tracking.
-/// Stored once per (subject, property) in Subject.Data under a short key
+/// Created once per (subject, property) and never removed or replaced. Stored in Subject.Data under a short key
 /// to minimize dictionary lookups (one lookup instead of separate lookups
 /// for UsedByProperties, RequiredProperties, and LastKnownValue).
 /// </summary>
@@ -24,6 +24,13 @@ internal sealed class DerivedPropertyData
     private int _requiredPropertyCount;
 
     /// <summary>
+    /// The data of each dependency, at the index of its <see cref="_requiredProperties"/> entry. Written under
+    /// lock(this); read without the lock by an evaluation of this property (<see cref="RequiredData"/>), which
+    /// checks each entry's <see cref="Property"/> before it uses it.
+    /// </summary>
+    private DerivedPropertyData?[]? _requiredData;
+
+    /// <summary>
     /// Used-by properties: Which derived properties depend on this property.
     /// Initialized lazily via Interlocked.CompareExchange for thread safety.
     /// </summary>
@@ -36,48 +43,80 @@ internal sealed class DerivedPropertyData
     internal object? LastKnownValue;
 
     /// <summary>
-    /// Reentrancy guard for RecalculateDerivedProperty.
-    /// Prevents infinite recursion when a derived-with-setter property's
-    /// PublishDerivedPropertyValue re-enters WriteProperty.
-    /// Only read/written inside lock(this), so no volatile needed.
+    /// Incremented by every landed write of this property (source role), after the value landed and a full fence;
+    /// read by evaluations to detect a write between a read and its link.
     /// </summary>
-    internal bool IsRecalculating;
+    internal long Version;
+
+    // Ownership state, see "Ownership Protocol" in docs/design/tracking-derived-properties.md. Read and written only
+    // under lock(this) unless noted.
+
+    /// <summary>The token of the evaluation that owns this derived property (a recalculation or an attach), or 0.</summary>
+    internal long OwnerToken;
+
+    /// <summary>The token of the attach in progress, or 0; a newer attach or a detach replaces it.</summary>
+    internal long AttachToken;
 
     /// <summary>
-    /// Sequence counter incremented under lock(this) each time RecalculateDerivedProperty
-    /// computes a new value. Read via Volatile.Read outside the lock to detect stale
-    /// notifications — if the sequence has advanced, a newer recalculation is already completed
-    /// and the current notification should be skipped.
+    /// Incremented for every committed value and every detach. Read via Volatile.Read outside the lock to skip a
+    /// stale publication: if the sequence has advanced, a newer commit or a detach happened.
     /// </summary>
     internal long RecalculationSequence;
 
-    /// <summary>
-    /// Set under lock(this) when a state change occurs while IsRecalculating is true:
-    /// concurrent RecalculateDerivedProperty (bails), DetachProperty, or AttachProperty.
-    /// Checked by RecalculateDerivedProperty before committing — if set, the evaluation
-    /// result is discarded and the getter is re-evaluated with a fresh state.
-    /// </summary>
+    /// <summary>A recalculation was requested while the property is owned or an attach is in progress.</summary>
     internal bool RecalculationNeeded;
 
-    /// <summary>
-    /// Lifecycle flag cleared during DetachProperty under lock(this).
-    /// Checked by RecalculateDerivedProperty to prevent zombie used-by property resurrection.
-    /// Set by AttachProperty on every attach of a derived property. Not read for source properties,
-    /// whose data a detach always removes.
-    /// Defaults to true because properties are assumed to be attached until explicitly detached.
-    /// </summary>
-    internal bool IsAttached = true;
+    /// <summary>A pending request came from another thread than the owner's, or while nobody owned the property.</summary>
+    internal bool HasForeignRequest;
+
+    /// <summary>The managed thread id of the owner set with <see cref="OwnerToken"/>.</summary>
+    internal int OwnerThreadId;
+
+    /// <summary>The raw changed timestamp of the newest pending request, or 0.</summary>
+    internal long PendingRawTimestamp;
+
+    /// <summary>The derived property is attached. Not read for source properties.</summary>
+    internal bool IsAttached;
+
+    /// <summary><see cref="LastKnownValue"/> holds a committed value of the current attachment.</summary>
+    internal bool HasValue;
+
+    /// <summary>The last evaluation threw, so the first success afterwards is published.</summary>
+    internal bool IsFaulted;
 
     /// <summary>
     /// True if this data belongs to a derived property (vs. a source property whose data exists only
-    /// because a derived depends on it). Lets WriteProperty identify derived-with-setter writes
+    /// because a derived depends on it). Lets the write observer identify derived-with-setter writes
     /// without touching metadata on the hot path.
     /// </summary>
     /// <remarks>
-    /// Written via <c>Volatile.Write</c> in AttachProperty, read via <c>Volatile.Read</c> in
-    /// WriteProperty. Write-once; never reset (metadata.IsDerived is immutable).
+    /// Written via <c>Volatile.Write</c> by the attach, read via <c>Volatile.Read</c> by the write observer and
+    /// a recalculation request. Write-once; never reset (metadata.IsDerived is immutable).
     /// </remarks>
     internal bool IsDerived;
+
+    private static long _lastToken;
+
+    private DerivedPropertyData(PropertyReference property)
+    {
+        Property = property;
+    }
+
+    /// <summary>The property this data belongs to.</summary>
+    internal PropertyReference Property { get; }
+
+    /// <summary>
+    /// Creates the data of <paramref name="property"/> and raises the gate of its subject's type first, so the
+    /// gate is raised before the data can be found.
+    /// </summary>
+    internal static DerivedPropertyData Create(PropertyReference property)
+    {
+        DerivedPropertyTypeGate.Of(property.Subject).Raise();
+        return new DerivedPropertyData(property);
+    }
+
+    /// <summary>Returns a new, process-wide unique, nonzero owner or attach token.</summary>
+    internal static long NewToken() => Interlocked.Increment(ref _lastToken);
 
     /// <summary>
     /// Read-only access to used-by properties for public API.
@@ -109,6 +148,16 @@ internal sealed class DerivedPropertyData
     }
 
     /// <summary>
+    /// The dependency data of the last committed links, in read order, or null. Read without the lock: the array
+    /// can change while it is read, so an entry is only valid for the property it names.
+    /// </summary>
+    internal DerivedPropertyData?[]? RequiredData
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Volatile.Read(ref _requiredData);
+    }
+
+    /// <summary>
     /// Returns used-by properties as a read-only span (allocation-free).
     /// Performs a single Volatile.Read of the collection and returns its Items span.
     /// </summary>
@@ -125,113 +174,74 @@ internal sealed class DerivedPropertyData
     }
 
     /// <summary>
-    /// Detaches this property: sets IsAttached=false, cleans dependencies (if derived),
-    /// snapshots, and clears used-by properties. Called under lock(this).
+    /// Removes this derived property from the used-by set of every dependency and clears its dependencies.
+    /// Called under lock(this).
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal PropertyReference[] DetachAndSnapshotUsedBy(in PropertyReference property)
+    internal void RemoveAllLinks(in PropertyReference derivedProperty)
     {
-        IsAttached = false;
-
-        // Case 1 (derived only): remove this property from each dependency's UsedByProperties.
-        if (property.Metadata.IsDerived)
+        foreach (ref readonly var dependency in RequiredPropertiesSpan)
         {
-            var requiredProperties = RequiredPropertiesSpan;
-            for (var i = 0; i < requiredProperties.Length; i++)
-            {
-                requiredProperties[i]
-                    .TryGetDerivedPropertyData()?
-                    .RemoveUsedByProperty(property);
-            }
-
-            ClearRequiredProperties();
-            LastKnownValue = null;
+            dependency.TryGetDerivedPropertyData()?.RemoveUsedByProperty(derivedProperty);
         }
 
-        // Case 2: snapshot used-by properties, then clear. The snapshot is stable because the collection
-        // never changes an array it handed out.
-        var snapshot = _usedByProperties?.ItemsArray ?? [];
-        _usedByProperties = null;
-        return snapshot;
+        ClearRequiredProperties();
     }
 
     /// <summary>
-    /// Updates dependencies (RequiredProperties) and used-by properties (UsedByProperties).
-    /// Called under lock(this). Returns true if dependency set changed (caller should re-evaluate).
+    /// Updates dependencies (RequiredProperties) and used-by properties (UsedByProperties) to the recorded set.
+    /// Called under lock(this).
     /// </summary>
-    internal bool UpdateDependencies(
-        in PropertyReference derivedProperty,
-        ReadOnlySpan<PropertyReference> recordedDependencies,
-        DerivedPropertyRecorder recorder)
+    internal void UpdateDependencies(in PropertyReference derivedProperty, ReadOnlySpan<RecordedDependency> recorded)
     {
-        var previousRequiredProperties = RequiredPropertiesSpan;
-
-        // Fast path: deps unchanged — no allocation.
-        if (previousRequiredProperties.SequenceEqual(recordedDependencies))
+        var previous = RequiredPropertiesSpan;
+        if (previous.Length == recorded.Length && IsSameOrder(previous, recorded))
         {
-            recorder.ClearLastRecording();
-            return false;
+            return;
         }
 
-        RemoveStaleUsedByProperties(derivedProperty, previousRequiredProperties, recordedDependencies);
-        AddNewUsedByProperties(derivedProperty, previousRequiredProperties, recordedDependencies);
-        SetRequiredProperties(recordedDependencies);
-        recorder.ClearLastRecording();
+        foreach (ref readonly var old in previous)
+        {
+            if (IndexOf(recorded, old) < 0)
+            {
+                old.TryGetDerivedPropertyData()?.RemoveUsedByProperty(derivedProperty);
+            }
+        }
+
+        foreach (ref readonly var dependency in recorded)
+        {
+            if (previous.IndexOf(dependency.Property) < 0)
+            {
+                dependency.Property.GetDerivedPropertyData().AddUsedByProperty(derivedProperty);
+            }
+        }
+
+        SetRequiredProperties(recorded);
+    }
+
+    private static bool IsSameOrder(ReadOnlySpan<PropertyReference> previous, ReadOnlySpan<RecordedDependency> recorded)
+    {
+        for (var i = 0; i < previous.Length; i++)
+        {
+            if (previous[i] != recorded[i].Property)
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 
-    /// <summary>
-    /// Removes used-by properties for dependencies that are no longer in the recorded set.
-    /// Called under lock(this). Both spans must be valid (array not yet modified, recorder not yet cleared).
-    /// </summary>
-    private static void RemoveStaleUsedByProperties(
-        in PropertyReference derivedProperty,
-        ReadOnlySpan<PropertyReference> previousRequiredProperties,
-        ReadOnlySpan<PropertyReference> recordedDependencies)
+    private static int IndexOf(ReadOnlySpan<RecordedDependency> recorded, in PropertyReference property)
     {
-        foreach (ref readonly var oldDependency in previousRequiredProperties)
+        for (var i = 0; i < recorded.Length; i++)
         {
-            if (!recordedDependencies.Contains(oldDependency))
+            if (recorded[i].Property == property)
             {
-                oldDependency.TryGetDerivedPropertyData()?.RemoveUsedByProperty(derivedProperty);
+                return i;
             }
         }
-    }
 
-    /// <summary>
-    /// Adds used-by properties for newly recorded dependencies. Locks each dependency's data
-    /// to serialize with DetachProperty's used-by snapshot. Called under lock(this).
-    /// </summary>
-    private static void AddNewUsedByProperties(
-        in PropertyReference derivedProperty,
-        ReadOnlySpan<PropertyReference> previousRequiredProperties,
-        ReadOnlySpan<PropertyReference> recordedDependencies)
-    {
-        foreach (ref readonly var newDependency in recordedDependencies)
-        {
-            if (!previousRequiredProperties.Contains(newDependency))
-            {
-                AddUsedByPropertyToCurrentData(newDependency, derivedProperty);
-            }
-        }
-    }
-
-    private static void AddUsedByPropertyToCurrentData(in PropertyReference dependency, in PropertyReference derivedProperty)
-    {
-        // A detach may remove the fetched data before it is locked. Registering on the removed instance would
-        // lose this used-by property when the dependency is attached again, so register on the current data.
-        while (true)
-        {
-            var dependencyData = dependency.GetDerivedPropertyData();
-            lock (dependencyData)
-            {
-                if (ReferenceEquals(dependency.TryGetDerivedPropertyData(), dependencyData))
-                {
-                    dependencyData.AddUsedByProperty(derivedProperty);
-                    return;
-                }
-            }
-        }
+        return -1;
     }
 
     /// <summary>
@@ -239,23 +249,29 @@ internal sealed class DerivedPropertyData
     /// Reuses existing array if capacity is sufficient; allocates only when growing.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void SetRequiredProperties(ReadOnlySpan<PropertyReference> properties)
+    private void SetRequiredProperties(ReadOnlySpan<RecordedDependency> recorded)
     {
-        var newCount = properties.Length;
+        var newCount = recorded.Length;
         var currentArray = _requiredProperties;
-        if (currentArray is not null && currentArray.Length >= newCount)
+        var currentData = _requiredData;
+        if (currentArray is null || currentData is null || currentArray.Length < newCount)
         {
-            // Reuse existing buffer — zero allocation.
-            properties.CopyTo(currentArray);
-            if (currentArray.Length > newCount)
-            {
-                currentArray.AsSpan(newCount).Clear();
-            }
+            currentArray = new PropertyReference[newCount];
+            currentData = new DerivedPropertyData?[newCount];
+            _requiredProperties = currentArray;
+            Volatile.Write(ref _requiredData, currentData);
         }
-        else
+
+        for (var i = 0; i < newCount; i++)
         {
-            // Must grow: allocate new array.
-            _requiredProperties = properties.ToArray();
+            currentArray[i] = recorded[i].Property;
+            currentData[i] = recorded[i].Data;
+        }
+
+        if (currentArray.Length > newCount)
+        {
+            currentArray.AsSpan(newCount).Clear();
+            currentData.AsSpan(newCount).Clear();
         }
 
         _requiredPropertyCount = newCount;
@@ -268,46 +284,8 @@ internal sealed class DerivedPropertyData
     private void ClearRequiredProperties()
     {
         _requiredProperties = null;
+        _requiredData = null;
         _requiredPropertyCount = 0;
-    }
-
-    /// <summary>
-    /// Removes a dependency using swap-remove (no array allocation).
-    /// Nulls out array when the last item is removed.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal bool RemoveRequiredProperty(in PropertyReference property)
-    {
-        var required = _requiredProperties;
-        var requiredCount = _requiredPropertyCount;
-        if (required is null || requiredCount == 0)
-        {
-            return false;
-        }
-
-        var index = Array.IndexOf(required, property, 0, requiredCount);
-        if (index < 0)
-        {
-            return false;
-        }
-
-        // Swap-remove: move the last item into the removed slot, decrement count.
-        // No array allocation. Safe under lock.
-        var lastIndex = requiredCount - 1;
-        if (index < lastIndex)
-        {
-            required[index] = required[lastIndex];
-        }
-
-        required[lastIndex] = default;
-        _requiredPropertyCount = lastIndex;
-
-        if (lastIndex == 0)
-        {
-            _requiredProperties = null;
-        }
-
-        return true;
     }
 
     /// <summary>

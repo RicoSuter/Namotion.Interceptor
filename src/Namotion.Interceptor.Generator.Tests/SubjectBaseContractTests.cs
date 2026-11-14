@@ -615,13 +615,13 @@ public class SubjectBaseContractTests
                 protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;
 
                 protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
-                    => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
+                    => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : global::Namotion.Interceptor.Interceptors.InterceptorExecutor.GetPropertyValueWithoutContext(this, propertyName, readValue)!;
 
                 protected void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
                 {
                     if (_context is null)
                     {
-                        setValue(this, newValue);
+                        global::Namotion.Interceptor.Interceptors.InterceptorExecutor.SetPropertyValueWithoutContext(this, propertyName, newValue, setValue);
                         return;
                     }
 
@@ -678,14 +678,13 @@ public class SubjectBaseContractTests
                 protected FrozenDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;
 
                 protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
-                    => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
+                    => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : global::Namotion.Interceptor.Interceptors.InterceptorExecutor.GetPropertyValueWithoutContext(this, propertyName, readValue)!;
 
                 protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
                 {
                     if (_context is null)
                     {
-                        setValue(this, newValue);
-                        return true;
+                        return global::Namotion.Interceptor.Interceptors.InterceptorExecutor.SetPropertyValueWithoutContext(this, propertyName, newValue, setValue);
                     }
 
                     return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
@@ -762,14 +761,13 @@ public class SubjectBaseContractTests
                 protected PropertyMap GetInstanceProperties() => default;
 
                 protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
-                    => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
+                    => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : global::Namotion.Interceptor.Interceptors.InterceptorExecutor.GetPropertyValueWithoutContext(this, propertyName, readValue)!;
 
                 protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
                 {
                     if (_context is null)
                     {
-                        setValue(this, newValue);
-                        return true;
+                        return global::Namotion.Interceptor.Interceptors.InterceptorExecutor.SetPropertyValueWithoutContext(this, propertyName, newValue, setValue);
                     }
 
                     return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);

@@ -1,5 +1,6 @@
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
@@ -26,6 +27,41 @@ public class DerivedPropertyRequiredPropertiesTests
         // Assert
         Assert.DoesNotContain(fullName, fullName.GetRequiredProperties().ToArray());
         Assert.DoesNotContain(fullNameWithPrefix, fullNameWithPrefix.GetRequiredProperties().ToArray());
+    }
+
+    [Fact]
+    public void WhenGetterAttachesASubjectAsASideEffect_ThenRequiredPropertiesContainOnlyTheGettersOwnReads()
+    {
+        // Arrange: each evaluation assigns a new machine, so the lifecycle, its handlers and the registry read
+        // properties of the assigned subjects on the evaluating thread, the assigned property included.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithParents()
+            .WithRegistry();
+
+        var root = new EvaluatorRoot(context);
+        var otherRoot = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var evaluations = 0;
+        machine.Worker.Evaluator = _ =>
+        {
+            var value = root.Anchor;
+            evaluations++;
+            otherRoot.Machine = new EvaluatorMachine();
+
+            return value;
+        };
+
+        // Act
+        root.Machine = machine;
+
+        // Assert
+        Assert.Equal(1, evaluations);
+        Assert.NotNull(otherRoot.Machine);
+        Assert.Equal(
+            [new PropertyReference(root, nameof(EvaluatorRoot.Anchor))],
+            new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)).GetRequiredProperties().ToArray());
     }
 
     [Fact]
@@ -186,7 +222,7 @@ public class DerivedPropertyRequiredPropertiesTests
     public void WhenSourcePropertyHasDependents_ThenIsDerivedStaysFalse()
     {
         // A source property acquires DerivedPropertyData because a derived depends on it.
-        // Its IsDerived flag must stay false — otherwise WriteProperty would treat the source
+        // Its IsDerived flag must stay false, otherwise the write observer would treat the source
         // as derived-with-setter and trigger a spurious self-recalc on every write.
 
         // Arrange
@@ -242,7 +278,7 @@ public class DerivedPropertyRequiredPropertiesTests
     [Fact]
     public void WhenDynamicDerivedWithSetterShortCircuitsAtAttach_ThenSetterTriggeredRecalcDiscoversNewDependency()
     {
-        // Pins the IsDerived guard in WriteProperty: a short-circuiting getter records zero deps
+        // Pins the IsDerived guard of the write observer: a short-circuiting getter records zero deps
         // at attach, and the setter-triggered recalc must still run to surface new dependencies.
 
         // Arrange
@@ -276,5 +312,38 @@ public class DerivedPropertyRequiredPropertiesTests
         // Assert
         Assert.DoesNotContain(derivedReference, deps);
         Assert.Contains(firstNameReference, deps);
+    }
+
+    [Fact]
+    public void WhenGetterReadsItsDependenciesInAnotherOrder_ThenEachLinkHasTheDataOfItsOwnProperty()
+    {
+        // Arrange: the getter reads Anchor and Value in an order that a flag outside the model decides, so the
+        // second evaluation reads at each position another property than the last commit's links.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var configuration = machine.Configuration;
+        var isAnchorReadFirst = true;
+        machine.Worker.Evaluator = _ => isAnchorReadFirst
+            ? root.Anchor + 10 * configuration.Value
+            : 10 * configuration.Value + root.Anchor;
+        root.Machine = machine;
+        var result = new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result));
+        var anchor = new PropertyReference(root, nameof(EvaluatorRoot.Anchor));
+        var value = new PropertyReference(configuration, nameof(EvaluatorConfiguration.Value));
+
+        // Act
+        isAnchorReadFirst = false;
+        root.Anchor = 1;
+        var requiredProperties = result.GetRequiredProperties().ToArray();
+        var requiredData = result.TryGetDerivedPropertyData()!.RequiredData!;
+        configuration.Value = 2;
+        root.Anchor = 3;
+
+        // Assert
+        Assert.Equal([value, anchor], requiredProperties);
+        Assert.Same(value.TryGetDerivedPropertyData(), requiredData[0]);
+        Assert.Same(anchor.TryGetDerivedPropertyData(), requiredData[1]);
+        Assert.Equal(23, result.TryGetDerivedPropertyData()?.LastKnownValue);
     }
 }

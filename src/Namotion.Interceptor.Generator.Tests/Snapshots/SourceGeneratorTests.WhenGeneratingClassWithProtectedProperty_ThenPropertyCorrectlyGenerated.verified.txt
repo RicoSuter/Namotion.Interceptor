@@ -143,7 +143,7 @@ using System.Text.Json.Serialization;
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
         {
-            return _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
+            return _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : global::Namotion.Interceptor.Interceptors.InterceptorExecutor.GetPropertyValueWithoutContext(this, propertyName, readValue)!;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -151,8 +151,7 @@ using System.Text.Json.Serialization;
         {
             if (_context is null)
             {
-                setValue(this, newValue);
-                return true;
+                return global::Namotion.Interceptor.Interceptors.InterceptorExecutor.SetPropertyValueWithoutContext(this, propertyName, newValue, setValue);
             }
             else
             {

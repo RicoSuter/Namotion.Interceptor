@@ -2,9 +2,6 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 public static class LifecycleInterceptorExtensions
 {
-    // Must match LifecycleInterceptor.ReferenceCountKey (private implementation detail)
-    private const string ReferenceCountKey = "Namotion.Interceptor.Tracking.ReferenceCount";
-
     /// <summary>
     /// Gets the lifecycle interceptor from the context, if configured.
     /// </summary>
@@ -19,11 +16,7 @@ public static class LifecycleInterceptorExtensions
     /// </summary>
     public static int GetReferenceCount(this IInterceptorSubject subject)
     {
-        if (subject.Data.TryGetValue((null, ReferenceCountKey), out var count))
-        {
-            return (int)(count ?? 0);
-        }
-        return 0;
+        return SubjectLifecycleAttachments.GetReferenceCount(subject);
     }
 
     /// <summary>
@@ -31,7 +24,7 @@ public static class LifecycleInterceptorExtensions
     /// </summary>
     internal static int IncrementReferenceCount(this IInterceptorSubject subject)
     {
-        return (int)(subject.Data.AddOrUpdate((null, ReferenceCountKey), 1, (_, count) => (int)(count ?? 0) + 1) ?? 1);
+        return SubjectLifecycleAttachments.IncrementReferenceCount(subject);
     }
 
     /// <summary>
@@ -39,7 +32,7 @@ public static class LifecycleInterceptorExtensions
     /// </summary>
     internal static int DecrementReferenceCount(this IInterceptorSubject subject)
     {
-        return (int)(subject.Data.AddOrUpdate((null, ReferenceCountKey), 0, (_, count) => Math.Max(0, (int)(count ?? 0) - 1)) ?? 0);
+        return SubjectLifecycleAttachments.DecrementReferenceCount(subject);
     }
 
     public static void AttachSubjectProperty(this IInterceptorSubject subject, PropertyReference property)

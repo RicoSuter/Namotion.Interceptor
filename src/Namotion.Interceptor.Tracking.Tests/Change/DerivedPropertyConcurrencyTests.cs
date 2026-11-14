@@ -297,9 +297,9 @@ public class DerivedPropertyConcurrencyTests
     [Fact]
     public async Task WhenDependencyChangesWhileNewDependencyDetaches_ThenNoStaleBacklinksOrExceptions()
     {
-        // Targets the rare path in UpdateDependencies where a newly-recorded dependency
-        // is being detached concurrently (hasSkippedDependencies = true). The rare path
-        // re-checks each dependency under lock and filters out still-detached ones.
+        // Changes the dependency set to include FirstName while FirstName, a source property, is
+        // detached concurrently. A source detach leaves the links alone, so Display still follows
+        // FirstName once it depends on it.
         for (var i = 0; i < DefaultIterations; i++)
         {
             // Arrange
@@ -318,7 +318,7 @@ public class DerivedPropertyConcurrencyTests
             var barrier = new Barrier(2);
 
             // Act — toggle condition (deps change to include FirstName) while
-            // concurrently detaching FirstName (sets IsAttached = false on FirstName's data)
+            // concurrently detaching FirstName
             var toggleTask = Task.Run(() =>
             {
                 barrier.SignalAndWait();

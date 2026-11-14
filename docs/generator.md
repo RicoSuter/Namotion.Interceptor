@@ -800,15 +800,16 @@ public class TrackedEntityBase : IInterceptorSubject, INotifyPropertyChanged, IR
     protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;
 
     protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
-        => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
+        => _context is not null
+            ? _context.GetPropertyValue(propertyName, readValue)!
+            : InterceptorExecutor.GetPropertyValueWithoutContext(this, propertyName, readValue)!;
 
     protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue,
         Action<IInterceptorSubject, TProperty> setValue)
     {
         if (_context is null)
         {
-            setValue(this, newValue);
-            return true;
+            return InterceptorExecutor.SetPropertyValueWithoutContext(this, propertyName, newValue, setValue);
         }
 
         return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
@@ -825,6 +826,8 @@ public partial class Machine : TrackedEntityBase
     public partial string SerialNumber { get; set; }
 }
 ```
+
+While there is no context, the base class calls `GetPropertyValueWithoutContext` and `SetPropertyValueWithoutContext` instead of reading and writing the field directly, because derived properties follow the subject before it is attached to a context.
 
 ### Three things the compiler cannot check for you
 

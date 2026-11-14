@@ -1,81 +1,127 @@
 using System.Buffers;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
-/// <summary>
-/// Pooled buffer for recording property dependencies during derived property evaluation.
-///
-/// - Stack-based: Supports nested derived property evaluations (rare but possible)
-/// - Pooled: Reuses ArrayPool buffers to avoid allocations in steady state
-/// - Deduplication: Automatically removes duplicate property accesses
-///
-/// Lifecycle: StartRecording() → TouchProperty() (N times) → FinishRecording()
-/// </summary>
-internal sealed class DerivedPropertyRecorder
-{
-    private readonly ArrayPool<PropertyReference> _pool = ArrayPool<PropertyReference>.Shared;
-    
-    private RecordingFrame[] _frames = [];
-    private int _depth; // Current nesting level (usually 0 or 1)
+/// <summary>A property read during an evaluation, with the source's version captured before the read.</summary>
+internal readonly record struct RecordedDependency(PropertyReference Property, DerivedPropertyData Data, long Version);
 
-    // Frame holds buffer and current count for one recording session
+/// <summary>
+/// Records the reads of a derived getter. Installed as the thread's read observer while at least one
+/// recording runs, so reads of subjects without a context are recorded as well. Frames nest; a
+/// suspended frame records nothing.
+/// </summary>
+internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
+{
+    [ThreadStatic]
+    private static DerivedPropertyRecorder? _current;
+
+    private readonly ArrayPool<RecordedDependency> _pool = ArrayPool<RecordedDependency>.Shared;
+    private RecordingFrame[] _frames = [];
+    private int _depth;
+
     private struct RecordingFrame
     {
-        public PropertyReference Property;   // Property whose dependencies are being recorded (excluded from touches)
-        public PropertyReference[]? Buffer;  // Rented from pool, reused across sessions
-        public int Count;                    // Number of recorded items in this session
+        public PropertyReference Property;
+        public bool IsSuspended;
+        public RecordedDependency[]? Buffer;
+        public DerivedPropertyData?[]? PreviousReads;
+        public int Count;
+        public bool HasOwnWriteAfterRead;
+    }
+
+    internal static DerivedPropertyRecorder Current => _current ??= new DerivedPropertyRecorder();
+
+    public bool IsRecording => _depth > 0 && !_frames[_depth - 1].IsSuspended;
+
+    /// <summary>A getter is being evaluated on this thread, also while its recording is suspended.</summary>
+    internal static bool IsEvaluatingOnThisThread => _current is { _depth: > 0 };
+
+    /// <summary>
+    /// Starts a recording frame for the getter of <paramref name="property"/> (reuses a pooled buffer; allocation-free in
+    /// steady state). Reads of <paramref name="property"/> itself are filtered so a derived property never depends on
+    /// itself: a dynamic derived getter reads its own property again through the interceptor chain.
+    /// <paramref name="previousReads"/> is the dependency data of the property's last committed links in read order:
+    /// a read at the same position of the same property takes its data from there instead of looking it up.
+    /// </summary>
+    public void StartRecording(in PropertyReference property, DerivedPropertyData?[]? previousReads = null)
+    {
+        PushFrame(property, isSuspended: false, previousReads);
     }
 
     /// <summary>
-    /// Gets whether the recording is currently active (depth > 0).
+    /// Records nothing on this thread until <see cref="Resume"/>; a recording started inside records normally.
+    /// Returns false, and suspends nothing, when no recording runs on this thread.
     /// </summary>
-    public bool IsRecording => _depth > 0;
-
-    /// <summary>
-    /// Starts a new recording session (reuses pooled buffer; allocation-free in steady state).
-    /// Reads of <paramref name="property"/> are filtered from the dependency set so a derived
-    /// property never depends on itself — needed because dynamic derived getters re-enter
-    /// <c>ReadProperty</c> via <c>GetPropertyValue</c> wrapping.
-    /// </summary>
-    public void StartRecording(in PropertyReference property)
+    internal static bool TrySuspend()
     {
-        // Grow frame stack if needed (rare - only happens on first use or deep nesting)
-        if (_depth == _frames.Length)
-            Array.Resize(ref _frames, Math.Max(2, _frames.Length * 2));
+        var recorder = _current;
+        if (recorder is null || recorder._depth == 0)
+        {
+            return false;
+        }
 
-        // Get a frame for this depth level and reset count
+        recorder.PushFrame(default, isSuspended: true, previousReads: null);
+        return true;
+    }
+
+    /// <summary>Ends the suspension of a <see cref="TrySuspend"/> that returned true.</summary>
+    internal static void Resume()
+    {
+        var recorder = _current!;
+        recorder.FinishRecording();
+        recorder.ClearLastRecording();
+    }
+
+    private void PushFrame(in PropertyReference property, bool isSuspended, DerivedPropertyData?[]? previousReads)
+    {
+        if (_depth == _frames.Length)
+        {
+            Array.Resize(ref _frames, Math.Max(2, _frames.Length * 2));
+        }
+
         ref var frame = ref _frames[_depth++];
         frame.Count = 0;
         frame.Property = property;
+        frame.IsSuspended = isSuspended;
+        frame.HasOwnWriteAfterRead = false;
+        frame.PreviousReads = previousReads;
+        if (!isSuspended)
+        {
+            frame.Buffer ??= _pool.Rent(8);
+        }
 
-        // Rent pooled buffer if not already allocated (allocation-free on subsequent calls)
-        frame.Buffer ??= _pool.Rent(8); // Typical derived property has < 8 dependencies
+        // The read observer is a single slot: a recording replaces any other observer of this thread, and
+        // FinishRecording clears it instead of restoring one.
+        PropertyAccessObservation.ReadObserver = this;
     }
 
-    /// <summary>
-    /// Records property access during derived property evaluation. Automatically deduplicates.
-    /// <para><b>Example:</b> If property X is accessed twice in the same getter, only recorded once.</para>
-    /// </summary>
-    public void TouchProperty(ref PropertyReference property)
+    public void OnPropertyRead(in PropertyReference property)
     {
         ref var frame = ref _frames[_depth - 1];
-
-        // Filter the self-read: dynamic derived getters re-enter ReadProperty for themselves via
-        // GetPropertyValue wrapping. See StartRecording.
-        if (property == frame.Property)
+        if (frame.IsSuspended || property == frame.Property)
         {
             return;
         }
 
         var buffer = frame.Buffer!;
-
-        // Deduplicate: Skip if already recorded in this session
-        if (Array.IndexOf(buffer, property, 0, frame.Count) >= 0)
+        for (var i = 0; i < frame.Count; i++)
         {
-            return;
+            if (buffer[i].Property == property)
+            {
+                // The first read keeps its version: a later version would let a value mixed from
+                // before and after a write pass the version check.
+                return;
+            }
         }
 
-        // Grow buffer if full (rare - only if property has > 8, 16, 32... dependencies)
+        // R1 and R2 of the protocol: the data exists and is fenced before its version is read with
+        // acquire semantics, and the version is read before the value. Data is never replaced, so the data of the
+        // previous evaluation's read at this position is current when it belongs to the same property.
+        var data = GetPreviousRead(frame.PreviousReads, frame.Count, property) ?? property.GetDerivedPropertyData();
+        Interlocked.MemoryBarrier();
+        var version = Volatile.Read(ref data.Version);
+
         if (frame.Count == buffer.Length)
         {
             var newBuffer = _pool.Rent(buffer.Length * 2);
@@ -85,31 +131,97 @@ internal sealed class DerivedPropertyRecorder
             buffer = newBuffer;
         }
 
-        // Record dependency
-        buffer[frame.Count++] = property;
+        buffer[frame.Count++] = new RecordedDependency(property, data, version);
+    }
+
+    // The array can change while it is read: an entry counts only for the property it belongs to.
+    private static DerivedPropertyData? GetPreviousRead(DerivedPropertyData?[]? previousReads, int index, in PropertyReference property)
+    {
+        if (previousReads is null || index >= previousReads.Length)
+        {
+            return null;
+        }
+
+        var previous = previousReads[index];
+        return previous is not null && previous.Property == property ? previous : null;
     }
 
     /// <summary>
-    /// Completes a recording session and returns recorded dependencies as a span.
-    /// <para><b>Important:</b> Span is only valid until <see cref="ClearLastRecording"/> or next
-    /// <see cref="StartRecording"/> call on this thread.</para>
+    /// Called after a write on this thread moved a property's version to <paramref name="newVersion"/>: rebases the
+    /// recordings of this thread that read it ("Own writes" in docs/design/tracking-derived-properties.md).
     /// </summary>
-    public ReadOnlySpan<PropertyReference> FinishRecording()
+    internal void OnOwnWrite(in PropertyReference property, long newVersion)
+    {
+        for (var depth = 0; depth < _depth; depth++)
+        {
+            ref var frame = ref _frames[depth];
+            if (!frame.IsSuspended)
+            {
+                RebaseOnOwnWrite(ref frame, property, newVersion);
+            }
+        }
+    }
+
+    private static void RebaseOnOwnWrite(ref RecordingFrame frame, in PropertyReference property, long newVersion)
+    {
+        var buffer = frame.Buffer!;
+        for (var i = 0; i < frame.Count; i++)
+        {
+            if (buffer[i].Property == property)
+            {
+                if (buffer[i].Version == newVersion - 1)
+                {
+                    buffer[i] = buffer[i] with { Version = newVersion };
+                    frame.HasOwnWriteAfterRead = true;
+                }
+
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Ends the innermost frame and returns its reads. The span (and <see cref="LastRecording"/>) stays valid until
+    /// <see cref="ClearLastRecording"/> or the next <see cref="StartRecording"/> on this thread, which the version
+    /// check of a commit relies on.
+    /// </summary>
+    public ReadOnlySpan<RecordedDependency> FinishRecording()
     {
         _depth--;
-        ref var frame = ref _frames[_depth];
+        if (_depth == 0)
+        {
+            PropertyAccessObservation.ReadObserver = null;
+        }
 
-        // Return the span view into a pooled buffer (zero allocation)
-        return new ReadOnlySpan<PropertyReference>(frame.Buffer, 0, frame.Count);
+        ref var frame = ref _frames[_depth];
+        frame.PreviousReads = null;
+        return new ReadOnlySpan<RecordedDependency>(frame.Buffer, 0, frame.Count);
     }
 
     /// <summary>
-    /// Clears stale PropertyReference values from the last finished recording's buffer.
-    /// Must be called after the span from <see cref="FinishRecording"/> is no longer in use.
-    /// Prevents the thread-static recorder from holding strong references to detached subjects.
+    /// The reads of the recording finished last on this thread; valid after <see cref="FinishRecording"/> until
+    /// <see cref="ClearLastRecording"/> or the next <see cref="StartRecording"/>.
+    /// </summary>
+    internal ReadOnlySpan<RecordedDependency> LastRecording => new(_frames[_depth].Buffer, 0, _frames[_depth].Count);
+
+    /// <summary>
+    /// A write on this thread moved a property that the recording finished last had read before, without a write of
+    /// another thread in between; valid like <see cref="LastRecording"/>.
+    /// </summary>
+    internal bool LastRecordingHasOwnWriteAfterRead => _frames[_depth].HasOwnWriteAfterRead;
+
+    /// <summary>
+    /// Clears the reads of the recording finished last, so the thread-static recorder holds no references to
+    /// subjects that may be detached. Called once its span is no longer in use.
     /// </summary>
     public void ClearLastRecording()
     {
+        // No recording finished at this depth yet (a failure before the first recording on this thread).
+        if (_depth >= _frames.Length)
+        {
+            return;
+        }
+
         ref var frame = ref _frames[_depth];
         if (frame.Count > 0)
         {
@@ -118,5 +230,7 @@ internal sealed class DerivedPropertyRecorder
         }
 
         frame.Property = default;
+        frame.IsSuspended = false;
+        frame.HasOwnWriteAfterRead = false;
     }
 }
