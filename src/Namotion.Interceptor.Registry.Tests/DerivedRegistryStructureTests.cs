@@ -117,6 +117,29 @@ public class DerivedRegistryStructureTests
     }
 
     [Fact]
+    public void WhenSubtreeIsAttached_ThenDerivedPropertyInItFollowsTheChildrenAttachedAfterIt()
+    {
+        // Arrange: the reader attaches before the targets of its holder, and reads the registered children.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new StructureHolder(context);
+        var child = new StructureHolder { Targets = [new RegistryTarget(), new RegistryTarget()] };
+        child.Reader = new StructureReader
+        {
+            Read = () => child.TryGetRegisteredSubject()?.TryGetProperty(nameof(StructureHolder.Targets))?.Children.Length.ToString()
+        };
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+
+        // Act
+        root.Child = child;
+
+        // Assert
+        var published = Assert.Single(changes, c => c.Property.Subject == child.Reader);
+        Assert.Equal("0", published.GetOldValue<string?>());
+        Assert.Equal("2", published.GetNewValue<string?>());
+    }
+
+    [Fact]
     public void WhenGetterSideEffectRunsReconciliation_ThenRegistryReadsAreNotRecorded()
     {
         // Arrange: each evaluation assigns a new target to another holder, whose reconciliation looks up the
