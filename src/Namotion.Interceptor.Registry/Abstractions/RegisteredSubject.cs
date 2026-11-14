@@ -336,6 +336,7 @@ public class RegisteredSubject
             isIntercepted: true,
             isDynamic: true));
 
+        var hasFailed = true;
         try
         {
             var property = AddPropertyInternal(name, type, attributes);
@@ -354,13 +355,14 @@ public class RegisteredSubject
                 property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject), null, delegate { });
             }
 
+            hasFailed = false;
             return property;
         }
         finally
         {
             // Reported once the property is attached: outside the lifecycle lock, this recalculates and publishes
             // the derived properties that read the registered properties, which can throw.
-            SubjectStructure.Changed(Subject);
+            SubjectStructure.Changed(Subject, hasFailed);
         }
     }
 
