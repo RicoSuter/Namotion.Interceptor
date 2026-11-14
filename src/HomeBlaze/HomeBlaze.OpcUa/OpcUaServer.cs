@@ -27,6 +27,10 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
     private readonly RootManager _rootManager;
     private readonly SubjectPathResolver _pathResolver;
     private readonly ILogger<OpcUaServer> _logger;
+
+    // Taken by UpdateDiagnostics and by the reset in StopServerAsync, so a stopped server is never given diagnostics again.
+    private readonly Lock _diagnosticsLock = new();
+
     private IOpcUaSubjectServer? _serverService;
 
     // Configuration properties (persisted to JSON)
@@ -96,10 +100,17 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
     public partial ServiceStatus Status { get; set; }
 
     /// <summary>
-    /// Error message when Status is Error.
+    /// Error message when Status is Error, or the last start error while the server is running but not accepting connections.
     /// </summary>
     [State]
     public partial string? StatusMessage { get; set; }
+
+    /// <summary>
+    /// Whether the server has started and accepts client connections. Null when not running or before the
+    /// server has reported its liveness.
+    /// </summary>
+    [State]
+    public partial bool? IsAcceptingConnections { get; set; }
 
     /// <summary>
     /// Average incoming changes per second (client writes to server). Null when not running.
@@ -154,15 +165,18 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
 
     // Interface implementations
 
+    /// <summary>
+    /// Whether the server is running and accepts client connections.
+    /// </summary>
     [Derived]
-    public bool IsServerRunning => Status == ServiceStatus.Running;
+    public bool IsServerRunning => Status == ServiceStatus.Running && IsAcceptingConnections == true;
 
     public string? Title => Name;
 
     public string? IconName => "Dns";
 
     [Derived]
-    public string? IconColor => Status == ServiceStatus.Running ? "Success" : null;
+    public string? IconColor => IsServerRunning ? "Success" : null;
 
     public OpcUaServer(
         RootManager rootManager,
@@ -184,21 +198,15 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
         if (IsEnabled)
         {
             await StartServerAsync(stoppingToken);
+            UpdateDiagnostics();
         }
 
         try
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                if (_serverService is { } service)
-                {
-                    var diagnostics = service.Diagnostics;
-                    IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
-                    OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;
-                    ActiveSessionCount = diagnostics.ActiveSessionCount;
-                }
-
-                await Task.Delay(TimeSpan.FromSeconds(60), stoppingToken);
+                await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+                UpdateDiagnostics();
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -212,6 +220,33 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
     {
         await StopServerAsync(cancellationToken);
         await StartServerAsync(cancellationToken);
+    }
+
+    private void UpdateDiagnostics()
+    {
+        if (_serverService is { } service)
+        {
+            var diagnostics = service.Diagnostics;
+            lock (_diagnosticsLock)
+            {
+                // A stop or restart that ran meanwhile has reset these properties and must not be overwritten.
+                if (!ReferenceEquals(_serverService, service))
+                {
+                    return;
+                }
+
+                // Without this, a server whose start keeps failing looks healthy while it never accepts connections.
+                IsAcceptingConnections = diagnostics.IsOperational;
+                if (Status == ServiceStatus.Running && diagnostics.IsOperational is { } isOperational)
+                {
+                    StatusMessage = isOperational ? null : diagnostics.LastError?.Message;
+                }
+
+                IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
+                OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;
+                ActiveSessionCount = diagnostics.ActiveSessionCount;
+            }
+        }
     }
 
     private async Task StartServerAsync(CancellationToken cancellationToken)
@@ -270,7 +305,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
                 BufferTime = BufferTimeMs.HasValue ? TimeSpan.FromMilliseconds(BufferTimeMs.Value) : defaults.BufferTime,
             };
 
-            // Separate from the client store: the server cleans its own store on start.
+            // Separate from the client store, so trusting a certificate for one does not trust it for the other.
             if (OpcUaCertificateStoreLocation.Resolve(this, "Server") is { } certificateStorePath)
             {
                 configuration.CertificateStoreBasePath = certificateStorePath;
@@ -306,11 +341,16 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
             }
             finally
             {
-                _serverService = null;
-                Status = ServiceStatus.Stopped;
-                IncomingChangesPerSecond = null;
-                OutgoingChangesPerSecond = null;
-                ActiveSessionCount = null;
+                lock (_diagnosticsLock)
+                {
+                    _serverService = null;
+                    Status = ServiceStatus.Stopped;
+                    StatusMessage = null;
+                    IsAcceptingConnections = null;
+                    IncomingChangesPerSecond = null;
+                    OutgoingChangesPerSecond = null;
+                    ActiveSessionCount = null;
+                }
             }
         }
     }

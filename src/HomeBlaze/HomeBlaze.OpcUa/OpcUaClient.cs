@@ -26,6 +26,10 @@ namespace HomeBlaze.OpcUa;
 public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvider, IIconProvider
 {
     private readonly ILogger<OpcUaClient> _logger;
+
+    // Taken by UpdateDiagnostics and by the reset in StopClientAsync, so a stopped client is never given diagnostics again.
+    private readonly Lock _diagnosticsLock = new();
+
     private IOpcUaSubjectClientSource? _clientSource;
 
     // Configuration properties
@@ -61,6 +65,14 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     public partial string? Password { get; set; }
 
     /// <summary>
+    /// Whether server certificates that are not in this client's trusted certificate store are accepted. Leave it
+    /// off and trust the server's certificate instead, unless the network is trusted. A rejected certificate is
+    /// written to the client's rejected store and shown in the status message.
+    /// </summary>
+    [Configuration]
+    public partial bool AcceptUntrustedServerCertificates { get; set; }
+
+    /// <summary>
     /// Default sampling interval in milliseconds for monitored items.
     /// Null uses the server default. 0 enables exception-based monitoring (immediate reporting).
     /// </summary>
@@ -83,7 +95,7 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     public partial ServiceStatus Status { get; set; }
 
     /// <summary>
-    /// Error message when Status is Error.
+    /// Error message when Status is Error, or the last connection error while the client is running but not connected.
     /// </summary>
     [State]
     public partial string? StatusMessage { get; set; }
@@ -181,7 +193,7 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     public string? IconName => "Cable";
 
     [Derived]
-    public string? IconColor => Status == ServiceStatus.Running ? "Success" : null;
+    public string? IconColor => Status == ServiceStatus.Running && IsConnected == true ? "Success" : null;
 
     public OpcUaClient(ILogger<OpcUaClient> logger)
     {
@@ -227,13 +239,29 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
         if (_clientSource is { } source)
         {
             var diagnostics = source.Diagnostics;
-            IsConnected = diagnostics.IsOperational;
-            IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
-            OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;
-            MonitoredItemCount = diagnostics.MonitoredItemCount;
-            PollingItemCount = diagnostics.Polling?.ItemCount ?? 0;
-            PendingWriteCount = diagnostics.OutboundRetries.Depth;
-            TotalReconnections = diagnostics.Reconnects.TotalAttempts;
+            lock (_diagnosticsLock)
+            {
+                // A stop or restart that ran meanwhile has reset these properties and must not be overwritten.
+                if (!ReferenceEquals(_clientSource, source))
+                {
+                    return;
+                }
+
+                IsConnected = diagnostics.IsOperational;
+
+                // Without this, a rejected server certificate leaves the client looking healthy while it never connects.
+                if (Status == ServiceStatus.Running && diagnostics.IsOperational is { } isOperational)
+                {
+                    StatusMessage = isOperational ? null : diagnostics.LastError?.Message;
+                }
+
+                IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
+                OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;
+                MonitoredItemCount = diagnostics.MonitoredItemCount;
+                PollingItemCount = diagnostics.Polling?.ItemCount ?? 0;
+                PendingWriteCount = diagnostics.OutboundRetries.Depth;
+                TotalReconnections = diagnostics.Reconnects.TotalAttempts;
+            }
         }
     }
 
@@ -266,6 +294,7 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
                 CreateUserIdentity = !string.IsNullOrEmpty(Username) && !string.IsNullOrEmpty(Password)
                     ? _ => Task.FromResult(new UserIdentity(Username, Encoding.UTF8.GetBytes(Password)))
                     : null,
+                AutoAcceptUntrustedCertificates = AcceptUntrustedServerCertificates,
             };
 
             if (OpcUaCertificateStoreLocation.Resolve(this, "Client") is { } certificateStorePath)
@@ -320,16 +349,20 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
                     }
                 }
 
-                _clientSource = null;
                 Root = null;
-                Status = ServiceStatus.Stopped;
-                IsConnected = null;
-                MonitoredItemCount = null;
-                PollingItemCount = null;
-                PendingWriteCount = null;
-                TotalReconnections = null;
-                IncomingChangesPerSecond = null;
-                OutgoingChangesPerSecond = null;
+                lock (_diagnosticsLock)
+                {
+                    _clientSource = null;
+                    Status = ServiceStatus.Stopped;
+                    StatusMessage = null;
+                    IsConnected = null;
+                    MonitoredItemCount = null;
+                    PollingItemCount = null;
+                    PendingWriteCount = null;
+                    TotalReconnections = null;
+                    IncomingChangesPerSecond = null;
+                    OutgoingChangesPerSecond = null;
+                }
             }
         }
     }
