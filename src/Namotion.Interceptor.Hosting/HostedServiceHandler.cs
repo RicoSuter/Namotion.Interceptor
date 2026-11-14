@@ -39,8 +39,6 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler, 
 
     internal HostedServiceStartDeferral DeferStarts() => new(_startDeferral);
 
-    /// <summary>Drops the ambient start deferral for the calling flow, which for a body is its own copy.</summary>
-    internal void ClearAmbientStartDeferral() => _startDeferral.Value = null;
 
     /// <summary>
     /// Transitions this handler enqueued that have not finished. Polled by the drain rather than
@@ -824,6 +822,11 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler, 
     /// stopped still stops and disposes what this handler started and refuses every later start. Does
     /// nothing after a stop.
     /// </summary>
+    /// <remarks>
+    /// The container disposes in reverse creation order, so a service it created after the handler, such
+    /// as a subject resolved at host start, may already be disposed when this stops it, and its stop and
+    /// a canceled execution are then logged as failures.
+    /// </remarks>
     public async ValueTask DisposeAsync()
     {
         if (_gate.IsDraining)

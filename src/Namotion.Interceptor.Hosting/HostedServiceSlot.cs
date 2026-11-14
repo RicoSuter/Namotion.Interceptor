@@ -394,28 +394,39 @@ internal sealed class HostedServiceSlot
         // between here and the enqueue may throw, because a leaked increment never comes back.
         handler.EnterTransition();
 
-        // The lock the callers hold is required: "_tail = _tail.ContinueWith(...)" is a
-        // read-modify-write, and two racing enqueuers lose an assignment and run both transitions
-        // concurrently. TaskScheduler.Default is required: ContinueWith otherwise captures
-        // TaskScheduler.Current, which can be a scheduler the enqueuing task is itself occupying.
-        _tail = _tail
-            .ContinueWith(
-                _ => RunAsync(body, handler),
-                CancellationToken.None,
-                TaskContinuationOptions.None,
-                TaskScheduler.Default)
-            .Unwrap();
+        // Without the enqueuing flow's execution context: a body, and a service it starts for the rest of
+        // that service's life, would otherwise carry the AsyncLocals of whatever flow changed the graph,
+        // such as a request's activity and logging scopes, or a start deferral a stop body must not join.
+        // Guarded because suppressing an already suppressed flow throws, and nothing here may throw.
+        var suppressesFlow = !ExecutionContext.IsFlowSuppressed();
+        var flowControl = suppressesFlow ? ExecutionContext.SuppressFlow() : default;
+        try
+        {
+            // The lock the callers hold is required: "_tail = _tail.ContinueWith(...)" is a
+            // read-modify-write, and two racing enqueuers lose an assignment and run both transitions
+            // concurrently. TaskScheduler.Default is required: ContinueWith otherwise captures
+            // TaskScheduler.Current, which can be a scheduler the enqueuing task is itself occupying.
+            _tail = _tail
+                .ContinueWith(
+                    _ => RunAsync(body, handler),
+                    CancellationToken.None,
+                    TaskContinuationOptions.None,
+                    TaskScheduler.Default)
+                .Unwrap();
+        }
+        finally
+        {
+            if (suppressesFlow)
+            {
+                flowControl.Undo();
+            }
+        }
 
         return _tail;
     }
 
     private async Task RunAsync(Func<Task> body, HostedServiceHandler handler)
     {
-        // A body inherits the execution context of the flow that enqueued it, start deferral included.
-        // A stop body does not wait for that deferral, so an attach it makes would be captured by a
-        // deferral belonging to a caller it has nothing to do with and park until that caller closes it.
-        handler.ClearAmbientStartDeferral();
-
         // Bodies never throw. A faulted tail would raise UnobservedTaskException for every dropped
         // fire and forget transition and would be retained until the slot transitions again.
         try

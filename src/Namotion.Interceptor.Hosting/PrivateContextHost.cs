@@ -58,11 +58,14 @@ internal sealed class PrivateContextHost
         {
             // The caller's token, so a stop that hangs cannot hold a host start past its own deadline,
             // and an already canceled one makes the drain give up at once rather than wait for a start
-            // that has not returned. The stop queued behind that start still stops and disposes the
-            // instance once the start returns.
+            // that has not returned. Bounded as a disposal is as well, because a host start without a
+            // StartupTimeout passes a token that never cancels. The stop queued behind that start still
+            // stops and disposes the instance once the start returns.
+            using var teardown = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            teardown.CancelAfter(HostedServiceHandler.DisposeStopTimeout);
             try
             {
-                await StopAsync(cancellationToken).ConfigureAwait(false);
+                await StopAsync(teardown.Token).ConfigureAwait(false);
             }
             catch (Exception teardownException)
             {

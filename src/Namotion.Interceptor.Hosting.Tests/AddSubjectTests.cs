@@ -72,6 +72,29 @@ public class AddSubjectTests
     }
 
     [Fact]
+    public async Task WhenTwoConstructorsTakeTheContext_ThenTheOneWithTheDependencyIsUsed()
+    {
+        // Arrange
+        var builder = HostingTestHost.CreateBuilder();
+        builder.Services.AddSubject<SubjectWithTwoContextConstructors>();
+        var host = builder.Build();
+        await host.StartAsync();
+
+        try
+        {
+            // Act
+            var subject = host.Services.GetRequiredService<SubjectWithTwoContextConstructors>();
+
+            // Assert
+            Assert.NotNull(subject.Logger);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
     public void WhenTheCallerAlreadyRegisteredTheType_ThenAddSubjectDoesNotThrow()
     {
         // Arrange - a caller who built the subject themselves and registers AddSubject to start it is a

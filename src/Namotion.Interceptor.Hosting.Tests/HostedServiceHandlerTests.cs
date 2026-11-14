@@ -136,6 +136,32 @@ public class HostedServiceHandlerTests
         Assert.Equal(0, late.StartCount);
     }
 
+    private static readonly AsyncLocal<string?> CallerFlowValue = new();
+
+    [Fact]
+    public async Task WhenAServiceIsAttachedFromAFlowWithAsyncLocalState_ThenItsStartDoesNotSeeIt()
+    {
+        await HostingTestHost.RunAsync(async context =>
+        {
+            // Arrange
+            var person = new Person(context);
+            var observed = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            CallerFlowValue.Value = "request";
+
+            // Act
+            var attachment = person.AttachHostedService(() =>
+            {
+                observed.TrySetResult(CallerFlowValue.Value);
+                return new TrackedBackgroundService();
+            });
+            CallerFlowValue.Value = null;
+
+            // Assert
+            Assert.Null(await observed.Task.WaitAsync(TestTimeouts.Default));
+            await attachment.DrainAsync();
+        });
+    }
+
     [Fact]
     public async Task WhenTheFactoryIsHeld_ThenTheAttachmentReportsStartingUntilTheInstanceIsRecorded()
     {

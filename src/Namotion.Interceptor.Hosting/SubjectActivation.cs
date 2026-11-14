@@ -79,8 +79,24 @@ internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, I
         await handler.WaitForStartAsync(subject, cancellationToken).ConfigureAwait(false);
     }
 
-    public Task StopAsync(CancellationToken cancellationToken)
-        => _host?.StopAsync(cancellationToken) ?? Task.CompletedTask;
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        if (_host is not { } host)
+        {
+            return;
+        }
+
+        // The wait bounded as well as the stop: a stop that already began, after a failed start, returns
+        // its own task, which this call's token does not reach.
+        try
+        {
+            await host.StopAsync(cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Past the host's shutdown deadline, the stop continues unobserved.
+        }
+    }
 
     /// <summary>Stops the host this activation holds, a no-op once it has been stopped.</summary>
     /// <remarks>

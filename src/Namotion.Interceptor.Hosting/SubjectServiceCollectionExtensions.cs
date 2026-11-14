@@ -123,7 +123,12 @@ public static class SubjectServiceCollectionExtensions
         }
         catch (InvalidOperationException)
         {
-            return null;
+            // Also thrown when several constructors take the context, such as the generated one beside one
+            // that adds dependencies. CreateInstance then picks the one whose other parameters it can supply.
+            return typeof(T).GetConstructors().Any(constructor => constructor.GetParameters().Any(
+                    parameter => parameter.ParameterType == typeof(IInterceptorSubjectContext)))
+                ? (serviceProvider, arguments) => ActivatorUtilities.CreateInstance(serviceProvider, typeof(T), arguments!)
+                : null;
         }
     }
 }
