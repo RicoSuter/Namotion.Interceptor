@@ -113,6 +113,33 @@ public class DerivedRegistryStructureTests
     }
 
     [Fact]
+    public void WhenSubtreeIsAttached_ThenDerivedPropertyInItThatReadsTheChildrenOfItsHolderIsEvaluatedOnce()
+    {
+        // Arrange: the reader attaches with the child, after the registry added the child to the root's children.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new StructureHolder(context);
+        var evaluations = 0;
+        var child = new StructureHolder
+        {
+            Reader = new StructureReader
+            {
+                Read = () =>
+                {
+                    evaluations++;
+                    return root.TryGetRegisteredSubject()!.TryGetProperty(nameof(StructureHolder.Child))!.Children.Length.ToString();
+                }
+            }
+        };
+
+        // Act
+        root.Child = child;
+
+        // Assert
+        Assert.Equal(1, evaluations);
+        Assert.Equal("1", child.Reader.Value);
+    }
+
+    [Fact]
     public void WhenObserverOfAPropertyReaderThrows_ThenAddedDerivedPropertyIsAttachedAndTheExceptionPropagates()
     {
         // Arrange
