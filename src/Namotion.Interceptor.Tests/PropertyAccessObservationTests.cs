@@ -126,6 +126,90 @@ public sealed class PropertyAccessObservationTests : IDisposable
         Assert.Equal(0, PropertyAccessObservation.WriteDepth);
     }
 
+    [Fact]
+    public void WhenWriteIsMadeInTheChainOfAnotherWrite_ThenInnerWriteIsObservedFirstAtTheNextDepth()
+    {
+        // Arrange
+        var inner = new ObservedSubject();
+        var depthsInChain = new List<int>();
+        var context = InterceptorSubjectContext.Create().WithService(() => new CallbackWrites(() =>
+        {
+            depthsInChain.Add(PropertyAccessObservation.WriteDepth);
+            inner.Value = 7;
+        }));
+        var outer = new ObservedSubject(context);
+
+        // Act
+        outer.Value = 5;
+
+        // Assert
+        Assert.Equal([1], depthsInChain);
+        Assert.Equal(
+            [(new PropertyReference(inner, nameof(ObservedSubject.Value)), 2), (new PropertyReference(outer, nameof(ObservedSubject.Value)), 1)],
+            _observer.Writes.Select(write => (write.Property, write.Depth)));
+        Assert.Equal(0, PropertyAccessObservation.WriteDepth);
+    }
+
+    [Fact]
+    public void WhenWriteInTheChainOfAnotherWriteThrows_ThenItIsObservedAsFailedAndTheOuterWriteIsNot()
+    {
+        // Arrange
+        var inner = new ObservedSubject(InterceptorSubjectContext.Create().WithService(() => new ThrowingWrites()));
+        var context = InterceptorSubjectContext.Create().WithService(() => new CallbackWrites(() =>
+        {
+            Assert.Throws<InvalidOperationException>(() => inner.Value = 7);
+        }));
+        var outer = new ObservedSubject(context);
+
+        // Act
+        outer.Value = 5;
+
+        // Assert
+        Assert.Equal(
+            [((IInterceptorSubject)inner, 2, true, false), ((IInterceptorSubject)outer, 1, false, true)],
+            _observer.Writes.Select(write => (write.Property.Subject, write.Depth, write.HasFailed, write.IsWritten)));
+        Assert.Equal(0, PropertyAccessObservation.WriteDepth);
+    }
+
+    [Fact]
+    public void WhenWriteOfSubjectWithoutContextThrows_ThenWriteIsObservedAsFailedAndNotWritten()
+    {
+        // Arrange
+        var subject = new ObservedSubject();
+
+        // Act
+        Assert.Throws<InvalidOperationException>(() => InterceptorExecutor.SetPropertyValueWithoutContext<int>(
+            subject, nameof(ObservedSubject.Value), 5, (_, _) => throw new InvalidOperationException()));
+
+        // Assert
+        var write = Assert.Single(_observer.Writes);
+        Assert.True(write.HasFailed);
+        Assert.False(write.IsWritten);
+        Assert.Equal(1, write.Depth);
+        Assert.Equal(0, PropertyAccessObservation.WriteDepth);
+    }
+
+    [Fact]
+    public void WhenReadObserverIsSetOnAnotherThread_ThenReadsOfThisThreadAreNotObserved()
+    {
+        // Arrange
+        var subject = new ObservedSubject();
+        var otherThread = new Thread(() =>
+        {
+            ObserveReads();
+            _ = subject.Value;
+        });
+
+        // Act
+        otherThread.Start();
+        otherThread.Join();
+        _ = subject.Value;
+
+        // Assert
+        Assert.Single(_observer.Reads);
+        Assert.Null(PropertyAccessObservation.ReadObserver);
+    }
+
     private sealed class RecordingObserver : IPropertyReadObserver, IPropertyWriteObserver
     {
         public List<PropertyReference> Reads { get; } = [];
@@ -139,6 +223,15 @@ public sealed class PropertyAccessObservationTests : IDisposable
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
         {
             // Vetoes: next is not called, so nothing lands.
+        }
+    }
+
+    private sealed class CallbackWrites(Action afterNext) : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+            afterNext();
         }
     }
 

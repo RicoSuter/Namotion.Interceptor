@@ -53,7 +53,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// <para>
     /// The callback runs under the lock that serializes graph mutation, so it must not block, must not
     /// mutate the graph, and must not wait on anything that does. It is re-entrant on the calling
-    /// thread, so an <see cref="ILifecycleHandler"/> may reach this while being invoked.
+    /// thread, so an <see cref="ILifecycleHandler"/> may reach this while being invoked. Changes of property writes
+    /// it makes are announced, and the derived properties they affect recalculated, after the lock is released.
     /// </para>
     /// </remarks>
     /// <param name="subject">The subject.</param>
@@ -61,6 +62,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// <returns>True when the subject was attached and the callback ran.</returns>
     public bool TryRunWhileAttached(IInterceptorSubject subject, Action whenAttached)
     {
+        using var lifecycleLock = SubjectLifecycleAttachments.EnterLifecycleLock(isWriteReconciliation: false);
         lock (_attachedSubjects)
         {
             if (!_attachedSubjects.ContainsKey(subject))
@@ -85,6 +87,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     public void AttachSubjectToContext(IInterceptorSubject subject)
     {
         var collectedSubjects = GetList();
+        using var lifecycleLock = SubjectLifecycleAttachments.EnterLifecycleLock(isWriteReconciliation: false);
         try
         {
             lock (_attachedSubjects)
@@ -112,6 +115,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     public void DetachSubjectFromContext(IInterceptorSubject subject)
     {
         var collectedSubjects = GetList();
+        using var lifecycleLock = SubjectLifecycleAttachments.EnterLifecycleLock(isWriteReconciliation: false);
         try
         {
             lock (_attachedSubjects)
@@ -376,6 +380,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             return;
         }
 
+        using var lifecycleLock = SubjectLifecycleAttachments.EnterLifecycleLock(isWriteReconciliation: true);
         lock (_attachedSubjects)
         {
             using var suspension = SubjectLifecycleAttachments.SuspendDerivedRecording();

@@ -32,6 +32,33 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
         new(subject, "__SelfUnderTest");
 
     [Fact]
+    public void WhenLastRecordingEnds_ThenTheReadObserverItReplacedIsRestored()
+    {
+        // Arrange
+        var person = new Person(InterceptorSubjectContext.Create());
+        var foreign = new ForeignReadObserver();
+        PropertyAccessObservation.ReadObserver = foreign;
+        var recorder = CreateRecorder();
+
+        // Act
+        recorder.StartRecording(CreateSelf(person));
+        var observerWhileRecording = PropertyAccessObservation.ReadObserver;
+        recorder.StartRecording(new PropertyReference(person, nameof(Person.FullName)));
+        recorder.FinishRecording();
+        recorder.ClearLastRecording();
+        var observerAfterNestedRecording = PropertyAccessObservation.ReadObserver;
+        recorder.FinishRecording();
+        recorder.ClearLastRecording();
+        _ = person.FirstName;
+
+        // Assert
+        Assert.Same(recorder, observerWhileRecording);
+        Assert.Same(recorder, observerAfterNestedRecording);
+        Assert.Same(foreign, PropertyAccessObservation.ReadObserver);
+        Assert.Equal([new PropertyReference(person, nameof(Person.FirstName))], foreign.Reads);
+    }
+
+    [Fact]
     public void StartRecording_SetsIsRecordingTrue()
     {
         // Arrange
@@ -408,5 +435,12 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
         Assert.Null(readObserverAfterAttach);
         Assert.Null(readObserverAfterRecalculation);
         Assert.False(DerivedPropertyRecorder.IsEvaluatingOnThisThread);
+    }
+
+    private sealed class ForeignReadObserver : IPropertyReadObserver
+    {
+        public List<PropertyReference> Reads { get; } = [];
+
+        public void OnPropertyRead(in PropertyReference property) => Reads.Add(property);
     }
 }

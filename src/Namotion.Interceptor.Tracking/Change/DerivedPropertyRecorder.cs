@@ -20,6 +20,9 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
     private RecordingFrame[] _frames = [];
     private int _depth;
 
+    // The read observer this recorder replaced when its first frame started, restored when its last frame ends.
+    private IPropertyReadObserver? _replacedObserver;
+
     private struct RecordingFrame
     {
         public PropertyReference Property;
@@ -80,6 +83,12 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
             Array.Resize(ref _frames, Math.Max(2, _frames.Length * 2));
         }
 
+        if (_depth == 0)
+        {
+            var replaced = PropertyAccessObservation.ReadObserver;
+            _replacedObserver = ReferenceEquals(replaced, this) ? null : replaced;
+        }
+
         ref var frame = ref _frames[_depth++];
         frame.Count = 0;
         frame.Property = property;
@@ -91,8 +100,8 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
             frame.Buffer ??= _pool.Rent(8);
         }
 
-        // The read observer is a single slot: a recording replaces any other observer of this thread, and
-        // FinishRecording clears it instead of restoring one.
+        // The read observer is a single slot: a recording replaces any other observer of this thread, and the end
+        // of the last frame restores it. A frame sets it again, in case code in the getter replaced it.
         PropertyAccessObservation.ReadObserver = this;
     }
 
@@ -190,7 +199,8 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
         _depth--;
         if (_depth == 0)
         {
-            PropertyAccessObservation.ReadObserver = null;
+            PropertyAccessObservation.ReadObserver = _replacedObserver;
+            _replacedObserver = null;
         }
 
         ref var frame = ref _frames[_depth];
