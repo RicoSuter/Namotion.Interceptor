@@ -1,4 +1,5 @@
-﻿using System.Collections.Immutable;
+﻿using System.Collections.Frozen;
+using System.Collections.Immutable;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
@@ -26,7 +27,9 @@ public class RegisteredSubjectProperty
     // 0: not computed yet, 1: no, 2: yes. Cached because segment lookups ask it for every matching property.
     private byte _isInlinePathsProperty;
 
-    internal RegisteredSubjectProperty[]? AttributesCache = null; // TODO: Dangerous cache, needs review
+    // Published with one write and used only while the registered properties it was computed from are current, so a
+    // read that computed it before a property was added and stores it after the add does not keep it.
+    internal AttributesSnapshot? AttributesCache;
 
     public RegisteredSubjectProperty(RegisteredSubject parent, string name,
         Type type, IReadOnlyCollection<Attribute> reflectionAttributes)
@@ -339,10 +342,26 @@ public class RegisteredSubjectProperty
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
-            // Recorded on every call, since the cache is cleared when a property is added.
+            // Recorded on every call, since a cached result reads the registered properties only to compare them.
             SubjectStructure.RecordRead(Parent.Subject);
-            return AttributesCache ??= Parent.GetPropertyAttributes(Name).ToArray();
+            var properties = Parent.RegisteredProperties;
+            var cache = AttributesCache;
+            if (cache is null || !ReferenceEquals(cache.Properties, properties))
+            {
+                cache = new AttributesSnapshot(properties, RegisteredSubject.GetPropertyAttributes(properties, Name).ToArray());
+                AttributesCache = cache;
+            }
+
+            return cache.Attributes;
         }
+    }
+
+    internal sealed class AttributesSnapshot(
+        FrozenDictionary<string, RegisteredSubjectProperty> properties, RegisteredSubjectProperty[] attributes)
+    {
+        public FrozenDictionary<string, RegisteredSubjectProperty> Properties { get; } = properties;
+
+        public RegisteredSubjectProperty[] Attributes { get; } = attributes;
     }
     
     /// <summary>
