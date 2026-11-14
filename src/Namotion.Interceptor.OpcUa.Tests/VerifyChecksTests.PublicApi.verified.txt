@@ -81,7 +81,11 @@ namespace Namotion.Interceptor.OpcUa.Client
     {
         public OpcUaClientConfiguration() { }
         public Opc.Ua.Client.ISessionFactory ActualSessionFactory { get; }
+        public ushort ApplicationCertificateLifetimeInMonths { get; set; }
         public string ApplicationName { get; set; }
+        public string? ApplicationUri { get; set; }
+        public bool AutoAcceptUntrustedCertificates { get; set; }
+        public bool AutoCreateApplicationCertificate { get; set; }
         public System.TimeSpan? BufferTime { get; set; }
         public string CertificateStoreBasePath { get; set; }
         public System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<Opc.Ua.UserIdentity>>? CreateUserIdentity { get; set; }
@@ -101,6 +105,7 @@ namespace Namotion.Interceptor.OpcUa.Client
         public System.TimeSpan MaxReconnectDuration { get; set; }
         public uint MaxReferencesPerNode { get; set; }
         public int MinPublishRequestCount { get; set; }
+        public Opc.Ua.MessageSecurityMode MinimumSecurityMode { get; set; }
         public System.TimeSpan OperationTimeout { get; set; }
         public int PollingBatchSize { get; set; }
         public System.TimeSpan PollingCircuitBreakerCooldown { get; set; }
@@ -128,7 +133,6 @@ namespace Namotion.Interceptor.OpcUa.Client
         public bool SubscriptionSequentialPublishing { get; set; }
         public Opc.Ua.ITelemetryContext? TelemetryContext { get; set; }
         public Namotion.Interceptor.OpcUa.Client.OpcUaTypeResolver? TypeResolver { get; set; }
-        public bool UseSecurity { get; set; }
         public Namotion.Interceptor.OpcUa.OpcUaValueConverter ValueConverter { get; set; }
         public int WriteRetryQueueSize { get; set; }
         public virtual System.Threading.Tasks.Task<Opc.Ua.Configuration.ApplicationInstance> CreateApplicationInstanceAsync() { }
@@ -357,6 +361,7 @@ namespace Namotion.Interceptor.OpcUa.Server
     {
         public OpcUaServerConfiguration() { }
         public string ApplicationName { get; set; }
+        public string? ApplicationUri { get; set; }
         public bool AutoAcceptUntrustedCertificates { get; set; }
         public string BaseAddress { get; set; }
         public System.TimeSpan? BufferTime { get; set; }
@@ -372,6 +377,7 @@ namespace Namotion.Interceptor.OpcUa.Server
         public virtual string[] GetNamespaceUris() { }
         protected void LoadNodeSetFromEmbeddedResource<TAssemblyType>(string name, Opc.Ua.NodeStateCollection nodes, Opc.Ua.ISystemContext context) { }
         public virtual void LoadPredefinedNodes(Opc.Ua.NodeStateCollection collection, Opc.Ua.ISystemContext context) { }
+        public void Validate() { }
     }
     public sealed class OpcUaServerDiagnostics : Namotion.Interceptor.Connectors.Diagnostics.ConnectorDiagnostics
     {

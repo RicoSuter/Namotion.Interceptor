@@ -19,7 +19,10 @@ internal interface IConnectorOwner<TService> : IInterceptorSubject
 {
     ServiceStatus Status { get; set; }
 
-    /// <summary>The text behind <see cref="ServiceStatus.Error"/>, and null at every other status.</summary>
+    /// <summary>
+    /// The text behind <see cref="ServiceStatus.Error"/>, or the connector's last error while it runs without
+    /// being operational, and null otherwise.
+    /// </summary>
     string? StatusMessage { get; set; }
 
     /// <summary>Whether a start is wanted, read when the wrapper starts and after a configuration edit.</summary>
@@ -425,8 +428,8 @@ internal sealed class OwnedConnectorHost<TService>
     {
         if (status is ServiceStatus.Error)
         {
-            // Status first when moving to Error, message first when moving away from it: the text stands
-            // under Error alone and must never be readable beside a status that lacks it.
+            // Status first when moving to Error, message first when moving away from it, so an error's text
+            // is never readable beside a status from before or after it.
             _owner.Status = status;
             _owner.StatusMessage = message;
         }

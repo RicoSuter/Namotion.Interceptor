@@ -67,6 +67,14 @@ public partial class OpcUaClient
     public partial string? Password { get; set; }
 
     /// <summary>
+    /// Whether server certificates that are not in this client's trusted certificate store are accepted. Leave it
+    /// off and trust the server's certificate instead, unless the network is trusted. A rejected certificate is
+    /// written to the client's rejected store and shown in the status message.
+    /// </summary>
+    [Configuration]
+    public partial bool AcceptUntrustedServerCertificates { get; set; }
+
+    /// <summary>
     /// Default sampling interval in milliseconds for monitored items.
     /// Null uses the server default. 0 enables exception-based monitoring (immediate reporting).
     /// </summary>
@@ -89,7 +97,7 @@ public partial class OpcUaClient
     public partial ServiceStatus Status { get; set; }
 
     /// <summary>
-    /// Error message when Status is Error.
+    /// Error message when Status is Error, or the last connection error while the client is running but not connected.
     /// </summary>
     [State]
     public partial string? StatusMessage { get; set; }
@@ -186,7 +194,7 @@ public partial class OpcUaClient
     public string? IconName => "Cable";
 
     [Derived]
-    public string? IconColor => Status == ServiceStatus.Running ? "Success" : null;
+    public string? IconColor => Status == ServiceStatus.Running && IsConnected == true ? "Success" : null;
 
     /// <remarks>
     /// <paramref name="diagnosticsPollInterval"/> is how often the running client's diagnostics are
@@ -255,6 +263,7 @@ public partial class OpcUaClient
             CreateUserIdentity = !string.IsNullOrEmpty(Username) && !string.IsNullOrEmpty(Password)
                 ? _ => Task.FromResult(new UserIdentity(Username, Encoding.UTF8.GetBytes(Password)))
                 : null,
+            AutoAcceptUntrustedCertificates = AcceptUntrustedServerCertificates,
         };
 
         if (OpcUaCertificateStoreLocation.Resolve(this, "Client") is { } certificateStorePath)
@@ -269,6 +278,13 @@ public partial class OpcUaClient
     {
         var diagnostics = source.Diagnostics;
         IsConnected = diagnostics.IsOperational;
+
+        // Without this, a rejected server certificate leaves the client looking healthy while it never connects.
+        if (Status == ServiceStatus.Running && diagnostics.IsOperational is { } isOperational)
+        {
+            StatusMessage = isOperational ? null : diagnostics.LastError?.Message;
+        }
+
         IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
         OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;
         MonitoredItemCount = diagnostics.MonitoredItemCount;

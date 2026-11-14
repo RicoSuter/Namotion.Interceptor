@@ -136,7 +136,11 @@ Beyond the settings shown above, the following properties are available on `OpcU
 | Property | Default | Description |
 |----------|---------|-------------|
 | `ApplicationName` | "Namotion.Interceptor.Client" | Application name for identification and certificate generation |
-| `UseSecurity` | false | Enable signing and encryption (see [Transport Security](#transport-security)) |
+| `MinimumSecurityMode` | None | Minimum security mode of the endpoint: `None`, `Sign` or `SignAndEncrypt` (see [Transport Security](#transport-security)) |
+| `AutoAcceptUntrustedCertificates` | false | Accept server certificates that are not in the trusted store |
+| `AutoCreateApplicationCertificate` | true | Create a self-signed client certificate for secured connections, and replace it once it has expired or no longer matches the application URI |
+| `ApplicationUri` | null | Application URI the client certificate carries (derived from host and application name when null) |
+| `ApplicationCertificateLifetimeInMonths` | 12 | Lifetime of a certificate the client creates, at least 1 |
 | `CreateUserIdentity` | null | Async factory for user credentials (see [Authentication](#authentication)) |
 | `CertificateStoreBasePath` | "pki" | Base directory for certificate stores |
 | `SessionFactory` | null | Custom session factory (uses `DefaultSessionFactory` when null) |
@@ -187,12 +191,50 @@ Beyond the settings shown above, the following properties are available on `OpcU
 var config = new OpcUaClientConfiguration
 {
     ServerUrl = "opc.tcp://plc.factory.com:4840",
-    UseSecurity = true,  // Enable signing and encryption (recommended for production)
+    MinimumSecurityMode = MessageSecurityMode.SignAndEncrypt, // connect only to an encrypted endpoint
     // ... other settings
 };
 ```
 
-When `UseSecurity = true`, the client prefers secure endpoints with message signing and encryption. The default is `false` for development convenience.
+With `MinimumSecurityMode = None`, the default, the client prefers an unsecured endpoint and uses a secured one only when the server offers nothing else; `Sign` requires signing and `SignAndEncrypt` encryption. Among secured endpoints it picks the most secure one with a supported policy (Basic256Sha256, Aes128_Sha256_RsaOaep or Aes256_Sha256_RsaPss with the default RSA certificate). If none qualifies, connecting fails and the error lists the server's endpoints.
+
+#### Certificate Stores
+
+The client and the [server](connectors-opcua-server.md#certificates) use these folders under `CertificateStoreBasePath`:
+
+| Folder | Content |
+|---|---|
+| `own` | Certificate in `certs/{name}.der`, private key in `private/{name}.pfx` or `.pem`, same base name |
+| `trusted/certs` | Trusted peer certificates, and the root authority certificate of a CA-issued peer |
+| `issuer/certs` | Issuing authorities of a CA-issued certificate, own or peer; without them its chain is incomplete |
+| `rejected/certs` | Untrusted peer certificates |
+
+Both default to `pki`, so a client and a server in one process share their stores: a certificate trusted for one is trusted for the other, and the server's `CleanCertificateStore` deletes the client's certificate. Give each its own base path. Processes sharing a store need different application names or certificates that are never replaced.
+
+#### Client Certificate
+
+Only secured connections need one. With `AutoCreateApplicationCertificate = true`, the default, the client creates a self-signed certificate on its first secured connect; otherwise a missing certificate fails the connection. A provisioned certificate must carry the application URI `urn:{host name}:Namotion.Interceptor:{ApplicationName}` or the value of `ApplicationUri`, and should have the subject `CN={ApplicationName}, O=Namotion`. A password-protected key needs a `CertificatePasswordProvider` (see [Custom Application Configuration](#custom-application-configuration)).
+
+The default application URI contains the host name, so after a rename, such as a recreated container, the stored certificate no longer matches. A self-signed one is then replaced, as described below, and the server has to trust the new one; any other fails every connect. Set `ApplicationUri` where the host name can change.
+
+#### Certificate Expiry
+
+When the client or the server loads its certificate:
+
+- within 30 days of expiry, it logs a warning;
+- an expired self-signed certificate, created or provisioned, is replaced with a warning, and peers have to trust the new one;
+- so is a self-signed certificate that does not carry the application URI or, for the server, does not cover the host of `BaseAddress`;
+- a CA-issued certificate, any certificate while automatic creation is off, and one an override provides (see [Custom Application Configuration](#custom-application-configuration)) are never replaced.
+
+The client loads it each time it creates a secured session itself, on the initial connect and on manual reconnects (see [Connection Loss Recovery](#connection-loss-recovery)). A session that outlives the certificate fails once the server rejects it, and the next connect replaces it.
+
+#### Trust
+
+With `AutoAcceptUntrustedCertificates = false`, the default, an unknown server certificate is rejected and written to `rejected/certs`; move it to `trusted/certs`, or provision it there. The check runs on secured connections, and on unsecured ones before a login is encrypted: always for username and certificate logins, and for anonymous logins when the server's anonymous token policy names a security policy. The server trusts the client certificate the same way through its own stores.
+
+#### Errors
+
+A failed connection attempt, including a failed certificate load, is reported in `Diagnostics.LastError` (see [Diagnostics](#diagnostics)) and retried. Certificate errors name the certificate at fault and the folder or option that resolves it.
 
 ### Authentication
 
@@ -237,21 +279,34 @@ CreateUserIdentity = _ =>
 Override `CreateApplicationInstanceAsync()` in a derived configuration class for full control over OPC UA application settings (certificates, transport quotas, security policies):
 
 ```csharp
+using System.Text;
+using Namotion.Interceptor.OpcUa.Client;
+using Opc.Ua;
+using Opc.Ua.Configuration;
+
 public class MyOpcUaClientConfiguration : OpcUaClientConfiguration
 {
+    public required string CertificatePassword { get; init; }
+
     public override async Task<ApplicationInstance> CreateApplicationInstanceAsync()
     {
         var application = await base.CreateApplicationInstanceAsync();
 
         // Customize the application configuration
         var config = application.ApplicationConfiguration;
-        config.SecurityConfiguration.AutoAcceptUntrustedCertificates = false;
+        config.SecurityConfiguration.RejectSHA1SignedCertificates = true;
+        config.SecurityConfiguration.CertificatePasswordProvider = new CertificatePasswordProvider(Encoding.UTF8.GetBytes(CertificatePassword));
         config.TransportQuotas.MaxMessageSize = 64_000_000;
+
+        // Changed security settings take effect only through UpdateAsync.
+        await config.CertificateValidator.UpdateAsync(config);
 
         return application;
     }
 }
 ```
+
+A certificate the override sets on `SecurityConfiguration.ApplicationCertificate.Certificate` with its private key, for example from a hardware security module, is used as is and never validated or replaced. So is one that `UpdateAsync` loads with its key from another store type, such as the Windows certificate store.
 
 ## Monitoring & Subscriptions
 

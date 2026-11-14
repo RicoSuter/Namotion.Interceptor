@@ -30,7 +30,6 @@ public partial class OpcUaServer
       IConnectorOwner<IOpcUaSubjectServer>
 {
     private static readonly TimeSpan DefaultRootLoadWaitTimeout = TimeSpan.FromSeconds(10);
-    private static readonly TimeSpan DefaultDiagnosticsPollInterval = TimeSpan.FromSeconds(60);
 
     private readonly RootManager _rootManager;
     private readonly SubjectPathResolver _pathResolver;
@@ -107,10 +106,17 @@ public partial class OpcUaServer
     public partial ServiceStatus Status { get; set; }
 
     /// <summary>
-    /// Error message when Status is Error.
+    /// Error message when Status is Error, or the last start error while the server is running but not accepting connections.
     /// </summary>
     [State]
     public partial string? StatusMessage { get; set; }
+
+    /// <summary>
+    /// Whether the server has started and accepts client connections. Null when not running or before the
+    /// server has reported its liveness.
+    /// </summary>
+    [State]
+    public partial bool? IsAcceptingConnections { get; set; }
 
     /// <summary>
     /// Average incoming changes per second (client writes to server). Null when not running.
@@ -165,15 +171,18 @@ public partial class OpcUaServer
 
     // Interface implementations
 
+    /// <summary>
+    /// Whether the server is running and accepts client connections.
+    /// </summary>
     [Derived]
-    public bool IsServerRunning => Status == ServiceStatus.Running;
+    public bool IsServerRunning => Status == ServiceStatus.Running && IsAcceptingConnections == true;
 
     public string? Title => Name;
 
     public string? IconName => "Dns";
 
     [Derived]
-    public string? IconColor => Status == ServiceStatus.Running ? "Success" : null;
+    public string? IconColor => IsServerRunning ? "Success" : null;
 
     /// <remarks>
     /// <paramref name="diagnosticsPollInterval"/> is how often the running server's diagnostics are
@@ -191,8 +200,7 @@ public partial class OpcUaServer
         _pathResolver = pathResolver;
         _logger = logger;
         _rootLoadWaitTimeout = rootLoadWaitTimeout ?? DefaultRootLoadWaitTimeout;
-        _connectorHost = new OwnedConnectorHost<IOpcUaSubjectServer>(
-            this, logger, diagnosticsPollInterval ?? DefaultDiagnosticsPollInterval);
+        _connectorHost = new OwnedConnectorHost<IOpcUaSubjectServer>(this, logger, diagnosticsPollInterval);
 
         Name = string.Empty;
         Path = string.Empty;
@@ -295,7 +303,7 @@ public partial class OpcUaServer
             BufferTime = BufferTimeMs.HasValue ? TimeSpan.FromMilliseconds(BufferTimeMs.Value) : defaults.BufferTime,
         };
 
-        // Separate from the client store: the server cleans its own store on start.
+        // Separate from the client store, so trusting a certificate for one does not trust it for the other.
         if (OpcUaCertificateStoreLocation.Resolve(this, "Server") is { } certificateStorePath)
         {
             configuration.CertificateStoreBasePath = certificateStorePath;
@@ -307,6 +315,14 @@ public partial class OpcUaServer
     void IConnectorOwner<IOpcUaSubjectServer>.ApplyDiagnostics(IOpcUaSubjectServer server)
     {
         var diagnostics = server.Diagnostics;
+
+        // Without this, a server whose start keeps failing looks healthy while it never accepts connections.
+        IsAcceptingConnections = diagnostics.IsOperational;
+        if (Status == ServiceStatus.Running && diagnostics.IsOperational is { } isOperational)
+        {
+            StatusMessage = isOperational ? null : diagnostics.LastError?.Message;
+        }
+
         IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
         OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;
         ActiveSessionCount = diagnostics.ActiveSessionCount;
@@ -314,6 +330,7 @@ public partial class OpcUaServer
 
     void IConnectorOwner<IOpcUaSubjectServer>.ResetDiagnostics()
     {
+        IsAcceptingConnections = null;
         IncomingChangesPerSecond = null;
         OutgoingChangesPerSecond = null;
         ActiveSessionCount = null;

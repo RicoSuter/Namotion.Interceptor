@@ -45,6 +45,11 @@
                   OnKeyUp="OnFieldChanged"
                   Class="mt-4" />
 
+    <MudCheckBox @bind-Value="_acceptUntrustedServerCertificates"
+                 @bind-Value:after="OnFieldChanged"
+                 Label="Accept Untrusted Server Certificates"
+                 Class="mt-4" />
+
     <MudNumericField @bind-Value="_samplingInterval"
                      Label="Sampling Interval (ms)"
                      HelperText="Leave empty for server default, 0 for exception-based monitoring"
@@ -86,6 +91,7 @@
     private string? _rootPath;
     private string? _username;
     private string? _password;
+    private bool _acceptUntrustedServerCertificates;
     private int? _samplingInterval;
     private bool _isEnabled = true;
 
@@ -94,6 +100,7 @@
     private string? _originalRootPath;
     private string? _originalUsername;
     private string? _originalPassword;
+    private bool _originalAcceptUntrustedServerCertificates;
     private int? _originalSamplingInterval;
     private bool _originalIsEnabled = true;
 
@@ -104,6 +111,7 @@
                            _rootPath != _originalRootPath ||
                            _username != _originalUsername ||
                            _password != _originalPassword ||
+                           _acceptUntrustedServerCertificates != _originalAcceptUntrustedServerCertificates ||
                            _samplingInterval != _originalSamplingInterval ||
                            _isEnabled != _originalIsEnabled;
 
@@ -121,6 +129,7 @@
             _rootPath = ClientSubject.RootPath;
             _username = ClientSubject.Username;
             _password = ClientSubject.Password;
+            _acceptUntrustedServerCertificates = ClientSubject.AcceptUntrustedServerCertificates;
             _samplingInterval = ClientSubject.SamplingInterval;
             _isEnabled = ClientSubject.IsEnabled;
 
@@ -129,6 +138,7 @@
             _originalRootPath = _rootPath;
             _originalUsername = _username;
             _originalPassword = _password;
+            _originalAcceptUntrustedServerCertificates = _acceptUntrustedServerCertificates;
             _originalSamplingInterval = _samplingInterval;
             _originalIsEnabled = _isEnabled;
         }
@@ -149,6 +159,7 @@
             ClientSubject.RootPath = _rootPath;
             ClientSubject.Username = _username;
             ClientSubject.Password = _password;
+            ClientSubject.AcceptUntrustedServerCertificates = _acceptUntrustedServerCertificates;
             ClientSubject.SamplingInterval = _samplingInterval;
             ClientSubject.IsEnabled = _isEnabled;
 
@@ -157,6 +168,7 @@
             _originalRootPath = _rootPath;
             _originalUsername = _username;
             _originalPassword = _password;
+            _originalAcceptUntrustedServerCertificates = _acceptUntrustedServerCertificates;
             _originalSamplingInterval = _samplingInterval;
             _originalIsEnabled = _isEnabled;
 

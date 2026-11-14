@@ -19,7 +19,7 @@ public interface IServerSubject : IMonitoredService
     string? ServerUrl => null;
 
     /// <summary>
-    /// Whether the server is currently running.
+    /// Whether the server is running and accepting client connections.
     /// </summary>
     [Derived]
     [State(Position = 920)]
