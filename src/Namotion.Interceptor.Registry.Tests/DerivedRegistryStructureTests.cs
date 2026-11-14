@@ -287,6 +287,22 @@ public class DerivedRegistryStructureTests
         Assert.NotEqual(initialValue, read());
     }
 
+    [Theory]
+    [InlineData("\0children")]
+    [InlineData("Name\0")]
+    public void WhenAddedPropertyNameContainsNullCharacter_ThenAddPropertyThrowsAndAddsNothing(string name)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var target = new RegistryTarget(context);
+        var registered = target.TryGetRegisteredSubject()!;
+
+        // Act & Assert
+        Assert.Throws<ArgumentException>(() => registered.AddProperty<int>(name, _ => 1));
+        Assert.Null(registered.TryGetProperty(name));
+        Assert.False(((IInterceptorSubject)target).Properties.ContainsKey(name));
+    }
+
     [Fact]
     public void WhenGetterSideEffectRunsReconciliation_ThenRegistryReadsAreNotRecorded()
     {

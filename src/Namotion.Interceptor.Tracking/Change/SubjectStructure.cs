@@ -52,7 +52,7 @@ public static class SubjectStructure
 
     /// <summary>
     /// The reference under which the children of <paramref name="subject"/> are recorded and linked: its name contains
-    /// a null character, which a property name does not.
+    /// a null character, which the registry rejects in the name of an added property.
     /// </summary>
     internal static PropertyReference ChildrenOf(IInterceptorSubject subject) => new(subject, ChildrenName);
 
