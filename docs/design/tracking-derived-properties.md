@@ -207,7 +207,7 @@ Recorded, only while a getter is recorded, by:
 Changed by the following; a change updates the state first, then runs W2 to W5 on the cell (`TrackingWriteObserver.OnStructureChanged`), whose requests are queued while the thread holds a lifecycle lock (see [Structure Changes](tracking-lifecycle.md#structure-changes)) and run immediately otherwise:
 
 - `LifecycleInterceptor`, once per lifecycle change of S it dispatches (context attach or detach, reference added or removed), after all lifecycle handlers ran or one of them threw. When a handler of an attach descends into the subtree of S (`ContextInheritanceHandler`), the structure of S is reported once, when the descent starts, instead: the handlers that set it (the registry and parent tracking) run before the descent, and the attach evaluations in the subtree then read it at its new version. No handler changes the structure of S after the descent without reporting the change itself.
-- `LifecycleInterceptor`, for the children of the holding subject, once per such dispatch through a property, after all lifecycle handlers ran.
+- `LifecycleInterceptor`, for the children of the holding subject, once per such dispatch through a property, after all lifecycle handlers ran or one of them threw.
 - `LifecycleInterceptor`, once per child whose key or position a write changed, and for the children of the written property's subject, after the `IChildIndexHandler` services ran or one of them threw.
 - `RegisteredSubject.AddProperty`, `AddDerivedProperty` and `AddAttribute`, once the new property is registered, attached and its initial value published, also when one of these threw.
 
