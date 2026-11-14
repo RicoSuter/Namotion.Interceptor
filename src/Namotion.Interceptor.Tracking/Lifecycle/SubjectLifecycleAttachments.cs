@@ -112,7 +112,13 @@ internal static class SubjectLifecycleAttachments
         // The common cases first: the subject's first graph, or a graph again after it left all of them.
         var single = interceptor.SingleAttachment;
         var current = Interlocked.CompareExchange(ref state.Interceptors, single, null);
-        while (current is not null && IndexOf(current, interceptor) < 0)
+        if (current is null)
+        {
+            return;
+        }
+
+        // A concurrent remove can empty the attachments between two attempts, so null is retried like any other set.
+        while (IndexOf(current, interceptor) < 0)
         {
             var observed = Interlocked.CompareExchange(ref state.Interceptors, With(current, interceptor), current);
             if (ReferenceEquals(observed, current))
@@ -134,7 +140,14 @@ internal static class SubjectLifecycleAttachments
         // The common case first: the subject leaves its only graph.
         var single = interceptor.SingleAttachment;
         var current = Interlocked.CompareExchange(ref state.Interceptors, null, single);
-        while (current is not null && !ReferenceEquals(current, single) && IndexOf(current, interceptor) >= 0)
+        if (ReferenceEquals(current, single))
+        {
+            return;
+        }
+
+        // A concurrent remove can leave this interceptor's own one-element array between two attempts, so it is
+        // removed like any other set that contains the interceptor.
+        while (current is not null && IndexOf(current, interceptor) >= 0)
         {
             var observed = Interlocked.CompareExchange(ref state.Interceptors, Without(current, interceptor), current);
             if (ReferenceEquals(observed, current))
