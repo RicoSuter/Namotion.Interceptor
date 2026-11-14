@@ -228,12 +228,6 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                 var linkedToken = attempt.Token;
 
                 var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
-
-                if (_configuration.CleanCertificateStore)
-                {
-                    CleanCertificateStore(application);
-                }
-
                 var server = new OpcUaStandardServer(_subject, this, _configuration, _logger);
 
                 try
@@ -251,6 +245,14 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                         // next restart register its own: a second Register while one is still live throws.
                         using var outboundRegistration = Metrics.OutboundChanges.Register(
                             () => changeQueueProcessor.QueueDepth, capacity: null);
+
+                        if (_configuration.CleanCertificateStore)
+                        {
+                            await ApplicationCertificateLoader.CleanStoreAsync(
+                                application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate,
+                                _logger,
+                                linkedToken).ConfigureAwait(false);
+                        }
 
                         await LoadApplicationCertificateAsync(application, linkedToken).ConfigureAwait(false);
                         await application.StartAsync(server).ConfigureAwait(false);
@@ -382,34 +384,6 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         catch (ServiceResultException e) when (e.StatusCode == StatusCodes.BadServerHalted)
         {
             // Server already halted
-        }
-    }
-
-    private void CleanCertificateStore(ApplicationInstance application)
-    {
-        var path = application
-            .ApplicationConfiguration
-            .SecurityConfiguration
-            .ApplicationCertificate
-            .StorePath;
-
-        if (string.IsNullOrEmpty(path))
-        {
-            _logger.LogWarning("Certificate store path is empty, skipping cleanup.");
-            return;
-        }
-
-        try
-        {
-            if (Directory.Exists(path))
-            {
-                Directory.Delete(path, true);
-                _logger.LogDebug("Cleaned certificate store at {Path}.", path);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to clean certificate store at {Path}. Continuing with existing certificates.", path);
         }
     }
 

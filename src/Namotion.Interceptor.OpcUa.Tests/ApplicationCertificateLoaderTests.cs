@@ -339,6 +339,41 @@ public class ApplicationCertificateLoaderTests : IDisposable
         Assert.True(application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate!.HasPrivateKey);
     }
 
+    [Fact]
+    public async Task WhenTheStoreIsCleanedWhileItIsInUse_ThenTheCleanWaitsAndThenDeletesTheStore()
+    {
+        // Arrange - the lock is taken through another spelling of the same folder, as a second application may configure it.
+        var configuration = CreateConfiguration();
+        var application = await configuration.CreateApplicationInstanceAsync();
+        await LoadAsync(application, configuration);
+        var identifier = application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate;
+        var otherSpelling = new CertificateIdentifier
+        {
+            StoreType = CertificateStoreType.Directory,
+            StorePath = Path.Combine(_storePath, "own") + Path.DirectorySeparatorChar
+        };
+        var storeLock = ApplicationCertificateLoader.GetStoreLock(otherSpelling);
+        await storeLock.WaitAsync();
+
+        // Act
+        Task cleaning;
+        try
+        {
+            cleaning = ApplicationCertificateLoader.CleanStoreAsync(identifier, NullLogger.Instance, CancellationToken.None);
+
+            // Assert
+            Assert.False(cleaning.IsCompleted);
+            Assert.True(Directory.Exists(Path.Combine(_storePath, "own")));
+        }
+        finally
+        {
+            storeLock.Release();
+        }
+
+        await cleaning.WaitAsync(TestTimeouts.Default);
+        Assert.False(Directory.Exists(Path.Combine(_storePath, "own")));
+    }
+
     private OpcUaClientConfiguration CreateConfiguration() =>
         ClientSourceTestFactory.CreateConfiguration(certificateStoreBasePath: _storePath);
 

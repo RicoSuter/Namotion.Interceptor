@@ -43,7 +43,7 @@ internal static class ApplicationCertificateLoader
             return;
         }
 
-        var storeLock = StoreLocks.GetOrAdd(GetStoreKey(identifier), static _ => new SemaphoreSlim(1, 1));
+        var storeLock = GetStoreLock(identifier);
         await storeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -81,6 +81,46 @@ internal static class ApplicationCertificateLoader
             storeLock.Release();
         }
     }
+
+    /// <summary>
+    /// Deletes the own store folder of <paramref name="identifier"/> with every certificate and private key in it,
+    /// under the same lock as <see cref="EnsureLoadedAsync"/>. An empty store path or a failure to delete is logged
+    /// as a warning and otherwise ignored.
+    /// </summary>
+    public static async Task CleanStoreAsync(CertificateIdentifier identifier, ILogger logger, CancellationToken cancellationToken)
+    {
+        var storePath = identifier.StorePath;
+        if (string.IsNullOrEmpty(storePath))
+        {
+            logger.LogWarning("Certificate store path is empty, skipping cleanup.");
+            return;
+        }
+
+        var storeLock = GetStoreLock(identifier);
+        await storeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (Directory.Exists(storePath))
+            {
+                Directory.Delete(storePath, true);
+                logger.LogDebug("Cleaned certificate store at {Path}.", storePath);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to clean certificate store at {Path}. Continuing with existing certificates.", storePath);
+        }
+        finally
+        {
+            storeLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Gets the lock that serializes access to the store of <paramref name="identifier"/> within the process.
+    /// </summary>
+    internal static SemaphoreSlim GetStoreLock(CertificateIdentifier identifier) =>
+        StoreLocks.GetOrAdd(GetStoreKey(identifier), static _ => new SemaphoreSlim(1, 1));
 
     private static void LogExpiryWarning(X509Certificate2 certificate, bool autoCreate, string storePath, ILogger logger)
     {
