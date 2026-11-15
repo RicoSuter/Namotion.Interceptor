@@ -23,7 +23,8 @@ public static class DerivedPropertyChangeHandlerExtensions
     /// <summary>
     /// Gets forward dependencies: Which properties this derived property depends on.
     /// Example: FullName.GetRequiredProperties() includes FirstName and LastName.
-    /// Returns empty span if no tracking data exists (allocation-free).
+    /// Returns a copy of the last committed dependencies, so a later recalculation does not change it. Allocates one
+    /// array when the property depends on a property, and returns an empty span otherwise.
     /// </summary>
     public static ReadOnlySpan<PropertyReference> GetRequiredProperties(this PropertyReference property)
     {
@@ -33,17 +34,37 @@ public static class DerivedPropertyChangeHandlerExtensions
             return ReadOnlySpan<PropertyReference>.Empty;
         }
 
-        // The structures the getter read are dependencies, but not properties.
-        var dependencies = data.RequiredPropertiesSpan;
-        foreach (ref readonly var dependency in dependencies)
+        // A commit rewrites the dependency buffer in place under lock(data).
+        lock (data)
         {
-            if (DerivedStructureDependencies.IsStructureDependency(dependency))
+            // The structures the getter read are dependencies, but not properties.
+            var dependencies = data.RequiredPropertiesSpan;
+            var count = 0;
+            foreach (ref readonly var dependency in dependencies)
             {
-                return dependencies.ToArray().Where(d => !DerivedStructureDependencies.IsStructureDependency(d)).ToArray();
+                if (!DerivedStructureDependencies.IsStructureDependency(dependency))
+                {
+                    count++;
+                }
             }
-        }
 
-        return dependencies;
+            if (count == 0)
+            {
+                return ReadOnlySpan<PropertyReference>.Empty;
+            }
+
+            var properties = new PropertyReference[count];
+            var index = 0;
+            foreach (ref readonly var dependency in dependencies)
+            {
+                if (!DerivedStructureDependencies.IsStructureDependency(dependency))
+                {
+                    properties[index++] = dependency;
+                }
+            }
+
+            return properties;
+        }
     }
 
     /// <summary>

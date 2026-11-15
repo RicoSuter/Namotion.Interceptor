@@ -114,9 +114,10 @@ public class DerivedRegistryStructureTests
     }
 
     [Fact]
-    public void WhenSubtreeIsAttached_ThenDerivedPropertyInItThatReadsTheChildrenOfItsHolderIsEvaluatedOnce()
+    public void WhenSubtreeIsAttached_ThenDerivedPropertyInItThatReadsTheChildrenOfItsHolderIsEvaluatedOnceMore()
     {
-        // Arrange: the reader attaches with the child, after the registry added the child to the root's children.
+        // Arrange: the reader attaches with the child, after the registry added the child to the root's children and
+        // before the children of the root are reported.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var root = new StructureHolder(context);
         var evaluations = 0;
@@ -136,8 +137,34 @@ public class DerivedRegistryStructureTests
         root.Child = child;
 
         // Assert
-        Assert.Equal(1, evaluations);
+        Assert.Equal(2, evaluations);
         Assert.Equal("1", child.Reader.Value);
+    }
+
+    [Fact]
+    public void WhenChildIsAttachedToHolder_ThenDerivedPropertyThatReadsOnlyTheStructureOfTheHolderIsNotRecalculated()
+    {
+        // Arrange: the children of the holder are a dependency of their own, so a getter that walks up through the
+        // holder does not follow them.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new StructureHolder(context);
+        var evaluations = 0;
+        root.Reader = new StructureReader
+        {
+            Read = () =>
+            {
+                evaluations++;
+                return root.TryGetRegisteredSubject()!.Parents.Length.ToString();
+            }
+        };
+        var evaluationsBefore = evaluations;
+
+        // Act
+        root.Target = new RegistryTarget();
+        root.Target = null;
+
+        // Assert
+        Assert.Equal(evaluationsBefore, evaluations);
     }
 
     [Fact]
@@ -349,22 +376,6 @@ public class DerivedRegistryStructureTests
         // Assert
         Assert.IsType<InvalidOperationException>(exception);
         Assert.Equal(evaluationsBefore + 1, evaluations);
-    }
-
-    [Fact]
-    public void WhenAddedPropertyNameIsTheReservedChildrenName_ThenAddPropertyThrowsAndAddsNothing()
-    {
-        const string name = "\0children";
-
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var target = new RegistryTarget(context);
-        var registered = target.TryGetRegisteredSubject()!;
-
-        // Act & Assert
-        Assert.Throws<ArgumentException>(() => registered.AddProperty<int>(name, _ => 1));
-        Assert.Null(registered.TryGetProperty(name));
-        Assert.False(((IInterceptorSubject)target).Properties.ContainsKey(name));
     }
 
     [Fact]

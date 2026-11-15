@@ -75,8 +75,8 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
     }
 
     /// <summary>
-    /// W2 to W5 for a change of the structure of <paramref name="subject"/> (<see cref="DerivedStructureDependencies"/>). Called
-    /// after the structure changed.
+    /// W2 to W5 ("The Version Protocol" in docs/design/tracking-derived-properties.md) for a change of the structure of
+    /// <paramref name="subject"/> (<see cref="DerivedStructureDependencies"/>). Called after the structure changed.
     /// </summary>
     internal static void OnStructureChanged(IInterceptorSubject subject, bool hasFailed = false)
     {
@@ -93,12 +93,12 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
     }
 
     /// <summary>
-    /// W2 to W5 for a change of the structure of <paramref name="subject"/>, of the children of
-    /// <paramref name="holder"/>, and of the structure of <paramref name="holder"/> when
-    /// <paramref name="isHolderStructureChanged"/> (<see cref="DerivedStructureDependencies"/>). Called after a subject was attached
-    /// or detached through a property of <paramref name="holder"/>, once all of these changed.
+    /// W2 to W5 ("The Version Protocol" in docs/design/tracking-derived-properties.md) for a change of the structure of
+    /// <paramref name="subject"/> and of the children of <paramref name="holder"/>
+    /// (<see cref="DerivedStructureDependencies"/>). Called after a subject was attached or detached through a property
+    /// of <paramref name="holder"/>, once both changed.
     /// </summary>
-    internal static void OnStructureChanged(IInterceptorSubject subject, IInterceptorSubject holder, bool isHolderStructureChanged)
+    internal static void OnStructureChanged(IInterceptorSubject subject, IInterceptorSubject holder)
     {
         if (!DerivedStructureDependencies.IsGateRaised)
         {
@@ -109,16 +109,13 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
         Interlocked.MemoryBarrier();
         RequestStructureRecalculations(DerivedStructureDependencies.Of(subject), hasFailed: false);
         RequestStructureRecalculations(DerivedStructureDependencies.ChildrenOf(holder), hasFailed: false);
-        if (isHolderStructureChanged)
-        {
-            RequestStructureRecalculations(DerivedStructureDependencies.Of(holder), hasFailed: false);
-        }
     }
 
     /// <summary>
-    /// W2 to W5 for a change of the structure of every subject in <paramref name="children"/> and of the children of
-    /// <paramref name="holder"/> (<see cref="DerivedStructureDependencies"/>). Called after the children moved within a property
-    /// of <paramref name="holder"/>.
+    /// W2 to W5 ("The Version Protocol" in docs/design/tracking-derived-properties.md) for a change of the structure of
+    /// every subject in <paramref name="children"/> and of the children of <paramref name="holder"/>
+    /// (<see cref="DerivedStructureDependencies"/>). Called after the children moved within a property of
+    /// <paramref name="holder"/>.
     /// </summary>
     internal static void OnChildrenMoved(ReadOnlySpan<SubjectChild> children, IInterceptorSubject holder)
     {
@@ -155,8 +152,8 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
             return null;
         }
 
-        // W2: the value landed before the gate and the data are read, so an evaluation that creates the data
-        // later reads this value.
+        // W2 ("The Version Protocol" in docs/design/tracking-derived-properties.md): the value landed before the gate
+        // and the data are read, so an evaluation that creates the data later reads this value.
         Interlocked.MemoryBarrier();
         var property = write.Property;
 
@@ -175,7 +172,8 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
     {
         var property = write.Property;
 
-        // W4, then W5: the used-by set is read after the version moved.
+        // W4, then W5 ("The Version Protocol" in docs/design/tracking-derived-properties.md): the used-by set is read
+        // after the version moved.
         var newVersion = Interlocked.Increment(ref data.Version);
         if (DerivedPropertyRecorder.IsEvaluatingOnThisThread)
         {
