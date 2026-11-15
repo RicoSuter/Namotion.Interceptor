@@ -29,6 +29,28 @@ public class HostSystemTests
     }
 
     [Fact]
+    public void WhenExceptionsAreThrownAndCaught_ThenTheCounterCountsThem()
+    {
+        // Arrange
+        var before = FirstChanceExceptionCounter.Count;
+
+        // Act
+        for (var index = 0; index < 3; index++)
+        {
+            try
+            {
+                throw new InvalidOperationException();
+            }
+            catch (InvalidOperationException)
+            {
+            }
+        }
+
+        // Assert - other tests in the process may throw too, so at least these three.
+        Assert.True(FirstChanceExceptionCounter.Count - before >= 3);
+    }
+
+    [Fact]
     public void WhenNameIsSet_ThenTitleUsesName()
     {
         // Arrange
@@ -59,6 +81,35 @@ public class HostSystemTests
         Assert.NotNull(host.Process.AllocationRate);
         Assert.True(host.Process.WorkingSet > 0);
         Assert.True(host.Process.ThreadCount > 0);
+        Assert.True(host.Process.GcCommittedSize > 0);
+        Assert.True(host.Process.GcFragmentedSize >= 0);
+        Assert.True(host.Process.Gen2Size >= 0);
+        Assert.True(host.Process.LargeObjectHeapSize >= 0);
+        if (OperatingSystem.IsMacOS())
+        {
+            Assert.Null(host.Process.HandleCount);
+        }
+        else
+        {
+            Assert.True(host.Process.HandleCount > 0);
+        }
+
+        Assert.True(host.Process.TimerCount >= 0);
+        Assert.True(host.Process.ThreadPoolThreadCount > 0);
+        Assert.True(host.Process.ThreadPoolQueueLength >= 0);
+        Assert.True(host.Process.LockContentionRate >= 0);
+        Assert.True(host.Process.ExceptionRate >= 0);
+        if (OperatingSystem.IsLinux())
+        {
+            Assert.True(host.Process.ResidentAnonymousMemory > 0);
+            Assert.True(host.Process.ResidentFileMemory > 0);
+        }
+        else
+        {
+            Assert.Null(host.Process.ResidentAnonymousMemory);
+            Assert.Null(host.Process.ResidentFileMemory);
+        }
+
         if (supported)
         {
             Assert.InRange(host.CpuUsage!.Value, 0m, 1m);

@@ -26,6 +26,11 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
     private TimeSpan _baselineCpuTime;
     private long _baselineAllocatedBytes;
     private TimeSpan _baselinePauseDuration;
+    private long _baselineLockContentionCount;
+    private long _baselineExceptionCount;
+
+    // Only read by the polling loop, so the buffer is never shared between threads; allocated on Linux only.
+    private byte[]? _statusBuffer;
 
     [Derived]
     public string Title => "Process";
@@ -66,6 +71,73 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
     [State(Position = 416)]
     public partial TimeSpan? Uptime { get; internal set; }
 
+    /// <summary>
+    /// Memory the garbage collector holds from the operating system, including free space it keeps for reuse.
+    /// </summary>
+    [State(Unit = StateUnit.Byte, Position = 417)]
+    public partial long? GcCommittedSize { get; internal set; }
+
+    /// <summary>
+    /// Free space between objects in the managed heap at the last garbage collection.
+    /// </summary>
+    [State(Unit = StateUnit.Byte, Position = 418)]
+    public partial long? GcFragmentedSize { get; internal set; }
+
+    /// <summary>
+    /// Size of the oldest generation at the last garbage collection, where long-lived objects end up.
+    /// </summary>
+    [State(Unit = StateUnit.Byte, Position = 419)]
+    public partial long? Gen2Size { get; internal set; }
+
+    /// <summary>
+    /// Size of the large object heap at the last garbage collection, which holds objects of 85,000 bytes or more.
+    /// </summary>
+    [State(Unit = StateUnit.Byte, Position = 420)]
+    public partial long? LargeObjectHeapSize { get; internal set; }
+
+    /// <summary>
+    /// Resident memory not backed by a file, such as the managed and native heaps and thread stacks. Linux only.
+    /// </summary>
+    [State(Unit = StateUnit.Byte, Position = 421)]
+    public partial long? ResidentAnonymousMemory { get; internal set; }
+
+    /// <summary>
+    /// Resident memory backed by a file, such as the executable, libraries and mapped files. Linux only.
+    /// </summary>
+    [State(Unit = StateUnit.Byte, Position = 422)]
+    public partial long? ResidentFileMemory { get; internal set; }
+
+    /// <summary>
+    /// Open handles of the process: file descriptors on Linux, kernel handles on Windows. Empty on macOS, where
+    /// .NET does not report them.
+    /// </summary>
+    [State(Position = 423)]
+    public partial int? HandleCount { get; internal set; }
+
+    [State(Position = 424)]
+    public partial long? TimerCount { get; internal set; }
+
+    [State(Position = 425)]
+    public partial int? ThreadPoolThreadCount { get; internal set; }
+
+    /// <summary>
+    /// Work items waiting for a thread pool thread.
+    /// </summary>
+    [State(Position = 426)]
+    public partial long? ThreadPoolQueueLength { get; internal set; }
+
+    /// <summary>
+    /// Times per second a thread had to wait for a lock another thread held.
+    /// </summary>
+    [State(Position = 427)]
+    public partial decimal? LockContentionRate { get; internal set; }
+
+    /// <summary>
+    /// Exceptions thrown per second, caught or not.
+    /// </summary>
+    [State(Position = 428)]
+    public partial decimal? ExceptionRate { get; internal set; }
+
     internal HostProcess(Action collectGarbage, Action collected)
     {
         _collectGarbage = collectGarbage;
@@ -79,6 +151,18 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
         GcPauseTime = null;
         ThreadCount = null;
         Uptime = null;
+        GcCommittedSize = null;
+        GcFragmentedSize = null;
+        Gen2Size = null;
+        LargeObjectHeapSize = null;
+        ResidentAnonymousMemory = null;
+        ResidentFileMemory = null;
+        HandleCount = null;
+        TimerCount = null;
+        ThreadPoolThreadCount = null;
+        ThreadPoolQueueLength = null;
+        LockContentionRate = null;
+        ExceptionRate = null;
     }
 
     [Operation(Title = "Collect garbage", Description = "Runs a full, compacting garbage collection and refreshes the values.", Icon = "DeleteSweep", RequiresConfirmation = true)]
@@ -121,12 +205,31 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
 
         WorkingSet = process.WorkingSet64;
         ThreadCount = process.Threads.Count;
+        HandleCount = OperatingSystem.IsMacOS() ? null : process.HandleCount;
         Uptime = DateTime.UtcNow - _startTime.Value;
-        GcHeapSize = GC.GetGCMemoryInfo().HeapSizeBytes;
+
+        var memoryInfo = GC.GetGCMemoryInfo();
+        GcHeapSize = memoryInfo.HeapSizeBytes;
+        GcCommittedSize = memoryInfo.TotalCommittedBytes;
+        GcFragmentedSize = memoryInfo.FragmentedBytes;
+        var generations = memoryInfo.GenerationInfo;
+        Gen2Size = generations.Length > 2 ? generations[2].SizeAfterBytes : null;
+        LargeObjectHeapSize = generations.Length > 3 ? generations[3].SizeAfterBytes : null;
+
+        TimerCount = Timer.ActiveCount;
+        ThreadPoolThreadCount = ThreadPool.ThreadCount;
+        ThreadPoolQueueLength = ThreadPool.PendingWorkItemCount;
+
+        if (OperatingSystem.IsLinux())
+        {
+            UpdateResidentMemory();
+        }
 
         var cpuTime = Environment.CpuUsage.TotalTime;
         var allocatedBytes = GC.GetTotalAllocatedBytes(precise: false);
         var pauseDuration = GC.GetTotalPauseDuration();
+        var lockContentionCount = Monitor.LockContentionCount;
+        var exceptionCount = FirstChanceExceptionCounter.Count;
 
         var hadBaseline = _rateWindow.HasBaseline;
         var isAdvanced = _rateWindow.TryAdvance(timestamp, out var elapsed);
@@ -135,6 +238,8 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
             CpuUsage = RateCalculator.ComputeTimeFraction(_baselineCpuTime, cpuTime, elapsed, processorCount) ?? CpuUsage;
             AllocationRate = RateCalculator.ComputeKilobytesPerSecond(_baselineAllocatedBytes, allocatedBytes, elapsed) ?? AllocationRate;
             GcPauseTime = RateCalculator.ComputeTimeFraction(_baselinePauseDuration, pauseDuration, elapsed) ?? GcPauseTime;
+            LockContentionRate = RateCalculator.ComputePerSecond(_baselineLockContentionCount, lockContentionCount, elapsed) ?? LockContentionRate;
+            ExceptionRate = RateCalculator.ComputePerSecond(_baselineExceptionCount, exceptionCount, elapsed) ?? ExceptionRate;
         }
 
         if (isAdvanced || !hadBaseline)
@@ -142,8 +247,41 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
             _baselineCpuTime = cpuTime;
             _baselineAllocatedBytes = allocatedBytes;
             _baselinePauseDuration = pauseDuration;
+            _baselineLockContentionCount = lockContentionCount;
+            _baselineExceptionCount = exceptionCount;
         }
 
         return isAdvanced;
+    }
+
+    // A missing or unreadable /proc/self/status, as under some sandboxes, empties the two values instead of failing
+    // the whole poll.
+    private void UpdateResidentMemory()
+    {
+        _statusBuffer ??= new byte[4096];
+        try
+        {
+            using var handle = File.OpenHandle("/proc/self/status");
+            var length = 0;
+            int read;
+            while (length < _statusBuffer.Length &&
+                   (read = RandomAccess.Read(handle, _statusBuffer.AsSpan(length), length)) > 0)
+            {
+                length += read;
+            }
+
+            if (LinuxProcParser.TryParseProcessStatus(_statusBuffer.AsSpan(0, length), out var anonymousBytes, out var fileBytes))
+            {
+                ResidentAnonymousMemory = anonymousBytes;
+                ResidentFileMemory = fileBytes;
+                return;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+
+        ResidentAnonymousMemory = null;
+        ResidentFileMemory = null;
     }
 }

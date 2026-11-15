@@ -83,6 +83,10 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     private readonly object _connectionLock = new();
     private readonly Dictionary<string, SqliteConnection> _connections = new(StringComparer.Ordinal);
 
+    // _connections.Count, published on every change so metrics read it without waiting for _connectionLock, which
+    // a long query holds for its whole run.
+    private int _openConnectionCount;
+
     // Partitions this build refused to open, so a read skips them without retrying and logging per query.
     private readonly HashSet<string> _unreadablePartitions = new(StringComparer.Ordinal);
 
@@ -215,6 +219,11 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     public string? LastError => _lastError;
 
     public ImmutableArray<HistoryCoverage> CoverageRanges => GetEffectiveCoverageSnapshot();
+
+    /// <summary>
+    /// Gets the number of open database connections, partitions and the metadata database together.
+    /// </summary>
+    public int OpenConnectionCount => Volatile.Read(ref _openConnectionCount);
 
     public long EstimatedStorageBytes
     {
@@ -485,6 +494,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         }
 
         _connections.Clear();
+        Volatile.Write(ref _openConnectionCount, 0);
         _partitionLastUsed.Clear();
     }
 
@@ -959,6 +969,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             }
 
             _connections[key] = connection;
+            Volatile.Write(ref _openConnectionCount, _connections.Count);
             _partitionLastUsed[key] = now;
             return connection;
         }
@@ -1003,6 +1014,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             }
 
             _connections[MetadataKey] = connection;
+            Volatile.Write(ref _openConnectionCount, _connections.Count);
             return connection;
         }
     }
@@ -1110,6 +1122,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         {
             return false;
         }
+
+        Volatile.Write(ref _openConnectionCount, _connections.Count);
 
         connection.Dispose();
         return true;

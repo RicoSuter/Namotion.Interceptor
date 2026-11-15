@@ -158,6 +158,18 @@ public partial class SqliteHistoryStoreSubject :
     public partial long EstimatedStorageSize { get; set; }
 
     /// <summary>
+    /// Open database connections of this store, partitions and the metadata database together.
+    /// </summary>
+    [State]
+    public partial int OpenConnectionCount { get; set; }
+
+    /// <summary>
+    /// Memory SQLite holds in this process, for every SQLite database the process uses, not only this store.
+    /// </summary>
+    [State(Unit = StateUnit.Byte)]
+    public partial long SqliteMemorySize { get; set; }
+
+    /// <summary>
     /// Average incoming changes per second (eligible [State] changes observed).
     /// </summary>
     [State]
@@ -393,6 +405,8 @@ public partial class SqliteHistoryStoreSubject :
         QueueDepth = engine.QueueDepth;
         DropCount = engine.DropCount;
         EstimatedStorageSize = engine.EstimatedStorageBytes;
+        OpenConnectionCount = engine.OpenConnectionCount;
+        SqliteMemorySize = SQLitePCL.raw.sqlite3_memory_used();
         LastFlushUtc = engine.LastFlushUtc;
         LastError = engine.LastError;
         IncomingChangesPerSecond = _recorder?.IncomingChangesPerSecond ?? 0;

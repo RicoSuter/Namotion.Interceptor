@@ -58,6 +58,19 @@ internal static class RateCalculator
     }
 
     /// <summary>
+    /// Returns how much a cumulative count grew per second, rounded to two decimals.
+    /// </summary>
+    public static decimal? ComputePerSecond(long previous, long current, TimeSpan elapsed)
+    {
+        if (elapsed <= TimeSpan.Zero || current < previous)
+        {
+            return null;
+        }
+
+        return Math.Round((current - previous) / (decimal)elapsed.TotalSeconds, 2);
+    }
+
+    /// <summary>
     /// Adds the delta of a 32-bit tick counter that may wrap around to a 64-bit running total.
     /// </summary>
     public static ulong AccumulateTicks(ulong accumulated, uint previous, uint current)

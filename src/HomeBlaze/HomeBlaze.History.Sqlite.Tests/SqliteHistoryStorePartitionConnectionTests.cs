@@ -358,6 +358,27 @@ public sealed class SqliteHistoryStorePartitionConnectionTests : IDisposable
         Assert.Equal(hasGlibc, NativeHeap.IsAvailable);
     }
 
+    [Fact]
+    public async Task WhenPartitionConnectionsOpenAndClose_ThenTheOpenConnectionCountFollows()
+    {
+        // Arrange
+        var now = Base;
+        using var core = NewCore(() => now);
+        core.Record("/a/Value", Base.AddDays(-14), 1d, typeof(double));
+        core.Record("/a/Value", Base.AddSeconds(1), 2d, typeof(double));
+        now = Base.AddSeconds(10);
+        await core.FlushAsync(CancellationToken.None);
+        var afterFlush = core.OpenConnectionCount;
+        now += SqliteHistoryStore.IdlePartitionConnectionTimeout + TimeSpan.FromTicks(1);
+
+        // Act
+        core.Sweep();
+
+        // Assert - the metadata database and both partitions, then only the metadata database.
+        Assert.Equal(3, afterFlush);
+        Assert.Equal(1, core.OpenConnectionCount);
+    }
+
     // A SQLite file under a partition-shaped name that this build refuses to read, as in SqliteHistorySchemaTests.
     private void WriteForeignPartition(DateTimeOffset timestamp)
     {
