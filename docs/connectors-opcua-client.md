@@ -506,6 +506,10 @@ builder.Services.AddOpcUaSubjectClientSource(
 - `PollingInterval` minimum of 100 milliseconds enforced
 - Fail-fast with clear error messages on invalid configuration
 
+### Responses for a Different Request
+
+The client detects when one of its own writes or value reads receives the response to a different request of this client: the request handle the server echoes must match the one the request was sent with, and a response of another service type counts as a mismatch too. This is a detection, not a complete defense: a misdelivered fault, or a response from a server that does not echo request handles (it answers with zero, which the client accepts), cannot be told apart from a genuine one. On a detected mismatch nothing from that response is applied. A write fails and its changes are retried like any other failed write, and a read fails like any other failed read. Because the received response belonged to another request, possibly one carrying subscription notifications, the client also schedules a full state read on the next health check with a healthy session. Repeated mismatches coalesce into one read, at most once every 30 seconds.
+
 ### Connection Loss Recovery
 
 The client handles connection loss through two cooperating mechanisms: the OPC UA SDK's built-in `SessionReconnectHandler` (automatic) and a health check loop that performs manual reconnection when the SDK handler fails or is insufficient.

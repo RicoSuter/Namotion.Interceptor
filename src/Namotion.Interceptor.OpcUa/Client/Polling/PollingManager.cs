@@ -248,10 +248,13 @@ internal sealed class PollingManager : IAsyncDisposable
             // Get snapshot of items to poll
             var itemsToRead = _pollingItems.Values.ToArray();
 
+            // Each batch is one read, so it may not exceed the server's read limit.
+            var batchLimit = OpcUaValueReader.GetNodesPerRead(session, _configuration.PollingBatchSize);
+
             // Process in batches using direct indexing
-            for (int i = 0; i < itemsToRead.Length; i += _configuration.PollingBatchSize)
+            for (int i = 0; i < itemsToRead.Length; i += batchLimit)
             {
-                var batchSize = Math.Min(_configuration.PollingBatchSize, itemsToRead.Length - i);
+                var batchSize = Math.Min(batchLimit, itemsToRead.Length - i);
                 var batch = new ArraySegment<PollingItem>(itemsToRead, i, batchSize);
                 await ReadBatchAsync(session, batch, cancellationToken).ConfigureAwait(false);
             }
@@ -335,20 +338,15 @@ internal sealed class PollingManager : IAsyncDisposable
                 });
             }
 
-            // Execute read
-            var response = await session.ReadAsync(
-                requestHeader: null,
-                maxAge: 0,
-                timestampsToReturn: TimestampsToReturn.Both,
-                nodesToRead,
-                cancellationToken).ConfigureAwait(false);
+            var results = await OpcUaValueReader.ReadAsync(
+                session, nodesToRead, TimestampsToReturn.Both, cancellationToken).ConfigureAwait(false);
 
             // Process results - count metrics per item for accurate monitoring
-            for (var i = 0; i < Math.Min(response.Results.Count, batch.Count); i++)
+            for (var i = 0; i < results.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var dataValue = response.Results[i];
+                var dataValue = results[i];
                 var pollingItem = batch[i];
 
                 if (StatusCode.IsGood(dataValue.StatusCode))
