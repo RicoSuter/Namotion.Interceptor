@@ -32,6 +32,33 @@ public class DerivedPropertyInvalidationTests
     }
 
     [Fact]
+    public void WhenTwoAggregatedContextsHaveDerivedDetectionAndSubjectIsAttachedThroughAProperty_ThenDerivedChangeIsPublishedOnce()
+    {
+        // Arrange
+        static IInterceptorSubjectContext Create() => InterceptorSubjectContext.Create()
+            .WithDerivedPropertyChangeDetection()
+            .WithPropertyChangeSubscriptions()
+            .WithContextInheritance();
+        var parent = Create();
+        var child = Create();
+        child.AddFallbackContext(parent);
+        var person = new Person(child) { FirstName = "a", LastName = "x" };
+        var father = new Person { FirstName = "f", LastName = "x" };
+        person.Father = father;
+        var changes = new List<SubjectPropertyChange>();
+        parent.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+
+        // Act
+        father.FirstName = "g";
+
+        // Assert
+        var change = Assert.Single(changes, c => c.Property.Subject == father && c.Property.Name == nameof(Person.FullName));
+        Assert.Equal("g x", change.GetNewValue<string>());
+        Assert.Single(changes, c => c.Property.Subject == father && c.Property.Name == nameof(Person.FullNameWithPrefix));
+        Assert.DoesNotContain(changes, c => c.Property.Subject == person);
+    }
+
+    [Fact]
     public void WhenSourceWithoutContextIsWritten_ThenAttachedDerivedPropertyIsPublished()
     {
         // Arrange

@@ -104,6 +104,36 @@ public class DerivedPropertyOwnershipTests
     }
 
     [Fact]
+    public void WhenRecalculationThrowsAfterReadingANewSource_ThenThatSourceIsADependency()
+    {
+        // Arrange: once Data is set, the getter reads Anchor, which is not a dependency yet, and throws while it is 0.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = _ =>
+        {
+            if (root.Data is null)
+            {
+                return -1;
+            }
+
+            return root.Anchor == 0 ? throw new InvalidOperationException() : 20;
+        };
+        root.Machine = machine;
+        root.Data = [1];
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        root.Anchor = 5;
+
+        // Assert
+        var change = Assert.Single(changes, c => c.Property.Subject == machine.Worker && c.Property.Name == nameof(EvaluatorWorker.Result));
+        Assert.Equal(-1, change.GetOldValue<int>());
+        Assert.Equal(20, change.GetNewValue<int>());
+        Assert.Equal(20, machine.Worker.Result);
+    }
+
+    [Fact]
     public void WhenSubjectIsAttachedToSecondGraph_ThenItsDerivedPropertyIsNotEvaluatedAgain()
     {
         // Arrange: the getter reads state outside the model, so only an evaluation sees it change.

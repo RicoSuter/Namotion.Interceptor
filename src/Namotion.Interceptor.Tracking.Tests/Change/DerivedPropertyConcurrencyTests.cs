@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -12,6 +13,9 @@ namespace Namotion.Interceptor.Tracking.Tests.Change;
 public class DerivedPropertyConcurrencyTests
 {
     private const int DefaultIterations = 50;
+
+    [ThreadStatic]
+    private static string? _cycleReaderOnThisThread;
 
     [Fact]
     public async Task WhenMultipleSourcePropertiesWrittenConcurrently_ThenDerivedPropertySettlesToCorrectValue()
@@ -939,6 +943,61 @@ public class DerivedPropertyConcurrencyTests
             // Assert
             AssertValuesAndUsedByAgree(root, children);
         }
+    }
+
+    [Fact]
+    public async Task WhenTwoDynamicDerivedPropertiesStartToReadEachOtherOnTwoThreads_ThenNeitherCommitBlocks()
+    {
+        // Arrange: each getter reads the other one only on the thread that selected it, so each thread records one
+        // direction of the cycle.
+        var timeout = TestTimeouts.Default;
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var registered = new Person(context).TryGetRegisteredSubject()!;
+        var a = registered.AddDerivedProperty<int>("A", subject => _cycleReaderOnThisThread == "A" ? ReadInt(subject, "B") + 1 : 1);
+        var b = registered.AddDerivedProperty<int>("B", subject => _cycleReaderOnThisThread == "B" ? ReadInt(subject, "A") + 1 : 2);
+        var aData = a.Reference.TryGetDerivedPropertyData()!;
+        var bData = b.Reference.TryGetDerivedPropertyData()!;
+        var secondHoldsB = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Act: the second thread holds the data lock of B, as in the middle of a commit of B, while the first commits
+        // A, which now reads B. Once the first is done or holds the data lock of A, the second commits B, which now
+        // reads A.
+        var first = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+        {
+            SelectCycleReader("A");
+            Assert.True(secondHoldsB.Task.Wait(timeout));
+            a.Reference.RecalculateDerivedProperty();
+        });
+        var second = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+        {
+            SelectCycleReader("B");
+            lock (bData)
+            {
+                secondHoldsB.SetResult();
+                SpinWait.SpinUntil(() => first.IsCompleted || IsLockHeldByAnotherThread(aData), timeout);
+                b.Reference.RecalculateDerivedProperty();
+            }
+        });
+
+        // Assert
+        await Task.WhenAll(first, second).WaitAsync(timeout);
+    }
+
+    private static void SelectCycleReader(string propertyName) => _cycleReaderOnThisThread = propertyName;
+
+    private static int ReadInt(IInterceptorSubject subject, string propertyName) =>
+        (int)subject.Properties[propertyName].GetValue!(subject)!;
+
+    // Must be called by a thread that does not hold the lock itself.
+    private static bool IsLockHeldByAnotherThread(object lockObject)
+    {
+        if (!Monitor.TryEnter(lockObject))
+        {
+            return true;
+        }
+
+        Monitor.Exit(lockObject);
+        return false;
     }
 
     private static void AssertValuesAndUsedByAgree(ConditionalSourceRoot root, ConditionalSourceChild[] children)
