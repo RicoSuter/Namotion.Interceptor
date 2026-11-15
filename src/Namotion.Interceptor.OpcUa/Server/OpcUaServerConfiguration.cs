@@ -98,7 +98,10 @@ public class OpcUaServerConfiguration
     /// <remarks>
     /// When this list is not empty, the server advertises one user token policy per token type the authenticators
     /// accept, and no anonymous policy unless one of them accepts anonymous tokens, such as the SDK's
-    /// <c>AnonymousAuthenticator</c>. This matches how the SDK's own hosting derives the policies from its authenticators.
+    /// <c>AnonymousAuthenticator</c>. Unlike the SDK's own hosting, which keeps anonymous access when only custom
+    /// authenticators are added, a configured list turns anonymous logins off unless one of them accepts them. The SDK
+    /// keeps one authenticator per token type and issued token profile, so checks for the same token type have to be
+    /// combined in one authenticator; <see cref="Validate"/> rejects duplicates.
     /// </remarks>
     public IReadOnlyList<IUserTokenAuthenticator> UserTokenAuthenticators { get; set; } = [];
 
@@ -275,6 +278,18 @@ public class OpcUaServerConfiguration
             throw new ArgumentException(
                 "ApplicationUri must not be empty or whitespace when set",
                 nameof(ApplicationUri));
+        }
+
+        var registeredTokenTypes = new HashSet<(UserTokenType, string?)>();
+        foreach (var authenticator in UserTokenAuthenticators)
+        {
+            if (!registeredTokenTypes.Add((authenticator.TokenType, authenticator.IssuedTokenProfileUri)))
+            {
+                throw new ArgumentException(
+                    $"UserTokenAuthenticators contains more than one authenticator for the token type {authenticator.TokenType}; " +
+                    "the server keeps only one per token type, so combine their checks in one authenticator.",
+                    nameof(UserTokenAuthenticators));
+            }
         }
     }
 

@@ -42,7 +42,6 @@ public class OpcUaServerConfigurationTests
             UserTokenAuthenticators =
             [
                 new TestAuthenticator(UserTokenType.UserName),
-                new TestAuthenticator(UserTokenType.UserName),
                 new TestAuthenticator(UserTokenType.Certificate)
             ]
         };
@@ -83,6 +82,24 @@ public class OpcUaServerConfigurationTests
         Assert.Equal(
             $"urn:{System.Net.Dns.GetHostName()}:Namotion.Interceptor:{configuration.ApplicationName}",
             application.ApplicationConfiguration!.ApplicationUri);
+    }
+
+    [Fact]
+    public void WhenTwoAuthenticatorsHandleTheSameTokenType_ThenValidationFails()
+    {
+        // Arrange
+        var configuration = new OpcUaServerConfiguration
+        {
+            UserTokenAuthenticators =
+            [
+                new TestAuthenticator(UserTokenType.UserName),
+                new TestAuthenticator(UserTokenType.UserName)
+            ]
+        };
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Equal(nameof(OpcUaServerConfiguration.UserTokenAuthenticators), exception.ParamName);
     }
 
     [Theory]
