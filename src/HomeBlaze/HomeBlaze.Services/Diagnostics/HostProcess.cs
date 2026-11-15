@@ -159,7 +159,7 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
     public partial decimal? ExceptionRate { get; internal set; }
 
     /// <summary>
-    /// Resident shared memory, where .NET maps the code it compiles at runtime. Linux only.
+    /// Resident shared memory, where .NET maps the code it compiles at runtime while W^X is on, the default. Linux only.
     /// </summary>
     [State(Unit = StateUnit.Byte, Position = 429)]
     public partial long? ResidentSharedMemory { get; internal set; }
