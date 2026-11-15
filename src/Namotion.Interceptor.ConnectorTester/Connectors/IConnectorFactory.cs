@@ -13,6 +13,6 @@ public interface IConnectorFactory
     ConnectorKind Kind { get; }
     int DefaultPort { get; }
 
-    void RegisterServer(IServiceCollection services, TestNode root, int port);
+    void RegisterServer(IServiceCollection services, TestNode root, ParticipantConfiguration participantConfiguration, int port);
     void RegisterClient(IServiceCollection services, TestNode root, ParticipantConfiguration participantConfiguration, int port);
 }

@@ -68,6 +68,8 @@ When running from source, the data folder is `src/HomeBlaze/HomeBlaze/Data`. The
 
 `AutomationState/` holds one checkpoint file per automation with its current state and last runs, described in [Automations: The checkpoint](automation.md#the-checkpoint).
 
+`OpcUa/` holds the certificate stores of the OPC UA client and server subjects, `OpcUa/Client/Pki` and `OpcUa/Server/Pki`, described in [OPC UA](opc-ua.md#certificates).
+
 ---
 
 ## HomeBlaze:RootConfigFile

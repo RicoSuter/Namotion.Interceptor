@@ -297,6 +297,167 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task WhenTheReadReceivesTheResponseToADifferentRequest_ThenNothingIsAppliedAndTheMismatchIsReported()
+    {
+        // Arrange
+        var subject = new TestPerson(InterceptorSubjectContext.Create().WithFullPropertyTracking());
+        var session = new Mock<ISession>();
+        session.SetupGet(value => value.Connected).Returns(true);
+        session
+            .Setup(value => value.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((RequestHeader requestHeader, double _, TimestampsToReturn _, ArrayOf<ReadValueId> _, CancellationToken _) =>
+            {
+                // Assigns the request handle as the SDK does while sending, and answers for another request.
+                requestHeader.RequestHandle = 7;
+                return new ValueTask<ReadResponse>(new ReadResponse
+                {
+                    ResponseHeader = new ResponseHeader { RequestHandle = 8 },
+                    Results = new[] { CreateDataValue("wrong", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1)) }.ToArrayOf(),
+                    DiagnosticInfos = []
+                });
+            });
+
+        var metrics = new ReadAfterWriteMetrics();
+        var reportedErrors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        await using var manager = new ReadAfterWriteManager(
+            () => session.Object,
+            new Mock<Connectors.ISubjectSource>().Object,
+            CreateConfiguration(TimeSpan.FromMilliseconds(250)),
+            metrics,
+            reportedErrors.Enqueue,
+            NullLogger.Instance);
+
+        RegisterAndSchedule(manager, new NodeId("FirstName", 2), CreateTestProperty(subject));
+
+        // Act
+        await manager.ProcessDueReadsAsync(DateTime.MaxValue);
+
+        // Assert
+        Assert.Equal(string.Empty, subject.FirstName);
+        Assert.Equal(0, metrics.Executed);
+        Assert.Equal(1, metrics.Failed);
+        Assert.Collection(reportedErrors, error => Assert.IsType<OpcUaResponseMismatchException>(error));
+    }
+
+    [Fact]
+    public async Task WhenAnEarlierChunkReceivesTheResponseToADifferentRequest_ThenNothingIsApplied()
+    {
+        // Arrange
+        // A read limit of one splits the two due reads into two requests, each checked on its own; the SDK
+        // would otherwise split them itself and only its last request would be checked.
+        var subjects = Enumerable.Range(0, 2)
+            .Select(_ => new TestPerson(InterceptorSubjectContext.Create().WithFullPropertyTracking()))
+            .ToArray();
+        var requestedNodeCounts = new System.Collections.Concurrent.ConcurrentQueue<int>();
+        uint nextHandle = 0;
+        var session = new Mock<ISession>();
+        session.SetupGet(value => value.Connected).Returns(true);
+        session.SetupGet(value => value.OperationLimits).Returns(new OperationLimits { MaxNodesPerRead = 1 });
+        session
+            .Setup(value => value.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((RequestHeader requestHeader, double _, TimestampsToReturn _, ArrayOf<ReadValueId> nodesToRead, CancellationToken _) =>
+            {
+                requestedNodeCounts.Enqueue(nodesToRead.Count);
+                requestHeader.RequestHandle = ++nextHandle;
+                return new ValueTask<ReadResponse>(new ReadResponse
+                {
+                    // Only the first request is answered for another request.
+                    ResponseHeader = new ResponseHeader { RequestHandle = nextHandle == 1 ? 99u : nextHandle },
+                    Results = new[] { CreateDataValue("read", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1)) }.ToArrayOf(),
+                    DiagnosticInfos = []
+                });
+            });
+
+        var metrics = new ReadAfterWriteMetrics();
+        var reportedErrors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        await using var manager = new ReadAfterWriteManager(
+            () => session.Object,
+            new Mock<Connectors.ISubjectSource>().Object,
+            CreateConfiguration(TimeSpan.FromMilliseconds(250)),
+            metrics,
+            reportedErrors.Enqueue,
+            NullLogger.Instance);
+
+        RegisterAndSchedule(manager, new NodeId("First", 2), CreateTestProperty(subjects[0]));
+        RegisterAndSchedule(manager, new NodeId("Second", 2), CreateTestProperty(subjects[1]));
+
+        // Act
+        await manager.ProcessDueReadsAsync(DateTime.MaxValue);
+
+        // Assert
+        Assert.Equal([1], requestedNodeCounts);
+        Assert.All(subjects, subject => Assert.Equal(string.Empty, subject.FirstName));
+        Assert.Equal(0, metrics.Executed);
+        Assert.Equal(2, metrics.Failed);
+        Assert.Collection(reportedErrors, error => Assert.IsType<OpcUaResponseMismatchException>(error));
+    }
+
+    [Fact]
+    public async Task WhenALaterChunkReceivesTheResponseToADifferentRequest_ThenEarlierChunksStayApplied()
+    {
+        // Arrange
+        var subjects = Enumerable.Range(0, 2)
+            .Select(_ => new TestPerson(InterceptorSubjectContext.Create().WithFullPropertyTracking()))
+            .ToArray();
+        uint nextHandle = 0;
+        var session = new Mock<ISession>();
+        session.SetupGet(value => value.Connected).Returns(true);
+        session.SetupGet(value => value.OperationLimits).Returns(new OperationLimits { MaxNodesPerRead = 1 });
+        session
+            .Setup(value => value.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((RequestHeader requestHeader, double _, TimestampsToReturn _, ArrayOf<ReadValueId> _, CancellationToken _) =>
+            {
+                requestHeader.RequestHandle = ++nextHandle;
+                return new ValueTask<ReadResponse>(new ReadResponse
+                {
+                    // Only the second request is answered for another request.
+                    ResponseHeader = new ResponseHeader { RequestHandle = nextHandle == 2 ? 99u : nextHandle },
+                    Results = new[] { CreateDataValue("read", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1)) }.ToArrayOf(),
+                    DiagnosticInfos = []
+                });
+            });
+
+        var metrics = new ReadAfterWriteMetrics();
+        var reportedErrors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        await using var manager = new ReadAfterWriteManager(
+            () => session.Object,
+            new Mock<Connectors.ISubjectSource>().Object,
+            CreateConfiguration(TimeSpan.FromMilliseconds(250)),
+            metrics,
+            reportedErrors.Enqueue,
+            NullLogger.Instance);
+
+        RegisterAndSchedule(manager, new NodeId("First", 2), CreateTestProperty(subjects[0]));
+        RegisterAndSchedule(manager, new NodeId("Second", 2), CreateTestProperty(subjects[1]));
+
+        // Act
+        await manager.ProcessDueReadsAsync(DateTime.MaxValue);
+
+        // Assert
+        Assert.Equal(2u, nextHandle);
+        Assert.Equal("read", subjects[0].FirstName);
+        Assert.Equal(string.Empty, subjects[1].FirstName);
+        Assert.Equal(1, metrics.Executed);
+        Assert.Equal(1, metrics.Failed);
+        Assert.Collection(reportedErrors, error => Assert.IsType<OpcUaResponseMismatchException>(error));
+    }
+
+    [Fact]
     public async Task WhenTheServerOmitsResults_ThenEachMissingResultIsCountedAsFailed()
     {
         // Arrange
