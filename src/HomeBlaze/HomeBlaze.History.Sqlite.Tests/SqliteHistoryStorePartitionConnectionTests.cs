@@ -209,10 +209,12 @@ public sealed class SqliteHistoryStorePartitionConnectionTests : IDisposable
         // Act
         var series = core.Query(query);
         var reading = core.GetLastNumericSampleBefore("/b/Value", now);
+        var raw = core.Query(new HistoryQuery("/b/Value", Base.AddDays(-30), now));
 
         // Assert
         Assert.All(series.Points, point => Assert.Null(point.Number));
         Assert.Null(reading);
+        Assert.Empty(raw.Points);
         Assert.False(core.IsPartitionOpen(pastPartition));
     }
 
@@ -237,6 +239,45 @@ public sealed class SqliteHistoryStorePartitionConnectionTests : IDisposable
 
         // Assert
         Assert.Equal(9d, series.Points.Single(point => point.Number is not null).Number);
+    }
+
+    [Fact]
+    public async Task WhenTheNewerLegOfAMovedPathHoldsNoRows_ThenABucketedQueryStillReadsTheOlderLeg()
+    {
+        // Arrange - the only rows sit under the old path, so resolving the new path's leg finds nothing.
+        var now = Base.AddDays(-14);
+        using var core = NewCore(() => now);
+        core.Record("/old/Value", Base.AddDays(-14).AddSeconds(1), 6d, typeof(double));
+        core.RecordMove(Base, "/old/Value", "/new/Value");
+        now = Base.AddSeconds(10);
+        await core.FlushAsync(CancellationToken.None);
+
+        // Act
+        var series = core.Query(new HistoryQuery("/new/Value", Base.AddDays(-14), Base.AddSeconds(10),
+            HistoryBucket.Fixed(TimeSpan.FromDays(28)), HistoryAggregations.Maximum));
+
+        // Assert
+        Assert.Equal(6d, series.Points.Single(point => point.Number is not null).Number);
+    }
+
+    [Fact]
+    public async Task WhenTheClockGoesBack_ThenTheSweepClosesConnectionsLastUsedInTheFuture()
+    {
+        // Arrange
+        var now = Base;
+        using var core = NewCore(() => now);
+        core.Record("/a/Value", Base.AddDays(-14), 1d, typeof(double));
+        core.Record("/a/Value", Base.AddSeconds(1), 2d, typeof(double));
+        now = Base.AddSeconds(10);
+        await core.FlushAsync(CancellationToken.None);
+        now = Base.AddHours(-1);
+
+        // Act
+        core.Sweep();
+
+        // Assert
+        Assert.False(core.IsPartitionOpen(SqlitePartition.PartitionKey(Base.AddDays(-14), PartitionInterval.Weekly)));
+        Assert.False(core.IsPartitionOpen(SqlitePartition.PartitionKey(Base, PartitionInterval.Weekly)));
     }
 
     // A SQLite file under a partition-shaped name that this build refuses to read, as in SqliteHistorySchemaTests.

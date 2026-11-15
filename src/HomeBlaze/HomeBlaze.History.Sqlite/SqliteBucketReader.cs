@@ -107,7 +107,7 @@ internal static class SqliteBucketReader
             }
 
             // Resolving the column kind above marks a path no partition knows, so its window partitions stay closed.
-            var legsWithRows = chain.FindAll(leg => !context.IsPathAbsent(leg.Path));
+            var legsWithRows = WithoutAbsentLegs(context, chain);
             var pathIds = new Dictionary<(string PartitionKey, string Path), long?>();
             var segments = new List<ChainSegment>();
             var deltaCursor = new BucketCursor(bucket);
@@ -163,6 +163,29 @@ internal static class SqliteBucketReader
         return BucketAssembler.Assemble(
             query, partials, aggregation is HistoryAggregations.Last or HistoryAggregations.Delta ? carrySeed : null,
             windows);
+    }
+
+    // The chain itself when no leg is absent, which is the common case, so it allocates nothing then.
+    private static List<HistoryChainLeg> WithoutAbsentLegs(SqliteReadContext context, List<HistoryChainLeg> chain)
+    {
+        foreach (var leg in chain)
+        {
+            if (context.IsPathAbsent(leg.Path))
+            {
+                var result = new List<HistoryChainLeg>(chain.Count - 1);
+                foreach (var other in chain)
+                {
+                    if (!context.IsPathAbsent(other.Path))
+                    {
+                        result.Add(other);
+                    }
+                }
+
+                return result;
+            }
+        }
+
+        return chain;
     }
 
     // Replaces segments with the window's (path, partitionKey, tickWindow) slices: per leg, the window

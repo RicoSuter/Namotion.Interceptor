@@ -90,10 +90,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     // section of the history design document).
     internal static readonly TimeSpan IdlePartitionConnectionTimeout = TimeSpan.FromMinutes(5);
 
-    // The page cache, in KiB, of a connection to a partition whose range has ended, instead of SQLite's default of
-    // 2000 KiB. glibc keeps the heap a closed connection frees, so closing idle connections does not lower the working
-    // set: the process keeps what a query spanning every partition held at its peak (see the SQLite section of the
-    // history design document).
+    // The page cache, in KiB, of a connection opened to a partition whose range has ended (see the SQLite section of
+    // the history design document).
     internal const int PastPartitionPageCacheKibibytes = 256;
 
     private static readonly string PastPartitionPageCacheSql =
@@ -103,7 +101,9 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     private readonly Dictionary<string, DateTimeOffset> _partitionLastUsed = new(StringComparer.Ordinal);
 
     // Paths a walk over every partition found in none of them, until a flush writes them. Under _connectionLock.
+    // Capped because callers such as MCP clients can ask for any path; past the cap a read only walks again.
     private readonly HashSet<string> _absentPaths = new(StringComparer.Ordinal);
+    private const int MaxAbsentPaths = 4096;
 
     private readonly SqliteCoverageStore _coverageStore;
 
@@ -146,7 +146,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         _logger = logger;
         _readContext = new SqliteReadContext(
             _databaseDirectory, MetadataKey, TryOpenPartition, OpenMetadata,
-            path => _absentPaths.Contains(path), path => _absentPaths.Add(path));
+            path => _absentPaths.Contains(path), MarkPathAbsent);
         _coverageStore = new SqliteCoverageStore(OpenMetadata);
 
         // After the coverage store exists: publishing the watermark compares against its snapshot.
@@ -1063,25 +1063,33 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
 
         foreach (var key in idle)
         {
-            ClosePartition(key);
+            try
+            {
+                ClosePartition(key);
+            }
+            catch (SqliteException exception)
+            {
+                // One failing close must not stop the others or the checkpoints and coverage advance after it.
+                _lastError = exception.Message;
+            }
         }
     }
 
     private void ClosePartition(string key)
     {
+        _partitionLastUsed.Remove(key);
         if (_connections.Remove(key, out var connection))
         {
-            try
-            {
-                connection.Close();
-            }
-            finally
-            {
-                connection.Dispose();
-            }
+            connection.Dispose();
         }
+    }
 
-        _partitionLastUsed.Remove(key);
+    private void MarkPathAbsent(string path)
+    {
+        if (_absentPaths.Count < MaxAbsentPaths)
+        {
+            _absentPaths.Add(path);
+        }
     }
 
     private const string HasUserTablesSql =

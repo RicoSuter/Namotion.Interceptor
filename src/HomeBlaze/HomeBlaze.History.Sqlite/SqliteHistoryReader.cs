@@ -29,10 +29,7 @@ internal readonly struct SqliteReadContext(
 {
     public string MetadataKey => metadataKey;
 
-    /// <summary>
-    /// Whether a walk over every partition found no file that knows the path, and no flush has written it since.
-    /// Reads skip such a path instead of opening every partition again to find nothing.
-    /// </summary>
+    // Reads skip an absent path instead of opening every partition again to find nothing.
     public bool IsPathAbsent(string path) => isPathAbsent(path);
 
     public void MarkPathAbsent(string path) => markPathAbsent(path);
