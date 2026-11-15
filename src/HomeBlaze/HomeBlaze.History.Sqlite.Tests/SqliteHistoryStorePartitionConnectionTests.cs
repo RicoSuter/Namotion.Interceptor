@@ -78,26 +78,6 @@ public sealed class SqliteHistoryStorePartitionConnectionTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenAPartitionLiesInThePast_ThenItsConnectionKeepsTheSmallPageCache()
-    {
-        // Arrange
-        var now = Base;
-        using var core = NewCore(() => now);
-        core.Record("/a/Value", Base.AddDays(-14), 1d, typeof(double));
-        core.Record("/a/Value", Base.AddSeconds(1), 2d, typeof(double));
-        now = Base.AddSeconds(10);
-
-        // Act
-        await core.FlushAsync(CancellationToken.None);
-
-        // Assert
-        var pastPartition = SqlitePartition.PartitionKey(Base.AddDays(-14), PartitionInterval.Weekly);
-        var currentPartition = SqlitePartition.PartitionKey(Base, PartitionInterval.Weekly);
-        Assert.Equal(-SqliteHistoryStore.PastPartitionPageCacheKibibytes, core.GetPageCacheSize(pastPartition));
-        Assert.NotEqual(-SqliteHistoryStore.PastPartitionPageCacheKibibytes, core.GetPageCacheSize(currentPartition));
-    }
-
-    [Fact]
     public async Task WhenAPartitionConnectionStaysUnusedPastTheTimeout_ThenTheSweepClosesIt()
     {
         // Arrange - the flush opens both partitions, then only the current one keeps being written.
@@ -117,8 +97,8 @@ public sealed class SqliteHistoryStorePartitionConnectionTests : IDisposable
         // Assert - the idle past partition is closed, and still answers a query by opening again.
         var pastPartition = SqlitePartition.PartitionKey(Base.AddDays(-14), PartitionInterval.Weekly);
         var currentPartition = SqlitePartition.PartitionKey(Base, PartitionInterval.Weekly);
-        Assert.Null(core.GetPageCacheSize(pastPartition));
-        Assert.NotNull(core.GetPageCacheSize(currentPartition));
+        Assert.False(core.IsPartitionOpen(pastPartition));
+        Assert.True(core.IsPartitionOpen(currentPartition));
         var series = core.Query(new HistoryQuery("/a/Value", Base.AddDays(-15), now.AddSeconds(1)));
         Assert.Equal(new double?[] { 1, 2, 3 }, series.Points.Select(point => point.Number).ToArray());
     }
@@ -141,7 +121,7 @@ public sealed class SqliteHistoryStorePartitionConnectionTests : IDisposable
 
         // Assert
         var pastPartition = SqlitePartition.PartitionKey(Base.AddDays(-14), PartitionInterval.Weekly);
-        Assert.NotNull(core.GetPageCacheSize(pastPartition));
+        Assert.True(core.IsPartitionOpen(pastPartition));
     }
 
     // A SQLite file under a partition-shaped name that this build refuses to read, as in SqliteHistorySchemaTests.

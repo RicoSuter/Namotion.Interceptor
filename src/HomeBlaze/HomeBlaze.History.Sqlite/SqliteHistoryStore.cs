@@ -90,11 +90,6 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     // its memory in SQLite. The partition being written is used by every flush and so stays open.
     internal static readonly TimeSpan IdlePartitionConnectionTimeout = TimeSpan.FromMinutes(5);
 
-    // The page cache, in KiB, of a connection to a partition whose range has ended, instead of SQLite's default
-    // of about 2 MB. It bounds the memory a query spanning many partitions holds until the sweep closes them; a
-    // past partition is mostly read once per query, which the operating system's file cache already serves.
-    internal const int PastPartitionPageCacheKibibytes = 256;
-
     // When each cached partition connection was last handed out. Under _connectionLock.
     private readonly Dictionary<string, DateTimeOffset> _partitionLastUsed = new(StringComparer.Ordinal);
 
@@ -908,11 +903,6 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                     "CREATE VIEW IF NOT EXISTS history_paths AS " +
                     "SELECT p.path, h.ts, h.value_long, h.value_double, h.value_json " +
                     "FROM history h JOIN paths p ON p.id = h.path_id;");
-
-                if (SqlitePartition.InferredRange(key).End <= now)
-                {
-                    Execute(connection, PastPartitionPageCacheSql);
-                }
             }
             catch
             {
@@ -1023,9 +1013,6 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         }
     }
 
-    private static readonly string PastPartitionPageCacheSql =
-        "PRAGMA cache_size=-" + PastPartitionPageCacheKibibytes.ToString(CultureInfo.InvariantCulture) + ";";
-
     // Closes the partition connections not handed out for IdlePartitionConnectionTimeout. Every query holds
     // _connectionLock for its whole run, as this caller does, so no connection is closed while in use.
     private void CloseIdlePartitions(DateTimeOffset now)
@@ -1078,15 +1065,12 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         return Convert.ToInt64(command.ExecuteScalar() ?? 0L, CultureInfo.InvariantCulture);
     }
 
-    // The page cache of a cached partition connection as PRAGMA cache_size reports it (negative values are
-    // KiB), or null when the partition has no cached connection.
-    internal long? GetPageCacheSize(string partitionKey)
+    // Whether the partition has a cached connection.
+    internal bool IsPartitionOpen(string partitionKey)
     {
         lock (_connectionLock)
         {
-            return _connections.TryGetValue(partitionKey, out var connection)
-                ? QueryLong(connection, "PRAGMA cache_size;")
-                : null;
+            return _connections.ContainsKey(partitionKey);
         }
     }
 

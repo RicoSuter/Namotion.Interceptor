@@ -306,7 +306,7 @@ The parity test suite feeds identical cases to both engines. Any future Timescal
 - WAL mode with pooling disabled.
 - `moves.db` metadata sidecar for moves and coverage ranges.
 - Serialized connection access because `SqliteConnection` and commands are not thread-safe.
-- A partition's connection is cached while it is used. The sweep closes one that has not been used for five minutes, which frees all of its memory in SQLite; the partition being written is used by every flush and stays open. A connection to a partition whose range has ended runs with a 256 KiB page cache instead of SQLite's default of about 2 MB, which bounds what a query spanning many partitions holds until then.
+- A partition's connection is cached while it is used. The sweep closes one that has not been used for five minutes, which frees all of its memory in SQLite; the partition being written is used by every flush and stays open.
 - A look-back stops at the start of the coverage holding its instant, and a raw query reads the column kind only once it found rows, so a property without samples does not open every partition.
 - Pending and in-flight sample accounting under one lock.
 - Flush serialization under a separate gate.
