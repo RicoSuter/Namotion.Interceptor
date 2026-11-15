@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
@@ -6,6 +7,7 @@ using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Benchmark;
@@ -47,6 +49,23 @@ public partial class HostingGraphRoot
     }
 
     public partial HostingLeaf[] Items { get; set; }
+}
+
+/// <summary>
+/// A subject whose derived getter reads the parents of a subject, which is a recorded structure read.
+/// </summary>
+[InterceptorSubject]
+public partial class HostingStructureReader
+{
+    public HostingStructureReader()
+    {
+        Target = new HostingLeaf();
+    }
+
+    public HostingLeaf Target { get; init; }
+
+    [Derived]
+    public int ParentCount => Target.GetParents().Length;
 }
 
 /// <summary>
@@ -101,6 +120,38 @@ public class HostingLifecycleBenchmark
 
     [Params(20_000)]
     public int SubjectCount;
+
+    /// <summary>
+    /// Whether the process wide structure gate is raised before measuring. It is never lowered, and
+    /// BenchmarkDotNet runs every parameter combination in its own process, so the rows with
+    /// <c>false</c> measure a process in which no structure dependency was ever created.
+    /// </summary>
+    [Params(false, true)]
+    public bool StructureGateRaised;
+
+    private HostingStructureReader? _structureReader;
+
+    [GlobalSetup]
+    public void RaiseStructureGate()
+    {
+        if (!StructureGateRaised)
+        {
+            return;
+        }
+
+        // Evaluating a derived getter that reads a structure API creates a structure dependency, which
+        // raises the gate. The reader is kept alive so the dependency stays in place.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithDerivedPropertyChangeDetection()
+            .WithContextInheritance();
+
+        _structureReader = new HostingStructureReader(context);
+        if (_structureReader.ParentCount != 0)
+        {
+            throw new InvalidOperationException("The structure reader did not evaluate.");
+        }
+    }
 
     private IInterceptorSubjectContext CreateContext()
     {
