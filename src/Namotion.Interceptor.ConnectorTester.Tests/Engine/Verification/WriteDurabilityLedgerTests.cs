@@ -110,29 +110,34 @@ public class WriteDurabilityLedgerTests
     }
 
     [Fact]
-    public void WhenCommitFailed_ThenRecordCommitRecordsOnlyTheAppliedWrites()
+    public void WhenCommitFailed_ThenRecordCommitDoesNotRecordTheFailedWrites()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var root = TestNode.CreateWithGraph(context, collectionCount: 2, dictionaryCount: 0);
-        var appliedNode = root.Collection[0];
-        var failedNode = root.Collection[1];
-        TestNode.WriteValueProperty(appliedNode, property: 0, counter: 42);
-        failedNode.StringValue = "previous-value";
-        var failure = new SubjectTransactionException(
-            "Partial failure.",
-            [CreateStringValueChange(appliedNode, appliedNode.StringValue)],
-            [CreateStringValueChange(failedNode, "0000002b")],
-            [new InvalidOperationException("Source is not connected")]);
+        var (appliedNode, failedNode, failure) = CreatePartiallyFailedCommit();
         var ledger = new WriteDurabilityLedger();
 
         // Act
         ledger.RecordCommit([(appliedNode, 0, 42), (failedNode, 0, 43)], failure);
+        var violations = ledger.Verify([appliedNode, failedNode]);
 
-        // Assert: the failed write is not claimed, the applied one is.
-        Assert.Empty(ledger.Verify([appliedNode, failedNode]));
+        // Assert
+        Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void WhenCommitFailed_ThenRecordCommitRecordsTheAppliedWrites()
+    {
+        // Arrange
+        var (appliedNode, failedNode, failure) = CreatePartiallyFailedCommit();
         appliedNode.StringValue = "lost";
-        var violation = Assert.Single(ledger.Verify([appliedNode, failedNode]));
+        var ledger = new WriteDurabilityLedger();
+
+        // Act
+        ledger.RecordCommit([(appliedNode, 0, 42), (failedNode, 0, 43)], failure);
+        var violations = ledger.Verify([appliedNode, failedNode]);
+
+        // Assert
+        var violation = Assert.Single(violations);
         Assert.StartsWith("Collection[0].StringValue: ", violation);
     }
 
@@ -165,6 +170,26 @@ public class WriteDurabilityLedgerTests
 
         // Assert
         Assert.Equal(0, droppedWriteCount);
+    }
+
+    /// <summary>
+    /// Creates a failed commit of counter 42 to the first node's string value, which it applied, and of counter 43 to
+    /// the second node's, which it did not.
+    /// </summary>
+    private static (TestNode AppliedNode, TestNode FailedNode, SubjectTransactionException Failure) CreatePartiallyFailedCommit()
+    {
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var root = TestNode.CreateWithGraph(context, collectionCount: 2, dictionaryCount: 0);
+        var appliedNode = root.Collection[0];
+        var failedNode = root.Collection[1];
+        TestNode.WriteValueProperty(appliedNode, property: 0, counter: 42);
+        failedNode.StringValue = "previous-value";
+        var failure = new SubjectTransactionException(
+            "Partial failure.",
+            [CreateStringValueChange(appliedNode, appliedNode.StringValue)],
+            [CreateStringValueChange(failedNode, "0000002b")],
+            [new InvalidOperationException("Source is not connected")]);
+        return (appliedNode, failedNode, failure);
     }
 
     private static SubjectPropertyChange CreateStringValueChange(TestNode node, string value)

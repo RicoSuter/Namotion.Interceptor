@@ -86,8 +86,6 @@ public sealed class ConnectorTesterHost
             configuration.Clients[i].Index = i + 1;
         }
 
-        configuration.ValidateVerifyWriteDurability();
-
         configuration.Server.Chaos?.Validate();
         foreach (var client in configuration.Clients)
         {
@@ -95,6 +93,12 @@ public sealed class ConnectorTesterHost
         }
 
         var runModeSelection = RunModeSelector.Select(args, configuration);
+        if (runModeSelection.Mode == RunMode.Verify)
+        {
+            // A --participant run has no verification engine and ignores the option.
+            configuration.ValidateVerifyWriteDurability();
+        }
+
         var connectorFactory = ConnectorFactoryRegistry.Resolve(configuration, runDirectory);
 
         var participants = new Dictionary<string, TestNode>();
@@ -152,10 +156,9 @@ public sealed class ConnectorTesterHost
             // Mutation engine stays in the main host so it shares the verification coordinator
             // graph; its logger category already encodes the participant name explicitly.
             var mutationLogger = sharedLoggerFactory.CreateLogger($"MutationEngine/{participantConfiguration.Name}");
-            // A client's retry queue may drop its oldest writes when full, which the durability check must not
-            // report as a loss. The queue lives as long as the source, so a chaos kill keeps its writes.
-            var source = bundle.Connectors.OfType<ISubjectSource>().FirstOrDefault(connector => connector.RootSubject == root);
-            Func<long>? droppedWriteCount = source is null ? null : () => source.Diagnostics.OutboundRetries.TotalDropped;
+            var droppedWriteCount = verifyWriteDurability
+                ? DroppedWriteCountResolver.Resolve(bundle.Connectors, root, participantConfiguration.Name, isServer)
+                : null;
             var mutationEngine = configuration.NumberOfBatches > 0
                 ? MutationEngine.CreateBatch(root, participantConfiguration, coordinator, mutationLogger,
                     configuration.NumberOfBatches, participantConfiguration.Index, verifyWriteDurability, droppedWriteCount)

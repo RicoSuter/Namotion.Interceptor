@@ -97,7 +97,7 @@ public class FindingsLogTests
 
             // Assert
             var contents = File.ReadAllText(path);
-            Assert.Contains("durability-inconclusive: client-a: 1 write(s) lost with 5 dropped queued write(s)", contents);
+            Assert.Contains("durability-inconclusive: client-a: 1 write(s) lost, dropped-write count changed by 5", contents);
             Assert.DoesNotContain("server", contents);
         }
         finally

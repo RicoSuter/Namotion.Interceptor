@@ -53,7 +53,7 @@ public sealed class FindingsLog
             findings.AddRange(durabilityResults
                 .Where(result => result.IsInconclusive)
                 .Select(result =>
-                    $"durability-inconclusive: {result.Participant}: {result.Violations.Count} write(s) lost with {result.DroppedWriteCount} dropped queued write(s)"));
+                    $"durability-inconclusive: {result.Participant}: {result.Violations.Count} write(s) lost, dropped-write count changed by {result.DroppedWriteCount}"));
 
             if (findings.Count == 0)
             {

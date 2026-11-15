@@ -24,7 +24,14 @@ internal sealed class FailingSource : ISubjectSource
 
     public DateTimeOffset? LastSynchronizedAt => null;
 
-    public SourceDiagnostics Diagnostics { get; } = new(new SourceMetrics());
+    public FailingSource()
+    {
+        Diagnostics = new SourceDiagnostics(Metrics);
+    }
+
+    public SourceMetrics Metrics { get; } = new();
+
+    public SourceDiagnostics Diagnostics { get; }
 
     ConnectorDiagnostics ISubjectConnector.Diagnostics => Diagnostics;
 

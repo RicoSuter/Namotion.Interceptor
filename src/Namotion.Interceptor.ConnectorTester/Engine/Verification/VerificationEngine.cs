@@ -204,7 +204,7 @@ public class VerificationEngine : BackgroundService
         foreach (var result in durabilityResults.Where(result => result.IsInconclusive))
         {
             _logger.LogWarning(
-                "Cycle {Cycle}: write durability of {Participant} is inconclusive: {ViolationCount} write(s) lost, but its source dropped {DroppedCount} queued write(s) in the cycle, which a full retry queue is allowed to do",
+                "Cycle {Cycle}: write durability of {Participant} is inconclusive: {ViolationCount} write(s) lost, but its source's dropped-write count changed by {DroppedCount} in the cycle, either because a full retry queue dropped writes or, when negative, because the count was reset",
                 _cycleNumber, result.Participant, result.Violations.Count, result.DroppedWriteCount);
             foreach (var violation in result.Violations)
             {

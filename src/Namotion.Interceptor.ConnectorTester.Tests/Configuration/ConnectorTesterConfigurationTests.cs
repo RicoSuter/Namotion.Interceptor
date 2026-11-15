@@ -68,6 +68,35 @@ public class ConnectorTesterConfigurationTests
     }
 
     [Theory]
+    [InlineData(-1)] // server
+    [InlineData(0)] // first client
+    public void WhenVerifyWriteDurabilityHasStructuralMutations_ThenValidateThrowsNamingTheParticipant(int clientIndex)
+    {
+        // Arrange
+        var configuration = CreateConfiguration(verifyWriteDurability: true, clientCount: 2, numberOfBatches: 0);
+        var participant = clientIndex < 0 ? configuration.Server : configuration.Clients[clientIndex];
+        participant.StructuralMutationRate = 1;
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(configuration.ValidateVerifyWriteDurability);
+        Assert.Contains($"'{participant.Name}'", exception.Message);
+    }
+
+    [Fact]
+    public void WhenVerifyWriteDurabilityIsDisabled_ThenStructuralMutationsAreFine()
+    {
+        // Arrange
+        var configuration = CreateConfiguration(verifyWriteDurability: false, clientCount: 1, numberOfBatches: 0);
+        configuration.Clients[0].StructuralMutationRate = 1;
+
+        // Act
+        var exception = Record.Exception(configuration.ValidateVerifyWriteDurability);
+
+        // Assert
+        Assert.Null(exception);
+    }
+
+    [Theory]
     [InlineData("opcua-chaos", "opcua-durability")]
     [InlineData("websocket-chaos", "websocket-durability")]
     public void WhenDurabilityProfileIsLoaded_ThenItMatchesItsChaosProfileWithTheCheckOn(

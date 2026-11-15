@@ -34,7 +34,10 @@ public sealed class WriteDurabilityLedger
         _droppedWriteBaseline = droppedWriteCount?.Invoke() ?? 0;
     }
 
-    /// <summary>Gets the number of writes the participant's source dropped since the last <see cref="Reset"/>.</summary>
+    /// <summary>
+    /// Gets the change in the number of writes the participant's source dropped since the last <see cref="Reset"/>,
+    /// negative when the source's count was reset in between.
+    /// </summary>
     public long DroppedWriteCount => (_droppedWriteCount?.Invoke() ?? 0) - Interlocked.Read(ref _droppedWriteBaseline);
 
     public void Record(TestNode node, int property, long counter)
