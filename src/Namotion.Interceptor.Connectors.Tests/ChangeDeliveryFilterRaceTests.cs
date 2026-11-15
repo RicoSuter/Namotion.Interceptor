@@ -25,7 +25,8 @@ public class ChangeDeliveryFilterRaceTests
     [Theory]
     [InlineData(ChangeDeliveryRule.SourceValuesMayBeStale)]
     [InlineData(ChangeDeliveryRule.SourceValuesAreSettled)]
-    public async Task WhenAConfirmationCommitsWhileTheFlushIsMarkingTheFirstPublish_ThenTheSourceEndsAtTheModelValue(ChangeDeliveryRule rule)
+    public Task WhenAConfirmationCommitsWhileTheFlushIsMarkingTheFirstPublish_ThenTheSourceEndsAtTheModelValue(ChangeDeliveryRule rule) =>
+        DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(async () =>
     {
         // Arrange
         await using var race = await Race.StartAsync(rule);
@@ -68,12 +69,13 @@ public class ChangeDeliveryFilterRaceTests
         // Assert
         Assert.Equal("T", subject.Value);
         Assert.Equal(subject.Value, race.SourceWrites.Last(write => write.Property == nameof(GatedSubject.Value)).Value);
-    }
+    });
 
     [Theory]
     [InlineData(ChangeDeliveryRule.SourceValuesMayBeStale)]
     [InlineData(ChangeDeliveryRule.SourceValuesAreSettled)]
-    public async Task WhenAConfirmationCommitsBetweenTheFlushRevisionReadAndTheFirstPublishLock_ThenTheSourceEndsAtTheModelValue(ChangeDeliveryRule rule)
+    public Task WhenAConfirmationCommitsBetweenTheFlushRevisionReadAndTheFirstPublishLock_ThenTheSourceEndsAtTheModelValue(ChangeDeliveryRule rule) =>
+        DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(async () =>
     {
         // Arrange
         await using var race = await Race.StartAsync(rule);
@@ -115,7 +117,7 @@ public class ChangeDeliveryFilterRaceTests
         // Assert
         Assert.Equal("T", subject.Value);
         Assert.Equal(subject.Value, race.SourceWrites.Last(write => write.Property == nameof(GatedSubject.Value)).Value);
-    }
+    });
 
     /// <summary>
     /// A gated subject with a running processor that records what reaches the source.
