@@ -406,11 +406,13 @@ public partial class SqliteHistoryStoreSubject :
         DropCount = engine.DropCount;
         EstimatedStorageSize = engine.EstimatedStorageBytes;
         OpenConnectionCount = engine.OpenConnectionCount;
-        SqliteMemorySize = SQLitePCL.raw.sqlite3_memory_used();
         LastFlushUtc = engine.LastFlushUtc;
         LastError = engine.LastError;
         IncomingChangesPerSecond = _recorder?.IncomingChangesPerSecond ?? 0;
         RecordedChangesPerSecond = _recorder?.RecordedChangesPerSecond ?? 0;
+
+        // Last, so a throwing native call cannot skip the values above.
+        SqliteMemorySize = SQLitePCL.raw.sqlite3_memory_used();
     }
 
     // ILifecycleHandler

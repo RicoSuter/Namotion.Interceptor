@@ -51,6 +51,47 @@ public class HostSystemTests
     }
 
     [Fact]
+    public void WhenDirectoryEntriesAreCounted_ThenAllocationDoesNotGrowWithTheEntryCount()
+    {
+        // Arrange
+        var fewEntries = CreateDirectoryWithFiles(10);
+        var manyEntries = CreateDirectoryWithFiles(1000);
+        try
+        {
+            HostProcess.CountDirectoryEntries(fewEntries);
+            HostProcess.CountDirectoryEntries(manyEntries);
+
+            // Act
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            var fewCount = HostProcess.CountDirectoryEntries(fewEntries);
+            var fewAllocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            before = GC.GetAllocatedBytesForCurrentThread();
+            var manyCount = HostProcess.CountDirectoryEntries(manyEntries);
+            var manyAllocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            // Assert - a string per entry would add tens of kilobytes for the larger directory.
+            Assert.Equal(10, fewCount);
+            Assert.Equal(1000, manyCount);
+            Assert.True(manyAllocated - fewAllocated < 2048, $"{fewAllocated} bytes for 10 entries, {manyAllocated} bytes for 1000 entries");
+        }
+        finally
+        {
+            Directory.Delete(fewEntries, recursive: true);
+            Directory.Delete(manyEntries, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void WhenDirectoryIsMissing_ThenCountingEntriesThrows()
+    {
+        // Arrange
+        var path = Path.Combine(Path.GetTempPath(), "hb-missing-" + Guid.NewGuid().ToString("N"));
+
+        // Act & Assert
+        Assert.Throws<DirectoryNotFoundException>(() => HostProcess.CountDirectoryEntries(path));
+    }
+
+    [Fact]
     public void WhenNameIsSet_ThenTitleUsesName()
     {
         // Arrange
@@ -66,7 +107,8 @@ public class HostSystemTests
     [Fact]
     public async Task WhenRunningOnTheCurrentPlatform_ThenRatesAppearInRange()
     {
-        // Arrange
+        // Arrange: the garbage collection values stay zero until the first collection.
+        GC.Collect();
         var host = new HostSystem(NullLogger<HostSystem>.Instance);
         var supported = OperatingSystem.IsLinux() || OperatingSystem.IsWindows() || OperatingSystem.IsMacOS();
 
@@ -99,15 +141,18 @@ public class HostSystemTests
         Assert.True(host.Process.ThreadPoolQueueLength >= 0);
         Assert.True(host.Process.LockContentionRate >= 0);
         Assert.True(host.Process.ExceptionRate >= 0);
+        Assert.True(host.Process.JitCompiledMethodCount > 0);
         if (OperatingSystem.IsLinux())
         {
             Assert.True(host.Process.ResidentAnonymousMemory > 0);
             Assert.True(host.Process.ResidentFileMemory > 0);
+            Assert.True(host.Process.ResidentSharedMemory >= 0);
         }
         else
         {
             Assert.Null(host.Process.ResidentAnonymousMemory);
             Assert.Null(host.Process.ResidentFileMemory);
+            Assert.Null(host.Process.ResidentSharedMemory);
         }
 
         if (supported)
@@ -278,6 +323,18 @@ public class HostSystemTests
         {
             PollingInterval = TimeSpan.FromHours(1)
         };
+    }
+
+    private static string CreateDirectoryWithFiles(int fileCount)
+    {
+        var path = Path.Combine(Path.GetTempPath(), "hb-entries-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        for (var index = 0; index < fileCount; index++)
+        {
+            File.Create(Path.Combine(path, "file-" + index)).Dispose();
+        }
+
+        return path;
     }
 
     private static async Task RunAsync(HostSystem host, Func<Task> whileRunning)

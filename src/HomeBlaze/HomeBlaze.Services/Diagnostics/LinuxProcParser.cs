@@ -71,14 +71,17 @@ internal static class LinuxProcParser
     }
 
     /// <summary>
-    /// Parses RssAnon and RssFile from /proc/self/status: resident memory not backed by a file (heap, stacks,
-    /// anonymous mappings) and resident memory backed by one (the executable, libraries, mapped files).
+    /// Parses RssAnon, RssFile and RssShmem from /proc/self/status: resident memory not backed by a file (heap,
+    /// stacks, anonymous mappings), resident memory backed by one (the executable, libraries, mapped files) and
+    /// resident shared memory.
     /// </summary>
-    public static bool TryParseProcessStatus(ReadOnlySpan<byte> content, out long anonymousBytes, out long fileBytes)
+    public static bool TryParseProcessStatus(ReadOnlySpan<byte> content, out long anonymousBytes, out long fileBytes, out long sharedBytes)
     {
         fileBytes = 0;
+        sharedBytes = 0;
         return TryReadMemInfoValue(content, "\nRssAnon:"u8, out anonymousBytes) &
-               TryReadMemInfoValue(content, "\nRssFile:"u8, out fileBytes);
+               TryReadMemInfoValue(content, "\nRssFile:"u8, out fileBytes) &
+               TryReadMemInfoValue(content, "\nRssShmem:"u8, out sharedBytes);
     }
 
     /// <summary>

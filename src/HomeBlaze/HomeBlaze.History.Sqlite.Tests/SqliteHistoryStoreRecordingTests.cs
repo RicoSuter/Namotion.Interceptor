@@ -148,6 +148,30 @@ public class SqliteHistoryStoreRecordingTests
     }
 
     [Fact]
+    public async Task WhenStoreHasOpenConnections_ThenSqliteMemorySizeIsPositive()
+    {
+        // Arrange
+        var (context, _, _) = CreateGraph();
+        var (store, databasePath) = CreateStore(context);
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => store.Status == "Running", message: "Store did not start");
+        }
+        finally
+        {
+            // Act: stopping refreshes the values one last time, before the connections close, and waits for it.
+            await hostedService.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+        }
+
+        // Assert
+        Assert.True(store.OpenConnectionCount > 0);
+        Assert.True(store.SqliteMemorySize > 0);
+    }
+
+    [Fact]
     public async Task WhenRootStatePropertyMutated_ThenRecordedUnderCanonicalPath()
     {
         // Arrange

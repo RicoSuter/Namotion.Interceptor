@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.IO.Enumeration;
 using System.Runtime;
 using System.Runtime.InteropServices;
 using HomeBlaze.Abstractions;
@@ -28,6 +29,13 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
     private TimeSpan _baselinePauseDuration;
     private long _baselineLockContentionCount;
     private long _baselineExceptionCount;
+
+    // Counts every entry, and throws on errors so an unreadable directory empties the value instead of counting zero.
+    private static readonly EnumerationOptions DirectoryEntryCountOptions = new()
+    {
+        AttributesToSkip = 0,
+        IgnoreInaccessible = false
+    };
 
     // Only read by the polling loop, so the buffer is never shared between threads; allocated on Linux only.
     private byte[]? _statusBuffer;
@@ -72,7 +80,8 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
     public partial TimeSpan? Uptime { get; internal set; }
 
     /// <summary>
-    /// Memory the garbage collector holds from the operating system, including free space it keeps for reuse.
+    /// Memory the garbage collector held from the operating system at the last garbage collection, including free
+    /// space it keeps for reuse.
     /// </summary>
     [State(Unit = StateUnit.Byte, Position = 417)]
     public partial long? GcCommittedSize { get; internal set; }
@@ -114,9 +123,16 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
     [State(Position = 423)]
     public partial int? HandleCount { get; internal set; }
 
+    /// <summary>
+    /// Active .NET timers, including the ones behind <see cref="Task.Delay(TimeSpan)"/> and
+    /// <see cref="CancellationTokenSource.CancelAfter(TimeSpan)"/>.
+    /// </summary>
     [State(Position = 424)]
     public partial long? TimerCount { get; internal set; }
 
+    /// <summary>
+    /// Threads the thread pool currently has, busy or idle.
+    /// </summary>
     [State(Position = 425)]
     public partial int? ThreadPoolThreadCount { get; internal set; }
 
@@ -133,10 +149,23 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
     public partial decimal? LockContentionRate { get; internal set; }
 
     /// <summary>
-    /// Exceptions thrown per second, caught or not.
+    /// Exceptions thrown per second, caught or not. An exception rethrown through await frames counts again at
+    /// each frame.
     /// </summary>
     [State(Position = 428)]
     public partial decimal? ExceptionRate { get; internal set; }
+
+    /// <summary>
+    /// Resident shared memory, where .NET maps the code it compiles at runtime. Linux only.
+    /// </summary>
+    [State(Unit = StateUnit.Byte, Position = 429)]
+    public partial long? ResidentSharedMemory { get; internal set; }
+
+    /// <summary>
+    /// Methods the JIT compiler compiled since the process started.
+    /// </summary>
+    [State(Position = 430)]
+    public partial long? JitCompiledMethodCount { get; internal set; }
 
     internal HostProcess(Action collectGarbage, Action collected)
     {
@@ -163,6 +192,8 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
         ThreadPoolQueueLength = null;
         LockContentionRate = null;
         ExceptionRate = null;
+        ResidentSharedMemory = null;
+        JitCompiledMethodCount = null;
     }
 
     [Operation(Title = "Collect garbage", Description = "Runs a full, compacting garbage collection and refreshes the values.", Icon = "DeleteSweep", RequiresConfirmation = true)]
@@ -170,6 +201,20 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
     {
         _collectGarbage();
         _collected();
+    }
+
+    /// <summary>
+    /// Counts the entries of a directory without allocating per entry.
+    /// </summary>
+    internal static int CountDirectoryEntries(string path)
+    {
+        var count = 0;
+        foreach (var _ in new FileSystemEnumerable<bool>(path, static (ref FileSystemEntry _) => true, DirectoryEntryCountOptions))
+        {
+            count++;
+        }
+
+        return count;
     }
 
     internal static void CollectAllGarbage()
@@ -205,7 +250,6 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
 
         WorkingSet = process.WorkingSet64;
         ThreadCount = process.Threads.Count;
-        HandleCount = OperatingSystem.IsMacOS() ? null : process.HandleCount;
         Uptime = DateTime.UtcNow - _startTime.Value;
 
         var memoryInfo = GC.GetGCMemoryInfo();
@@ -219,11 +263,7 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
         TimerCount = Timer.ActiveCount;
         ThreadPoolThreadCount = ThreadPool.ThreadCount;
         ThreadPoolQueueLength = ThreadPool.PendingWorkItemCount;
-
-        if (OperatingSystem.IsLinux())
-        {
-            UpdateResidentMemory();
-        }
+        JitCompiledMethodCount = JitInfo.GetCompiledMethodCount();
 
         var cpuTime = Environment.CpuUsage.TotalTime;
         var allocatedBytes = GC.GetTotalAllocatedBytes(precise: false);
@@ -251,10 +291,35 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
             _baselineExceptionCount = exceptionCount;
         }
 
+        UpdateHandleCount(process);
+        if (OperatingSystem.IsLinux())
+        {
+            UpdateResidentMemory();
+        }
+
         return isAdvanced;
     }
 
-    // A missing or unreadable /proc/self/status, as under some sandboxes, empties the two values instead of failing
+    // An unreadable handle source, as under some sandboxes, empties the value instead of failing the whole poll.
+    private void UpdateHandleCount(DiagnosticsProcess process)
+    {
+        try
+        {
+            // Process.HandleCount allocates a string per descriptor on Linux, so its cost would grow with a leak. The
+            // count leaves out the descriptor the enumeration holds open while it reads the directory.
+            HandleCount = OperatingSystem.IsLinux() ? CountDirectoryEntries("/proc/self/fd") - 1 :
+                OperatingSystem.IsMacOS() ? null :
+                process.HandleCount;
+            return;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or Win32Exception)
+        {
+        }
+
+        HandleCount = null;
+    }
+
+    // A missing or unreadable /proc/self/status, as under some sandboxes, empties the values instead of failing
     // the whole poll.
     private void UpdateResidentMemory()
     {
@@ -270,10 +335,11 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
                 length += read;
             }
 
-            if (LinuxProcParser.TryParseProcessStatus(_statusBuffer.AsSpan(0, length), out var anonymousBytes, out var fileBytes))
+            if (LinuxProcParser.TryParseProcessStatus(_statusBuffer.AsSpan(0, length), out var anonymousBytes, out var fileBytes, out var sharedBytes))
             {
                 ResidentAnonymousMemory = anonymousBytes;
                 ResidentFileMemory = fileBytes;
+                ResidentSharedMemory = sharedBytes;
                 return;
             }
         }
@@ -283,5 +349,6 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
 
         ResidentAnonymousMemory = null;
         ResidentFileMemory = null;
+        ResidentSharedMemory = null;
     }
 }

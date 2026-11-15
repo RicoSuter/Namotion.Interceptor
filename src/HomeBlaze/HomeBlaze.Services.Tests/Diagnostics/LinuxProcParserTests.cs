@@ -71,22 +71,36 @@ public class LinuxProcParserTests
         var content = "Name:\tdotnet\nVmRSS:\t  300000 kB\nRssAnon:\t  250000 kB\nRssFile:\t   49000 kB\nRssShmem:\t    1000 kB\n"u8;
 
         // Act
-        var success = LinuxProcParser.TryParseProcessStatus(content, out var anonymousBytes, out var fileBytes);
+        var success = LinuxProcParser.TryParseProcessStatus(content, out var anonymousBytes, out var fileBytes, out var sharedBytes);
 
         // Assert
         Assert.True(success);
         Assert.Equal(250_000L * 1024, anonymousBytes);
         Assert.Equal(49_000L * 1024, fileBytes);
+        Assert.Equal(1_000L * 1024, sharedBytes);
     }
 
     [Fact]
     public void WhenProcessStatusLacksRssFile_ThenFails()
     {
         // Arrange
-        var content = "Name:\tdotnet\nRssAnon:\t  250000 kB\n"u8;
+        var content = "Name:\tdotnet\nRssAnon:\t  250000 kB\nRssShmem:\t    1000 kB\n"u8;
 
         // Act
-        var success = LinuxProcParser.TryParseProcessStatus(content, out _, out _);
+        var success = LinuxProcParser.TryParseProcessStatus(content, out _, out _, out _);
+
+        // Assert
+        Assert.False(success);
+    }
+
+    [Fact]
+    public void WhenProcessStatusLacksRssShmem_ThenFails()
+    {
+        // Arrange
+        var content = "Name:\tdotnet\nRssAnon:\t  250000 kB\nRssFile:\t   49000 kB\n"u8;
+
+        // Act
+        var success = LinuxProcParser.TryParseProcessStatus(content, out _, out _, out _);
 
         // Assert
         Assert.False(success);

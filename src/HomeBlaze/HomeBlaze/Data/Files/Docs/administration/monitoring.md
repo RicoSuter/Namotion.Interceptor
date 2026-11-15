@@ -26,15 +26,17 @@ The `Host system` subject reports the machine HomeBlaze runs on and the HomeBlaz
 | `Process.GcHeapSize` | Size of the .NET heap at the last garbage collection |
 | `Process.AllocationRate` | Memory HomeBlaze allocates per second |
 | `Process.GcPauseTime` | Share of the time the garbage collector paused HomeBlaze; under 1 % is normal |
-| `Process.GcCommittedSize` | Memory the garbage collector holds from the operating system, including free space it keeps for reuse |
+| `Process.GcCommittedSize` | Memory the garbage collector held from the operating system at the last garbage collection, including free space it keeps for reuse |
 | `Process.GcFragmentedSize` | Free space between objects in the .NET heap at the last garbage collection |
 | `Process.Gen2Size`, `Process.LargeObjectHeapSize` | Long-lived objects and objects of 85,000 bytes or more at the last garbage collection |
 | `Process.ResidentAnonymousMemory`, `Process.ResidentFileMemory` | Physical memory not backed by a file (heaps, stacks) and backed by one (executable, libraries); Linux only |
 | `Process.HandleCount` | Open file descriptors on Linux, kernel handles on Windows; empty on macOS |
-| `Process.TimerCount` | Active .NET timers |
+| `Process.TimerCount` | Active .NET timers, including the ones behind `Task.Delay` and `CancelAfter` |
 | `Process.ThreadPoolThreadCount`, `Process.ThreadPoolQueueLength` | Thread pool threads, and work items waiting for one |
 | `Process.LockContentionRate` | Times per second a thread waited for a lock another thread held |
-| `Process.ExceptionRate` | Exceptions thrown per second, caught or not |
+| `Process.ExceptionRate` | Exceptions thrown per second, caught or not; an exception rethrown through `await` counts again at each awaiting method |
+| `Process.ResidentSharedMemory` | Physical shared memory, where .NET maps the code it compiles at runtime; Linux only |
+| `Process.JitCompiledMethodCount` | Methods the JIT compiler compiled since HomeBlaze started |
 
 The values refresh every `PollingInterval` (15 seconds by default, at least 1 second). CPU usage, allocation rate, GC pause time, lock contention rate and exception rate appear after the second reading.
 
@@ -42,9 +44,10 @@ All of them are recorded in history, so a trend shows where memory or CPU goes:
 
 | Trend | Points to |
 |-------|-----------|
-| `Gen2Size` or `LargeObjectHeapSize` keeps growing across garbage collections | A managed leak: objects that are never released |
+| The low point of `Gen2Size` or `LargeObjectHeapSize` after each full garbage collection rises over days | A managed leak: objects that are never released. Both grow between full collections and drop at each one, so compare the lows over days, or run `Collect garbage` now and again and compare the values right after it |
 | `GcCommittedSize` stays far above `GcHeapSize` | Memory the garbage collector keeps for reuse; `Collect garbage` returns it |
 | `ResidentAnonymousMemory` grows while `GcCommittedSize` does not | Native memory outside .NET, such as SQLite or a device driver |
+| `JitCompiledMethodCount` or `ResidentSharedMemory` keeps growing long after startup | Code generated at runtime again and again, such as a regular expression or expression tree compiled per call |
 | `HandleCount` or `TimerCount` keeps growing | Connections, files or timers that are never closed |
 | `ThreadPoolQueueLength` stays above zero | Blocked threads; work waits although the CPU is idle |
 | `ExceptionRate` or `LockContentionRate` stays high | A retry loop or contended lock that costs CPU |
