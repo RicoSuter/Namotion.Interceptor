@@ -1,5 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+    <PropertyGroup>
+        <!-- LibraryImport for malloc_trim in NativeHeap. -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    </PropertyGroup>
+
     <ItemGroup>
         <InternalsVisibleTo Include="HomeBlaze.History.Sqlite.Tests" />
     </ItemGroup>

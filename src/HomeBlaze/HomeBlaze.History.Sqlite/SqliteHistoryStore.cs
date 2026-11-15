@@ -97,6 +97,9 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     private static readonly string PastPartitionPageCacheSql =
         "PRAGMA cache_size=-" + PastPartitionPageCacheKibibytes.ToString(CultureInfo.InvariantCulture) + ";";
 
+    // Hands the heap freed by closed connections back to the operating system; replaceable by tests.
+    internal Action TrimNativeHeap { get; set; } = NativeHeap.Trim;
+
     // When each cached partition connection was last handed out. Under _connectionLock.
     private readonly Dictionary<string, DateTimeOffset> _partitionLastUsed = new(StringComparer.Ordinal);
 
@@ -711,6 +714,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         {
             var now = _getUtcNow();
             var cutoff = now - _maxAge;
+            int closedCount;
 
             lock (_connectionLock)
             {
@@ -763,7 +767,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
 
                 // First, so a checkpoint that throws below cannot keep idle connections open. Closing the last
                 // connection to a database checkpoints it as well.
-                CloseIdlePartitions(now);
+                closedCount = CloseIdlePartitions(now);
 
                 // Persist the WAL contents back into the surviving main database files so their on-disk
                 // size reflects the data after the sweep.
@@ -781,6 +785,13 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                         Execute(connection, "PRAGMA wal_checkpoint(TRUNCATE);");
                     }
                 }
+            }
+
+            // Outside the connection lock, since trimming walks the whole C heap; only after a close, so a sweep
+            // that freed nothing costs nothing.
+            if (closedCount > 0)
+            {
+                TrimNativeHeap();
             }
 
             lock (_pendingLock)
@@ -1043,7 +1054,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
 
     // Closes the partition connections not handed out for IdlePartitionConnectionTimeout. Every query holds
     // _connectionLock for its whole run, as this caller does, so no connection is closed while in use.
-    private void CloseIdlePartitions(DateTimeOffset now)
+    // Returns how many connections it closed.
+    private int CloseIdlePartitions(DateTimeOffset now)
     {
         List<string>? idle = null;
         foreach (var (key, lastUsed) in _partitionLastUsed)
@@ -1058,7 +1070,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
 
         if (idle is null)
         {
-            return;
+            return 0;
         }
 
         foreach (var key in idle)
@@ -1073,6 +1085,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                 _lastError = exception.Message;
             }
         }
+
+        return idle.Count;
     }
 
     private void ClosePartition(string key)

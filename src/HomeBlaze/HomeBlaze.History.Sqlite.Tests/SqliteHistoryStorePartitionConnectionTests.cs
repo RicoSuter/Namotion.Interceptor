@@ -1,5 +1,6 @@
 using HomeBlaze.History.Abstractions;
 using HomeBlaze.History.Sqlite;
+using System.Runtime.InteropServices;
 using Microsoft.Data.Sqlite;
 
 namespace HomeBlaze.History.Sqlite.Tests;
@@ -278,6 +279,61 @@ public sealed class SqliteHistoryStorePartitionConnectionTests : IDisposable
         // Assert
         Assert.False(core.IsPartitionOpen(SqlitePartition.PartitionKey(Base.AddDays(-14), PartitionInterval.Weekly)));
         Assert.False(core.IsPartitionOpen(SqlitePartition.PartitionKey(Base, PartitionInterval.Weekly)));
+    }
+
+    [Fact]
+    public async Task WhenTheSweepClosesIdleConnections_ThenItTrimsTheNativeHeapOnce()
+    {
+        // Arrange
+        var now = Base;
+        using var core = NewCore(() => now);
+        var trimCount = 0;
+        core.TrimNativeHeap = () => trimCount++;
+        core.Record("/a/Value", Base.AddDays(-14), 1d, typeof(double));
+        core.Record("/a/Value", Base.AddDays(-7), 2d, typeof(double));
+        now = Base.AddSeconds(10);
+        await core.FlushAsync(CancellationToken.None);
+        now += SqliteHistoryStore.IdlePartitionConnectionTimeout + TimeSpan.FromTicks(1);
+
+        // Act
+        core.Sweep();
+
+        // Assert
+        Assert.Equal(1, trimCount);
+    }
+
+    [Fact]
+    public async Task WhenTheSweepClosesNoConnection_ThenItDoesNotTrimTheNativeHeap()
+    {
+        // Arrange
+        var now = Base;
+        using var core = NewCore(() => now);
+        var trimCount = 0;
+        core.TrimNativeHeap = () => trimCount++;
+        core.Record("/a/Value", Base.AddSeconds(1), 1d, typeof(double));
+        now = Base.AddSeconds(10);
+        await core.FlushAsync(CancellationToken.None);
+
+        // Act
+        core.Sweep();
+
+        // Assert
+        Assert.Equal(0, trimCount);
+    }
+
+    [Fact]
+    public void WhenTheNativeHeapIsTrimmed_ThenGlibcIsUsedOnlyWhereItExists()
+    {
+        // Arrange
+        var hasGlibc = OperatingSystem.IsLinux() &&
+            !RuntimeInformation.RuntimeIdentifier.Contains("musl", StringComparison.Ordinal);
+
+        // Act - twice, so a disabled path after a failed load runs too.
+        NativeHeap.Trim();
+        NativeHeap.Trim();
+
+        // Assert
+        Assert.Equal(hasGlibc, NativeHeap.IsAvailable);
     }
 
     // A SQLite file under a partition-shaped name that this build refuses to read, as in SqliteHistorySchemaTests.
