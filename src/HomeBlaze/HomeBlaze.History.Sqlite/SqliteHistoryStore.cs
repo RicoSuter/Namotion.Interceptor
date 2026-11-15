@@ -714,7 +714,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         {
             var now = _getUtcNow();
             var cutoff = now - _maxAge;
-            int closedCount;
+            var closedCount = 0;
 
             lock (_connectionLock)
             {
@@ -739,7 +739,10 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
 
                     try
                     {
-                        DeletePartition(key);
+                        if (DeletePartition(key))
+                        {
+                            closedCount++;
+                        }
                     }
                     catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
                     {
@@ -767,7 +770,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
 
                 // First, so a checkpoint that throws below cannot keep idle connections open. Closing the last
                 // connection to a database checkpoints it as well.
-                closedCount = CloseIdlePartitions(now);
+                closedCount += CloseIdlePartitions(now);
 
                 // Persist the WAL contents back into the surviving main database files so their on-disk
                 // size reflects the data after the sweep.
@@ -787,13 +790,6 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                 }
             }
 
-            // Outside the connection lock, since trimming walks the whole C heap; only after a close, so a sweep
-            // that freed nothing costs nothing.
-            if (closedCount > 0)
-            {
-                TrimNativeHeap();
-            }
-
             lock (_pendingLock)
             {
                 if (_pendingCoverageStart < cutoff)
@@ -801,19 +797,27 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                     SetPendingCoverageStart(cutoff);
                 }
             }
+
+            // Last and outside the connection lock, since trimming walks the whole C heap; only after a close, so
+            // a sweep that freed nothing costs nothing.
+            if (closedCount > 0)
+            {
+                TrimNativeHeap();
+            }
         }
     }
 
     // Closes and removes the cached connection (Windows holds WAL/SHM locks), then deletes the
-    // partition's main file and its -wal/-shm siblings if present.
-    private void DeletePartition(string key)
+    // partition's main file and its -wal/-shm siblings if present. Returns whether a connection was closed.
+    private bool DeletePartition(string key)
     {
-        ClosePartition(key);
+        var closed = ClosePartition(key);
 
         var path = _readContext.PartitionFilePath(key);
         DeleteFileIfExists(path);
         DeleteFileIfExists(path + "-wal");
         DeleteFileIfExists(path + "-shm");
+        return closed;
     }
 
     // Drops moves that only describe samples already aged out, keeping the newest one at or before the
@@ -1073,11 +1077,15 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             return 0;
         }
 
+        var closedCount = 0;
         foreach (var key in idle)
         {
             try
             {
-                ClosePartition(key);
+                if (ClosePartition(key))
+                {
+                    closedCount++;
+                }
             }
             catch (SqliteException exception)
             {
@@ -1086,16 +1094,20 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             }
         }
 
-        return idle.Count;
+        return closedCount;
     }
 
-    private void ClosePartition(string key)
+    // Returns whether a cached connection was closed.
+    private bool ClosePartition(string key)
     {
         _partitionLastUsed.Remove(key);
-        if (_connections.Remove(key, out var connection))
+        if (!_connections.Remove(key, out var connection))
         {
-            connection.Dispose();
+            return false;
         }
+
+        connection.Dispose();
+        return true;
     }
 
     private void MarkPathAbsent(string path)

@@ -1,6 +1,5 @@
 using HomeBlaze.History.Abstractions;
 using HomeBlaze.History.Sqlite;
-using System.Runtime.InteropServices;
 using Microsoft.Data.Sqlite;
 
 namespace HomeBlaze.History.Sqlite.Tests;
@@ -303,6 +302,28 @@ public sealed class SqliteHistoryStorePartitionConnectionTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenRetentionDeletesAPartitionWithAnOpenConnection_ThenTheSweepTrimsTheNativeHeap()
+    {
+        // Arrange - the flush opens both partitions just before the sweep, so neither is idle.
+        var now = Base;
+        using var core = new SqliteHistoryStore(priority: 50, databaseDirectory: _directory,
+            PartitionInterval.Weekly, TimeSpan.FromDays(8), maxJsonSize: 8192, getUtcNow: () => now);
+        var trimCount = 0;
+        core.TrimNativeHeap = () => trimCount++;
+        core.Record("/a/Value", Base, 1d, typeof(double));
+        core.Record("/a/Value", Base.AddDays(18), 2d, typeof(double));
+        now = Base.AddDays(20);
+        await core.FlushAsync(CancellationToken.None);
+
+        // Act
+        core.Sweep();
+
+        // Assert
+        Assert.False(core.IsPartitionOpen(SqlitePartition.PartitionKey(Base, PartitionInterval.Weekly)));
+        Assert.Equal(1, trimCount);
+    }
+
+    [Fact]
     public async Task WhenTheSweepClosesNoConnection_ThenItDoesNotTrimTheNativeHeap()
     {
         // Arrange
@@ -324,9 +345,10 @@ public sealed class SqliteHistoryStorePartitionConnectionTests : IDisposable
     [Fact]
     public void WhenTheNativeHeapIsTrimmed_ThenGlibcIsUsedOnlyWhereItExists()
     {
-        // Arrange
+        // Arrange - musl ships its dynamic loader as /lib/ld-musl-*; a distribution-built SDK reports a RID such as
+        // alpine.3.22-x64 that does not say musl.
         var hasGlibc = OperatingSystem.IsLinux() &&
-            !RuntimeInformation.RuntimeIdentifier.Contains("musl", StringComparison.Ordinal);
+            !(Directory.Exists("/lib") && Directory.EnumerateFiles("/lib", "ld-musl-*").Any());
 
         // Act - twice, so a disabled path after a failed load runs too.
         NativeHeap.Trim();
