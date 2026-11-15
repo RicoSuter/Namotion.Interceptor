@@ -143,7 +143,7 @@ Beyond the settings shown above, the following properties are available on `OpcU
 | `ApplicationCertificateLifetimeInMonths` | 12 | Lifetime of a certificate the client creates, at least 1 |
 | `CreateUserIdentity` | null | Async factory for user credentials (see [Authentication](#authentication)) |
 | `CertificateStoreBasePath` | "pki" | Base directory for certificate stores |
-| `SessionFactory` | null | Custom session factory (uses `DefaultSessionFactory` when null) |
+| `SessionFactory` | null | Custom session factory (uses `DefaultSessionFactory` when null). Leave its `SubscriptionEngineFactory` unset: the client requires the SDK's default subscription engine, which the managed session sets only when the factory sets none, and fails creating subscriptions otherwise |
 | `TelemetryContext` | NullTelemetryContext | Telemetry integration for logging and diagnostics |
 | `Mapper` | OpcUaCompositeMapper | `IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>` that maps C# properties to OPC UA nodes (see [Mapping Guide](connectors-opcua-mapping.md)) |
 
