@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.Interceptors;
 [EditorBrowsable(EditorBrowsableState.Never)]
 public interface IPropertyReadObserver
 {
-    void OnPropertyRead(in PropertyReference property);
+    void OnPropertyRead(in PropertyReadObservation read);
 }
 
 /// <summary>
@@ -22,6 +22,21 @@ public interface IPropertyReadObserver
 public interface IPropertyWriteObserver
 {
     void OnPropertyWritten(in PropertyWriteObservation write);
+}
+
+/// <summary>
+/// A property read as reported to the <see cref="IPropertyReadObserver"/>.
+/// </summary>
+[EditorBrowsable(EditorBrowsableState.Never)]
+public readonly struct PropertyReadObservation
+{
+    public PropertyReadObservation(PropertyReference property)
+    {
+        Property = property;
+    }
+
+    /// <summary>The read property.</summary>
+    public PropertyReference Property { get; }
 }
 
 /// <summary>
@@ -87,8 +102,9 @@ public static class PropertyAccessObservation
     private static bool _isWriteObserverInstalled;
 
     /// <summary>
-    /// The read observer of the current thread. A single slot: whoever sets it replaces the previous observer, and
-    /// clearing it does not restore one.
+    /// The read observer of the current thread. A single slot: whoever sets it replaces the previous observer, which
+    /// sees no reads until it is set again. Derived property tracking sets it while a getter is recorded and restores
+    /// the previous observer afterwards.
     /// </summary>
     public static IPropertyReadObserver? ReadObserver
     {

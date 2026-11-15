@@ -64,7 +64,7 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     public TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
     {
         var context = new PropertyReadContext<TProperty>(new PropertyReference(_subject, propertyName));
-        PropertyAccessObservation.ReadObserver?.OnPropertyRead(context.Property);
+        PropertyAccessObservation.ReadObserver?.OnPropertyRead(new PropertyReadObservation(context.Property));
         return ExecuteInterceptedRead(ref context, readValue);
     }
 
@@ -136,7 +136,7 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     [EditorBrowsable(EditorBrowsableState.Never)]
     public static TProperty GetPropertyValueWithoutContext<TProperty>(IInterceptorSubject subject, string propertyName, Func<IInterceptorSubject, TProperty> readValue)
     {
-        PropertyAccessObservation.ReadObserver?.OnPropertyRead(new PropertyReference(subject, propertyName));
+        PropertyAccessObservation.ReadObserver?.OnPropertyRead(new PropertyReadObservation(new PropertyReference(subject, propertyName)));
         return readValue(subject);
     }
 

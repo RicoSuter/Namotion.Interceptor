@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Tracking.Change;
@@ -10,8 +9,11 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// </summary>
 internal sealed class DerivedPropertyTypeGate
 {
-    private static readonly ConcurrentDictionary<Type, DerivedPropertyTypeGate> Gates = new();
+    // Weak, so that a type of an assembly that is unloaded is not kept. While its type is alive, a gate is never
+    // removed, so every lookup of a type returns the same gate object, which is raised in place.
+    private static readonly ConditionalWeakTable<Type, DerivedPropertyTypeGate> Gates = new();
 
+    // Keeps at most one type alive per thread, until the thread accesses a subject of another type.
     [ThreadStatic]
     private static DerivedPropertyTypeGate? _last;
 
@@ -25,17 +27,21 @@ internal sealed class DerivedPropertyTypeGate
 
     /// <summary>Returns the gate of the subject's type.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static DerivedPropertyTypeGate Of(IInterceptorSubject subject)
+    internal static DerivedPropertyTypeGate Of(IInterceptorSubject subject) => Of(subject.GetType());
+
+    /// <summary>Returns the gate of the type.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static DerivedPropertyTypeGate Of(Type type)
     {
-        // Consecutive accesses mostly hit subjects of one type, which the thread's last gate answers without a lookup.
-        var type = subject.GetType();
+        // Consecutive accesses mostly hit subjects of one type, which the thread's last gate answers without a
+        // lookup, whether that gate is raised or not.
         var last = _last;
         return last is not null && ReferenceEquals(last._type, type) ? last : Find(type);
     }
 
     private static DerivedPropertyTypeGate Find(Type type)
     {
-        var gate = Gates.GetOrAdd(type, static type => new DerivedPropertyTypeGate(type));
+        var gate = Gates.GetValue(type, static type => new DerivedPropertyTypeGate(type));
         _last = gate;
         return gate;
     }

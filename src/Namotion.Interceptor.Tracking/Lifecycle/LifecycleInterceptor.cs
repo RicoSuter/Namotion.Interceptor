@@ -6,16 +6,17 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "The central orchestrator of attach, detach and derived property tracking for the graph; staying under the limit would take forwarder methods or rewriting framework collection code for the coupling count alone.")]
 public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 {
     private readonly Dictionary<IInterceptorSubject, PropertyReferenceSet> _attachedSubjects = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<PropertyReference, object?> _lastProcessedValues = new(PropertyReference.Comparer);
 
     [ThreadStatic]
-    private static List<List<(IInterceptorSubject subject, PropertyReference property, object? index)>>? _listPool;
+    private static Stack<List<(IInterceptorSubject subject, PropertyReference property, object? index)>>? _listPool;
 
     [ThreadStatic]
-    private static List<HashSet<IInterceptorSubject>>? _subjectHashSetPool;
+    private static Stack<HashSet<IInterceptorSubject>>? _subjectHashSetPool;
 
     public LifecycleInterceptor()
     {
@@ -633,41 +634,31 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static List<(IInterceptorSubject subject, PropertyReference property, object? index)> GetList()
     {
-        _listPool ??= [];
-        return _listPool.Count > 0 ? Pop(_listPool) : new List<(IInterceptorSubject, PropertyReference, object?)>(8);
+        _listPool ??= new Stack<List<(IInterceptorSubject, PropertyReference, object?)>>();
+        return _listPool.Count > 0 ? _listPool.Pop() : new List<(IInterceptorSubject, PropertyReference, object?)>(8);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static HashSet<IInterceptorSubject> GetSubjectHashSet()
     {
-        _subjectHashSetPool ??= [];
-        return _subjectHashSetPool.Count > 0 ? Pop(_subjectHashSetPool) : new HashSet<IInterceptorSubject>(8, ReferenceEqualityComparer.Instance);
+        _subjectHashSetPool ??= new Stack<HashSet<IInterceptorSubject>>();
+        return _subjectHashSetPool.Count > 0 ? _subjectHashSetPool.Pop() : new HashSet<IInterceptorSubject>(8, ReferenceEqualityComparer.Instance);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void ReturnList(List<(IInterceptorSubject, PropertyReference, object?)> list)
     {
         list.Clear();
-        _listPool ??= [];
-        _listPool.Add(list);
+        _listPool ??= new Stack<List<(IInterceptorSubject, PropertyReference, object?)>>();
+        _listPool.Push(list);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void ReturnSubjectHashSet(HashSet<IInterceptorSubject> hashSet)
     {
         hashSet.Clear();
-        _subjectHashSetPool ??= [];
-        _subjectHashSetPool.Add(hashSet);
-    }
-
-    // The pools are lists used as stacks (the last returned item is taken first): a Stack<T> would add a type to the
-    // coupling of this class, which is at the limit of S1200.
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static T Pop<T>(List<T> pool)
-    {
-        var item = pool[^1];
-        pool.RemoveAt(pool.Count - 1);
-        return item;
+        _subjectHashSetPool ??= new Stack<HashSet<IInterceptorSubject>>();
+        _subjectHashSetPool.Push(hashSet);
     }
 
     #endregion

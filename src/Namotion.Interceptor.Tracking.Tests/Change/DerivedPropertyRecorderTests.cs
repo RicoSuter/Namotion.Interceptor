@@ -32,6 +32,33 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
         new(subject, "__SelfUnderTest");
 
     [Fact]
+    public void WhenLastRecordingEnds_ThenTheReadObserverItReplacedIsRestored()
+    {
+        // Arrange
+        var person = new Person(InterceptorSubjectContext.Create());
+        var foreign = new ForeignReadObserver();
+        PropertyAccessObservation.ReadObserver = foreign;
+        var recorder = CreateRecorder();
+
+        // Act
+        recorder.StartRecording(CreateSelf(person));
+        var observerWhileRecording = PropertyAccessObservation.ReadObserver;
+        recorder.StartRecording(new PropertyReference(person, nameof(Person.FullName)));
+        recorder.FinishRecording();
+        recorder.ClearLastRecording();
+        var observerAfterNestedRecording = PropertyAccessObservation.ReadObserver;
+        recorder.FinishRecording();
+        recorder.ClearLastRecording();
+        _ = person.FirstName;
+
+        // Assert
+        Assert.Same(recorder, observerWhileRecording);
+        Assert.Same(recorder, observerAfterNestedRecording);
+        Assert.Same(foreign, PropertyAccessObservation.ReadObserver);
+        Assert.Equal([new PropertyReference(person, nameof(Person.FirstName))], foreign.Reads);
+    }
+
+    [Fact]
     public void StartRecording_SetsIsRecordingTrue()
     {
         // Arrange
@@ -74,7 +101,7 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
         recorder.StartRecording(CreateSelf(person));
 
         // Act
-        recorder.OnPropertyRead(in property);
+        recorder.OnPropertyRead(new PropertyReadObservation(property));
         var recorded = recorder.FinishRecording();
 
         // Assert
@@ -95,10 +122,10 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
         recorder.StartRecording(CreateSelf(person));
 
         // Act - read the same property multiple times, with a write between the reads
-        recorder.OnPropertyRead(in property);
+        recorder.OnPropertyRead(new PropertyReadObservation(property));
         Interlocked.Increment(ref data.Version);
-        recorder.OnPropertyRead(in property);
-        recorder.OnPropertyRead(in property);
+        recorder.OnPropertyRead(new PropertyReadObservation(property));
+        recorder.OnPropertyRead(new PropertyReadObservation(property));
         var recorded = recorder.FinishRecording();
 
         // Assert - should only appear once, with the version of the first read
@@ -121,8 +148,8 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
         recorder.StartRecording(CreateSelf(person));
 
         // Act
-        recorder.OnPropertyRead(in firstNameProperty);
-        recorder.OnPropertyRead(in lastNameProperty);
+        recorder.OnPropertyRead(new PropertyReadObservation(firstNameProperty));
+        recorder.OnPropertyRead(new PropertyReadObservation(lastNameProperty));
         var recorded = recorder.FinishRecording();
 
         // Assert
@@ -147,8 +174,8 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
         recorder.StartRecording(selfProperty);
 
         // Act - read both the property itself and a real dependency
-        recorder.OnPropertyRead(in selfProperty);
-        recorder.OnPropertyRead(in firstNameProperty);
+        recorder.OnPropertyRead(new PropertyReadObservation(selfProperty));
+        recorder.OnPropertyRead(new PropertyReadObservation(firstNameProperty));
         var recorded = recorder.FinishRecording();
 
         // Assert - only the real dependency is recorded
@@ -172,11 +199,11 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
 
         // Act: the outer frame reads the inner derived property, while the inner frame reads itself.
         recorder.StartRecording(outerSelf);
-        recorder.OnPropertyRead(in innerSelf);
+        recorder.OnPropertyRead(new PropertyReadObservation(innerSelf));
 
         recorder.StartRecording(innerSelf);
-        recorder.OnPropertyRead(in innerSelf);       // filtered (inner's self)
-        recorder.OnPropertyRead(in firstNameProperty);
+        recorder.OnPropertyRead(new PropertyReadObservation(innerSelf));       // filtered (inner's self)
+        recorder.OnPropertyRead(new PropertyReadObservation(firstNameProperty));
         var innerRecorded = recorder.FinishRecording();
 
         var outerRecorded = recorder.FinishRecording();
@@ -207,11 +234,11 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
 
         // Act - nested recording
         recorder.StartRecording(CreateSelf(person));
-        recorder.OnPropertyRead(in firstNameProperty);
+        recorder.OnPropertyRead(new PropertyReadObservation(firstNameProperty));
 
         recorder.StartRecording(CreateSelf(person)); // Nested
-        recorder.OnPropertyRead(in lastNameProperty);
-        recorder.OnPropertyRead(in fatherProperty);
+        recorder.OnPropertyRead(new PropertyReadObservation(lastNameProperty));
+        recorder.OnPropertyRead(new PropertyReadObservation(fatherProperty));
         var innerRecorded = recorder.FinishRecording();
 
         var outerRecorded = recorder.FinishRecording();
@@ -241,7 +268,7 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
         {
             var property = new PropertyReference(person, $"Prop{i}");
             properties.Add(property);
-            recorder.OnPropertyRead(in property);
+            recorder.OnPropertyRead(new PropertyReadObservation(property));
         }
 
         var recorded = recorder.FinishRecording();
@@ -297,7 +324,7 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
         for (var i = 0; i < count; i++)
         {
             var property = new PropertyReference(subject, $"Prop{i}");
-            recorder.OnPropertyRead(in property);
+            recorder.OnPropertyRead(new PropertyReadObservation(property));
         }
     }
 
@@ -311,7 +338,7 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
         var property = new PropertyReference(person, nameof(Person.FirstName));
 
         recorder.StartRecording(CreateSelf(person));
-        recorder.OnPropertyRead(in property);
+        recorder.OnPropertyRead(new PropertyReadObservation(property));
         _ = recorder.FinishRecording();
 
         // Act
@@ -408,5 +435,12 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
         Assert.Null(readObserverAfterAttach);
         Assert.Null(readObserverAfterRecalculation);
         Assert.False(DerivedPropertyRecorder.IsEvaluatingOnThisThread);
+    }
+
+    private sealed class ForeignReadObserver : IPropertyReadObserver
+    {
+        public List<PropertyReference> Reads { get; } = [];
+
+        public void OnPropertyRead(in PropertyReadObservation read) => Reads.Add(read.Property);
     }
 }

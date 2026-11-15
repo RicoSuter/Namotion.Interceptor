@@ -1,4 +1,7 @@
 using System.Reactive.Concurrency;
+using System.Reflection;
+using System.Reflection.Emit;
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -22,6 +25,34 @@ public class DerivedPropertyTypeGateTests
         Assert.False(DerivedPropertyTypeGate.Of(withContext).IsRaised);
         Assert.Null(new PropertyReference(withContext, nameof(UntrackedGateSubject.Value)).TryGetDerivedPropertyData());
         Assert.Null(new PropertyReference(withoutContext, nameof(UntrackedGateSubject.Value)).TryGetDerivedPropertyData());
+    }
+
+    [Fact]
+    public void WhenGateOfCollectibleTypeWasLookedUp_ThenTypeCanBeCollected()
+    {
+        // Arrange
+        var type = LookUpGateOfCollectibleType();
+
+        // Act: the thread's last gate moves to another type, so only the gate table could still keep the type.
+        DerivedPropertyTypeGate.Of(typeof(UntrackedGateSubject));
+        for (var i = 0; i < 10 && type.IsAlive; i++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+
+        // Assert
+        Assert.False(type.IsAlive);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference LookUpGateOfCollectibleType()
+    {
+        var assembly = AssemblyBuilder.DefineDynamicAssembly(
+            new AssemblyName("CollectibleGateAssembly"), AssemblyBuilderAccess.RunAndCollect);
+        var type = assembly.DefineDynamicModule("CollectibleGateModule").DefineType("CollectibleGateType").CreateType();
+        DerivedPropertyTypeGate.Of(type);
+        return new WeakReference(type);
     }
 
     [Fact]
