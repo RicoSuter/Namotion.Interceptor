@@ -280,6 +280,84 @@ public sealed class SqliteHistoryStorePartitionConnectionTests : IDisposable
         Assert.False(core.IsPartitionOpen(SqlitePartition.PartitionKey(Base, PartitionInterval.Weekly)));
     }
 
+    [Fact]
+    public async Task WhenTheSweepClosesIdleConnections_ThenItTrimsTheNativeHeapOnce()
+    {
+        // Arrange
+        var now = Base;
+        using var core = NewCore(() => now);
+        var trimCount = 0;
+        core.TrimNativeHeap = () => trimCount++;
+        core.Record("/a/Value", Base.AddDays(-14), 1d, typeof(double));
+        core.Record("/a/Value", Base.AddDays(-7), 2d, typeof(double));
+        now = Base.AddSeconds(10);
+        await core.FlushAsync(CancellationToken.None);
+        now += SqliteHistoryStore.IdlePartitionConnectionTimeout + TimeSpan.FromTicks(1);
+
+        // Act
+        core.Sweep();
+
+        // Assert
+        Assert.Equal(1, trimCount);
+    }
+
+    [Fact]
+    public async Task WhenRetentionDeletesAPartitionWithAnOpenConnection_ThenTheSweepTrimsTheNativeHeap()
+    {
+        // Arrange - the flush opens both partitions just before the sweep, so neither is idle.
+        var now = Base;
+        using var core = new SqliteHistoryStore(priority: 50, databaseDirectory: _directory,
+            PartitionInterval.Weekly, TimeSpan.FromDays(8), maxJsonSize: 8192, getUtcNow: () => now);
+        var trimCount = 0;
+        core.TrimNativeHeap = () => trimCount++;
+        core.Record("/a/Value", Base, 1d, typeof(double));
+        core.Record("/a/Value", Base.AddDays(18), 2d, typeof(double));
+        now = Base.AddDays(20);
+        await core.FlushAsync(CancellationToken.None);
+
+        // Act
+        core.Sweep();
+
+        // Assert
+        Assert.False(core.IsPartitionOpen(SqlitePartition.PartitionKey(Base, PartitionInterval.Weekly)));
+        Assert.Equal(1, trimCount);
+    }
+
+    [Fact]
+    public async Task WhenTheSweepClosesNoConnection_ThenItDoesNotTrimTheNativeHeap()
+    {
+        // Arrange
+        var now = Base;
+        using var core = NewCore(() => now);
+        var trimCount = 0;
+        core.TrimNativeHeap = () => trimCount++;
+        core.Record("/a/Value", Base.AddSeconds(1), 1d, typeof(double));
+        now = Base.AddSeconds(10);
+        await core.FlushAsync(CancellationToken.None);
+
+        // Act
+        core.Sweep();
+
+        // Assert
+        Assert.Equal(0, trimCount);
+    }
+
+    [Fact]
+    public void WhenTheNativeHeapIsTrimmed_ThenGlibcIsUsedOnlyWhereItExists()
+    {
+        // Arrange - musl ships its dynamic loader as /lib/ld-musl-*; a distribution-built SDK reports a RID such as
+        // alpine.3.22-x64 that does not say musl.
+        var hasGlibc = OperatingSystem.IsLinux() &&
+            !(Directory.Exists("/lib") && Directory.EnumerateFiles("/lib", "ld-musl-*").Any());
+
+        // Act - twice, so a disabled path after a failed load runs too.
+        NativeHeap.Trim();
+        NativeHeap.Trim();
+
+        // Assert
+        Assert.Equal(hasGlibc, NativeHeap.IsAvailable);
+    }
+
     // A SQLite file under a partition-shaped name that this build refuses to read, as in SqliteHistorySchemaTests.
     private void WriteForeignPartition(DateTimeOffset timestamp)
     {
