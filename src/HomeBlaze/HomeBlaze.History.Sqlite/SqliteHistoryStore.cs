@@ -90,6 +90,15 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     // section of the history design document).
     internal static readonly TimeSpan IdlePartitionConnectionTimeout = TimeSpan.FromMinutes(5);
 
+    // The page cache, in KiB, of a connection to a partition whose range has ended, instead of SQLite's default of
+    // 2000 KiB. glibc keeps the heap a closed connection frees, so closing idle connections does not lower the working
+    // set: the process keeps what a query spanning every partition held at its peak (see the SQLite section of the
+    // history design document).
+    internal const int PastPartitionPageCacheKibibytes = 256;
+
+    private static readonly string PastPartitionPageCacheSql =
+        "PRAGMA cache_size=-" + PastPartitionPageCacheKibibytes.ToString(CultureInfo.InvariantCulture) + ";";
+
     // When each cached partition connection was last handed out. Under _connectionLock.
     private readonly Dictionary<string, DateTimeOffset> _partitionLastUsed = new(StringComparer.Ordinal);
 
@@ -917,6 +926,11 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                     "CREATE VIEW IF NOT EXISTS history_paths AS " +
                     "SELECT p.path, h.ts, h.value_long, h.value_double, h.value_json " +
                     "FROM history h JOIN paths p ON p.id = h.path_id;");
+
+                if (SqlitePartition.InferredRange(key).End <= now)
+                {
+                    Execute(connection, PastPartitionPageCacheSql);
+                }
             }
             catch
             {
@@ -1093,6 +1107,18 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         lock (_connectionLock)
         {
             return _connections.ContainsKey(partitionKey);
+        }
+    }
+
+    // The page cache of a cached partition connection as PRAGMA cache_size reports it (negative values are KiB),
+    // or null when the partition has no cached connection.
+    internal long? GetPageCacheSize(string partitionKey)
+    {
+        lock (_connectionLock)
+        {
+            return _connections.TryGetValue(partitionKey, out var connection)
+                ? QueryLong(connection, "PRAGMA cache_size;")
+                : null;
         }
     }
 

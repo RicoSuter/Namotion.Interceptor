@@ -78,6 +78,26 @@ public sealed class SqliteHistoryStorePartitionConnectionTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenAPartitionLiesInThePast_ThenItsConnectionKeepsTheSmallPageCache()
+    {
+        // Arrange
+        var now = Base;
+        using var core = NewCore(() => now);
+        core.Record("/a/Value", Base.AddDays(-14), 1d, typeof(double));
+        core.Record("/a/Value", Base.AddSeconds(1), 2d, typeof(double));
+        now = Base.AddSeconds(10);
+
+        // Act
+        await core.FlushAsync(CancellationToken.None);
+
+        // Assert
+        var pastPartition = SqlitePartition.PartitionKey(Base.AddDays(-14), PartitionInterval.Weekly);
+        var currentPartition = SqlitePartition.PartitionKey(Base, PartitionInterval.Weekly);
+        Assert.Equal(-SqliteHistoryStore.PastPartitionPageCacheKibibytes, core.GetPageCacheSize(pastPartition));
+        Assert.NotEqual(-SqliteHistoryStore.PastPartitionPageCacheKibibytes, core.GetPageCacheSize(currentPartition));
+    }
+
+    [Fact]
     public async Task WhenAPartitionConnectionStaysUnusedPastTheTimeout_ThenTheSweepClosesIt()
     {
         // Arrange - the flush opens both partitions, then only the current one keeps being written.
