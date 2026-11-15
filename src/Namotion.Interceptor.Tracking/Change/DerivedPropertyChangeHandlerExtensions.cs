@@ -37,9 +37,9 @@ public static class DerivedPropertyChangeHandlerExtensions
         var dependencies = data.RequiredPropertiesSpan;
         foreach (ref readonly var dependency in dependencies)
         {
-            if (SubjectStructure.IsStructure(dependency))
+            if (DerivedStructureDependencies.IsStructureDependency(dependency))
             {
-                return dependencies.ToArray().Where(d => !SubjectStructure.IsStructure(d)).ToArray();
+                return dependencies.ToArray().Where(d => !DerivedStructureDependencies.IsStructureDependency(d)).ToArray();
             }
         }
 

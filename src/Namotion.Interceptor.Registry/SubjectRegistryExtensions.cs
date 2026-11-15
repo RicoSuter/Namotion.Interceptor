@@ -96,7 +96,7 @@ public static class SubjectRegistryExtensions
     public static RegisteredSubjectProperty? TryGetRegisteredProperty(this IInterceptorSubject subject, string propertyName, ISubjectRegistry? registry = null)
     {
         // Recorded before the registry is resolved: a subject without a registry gains one when it is attached.
-        SubjectStructure.RecordRead(subject);
+        DerivedStructureDependencies.RecordRead(subject);
         registry ??= subject.Context.TryGetService<ISubjectRegistry>();
         return registry?
             .TryGetRegisteredSubject(subject)?
@@ -140,7 +140,7 @@ public static class SubjectRegistryExtensions
     {
         // TODO(perf): Replace calls of TryGetRegisteredSubject with registry.TryGetRegisteredSubject to avoid multiple registry resolves
         // Recorded before the registry is resolved: a subject without a registry gains one when it is attached.
-        SubjectStructure.RecordRead(subject);
+        DerivedStructureDependencies.RecordRead(subject);
         var registry = subject.Context.TryGetService<ISubjectRegistry>();
         return registry?.TryGetRegisteredSubject(subject);
     }

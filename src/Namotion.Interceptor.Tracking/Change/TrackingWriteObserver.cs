@@ -75,54 +75,54 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
     }
 
     /// <summary>
-    /// W2 to W5 for a change of the structure of <paramref name="subject"/> (<see cref="SubjectStructure"/>). Called
+    /// W2 to W5 for a change of the structure of <paramref name="subject"/> (<see cref="DerivedStructureDependencies"/>). Called
     /// after the structure changed.
     /// </summary>
     internal static void OnStructureChanged(IInterceptorSubject subject, bool hasFailed = false)
     {
         // No structure dependency has data while the structure gate is not raised, see "Structure gate" in
         // docs/design/tracking-derived-properties.md.
-        if (!SubjectStructure.IsGateRaised)
+        if (!DerivedStructureDependencies.IsGateRaised)
         {
             return;
         }
 
         // W2: the structure changed before its data is looked up.
         Interlocked.MemoryBarrier();
-        RequestStructureRecalculations(SubjectStructure.Of(subject), hasFailed);
+        RequestStructureRecalculations(DerivedStructureDependencies.Of(subject), hasFailed);
     }
 
     /// <summary>
     /// W2 to W5 for a change of the structure of <paramref name="subject"/>, of the children of
     /// <paramref name="holder"/>, and of the structure of <paramref name="holder"/> when
-    /// <paramref name="isHolderStructureChanged"/> (<see cref="SubjectStructure"/>). Called after a subject was attached
+    /// <paramref name="isHolderStructureChanged"/> (<see cref="DerivedStructureDependencies"/>). Called after a subject was attached
     /// or detached through a property of <paramref name="holder"/>, once all of these changed.
     /// </summary>
     internal static void OnStructureChanged(IInterceptorSubject subject, IInterceptorSubject holder, bool isHolderStructureChanged)
     {
-        if (!SubjectStructure.IsGateRaised)
+        if (!DerivedStructureDependencies.IsGateRaised)
         {
             return;
         }
 
         // W2, once for every structure dependency: all of them changed before the first data lookup.
         Interlocked.MemoryBarrier();
-        RequestStructureRecalculations(SubjectStructure.Of(subject), hasFailed: false);
-        RequestStructureRecalculations(SubjectStructure.ChildrenOf(holder), hasFailed: false);
+        RequestStructureRecalculations(DerivedStructureDependencies.Of(subject), hasFailed: false);
+        RequestStructureRecalculations(DerivedStructureDependencies.ChildrenOf(holder), hasFailed: false);
         if (isHolderStructureChanged)
         {
-            RequestStructureRecalculations(SubjectStructure.Of(holder), hasFailed: false);
+            RequestStructureRecalculations(DerivedStructureDependencies.Of(holder), hasFailed: false);
         }
     }
 
     /// <summary>
     /// W2 to W5 for a change of the structure of every subject in <paramref name="children"/> and of the children of
-    /// <paramref name="holder"/> (<see cref="SubjectStructure"/>). Called after the children moved within a property
+    /// <paramref name="holder"/> (<see cref="DerivedStructureDependencies"/>). Called after the children moved within a property
     /// of <paramref name="holder"/>.
     /// </summary>
     internal static void OnChildrenMoved(ReadOnlySpan<SubjectChild> children, IInterceptorSubject holder)
     {
-        if (!SubjectStructure.IsGateRaised)
+        if (!DerivedStructureDependencies.IsGateRaised)
         {
             return;
         }
@@ -131,10 +131,10 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
         Interlocked.MemoryBarrier();
         foreach (var child in children)
         {
-            RequestStructureRecalculations(SubjectStructure.Of(child.Subject), hasFailed: false);
+            RequestStructureRecalculations(DerivedStructureDependencies.Of(child.Subject), hasFailed: false);
         }
 
-        RequestStructureRecalculations(SubjectStructure.ChildrenOf(holder), hasFailed: false);
+        RequestStructureRecalculations(DerivedStructureDependencies.ChildrenOf(holder), hasFailed: false);
     }
 
     private static void RequestStructureRecalculations(PropertyReference structure, bool hasFailed)

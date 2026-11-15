@@ -65,7 +65,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubject? TryGetRegisteredSubject(IInterceptorSubject subject)
     {
-        SubjectStructure.RecordRead(subject);
+        DerivedStructureDependencies.RecordRead(subject);
         lock (_knownSubjects)
         {
             return _knownSubjects.GetValueOrDefault(subject);

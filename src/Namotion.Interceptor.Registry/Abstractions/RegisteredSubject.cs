@@ -45,7 +45,7 @@ public class RegisteredSubject
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
-            SubjectStructure.RecordRead(Subject);
+            DerivedStructureDependencies.RecordRead(Subject);
             var snapshot = Volatile.Read(ref _parentsSnapshot);
             return snapshot is not null
                 ? ImmutableCollectionsMarshal.AsImmutableArray(snapshot)
@@ -96,7 +96,7 @@ public class RegisteredSubject
     {
         get
         {
-            SubjectStructure.RecordRead(Subject);
+            DerivedStructureDependencies.RecordRead(Subject);
             return _properties.Values;
         }
     }
@@ -107,7 +107,7 @@ public class RegisteredSubject
     public IEnumerable<RegisteredSubjectProperty> GetPropertyAttributes(string propertyName)
     {
         // Recorded when called, not when enumerated: a getter may enumerate the result after it returned.
-        SubjectStructure.RecordRead(Subject);
+        DerivedStructureDependencies.RecordRead(Subject);
         return GetPropertyAttributes(_properties, propertyName);
     }
 
@@ -131,7 +131,7 @@ public class RegisteredSubject
     /// <returns>The attribute property.</returns>
     public RegisteredSubjectProperty? TryGetPropertyAttribute(string propertyName, string attributeName)
     {
-        SubjectStructure.RecordRead(Subject);
+        DerivedStructureDependencies.RecordRead(Subject);
         foreach (var property in _properties.Values)
         {
             if (property.IsAttribute &&
@@ -152,7 +152,7 @@ public class RegisteredSubject
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubjectProperty? TryGetProperty(string propertyName)
     {
-        SubjectStructure.RecordRead(Subject);
+        DerivedStructureDependencies.RecordRead(Subject);
         return _properties.GetValueOrDefault(propertyName);
     }
 
@@ -331,7 +331,7 @@ public class RegisteredSubject
         Action<IInterceptorSubject, object?>? setValue,
         params Attribute[] attributes)
     {
-        // Derived property tracking records the children of a subject under this name (SubjectStructure.ChildrenName).
+        // Derived property tracking records the children of a subject under this name (DerivedStructureDependencies.ChildrenName).
         if (name == "\0children")
         {
             throw new ArgumentException("The property name is reserved for the children of a subject.", nameof(name));
@@ -372,7 +372,7 @@ public class RegisteredSubject
         {
             // Reported once the property is attached: outside the lifecycle lock, this recalculates and publishes
             // the derived properties that read the registered properties, which can throw.
-            SubjectStructure.Changed(Subject, hasFailed);
+            DerivedStructureDependencies.Changed(Subject, hasFailed);
         }
     }
 
