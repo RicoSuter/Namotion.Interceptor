@@ -316,6 +316,61 @@ public class DerivedPropertyProtocolTests
     }
 
     [Fact]
+    public async Task WhenSubjectIsDetachedAttachedAndItsSourceWrittenWhileARecalculationIsInFlight_ThenTheChangeCarriesTheTimestampOfThatWrite()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var gate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            var anchor = root.Anchor;
+            gate.PauseIfArmed();
+            return anchor;
+        };
+        root.Machine = machine;
+        var result = GetResult(machine);
+        var firstTimestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var secondTimestamp = firstTimestamp.AddMinutes(1);
+        var published = new List<(int OldValue, int NewValue, DateTimeOffset Timestamp)>();
+        using var subscription = result.SubscribeInline((in SubjectPropertyChange change) =>
+        {
+            lock (published)
+            {
+                published.Add((change.GetOldValue<int>(), change.GetNewValue<int>(), change.ChangedTimestamp));
+            }
+        });
+
+        // Act: the recalculation of the write at the first timestamp pauses after it read Anchor, while the subject
+        // is detached and attached again, and Anchor is written, at the second timestamp.
+        gate.Arm();
+        var recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+        {
+            using (SubjectChangeContext.WithChangedTimestamp(firstTimestamp))
+            {
+                root.Anchor = 1;
+            }
+        });
+        var isPaused = gate.Paused.Wait(Timeout);
+        using (SubjectChangeContext.WithChangedTimestamp(secondTimestamp))
+        {
+            root.Machine = null;
+            root.Machine = machine;
+            root.Anchor = 2;
+        }
+
+        gate.Resume.Set();
+        await recalculation.WaitAsync(Timeout);
+
+        // Assert
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.Equal([(1, 2, secondTimestamp)], published);
+        Assert.Equal(2, machine.Worker.Result);
+    }
+
+    [Fact]
     public async Task WhenAttachCommitsWhileARecalculationFromBeforeTheDetachOwnsTheProperty_ThenTheChangeCarriesTheAttachTimestamp()
     {
         // Arrange: the getter also reads state outside the model, which changes after the attach evaluation read it,
