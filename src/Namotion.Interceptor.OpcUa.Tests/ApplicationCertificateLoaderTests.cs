@@ -220,6 +220,26 @@ public class ApplicationCertificateLoaderTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenAPinnedSelfSignedCertificateHasExpired_ThenItIsKeptWithAWarning()
+    {
+        // Arrange
+        var configuration = CreateConfiguration();
+        configuration.ApplicationUri = "urn:test:client";
+        using var expired = await AddSelfSignedCertificateAsync(configuration, ageInDays: 400);
+        var application = await configuration.CreateApplicationInstanceAsync();
+        application.ApplicationConfiguration!.SecurityConfiguration.ApplicationCertificate!.Thumbprint = expired.Thumbprint;
+        var logger = new RecordingLogger();
+
+        // Act
+        using var certificate = await LoadAsync(application, configuration, logger);
+
+        // Assert
+        Assert.Equal(expired.Thumbprint, certificate.Thumbprint);
+        Assert.Contains(expired.Thumbprint, Path.GetFileName(Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "certs")))));
+        Assert.Contains("not replaced", Assert.Single(logger.Warnings));
+    }
+
+    [Fact]
     public async Task WhenACaIssuedCertificateHasExpired_ThenItIsKeptWithAWarning()
     {
         // Arrange
@@ -363,13 +383,16 @@ public class ApplicationCertificateLoaderTests : IDisposable
     }
 
     [Theory]
-    [InlineData(null, true)]
-    [InlineData("Directory", true)]
-    [InlineData("X509Store", false)]
-    public void WhenTheStoreTypeIsChecked_ThenOnlyADirectoryStoreIsManaged(string? storeType, bool expected)
+    [InlineData(null, "own", true)]
+    [InlineData("", "own", true)]
+    [InlineData("Directory", "own", true)]
+    [InlineData("X509Store", "own", false)]
+    [InlineData(null, "CurrentUser\\My", false)]
+    public void WhenTheStoreTypeIsChecked_ThenOnlyADirectoryStoreIsManaged(string? storeType, string storePath, bool expected)
     {
         // Arrange
-        var identifier = new CertificateIdentifier { StoreType = storeType, StorePath = "own" };
+        var identifier = new CertificateIdentifier { StorePath = storePath };
+        identifier.StoreType = storeType;
 
         // Act
         var isManaged = ApplicationCertificateLoader.IsManagedStore(identifier);

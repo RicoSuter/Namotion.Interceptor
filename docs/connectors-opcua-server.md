@@ -133,7 +133,7 @@ The server follows the client's [store layout](connectors-opcua-client.md#certif
 
 ### User Authentication
 
-By default the server advertises and accepts anonymous logins only. To accept user names or certificates, set `UserTokenAuthenticators` to authenticators of the SDK's `Opc.Ua.Identity.IUserTokenAuthenticator` type. The server then advertises one user token policy per token type they accept, encrypted with Basic256Sha256, and no anonymous policy unless one of them accepts anonymous tokens, such as the SDK's `AnonymousAuthenticator`. The authenticators are registered with every server instance, including after a restart.
+By default the server advertises and accepts anonymous logins only. To accept user names or certificates, set `UserTokenAuthenticators` to authenticators of the SDK's `Opc.Ua.Identity.IUserTokenAuthenticator` type. The server then advertises one user token policy per token type they accept, encrypted with Basic256Sha256, and no anonymous policy unless one of them accepts anonymous tokens, such as the SDK's `AnonymousAuthenticator`. The authenticators are registered with every server instance, including after a restart. The SDK keeps one authenticator per token type, so `Validate` rejects a second one for the same token type; combine such checks in one authenticator.
 
 ```csharp
 var config = new OpcUaServerConfiguration

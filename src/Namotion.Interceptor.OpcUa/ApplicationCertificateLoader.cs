@@ -78,7 +78,7 @@ internal static class ApplicationCertificateLoader
                 // The store can hold several expired certificates for the application, and each reload finds the next one,
                 // so this deletes them one by one until a valid one is loaded or created.
                 var replacementsLeft = -1;
-                while (manageStore && HasExpired(certificate) && X509Utils.IsSelfSigned(certificate))
+                while (manageStore && string.IsNullOrEmpty(configuredThumbprint) && HasExpired(certificate) && X509Utils.IsSelfSigned(certificate))
                 {
                     if (replacementsLeft < 0)
                     {
@@ -101,7 +101,7 @@ internal static class ApplicationCertificateLoader
                     certificate = replacement;
                 }
 
-                LogExpiryWarning(certificate, manageStore, identifier.StorePath ?? string.Empty, logger);
+                LogExpiryWarning(certificate, manageStore && string.IsNullOrEmpty(configuredThumbprint), identifier.StorePath ?? string.Empty, logger);
                 return certificate;
             }
             catch
@@ -127,6 +127,12 @@ internal static class ApplicationCertificateLoader
         if (string.IsNullOrEmpty(storePath))
         {
             logger.LogWarning("Certificate store path is empty, skipping cleanup.");
+            return;
+        }
+
+        if (!IsManagedStore(identifier))
+        {
+            logger.LogWarning("Certificate store '{Path}' is not a directory store, skipping cleanup.", storePath);
             return;
         }
 
@@ -168,8 +174,13 @@ internal static class ApplicationCertificateLoader
     /// Gets whether the loader creates, deletes and replaces certificates in the store of <paramref name="identifier"/>,
     /// which it does only for a directory store.
     /// </summary>
-    internal static bool IsManagedStore(CertificateIdentifier identifier) =>
-        string.Equals(identifier.StoreType ?? CertificateStoreType.Directory, CertificateStoreType.Directory, StringComparison.OrdinalIgnoreCase);
+    internal static bool IsManagedStore(CertificateIdentifier identifier)
+    {
+        var storeType = string.IsNullOrEmpty(identifier.StoreType)
+            ? CertificateStoreIdentifier.DetermineStoreType(identifier.StorePath ?? string.Empty)
+            : identifier.StoreType;
+        return string.Equals(storeType, CertificateStoreType.Directory, StringComparison.OrdinalIgnoreCase);
+    }
 
     private static void LogExpiryWarning(Certificate certificate, bool replacesSelfSigned, string storePath, ILogger logger)
     {
