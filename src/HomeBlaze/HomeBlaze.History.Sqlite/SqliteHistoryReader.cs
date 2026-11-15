@@ -23,9 +23,16 @@ internal readonly struct SqliteReadContext(
     string databaseDirectory,
     string metadataKey,
     Func<string, SqliteConnection?> openPartition,
-    Func<SqliteConnection> openMetadata)
+    Func<SqliteConnection> openMetadata,
+    Func<string, bool> isPathAbsent,
+    Action<string> markPathAbsent)
 {
     public string MetadataKey => metadataKey;
+
+    // Reads skip an absent path instead of opening every partition again to find nothing.
+    public bool IsPathAbsent(string path) => isPathAbsent(path);
+
+    public void MarkPathAbsent(string path) => markPathAbsent(path);
 
     /// <summary>
     /// The partition's connection, or null when this build cannot read that file. Callers skip a null
@@ -107,6 +114,10 @@ internal static class SqliteHistoryReader
         foreach (var leg in ResolveChain(context, query.PropertyPath))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (context.IsPathAbsent(leg.Path))
+            {
+                continue;
+            }
 
             var legFrom = query.From > leg.ValidFrom ? query.From : leg.ValidFrom;
             var legTo = query.To < leg.ValidTo ? query.To : leg.ValidTo;
@@ -117,7 +128,9 @@ internal static class SqliteHistoryReader
 
             var fromTicks = EpochTicks.ToEpochTicks(legFrom);
             var toTicks = EpochTicks.ToEpochTicks(legTo);
-            var isUlong = ResolveIsUlong(context, leg.Path);
+
+            // Resolved only once the leg has rows, so a window without rows does not walk the partitions outside it.
+            bool? isUlong = null;
 
             foreach (var key in context.PartitionKeysOverlapping(legFrom, legTo))
             {
@@ -147,7 +160,8 @@ internal static class SqliteHistoryReader
                 while (reader.Read())
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    rows.Add((ReadRawRow(reader), isUlong));
+                    isUlong ??= ResolveIsUlong(context, leg.Path);
+                    rows.Add((ReadRawRow(reader), isUlong.Value));
                 }
             }
         }
@@ -166,7 +180,10 @@ internal static class SqliteHistoryReader
             ImmutableArray<HistoryCoverage>.Empty);
     }
 
-    public static HistoryPoint? GetSampleAtOrBefore(SqliteReadContext context, string propertyPath, DateTimeOffset asOf)
+    // Partitions ending at or before floor are not searched, so a caller that discards any sample older than
+    // floor (the start of the coverage holding asOf) does not open every older partition when there is none.
+    public static HistoryPoint? GetSampleAtOrBefore(
+        SqliteReadContext context, string propertyPath, DateTimeOffset asOf, DateTimeOffset floor)
     {
         // Route through the move chain: walk legs from newest to oldest and return the first held value.
         // Only legs whose validity starts at or before asOf can hold the value; the older leg of a move is
@@ -179,7 +196,7 @@ internal static class SqliteHistoryReader
             }
 
             var ceiling = asOf < leg.ValidTo ? asOf : leg.ValidTo - new TimeSpan(1);
-            var found = GetLegSampleAtOrBefore(context, leg.Path, ceiling);
+            var found = GetLegSampleAtOrBefore(context, leg.Path, ceiling, floor);
             if (found is { } row && EpochTicks.FromEpochTicks(row.Ticks) >= leg.ValidFrom)
             {
                 return SqliteValueRouting.ToPoint(row, ResolveIsUlong(context, leg.Path));
@@ -254,17 +271,24 @@ internal static class SqliteHistoryReader
         return result;
     }
 
-    // Newest row at or before asOf for a single path across its partitions.
-    private static RawRow? GetLegSampleAtOrBefore(SqliteReadContext context, string path, DateTimeOffset asOf)
+    // Newest row at or before asOf for a single path across its partitions ending after floor.
+    private static RawRow? GetLegSampleAtOrBefore(
+        SqliteReadContext context, string path, DateTimeOffset asOf, DateTimeOffset floor)
     {
+        if (context.IsPathAbsent(path))
+        {
+            return null;
+        }
+
         var asOfTicks = EpochTicks.ToEpochTicks(asOf);
         RawRow? newest = null;
         var newestTicks = long.MinValue;
+        var floorTicks = EpochTicks.ToEpochTicks(floor);
         foreach (var (key, endTicks) in context.PartitionsAtOrBeforeByEndDescending(asOf))
         {
-            if (endTicks <= newestTicks)
+            if (endTicks <= newestTicks || endTicks <= floorTicks)
             {
-                break; // this file and every later one only hold rows before the newest found
+                break; // this file and every later one only hold rows before the newest found or the floor
             }
 
             if (!context.PartitionFileExists(key))
@@ -312,6 +336,11 @@ internal static class SqliteHistoryReader
     // Newest row with a finite numeric value strictly before the given instant for a single path across its partitions.
     private static HistoryPoint? GetLegNumericSampleBefore(SqliteReadContext context, string path, DateTimeOffset before, bool isUlong)
     {
+        if (context.IsPathAbsent(path))
+        {
+            return null;
+        }
+
         var sql = isUlong ? UlongLastNumericBeforeSql : LastNumericBeforeSql;
         var beforeTicks = EpochTicks.ToEpochTicks(before);
         HistoryPoint? newest = null;
@@ -377,6 +406,11 @@ internal static class SqliteHistoryReader
     // row, and then the first one walked wins.
     private static ColumnMeta? ResolveColumnMetaForPath(SqliteReadContext context, string propertyPath)
     {
+        if (context.IsPathAbsent(propertyPath))
+        {
+            return null;
+        }
+
         ColumnMeta? newest = null;
         var newestTicks = long.MinValue;
         foreach (var (key, endTicks) in context.PartitionsAtOrBeforeByEndDescending(DateTimeOffset.MaxValue))
@@ -416,6 +450,12 @@ internal static class SqliteHistoryReader
                 newest = meta;
                 newestTicks = reader.GetInt64(2);
             }
+        }
+
+        // Only a walk that found no row can end with nothing, and that walk visited every partition.
+        if (newest is null)
+        {
+            context.MarkPathAbsent(propertyPath);
         }
 
         return newest;

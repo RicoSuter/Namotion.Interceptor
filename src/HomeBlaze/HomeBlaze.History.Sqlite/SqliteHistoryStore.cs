@@ -86,6 +86,25 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     // Partitions this build refused to open, so a read skips them without retrying and logging per query.
     private readonly HashSet<string> _unreadablePartitions = new(StringComparer.Ordinal);
 
+    // How long a partition connection stays cached without use before the sweep closes it (see the SQLite
+    // section of the history design document).
+    internal static readonly TimeSpan IdlePartitionConnectionTimeout = TimeSpan.FromMinutes(5);
+
+    // The page cache, in KiB, of a connection opened to a partition whose range has ended (see the SQLite section of
+    // the history design document).
+    internal const int PastPartitionPageCacheKibibytes = 256;
+
+    private static readonly string PastPartitionPageCacheSql =
+        "PRAGMA cache_size=-" + PastPartitionPageCacheKibibytes.ToString(CultureInfo.InvariantCulture) + ";";
+
+    // When each cached partition connection was last handed out. Under _connectionLock.
+    private readonly Dictionary<string, DateTimeOffset> _partitionLastUsed = new(StringComparer.Ordinal);
+
+    // Paths a walk over every partition found in none of them, until a flush writes them. Under _connectionLock.
+    // Capped because callers such as MCP clients can ask for any path; past the cap a read only walks again.
+    private readonly HashSet<string> _absentPaths = new(StringComparer.Ordinal);
+    private const int MaxAbsentPaths = 4096;
+
     private readonly SqliteCoverageStore _coverageStore;
 
     // The read/partition-layout context handed to SqliteHistoryReader. It captures this engine's
@@ -126,7 +145,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         _getUtcNow = getUtcNow;
         _logger = logger;
         _readContext = new SqliteReadContext(
-            _databaseDirectory, MetadataKey, TryOpenPartition, OpenMetadata);
+            _databaseDirectory, MetadataKey, TryOpenPartition, OpenMetadata,
+            path => _absentPaths.Contains(path), MarkPathAbsent);
         _coverageStore = new SqliteCoverageStore(OpenMetadata);
 
         // After the coverage store exists: publishing the watermark compares against its snapshot.
@@ -326,6 +346,14 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                         _reloadCoverageAfterFailure = false;
                     }
 
+                    if (_absentPaths.Count > 0)
+                    {
+                        foreach (var sample in batch)
+                        {
+                            _absentPaths.Remove(sample.Path);
+                        }
+                    }
+
                     foreach (var (key, samples) in byPartition)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
@@ -454,6 +482,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         }
 
         _connections.Clear();
+        _partitionLastUsed.Clear();
     }
 
     public Task<HistorySeries> QueryAsync(HistoryQuery query, CancellationToken cancellationToken)
@@ -550,7 +579,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             return null;
         }
 
-        var sample = SqliteHistoryReader.GetSampleAtOrBefore(_readContext, propertyPath, asOf);
+        var sample = SqliteHistoryReader.GetSampleAtOrBefore(_readContext, propertyPath, asOf, coverage.From);
         return sample is not null && sample.Timestamp >= coverage.From ? sample : null;
     }
 
@@ -680,7 +709,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     {
         lock (_flushLock)
         {
-            var cutoff = _getUtcNow() - _maxAge;
+            var now = _getUtcNow();
+            var cutoff = now - _maxAge;
 
             lock (_connectionLock)
             {
@@ -731,6 +761,10 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                     _lastError = exception.Message;
                 }
 
+                // First, so a checkpoint that throws below cannot keep idle connections open. Closing the last
+                // connection to a database checkpoints it as well.
+                CloseIdlePartitions(now);
+
                 // Persist the WAL contents back into the surviving main database files so their on-disk
                 // size reflects the data after the sweep.
                 //
@@ -763,12 +797,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     // partition's main file and its -wal/-shm siblings if present.
     private void DeletePartition(string key)
     {
-        if (_connections.TryGetValue(key, out var connection))
-        {
-            connection.Close();
-            connection.Dispose();
-            _connections.Remove(key);
-        }
+        ClosePartition(key);
 
         var path = _readContext.PartitionFilePath(key);
         DeleteFileIfExists(path);
@@ -853,8 +882,10 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     {
         lock (_connectionLock)
         {
+            var now = _getUtcNow();
             if (_connections.TryGetValue(key, out var existing))
             {
+                _partitionLastUsed[key] = now;
                 return existing;
             }
 
@@ -895,6 +926,11 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                     "CREATE VIEW IF NOT EXISTS history_paths AS " +
                     "SELECT p.path, h.ts, h.value_long, h.value_double, h.value_json " +
                     "FROM history h JOIN paths p ON p.id = h.path_id;");
+
+                if (SqlitePartition.InferredRange(key).End <= now)
+                {
+                    Execute(connection, PastPartitionPageCacheSql);
+                }
             }
             catch
             {
@@ -903,6 +939,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             }
 
             _connections[key] = connection;
+            _partitionLastUsed[key] = now;
             return connection;
         }
     }
@@ -1004,6 +1041,57 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         }
     }
 
+    // Closes the partition connections not handed out for IdlePartitionConnectionTimeout. Every query holds
+    // _connectionLock for its whole run, as this caller does, so no connection is closed while in use.
+    private void CloseIdlePartitions(DateTimeOffset now)
+    {
+        List<string>? idle = null;
+        foreach (var (key, lastUsed) in _partitionLastUsed)
+        {
+            // A last use in the future means the clock went back; closing then only costs a reopen, while
+            // waiting for the clock to catch up could keep the connection for days.
+            if (now - lastUsed >= IdlePartitionConnectionTimeout || lastUsed > now)
+            {
+                (idle ??= []).Add(key);
+            }
+        }
+
+        if (idle is null)
+        {
+            return;
+        }
+
+        foreach (var key in idle)
+        {
+            try
+            {
+                ClosePartition(key);
+            }
+            catch (SqliteException exception)
+            {
+                // One failing close must not stop the others or the checkpoints and coverage advance after it.
+                _lastError = exception.Message;
+            }
+        }
+    }
+
+    private void ClosePartition(string key)
+    {
+        _partitionLastUsed.Remove(key);
+        if (_connections.Remove(key, out var connection))
+        {
+            connection.Dispose();
+        }
+    }
+
+    private void MarkPathAbsent(string path)
+    {
+        if (_absentPaths.Count < MaxAbsentPaths)
+        {
+            _absentPaths.Add(path);
+        }
+    }
+
     private const string HasUserTablesSql =
         "SELECT EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%');";
 
@@ -1019,6 +1107,27 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         using var command = connection.CreateCommand();
         command.CommandText = sql;
         return Convert.ToInt64(command.ExecuteScalar() ?? 0L, CultureInfo.InvariantCulture);
+    }
+
+    // Whether the partition has a cached connection.
+    internal bool IsPartitionOpen(string partitionKey)
+    {
+        lock (_connectionLock)
+        {
+            return _connections.ContainsKey(partitionKey);
+        }
+    }
+
+    // The page cache of a cached partition connection as PRAGMA cache_size reports it (negative values are KiB),
+    // or null when the partition has no cached connection.
+    internal long? GetPageCacheSize(string partitionKey)
+    {
+        lock (_connectionLock)
+        {
+            return _connections.TryGetValue(partitionKey, out var connection)
+                ? QueryLong(connection, "PRAGMA cache_size;")
+                : null;
+        }
     }
 
     public void Dispose()
