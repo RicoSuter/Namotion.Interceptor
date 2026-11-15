@@ -146,7 +146,7 @@ internal sealed class DerivedPropertyData
     /// <summary>
     /// Returns the current dependencies as a read-only span.
     /// Returns an empty span if no dependencies exist (allocation-free).
-    /// Safe for lock-free reads (clamps count to array length to handle torn reads).
+    /// Read under lock(this): a commit rewrites the buffer in place.
     /// </summary>
     internal ReadOnlySpan<PropertyReference> RequiredPropertiesSpan
     {
@@ -159,7 +159,7 @@ internal sealed class DerivedPropertyData
                 return ReadOnlySpan<PropertyReference>.Empty;
             }
 
-            return array.AsSpan(0, Math.Min(_requiredPropertyCount, array.Length));
+            return array.AsSpan(0, _requiredPropertyCount);
         }
     }
 

@@ -251,7 +251,8 @@ internal static class PostLockQueue
 
     /// <summary>
     /// Adds a request to a segment; a property already queued in it keeps one entry with the newer timestamp and the
-    /// newer attach count. A request raised by a write takes the property's attach count now, after the write's W4.
+    /// newer attach count. A request raised by a write takes the property's attach count now, after the write's W4
+    /// ("The Version Protocol" in docs/design/tracking-derived-properties.md).
     /// </summary>
     internal static void AddRequest(
         Segment segment, PropertyReference property, long rawTimestamp, long attachCount = DerivedPropertyOwnership.AnyAttachCount)

@@ -125,9 +125,10 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
             }
         }
 
-        // R1 and R2 of the protocol: the data exists and is fenced before its version is read with
-        // acquire semantics, and the version is read before the value. Data is never replaced, so the data of the
-        // previous evaluation's read at this position is current when it belongs to the same property.
+        // R1 and R2 of "The Version Protocol" in docs/design/tracking-derived-properties.md: the data exists and is
+        // fenced before its version is read with acquire semantics, and the version is read before the value. Data is
+        // never replaced, so the data of the previous evaluation's read at this position is current when it belongs
+        // to the same property.
         var data = GetPreviousRead(frame.PreviousReads, frame.Count, property) ?? property.GetDerivedPropertyData();
         Interlocked.MemoryBarrier();
         var version = Volatile.Read(ref data.Version);

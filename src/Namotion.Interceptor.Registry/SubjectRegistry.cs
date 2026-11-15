@@ -66,6 +66,13 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     public RegisteredSubject? TryGetRegisteredSubject(IInterceptorSubject subject)
     {
         DerivedStructureDependencies.RecordRead(subject);
+        return TryGetKnownSubject(subject);
+    }
+
+    /// <summary>Gets the registered subject, without recording the structure read.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal RegisteredSubject? TryGetKnownSubject(IInterceptorSubject subject)
+    {
         lock (_knownSubjects)
         {
             return _knownSubjects.GetValueOrDefault(subject);

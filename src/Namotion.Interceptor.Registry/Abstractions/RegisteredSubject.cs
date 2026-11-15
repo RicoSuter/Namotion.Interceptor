@@ -323,7 +323,6 @@ public class RegisteredSubject
     /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is the reserved name of the children of a subject, <c>"\0children"</c>.</exception>
     public RegisteredSubjectProperty AddProperty(
         string name,
         Type type,
@@ -331,12 +330,6 @@ public class RegisteredSubject
         Action<IInterceptorSubject, object?>? setValue,
         params Attribute[] attributes)
     {
-        // Derived property tracking records the children of a subject under this name (DerivedStructureDependencies.ChildrenName).
-        if (name == "\0children")
-        {
-            throw new ArgumentException("The property name is reserved for the children of a subject.", nameof(name));
-        }
-
         Subject.AddProperties(new SubjectPropertyMetadata(
             name,
             type,

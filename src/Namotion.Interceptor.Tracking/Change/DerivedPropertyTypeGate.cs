@@ -58,8 +58,8 @@ internal sealed class DerivedPropertyTypeGate
         if (!Volatile.Read(ref _isRaised))
         {
             // The fence orders this store before the store of the data that follows, which the write protocol
-            // relies on: a writer that finds the gate not raised after its own fence (W2) wrote before any
-            // data of the type existed.
+            // relies on: a writer that finds the gate not raised after its own fence (W2, see "The Version
+            // Protocol" in docs/design/tracking-derived-properties.md) wrote before any data of the type existed.
             Volatile.Write(ref _isRaised, true);
             Interlocked.MemoryBarrier();
         }

@@ -414,11 +414,12 @@ public class DerivedPropertyAttachOrderTests
     [InlineData(true, false)]
     [InlineData(false, true)]
     [InlineData(true, true)]
-    public void WhenDerivedPropertyBuildsItsValueAnew_ThenAttachPublishesNoChangeOfAnUnchangedValue(bool attachRootToContext, bool walkToTheRoot)
+    public void WhenDerivedPropertyBuildsItsValueAnew_ThenAttachPublishesTheUnchangedValueOnceMore(bool attachRootToContext, bool walkToTheRoot)
     {
         // Arrange: the getter walks two levels up, so it reads the parents of the worker and of the machine, which
         // attaches the worker while it attaches itself. Searching a type that is not on the path also reads the
-        // parents of the root.
+        // parents of the root. The structure of the machine is reported after all of its lifecycle handlers ran, so
+        // after the worker's attach evaluation read it.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var machine = new EvaluatorMachine();
         var root = attachRootToContext ? new EvaluatorRoot { Machine = machine } : new EvaluatorRoot(context);
@@ -445,9 +446,11 @@ public class DerivedPropertyAttachOrderTests
             root.Machine = machine;
         }
 
-        // Assert
-        Assert.Equal(1, evaluations);
-        Assert.DoesNotContain(changes, change => change.Property.Name == nameof(EvaluatorWorker.ObjectResult));
+        // Assert: an array does not override equality, so the evaluation of the report publishes the unchanged value.
+        Assert.Equal(2, evaluations);
+        var change = Assert.Single(changes, c => c.Property.Name == nameof(EvaluatorWorker.ObjectResult));
+        Assert.Equal([true], change.GetOldValue<bool[]>());
+        Assert.Equal([true], change.GetNewValue<bool[]>());
         Assert.Equal([true], (bool[])machine.Worker.ObjectResult!);
     }
 
