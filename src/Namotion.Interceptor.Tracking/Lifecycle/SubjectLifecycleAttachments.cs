@@ -39,8 +39,7 @@ internal static class SubjectLifecycleAttachments
         return DetachEnd.Instance;
     }
 
-    // The scopes are stateless singletons, so they allocate nothing. They are typed IDisposable rather than ref
-    // structs, which would add types to the coupling of LifecycleInterceptor (S1200).
+    // The scopes are stateless singletons, so they allocate nothing.
     private sealed class RecordingResumption : IDisposable
     {
         public static readonly RecordingResumption Instance = new();

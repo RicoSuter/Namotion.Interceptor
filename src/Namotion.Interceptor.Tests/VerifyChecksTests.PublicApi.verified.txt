@@ -193,7 +193,7 @@ namespace Namotion.Interceptor.Interceptors
     }
     public interface IPropertyReadObserver
     {
-        void OnPropertyRead(in Namotion.Interceptor.PropertyReference property);
+        void OnPropertyRead(in Namotion.Interceptor.Interceptors.PropertyReadObservation read);
     }
     public interface IPropertyWriteObserver
     {
@@ -235,6 +235,11 @@ namespace Namotion.Interceptor.Interceptors
     }
     public struct PropertyReadContext<TProperty>
     {
+        public Namotion.Interceptor.PropertyReference Property { get; }
+    }
+    public readonly struct PropertyReadObservation
+    {
+        public PropertyReadObservation(Namotion.Interceptor.PropertyReference property) { }
         public Namotion.Interceptor.PropertyReference Property { get; }
     }
     public struct PropertyWriteContext<TProperty>

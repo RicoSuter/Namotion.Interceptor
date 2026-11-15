@@ -19,11 +19,6 @@ public class DerivedPropertyChangeHandler : IPropertyLifecycleHandler
         get => DerivedPropertyRecorder.IsEvaluatingOnThisThread;
     }
 
-    public DerivedPropertyChangeHandler()
-    {
-        TrackingWriteObserver.EnsureRegistered();
-    }
-
     /// <inheritdoc />
     public void AttachProperty(SubjectPropertyLifecycleChange change)
     {
