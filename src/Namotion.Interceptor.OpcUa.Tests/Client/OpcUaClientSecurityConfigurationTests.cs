@@ -360,6 +360,42 @@ public class OpcUaClientSecurityConfigurationTests : IDisposable
     }
 
     [Fact]
+    public void WhenAReconnectCycleEndsWithAnUntrustedServerCertificate_ThenTheErrorNamesTheFoldersThatResolveIt()
+    {
+        // Arrange
+        using var serverCertificate = CertificateBuilder.Create("CN=Server").CreateForRSA();
+        var endpoint = CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256);
+        endpoint.ServerCertificate = ByteString.From(serverCertificate.RawData);
+
+        // Act
+        var error = SessionManager.CreateReconnectCycleException(
+            new ServiceResult(StatusCodes.BadCertificateUntrusted), endpoint, CreateApplicationConfiguration(),
+            clientCertificate: null, NullTelemetryContext.Instance);
+
+        // Assert
+        var exception = Assert.IsType<InvalidOperationException>(error);
+        Assert.Contains(serverCertificate.Thumbprint, exception.Message);
+        Assert.Contains(Path.Combine("store/rejected", "certs"), exception.Message);
+        Assert.Contains(Path.Combine("store/trusted", "certs"), exception.Message);
+        Assert.Equal(StatusCodes.BadCertificateUntrusted, Assert.IsType<ServiceResultException>(exception.InnerException).StatusCode);
+    }
+
+    [Fact]
+    public void WhenAReconnectCycleEndsWithAnotherError_ThenItIsReportedAsIs()
+    {
+        // Arrange
+        var endpoint = CreateEndpoint(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256);
+
+        // Act
+        var error = SessionManager.CreateReconnectCycleException(
+            new ServiceResult(StatusCodes.BadTimeout), endpoint, CreateApplicationConfiguration(),
+            clientCertificate: null, NullTelemetryContext.Instance);
+
+        // Assert
+        Assert.Equal(StatusCodes.BadTimeout, Assert.IsType<ServiceResultException>(error).StatusCode);
+    }
+
+    [Fact]
     public void WhenTheServerCertificateChainIsIncomplete_ThenTheMessageNamesTheIssuerFolderWithoutAutoAccept()
     {
         // Arrange

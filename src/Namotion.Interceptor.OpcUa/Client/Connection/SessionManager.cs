@@ -42,6 +42,9 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private int _needsFullStateSync;
     private int _responseMismatchSyncPending; // 0 = false, 1 = true (thread-safe via Interlocked)
     private long? _lastFullStateSyncTimestamp; // Health check loop only
+    private Certificate? _clientCertificate; // Replaced and read under _stateLock; owned by this instance
+    private long _lastClientCertificateCheckTimestamp; // Health check loop and session creation
+    private int _clientCertificateCheckRequested; // 1 = check on the next health check tick
     private int _disposed;
 
     // Owns the certificate manager and its timer, so it is disposed with this manager.
@@ -201,9 +204,21 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            Interlocked.Exchange(ref _needsFullStateSync, 1);
+            // A recovery or a recreate retries on the next tick. A sync after a response mismatch retries through the
+            // mismatch path, so a server that keeps answering wrongly still gets at most one sync per interval.
+            if (requested)
+            {
+                Interlocked.Exchange(ref _needsFullStateSync, 1);
+            }
+            else
+            {
+                Interlocked.Exchange(ref _responseMismatchSyncPending, 1);
+            }
+
             _source.ReportBackgroundError(ex, cancellationToken);
-            _logger.LogError(ex, "Full state sync failed {Reason}. Retrying on the next health check.", reason);
+            _logger.LogError(
+                ex, "Full state sync failed {Reason}. Retrying on the next health check{Delay}.",
+                reason, requested ? string.Empty : $" after at least {ResponseMismatchSyncInterval.TotalSeconds:0} seconds");
         }
     }
 
@@ -289,8 +304,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             configuration.MinimumSecurityMode,
             configuration.ResolvedTelemetryContext);
 
-        // Discovery needs no client certificate, and an unsecured endpoint never does. The managed session
-        // keeps the certificate it loads for its lifetime, so this check runs once per managed session.
+        // Discovery needs no client certificate, and an unsecured endpoint never does. While the source runs,
+        // CheckClientCertificateIfDueAsync repeats the check and hands a replacement to the managed session.
         using var clientCertificate = endpointDescription.SecurityMode != MessageSecurityMode.None
             ? await LoadClientCertificateAsync(application, applicationConfiguration, configuration, cancellationToken).ConfigureAwait(false)
             : null;
@@ -333,6 +348,9 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             throw CreateCertificateErrorException(
                 error, endpointDescription, applicationConfiguration, clientCertificate, configuration.ResolvedTelemetryContext);
         }
+
+        ReplaceClientCertificate(clientCertificate?.AddRef());
+        Interlocked.Exchange(ref _lastClientCertificateCheckTimestamp, _timeProvider.GetTimestamp());
 
         session.TransferSubscriptionsOnReconnect = true;
         session.DeleteSubscriptionsOnClose = false;
@@ -407,6 +425,104 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         }
     }
 
+    /// <summary>
+    /// The interval at which <see cref="CheckClientCertificateIfDueAsync"/> checks the client certificate of a secured
+    /// session when no reconnect cycle failed with a certificate error.
+    /// </summary>
+    internal static readonly TimeSpan ClientCertificateCheckInterval = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// Checks the client certificate of a secured session once per <see cref="ClientCertificateCheckInterval"/>, and
+    /// on the next call after a reconnect cycle failed with a certificate error. The check logs the expiry warning and,
+    /// in a managed directory store, replaces an expired or mismatching self-signed certificate. A certificate that
+    /// differs from the one in use is passed to the certificate manager, which makes the managed session reload it
+    /// and reconnect. A failure is reported as a background error.
+    /// </summary>
+    internal async Task CheckClientCertificateIfDueAsync(CancellationToken cancellationToken)
+    {
+        var application = Volatile.Read(ref _application);
+        var currentThumbprint = GetClientCertificateThumbprint();
+        if (application?.ApplicationConfiguration is not { } applicationConfiguration || currentThumbprint is null)
+        {
+            return;
+        }
+
+        var requested = Interlocked.Exchange(ref _clientCertificateCheckRequested, 0) == 1;
+        var lastCheck = Interlocked.Read(ref _lastClientCertificateCheckTimestamp);
+        if (!requested && lastCheck != 0 && _timeProvider.GetElapsedTime(lastCheck) < ClientCertificateCheckInterval)
+        {
+            return;
+        }
+
+        Interlocked.Exchange(ref _lastClientCertificateCheckTimestamp, _timeProvider.GetTimestamp());
+        try
+        {
+            using var certificate = await LoadClientCertificateAsync(
+                application, applicationConfiguration, _configuration, cancellationToken).ConfigureAwait(false);
+            if (string.Equals(certificate.Thumbprint, currentThumbprint, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (applicationConfiguration.CertificateManager is not ICertificateLifecycle lifecycle)
+            {
+                _logger.LogWarning(
+                    "The OPC UA client certificate changed to {Thumbprint}, but the application has no certificate manager " +
+                    "to pass it to. The client uses it once the source restarts.",
+                    certificate.Thumbprint);
+                return;
+            }
+
+            _logger.LogInformation(
+                "The OPC UA client certificate changed from {PreviousThumbprint} to {Thumbprint}. Reconnecting with it.",
+                currentThumbprint, certificate.Thumbprint);
+
+            // The change event carries this handle to observers that may read it later, so it stays alive as the
+            // retained certificate instead of the one disposed when this method returns.
+            var retained = certificate.AddRef();
+            try
+            {
+                await lifecycle.UpdateApplicationCertificateAsync(
+                    CertificateIdentifier.GetCertificateType(retained), retained, ct: cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                retained.Dispose();
+                throw;
+            }
+
+            ReplaceClientCertificate(retained);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            _source.ReportBackgroundError(ex, cancellationToken);
+            _logger.LogError(ex, "Failed to check the OPC UA client certificate. Retrying in {Interval}.", ClientCertificateCheckInterval);
+        }
+    }
+
+    private string? GetClientCertificateThumbprint()
+    {
+        lock (_stateLock)
+        {
+            return _clientCertificate?.Thumbprint;
+        }
+    }
+
+    /// <summary>
+    /// Replaces the retained client certificate with <paramref name="certificate"/>, taking ownership of it.
+    /// </summary>
+    private void ReplaceClientCertificate(Certificate? certificate)
+    {
+        Certificate? previous;
+        lock (_stateLock)
+        {
+            previous = _clientCertificate;
+            _clientCertificate = certificate;
+        }
+
+        previous?.Dispose();
+    }
+
     public async Task CreateSubscriptionsAsync(
         IReadOnlyList<MonitoredItem> monitoredItems,
         ISession session, CancellationToken cancellationToken)
@@ -469,7 +585,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                         var error = _lastReconnectError ?? e.Error;
                         if (error is not null)
                         {
-                            _source.ReportBackgroundError(new ServiceResultException(error));
+                            _source.ReportBackgroundError(CreateReconnectCycleException((ManagedSession)sender!, error));
                         }
                     }
 
@@ -499,6 +615,44 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// Creates the error reported for a reconnect cycle that ended without a connection, and requests a check of the
+    /// client certificate when the cycle failed with a certificate error. Called under <see cref="_stateLock"/>.
+    /// </summary>
+    private Exception CreateReconnectCycleException(ManagedSession session, ServiceResult error)
+    {
+        var exception = CreateReconnectCycleException(
+            error,
+            session.ConfiguredEndpoint?.Description,
+            Volatile.Read(ref _application)?.ApplicationConfiguration,
+            _clientCertificate,
+            _configuration.ResolvedTelemetryContext);
+        if (exception is InvalidOperationException)
+        {
+            Interlocked.Exchange(ref _clientCertificateCheckRequested, 1);
+        }
+
+        return exception;
+    }
+
+    /// <summary>
+    /// Creates the error reported for a reconnect cycle that ended with <paramref name="error"/>: a certificate error
+    /// is explained by <see cref="CreateCertificateErrorException"/>, like one on the initial connect, and any other
+    /// error is reported as is.
+    /// </summary>
+    internal static Exception CreateReconnectCycleException(
+        ServiceResult error,
+        EndpointDescription? endpoint,
+        ApplicationConfiguration? applicationConfiguration,
+        Certificate? clientCertificate,
+        ITelemetryContext telemetryContext)
+    {
+        var exception = new ServiceResultException(error);
+        return endpoint is not null && applicationConfiguration is not null && IsCertificateError(exception, endpoint)
+            ? CreateCertificateErrorException(exception, endpoint, applicationConfiguration, clientCertificate, telemetryContext)
+            : exception;
     }
 
     private void OnSessionGenerationChanged(object? sender, SessionGenerationChangedEventArgs e)
@@ -819,6 +973,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         }
 
         DrainPendingSessionTransitions();
+        ReplaceClientCertificate(null);
 
         var application = Interlocked.Exchange(ref _application, null);
         if (application is not null)

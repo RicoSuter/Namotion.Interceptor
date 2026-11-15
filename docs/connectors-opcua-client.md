@@ -227,7 +227,7 @@ When the client or the server loads its certificate:
 - a CA-issued certificate, any certificate while automatic creation is off, and any certificate in a store other than a directory store, such as the Windows certificate store, are never replaced; the client never creates or deletes a certificate there either;
 - when an override pins a certificate by `ApplicationCertificate.Thumbprint`, only that certificate is used, and loading fails when the store does not hold it.
 
-The client loads it when it creates the managed session on a secured connect, that is when the source starts. The managed session keeps that certificate through its reconnects and session recreations (see [Connection Loss Recovery](#connection-loss-recovery)), so a certificate that expires while the source runs fails once the server rejects it, and is replaced when the source starts again. The server certificate is validated on every new secure channel, including those a reconnect opens.
+The client loads it when it creates the managed session on a secured connect, that is when the source starts. The managed session keeps that certificate through its reconnects and session recreations (see [Connection Loss Recovery](#connection-loss-recovery)), so while the source runs the health check loads it again once an hour, and right after a reconnect cycle that failed with a certificate error. That check logs the expiry warning and replaces an expired certificate as described above. When the store then holds a different certificate, for example the replacement or one provisioned there by hand, the client passes it to the SDK's certificate manager, and the managed session reloads it and reconnects. The server certificate is validated on every new secure channel, including those a reconnect opens.
 
 #### Trust
 
@@ -235,7 +235,7 @@ With `AutoAcceptUntrustedCertificates = false`, the default, an unknown server c
 
 #### Errors
 
-A failed connection attempt, including a failed certificate load, is reported in `Diagnostics.LastError` (see [Diagnostics](#diagnostics)) and retried. Certificate errors name the certificate at fault and the folder or option that resolves it.
+A failed connection attempt, including a failed certificate load, is reported in `Diagnostics.LastError` (see [Diagnostics](#diagnostics)) and retried. Certificate errors name the certificate at fault and the folder or option that resolves it, on the initial connect and at the end of every reconnect cycle that failed with one. The managed session retries a failed initial connect like a lost connection, so a certificate error on the initial connect is reported once the first reconnect cycle of `MaxReconnectDuration` has ended.
 
 ### Authentication
 

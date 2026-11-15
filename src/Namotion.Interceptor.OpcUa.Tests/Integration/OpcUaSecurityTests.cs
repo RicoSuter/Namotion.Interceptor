@@ -20,7 +20,7 @@ public class OpcUaSecurityTests
     private const string ServerApplicationUri = "urn:test:Namotion.Interceptor.Server";
     private const string OtherServerApplicationUri = "urn:test:Namotion.Interceptor.Server.Renamed";
 
-    // Covers up to 15 s of MaxReconnectDuration before a manual reconnect, the 5 s health check, the 1 s retry and the
+    // Covers up to 15 s of MaxReconnectDuration for one reconnect cycle, the 5 s health check, the 1 s retry and the
     // secured handshake, with the margin of the existing reconnection tests, which use 90 s.
     private static readonly TimeSpan ReconnectTimeout = TimeSpan.FromSeconds(90);
 

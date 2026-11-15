@@ -382,6 +382,9 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                     {
                         sessionManager.ReportLivenessFromSessionState();
                     }
+
+                    // Also while reconnecting: an expired client certificate is what can keep the session from recovering.
+                    await sessionManager.CheckClientCertificateIfDueAsync(stoppingToken).ConfigureAwait(false);
                 }
 
                 await Task.Delay(_configuration.SubscriptionHealthCheckInterval, stoppingToken).ConfigureAwait(false);
