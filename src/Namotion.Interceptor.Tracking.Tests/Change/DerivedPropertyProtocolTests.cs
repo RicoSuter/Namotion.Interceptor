@@ -1021,28 +1021,4 @@ public class DerivedPropertyProtocolTests
             return false;
         }
     }
-
-    /// <summary>Parks the first evaluation or delivery that passes it after <see cref="Arm"/> until resumed.</summary>
-    private sealed class EvaluationGate
-    {
-        private int _isArmed;
-        private volatile bool _hasTimedOut;
-
-        public ManualResetEventSlim Paused { get; } = new();
-
-        public ManualResetEventSlim Resume { get; } = new();
-
-        public bool HasTimedOut => _hasTimedOut;
-
-        public void Arm() => Volatile.Write(ref _isArmed, 1);
-
-        public void PauseIfArmed()
-        {
-            if (Interlocked.Exchange(ref _isArmed, 0) == 1)
-            {
-                Paused.Set();
-                _hasTimedOut = !Resume.Wait(Timeout);
-            }
-        }
-    }
 }

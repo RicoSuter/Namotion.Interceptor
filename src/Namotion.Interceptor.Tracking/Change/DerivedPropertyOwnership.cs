@@ -126,16 +126,12 @@ internal static class DerivedPropertyOwnership
     }
 
     /// <summary>
-    /// Runs a request that was queued under a lifecycle lock, outside every lifecycle lock. It is dropped when the
-    /// property was attached again since it was queued (<paramref name="attachCount"/> moved): that attach evaluated
-    /// after the request's cause.
+    /// Runs a request outside every lifecycle lock. A request that carries an attach count (queued under a lifecycle
+    /// lock, or handed over by an attach) is dropped when the property was attached again since that count was read
+    /// (<paramref name="attachCount"/> moved): that attach evaluated after the request's cause.
+    /// <see cref="AnyAttachCount"/> skips this check.
     /// </summary>
-    internal static void RunQueuedRequest(PropertyReference property, long rawTimestamp, long attachCount)
-    {
-        Request(property, rawTimestamp, attachCount);
-    }
-
-    private static void Request(PropertyReference property, long rawTimestamp, long attachCount)
+    internal static void Request(PropertyReference property, long rawTimestamp, long attachCount)
     {
         if (rawTimestamp == 0)
         {
@@ -163,7 +159,9 @@ internal static class DerivedPropertyOwnership
             if (data.OwnerToken != 0 || data.AttachToken != 0)
             {
                 MarkRecalculationNeeded(data);
-                data.PendingRawTimestamp = rawTimestamp;
+
+                // The newest timestamp wins, whichever request arrives last.
+                data.PendingRawTimestamp = PostLockQueue.Newest(data.PendingRawTimestamp, rawTimestamp);
                 return;
             }
 
@@ -518,7 +516,7 @@ internal static class DerivedPropertyOwnership
     {
         /// <summary>
         /// The raw changed timestamp of the request being evaluated; 0 for a request without one, which its
-        /// publication resolves.
+        /// publication resolves, and 0 after a commit answered it, until the loop takes the next request.
         /// </summary>
         public long RawTimestamp;
 
@@ -586,12 +584,16 @@ internal static class DerivedPropertyOwnership
             return commit.Outcome != CommitOutcome.EvaluateAgain;
         }
 
+        // The commit answered the request, so a request taken after it, also by a takeover after the publication
+        // failed, carries its own timestamp.
+        var rawTimestamp = state.RawTimestamp;
+        state.RawTimestamp = 0;
         state.Unanswered = UnansweredRequest.None;
         state.HasEvaluatedAfterOwnWrite = false;
 
         if (commit.ShouldPublish)
         {
-            NotifyDerivedPropertyChanged(property, data, commit.Sequence, commit.NewValue, commit.OldValue, state.RawTimestamp);
+            NotifyDerivedPropertyChanged(property, data, commit.Sequence, commit.NewValue, commit.OldValue, rawTimestamp);
         }
 
         lock (data)
@@ -615,6 +617,30 @@ internal static class DerivedPropertyOwnership
         }
     }
 
+    /// <summary>
+    /// The timestamp of the evaluation that answers the taken pending request (0 for none) together with the request
+    /// the loop carries unanswered from the current attachment: the newest of both. An attach that committed since the
+    /// loop took its last request answered that request, so the pending timestamp alone is carried then. Called under
+    /// lock(data) before <see cref="OwnerLoopState.AttachCount"/> is updated.
+    /// </summary>
+    private static long GetAnsweredTimestamp(DerivedPropertyData data, in OwnerLoopState state, long pendingTimestamp)
+    {
+        return data.AttachCount == state.AttachCount
+            ? PostLockQueue.Newest(state.RawTimestamp, pendingTimestamp)
+            : pendingTimestamp;
+    }
+
+    /// <summary>
+    /// Whether a request is pending, or the failed loop carries one unanswered from the current attachment. An attach
+    /// that committed since the loop took its last request answered that request and requests a recalculation after
+    /// it, so without a pending request the owner releases, as at its commit. Called under lock(data).
+    /// </summary>
+    private static bool HasRequestToTakeOver(DerivedPropertyData data, in OwnerLoopState state)
+    {
+        return data.RecalculationNeeded ||
+            (state.Unanswered != UnansweredRequest.None && data.AttachCount == state.AttachCount);
+    }
+
     // Called after a failed owner loop: releases ownership and takes a pending request over with a new token. A
     // request raised on this thread alone is dropped unless isOwnRequestTakenOver.
     private static bool TryTakeOverAfterFailure(
@@ -629,10 +655,9 @@ internal static class DerivedPropertyOwnership
 
             data.OwnerToken = 0;
 
-            // Nothing is pending, the property is detached, or an attach is in progress, which evaluates again and
-            // takes over a set flag.
-            var hasNewRequest = data.RecalculationNeeded;
-            if ((!hasNewRequest && state.Unanswered == UnansweredRequest.None) || !data.IsAttached || data.AttachToken != 0)
+            // No request to take over, the property is detached, or an attach is in progress, which evaluates again
+            // and takes over a set flag.
+            if (!HasRequestToTakeOver(data, in state) || !data.IsAttached || data.AttachToken != 0)
             {
                 return false;
             }
@@ -643,12 +668,7 @@ internal static class DerivedPropertyOwnership
                 return false;
             }
 
-            // A request carried over from the failed loop keeps the timestamp it adopted; a newer one wins.
-            if (hasNewRequest)
-            {
-                state.RawTimestamp = pendingTimestamp;
-            }
-
+            state.RawTimestamp = GetAnsweredTimestamp(data, in state, pendingTimestamp);
             token = TakeOwnership(data, DerivedPropertyData.NewToken());
             state.AttachCount = data.AttachCount;
             return true;
@@ -689,8 +709,9 @@ internal static class DerivedPropertyOwnership
             if (data.RecalculationNeeded)
             {
                 DiscardRecording();
-                state.IsAnsweringForeignWrite = TakePendingRequest(data, out state.RawTimestamp);
+                state.IsAnsweringForeignWrite = TakePendingRequest(data, out var pendingTimestamp);
                 state.Unanswered = Add(state.Unanswered, state.IsAnsweringForeignWrite);
+                state.RawTimestamp = GetAnsweredTimestamp(data, in state, pendingTimestamp);
                 state.AttachCount = data.AttachCount;
                 return new Commit(CommitOutcome.EvaluateAgain);
             }

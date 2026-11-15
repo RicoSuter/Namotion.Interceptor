@@ -198,17 +198,13 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
     /// <summary>
     /// Under a lifecycle lock the delivery is queued (see <see cref="PostLockQueue"/>). A structural write reserves its
     /// place before its chain runs, so it is delivered before the writes that the handlers of its reconciliation make.
-    /// The lock count does not change across the chain: every lock taken in it is released in it.
+    /// The lock count does not change across the chain, since every lock taken in it is released in it, so a write
+    /// that reserved a slot and dispatches its change queues it in that slot (see <see cref="DispatchChange"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int GetDeliverySlot<TProperty>(ref PropertyWriteContext<TProperty> context)
     {
-        if (!PostLockQueue.IsLockHeld)
-        {
-            return PostLockQueue.ImmediateDelivery;
-        }
-
-        return context.Property.Metadata.Type.CanContainSubjects<TProperty>()
+        return PostLockQueue.IsLockHeld && context.Property.Metadata.Type.CanContainSubjects<TProperty>()
             ? PostLockQueue.ReserveDelivery()
             : PostLockQueue.UnreservedDelivery;
     }
@@ -225,8 +221,9 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         PropertyChangeSubscription[]? listeners,
         SubjectPropertyChange change)
     {
+        // The drain runs outside every lifecycle lock, so the queued delivery dispatches at once.
         PostLockQueue.EnqueueDelivery(
-            deliverySlot, () => DispatchChange(PostLockQueue.ImmediateDelivery, subscriptions, syncSubject, listeners, in change));
+            deliverySlot, () => DispatchChange(PostLockQueue.UnreservedDelivery, subscriptions, syncSubject, listeners, in change));
     }
 
     private static void DispatchChange(
@@ -236,7 +233,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         PropertyChangeSubscription[]? listeners,
         in SubjectPropertyChange change)
     {
-        if (deliverySlot != PostLockQueue.ImmediateDelivery)
+        if (PostLockQueue.IsLockHeld)
         {
             QueueChange(deliverySlot, subscriptions, syncSubject, listeners, change);
             return;
@@ -287,7 +284,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             finalValue,
             context.Revision);
 
-        DispatchChange(PostLockQueue.DeliverySlot, state?.QueueSubscriptions ?? [], state?.SyncSubject, listeners, in change);
+        DispatchChange(PostLockQueue.UnreservedDelivery, state?.QueueSubscriptions ?? [], state?.SyncSubject, listeners, in change);
     }
 
     // Post-commit listener resolution, shared by both entry paths and performed once per write:

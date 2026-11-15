@@ -154,14 +154,11 @@ internal static class PostLockQueue
         return true;
     }
 
-    /// <summary>The delivery slot of a change written while the thread holds no lifecycle lock: it is delivered at once.</summary>
-    internal const int ImmediateDelivery = -2;
-
-    /// <summary>The delivery slot of a change written under a lifecycle lock without a reserved slot.</summary>
+    /// <summary>
+    /// The delivery slot of a change without a reserved slot: under a lifecycle lock, it is queued after the deliveries
+    /// queued so far.
+    /// </summary>
     internal const int UnreservedDelivery = -1;
-
-    /// <summary>The delivery slot of a change that reserved none: queued when the thread holds a lifecycle lock.</summary>
-    internal static int DeliverySlot => _heldLocks == 0 ? ImmediateDelivery : UnreservedDelivery;
 
     /// <summary>
     /// Reserves the place of a delivery in arrival order, for a write that the thread makes while it holds a lifecycle
@@ -299,7 +296,7 @@ internal static class PostLockQueue
             try
             {
                 var timestamp = Newest(request.RawTimestamp, rawTimestamp);
-                DerivedPropertyOwnership.RunQueuedRequest(
+                DerivedPropertyOwnership.Request(
                     request.Property,
                     timestamp != 0 ? timestamp : TrackingWriteObserver.ResolveTimestamp(ref drainTimestamp),
                     request.AttachCount);
@@ -325,8 +322,10 @@ internal static class PostLockQueue
         _pool = segment;
     }
 
-    // Raw timestamps are ticks, negated for an explicit null scope; 0 means none.
-    private static long Newest(long left, long right)
+    /// <summary>
+    /// The newer of two raw timestamps, which are ticks, negated for an explicit null scope; 0 means none.
+    /// </summary>
+    internal static long Newest(long left, long right)
     {
         if (left == 0)
         {
