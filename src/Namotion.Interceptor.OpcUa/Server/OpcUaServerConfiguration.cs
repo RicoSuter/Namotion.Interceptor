@@ -4,6 +4,7 @@ using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 using Opc.Ua.Configuration;
 using Opc.Ua.Export;
+using Opc.Ua.Identity;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
@@ -88,6 +89,18 @@ public class OpcUaServerConfiguration
     /// Default is false for security.
     /// </summary>
     public bool AutoAcceptUntrustedCertificates { get; set; }
+
+    /// <summary>
+    /// Gets or sets the authenticators that accept user tokens other than anonymous ones, for example the SDK's
+    /// <c>UserNamePasswordAuthenticator</c> or <c>X509Authenticator</c>. They are registered with every server instance,
+    /// including after a restart. Default is empty: the server advertises and accepts anonymous logins only.
+    /// </summary>
+    /// <remarks>
+    /// When this list is not empty, the server advertises one user token policy per token type the authenticators
+    /// accept, and no anonymous policy unless one of them accepts anonymous tokens, such as the SDK's
+    /// <c>AnonymousAuthenticator</c>. This matches how the SDK's own hosting derives the policies from its authenticators.
+    /// </remarks>
+    public IReadOnlyList<IUserTokenAuthenticator> UserTokenAuthenticators { get; set; } = [];
 
     /// <summary>
     /// Gets or sets the base path for certificate stores.
@@ -175,12 +188,7 @@ public class OpcUaServerConfiguration
                     new ServerSecurityPolicy { SecurityMode = MessageSecurityMode.SignAndEncrypt, SecurityPolicyUri = SecurityPolicies.Aes256_Sha256_RsaPss },
                     new ServerSecurityPolicy { SecurityMode = MessageSecurityMode.None, SecurityPolicyUri = SecurityPolicies.None }
                 ],
-                UserTokenPolicies =
-                [
-                    new UserTokenPolicy(UserTokenType.Anonymous) { SecurityPolicyUri = SecurityPolicies.None },
-                    new UserTokenPolicy(UserTokenType.UserName) { SecurityPolicyUri = SecurityPolicies.Basic256Sha256 },
-                    new UserTokenPolicy(UserTokenType.Certificate) { SecurityPolicyUri = SecurityPolicies.Basic256Sha256 }
-                ],
+                UserTokenPolicies = CreateUserTokenPolicies(),
                 DiagnosticsEnabled = true,
                 MaxSessionCount = 100,
                 MinSessionTimeout = 10_000,
@@ -223,6 +231,37 @@ public class OpcUaServerConfiguration
 
         application.ApplicationConfiguration = config;
         return Task.FromResult(application);
+    }
+
+    /// <summary>
+    /// Creates the user token policies the server advertises: anonymous only without
+    /// <see cref="UserTokenAuthenticators"/>, otherwise one policy per token type they accept. Tokens other than
+    /// anonymous ones are encrypted with Basic256Sha256, also on an unsecured channel.
+    /// </summary>
+    protected ArrayOf<UserTokenPolicy> CreateUserTokenPolicies()
+    {
+        if (UserTokenAuthenticators.Count == 0)
+        {
+            return new[] { new UserTokenPolicy(UserTokenType.Anonymous) { SecurityPolicyUri = SecurityPolicies.None } }.ToArrayOf();
+        }
+
+        var policies = new List<UserTokenPolicy>();
+        foreach (var authenticator in UserTokenAuthenticators)
+        {
+            var issuedTokenType = authenticator.TokenType == UserTokenType.IssuedToken ? authenticator.IssuedTokenProfileUri : null;
+            if (policies.Exists(policy => policy.TokenType == authenticator.TokenType && policy.IssuedTokenType == issuedTokenType))
+            {
+                continue;
+            }
+
+            policies.Add(new UserTokenPolicy(authenticator.TokenType)
+            {
+                SecurityPolicyUri = authenticator.TokenType == UserTokenType.Anonymous ? SecurityPolicies.None : SecurityPolicies.Basic256Sha256,
+                IssuedTokenType = issuedTokenType
+            });
+        }
+
+        return policies.ToArrayOf();
     }
 
     /// <summary>

@@ -42,6 +42,8 @@ The client prefers an unsecured endpoint and uses a secured one only when the se
 | `BufferTimeMs` | int | 8 | Time window in milliseconds to batch changes before they are published |
 | `IsEnabled` | bool | true | Start with HomeBlaze; **Start** and **Stop** set it |
 
+The server accepts anonymous logins only, so a client that connects to it must not set a user name.
+
 | State | Description |
 |-------|-------------|
 | `Status`, `StatusMessage` | Service status, and the error when the server could not be set up, such as a path that does not resolve. A failed start, such as a server certificate that cannot be loaded, is retried, and `StatusMessage` shows its error until the server accepts connections |

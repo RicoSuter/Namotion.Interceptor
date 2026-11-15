@@ -2,6 +2,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
+using Opc.Ua;
+using Opc.Ua.Identity;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Server;
 
@@ -15,6 +17,43 @@ public class OpcUaServerConfigurationTests
 
         // Assert
         Assert.False(configuration.CleanCertificateStore);
+    }
+
+    [Fact]
+    public async Task WhenNoAuthenticatorIsConfigured_ThenOnlyAnonymousLoginsAreAdvertised()
+    {
+        // Arrange
+        var configuration = new OpcUaServerConfiguration();
+
+        // Act
+        var application = await configuration.CreateApplicationInstanceAsync();
+
+        // Assert
+        var policy = Assert.Single(application.ApplicationConfiguration!.ServerConfiguration!.UserTokenPolicies.ToArray()!);
+        Assert.Equal(UserTokenType.Anonymous, policy.TokenType);
+    }
+
+    [Fact]
+    public async Task WhenAuthenticatorsAreConfigured_ThenTheirTokenTypesAreAdvertisedInsteadOfAnonymous()
+    {
+        // Arrange
+        var configuration = new OpcUaServerConfiguration
+        {
+            UserTokenAuthenticators =
+            [
+                new TestAuthenticator(UserTokenType.UserName),
+                new TestAuthenticator(UserTokenType.UserName),
+                new TestAuthenticator(UserTokenType.Certificate)
+            ]
+        };
+
+        // Act
+        var application = await configuration.CreateApplicationInstanceAsync();
+
+        // Assert
+        var policies = application.ApplicationConfiguration!.ServerConfiguration!.UserTokenPolicies.ToArray()!;
+        Assert.Equal([UserTokenType.UserName, UserTokenType.Certificate], policies.Select(policy => policy.TokenType));
+        Assert.All(policies, policy => Assert.Equal(SecurityPolicies.Basic256Sha256, policy.SecurityPolicyUri));
     }
 
     [Fact]
@@ -70,5 +109,15 @@ public class OpcUaServerConfigurationTests
         // Act & Assert
         var exception = Assert.Throws<ArgumentException>(() => new OpcUaSubjectServer(subject, configuration, NullLogger.Instance));
         Assert.Equal(nameof(OpcUaServerConfiguration.ApplicationUri), exception.ParamName);
+    }
+
+    private sealed class TestAuthenticator(UserTokenType tokenType) : IUserTokenAuthenticator
+    {
+        public UserTokenType TokenType => tokenType;
+
+        public string? IssuedTokenProfileUri => null;
+
+        public ValueTask<AuthenticationResult> AuthenticateAsync(AuthenticationContext context, CancellationToken ct = default) =>
+            new(AuthenticationResult.NotHandled);
     }
 }
