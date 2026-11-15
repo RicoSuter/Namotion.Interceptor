@@ -11,7 +11,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// </summary>
 /// <remarks>See "Structure Dependencies" in docs/design/tracking-derived-properties.md.</remarks>
 [EditorBrowsable(EditorBrowsableState.Never)]
-public static class SubjectStructure
+public static class DerivedStructureDependencies
 {
     // 0 while no structure dependency was ever created, 1 while the first creation raises the gate, 2 once it is marked raised.
     // A change counts 1 as raised, which "Structure gate" in docs/design/tracking-derived-properties.md depends on: a
@@ -70,7 +70,7 @@ public static class SubjectStructure
     /// </summary>
     internal static PropertyReference ChildrenOf(IInterceptorSubject subject) => new(subject, ChildrenName);
 
-    internal static bool IsStructure(in PropertyReference reference) => reference.Name is null or ChildrenName;
+    internal static bool IsStructureDependency(in PropertyReference reference) => reference.Name is null or ChildrenName;
 
     /// <summary>
     /// Raises the structure gate. Called before the data of a structure dependency is created, and returns only once the gate is
