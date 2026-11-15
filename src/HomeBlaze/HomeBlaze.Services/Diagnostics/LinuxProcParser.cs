@@ -77,8 +77,6 @@ internal static class LinuxProcParser
     /// </summary>
     public static bool TryParseProcessStatus(ReadOnlySpan<byte> content, out long anonymousBytes, out long fileBytes, out long sharedBytes)
     {
-        fileBytes = 0;
-        sharedBytes = 0;
         return TryReadMemInfoValue(content, "\nRssAnon:"u8, out anonymousBytes) &
                TryReadMemInfoValue(content, "\nRssFile:"u8, out fileBytes) &
                TryReadMemInfoValue(content, "\nRssShmem:"u8, out sharedBytes);

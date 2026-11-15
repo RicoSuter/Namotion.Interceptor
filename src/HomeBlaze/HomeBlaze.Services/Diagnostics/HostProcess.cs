@@ -59,7 +59,7 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
     public partial long? WorkingSet { get; internal set; }
 
     /// <summary>
-    /// Size of the managed heap at the last garbage collection.
+    /// Size of the managed heap at the last garbage collection. Empty until the first collection.
     /// </summary>
     [State(Unit = StateUnit.Byte, Position = 412)]
     public partial long? GcHeapSize { get; internal set; }
@@ -81,25 +81,28 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
 
     /// <summary>
     /// Memory the garbage collector held from the operating system at the last garbage collection, including free
-    /// space it keeps for reuse.
+    /// space it keeps for reuse. Empty until the first collection.
     /// </summary>
     [State(Unit = StateUnit.Byte, Position = 417)]
     public partial long? GcCommittedSize { get; internal set; }
 
     /// <summary>
-    /// Free space between objects in the managed heap at the last garbage collection.
+    /// Free space between objects in the managed heap at the last garbage collection. Empty until the first
+    /// collection.
     /// </summary>
     [State(Unit = StateUnit.Byte, Position = 418)]
     public partial long? GcFragmentedSize { get; internal set; }
 
     /// <summary>
-    /// Size of the oldest generation at the last garbage collection, where long-lived objects end up.
+    /// Size of the oldest generation after the last full garbage collection, where long-lived objects end up,
+    /// including the free space between them. Empty until the first full collection.
     /// </summary>
     [State(Unit = StateUnit.Byte, Position = 419)]
     public partial long? Gen2Size { get; internal set; }
 
     /// <summary>
-    /// Size of the large object heap at the last garbage collection, which holds objects of 85,000 bytes or more.
+    /// Size of the large object heap after the last full garbage collection, which holds objects of 85,000 bytes or
+    /// more, including the free space between them. Empty until the first full collection.
     /// </summary>
     [State(Unit = StateUnit.Byte, Position = 420)]
     public partial long? LargeObjectHeapSize { get; internal set; }
@@ -253,12 +256,17 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
         Uptime = DateTime.UtcNow - _startTime.Value;
 
         var memoryInfo = GC.GetGCMemoryInfo();
-        GcHeapSize = memoryInfo.HeapSizeBytes;
-        GcCommittedSize = memoryInfo.TotalCommittedBytes;
-        GcFragmentedSize = memoryInfo.FragmentedBytes;
-        var generations = memoryInfo.GenerationInfo;
-        Gen2Size = generations.Length > 2 ? generations[2].SizeAfterBytes : null;
-        LargeObjectHeapSize = generations.Length > 3 ? generations[3].SizeAfterBytes : null;
+        SetLastCollectionValues(memoryInfo.Index, memoryInfo.HeapSizeBytes, memoryInfo.TotalCommittedBytes, memoryInfo.FragmentedBytes);
+
+        // Minor collections that follow a full one overwrite the generation sizes of the last collection of any kind.
+        var fullBlockingInfo = GC.GetGCMemoryInfo(GCKind.FullBlocking);
+        var backgroundInfo = GC.GetGCMemoryInfo(GCKind.Background);
+        var fullInfo = backgroundInfo.Index > fullBlockingInfo.Index ? backgroundInfo : fullBlockingInfo;
+        var generations = fullInfo.GenerationInfo;
+        SetLastFullCollectionValues(
+            fullInfo.Index,
+            generations.Length > 2 ? generations[2].SizeAfterBytes : null,
+            generations.Length > 3 ? generations[3].SizeAfterBytes : null);
 
         TimerCount = Timer.ActiveCount;
         ThreadPoolThreadCount = ThreadPool.ThreadCount;
@@ -298,6 +306,29 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
         }
 
         return isAdvanced;
+    }
+
+    /// <summary>
+    /// Sets the values of the last garbage collection of any kind, or empties them while no collection has run
+    /// (<paramref name="index"/> is 0).
+    /// </summary>
+    internal void SetLastCollectionValues(long index, long heapSize, long committedSize, long fragmentedSize)
+    {
+        var hasCollected = index > 0;
+        GcHeapSize = hasCollected ? heapSize : null;
+        GcCommittedSize = hasCollected ? committedSize : null;
+        GcFragmentedSize = hasCollected ? fragmentedSize : null;
+    }
+
+    /// <summary>
+    /// Sets the generation sizes after the last full garbage collection, or empties them while no full collection
+    /// has run (<paramref name="index"/> is 0).
+    /// </summary>
+    internal void SetLastFullCollectionValues(long index, long? gen2Size, long? largeObjectHeapSize)
+    {
+        var hasCollected = index > 0;
+        Gen2Size = hasCollected ? gen2Size : null;
+        LargeObjectHeapSize = hasCollected ? largeObjectHeapSize : null;
     }
 
     // An unreadable handle source, as under some sandboxes, empties the value instead of failing the whole poll.

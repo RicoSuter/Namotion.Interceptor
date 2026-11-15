@@ -333,8 +333,10 @@ public partial class SqliteHistoryStoreSubject :
                 _logger.LogError(exception, "Final history flush on shutdown failed; pending samples were not persisted.");
             }
 
-            RefreshMetrics(engine);
             engine.Dispose();
+
+            // After disposing, so a stopped store reports no open connections.
+            RefreshMetrics(engine);
             Status = "Stopped";
         }
     }

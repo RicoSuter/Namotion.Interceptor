@@ -82,6 +82,44 @@ public class HostSystemTests
     }
 
     [Fact]
+    public void WhenNoGarbageCollectionHasRun_ThenTheGarbageCollectionValuesAreEmpty()
+    {
+        // Arrange
+        var process = new HostSystem(NullLogger<HostSystem>.Instance).Process;
+        process.SetLastCollectionValues(index: 4, heapSize: 100, committedSize: 200, fragmentedSize: 10);
+        process.SetLastFullCollectionValues(index: 3, gen2Size: 60, largeObjectHeapSize: 20);
+
+        // Act - the runtime reports index 0 and zero sizes until the first collection.
+        process.SetLastCollectionValues(index: 0, heapSize: 0, committedSize: 0, fragmentedSize: 0);
+        process.SetLastFullCollectionValues(index: 0, gen2Size: 0, largeObjectHeapSize: 0);
+
+        // Assert
+        Assert.Null(process.GcHeapSize);
+        Assert.Null(process.GcCommittedSize);
+        Assert.Null(process.GcFragmentedSize);
+        Assert.Null(process.Gen2Size);
+        Assert.Null(process.LargeObjectHeapSize);
+    }
+
+    [Fact]
+    public void WhenGarbageCollectionsHaveRun_ThenTheGarbageCollectionValuesAreSet()
+    {
+        // Arrange
+        var process = new HostSystem(NullLogger<HostSystem>.Instance).Process;
+
+        // Act
+        process.SetLastCollectionValues(index: 4, heapSize: 100, committedSize: 200, fragmentedSize: 10);
+        process.SetLastFullCollectionValues(index: 3, gen2Size: 60, largeObjectHeapSize: 20);
+
+        // Assert
+        Assert.Equal(100, process.GcHeapSize);
+        Assert.Equal(200, process.GcCommittedSize);
+        Assert.Equal(10, process.GcFragmentedSize);
+        Assert.Equal(60, process.Gen2Size);
+        Assert.Equal(20, process.LargeObjectHeapSize);
+    }
+
+    [Fact]
     public void WhenDirectoryIsMissing_ThenCountingEntriesThrows()
     {
         // Arrange

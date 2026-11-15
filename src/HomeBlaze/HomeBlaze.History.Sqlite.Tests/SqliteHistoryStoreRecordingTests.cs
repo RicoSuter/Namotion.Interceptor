@@ -148,7 +148,7 @@ public class SqliteHistoryStoreRecordingTests
     }
 
     [Fact]
-    public async Task WhenStoreHasOpenConnections_ThenSqliteMemorySizeIsPositive()
+    public async Task WhenRunningStoreStops_ThenItReportsSqliteMemoryWhileRunningAndNoOpenConnectionsAfterwards()
     {
         // Arrange
         var (context, _, _) = CreateGraph();
@@ -157,18 +157,28 @@ public class SqliteHistoryStoreRecordingTests
         await hostedService.StartAsync(CancellationToken.None);
         try
         {
-            await AsyncTestHelpers.WaitUntilAsync(() => store.Status == "Running", message: "Store did not start");
+            // Both values are written by the same metrics refresh, SqliteMemorySize after OpenConnectionCount.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => store.OpenConnectionCount > 0 && store.SqliteMemorySize > 0,
+                message: "Store did not report open connections and SQLite memory while running");
+            var runningOpenConnectionCount = store.OpenConnectionCount;
+            var runningSqliteMemorySize = store.SqliteMemorySize;
+
+            // Act
+            await hostedService.StopAsync(CancellationToken.None);
+
+            // Assert
+            Assert.True(runningOpenConnectionCount > 0);
+            Assert.True(runningSqliteMemorySize > 0);
+            Assert.Equal("Stopped", store.Status);
+            Assert.Equal(0, store.OpenConnectionCount);
         }
         finally
         {
-            // Act: stopping refreshes the values one last time, before the connections close, and waits for it.
+            // Stops the store when the wait failed; a no-op once the Act stopped it.
             await hostedService.StopAsync(CancellationToken.None);
             DeleteDirectory(databasePath);
         }
-
-        // Assert
-        Assert.True(store.OpenConnectionCount > 0);
-        Assert.True(store.SqliteMemorySize > 0);
     }
 
     [Fact]
