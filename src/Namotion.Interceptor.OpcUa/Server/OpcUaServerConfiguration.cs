@@ -4,6 +4,7 @@ using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 using Opc.Ua.Configuration;
 using Opc.Ua.Export;
+using Opc.Ua.Identity;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
@@ -27,6 +28,19 @@ public class OpcUaServerConfiguration
     public string ApplicationName { get; set; } = "Namotion.Interceptor.Server";
 
     /// <summary>
+    /// Gets or sets the application URI the server presents and its certificate must carry. When null,
+    /// "urn:{host name}:Namotion.Interceptor:{ApplicationName}" is used, which changes when the host name changes.
+    /// </summary>
+    /// <remarks>
+    /// A kept certificate must also carry the host of <see cref="BaseAddress"/>, where localhost stands for the host
+    /// name. When the host name changes, such as for a recreated container, a self-signed certificate that then fails the
+    /// application URI or host check is replaced and clients have to trust the new one, while any other certificate fails
+    /// the start. A stable host name, or an explicit
+    /// host in <see cref="BaseAddress"/> together with this property, avoids both.
+    /// </remarks>
+    public string? ApplicationUri { get; set; }
+
+    /// <summary>
     /// Gets the primary namespace URI for the OPC UA server used to identify custom nodes.
     /// Default is "http://namotion.com/Interceptor/".
     /// </summary>
@@ -45,10 +59,11 @@ public class OpcUaServerConfiguration
     public IPropertyMapper<OpcUaPropertyMapping> Mapper { get; set; } = DefaultMapper;
 
     /// <summary>
-    /// Gets or sets a value indicating whether to clean up old certificates from the
-    /// application certificate store on connect. Defaults to true.
+    /// Gets or sets whether the application certificate store is emptied on startup, which makes the server
+    /// create a new certificate on every start. Clients that trust the server then have to trust it again.
+    /// Default is false.
     /// </summary>
-    public bool CleanCertificateStore { get; set; } = true;
+    public bool CleanCertificateStore { get; set; }
 
     /// <summary>
     /// Gets or sets the time window to buffer incoming changes (default: 8ms).
@@ -76,6 +91,21 @@ public class OpcUaServerConfiguration
     public bool AutoAcceptUntrustedCertificates { get; set; }
 
     /// <summary>
+    /// Gets or sets the authenticators that accept user tokens other than anonymous ones, for example the SDK's
+    /// <c>UserNamePasswordAuthenticator</c> or <c>X509Authenticator</c>. They are registered with every server instance,
+    /// including after a restart. Default is empty: the server advertises and accepts anonymous logins only.
+    /// </summary>
+    /// <remarks>
+    /// When this list is not empty, the server advertises one user token policy per token type the authenticators
+    /// accept, and no anonymous policy unless one of them accepts anonymous tokens, such as the SDK's
+    /// <c>AnonymousAuthenticator</c>. Unlike the SDK's own hosting, which keeps anonymous access when only custom
+    /// authenticators are added, a configured list turns anonymous logins off unless one of them accepts them. The SDK
+    /// keeps one authenticator per token type and issued token profile, so checks for the same token type have to be
+    /// combined in one authenticator; <see cref="Validate"/> rejects duplicates.
+    /// </remarks>
+    public IReadOnlyList<IUserTokenAuthenticator> UserTokenAuthenticators { get; set; } = [];
+
+    /// <summary>
     /// Gets or sets the base path for certificate stores.
     /// Default is "pki". Change this to isolate certificate stores for parallel test execution.
     /// </summary>
@@ -99,8 +129,7 @@ public class OpcUaServerConfiguration
             ApplicationType = ApplicationType.Server
         };
 
-        var host = System.Net.Dns.GetHostName();
-        var applicationUri = $"urn:{host}:Namotion.Interceptor:{ApplicationName}";
+        var applicationUri = ApplicationUri ?? $"urn:{System.Net.Dns.GetHostName()}:Namotion.Interceptor:{ApplicationName}";
 
         var config = new ApplicationConfiguration(ResolvedTelemetryContext)
         {
@@ -162,12 +191,7 @@ public class OpcUaServerConfiguration
                     new ServerSecurityPolicy { SecurityMode = MessageSecurityMode.SignAndEncrypt, SecurityPolicyUri = SecurityPolicies.Aes256_Sha256_RsaPss },
                     new ServerSecurityPolicy { SecurityMode = MessageSecurityMode.None, SecurityPolicyUri = SecurityPolicies.None }
                 ],
-                UserTokenPolicies =
-                [
-                    new UserTokenPolicy(UserTokenType.Anonymous) { SecurityPolicyUri = SecurityPolicies.None },
-                    new UserTokenPolicy(UserTokenType.UserName) { SecurityPolicyUri = SecurityPolicies.Basic256Sha256 },
-                    new UserTokenPolicy(UserTokenType.Certificate) { SecurityPolicyUri = SecurityPolicies.Basic256Sha256 }
-                ],
+                UserTokenPolicies = CreateUserTokenPolicies(),
                 DiagnosticsEnabled = true,
                 MaxSessionCount = 100,
                 MinSessionTimeout = 10_000,
@@ -210,6 +234,63 @@ public class OpcUaServerConfiguration
 
         application.ApplicationConfiguration = config;
         return Task.FromResult(application);
+    }
+
+    /// <summary>
+    /// Creates the user token policies the server advertises: anonymous only without
+    /// <see cref="UserTokenAuthenticators"/>, otherwise one policy per token type they accept. Tokens other than
+    /// anonymous ones are encrypted with Basic256Sha256, also on an unsecured channel.
+    /// </summary>
+    protected ArrayOf<UserTokenPolicy> CreateUserTokenPolicies()
+    {
+        if (UserTokenAuthenticators.Count == 0)
+        {
+            return new[] { new UserTokenPolicy(UserTokenType.Anonymous) { SecurityPolicyUri = SecurityPolicies.None } }.ToArrayOf();
+        }
+
+        var policies = new List<UserTokenPolicy>();
+        foreach (var authenticator in UserTokenAuthenticators)
+        {
+            var issuedTokenType = authenticator.TokenType == UserTokenType.IssuedToken ? authenticator.IssuedTokenProfileUri : null;
+            if (policies.Exists(policy => policy.TokenType == authenticator.TokenType && policy.IssuedTokenType == issuedTokenType))
+            {
+                continue;
+            }
+
+            policies.Add(new UserTokenPolicy(authenticator.TokenType)
+            {
+                SecurityPolicyUri = authenticator.TokenType == UserTokenType.Anonymous ? SecurityPolicies.None : SecurityPolicies.Basic256Sha256,
+                IssuedTokenType = issuedTokenType
+            });
+        }
+
+        return policies.ToArrayOf();
+    }
+
+    /// <summary>
+    /// Validates configuration values and throws ArgumentException if invalid.
+    /// Call this method during initialization to fail fast with clear error messages.
+    /// </summary>
+    public void Validate()
+    {
+        if (ApplicationUri is not null && string.IsNullOrWhiteSpace(ApplicationUri))
+        {
+            throw new ArgumentException(
+                "ApplicationUri must not be empty or whitespace when set",
+                nameof(ApplicationUri));
+        }
+
+        var registeredTokenTypes = new HashSet<(UserTokenType, string?)>();
+        foreach (var authenticator in UserTokenAuthenticators)
+        {
+            if (!registeredTokenTypes.Add((authenticator.TokenType, authenticator.IssuedTokenProfileUri)))
+            {
+                throw new ArgumentException(
+                    $"UserTokenAuthenticators contains more than one authenticator for the token type {authenticator.TokenType}; " +
+                    "the server keeps only one per token type, so combine their checks in one authenticator.",
+                    nameof(UserTokenAuthenticators));
+            }
+        }
     }
 
     public virtual string[] GetNamespaceUris()

@@ -136,7 +136,11 @@ Beyond the settings shown above, the following properties are available on `OpcU
 | Property | Default | Description |
 |----------|---------|-------------|
 | `ApplicationName` | "Namotion.Interceptor.Client" | Application name for identification and certificate generation |
-| `UseSecurity` | false | Enable signing and encryption (see [Transport Security](#transport-security)) |
+| `MinimumSecurityMode` | None | Minimum security mode of the endpoint: `None`, `Sign` or `SignAndEncrypt` (see [Transport Security](#transport-security)) |
+| `AutoAcceptUntrustedCertificates` | false | Accept server certificates that are not in the trusted store |
+| `AutoCreateApplicationCertificate` | true | Create a self-signed client certificate for secured connections, and replace it once it has expired or no longer matches the application URI |
+| `ApplicationUri` | null | Application URI the client certificate carries (derived from host and application name when null) |
+| `ApplicationCertificateLifetimeInMonths` | 12 | Lifetime of a certificate the client creates, at least 1 |
 | `CreateUserIdentity` | null | Async factory for user credentials (see [Authentication](#authentication)) |
 | `CertificateStoreBasePath` | "pki" | Base directory for certificate stores |
 | `SessionFactory` | null | Custom session factory (uses `DefaultSessionFactory` when null) |
@@ -186,12 +190,51 @@ Beyond the settings shown above, the following properties are available on `OpcU
 var config = new OpcUaClientConfiguration
 {
     ServerUrl = "opc.tcp://plc.factory.com:4840",
-    UseSecurity = true,  // Enable signing and encryption (recommended for production)
+    MinimumSecurityMode = MessageSecurityMode.SignAndEncrypt, // connect only to an encrypted endpoint
     // ... other settings
 };
 ```
 
-When `UseSecurity = true`, the client prefers secure endpoints with message signing and encryption. The default is `false` for development convenience.
+With `MinimumSecurityMode = None`, the default, the client prefers an unsecured endpoint and uses a secured one only when the server offers nothing else; `Sign` requires signing and `SignAndEncrypt` encryption. Among secured endpoints it picks the most secure one with a supported policy (Basic256Sha256, Aes128_Sha256_RsaOaep or Aes256_Sha256_RsaPss with the default RSA certificate). If none qualifies, connecting fails and the error lists the server's endpoints.
+
+#### Certificate Stores
+
+The client and the [server](connectors-opcua-server.md#certificates) use these folders under `CertificateStoreBasePath`:
+
+| Folder | Content |
+|---|---|
+| `own` | Certificate in `certs/{name}.der`, private key in `private/{name}.pfx` or `.pem`, same base name |
+| `trusted/certs` | Trusted peer certificates, and the root authority certificate of a CA-issued peer |
+| `issuer/certs` | Issuing authorities of a CA-issued certificate, own or peer; without them its chain is incomplete |
+| `rejected/certs` | Untrusted peer certificates |
+
+Both default to `pki`, so a client and a server in one process share their stores: a certificate trusted for one is trusted for the other, and the server's `CleanCertificateStore` deletes the client's certificate. Give each its own base path. Processes sharing a store need different application names or certificates that are never replaced.
+
+#### Client Certificate
+
+Only secured connections need one. With `AutoCreateApplicationCertificate = true`, the default, the client creates a self-signed certificate on its first secured connect; otherwise a missing certificate fails the connection. A provisioned certificate must carry the application URI `urn:{host name}:Namotion.Interceptor:{ApplicationName}` or the value of `ApplicationUri`, and should have the subject `CN={ApplicationName}, O=Namotion`. A password-protected key needs a `CertificatePasswordProvider` (see [Custom Application Configuration](#custom-application-configuration)).
+
+The default application URI contains the host name, so after a rename, such as a recreated container, the stored certificate no longer matches. A self-signed one is then replaced, as described below, and the server has to trust the new one; any other fails every connect. Set `ApplicationUri` where the host name can change.
+
+#### Certificate Expiry
+
+When the client or the server loads its certificate:
+
+- within 30 days of expiry, it logs a warning;
+- an expired self-signed certificate, created or provisioned, is replaced with a warning, and peers have to trust the new one;
+- so is a self-signed certificate that does not carry the application URI or, for the server, does not cover the host of `BaseAddress`;
+- a CA-issued certificate, any certificate while automatic creation is off, and any certificate in a store other than a directory store, such as the Windows certificate store, are never replaced; the client never creates or deletes a certificate there either;
+- when an override pins a certificate by `ApplicationCertificate.Thumbprint`, only that certificate is used, and loading fails when the store does not hold it.
+
+The client loads it when it creates the managed session on a secured connect, that is when the source starts. The managed session keeps that certificate through its reconnects and session recreations (see [Connection Loss Recovery](#connection-loss-recovery)), so while the source runs the health check loads it again once an hour, and right after a reconnect cycle that failed with a certificate error. That check logs the expiry warning and replaces an expired certificate as described above. When the store then holds a different certificate, for example the replacement or one provisioned there by hand, the client passes it to the SDK's certificate manager, and the managed session reloads it and reconnects. The server certificate is validated on every new secure channel, including those a reconnect opens.
+
+#### Trust
+
+With `AutoAcceptUntrustedCertificates = false`, the default, an unknown server certificate is rejected and written to `rejected/certs`; move it to `trusted/certs`, or provision it there. The check runs on secured connections, and on unsecured ones before a login is encrypted: always for username and certificate logins, and for anonymous logins when the server's anonymous token policy names a security policy. The server trusts the client certificate the same way through its own stores.
+
+#### Errors
+
+A failed connection attempt, including a failed certificate load, is reported in `Diagnostics.LastError` (see [Diagnostics](#diagnostics)) and retried. Certificate errors name the certificate at fault and the folder or option that resolves it, on the initial connect and at the end of every reconnect cycle that failed with one. The managed session retries a failed initial connect like a lost connection, so a certificate error on the initial connect is reported once the first reconnect cycle of `MaxReconnectDuration` has ended.
 
 ### Authentication
 
@@ -201,7 +244,7 @@ By default, the client connects with anonymous authentication. Use `CreateUserId
 var config = new OpcUaClientConfiguration
 {
     ServerUrl = "opc.tcp://plc.factory.com:4840",
-    CreateUserIdentity = _ => Task.FromResult(new UserIdentity("user", "password")),
+    CreateUserIdentity = _ => Task.FromResult(new UserIdentity("user", "password"u8.ToArray())),
     // ... other settings
 };
 ```
@@ -215,20 +258,33 @@ var config = new OpcUaClientConfiguration
     CreateUserIdentity = async cancellationToken =>
     {
         var secret = await vault.GetSecretAsync("opcua-credentials", cancellationToken);
-        return new UserIdentity(secret.Username, secret.Password);
+        return new UserIdentity(secret.Username, Encoding.UTF8.GetBytes(secret.Password));
     },
     // ... other settings
 };
 ```
 
-For certificate-based authentication:
+For certificate-based authentication, the user certificate is described by a `CertificateIdentifier` and loaded with its private key through a certificate provider whenever the session signs with it, so the certificate manager that provides it must live as long as the client:
 
 ```csharp
-CreateUserIdentity = _ =>
+var userCertificates = CertificateManagerFactory.Create(new SecurityConfiguration(), telemetryContext);
+var userCertificate = new CertificateIdentifier
 {
-    var certificate = X509Certificate2.CreateFromPemFile("client.pem", "client.key");
-    return Task.FromResult(new UserIdentity(certificate));
-}
+    StoreType = CertificateStoreType.Directory,
+    StorePath = "pki/user",
+    SubjectName = "CN=Operator"
+};
+
+var config = new OpcUaClientConfiguration
+{
+    ServerUrl = "opc.tcp://plc.factory.com:4840",
+    CreateUserIdentity = cancellationToken => UserIdentity.CreateAsync(
+        userCertificate,
+        new CertificatePasswordProvider(keyPassword),
+        userCertificates.CertificateProvider,
+        cancellationToken),
+    // ... other settings
+};
 ```
 
 ### Custom Application Configuration
@@ -236,21 +292,34 @@ CreateUserIdentity = _ =>
 Override `CreateApplicationInstanceAsync()` in a derived configuration class for full control over OPC UA application settings (certificates, transport quotas, security policies):
 
 ```csharp
+using System.Text;
+using Namotion.Interceptor.OpcUa.Client;
+using Opc.Ua;
+using Opc.Ua.Configuration;
+
 public class MyOpcUaClientConfiguration : OpcUaClientConfiguration
 {
+    public required string CertificatePassword { get; init; }
+
     public override async Task<ApplicationInstance> CreateApplicationInstanceAsync()
     {
         var application = await base.CreateApplicationInstanceAsync();
 
         // Customize the application configuration
         var config = application.ApplicationConfiguration;
-        config.SecurityConfiguration.AutoAcceptUntrustedCertificates = false;
+        config.SecurityConfiguration.RejectSHA1SignedCertificates = true;
+        config.SecurityConfiguration.CertificatePasswordProvider = new CertificatePasswordProvider(Encoding.UTF8.GetBytes(CertificatePassword));
         config.TransportQuotas.MaxMessageSize = 64_000_000;
+
+        // Changed security settings take effect only through UpdateAsync.
+        await config.CertificateManager.UpdateAsync(config.SecurityConfiguration);
 
         return application;
     }
 }
 ```
+
+The client certificate always comes from the own store that `SecurityConfiguration.ApplicationCertificate` describes: its `StoreType` and `StorePath` select the store it is loaded from. The default is the directory store `{CertificateStoreBasePath}/own` (`StoreType` `Directory`). To use the Windows certificate store instead, an override sets `StoreType` to `X509Store` and `StorePath` to a store such as `CurrentUser\My`; the certificate must be provisioned there, because the client only loads it and never creates, deletes or replaces a certificate outside a directory store. Other store types, such as PKCS#11 hardware tokens or custom store providers, are not supported, because the client session opens the store without the certificate manager's store providers.
 
 ## Monitoring & Subscriptions
 
@@ -449,6 +518,10 @@ builder.Services.AddOpcUaSubjectClientSource(
 - `SubscriptionHealthCheckInterval` minimum of 1 second enforced
 - `PollingInterval` minimum of 100 milliseconds enforced
 - Fail-fast with clear error messages on invalid configuration
+
+### Responses for a Different Request
+
+The client detects when one of its own writes or value reads receives the response to a different request of this client: the request handle the server echoes must match the one the request was sent with, and a response of another service type counts as a mismatch too. This is a detection, not a complete defense: a misdelivered fault, or a response from a server that does not echo request handles (it answers with zero, which the client accepts), cannot be told apart from a genuine one. On a detected mismatch nothing from that response is applied. A write fails and its changes are retried like any other failed write, and a read fails like any other failed read. Because the received response belonged to another request, possibly one carrying subscription notifications, the client also schedules a full state read on the next health check with a healthy session. Repeated mismatches coalesce into one read, at most once every 30 seconds.
 
 ### Connection Loss Recovery
 

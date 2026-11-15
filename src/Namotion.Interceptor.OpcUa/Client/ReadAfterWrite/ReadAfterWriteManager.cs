@@ -332,78 +332,76 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         }
 
         var successCount = 0;
-        var failedCount = 0;
         var skippedCount = 0;
 
         try
         {
             try
             {
-                var readValues = new ReadValueId[dueCount];
-                for (var i = 0; i < dueCount; i++)
+                var chunkSize = OpcUaValueReader.GetNodesPerRead(session, dueCount);
+                for (var offset = 0; offset < dueCount; offset += chunkSize)
                 {
-                    readValues[i] = new ReadValueId
+                    var count = Math.Min(chunkSize, dueCount - offset);
+                    var readValues = new ReadValueId[count];
+                    for (var i = 0; i < count; i++)
                     {
-                        NodeId = _dueReadsList[i].NodeId,
-                        AttributeId = Opc.Ua.Attributes.Value
-                    };
-                }
-
-                ReadResponse response;
-                try
-                {
-                    response = await session.ReadAsync(
-                        requestHeader: null,
-                        maxAge: 0,
-                        timestampsToReturn: TimestampsToReturn.Source,
-                        readValues.ToArrayOf(),
-                        _cts.Token).ConfigureAwait(false);
-                }
-                catch (Exception) when (_cts.IsCancellationRequested)
-                {
-                    return;
-                }
-
-                var receivedTimestamp = DateTimeOffset.UtcNow;
-
-                for (var i = 0; i < response.Results.Count && i < dueCount; i++)
-                {
-                    var result = response.Results[i];
-                    if (!StatusCode.IsGood(result.StatusCode))
-                    {
-                        failedCount++;
-                        continue;
+                        readValues[i] = new ReadValueId
+                        {
+                            NodeId = _dueReadsList[offset + i].NodeId,
+                            AttributeId = Opc.Ua.Attributes.Value
+                        };
                     }
 
-                    var (nodeId, property) = _dueReadsList[i];
-                    var sourceTimestamp = result.SourceTimestamp.ToClrTimestamp();
-
-                    // Skips a result that is already stale without converting it; the check under the lock decides.
-                    if (IsStale(property, sourceTimestamp))
+                    ArrayOf<DataValue> results;
+                    try
                     {
-                        skippedCount++;
-                        continue;
+                        results = await OpcUaValueReader.ReadAsync(
+                            session, readValues, TimestampsToReturn.Source, _cts.Token).ConfigureAwait(false);
+                    }
+                    catch (Exception exception) when (_cts.IsCancellationRequested && exception is not OpcUaResponseMismatchException)
+                    {
+                        return;
                     }
 
-                    var value = _configuration.ValueConverter.ConvertToPropertyValue(
-                        result.WrappedValue.ToClrValue(), property);
+                    var receivedTimestamp = DateTimeOffset.UtcNow;
 
-                    if (!TryApplyRead(nodeId, property, sourceTimestamp, receivedTimestamp, value))
+                    for (var i = 0; i < results.Count; i++)
                     {
-                        skippedCount++;
-                        continue;
-                    }
+                        var result = results[i];
+                        if (!StatusCode.IsGood(result.StatusCode))
+                        {
+                            continue;
+                        }
 
-                    successCount++;
+                        var (nodeId, property) = _dueReadsList[offset + i];
+                        var sourceTimestamp = result.SourceTimestamp.ToClrTimestamp();
+
+                        // Skips a result that is already stale without converting it; the check under the lock decides.
+                        if (IsStale(property, sourceTimestamp))
+                        {
+                            skippedCount++;
+                            continue;
+                        }
+
+                        var value = _configuration.ValueConverter.ConvertToPropertyValue(
+                            result.WrappedValue.ToClrValue(), property);
+
+                        if (!TryApplyRead(nodeId, property, sourceTimestamp, receivedTimestamp, value))
+                        {
+                            skippedCount++;
+                            continue;
+                        }
+
+                        successCount++;
+                    }
                 }
             }
             catch (Exception ex)
             {
                 // Every due read that did not succeed or get skipped failed, including those a
                 // thrown batch never processed.
-                failedCount = dueCount - successCount - skippedCount;
                 _metrics.RecordExecuted(successCount);
-                _metrics.RecordFailed(failedCount);
+                _metrics.RecordFailed(dueCount - successCount - skippedCount);
                 ReportErrorIfRunning(ex);
                 if (_circuitBreaker.RecordFailure())
                 {
@@ -418,9 +416,8 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             }
 
             // A response can carry fewer results than requested; the unanswered remainder failed.
-            failedCount = dueCount - successCount - skippedCount;
             _metrics.RecordExecuted(successCount);
-            _metrics.RecordFailed(failedCount);
+            _metrics.RecordFailed(dueCount - successCount - skippedCount);
             _circuitBreaker.RecordSuccess();
 
             // Logging provider failures are not read failures. Let them propagate to the timer callback's

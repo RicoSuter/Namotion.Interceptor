@@ -1,6 +1,7 @@
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Testing;
+using Opc.Ua;
 using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
