@@ -27,6 +27,30 @@ public class DerivedPropertyAttachOrderTests
         AssertSingleChange(changes, machine.Device, nameof(SiblingReadingDevice.IsInstalled), true);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void WhenSubtreeIsAssigned_ThenDerivedPropertyFollowsSiblingReadThroughAPlainField(bool isReaderAttachedFirst)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var root = new FieldOwnerRoot(context);
+        var pair = new FieldOwnerPair();
+        var reader = new FieldOwnedNode { Owner = pair };
+        var sibling = new FieldOwnedNode { Value = 1 };
+        pair.First = isReaderAttachedFirst ? reader : sibling;
+        pair.Second = isReaderAttachedFirst ? sibling : reader;
+        root.Pair = pair;
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        sibling.Value = 5;
+
+        // Assert
+        AssertSingleChange(changes, reader, nameof(FieldOwnedNode.SiblingValue), 5);
+        Assert.Equal(5, reader.SiblingValue);
+    }
+
     [Fact]
     public void WhenRootIsAttachedToContext_ThenDerivedPropertyFollowsSiblingAttachedAfterIt()
     {
