@@ -123,26 +123,45 @@ public class PostLockQueueTests
         Assert.Equal("r l", changes.Single(c => c.Property.Name == nameof(Person.FullName)).GetNewValue<string>());
     }
 
-    [Fact]
-    public async Task WhenHandlerWritesWhileSynchronousObserverMakesStructuralWrite_ThenBothComplete()
+    [Theory]
+    [InlineData("structuralAttach")]
+    [InlineData("contextAttach")]
+    [InlineData("structuralDetach")]
+    [InlineData("tryRunWhileAttached")]
+    public async Task WhenLockHolderWritesWhileSynchronousObserverMakesStructuralWrite_ThenBothComplete(string operation)
     {
         // Arrange: the observer holds the dispatch gate of the observable while it waits for the lifecycle lock,
-        // which the attaching thread holds while its handler writes.
+        // which the other thread holds while its handler or callback writes.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var lifecycle = context.GetService<LifecycleInterceptor>();
         var root = new Person(context);
         var source = new Person(context);
         var attached = new Person();
+        if (operation == "structuralDetach")
+        {
+            root.Mother = attached;
+        }
+
         using var observerEntered = new ManualResetEventSlim();
         using var handlerReached = new ManualResetEventSlim();
         var handlerSawObserver = false;
         var observerSawHandler = false;
+        Person? written = null;
+        void GatedWrite(Person target)
+        {
+            handlerReached.Set();
+            handlerSawObserver = observerEntered.Wait(Timeout);
+            target.FirstName = "h";
+            written = target;
+        }
+
+        var isArmed = 1;
         context.WithService(() => new CallbackLifecycleHandler(change =>
         {
-            if (change.IsContextAttach && change.Subject == attached)
+            if (GetGatedWriteTarget(operation, change, root, source, attached) is { } target &&
+                Interlocked.Exchange(ref isArmed, 0) == 1)
             {
-                handlerReached.Set();
-                handlerSawObserver = observerEntered.Wait(Timeout);
-                attached.FirstName = "h";
+                GatedWrite(target);
             }
         }));
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
@@ -157,13 +176,14 @@ public class PostLockQueueTests
 
         // Act
         var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => source.FirstName = "s");
-        var attacher = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => root.Mother = attached);
-        await Task.WhenAll(writer, attacher).WaitAsync(Timeout);
+        var lockHolder = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+            RunUnderLifecycleLock(operation, context, lifecycle, root, attached, () => GatedWrite(root)));
+        await Task.WhenAll(writer, lockHolder).WaitAsync(Timeout);
 
         // Assert
         Assert.True(handlerSawObserver);
         Assert.True(observerSawHandler);
-        Assert.Equal("h", attached.FirstName);
+        Assert.Equal("h", written?.FirstName);
         Assert.NotNull(root.Father);
     }
 
@@ -418,5 +438,38 @@ public class PostLockQueueTests
         return DedicatedThreadTestHelpers
             .RunOnDedicatedThreadAsync(() => lifecycle.TryRunWhileAttached(subject, () => { }))
             .Wait(Timeout);
+    }
+
+    // The subject the handler writes on the change the operation makes under the lock, null on any other change.
+    private static Person? GetGatedWriteTarget(
+        string operation, SubjectLifecycleChange change, Person root, Person source, Person attached)
+    {
+        return operation switch
+        {
+            "structuralAttach" when change.IsContextAttach && change.Subject == attached => attached,
+            "contextAttach" when change is { IsContextAttach: true, Subject: Person person } && person != root && person != source => person,
+            "structuralDetach" when change.IsContextDetach && change.Subject == attached => root,
+            _ => null
+        };
+    }
+
+    private static void RunUnderLifecycleLock(
+        string operation, IInterceptorSubjectContext context, LifecycleInterceptor lifecycle, Person root, Person attached, Action write)
+    {
+        switch (operation)
+        {
+            case "structuralAttach":
+                root.Mother = attached;
+                break;
+            case "contextAttach":
+                _ = new Person(context);
+                break;
+            case "structuralDetach":
+                root.Mother = null;
+                break;
+            default:
+                Assert.True(lifecycle.TryRunWhileAttached(root, write));
+                break;
+        }
     }
 }
