@@ -280,17 +280,36 @@ public class OpcUaServerConfiguration
                 nameof(ApplicationUri));
         }
 
-        var registeredTokenTypes = new HashSet<(UserTokenType, string?)>();
-        foreach (var authenticator in UserTokenAuthenticators)
+        for (var i = 0; i < UserTokenAuthenticators.Count; i++)
         {
-            if (!registeredTokenTypes.Add((authenticator.TokenType, authenticator.IssuedTokenProfileUri)))
+            for (var j = 0; j < i; j++)
             {
-                throw new ArgumentException(
-                    $"UserTokenAuthenticators contains more than one authenticator for the token type {authenticator.TokenType}; " +
-                    "the server keeps only one per token type, so combine their checks in one authenticator.",
-                    nameof(UserTokenAuthenticators));
+                if (ReplacesInRegistry(UserTokenAuthenticators[i], UserTokenAuthenticators[j]))
+                {
+                    throw new ArgumentException(
+                        $"UserTokenAuthenticators contains more than one authenticator for the token type {UserTokenAuthenticators[i].TokenType}; " +
+                        "the server keeps only one per token type and issuer, so combine their checks in one authenticator.",
+                        nameof(UserTokenAuthenticators));
+                }
             }
         }
+    }
+
+    /// <summary>
+    /// Gets whether the SDK's identity registry would replace <paramref name="existing"/> when <paramref name="added"/>
+    /// is registered: same token type and issued token profile, and the same issuer unless either has none.
+    /// </summary>
+    private static bool ReplacesInRegistry(IUserTokenAuthenticator added, IUserTokenAuthenticator existing)
+    {
+        if (added.TokenType != existing.TokenType ||
+            !string.Equals(added.IssuedTokenProfileUri, existing.IssuedTokenProfileUri, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var addedIssuer = (added as IIssuerTokenAuthenticator)?.IssuerUri;
+        var existingIssuer = (existing as IIssuerTokenAuthenticator)?.IssuerUri;
+        return addedIssuer is null || existingIssuer is null || string.Equals(addedIssuer, existingIssuer, StringComparison.Ordinal);
     }
 
     public virtual string[] GetNamespaceUris()

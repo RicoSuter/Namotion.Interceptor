@@ -102,6 +102,26 @@ public class OpcUaServerConfigurationTests
         Assert.Equal(nameof(OpcUaServerConfiguration.UserTokenAuthenticators), exception.ParamName);
     }
 
+    [Fact]
+    public void WhenTwoIssuedTokenAuthenticatorsHaveDifferentIssuers_ThenValidationPasses()
+    {
+        // Arrange
+        var configuration = new OpcUaServerConfiguration
+        {
+            UserTokenAuthenticators =
+            [
+                new TestIssuerAuthenticator("urn:issuer:a"),
+                new TestIssuerAuthenticator("urn:issuer:b")
+            ]
+        };
+
+        // Act
+        var exception = Record.Exception(configuration.Validate);
+
+        // Assert
+        Assert.Null(exception);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("  ")]
@@ -126,6 +146,18 @@ public class OpcUaServerConfigurationTests
         // Act & Assert
         var exception = Assert.Throws<ArgumentException>(() => new OpcUaSubjectServer(subject, configuration, NullLogger.Instance));
         Assert.Equal(nameof(OpcUaServerConfiguration.ApplicationUri), exception.ParamName);
+    }
+
+    private sealed class TestIssuerAuthenticator(string issuerUri) : IIssuerTokenAuthenticator
+    {
+        public UserTokenType TokenType => UserTokenType.IssuedToken;
+
+        public string? IssuedTokenProfileUri => "http://opcfoundation.org/UA/UserToken#JWT";
+
+        public string? IssuerUri => issuerUri;
+
+        public ValueTask<AuthenticationResult> AuthenticateAsync(AuthenticationContext context, CancellationToken ct = default) =>
+            new(AuthenticationResult.NotHandled);
     }
 
     private sealed class TestAuthenticator(UserTokenType tokenType) : IUserTokenAuthenticator

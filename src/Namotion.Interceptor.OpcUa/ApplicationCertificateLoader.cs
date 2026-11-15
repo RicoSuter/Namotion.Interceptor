@@ -155,6 +155,17 @@ internal static class ApplicationCertificateLoader
             return;
         }
 
+        // The SDK writes the loaded certificate's thumbprint into the identifier, so the pin is the one remembered
+        // before the first load.
+        var configuredThumbprint = ConfiguredThumbprints.GetValue(identifier, static id => new StrongBox<string?>(id.Thumbprint)).Value;
+        if (!string.IsNullOrEmpty(configuredThumbprint))
+        {
+            logger.LogWarning(
+                "The application certificate is pinned to the thumbprint {Thumbprint}, skipping cleanup of the store '{Path}'.",
+                configuredThumbprint, storePath);
+            return;
+        }
+
         var storeLock = GetStoreLock(identifier);
         await storeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
