@@ -27,6 +27,19 @@ public class OpcUaServerConfiguration
     public string ApplicationName { get; set; } = "Namotion.Interceptor.Server";
 
     /// <summary>
+    /// Gets or sets the application URI the server presents and its certificate must carry. When null,
+    /// "urn:{host name}:Namotion.Interceptor:{ApplicationName}" is used, which changes when the host name changes.
+    /// </summary>
+    /// <remarks>
+    /// A kept certificate must also carry the host of <see cref="BaseAddress"/>, where localhost stands for the host
+    /// name. When the host name changes, such as for a recreated container, a self-signed certificate that then fails the
+    /// application URI or host check is replaced and clients have to trust the new one, while any other certificate fails
+    /// the start. A stable host name, or an explicit
+    /// host in <see cref="BaseAddress"/> together with this property, avoids both.
+    /// </remarks>
+    public string? ApplicationUri { get; set; }
+
+    /// <summary>
     /// Gets the primary namespace URI for the OPC UA server used to identify custom nodes.
     /// Default is "http://namotion.com/Interceptor/".
     /// </summary>
@@ -45,10 +58,11 @@ public class OpcUaServerConfiguration
     public IPropertyMapper<OpcUaPropertyMapping> Mapper { get; set; } = DefaultMapper;
 
     /// <summary>
-    /// Gets or sets a value indicating whether to clean up old certificates from the
-    /// application certificate store on connect. Defaults to true.
+    /// Gets or sets whether the application certificate store is emptied on startup, which makes the server
+    /// create a new certificate on every start. Clients that trust the server then have to trust it again.
+    /// Default is false.
     /// </summary>
-    public bool CleanCertificateStore { get; set; } = true;
+    public bool CleanCertificateStore { get; set; }
 
     /// <summary>
     /// Gets or sets the time window to buffer incoming changes (default: 8ms).
@@ -99,8 +113,7 @@ public class OpcUaServerConfiguration
             ApplicationType = ApplicationType.Server
         };
 
-        var host = System.Net.Dns.GetHostName();
-        var applicationUri = $"urn:{host}:Namotion.Interceptor:{ApplicationName}";
+        var applicationUri = ApplicationUri ?? $"urn:{System.Net.Dns.GetHostName()}:Namotion.Interceptor:{ApplicationName}";
 
         var config = new ApplicationConfiguration
         {
@@ -213,6 +226,20 @@ public class OpcUaServerConfiguration
 
         application.ApplicationConfiguration = config;
         return application;
+    }
+
+    /// <summary>
+    /// Validates configuration values and throws ArgumentException if invalid.
+    /// Call this method during initialization to fail fast with clear error messages.
+    /// </summary>
+    public void Validate()
+    {
+        if (ApplicationUri is not null && string.IsNullOrWhiteSpace(ApplicationUri))
+        {
+            throw new ArgumentException(
+                "ApplicationUri must not be empty or whitespace when set",
+                nameof(ApplicationUri));
+        }
     }
 
     public virtual string[] GetNamespaceUris()

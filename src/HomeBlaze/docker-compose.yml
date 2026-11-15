@@ -4,6 +4,7 @@
 services:
   homeblaze:
     image: ghcr.io/ricosuter/homeblaze:latest
+    hostname: homeblaze  # stable across recreated containers, so the OPC UA certificates kept in data/OpcUa stay valid
     restart: unless-stopped
     ports:
       - "8080:8080"   # UI and MCP
