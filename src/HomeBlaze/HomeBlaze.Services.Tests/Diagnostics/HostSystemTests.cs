@@ -29,6 +29,107 @@ public class HostSystemTests
     }
 
     [Fact]
+    public void WhenExceptionsAreThrownAndCaught_ThenTheCounterCountsThem()
+    {
+        // Arrange
+        var before = FirstChanceExceptionCounter.Count;
+
+        // Act
+        for (var index = 0; index < 3; index++)
+        {
+            try
+            {
+                throw new InvalidOperationException();
+            }
+            catch (InvalidOperationException)
+            {
+            }
+        }
+
+        // Assert - other tests in the process may throw too, so at least these three.
+        Assert.True(FirstChanceExceptionCounter.Count - before >= 3);
+    }
+
+    [Fact]
+    public void WhenDirectoryEntriesAreCounted_ThenAllocationDoesNotGrowWithTheEntryCount()
+    {
+        // Arrange
+        var fewEntries = CreateDirectoryWithFiles(10);
+        var manyEntries = CreateDirectoryWithFiles(1000);
+        try
+        {
+            HostProcess.CountDirectoryEntries(fewEntries);
+            HostProcess.CountDirectoryEntries(manyEntries);
+
+            // Act
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            var fewCount = HostProcess.CountDirectoryEntries(fewEntries);
+            var fewAllocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            before = GC.GetAllocatedBytesForCurrentThread();
+            var manyCount = HostProcess.CountDirectoryEntries(manyEntries);
+            var manyAllocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            // Assert - a string per entry would add tens of kilobytes for the larger directory.
+            Assert.Equal(10, fewCount);
+            Assert.Equal(1000, manyCount);
+            Assert.True(manyAllocated - fewAllocated < 2048, $"{fewAllocated} bytes for 10 entries, {manyAllocated} bytes for 1000 entries");
+        }
+        finally
+        {
+            Directory.Delete(fewEntries, recursive: true);
+            Directory.Delete(manyEntries, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void WhenNoGarbageCollectionHasRun_ThenTheGarbageCollectionValuesAreEmpty()
+    {
+        // Arrange
+        var process = new HostSystem(NullLogger<HostSystem>.Instance).Process;
+        process.SetLastCollectionValues(index: 4, heapSize: 100, committedSize: 200, fragmentedSize: 10);
+        process.SetLastFullCollectionValues(index: 3, gen2Size: 60, largeObjectHeapSize: 20);
+
+        // Act - the runtime reports index 0 and zero sizes until the first collection.
+        process.SetLastCollectionValues(index: 0, heapSize: 0, committedSize: 0, fragmentedSize: 0);
+        process.SetLastFullCollectionValues(index: 0, gen2Size: 0, largeObjectHeapSize: 0);
+
+        // Assert
+        Assert.Null(process.GcHeapSize);
+        Assert.Null(process.GcCommittedSize);
+        Assert.Null(process.GcFragmentedSize);
+        Assert.Null(process.Gen2Size);
+        Assert.Null(process.LargeObjectHeapSize);
+    }
+
+    [Fact]
+    public void WhenGarbageCollectionsHaveRun_ThenTheGarbageCollectionValuesAreSet()
+    {
+        // Arrange
+        var process = new HostSystem(NullLogger<HostSystem>.Instance).Process;
+
+        // Act
+        process.SetLastCollectionValues(index: 4, heapSize: 100, committedSize: 200, fragmentedSize: 10);
+        process.SetLastFullCollectionValues(index: 3, gen2Size: 60, largeObjectHeapSize: 20);
+
+        // Assert
+        Assert.Equal(100, process.GcHeapSize);
+        Assert.Equal(200, process.GcCommittedSize);
+        Assert.Equal(10, process.GcFragmentedSize);
+        Assert.Equal(60, process.Gen2Size);
+        Assert.Equal(20, process.LargeObjectHeapSize);
+    }
+
+    [Fact]
+    public void WhenDirectoryIsMissing_ThenCountingEntriesThrows()
+    {
+        // Arrange
+        var path = Path.Combine(Path.GetTempPath(), "hb-missing-" + Guid.NewGuid().ToString("N"));
+
+        // Act & Assert
+        Assert.Throws<DirectoryNotFoundException>(() => HostProcess.CountDirectoryEntries(path));
+    }
+
+    [Fact]
     public void WhenNameIsSet_ThenTitleUsesName()
     {
         // Arrange
@@ -44,7 +145,8 @@ public class HostSystemTests
     [Fact]
     public async Task WhenRunningOnTheCurrentPlatform_ThenRatesAppearInRange()
     {
-        // Arrange
+        // Arrange: the garbage collection values stay zero until the first collection.
+        GC.Collect();
         var host = new HostSystem(NullLogger<HostSystem>.Instance);
         var supported = OperatingSystem.IsLinux() || OperatingSystem.IsWindows() || OperatingSystem.IsMacOS();
 
@@ -59,6 +161,38 @@ public class HostSystemTests
         Assert.NotNull(host.Process.AllocationRate);
         Assert.True(host.Process.WorkingSet > 0);
         Assert.True(host.Process.ThreadCount > 0);
+        Assert.True(host.Process.GcCommittedSize > 0);
+        Assert.True(host.Process.GcFragmentedSize >= 0);
+        Assert.True(host.Process.Gen2Size >= 0);
+        Assert.True(host.Process.LargeObjectHeapSize >= 0);
+        if (OperatingSystem.IsMacOS())
+        {
+            Assert.Null(host.Process.HandleCount);
+        }
+        else
+        {
+            Assert.True(host.Process.HandleCount > 0);
+        }
+
+        Assert.True(host.Process.TimerCount >= 0);
+        Assert.True(host.Process.ThreadPoolThreadCount > 0);
+        Assert.True(host.Process.ThreadPoolQueueLength >= 0);
+        Assert.True(host.Process.LockContentionRate >= 0);
+        Assert.True(host.Process.ExceptionRate >= 0);
+        Assert.True(host.Process.JitCompiledMethodCount > 0);
+        if (OperatingSystem.IsLinux())
+        {
+            Assert.True(host.Process.ResidentAnonymousMemory > 0);
+            Assert.True(host.Process.ResidentFileMemory > 0);
+            Assert.True(host.Process.ResidentSharedMemory >= 0);
+        }
+        else
+        {
+            Assert.Null(host.Process.ResidentAnonymousMemory);
+            Assert.Null(host.Process.ResidentFileMemory);
+            Assert.Null(host.Process.ResidentSharedMemory);
+        }
+
         if (supported)
         {
             Assert.InRange(host.CpuUsage!.Value, 0m, 1m);
@@ -227,6 +361,18 @@ public class HostSystemTests
         {
             PollingInterval = TimeSpan.FromHours(1)
         };
+    }
+
+    private static string CreateDirectoryWithFiles(int fileCount)
+    {
+        var path = Path.Combine(Path.GetTempPath(), "hb-entries-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        for (var index = 0; index < fileCount; index++)
+        {
+            File.Create(Path.Combine(path, "file-" + index)).Dispose();
+        }
+
+        return path;
     }
 
     private static async Task RunAsync(HostSystem host, Func<Task> whileRunning)

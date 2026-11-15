@@ -158,6 +158,18 @@ public partial class SqliteHistoryStoreSubject :
     public partial long EstimatedStorageSize { get; set; }
 
     /// <summary>
+    /// Open database connections of this store, partitions and the metadata database together.
+    /// </summary>
+    [State]
+    public partial int OpenConnectionCount { get; set; }
+
+    /// <summary>
+    /// Memory SQLite holds in this process, for every SQLite database the process uses, not only this store.
+    /// </summary>
+    [State(Unit = StateUnit.Byte)]
+    public partial long SqliteMemorySize { get; set; }
+
+    /// <summary>
     /// Average incoming changes per second (eligible [State] changes observed).
     /// </summary>
     [State]
@@ -321,8 +333,10 @@ public partial class SqliteHistoryStoreSubject :
                 _logger.LogError(exception, "Final history flush on shutdown failed; pending samples were not persisted.");
             }
 
-            RefreshMetrics(engine);
             engine.Dispose();
+
+            // After disposing, so a stopped store reports no open connections.
+            RefreshMetrics(engine);
             Status = "Stopped";
         }
     }
@@ -393,10 +407,14 @@ public partial class SqliteHistoryStoreSubject :
         QueueDepth = engine.QueueDepth;
         DropCount = engine.DropCount;
         EstimatedStorageSize = engine.EstimatedStorageBytes;
+        OpenConnectionCount = engine.OpenConnectionCount;
         LastFlushUtc = engine.LastFlushUtc;
         LastError = engine.LastError;
         IncomingChangesPerSecond = _recorder?.IncomingChangesPerSecond ?? 0;
         RecordedChangesPerSecond = _recorder?.RecordedChangesPerSecond ?? 0;
+
+        // Last, so a throwing native call cannot skip the values above.
+        SqliteMemorySize = SQLitePCL.raw.sqlite3_memory_used();
     }
 
     // ILifecycleHandler
