@@ -86,6 +86,18 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     // Partitions this build refused to open, so a read skips them without retrying and logging per query.
     private readonly HashSet<string> _unreadablePartitions = new(StringComparer.Ordinal);
 
+    // How long a partition connection stays cached without use before the sweep closes it, which frees all of
+    // its memory in SQLite. The partition being written is used by every flush and so stays open.
+    internal static readonly TimeSpan IdlePartitionConnectionTimeout = TimeSpan.FromMinutes(5);
+
+    // The page cache, in KiB, of a connection to a partition whose range has ended, instead of SQLite's default
+    // of about 2 MB. It bounds the memory a query spanning many partitions holds until the sweep closes them; a
+    // past partition is mostly read once per query, which the operating system's file cache already serves.
+    internal const int PastPartitionPageCacheKibibytes = 256;
+
+    // When each cached partition connection was last handed out. Under _connectionLock.
+    private readonly Dictionary<string, DateTimeOffset> _partitionLastUsed = new(StringComparer.Ordinal);
+
     private readonly SqliteCoverageStore _coverageStore;
 
     // The read/partition-layout context handed to SqliteHistoryReader. It captures this engine's
@@ -454,6 +466,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         }
 
         _connections.Clear();
+        _partitionLastUsed.Clear();
     }
 
     public Task<HistorySeries> QueryAsync(HistoryQuery query, CancellationToken cancellationToken)
@@ -550,7 +563,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             return null;
         }
 
-        var sample = SqliteHistoryReader.GetSampleAtOrBefore(_readContext, propertyPath, asOf);
+        var sample = SqliteHistoryReader.GetSampleAtOrBefore(_readContext, propertyPath, asOf, coverage.From);
         return sample is not null && sample.Timestamp >= coverage.From ? sample : null;
     }
 
@@ -680,7 +693,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     {
         lock (_flushLock)
         {
-            var cutoff = _getUtcNow() - _maxAge;
+            var now = _getUtcNow();
+            var cutoff = now - _maxAge;
 
             lock (_connectionLock)
             {
@@ -747,6 +761,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                         Execute(connection, "PRAGMA wal_checkpoint(TRUNCATE);");
                     }
                 }
+
+                CloseIdlePartitions(now);
             }
 
             lock (_pendingLock)
@@ -763,12 +779,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     // partition's main file and its -wal/-shm siblings if present.
     private void DeletePartition(string key)
     {
-        if (_connections.TryGetValue(key, out var connection))
-        {
-            connection.Close();
-            connection.Dispose();
-            _connections.Remove(key);
-        }
+        ClosePartition(key);
 
         var path = _readContext.PartitionFilePath(key);
         DeleteFileIfExists(path);
@@ -853,8 +864,10 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     {
         lock (_connectionLock)
         {
+            var now = _getUtcNow();
             if (_connections.TryGetValue(key, out var existing))
             {
+                _partitionLastUsed[key] = now;
                 return existing;
             }
 
@@ -895,6 +908,11 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                     "CREATE VIEW IF NOT EXISTS history_paths AS " +
                     "SELECT p.path, h.ts, h.value_long, h.value_double, h.value_json " +
                     "FROM history h JOIN paths p ON p.id = h.path_id;");
+
+                if (SqlitePartition.InferredRange(key).End <= now)
+                {
+                    Execute(connection, PastPartitionPageCacheSql);
+                }
             }
             catch
             {
@@ -903,6 +921,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             }
 
             _connections[key] = connection;
+            _partitionLastUsed[key] = now;
             return connection;
         }
     }
@@ -1004,6 +1023,44 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         }
     }
 
+    private static readonly string PastPartitionPageCacheSql =
+        "PRAGMA cache_size=-" + PastPartitionPageCacheKibibytes.ToString(CultureInfo.InvariantCulture) + ";";
+
+    // Closes the partition connections not handed out for IdlePartitionConnectionTimeout. Every query holds
+    // _connectionLock for its whole run, as this caller does, so no connection is closed while in use.
+    private void CloseIdlePartitions(DateTimeOffset now)
+    {
+        List<string>? idle = null;
+        foreach (var (key, lastUsed) in _partitionLastUsed)
+        {
+            if (now - lastUsed >= IdlePartitionConnectionTimeout)
+            {
+                (idle ??= []).Add(key);
+            }
+        }
+
+        if (idle is null)
+        {
+            return;
+        }
+
+        foreach (var key in idle)
+        {
+            ClosePartition(key);
+        }
+    }
+
+    private void ClosePartition(string key)
+    {
+        if (_connections.Remove(key, out var connection))
+        {
+            connection.Close();
+            connection.Dispose();
+        }
+
+        _partitionLastUsed.Remove(key);
+    }
+
     private const string HasUserTablesSql =
         "SELECT EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%');";
 
@@ -1019,6 +1076,18 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         using var command = connection.CreateCommand();
         command.CommandText = sql;
         return Convert.ToInt64(command.ExecuteScalar() ?? 0L, CultureInfo.InvariantCulture);
+    }
+
+    // The page cache of a cached partition connection as PRAGMA cache_size reports it (negative values are
+    // KiB), or null when the partition has no cached connection.
+    internal long? GetPageCacheSize(string partitionKey)
+    {
+        lock (_connectionLock)
+        {
+            return _connections.TryGetValue(partitionKey, out var connection)
+                ? QueryLong(connection, "PRAGMA cache_size;")
+                : null;
+        }
     }
 
     public void Dispose()

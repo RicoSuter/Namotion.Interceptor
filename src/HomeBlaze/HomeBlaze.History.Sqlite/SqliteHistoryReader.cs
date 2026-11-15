@@ -117,7 +117,10 @@ internal static class SqliteHistoryReader
 
             var fromTicks = EpochTicks.ToEpochTicks(legFrom);
             var toTicks = EpochTicks.ToEpochTicks(legTo);
-            var isUlong = ResolveIsUlong(context, leg.Path);
+
+            // Resolved only once the leg has rows: the column metadata walks every partition for a path none
+            // of them holds, which a query for a property this store never recorded would otherwise pay each time.
+            bool? isUlong = null;
 
             foreach (var key in context.PartitionKeysOverlapping(legFrom, legTo))
             {
@@ -147,7 +150,8 @@ internal static class SqliteHistoryReader
                 while (reader.Read())
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    rows.Add((ReadRawRow(reader), isUlong));
+                    isUlong ??= ResolveIsUlong(context, leg.Path);
+                    rows.Add((ReadRawRow(reader), isUlong.Value));
                 }
             }
         }
@@ -166,7 +170,10 @@ internal static class SqliteHistoryReader
             ImmutableArray<HistoryCoverage>.Empty);
     }
 
-    public static HistoryPoint? GetSampleAtOrBefore(SqliteReadContext context, string propertyPath, DateTimeOffset asOf)
+    // Partitions ending at or before floor are not searched, so a caller that discards any sample older than
+    // floor (the start of the coverage holding asOf) does not open every older partition when there is none.
+    public static HistoryPoint? GetSampleAtOrBefore(
+        SqliteReadContext context, string propertyPath, DateTimeOffset asOf, DateTimeOffset floor)
     {
         // Route through the move chain: walk legs from newest to oldest and return the first held value.
         // Only legs whose validity starts at or before asOf can hold the value; the older leg of a move is
@@ -179,7 +186,7 @@ internal static class SqliteHistoryReader
             }
 
             var ceiling = asOf < leg.ValidTo ? asOf : leg.ValidTo - new TimeSpan(1);
-            var found = GetLegSampleAtOrBefore(context, leg.Path, ceiling);
+            var found = GetLegSampleAtOrBefore(context, leg.Path, ceiling, floor);
             if (found is { } row && EpochTicks.FromEpochTicks(row.Ticks) >= leg.ValidFrom)
             {
                 return SqliteValueRouting.ToPoint(row, ResolveIsUlong(context, leg.Path));
@@ -254,17 +261,19 @@ internal static class SqliteHistoryReader
         return result;
     }
 
-    // Newest row at or before asOf for a single path across its partitions.
-    private static RawRow? GetLegSampleAtOrBefore(SqliteReadContext context, string path, DateTimeOffset asOf)
+    // Newest row at or before asOf for a single path across its partitions ending after floor.
+    private static RawRow? GetLegSampleAtOrBefore(
+        SqliteReadContext context, string path, DateTimeOffset asOf, DateTimeOffset floor)
     {
         var asOfTicks = EpochTicks.ToEpochTicks(asOf);
         RawRow? newest = null;
         var newestTicks = long.MinValue;
+        var floorTicks = EpochTicks.ToEpochTicks(floor);
         foreach (var (key, endTicks) in context.PartitionsAtOrBeforeByEndDescending(asOf))
         {
-            if (endTicks <= newestTicks)
+            if (endTicks <= newestTicks || endTicks <= floorTicks)
             {
-                break; // this file and every later one only hold rows before the newest found
+                break; // this file and every later one only hold rows before the newest found or the floor
             }
 
             if (!context.PartitionFileExists(key))
