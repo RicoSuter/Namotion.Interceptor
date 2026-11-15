@@ -65,8 +65,8 @@ public static class DerivedStructureDependencies
     internal static PropertyReference Of(IInterceptorSubject subject) => new(subject, null!);
 
     /// <summary>
-    /// The reference under which the children of <paramref name="subject"/> are recorded as a dependency: its name contains
-    /// a name starting with a null character, which the registry rejects for an added property.
+    /// The reference under which the children of <paramref name="subject"/> are recorded as a dependency: its name,
+    /// <see cref="ChildrenName"/>, is reserved and is never the name of a property.
     /// </summary>
     internal static PropertyReference ChildrenOf(IInterceptorSubject subject) => new(subject, ChildrenName);
 

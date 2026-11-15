@@ -107,6 +107,35 @@ public class ConditionalDependencyTests
     }
 
     [Fact]
+    public void WhenDependenciesChangeAfterTheyWereRead_ThenReturnedRequiredPropertiesDoNotChange()
+    {
+        // Arrange: both dependency sets have two entries, so the commit rewrites the same buffer.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithDerivedPropertyChangeDetection()
+            .WithLifecycle();
+
+        var person = new ConditionalPerson(context)
+        {
+            UseFirstName = false,
+            FirstName = "Alice",
+            LastName = "Bob"
+        };
+
+        var displayProperty = new PropertyReference(person, nameof(ConditionalPerson.Display));
+        var lastNameProperty = new PropertyReference(person, nameof(ConditionalPerson.LastName));
+        var useFirstNameProperty = new PropertyReference(person, nameof(ConditionalPerson.UseFirstName));
+        var requiredProperties = displayProperty.GetRequiredProperties();
+
+        // Act
+        person.UseFirstName = true;
+
+        // Assert
+        Assert.Equal("Alice", person.Display);
+        Assert.Equal([useFirstNameProperty, lastNameProperty], requiredProperties.ToArray());
+    }
+
+    [Fact]
     public async Task WhenConditionAndDependencyWrittenConcurrently_ThenValueConvergesToCorrectState()
     {
         // Stress test: concurrent writes to the condition flag and the dependencies.

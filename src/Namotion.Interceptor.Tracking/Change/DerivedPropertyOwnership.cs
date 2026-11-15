@@ -501,7 +501,8 @@ internal static class DerivedPropertyOwnership
     /// <summary>
     /// The request a loop took since its last commit and has not answered with a commit yet: none, only requests
     /// raised on the owner's thread, or a foreign one (another thread's request, or a write of another thread
-    /// that moved a source without a request, R5).
+    /// that moved a source without a request, R5 in "The Version Protocol" in
+    /// docs/design/tracking-derived-properties.md).
     /// </summary>
     private enum UnansweredRequest
     {
@@ -906,9 +907,10 @@ internal static class DerivedPropertyOwnership
 
     private static bool HasVersionChanged(ReadOnlySpan<RecordedDependency> recorded)
     {
-        // R5: a full fence between setting the dependencies and reading the versions, paired with the writer's Interlocked
-        // increment of the version (W4) before it reads the used-by set (W5): either a version read here sees the
-        // write, or the writer finds the derived property in the used-by set.
+        // R5 ("The Version Protocol" in docs/design/tracking-derived-properties.md): a full fence between setting the
+        // dependencies and reading the versions, paired with the writer's Interlocked increment of the version (W4)
+        // before it reads the used-by set (W5): either a version read here sees the write, or the writer finds the
+        // derived property in the used-by set.
         Interlocked.MemoryBarrier();
         foreach (ref readonly var dependency in recorded)
         {
