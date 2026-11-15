@@ -1,4 +1,5 @@
 using Xunit;
+using Microsoft.Extensions.Configuration;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Connectors;
 
@@ -65,6 +66,34 @@ public class ConnectorTesterConfigurationTests
         // Assert
         Assert.Null(exception);
     }
+
+    [Theory]
+    [InlineData("opcua-chaos", "opcua-durability")]
+    [InlineData("websocket-chaos", "websocket-durability")]
+    public void WhenDurabilityProfileIsLoaded_ThenItMatchesItsChaosProfileWithTheCheckOn(
+        string chaosProfile, string durabilityProfile)
+    {
+        // Arrange
+        var chaosSettings = LoadProfile(chaosProfile);
+        var durabilitySettings = LoadProfile(durabilityProfile);
+
+        // Act
+        var addedSettings = durabilitySettings.Except(chaosSettings).ToDictionary();
+        var removedSettings = chaosSettings.Except(durabilitySettings).ToDictionary();
+
+        // Assert
+        Assert.Equal(new Dictionary<string, string?> { ["ConnectorTester:VerifyWriteDurability"] = "True" }, addedSettings);
+        Assert.Empty(removedSettings);
+    }
+
+    private static Dictionary<string, string?> LoadProfile(string environmentName)
+        => new ConfigurationBuilder()
+            .SetBasePath(AppContext.BaseDirectory)
+            .AddJsonFile("appsettings.json", optional: false)
+            .AddJsonFile($"appsettings.{environmentName}.json", optional: false)
+            .Build()
+            .AsEnumerable()
+            .ToDictionary();
 
     private static ConnectorTesterConfiguration CreateConfiguration(
         bool verifyWriteDurability, int clientCount, int numberOfBatches) => new()

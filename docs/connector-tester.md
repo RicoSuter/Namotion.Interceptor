@@ -19,7 +19,8 @@ dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile o
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt-chaos --configuration Release
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-chaos --configuration Release
 
-# Write-durability test: websocket-chaos plus the write-durability oracle
+# Write-durability test: the chaos profile plus the write-durability oracle
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-durability --configuration Release
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-durability --configuration Release
 
 # Load test: throughput and latency at 20k changes/sec
@@ -101,7 +102,7 @@ The snapshot comparison checks that participants agree, not that their writes su
 
 The check is sound only when each property has a single writer, because another participant's later write looks exactly like a loss. The option therefore pins each RandomMutationEngine participant to the `TestNode` value property at its participant index, which the BatchMutationEngine does anyway, and startup rejects it with more than four participants. With the BatchMutationEngine, recording takes a lock on every write, so load numbers from such a run are not benchmark numbers.
 
-`websocket-durability` is `websocket-chaos` with the option on, and `websocket-chaos` keeps its overlapping writers, which only the agreement check covers. To enable it on another profile, set it as an environment variable, which overrides the profile's `appsettings` file:
+`opcua-durability` is `opcua-chaos` and `websocket-durability` is `websocket-chaos`, each with the option on, and a test checks that they differ in nothing else. The chaos profiles keep their overlapping writers, which only the agreement check covers. To enable it on another profile, set it as an environment variable, which overrides the profile's `appsettings` file:
 
 ```bash
 ConnectorTester__VerifyWriteDurability=true dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-load --configuration Release

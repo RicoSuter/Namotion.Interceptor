@@ -28,6 +28,10 @@
       "commandName": "Project",
       "environmentVariables": { "DOTNET_ENVIRONMENT": "websocket-load" }
     },
+    "opcua-durability": {
+      "commandName": "Project",
+      "environmentVariables": { "DOTNET_ENVIRONMENT": "opcua-durability" }
+    },
     "websocket-durability": {
       "commandName": "Project",
       "environmentVariables": { "DOTNET_ENVIRONMENT": "websocket-durability" }
