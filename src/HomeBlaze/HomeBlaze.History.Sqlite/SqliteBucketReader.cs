@@ -106,6 +106,8 @@ internal static class SqliteBucketReader
                 }
             }
 
+            // Resolving the column kind above marks a path no partition knows, so its window partitions stay closed.
+            var legsWithRows = chain.FindAll(leg => !context.IsPathAbsent(leg.Path));
             var pathIds = new Dictionary<(string PartitionKey, string Path), long?>();
             var segments = new List<ChainSegment>();
             var deltaCursor = new BucketCursor(bucket);
@@ -116,7 +118,7 @@ internal static class SqliteBucketReader
             for (var windowIndex = 0; windowIndex < windows.Length; windowIndex++)
             {
                 var window = windows[windowIndex];
-                firstPartition = CollectWindowSegments(chain, partitions, firstPartition, window, segments);
+                firstPartition = CollectWindowSegments(legsWithRows, partitions, firstPartition, window, segments);
                 if (aggregation == HistoryAggregations.TimeWeightedAverage)
                 {
                     // The held value only enters the scan when this store covers the first bucket's start.

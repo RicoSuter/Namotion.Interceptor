@@ -87,7 +87,7 @@ public sealed class SqliteHistoryStorePartitionConnectionTests : IDisposable
         core.Record("/a/Value", Base.AddSeconds(1), 2d, typeof(double));
         now = Base.AddSeconds(10);
         await core.FlushAsync(CancellationToken.None);
-        now += SqliteHistoryStore.IdlePartitionConnectionTimeout;
+        now += SqliteHistoryStore.IdlePartitionConnectionTimeout + TimeSpan.FromTicks(1);
         core.Record("/a/Value", now, 3d, typeof(double));
         await core.FlushAsync(CancellationToken.None);
 
@@ -122,6 +122,101 @@ public sealed class SqliteHistoryStorePartitionConnectionTests : IDisposable
         // Assert
         var pastPartition = SqlitePartition.PartitionKey(Base.AddDays(-14), PartitionInterval.Weekly);
         Assert.True(core.IsPartitionOpen(pastPartition));
+    }
+
+    [Fact]
+    public async Task WhenTheCoverageStartsOnAPartitionBoundary_ThenTheLookBackFindsTheSampleAtThatStart()
+    {
+        // Arrange - the sample sits exactly at the coverage start, in the partition starting there; the file of
+        // the week before cannot be read, so opening it would show on LastError.
+        var partitionStart = SqlitePartition.InferredRange(
+            SqlitePartition.PartitionKey(Base, PartitionInterval.Weekly)).Start;
+        var now = partitionStart;
+        using var core = NewCore(() => now);
+        core.Record("/a/Value", partitionStart, 5d, typeof(double));
+        now = partitionStart.AddSeconds(10);
+        await core.FlushAsync(CancellationToken.None);
+        WriteForeignPartition(partitionStart.AddDays(-1));
+
+        // Act
+        var sample = core.GetSampleAtOrBefore("/a/Value", partitionStart.AddSeconds(5));
+
+        // Assert
+        Assert.Equal(5d, sample?.Number);
+        Assert.Null(core.LastError);
+    }
+
+    [Fact]
+    public async Task WhenLookingBackForAMovedPath_ThenTheOlderLegIsFoundWithoutOpeningPartitionsBeforeTheCoverage()
+    {
+        // Arrange
+        var now = Base;
+        using var core = NewCore(() => now);
+        core.Record("/old/Value", Base.AddSeconds(1), 4d, typeof(double));
+        core.RecordMove(Base.AddSeconds(2), "/old/Value", "/new/Value");
+        now = Base.AddSeconds(10);
+        await core.FlushAsync(CancellationToken.None);
+        WriteForeignPartition(Base.AddDays(-30));
+
+        // Act
+        var sample = core.GetSampleAtOrBefore("/new/Value", Base.AddSeconds(5));
+
+        // Assert
+        Assert.Equal(4d, sample?.Number);
+        Assert.Null(core.LastError);
+    }
+
+    [Fact]
+    public async Task WhenAPathNoPartitionHoldsWasQueriedOnce_ThenLaterBucketedQueriesAndDeltaLookBacksOpenNoPartition()
+    {
+        // Arrange - coverage spans both partitions; the first bucketed query walks them all for the unknown path.
+        var now = Base.AddDays(-30);
+        using var core = NewCore(() => now);
+        core.Record("/a/Value", Base.AddDays(-30).AddSeconds(1), 1d, typeof(double));
+        core.Record("/a/Value", Base.AddSeconds(1), 2d, typeof(double));
+        now = Base.AddSeconds(10);
+        await core.FlushAsync(CancellationToken.None);
+        var query = new HistoryQuery("/b/Value", Base.AddDays(-30), Base.AddSeconds(10),
+            HistoryBucket.Fixed(TimeSpan.FromDays(1)), HistoryAggregations.Maximum);
+        core.Query(query);
+        now += SqliteHistoryStore.IdlePartitionConnectionTimeout + TimeSpan.FromTicks(1);
+        core.Record("/a/Value", now, 3d, typeof(double));
+        await core.FlushAsync(CancellationToken.None);
+        core.Sweep();
+        var pastPartition = SqlitePartition.PartitionKey(Base.AddDays(-30), PartitionInterval.Weekly);
+        Assert.False(core.IsPartitionOpen(pastPartition));
+
+        // Act
+        var series = core.Query(query);
+        var reading = core.GetLastNumericSampleBefore("/b/Value", now);
+
+        // Assert
+        Assert.All(series.Points, point => Assert.Null(point.Number));
+        Assert.Null(reading);
+        Assert.False(core.IsPartitionOpen(pastPartition));
+    }
+
+    [Fact]
+    public async Task WhenAPathFoundInNoPartitionIsRecordedLater_ThenQueriesReturnIt()
+    {
+        // Arrange
+        var now = Base;
+        using var core = NewCore(() => now);
+        core.Record("/a/Value", Base.AddSeconds(1), 1d, typeof(double));
+        now = Base.AddSeconds(10);
+        await core.FlushAsync(CancellationToken.None);
+        var query = new HistoryQuery("/b/Value", Base, Base.AddSeconds(30),
+            HistoryBucket.Fixed(TimeSpan.FromSeconds(30)), HistoryAggregations.Maximum);
+        core.Query(query);
+        core.Record("/b/Value", Base.AddSeconds(15), 9d, typeof(double));
+        now = Base.AddSeconds(30);
+        await core.FlushAsync(CancellationToken.None);
+
+        // Act
+        var series = core.Query(query);
+
+        // Assert
+        Assert.Equal(9d, series.Points.Single(point => point.Number is not null).Number);
     }
 
     // A SQLite file under a partition-shaped name that this build refuses to read, as in SqliteHistorySchemaTests.

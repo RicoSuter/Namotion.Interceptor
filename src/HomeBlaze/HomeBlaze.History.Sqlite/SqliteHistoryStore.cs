@@ -86,12 +86,15 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     // Partitions this build refused to open, so a read skips them without retrying and logging per query.
     private readonly HashSet<string> _unreadablePartitions = new(StringComparer.Ordinal);
 
-    // How long a partition connection stays cached without use before the sweep closes it, which frees all of
-    // its memory in SQLite. The partition being written is used by every flush and so stays open.
+    // How long a partition connection stays cached without use before the sweep closes it (see the SQLite
+    // section of the history design document).
     internal static readonly TimeSpan IdlePartitionConnectionTimeout = TimeSpan.FromMinutes(5);
 
     // When each cached partition connection was last handed out. Under _connectionLock.
     private readonly Dictionary<string, DateTimeOffset> _partitionLastUsed = new(StringComparer.Ordinal);
+
+    // Paths a walk over every partition found in none of them, until a flush writes them. Under _connectionLock.
+    private readonly HashSet<string> _absentPaths = new(StringComparer.Ordinal);
 
     private readonly SqliteCoverageStore _coverageStore;
 
@@ -133,7 +136,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         _getUtcNow = getUtcNow;
         _logger = logger;
         _readContext = new SqliteReadContext(
-            _databaseDirectory, MetadataKey, TryOpenPartition, OpenMetadata);
+            _databaseDirectory, MetadataKey, TryOpenPartition, OpenMetadata,
+            path => _absentPaths.Contains(path), path => _absentPaths.Add(path));
         _coverageStore = new SqliteCoverageStore(OpenMetadata);
 
         // After the coverage store exists: publishing the watermark compares against its snapshot.
@@ -331,6 +335,14 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                     {
                         _coverageStore.Reload();
                         _reloadCoverageAfterFailure = false;
+                    }
+
+                    if (_absentPaths.Count > 0)
+                    {
+                        foreach (var sample in batch)
+                        {
+                            _absentPaths.Remove(sample.Path);
+                        }
                     }
 
                     foreach (var (key, samples) in byPartition)
@@ -740,6 +752,10 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                     _lastError = exception.Message;
                 }
 
+                // First, so a checkpoint that throws below cannot keep idle connections open. Closing the last
+                // connection to a database checkpoints it as well.
+                CloseIdlePartitions(now);
+
                 // Persist the WAL contents back into the surviving main database files so their on-disk
                 // size reflects the data after the sweep.
                 //
@@ -756,8 +772,6 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                         Execute(connection, "PRAGMA wal_checkpoint(TRUNCATE);");
                     }
                 }
-
-                CloseIdlePartitions(now);
             }
 
             lock (_pendingLock)
@@ -1020,7 +1034,9 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         List<string>? idle = null;
         foreach (var (key, lastUsed) in _partitionLastUsed)
         {
-            if (now - lastUsed >= IdlePartitionConnectionTimeout)
+            // A last use in the future means the clock went back; closing then only costs a reopen, while
+            // waiting for the clock to catch up could keep the connection for days.
+            if (now - lastUsed >= IdlePartitionConnectionTimeout || lastUsed > now)
             {
                 (idle ??= []).Add(key);
             }
@@ -1041,8 +1057,14 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     {
         if (_connections.Remove(key, out var connection))
         {
-            connection.Close();
-            connection.Dispose();
+            try
+            {
+                connection.Close();
+            }
+            finally
+            {
+                connection.Dispose();
+            }
         }
 
         _partitionLastUsed.Remove(key);
