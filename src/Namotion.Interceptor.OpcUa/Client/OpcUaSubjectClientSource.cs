@@ -15,8 +15,6 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjectClientSource, IFaultInjectable, IAsyncDisposable
 {
-    private const int DefaultChunkSize = 512;
-
     private readonly IInterceptorSubject _subject;
     private readonly ILogger _logger;
     private readonly SourceOwnershipManager _ownership;
@@ -171,9 +169,17 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         _propertyWriter = propertyWriter;
         _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
 
-        _sessionManager = new SessionManager(
+        var sessionManager = new SessionManager(
             this, propertyWriter, _configuration, PollingMetrics, ReadAfterWriteMetrics, _logger);
-        _writer = new OutboundWriter(_sessionManager, _configuration, OpcUaNodeIdKey, OutgoingThroughput, _logger);
+        _sessionManager = sessionManager;
+        _writer = new OutboundWriter(
+            () => sessionManager.CurrentSession,
+            sessionManager.ReadAfterWriteManager,
+            sessionManager.ScheduleFullStateSyncAfterResponseMismatch,
+            _configuration,
+            OpcUaNodeIdKey,
+            OutgoingThroughput,
+            _logger);
 
         try
         {
@@ -265,38 +271,30 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         }
 
         var itemCount = ownedProperties.Count;
-        var batchSize = (int)(session.OperationLimits?.MaxNodesPerRead ?? DefaultChunkSize);
-        batchSize = batchSize is 0 ? int.MaxValue : batchSize;
-
+        var nodesPerRead = OpcUaValueReader.GetNodesPerRead(session, itemCount);
         var result = new Dictionary<RegisteredSubjectProperty, DataValue>(itemCount);
-        for (var offset = 0; offset < itemCount; offset += batchSize)
+        for (var offset = 0; offset < itemCount; offset += nodesPerRead)
         {
-            var take = Math.Min(batchSize, itemCount - offset);
-            var readValues = new List<ReadValueId>(take);
-
+            var take = Math.Min(nodesPerRead, itemCount - offset);
+            var readValues = new ReadValueId[take];
             for (var i = 0; i < take; i++)
             {
-                readValues.Add(new ReadValueId
+                readValues[i] = new ReadValueId
                 {
                     NodeId = ownedProperties[offset + i].NodeId,
                     AttributeId = Opc.Ua.Attributes.Value
-                });
+                };
             }
 
-            var readResponse = await session.ReadAsync(
-                requestHeader: null,
-                maxAge: 0,
-                timestampsToReturn: TimestampsToReturn.Source,
-                readValues.ToArrayOf(),
-                cancellationToken).ConfigureAwait(false);
+            // A mismatch fails the whole load, whose callers reload on failure, so the session is resynced anyway.
+            var results = await OpcUaValueReader.ReadAsync(
+                session, readValues, TimestampsToReturn.Source, cancellationToken).ConfigureAwait(false);
 
-            var resultCount = Math.Min(readResponse.Results.Count, readValues.Count);
-            for (var i = 0; i < resultCount; i++)
+            for (var i = 0; i < results.Count; i++)
             {
-                if (StatusCode.IsGood(readResponse.Results[i].StatusCode))
+                if (StatusCode.IsGood(results[i].StatusCode))
                 {
-                    var dataValue = readResponse.Results[i];
-                    result[ownedProperties[offset + i].Property] = dataValue;
+                    result[ownedProperties[offset + i].Property] = results[i];
                 }
             }
         }
