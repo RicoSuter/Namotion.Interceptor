@@ -325,6 +325,60 @@ public class ApplicationCertificateLoaderTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenTheConfiguredThumbprintIsInTheStore_ThenThatCertificateIsLoaded()
+    {
+        // Arrange
+        var configuration = CreateConfiguration();
+        configuration.ApplicationUri = "urn:test:client";
+        using var other = await AddSelfSignedCertificateAsync(configuration, ageInDays: 2);
+        using var pinned = await AddSelfSignedCertificateAsync(configuration, ageInDays: 1);
+        var application = await configuration.CreateApplicationInstanceAsync();
+        application.ApplicationConfiguration!.SecurityConfiguration.ApplicationCertificate!.Thumbprint = pinned.Thumbprint;
+
+        // Act
+        using var certificate = await LoadAsync(application, configuration);
+
+        // Assert
+        Assert.Equal(pinned.Thumbprint, certificate.Thumbprint);
+        Assert.Equal(2, Directory.GetFiles(Path.Combine(_storePath, "own", "certs")).Length);
+    }
+
+    [Fact]
+    public async Task WhenTheConfiguredThumbprintIsNotInTheStore_ThenLoadingFailsWithoutUsingAnotherCertificate()
+    {
+        // Arrange
+        var configuration = CreateConfiguration();
+        configuration.ApplicationUri = "urn:test:client";
+        using var stored = await AddSelfSignedCertificateAsync(configuration, ageInDays: 1);
+        var application = await configuration.CreateApplicationInstanceAsync();
+        var configuredThumbprint = new string('A', 40);
+        application.ApplicationConfiguration!.SecurityConfiguration.ApplicationCertificate!.Thumbprint = configuredThumbprint;
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => LoadAsync(application, configuration));
+
+        // Assert
+        Assert.Contains(configuredThumbprint, Assert.IsType<InvalidOperationException>(exception).Message);
+        Assert.Contains(stored.Thumbprint, Path.GetFileName(Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "certs")))));
+    }
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("Directory", true)]
+    [InlineData("X509Store", false)]
+    public void WhenTheStoreTypeIsChecked_ThenOnlyADirectoryStoreIsManaged(string? storeType, bool expected)
+    {
+        // Arrange
+        var identifier = new CertificateIdentifier { StoreType = storeType, StorePath = "own" };
+
+        // Act
+        var isManaged = ApplicationCertificateLoader.IsManagedStore(identifier);
+
+        // Assert
+        Assert.Equal(expected, isManaged);
+    }
+
+    [Fact]
     public async Task WhenTwoSourcesShareAStore_ThenOneCertificateIsCreated()
     {
         // Arrange

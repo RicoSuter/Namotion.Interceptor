@@ -133,15 +133,35 @@ The server follows the client's [store layout](connectors-opcua-client.md#certif
 
 ### User Authentication
 
-Three authentication methods are supported by default:
+By default the server advertises and accepts anonymous logins only. To accept user names or certificates, set `UserTokenAuthenticators` to authenticators of the SDK's `Opc.Ua.Identity.IUserTokenAuthenticator` type. The server then advertises one user token policy per token type they accept, encrypted with Basic256Sha256, and no anonymous policy unless one of them accepts anonymous tokens, such as the SDK's `AnonymousAuthenticator`. The authenticators are registered with every server instance, including after a restart.
 
-| Method | Security Policy | Description |
-|--------|----------------|-------------|
-| Anonymous | None | No credentials required (default for development) |
-| UserName | Basic256Sha256 | Username and password authentication |
-| Certificate | Basic256Sha256 | X.509 certificate-based authentication |
+```csharp
+var config = new OpcUaServerConfiguration
+{
+    UserTokenAuthenticators = [new OperatorAuthenticator(passwords)]
+};
 
-To customize authentication policies or add authorization logic, override `CreateApplicationInstanceAsync()` in a derived configuration class.
+public sealed class OperatorAuthenticator(IPasswordStore passwords) : IUserTokenAuthenticator
+{
+    public UserTokenType TokenType => UserTokenType.UserName;
+
+    public string? IssuedTokenProfileUri => null;
+
+    public ValueTask<AuthenticationResult> AuthenticateAsync(AuthenticationContext context, CancellationToken ct = default)
+    {
+        if (context.TokenHandler is not UserNameIdentityTokenHandler token)
+        {
+            return new(AuthenticationResult.NotHandled);
+        }
+
+        return new(token.DecryptedPassword is { } password && passwords.IsValid(token.UserName, password)
+            ? AuthenticationResult.Accept(new UserIdentity(token))
+            : AuthenticationResult.Reject(new ServiceResult(StatusCodes.BadUserAccessDenied)));
+    }
+}
+```
+
+The SDK also ships authenticators, such as `UserNamePasswordAuthenticator` and `X509Authenticator`.
 
 ### Custom Application Configuration
 

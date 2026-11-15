@@ -645,7 +645,12 @@ public class OpcUaClientSecurityConfigurationTests : IDisposable
             await store.AddAsync(certificate);
         }
 
-        return await ApplicationCertificateLoader.TryLoadAsync(applicationConfiguration, NullTelemetryContext.Instance, CancellationToken.None)
+        return await CertificateIdentifierResolver.LoadPrivateKeyAsync(
+                identifier,
+                applicationConfiguration.SecurityConfiguration.CertificatePasswordProvider,
+                applicationUri: null,
+                NullTelemetryContext.Instance,
+                CancellationToken.None)
             ?? throw new InvalidOperationException("The provisioned certificate could not be loaded.");
     }
 

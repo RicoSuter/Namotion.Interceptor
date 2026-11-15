@@ -1,4 +1,5 @@
 using System.Text;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Testing;
@@ -117,10 +118,9 @@ public class OpcUaSecurityTests
     [Fact]
     public async Task WhenAUsernameLoginRunsOverAnUnsecuredChannel_ThenTheServerCertificateMustBeTrusted()
     {
-        // Arrange - the server rejects a user name that no authenticator accepts, so this one is accepted.
+        // Arrange
         await using var test = await SecurityTest.CreateAsync(_output);
-        var server = await test.StartServerAsync();
-        server.Server!.CurrentServer!.CurrentInstance.IdentityRegistry.Register(new UserNameAuthenticator("user", "password"));
+        await test.StartServerAsync(userTokenAuthenticators: [new UserNameAuthenticator("user", "password")]);
         using var serverCertificate = LoadOwnCertificate(test.ServerStore);
         var client = await test.StartClientAsync(config =>
             config.CreateUserIdentity = _ => Task.FromResult(new UserIdentity("user", "password"u8.ToArray())));
@@ -337,6 +337,52 @@ public class OpcUaSecurityTests
     private static StatusCode? GetLastStatusCode(OpcUaTestClient<TestRoot> client) =>
         (client.Source?.Diagnostics.LastError?.InnerException as ServiceResultException)?.StatusCode;
 
+    [Fact]
+    public async Task WhenNoAuthenticatorIsConfigured_ThenAUserNameLoginIsNotOffered()
+    {
+        // Arrange
+        await using var test = await SecurityTest.CreateAsync(_output);
+        await test.StartServerAsync();
+
+        // Act
+        var client = await test.StartClientAsync(config =>
+            config.CreateUserIdentity = _ => Task.FromResult(new UserIdentity("user", "password"u8.ToArray())));
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Source!.Diagnostics.LastError is not null,
+            timeout: TimeSpan.FromSeconds(30),
+            message: "A user name login should fail when the server offers anonymous logins only");
+        Assert.Null(client.Source!.CurrentSession);
+    }
+
+    [Fact]
+    public async Task WhenTheServerRestarts_ThenItsConfiguredAuthenticatorStillAcceptsLogins()
+    {
+        // Arrange
+        await using var test = await SecurityTest.CreateAsync(_output);
+        var authenticator = new UserNameAuthenticator("user", "password");
+        var server = await test.StartServerAsync(userTokenAuthenticators: [authenticator]);
+        var client = await test.StartClientAsync(config =>
+        {
+            config.MinimumSecurityMode = MessageSecurityMode.Sign;
+            config.AutoAcceptUntrustedCertificates = true;
+            config.CreateUserIdentity = _ => Task.FromResult(new UserIdentity("user", "password"u8.ToArray()));
+        });
+        await WaitUntilConnectedAsync(client);
+        var acceptedBeforeRestart = authenticator.AcceptedCount;
+
+        // Act
+        await ((IFaultInjectable)server.Server!).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => authenticator.AcceptedCount > acceptedBeforeRestart && client.Source!.CurrentSession is { Connected: true },
+            timeout: TimeSpan.FromSeconds(60),
+            message: "The restarted server should accept the user name login through the configured authenticator");
+        Assert.True(acceptedBeforeRestart >= 1);
+    }
+
     private static Certificate ParseServerCertificate(EndpointDescription endpoint) =>
         Certificate.FromRawData(endpoint.ServerCertificate.Memory);
 
@@ -352,9 +398,13 @@ public class OpcUaSecurityTests
     /// </summary>
     private sealed class UserNameAuthenticator(string userName, string password) : IUserTokenAuthenticator
     {
+        private int _acceptedCount;
+
         public UserTokenType TokenType => UserTokenType.UserName;
 
         public string? IssuedTokenProfileUri => null;
+
+        public int AcceptedCount => Volatile.Read(ref _acceptedCount);
 
         public ValueTask<AuthenticationResult> AuthenticateAsync(AuthenticationContext context, CancellationToken ct = default)
         {
@@ -363,10 +413,13 @@ public class OpcUaSecurityTests
                 return new ValueTask<AuthenticationResult>(AuthenticationResult.NotHandled);
             }
 
-            return new ValueTask<AuthenticationResult>(
-                token.UserName == userName && token.DecryptedPassword is { } decrypted && Encoding.UTF8.GetString(decrypted) == password
-                    ? AuthenticationResult.Accept(new UserIdentity(token))
-                    : AuthenticationResult.Reject(new ServiceResult(StatusCodes.BadUserAccessDenied)));
+            if (token.UserName != userName || token.DecryptedPassword is not { } decrypted || Encoding.UTF8.GetString(decrypted) != password)
+            {
+                return new ValueTask<AuthenticationResult>(AuthenticationResult.Reject(new ServiceResult(StatusCodes.BadUserAccessDenied)));
+            }
+
+            Interlocked.Increment(ref _acceptedCount);
+            return new ValueTask<AuthenticationResult>(AuthenticationResult.Accept(new UserIdentity(token)));
         }
     }
 
@@ -448,7 +501,8 @@ public class OpcUaSecurityTests
         public async Task<OpcUaTestServer<TestRoot>> StartServerAsync(
             Action<Opc.Ua.ApplicationConfiguration>? configureApplication = null,
             string? applicationUri = null,
-            bool autoAcceptUntrustedCertificates = true)
+            bool autoAcceptUntrustedCertificates = true,
+            IReadOnlyList<IUserTokenAuthenticator>? userTokenAuthenticators = null)
         {
             if (_server is not null)
             {
@@ -467,7 +521,8 @@ public class OpcUaSecurityTests
                 certificateStoreBasePath: ServerStore,
                 configureApplication: configureApplication,
                 applicationUri: applicationUri,
-                autoAcceptUntrustedCertificates: autoAcceptUntrustedCertificates);
+                autoAcceptUntrustedCertificates: autoAcceptUntrustedCertificates,
+                userTokenAuthenticators: userTokenAuthenticators);
 
             return _server;
         }
