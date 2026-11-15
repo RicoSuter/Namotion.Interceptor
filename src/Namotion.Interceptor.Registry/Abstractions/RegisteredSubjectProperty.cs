@@ -230,7 +230,7 @@ public class RegisteredSubjectProperty
     {
         get
         {
-            SubjectStructure.RecordChildrenRead(Parent.Subject);
+            DerivedStructureDependencies.RecordChildrenRead(Parent.Subject);
             lock (_children)
             {
                 if (_childrenCache.IsDefault)
@@ -343,7 +343,7 @@ public class RegisteredSubjectProperty
         get
         {
             // Recorded on every call, since a cached result reads the registered properties only to compare them.
-            SubjectStructure.RecordRead(Parent.Subject);
+            DerivedStructureDependencies.RecordRead(Parent.Subject);
             var properties = Parent.RegisteredProperties;
             var cache = AttributesCache;
             if (cache is null || cache.PropertyCount != properties.Count)
