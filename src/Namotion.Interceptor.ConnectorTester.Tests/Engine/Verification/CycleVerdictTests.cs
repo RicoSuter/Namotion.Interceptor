@@ -20,7 +20,7 @@ public class CycleVerdictTests
         unexpectedCounters.IncrementFailedCommit(CommitFailureKind.Unexpected);
 
         // Act
-        var result = CycleVerdict.Decide(converged: true, [expectedOnly, withUnexpected], writeDurabilityViolationCount: 0);
+        var result = CycleVerdict.Decide(converged: true, [expectedOnly, withUnexpected], writeDurabilityResults: []);
 
         // Assert
         Assert.Equal(CycleResult.Fail, result);
@@ -35,7 +35,7 @@ public class CycleVerdictTests
         counters.IncrementFailedCommit(CommitFailureKind.SourceWriteFailure);
 
         // Act
-        var result = CycleVerdict.Decide(converged: true, [engine], writeDurabilityViolationCount: 0);
+        var result = CycleVerdict.Decide(converged: true, [engine], writeDurabilityResults: []);
 
         // Assert
         Assert.Equal(CycleResult.Pass, result);
@@ -46,12 +46,28 @@ public class CycleVerdictTests
     {
         // Arrange
         var (engine, _) = CreateEngine("client");
+        var durabilityResult = new WriteDurabilityResult("client", ["client: StringValue: lost"], DroppedWriteCount: 0);
 
         // Act
-        var result = CycleVerdict.Decide(converged: true, [engine], writeDurabilityViolationCount: 1);
+        var result = CycleVerdict.Decide(converged: true, [engine], [durabilityResult]);
 
         // Assert
         Assert.Equal(CycleResult.Fail, result);
+    }
+
+    [Fact]
+    public void WhenConvergedCycleLostAWriteAfterTheSourceDroppedWrites_ThenCyclePasses()
+    {
+        // Arrange
+        var (engine, _) = CreateEngine("client");
+        var durabilityResult = new WriteDurabilityResult("client", ["client: StringValue: lost"], DroppedWriteCount: 3);
+
+        // Act
+        var result = CycleVerdict.Decide(converged: true, [engine], [durabilityResult]);
+
+        // Assert
+        Assert.True(durabilityResult.IsInconclusive);
+        Assert.Equal(CycleResult.Pass, result);
     }
 
     [Fact]
@@ -61,7 +77,7 @@ public class CycleVerdictTests
         var (engine, _) = CreateEngine("client");
 
         // Act
-        var result = CycleVerdict.Decide(converged: false, [engine], writeDurabilityViolationCount: 0);
+        var result = CycleVerdict.Decide(converged: false, [engine], writeDurabilityResults: []);
 
         // Assert
         Assert.Equal(CycleResult.Fail, result);

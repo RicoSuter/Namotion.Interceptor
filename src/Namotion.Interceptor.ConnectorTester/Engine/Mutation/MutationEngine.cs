@@ -40,14 +40,14 @@ public sealed class MutationEngine : BackgroundService
     public void ResetDurabilityLedger() => _ledger?.Reset();
 
     /// <summary>
-    /// Returns one line per write the ledger recorded that this participant's model no longer holds, prefixed
-    /// with the participant name. Empty when the engine has no ledger.
+    /// Checks the writes the ledger recorded against this participant's model. The result lists one line per write
+    /// the model no longer holds, prefixed with the participant name, and is empty when the engine has no ledger.
     /// </summary>
-    public IReadOnlyList<string> VerifyWriteDurability()
+    public WriteDurabilityResult VerifyWriteDurability()
     {
         if (_ledger is null)
         {
-            return [];
+            return new WriteDurabilityResult(Name, [], DroppedWriteCount: 0);
         }
 
         // The known nodes lag structural changes, local and remote, until the next rebuild.
@@ -58,9 +58,12 @@ public sealed class MutationEngine : BackgroundService
             knownNodes = _graph.KnownNodes;
         }
 
-        return _ledger.Verify(knownNodes)
+        var violations = _ledger.Verify(knownNodes)
             .Select(violation => $"{Name}: {violation}")
             .ToList();
+
+        // Read after the model, so a drop that changed what the model holds is counted.
+        return new WriteDurabilityResult(Name, violations, _ledger.DroppedWriteCount);
     }
 
     public MutationEngine(
@@ -91,11 +94,12 @@ public sealed class MutationEngine : BackgroundService
         ParticipantConfiguration participantConfiguration,
         TestCycleCoordinator coordinator,
         ILogger logger,
-        bool verifyWriteDurability = false)
+        bool verifyWriteDurability = false,
+        Func<long>? droppedWriteCount = null)
     {
         var graph = new KnownNodeGraph();
         var counters = new MutationCounters();
-        var ledger = verifyWriteDurability ? new WriteDurabilityLedger() : null;
+        var ledger = verifyWriteDurability ? new WriteDurabilityLedger(droppedWriteCount) : null;
         var context = ((IInterceptorSubject)root).Context;
         var strategy = new RandomValueMutationStrategy(graph, coordinator, context, counters, participantConfiguration, logger, ledger);
         return new MutationEngine(root, participantConfiguration, coordinator, strategy, graph, counters, logger, ledger);
@@ -108,11 +112,12 @@ public sealed class MutationEngine : BackgroundService
         ILogger logger,
         int numberOfBatches,
         int participantIndex,
-        bool verifyWriteDurability = false)
+        bool verifyWriteDurability = false,
+        Func<long>? droppedWriteCount = null)
     {
         var graph = new KnownNodeGraph();
         var counters = new MutationCounters();
-        var ledger = verifyWriteDurability ? new WriteDurabilityLedger() : null;
+        var ledger = verifyWriteDurability ? new WriteDurabilityLedger(droppedWriteCount) : null;
         var context = ((IInterceptorSubject)root).Context;
         var strategy = new BatchValueMutationStrategy(graph, coordinator, context, counters, participantConfiguration, numberOfBatches, participantIndex, logger, ledger);
         return new MutationEngine(root, participantConfiguration, coordinator, strategy, graph, counters, logger, ledger);

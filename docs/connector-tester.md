@@ -100,6 +100,8 @@ The snapshot comparison checks that participants agree, not that their writes su
 
 `VerifyWriteDurability: true` adds a check for that, and it combines with either mutation engine, with or without chaos. Each participant records the last value it wrote to each node. A write in a transaction counts once its commit applied it, so a failed commit records only the changes it applied, which for a conflict is none. After a cycle converges, `VerificationEngine` checks that every participant's own model still holds those values. A mismatch fails the cycle, skips the snapshot diagnostics, since the participants agree, and logs the participant, the property path, the written value and the value the model holds. A `--participant` run has no verification engine and ignores the option.
 
+The write contract allows one loss: a client's [write retry queue](connectors.md#write-retry-queue) drops its oldest writes when it is full. When a client's source dropped writes in a cycle, as counted by its `Diagnostics.OutboundRetries.TotalDropped`, a mismatch on that client is inconclusive instead: it is logged as a warning with the dropped count, recorded as a `durability-inconclusive` finding, and does not fail the cycle. The queue lives as long as the source, so writes queued before a chaos kill are still retried after it.
+
 The check is sound only when each property has a single writer, because another participant's later write looks exactly like a loss. The option therefore pins each RandomMutationEngine participant to the `TestNode` value property at its participant index, which the BatchMutationEngine does anyway, and startup rejects it with more than four participants. With the BatchMutationEngine, recording takes a lock on every write, so load numbers from such a run are not benchmark numbers.
 
 `opcua-durability` is `opcua-chaos` and `websocket-durability` is `websocket-chaos`, each with the option on, and a test checks that they differ in nothing else. The chaos profiles keep their overlapping writers, which only the agreement check covers. To enable it on another profile, set it as an environment variable, which overrides the profile's `appsettings` file:
@@ -201,10 +203,11 @@ The per-cycle JSON files are formatted (indented) and can be diffed with any tex
 
 ### Findings Log
 
-`logs/{run}/findings.log` records non-failure observations during passing cycles. Two finding types:
+`logs/{run}/findings.log` records non-failure observations during passing cycles. Three finding types:
 
 - **`slow-convergence`**: convergence took >10s with no chaos active. May indicate a performance regression.
 - **`null-timestamp`**: the null-timestamp rule forgave a mismatch (one participant had a write timestamp, the other did not). Typically happens after a server rebuild or when the equality interceptor suppressed a redundant write. Not a failure, but worth investigating if frequent.
+- **`durability-inconclusive`**: the [write-durability oracle](#write-durability-oracle) found lost writes on a client whose retry queue dropped writes in the same cycle, so the loss may be one the write contract allows. A frequent finding means the queue is too small for the outage length.
 
 ### Chaos Events Log
 

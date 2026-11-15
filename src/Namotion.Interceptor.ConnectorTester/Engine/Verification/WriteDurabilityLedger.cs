@@ -20,6 +20,22 @@ public sealed class WriteDurabilityLedger
 {
     private readonly Dictionary<TestNode, (int Property, long Counter)> _lastWrites = new();
     private readonly Lock _lock = new();
+    private readonly Func<long>? _droppedWriteCount;
+    private long _droppedWriteBaseline;
+
+    /// <summary>
+    /// Creates a ledger. <paramref name="droppedWriteCount"/> returns the running total of writes the participant's
+    /// source dropped, such as its retry queue's <c>TotalDropped</c>, and is <c>null</c> for a participant without
+    /// a source.
+    /// </summary>
+    public WriteDurabilityLedger(Func<long>? droppedWriteCount = null)
+    {
+        _droppedWriteCount = droppedWriteCount;
+        _droppedWriteBaseline = droppedWriteCount?.Invoke() ?? 0;
+    }
+
+    /// <summary>Gets the number of writes the participant's source dropped since the last <see cref="Reset"/>.</summary>
+    public long DroppedWriteCount => (_droppedWriteCount?.Invoke() ?? 0) - Interlocked.Read(ref _droppedWriteBaseline);
 
     public void Record(TestNode node, int property, long counter)
     {
@@ -66,6 +82,7 @@ public sealed class WriteDurabilityLedger
         lock (_lock)
         {
             _lastWrites.Clear();
+            Interlocked.Exchange(ref _droppedWriteBaseline, _droppedWriteCount?.Invoke() ?? 0);
         }
     }
 

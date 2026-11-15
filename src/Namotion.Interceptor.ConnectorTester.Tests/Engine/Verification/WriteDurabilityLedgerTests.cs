@@ -136,6 +136,37 @@ public class WriteDurabilityLedgerTests
         Assert.StartsWith("Collection[0].StringValue: ", violation);
     }
 
+    [Fact]
+    public void WhenTheSourceDropsWrites_ThenDroppedWriteCountCountsOnlyThoseSinceTheLastReset()
+    {
+        // Arrange
+        long totalDropped = 4;
+        var ledger = new WriteDurabilityLedger(() => totalDropped);
+        totalDropped = 10;
+        ledger.Reset();
+        totalDropped = 13;
+
+        // Act
+        var droppedWriteCount = ledger.DroppedWriteCount;
+
+        // Assert
+        Assert.Equal(3, droppedWriteCount);
+    }
+
+    [Fact]
+    public void WhenTheParticipantHasNoSource_ThenDroppedWriteCountIsZero()
+    {
+        // Arrange
+        var ledger = new WriteDurabilityLedger();
+        ledger.Reset();
+
+        // Act
+        var droppedWriteCount = ledger.DroppedWriteCount;
+
+        // Assert
+        Assert.Equal(0, droppedWriteCount);
+    }
+
     private static SubjectPropertyChange CreateStringValueChange(TestNode node, string value)
         => SubjectPropertyChange.Create(
             new PropertyReference(node, nameof(TestNode.StringValue)),

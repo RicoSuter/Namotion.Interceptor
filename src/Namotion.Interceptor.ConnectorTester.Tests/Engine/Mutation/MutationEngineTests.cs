@@ -77,7 +77,7 @@ public class MutationEngineTests
         OverwriteValueProperties(root);
 
         // Act
-        var violations = engine.VerifyWriteDurability();
+        var violations = engine.VerifyWriteDurability().Violations;
 
         // Assert
         Assert.Empty(violations);
@@ -94,7 +94,7 @@ public class MutationEngineTests
             root, numberOfBatches, verifyWriteDurability: true, useTransactions: false);
 
         // Act
-        var violations = engine.VerifyWriteDurability();
+        var violations = engine.VerifyWriteDurability().Violations;
 
         // Assert
         Assert.Empty(violations);
@@ -115,7 +115,7 @@ public class MutationEngineTests
         OverwriteValueProperties(root);
 
         // Act
-        var violations = engine.VerifyWriteDurability();
+        var violations = engine.VerifyWriteDurability().Violations;
 
         // Assert: participant index 0 writes StringValue only.
         var violation = Assert.Single(violations);
@@ -138,14 +138,67 @@ public class MutationEngineTests
         OverwriteValueProperties(root);
 
         // Act
-        var violations = engine.VerifyWriteDurability();
+        var violations = engine.VerifyWriteDurability().Violations;
 
         // Assert
         Assert.Empty(violations);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(10)]
+    public async Task WhenTheSourceDroppedWritesInTheCycle_ThenALostWriteIsInconclusive(int numberOfBatches)
+    {
+        // Arrange
+        long totalDropped = 7;
+        var root = new TestNode(CreateContext());
+        var engine = CreateEngine(
+            root, numberOfBatches, verifyWriteDurability: true, useTransactions: false, () => totalDropped);
+        engine.ResetDurabilityLedger();
+        await RunTwoValueMutationTicksAsync(engine);
+        totalDropped += 2;
+        OverwriteValueProperties(root);
+
+        // Act
+        var result = engine.VerifyWriteDurability();
+
+        // Assert: only the drops since the reset count.
+        Assert.Equal(2, result.DroppedWriteCount);
+        Assert.Single(result.Violations);
+        Assert.True(result.IsInconclusive);
+        Assert.False(result.IsFailure);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(10)]
+    public async Task WhenTheSourceDroppedWritesBeforeTheCycle_ThenALostWriteIsAFailure(int numberOfBatches)
+    {
+        // Arrange
+        long totalDropped = 7;
+        var root = new TestNode(CreateContext());
+        var engine = CreateEngine(
+            root, numberOfBatches, verifyWriteDurability: true, useTransactions: false, () => totalDropped);
+        engine.ResetDurabilityLedger();
+        await RunTwoValueMutationTicksAsync(engine);
+        OverwriteValueProperties(root);
+
+        // Act
+        var result = engine.VerifyWriteDurability();
+
+        // Assert
+        Assert.Equal(0, result.DroppedWriteCount);
+        Assert.Single(result.Violations);
+        Assert.True(result.IsFailure);
+        Assert.False(result.IsInconclusive);
+    }
+
     private static MutationEngine CreateEngine(
-        TestNode root, int numberOfBatches, bool verifyWriteDurability, bool useTransactions)
+        TestNode root,
+        int numberOfBatches,
+        bool verifyWriteDurability,
+        bool useTransactions,
+        Func<long>? droppedWriteCount = null)
     {
         var configuration = new ParticipantConfiguration
         {
@@ -156,19 +209,25 @@ public class MutationEngineTests
         var coordinator = new TestCycleCoordinator();
         return numberOfBatches > 0
             ? MutationEngine.CreateBatch(root, configuration, coordinator, NullLogger.Instance,
-                numberOfBatches, configuration.Index, verifyWriteDurability)
-            : MutationEngine.CreateRandom(root, configuration, coordinator, NullLogger.Instance, verifyWriteDurability);
+                numberOfBatches, configuration.Index, verifyWriteDurability, droppedWriteCount)
+            : MutationEngine.CreateRandom(
+                root, configuration, coordinator, NullLogger.Instance, verifyWriteDurability, droppedWriteCount);
     }
 
     private static async Task<MutationEngine> RunTwoValueMutationTicksAsync(
         TestNode root, int numberOfBatches, bool verifyWriteDurability, bool useTransactions)
     {
         var engine = CreateEngine(root, numberOfBatches, verifyWriteDurability, useTransactions);
+        await RunTwoValueMutationTicksAsync(engine);
+        return engine;
+    }
+
+    private static async Task RunTwoValueMutationTicksAsync(MutationEngine engine)
+    {
         await engine.StartAsync(CancellationToken.None);
         // The first tick has committed once the second has mutated.
         await AsyncTestHelpers.WaitUntilAsync(() => engine.ValueMutationCount >= 2);
         await engine.StopAsync(CancellationToken.None);
-        return engine;
     }
 
     private static void OverwriteValueProperties(TestNode node)

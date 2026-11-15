@@ -152,11 +152,15 @@ public sealed class ConnectorTesterHost
             // Mutation engine stays in the main host so it shares the verification coordinator
             // graph; its logger category already encodes the participant name explicitly.
             var mutationLogger = sharedLoggerFactory.CreateLogger($"MutationEngine/{participantConfiguration.Name}");
+            // A client's retry queue may drop its oldest writes when full, which the durability check must not
+            // report as a loss. The queue lives as long as the source, so a chaos kill keeps its writes.
+            var source = bundle.Connectors.OfType<ISubjectSource>().FirstOrDefault(connector => connector.RootSubject == root);
+            Func<long>? droppedWriteCount = source is null ? null : () => source.Diagnostics.OutboundRetries.TotalDropped;
             var mutationEngine = configuration.NumberOfBatches > 0
                 ? MutationEngine.CreateBatch(root, participantConfiguration, coordinator, mutationLogger,
-                    configuration.NumberOfBatches, participantConfiguration.Index, verifyWriteDurability)
+                    configuration.NumberOfBatches, participantConfiguration.Index, verifyWriteDurability, droppedWriteCount)
                 : MutationEngine.CreateRandom(root, participantConfiguration, coordinator, mutationLogger,
-                    verifyWriteDurability);
+                    verifyWriteDurability, droppedWriteCount);
             mutationEngines.Add(mutationEngine);
             builder.Services.AddSingleton<IHostedService>(mutationEngine);
         }

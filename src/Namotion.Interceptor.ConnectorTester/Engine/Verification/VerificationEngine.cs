@@ -140,13 +140,14 @@ public class VerificationEngine : BackgroundService
             var outcome = await _convergenceChecker.WaitForConvergenceAsync(stoppingToken);
             cycleStopwatch.Stop();
 
-            var durabilityViolations = outcome.Converged
-                ? _mutationEngines.SelectMany(engine => engine.VerifyWriteDurability()).ToList()
+            List<WriteDurabilityResult> durabilityResults = outcome.Converged
+                ? _mutationEngines.Select(engine => engine.VerifyWriteDurability()).ToList()
                 : [];
+            LogInconclusiveDurability(durabilityResults);
 
-            if (CycleVerdict.Decide(outcome.Converged, _mutationEngines, durabilityViolations.Count) == CycleResult.Pass)
+            if (CycleVerdict.Decide(outcome.Converged, _mutationEngines, durabilityResults) == CycleResult.Pass)
             {
-                _findingsLog.AppendIfAny(outcome.Snapshots, outcome.Elapsed);
+                _findingsLog.AppendIfAny(outcome.Snapshots, outcome.Elapsed, durabilityResults);
                 _cycleStatistics.RecordPass(_cycleNumber, cycleStopwatch.Elapsed, outcome.Elapsed, activeProfileName);
                 var (subjects, properties) = SnapshotComparer.CountSubjectsAndProperties(outcome.Snapshots[0].Snapshot);
                 _logger.LogInformation(
@@ -167,6 +168,10 @@ public class VerificationEngine : BackgroundService
                         _cycleNumber, unexpectedFailedCommitCount);
                 }
 
+                var durabilityViolations = durabilityResults
+                    .Where(result => result.IsFailure)
+                    .SelectMany(result => result.Violations)
+                    .ToList();
                 if (durabilityViolations.Count > 0)
                 {
                     _logger.LogError("=== Cycle {Cycle}: FAIL ({Count} write-durability violation(s)) ===",
@@ -191,6 +196,20 @@ public class VerificationEngine : BackgroundService
             _failed = true;
             _applicationLifetime.StopApplication();
             return;
+        }
+    }
+
+    private void LogInconclusiveDurability(IEnumerable<WriteDurabilityResult> durabilityResults)
+    {
+        foreach (var result in durabilityResults.Where(result => result.IsInconclusive))
+        {
+            _logger.LogWarning(
+                "Cycle {Cycle}: write durability of {Participant} is inconclusive: {ViolationCount} write(s) lost, but its source dropped {DroppedCount} queued write(s) in the cycle, which a full retry queue is allowed to do",
+                _cycleNumber, result.Participant, result.Violations.Count, result.DroppedWriteCount);
+            foreach (var violation in result.Violations)
+            {
+                _logger.LogWarning("  {Violation}", violation);
+            }
         }
     }
 
