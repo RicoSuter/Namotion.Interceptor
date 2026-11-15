@@ -372,19 +372,25 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                 var sessionManager = _sessionManager;
                 if (sessionManager is not null && _propertyWriter is not null && _isStarted)
                 {
-                    // Reconnection is owned by the managed session; while it recovers there is nothing
-                    // to heal, and liveness follows its state transitions.
-                    if (sessionManager.IsConnected)
+                    try
                     {
-                        await HandleHealthySessionAsync(sessionManager, stoppingToken).ConfigureAwait(false);
+                        // Reconnection is owned by the managed session; while it recovers there is nothing
+                        // to heal, and liveness follows its state transitions.
+                        if (sessionManager.IsConnected)
+                        {
+                            await HandleHealthySessionAsync(sessionManager, stoppingToken).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            sessionManager.ReportLivenessFromSessionState();
+                        }
                     }
-                    else
+                    finally
                     {
-                        sessionManager.ReportLivenessFromSessionState();
+                        // Also while reconnecting, because an expired client certificate is what can keep the session
+                        // from recovering, and after a failed tick. The check reports its own errors.
+                        await sessionManager.CheckClientCertificateIfDueAsync(stoppingToken).ConfigureAwait(false);
                     }
-
-                    // Also while reconnecting: an expired client certificate is what can keep the session from recovering.
-                    await sessionManager.CheckClientCertificateIfDueAsync(stoppingToken).ConfigureAwait(false);
                 }
 
                 await Task.Delay(_configuration.SubscriptionHealthCheckInterval, stoppingToken).ConfigureAwait(false);

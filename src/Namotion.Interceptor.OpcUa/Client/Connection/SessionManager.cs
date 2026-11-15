@@ -44,6 +44,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private long? _lastFullStateSyncTimestamp; // Health check loop only
     private Certificate? _clientCertificate; // Replaced and read under _stateLock; owned by this instance
     private long _lastClientCertificateCheckTimestamp; // Health check loop and session creation
+    private long _lastExpiryWarningTimestamp; // Health check loop and session creation
     private int _clientCertificateCheckRequested; // 1 = check on the next health check tick
     private int _disposed;
 
@@ -214,6 +215,10 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             {
                 Interlocked.Exchange(ref _responseMismatchSyncPending, 1);
             }
+
+            // Buffered notifications are newer than anything the failed load could have applied, so they are applied
+            // now instead of being withheld until the retry; the source stays Synchronizing until a sync succeeds.
+            _propertyWriter.ResumeWithoutLoad();
 
             _source.ReportBackgroundError(ex, cancellationToken);
             _logger.LogError(
@@ -407,15 +412,24 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     {
         // Read before loading, because a successful load sets the subject of the certificate it found.
         var subjectName = applicationConfiguration.SecurityConfiguration.ApplicationCertificate?.SubjectName;
+        var lastExpiryWarning = Interlocked.Read(ref _lastExpiryWarningTimestamp);
+        var logExpiryWarning = lastExpiryWarning == 0 || _timeProvider.GetElapsedTime(lastExpiryWarning) >= ExpiryWarningInterval;
         try
         {
-            return await ApplicationCertificateLoader.EnsureLoadedAsync(
+            var certificate = await ApplicationCertificateLoader.EnsureLoadedAsync(
                 application,
                 configuration.AutoCreateApplicationCertificate,
                 configuration.ApplicationCertificateLifetimeInMonths,
                 configuration.ResolvedTelemetryContext,
                 _logger,
+                logExpiryWarning,
                 cancellationToken).ConfigureAwait(false);
+            if (logExpiryWarning && ApplicationCertificateLoader.IsWithinExpiryWarningWindow(certificate))
+            {
+                Interlocked.Exchange(ref _lastExpiryWarningTimestamp, _timeProvider.GetTimestamp());
+            }
+
+            return certificate;
         }
         // The SDK can report a cancellation as another exception type, so the token is checked too.
         catch (Exception error) when (error is not OperationCanceledException && !cancellationToken.IsCancellationRequested)
@@ -430,6 +444,18 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// session when no reconnect cycle failed with a certificate error.
     /// </summary>
     internal static readonly TimeSpan ClientCertificateCheckInterval = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// The minimum time between two checks requested by reconnect cycles that failed with a certificate error. The
+    /// status codes do not tell a rejected client certificate from a rejected server certificate, so every such cycle
+    /// requests a check.
+    /// </summary>
+    internal static readonly TimeSpan RequestedClientCertificateCheckInterval = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// The minimum time between two expiry warnings for the client certificate.
+    /// </summary>
+    internal static readonly TimeSpan ExpiryWarningInterval = TimeSpan.FromDays(1);
 
     /// <summary>
     /// Checks the client certificate of a secured session once per <see cref="ClientCertificateCheckInterval"/>, and
@@ -447,12 +473,15 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             return;
         }
 
-        var requested = Interlocked.Exchange(ref _clientCertificateCheckRequested, 0) == 1;
+        var requested = Volatile.Read(ref _clientCertificateCheckRequested) == 1;
         var lastCheck = Interlocked.Read(ref _lastClientCertificateCheckTimestamp);
-        if (!requested && lastCheck != 0 && _timeProvider.GetElapsedTime(lastCheck) < ClientCertificateCheckInterval)
+        if (lastCheck != 0 &&
+            _timeProvider.GetElapsedTime(lastCheck) < (requested ? RequestedClientCertificateCheckInterval : ClientCertificateCheckInterval))
         {
             return;
         }
+
+        Interlocked.Exchange(ref _clientCertificateCheckRequested, 0);
 
         Interlocked.Exchange(ref _lastClientCertificateCheckTimestamp, _timeProvider.GetTimestamp());
         try
@@ -461,6 +490,18 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 application, applicationConfiguration, _configuration, cancellationToken).ConfigureAwait(false);
             if (string.Equals(certificate.Thumbprint, currentThumbprint, StringComparison.OrdinalIgnoreCase))
             {
+                return;
+            }
+
+            // A certificate the SDK created while loading is already registered with the certificate manager, which
+            // notified the managed session itself; updating it again would make the managed session reconnect twice.
+            if (IsRegisteredWithCertificateManager(applicationConfiguration, certificate))
+            {
+                _logger.LogInformation(
+                    "The OPC UA client certificate changed from {PreviousThumbprint} to {Thumbprint}, which the certificate " +
+                    "manager already holds. Reconnecting with it.",
+                    currentThumbprint, certificate.Thumbprint);
+                ReplaceClientCertificate(certificate.AddRef());
                 return;
             }
 
@@ -498,6 +539,18 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             _source.ReportBackgroundError(ex, cancellationToken);
             _logger.LogError(ex, "Failed to check the OPC UA client certificate. Retrying in {Interval}.", ClientCertificateCheckInterval);
         }
+    }
+
+    private static bool IsRegisteredWithCertificateManager(ApplicationConfiguration applicationConfiguration, Certificate certificate)
+    {
+        if (applicationConfiguration.CertificateManager is not ICertificateRegistry registry)
+        {
+            return false;
+        }
+
+        using var registered = registry.AcquireApplicationCertificateByType(CertificateIdentifier.GetCertificateType(certificate));
+        return registered is not null &&
+            string.Equals(registered.Certificate.Thumbprint, certificate.Thumbprint, StringComparison.OrdinalIgnoreCase);
     }
 
     private string? GetClientCertificateThumbprint()

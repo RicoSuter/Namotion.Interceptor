@@ -82,6 +82,51 @@ public class SubjectPropertyWriterTests
     }
 
     [Fact]
+    public void WhenResumedWithoutLoad_ThenBufferedUpdatesAreAppliedAndLaterOnesImmediately()
+    {
+        // Arrange
+        var order = new List<string>();
+        var source = CreateSource();
+        var writer = new SubjectPropertyWriter(source, NullLogger.Instance);
+        writer.StartBuffering();
+        writer.Write(order, o => o.Add("Buffered"));
+
+        // Act
+        writer.ResumeWithoutLoad();
+        writer.Write(order, o => o.Add("Immediate"));
+
+        // Assert
+        Assert.Equal(["Buffered", "Immediate"], order);
+        Assert.Equal(0, writer.BufferedUpdateCount);
+        Assert.Equal(SourceState.Synchronizing, source.State);
+    }
+
+    [Fact]
+    public async Task WhenALoadCompletesAfterResumingWithoutLoad_ThenItsInitialStateIsDiscarded()
+    {
+        // Arrange
+        var order = new List<string>();
+        var loadCompletion = new TaskCompletionSource<Action?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var source = new TestSubjectSource(new Person(context), context, NullLogger.Instance, writeRetryQueueSize: 0)
+        {
+            LoadInitialStateOverride = _ => loadCompletion.Task
+        };
+        var writer = new SubjectPropertyWriter(source, NullLogger.Instance);
+        writer.StartBuffering();
+        var load = writer.LoadInitialStateAndResumeAsync(CancellationToken.None);
+
+        // Act
+        writer.ResumeWithoutLoad();
+        writer.Write(order, o => o.Add("Immediate"));
+        loadCompletion.SetResult(() => order.Add("StaleInitialState"));
+        await load;
+
+        // Assert
+        Assert.Equal(["Immediate"], order);
+    }
+
+    [Fact]
     public async Task WhenStartBufferingCalledMultipleTimes_ThenOnlyLatestBufferIsReplayed()
     {
         // Arrange
