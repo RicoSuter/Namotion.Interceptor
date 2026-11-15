@@ -9,9 +9,9 @@ using Opc.Ua.Security.Certificates;
 namespace Namotion.Interceptor.OpcUa;
 
 /// <summary>
-/// Loads or creates the application certificate of a client or server from its own store, warns before it expires and
-/// replaces it once it has expired or fails the application URI or host check, when it is self-signed and automatic
-/// creation is on.
+/// Loads or creates the application certificate of a client or server from its own store, warns before it expires and,
+/// in a directory store, replaces it once it has expired or fails the application URI or host check, when it is
+/// self-signed and automatic creation is on.
 /// </summary>
 internal static class ApplicationCertificateLoader
 {
@@ -29,11 +29,13 @@ internal static class ApplicationCertificateLoader
 
     /// <summary>
     /// Ensures the application certificate of <paramref name="application"/> is in its own store with its private key,
-    /// creating one when none exists and <paramref name="autoCreate"/> is true, and returns it. Within 30 days of expiry
-    /// a warning is logged. A self-signed certificate that has expired, or fails the SDK's application URI check or, for
-    /// a server, its host check against the base addresses, is deleted from the own store with its private key and
-    /// replaced when <paramref name="autoCreate"/> is true; any other certificate is never replaced. A failure to load,
-    /// create or replace the certificate propagates.
+    /// creating one in a directory store when none exists and <paramref name="autoCreate"/> is true, and returns it.
+    /// Within 30 days of expiry a warning is logged. In a directory store, a self-signed certificate that has expired,
+    /// or fails the SDK's application URI check or, for a server, its host check against the base addresses, is deleted
+    /// with its private key and replaced when <paramref name="autoCreate"/> is true. A certificate in any other store
+    /// type, such as the Windows certificate store, is used as is and never created, deleted or replaced. When the
+    /// identifier was configured with a thumbprint, only that certificate is used. A failure to load, create or replace
+    /// the certificate propagates.
     /// </summary>
     /// <returns>The loaded certificate with its private key, owned by the caller.</returns>
     public static async Task<Certificate> EnsureLoadedAsync(
@@ -54,11 +56,15 @@ internal static class ApplicationCertificateLoader
             var configuredThumbprint = ConfiguredThumbprints.GetValue(identifier, static id => new StrongBox<string?>(id.Thumbprint)).Value;
             identifier.Thumbprint = configuredThumbprint;
 
-            application.DisableCertificateAutoCreation = !autoCreate;
-            var hasDeletedMismatched = autoCreate &&
+            // Only a directory store is managed: a certificate in any other store type was put there by someone else
+            // and may be the only copy of its key.
+            var manageStore = autoCreate && IsManagedStore(identifier);
+            application.DisableCertificateAutoCreation = !manageStore;
+            var hasDeletedMismatched = manageStore &&
                 await DeleteMismatchedCertificatesAsync(configuration, identifier, telemetryContext, logger, cancellationToken).ConfigureAwait(false);
 
-            var certificate = await LoadOrCreateAsync(application, configuration, identifier, lifetimeInMonths, telemetryContext, cancellationToken).ConfigureAwait(false);
+            var certificate = await LoadOrCreateAsync(
+                application, configuration, identifier, configuredThumbprint, lifetimeInMonths, telemetryContext, cancellationToken).ConfigureAwait(false);
             try
             {
                 if (hasDeletedMismatched)
@@ -72,7 +78,7 @@ internal static class ApplicationCertificateLoader
                 // The store can hold several expired certificates for the application, and each reload finds the next one,
                 // so this deletes them one by one until a valid one is loaded or created.
                 var replacementsLeft = -1;
-                while (autoCreate && HasExpired(certificate) && X509Utils.IsSelfSigned(certificate))
+                while (manageStore && HasExpired(certificate) && X509Utils.IsSelfSigned(certificate))
                 {
                     if (replacementsLeft < 0)
                     {
@@ -95,7 +101,7 @@ internal static class ApplicationCertificateLoader
                     certificate = replacement;
                 }
 
-                LogExpiryWarning(certificate, autoCreate, identifier.StorePath ?? string.Empty, logger);
+                LogExpiryWarning(certificate, manageStore, identifier.StorePath ?? string.Empty, logger);
                 return certificate;
             }
             catch
@@ -145,24 +151,6 @@ internal static class ApplicationCertificateLoader
     }
 
     /// <summary>
-    /// Loads the application certificate with its private key from the own store the way a client session does, or
-    /// returns <c>null</c> when the store has none.
-    /// </summary>
-    /// <returns>The certificate, owned by the caller.</returns>
-    public static Task<Certificate?> TryLoadAsync(
-        ApplicationConfiguration configuration,
-        ITelemetryContext telemetryContext,
-        CancellationToken cancellationToken) =>
-        configuration.SecurityConfiguration.ApplicationCertificate is { } identifier
-            ? CertificateIdentifierResolver.LoadPrivateKeyAsync(
-                identifier,
-                configuration.SecurityConfiguration.CertificatePasswordProvider,
-                applicationUri: null,
-                telemetryContext,
-                cancellationToken)
-            : Task.FromResult<Certificate?>(null);
-
-    /// <summary>
     /// Gets the lock that serializes access to the store of <paramref name="identifier"/> within the process.
     /// </summary>
     internal static SemaphoreSlim GetStoreLock(CertificateIdentifier identifier) =>
@@ -176,7 +164,14 @@ internal static class ApplicationCertificateLoader
         configuration.SecurityConfiguration.ApplicationCertificate
         ?? throw new InvalidOperationException("The OPC UA application configuration has no application certificate.");
 
-    private static void LogExpiryWarning(Certificate certificate, bool autoCreate, string storePath, ILogger logger)
+    /// <summary>
+    /// Gets whether the loader creates, deletes and replaces certificates in the store of <paramref name="identifier"/>,
+    /// which it does only for a directory store.
+    /// </summary>
+    internal static bool IsManagedStore(CertificateIdentifier identifier) =>
+        string.Equals(identifier.StoreType ?? CertificateStoreType.Directory, CertificateStoreType.Directory, StringComparison.OrdinalIgnoreCase);
+
+    private static void LogExpiryWarning(Certificate certificate, bool replacesSelfSigned, string storePath, ILogger logger)
     {
         var notAfter = certificate.NotAfter.ToUniversalTime();
         var remaining = notAfter - DateTime.UtcNow;
@@ -192,7 +187,7 @@ internal static class ApplicationCertificateLoader
                 "Provide a new certificate; it is not replaced automatically.",
                 certificate.Thumbprint, storePath, notAfter);
         }
-        else if (autoCreate && X509Utils.IsSelfSigned(certificate))
+        else if (replacesSelfSigned && X509Utils.IsSelfSigned(certificate))
         {
             logger.LogWarning(
                 "The OPC UA application certificate {Thumbprint} in the store '{StorePath}' expires {NotAfter:u}. It is replaced " +
@@ -342,7 +337,8 @@ internal static class ApplicationCertificateLoader
 
         // The SDK pinned the deleted certificate when it loaded it; only a configured pin is kept.
         identifier.Thumbprint = configuredThumbprint;
-        return await LoadOrCreateAsync(application, configuration, identifier, lifetimeInMonths, telemetryContext, cancellationToken).ConfigureAwait(false);
+        return await LoadOrCreateAsync(
+            application, configuration, identifier, configuredThumbprint, lifetimeInMonths, telemetryContext, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task DeleteAsync(
@@ -367,6 +363,7 @@ internal static class ApplicationCertificateLoader
         ApplicationInstance application,
         ApplicationConfiguration configuration,
         CertificateIdentifier identifier,
+        string? configuredThumbprint,
         ushort lifetimeInMonths,
         ITelemetryContext telemetryContext,
         CancellationToken cancellationToken)
@@ -391,6 +388,18 @@ internal static class ApplicationCertificateLoader
         {
             certificate?.Dispose();
             throw new InvalidOperationException("No valid application certificate with a private key was found.");
+        }
+
+        // When no certificate carries the configured thumbprint, the SDK falls back to any certificate for the
+        // application URI, which would silently replace the pinned one.
+        if (!string.IsNullOrEmpty(configuredThumbprint) &&
+            !string.Equals(certificate.Thumbprint, configuredThumbprint, StringComparison.OrdinalIgnoreCase))
+        {
+            var thumbprint = certificate.Thumbprint;
+            certificate.Dispose();
+            throw new InvalidOperationException(
+                $"The application certificate {configuredThumbprint} configured by thumbprint is not in the store '{identifier.StorePath}'; " +
+                $"the store offered the certificate {thumbprint} instead, which is not used.");
         }
 
         return certificate;

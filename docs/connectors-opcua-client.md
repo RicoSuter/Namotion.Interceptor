@@ -224,7 +224,8 @@ When the client or the server loads its certificate:
 - within 30 days of expiry, it logs a warning;
 - an expired self-signed certificate, created or provisioned, is replaced with a warning, and peers have to trust the new one;
 - so is a self-signed certificate that does not carry the application URI or, for the server, does not cover the host of `BaseAddress`;
-- a CA-issued certificate, any certificate while automatic creation is off, and one an override provides (see [Custom Application Configuration](#custom-application-configuration)) are never replaced.
+- a CA-issued certificate, any certificate while automatic creation is off, and any certificate in a store other than a directory store, such as the Windows certificate store, are never replaced; the client never creates or deletes a certificate there either;
+- when an override pins a certificate by `ApplicationCertificate.Thumbprint`, only that certificate is used, and loading fails when the store does not hold it.
 
 The client loads it each time it creates a secured session itself, on the initial connect and on manual reconnects (see [Connection Loss Recovery](#connection-loss-recovery)). A session that outlives the certificate fails once the server rejects it, and the next connect replaces it.
 
@@ -244,7 +245,7 @@ By default, the client connects with anonymous authentication. Use `CreateUserId
 var config = new OpcUaClientConfiguration
 {
     ServerUrl = "opc.tcp://plc.factory.com:4840",
-    CreateUserIdentity = _ => Task.FromResult(new UserIdentity("user", "password")),
+    CreateUserIdentity = _ => Task.FromResult(new UserIdentity("user", "password"u8.ToArray())),
     // ... other settings
 };
 ```
@@ -258,20 +259,33 @@ var config = new OpcUaClientConfiguration
     CreateUserIdentity = async cancellationToken =>
     {
         var secret = await vault.GetSecretAsync("opcua-credentials", cancellationToken);
-        return new UserIdentity(secret.Username, secret.Password);
+        return new UserIdentity(secret.Username, Encoding.UTF8.GetBytes(secret.Password));
     },
     // ... other settings
 };
 ```
 
-For certificate-based authentication:
+For certificate-based authentication, the user certificate is described by a `CertificateIdentifier` and loaded with its private key through a certificate provider whenever the session signs with it, so the certificate manager that provides it must live as long as the client:
 
 ```csharp
-CreateUserIdentity = _ =>
+var userCertificates = CertificateManagerFactory.Create(new SecurityConfiguration(), telemetryContext);
+var userCertificate = new CertificateIdentifier
 {
-    var certificate = X509Certificate2.CreateFromPemFile("client.pem", "client.key");
-    return Task.FromResult(new UserIdentity(certificate));
-}
+    StoreType = CertificateStoreType.Directory,
+    StorePath = "pki/user",
+    SubjectName = "CN=Operator"
+};
+
+var config = new OpcUaClientConfiguration
+{
+    ServerUrl = "opc.tcp://plc.factory.com:4840",
+    CreateUserIdentity = cancellationToken => UserIdentity.CreateAsync(
+        userCertificate,
+        new CertificatePasswordProvider(keyPassword),
+        userCertificates.CertificateProvider,
+        cancellationToken),
+    // ... other settings
+};
 ```
 
 ### Custom Application Configuration
@@ -306,7 +320,7 @@ public class MyOpcUaClientConfiguration : OpcUaClientConfiguration
 }
 ```
 
-The client certificate always comes from the own store that `SecurityConfiguration.ApplicationCertificate` describes: its `StoreType` and `StorePath` select the store it is loaded from. The default is the directory store `{CertificateStoreBasePath}/own` (`StoreType` `Directory`). To use the Windows certificate store instead, an override sets `StoreType` to `X509Store` and `StorePath` to a store such as `CurrentUser\My`. Other store types, such as PKCS#11 hardware tokens or custom store providers, are not supported, because the client session opens the store without the certificate manager's store providers.
+The client certificate always comes from the own store that `SecurityConfiguration.ApplicationCertificate` describes: its `StoreType` and `StorePath` select the store it is loaded from. The default is the directory store `{CertificateStoreBasePath}/own` (`StoreType` `Directory`). To use the Windows certificate store instead, an override sets `StoreType` to `X509Store` and `StorePath` to a store such as `CurrentUser\My`; the certificate must be provisioned there, because the client only loads it and never creates, deletes or replaces a certificate outside a directory store. Other store types, such as PKCS#11 hardware tokens or custom store providers, are not supported, because the client session opens the store without the certificate manager's store providers.
 
 ## Monitoring & Subscriptions
 
