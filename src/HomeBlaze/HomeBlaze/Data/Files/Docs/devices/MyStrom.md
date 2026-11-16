@@ -17,7 +17,7 @@ The myStrom WiFi Switch is a smart plug with built-in power metering, temperatur
 | `PollingInterval` | TimeSpan | 15 seconds | How often to poll the device |
 | `RetryInterval` | TimeSpan | 30 seconds | Delay after connection error |
 
-Every request to the device, whether polling or an operation, times out after 10 seconds. A switch that stops answering is then shown as an error and reconnected, instead of keeping its last values for longer.
+A connection to the device that cannot be established is detected within 10 seconds, for polling and for operations. A poll that the device does not answer within 10 seconds counts as failed, so the switch is shown as an error and reconnected instead of keeping its last values. Operations may take longer than 10 seconds once connected.
 
 ## Operations
 

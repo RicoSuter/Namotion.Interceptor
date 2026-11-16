@@ -33,8 +33,13 @@ public partial class MyStromSwitch : BackgroundService,
     INetworkHost,
     IUptimeState
 {
-    // Without it a switch that stops answering holds the last values for the 100 seconds of the HttpClient default.
-    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
+    internal const string HttpClientName = "Namotion.Devices.MyStrom";
+
+    internal static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(10);
+
+    // Bounds the polling reads only, because operations may be blocking calls that legitimately take longer.
+    // Without it a switch that accepts the connection but never answers holds the last values for the 100 seconds of the HttpClient default.
+    internal TimeSpan PollRequestTimeout { get; init; } = TimeSpan.FromSeconds(10);
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<MyStromSwitch> _logger;
@@ -162,12 +167,9 @@ public partial class MyStromSwitch : BackgroundService,
         Uptime = null;
     }
 
-    internal HttpClient CreateHttpClient()
-    {
-        var client = _httpClientFactory.CreateClient();
-        client.Timeout = RequestTimeout;
-        return client;
-    }
+    internal HttpClient CreateHttpClient() => _httpClientFactory.CreateClient(HttpClientName);
+
+    internal static SocketsHttpHandler CreateHttpHandler() => new() { ConnectTimeout = ConnectTimeout };
 
     [Operation(Title = "Turn On", Icon = "PowerSettingsNew", Position = 1)]
     public async Task TurnOnAsync(CancellationToken cancellationToken)
@@ -213,7 +215,11 @@ public partial class MyStromSwitch : BackgroundService,
                 StatusMessage = "Connecting...";
 
                 using var client = CreateHttpClient();
-                await FetchInformationAsync(client, stoppingToken);
+                using (var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
+                {
+                    connectTimeout.CancelAfter(PollRequestTimeout);
+                    await FetchInformationAsync(client, connectTimeout.Token);
+                }
 
                 Status = ServiceStatus.Running;
                 StatusMessage = null;
@@ -251,19 +257,24 @@ public partial class MyStromSwitch : BackgroundService,
         {
             try
             {
-                var report = await RefreshReportAsync(client, stoppingToken);
+                // One source per poll cycle; its expiry is not the stop token, so it lands in the poll failure path below.
+                using var pollTimeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                pollTimeout.CancelAfter(PollRequestTimeout);
+                var pollToken = pollTimeout.Token;
+
+                var report = await RefreshReportAsync(client, pollToken);
                 if (report != null)
                 {
                     // The device restarted, for example after a firmware update, so its information may have changed.
                     if (report.TimeSinceBoot < previousTimeSinceBoot)
                     {
-                        await FetchInformationAsync(client, stoppingToken);
+                        await FetchInformationAsync(client, pollToken);
                     }
 
                     previousTimeSinceBoot = report.TimeSinceBoot;
                 }
 
-                await RefreshTemperatureAsync(client, stoppingToken);
+                await RefreshTemperatureAsync(client, pollToken);
                 LastUpdated = DateTimeOffset.UtcNow;
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

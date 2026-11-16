@@ -251,20 +251,17 @@ public class MyStromSwitchTests
     }
 
     [Fact]
-    public void WhenHttpClientIsCreated_ThenTimeoutIsTenSeconds()
+    public void WhenHandlerIsCreated_ThenConnectTimeoutIsTenSeconds()
     {
-        // Arrange
-        var subject = CreateSwitch();
-
         // Act
-        using var client = subject.CreateHttpClient();
+        using var handler = MyStromSwitch.CreateHttpHandler();
 
         // Assert
-        Assert.Equal(TimeSpan.FromSeconds(10), client.Timeout);
+        Assert.Equal(TimeSpan.FromSeconds(10), handler.ConnectTimeout);
     }
 
     [Fact]
-    public async Task WhenPollingAndOperating_ThenEveryClientHasTheShortTimeout()
+    public async Task WhenOperating_ThenTheNamedClientWithoutRequestTimeoutIsUsed()
     {
         // Arrange
         var device = new FakeDevice(uptimes: [100], versions: ["4.0.7"]);
@@ -272,38 +269,31 @@ public class MyStromSwitchTests
         var subject = new MyStromSwitch(factory, NullLogger<MyStromSwitch>.Instance)
         {
             HostAddress = "switch.test",
-            PollingInterval = TimeSpan.FromMilliseconds(1)
+            PollRequestTimeout = TimeSpan.Zero
         };
 
         // Act
-        await subject.StartAsync(CancellationToken.None);
-        try
-        {
-            await AsyncTestHelpers.WaitUntilAsync(() => device.ReportRequestCount >= 2);
-            await subject.TurnOnAsync(CancellationToken.None);
-            await subject.TurnOffAsync(CancellationToken.None);
-        }
-        finally
-        {
-            await subject.StopAsync(CancellationToken.None);
-        }
+        await subject.TurnOnAsync(CancellationToken.None);
+        await subject.TurnOffAsync(CancellationToken.None);
 
         // Assert
-        var timeouts = factory.Timeouts;
-        Assert.True(timeouts.Length >= 3);
-        Assert.All(timeouts, timeout => Assert.Equal(TimeSpan.FromSeconds(10), timeout));
+        Assert.Equal(2, factory.Clients.Length);
+        Assert.All(factory.Names, name => Assert.Equal("Namotion.Devices.MyStrom", name));
+        Assert.All(factory.Clients, client => Assert.Equal(TimeSpan.FromSeconds(100), client.Timeout));
+        Assert.Equal(true, subject.IsOn);
     }
 
     [Fact]
-    public async Task WhenARequestTimesOut_ThenTheSwitchIsInErrorAndReconnects()
+    public async Task WhenAPollIsNotAnswered_ThenTheSwitchIsInErrorAndReconnects()
     {
         // Arrange
-        var device = new FakeDevice(uptimes: [100], versions: ["4.0.7"]) { TimeOutReportRequestNumber = 2 };
+        var device = new FakeDevice(uptimes: [100], versions: ["4.0.7"]) { HangReportRequestNumber = 2 };
         var subject = new MyStromSwitch(new FakeHttpClientFactory(device), NullLogger<MyStromSwitch>.Instance)
         {
             HostAddress = "switch.test",
             PollingInterval = TimeSpan.FromMilliseconds(1),
-            RetryInterval = TimeSpan.FromMilliseconds(1)
+            RetryInterval = TimeSpan.FromMilliseconds(1),
+            PollRequestTimeout = TimeSpan.FromMilliseconds(50)
         };
 
         // Act
@@ -329,12 +319,17 @@ public class MyStromSwitchTests
     {
         private readonly ConcurrentQueue<HttpClient> _clients = new();
 
-        public TimeSpan[] Timeouts => _clients.Select(client => client.Timeout).ToArray();
+        private readonly ConcurrentQueue<string> _names = new();
+
+        public HttpClient[] Clients => _clients.ToArray();
+
+        public string[] Names => _names.ToArray();
 
         public HttpClient CreateClient(string name)
         {
             var client = new HttpClient(device, disposeHandler: false);
             _clients.Enqueue(client);
+            _names.Enqueue(name);
             return client;
         }
     }
@@ -347,19 +342,19 @@ public class MyStromSwitchTests
         private int _informationRequestCount;
         private int _reportRequestCount;
 
-        public int TimeOutReportRequestNumber { get; init; }
+        public int HangReportRequestNumber { get; init; }
 
         public int InformationRequestCount => Volatile.Read(ref _informationRequestCount);
 
         public int ReportRequestCount => Volatile.Read(ref _reportRequestCount);
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            if (request.RequestUri!.AbsolutePath == "/report" && TimeOutReportRequestNumber > 0 &&
-                Volatile.Read(ref _reportRequestCount) == TimeOutReportRequestNumber - 1)
+            if (request.RequestUri!.AbsolutePath == "/report" && HangReportRequestNumber > 0 &&
+                Volatile.Read(ref _reportRequestCount) == HangReportRequestNumber - 1)
             {
                 Interlocked.Increment(ref _reportRequestCount);
-                throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.", new TimeoutException());
+                await Task.Delay(Timeout.Infinite, cancellationToken);
             }
 
             var json = request.RequestUri!.AbsolutePath switch
@@ -368,10 +363,10 @@ public class MyStromSwitchTests
                 "/report" => $$"""{"power":0,"relay":true,"energy_since_boot":0,"time_since_boot":{{Next(uptimes, ref _reportRequestCount)}}}""",
                 _ => """{"measured":20,"compensation":0,"compensated":20}"""
             };
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
-            });
+            };
         }
 
         private static T Next<T>(T[] values, ref int count)

@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Http;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Namotion.Devices.MyStrom.Tests;
@@ -41,5 +43,26 @@ public class MyStromServiceCollectionExtensionsTests
         var subject = serviceProvider.GetRequiredService<MyStromSwitch>();
         Assert.Null(subject.HostAddress);
         Assert.Equal(TimeSpan.FromSeconds(15), subject.PollingInterval);
+    }
+
+    [Fact]
+    public void WhenAddMyStromSwitch_ThenNamedClientUsesConnectTimeoutHandler()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddMyStromSwitch();
+        var serviceProvider = services.BuildServiceProvider();
+        var options = serviceProvider.GetRequiredService<IOptionsMonitor<HttpClientFactoryOptions>>().Get("Namotion.Devices.MyStrom");
+        var builder = serviceProvider.GetRequiredService<HttpMessageHandlerBuilder>();
+
+        // Act
+        foreach (var action in options.HttpMessageHandlerBuilderActions)
+        {
+            action(builder);
+        }
+
+        // Assert
+        var handler = Assert.IsType<SocketsHttpHandler>(builder.PrimaryHandler);
+        Assert.Equal(TimeSpan.FromSeconds(10), handler.ConnectTimeout);
     }
 }
