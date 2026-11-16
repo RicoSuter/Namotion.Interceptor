@@ -35,7 +35,7 @@ The design rests on three rules:
 | Type | Assembly | Role |
 |------|----------|------|
 | `PropertyAccessObservation`, `IPropertyReadObserver`, `IPropertyWriteObserver`, `PropertyReadObservation`, `PropertyWriteObservation` | `Namotion.Interceptor` | The access taps: the read observer slot of the current thread, the process-wide write observer and the write depth of the current thread. No derived concepts. Public, `[EditorBrowsable(Never)]` infrastructure. |
-| `InterceptorExecutor` | `Namotion.Interceptor` | Calls the taps on every intercepted read and write, and provides `GetPropertyValueWithoutContext` and `SetPropertyValueWithoutContext`, which generated code calls for a subject without a context. |
+| `InterceptorExecutor` | `Namotion.Interceptor` | Calls the taps on every intercepted read and write, and provides `GetPropertyValueWithoutContext` and `SetPropertyValueWithoutContext`, which generated code and hand-written subjects call for a subject without a context (public and visible, part of the hand-written subject contract in `docs/generator.md`). |
 | `DerivedPropertyChangeHandler` | Tracking | `IPropertyLifecycleHandler` only: attaches and detaches derived properties. |
 | `DerivedPropertyOwnership` | Tracking | The ownership protocol: requests, the owner loop that evaluates, commits and publishes, the attach evaluation, detach, and the takeover after a failure. |
 | `DerivedPropertyRecorder` | Tracking | Thread-static recorder, installed as the thread's read observer while a getter is evaluated. Records each read property with its version, in nested frames. Uses `ArrayPool` to avoid allocations in steady state. |
