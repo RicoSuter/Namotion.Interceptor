@@ -122,6 +122,24 @@ public class OpcUaServerConfigurationTests
         Assert.Null(exception);
     }
 
+    [Fact]
+    public void WhenTwoUserNameAuthenticatorsHaveDifferentIssuers_ThenValidationFails()
+    {
+        // Arrange
+        var configuration = new OpcUaServerConfiguration
+        {
+            UserTokenAuthenticators =
+            [
+                new TestIssuerAuthenticator("urn:issuer:a", UserTokenType.UserName),
+                new TestIssuerAuthenticator("urn:issuer:b", UserTokenType.UserName)
+            ]
+        };
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Equal(nameof(OpcUaServerConfiguration.UserTokenAuthenticators), exception.ParamName);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("  ")]
@@ -148,11 +166,12 @@ public class OpcUaServerConfigurationTests
         Assert.Equal(nameof(OpcUaServerConfiguration.ApplicationUri), exception.ParamName);
     }
 
-    private sealed class TestIssuerAuthenticator(string issuerUri) : IIssuerTokenAuthenticator
+    private sealed class TestIssuerAuthenticator(string issuerUri, UserTokenType tokenType = UserTokenType.IssuedToken)
+        : IIssuerTokenAuthenticator
     {
-        public UserTokenType TokenType => UserTokenType.IssuedToken;
+        public UserTokenType TokenType => tokenType;
 
-        public string? IssuedTokenProfileUri => "http://opcfoundation.org/UA/UserToken#JWT";
+        public string? IssuedTokenProfileUri => tokenType == UserTokenType.IssuedToken ? "http://opcfoundation.org/UA/UserToken#JWT" : null;
 
         public string? IssuerUri => issuerUri;
 
