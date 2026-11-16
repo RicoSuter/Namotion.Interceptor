@@ -48,4 +48,22 @@ public static class ServiceCollectionExtensions
 
         return services;
     }
+
+    /// <summary>
+    /// Adds <see cref="IHttpClientFactory"/> whose clients give up connecting after 10 seconds, so that a device that is
+    /// not reachable fails fast. Requests that are connected have no limit besides the one of the client.
+    /// </summary>
+    public static IServiceCollection AddHomeBlazeHttpClients(this IServiceCollection services)
+    {
+        services.AddHttpClient();
+        services.ConfigureHttpClientDefaults(builder => builder.ConfigurePrimaryHttpMessageHandler((handler, _) =>
+        {
+            // Only the timeout is set, so the primary handler and its pooling stay those of the factory.
+            if (handler is SocketsHttpHandler socketsHandler)
+            {
+                socketsHandler.ConnectTimeout = TimeSpan.FromSeconds(10);
+            }
+        }));
+        return services;
+    }
 }

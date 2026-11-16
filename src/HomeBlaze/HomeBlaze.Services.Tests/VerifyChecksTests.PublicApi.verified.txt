@@ -124,6 +124,7 @@ namespace HomeBlaze.Services
     }
     public static class ServiceCollectionExtensions
     {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddHomeBlazeHttpClients(this Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddHomeBlazeServices(this Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
     }
     public sealed class SkippedConfigurationProperty : System.IEquatable<HomeBlaze.Services.SkippedConfigurationProperty>
