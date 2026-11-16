@@ -27,6 +27,16 @@ internal sealed record RenderingControlChange(
     bool? SpeechEnhancement);
 
 /// <summary>
+/// ContentDirectory values from an event. A null field was not reported. <see cref="FavoritesContainerUpdateId"/> is
+/// the update id <see cref="ContainerUpdateIds"/> lists for the favorites container.
+/// </summary>
+internal sealed record ContentDirectoryChange(
+    string? FavoritesUpdateId,
+    string? ContainerUpdateIds,
+    string? FavoritesContainerUpdateId,
+    string? SystemUpdateId);
+
+/// <summary>
 /// GroupRenderingControl values read from a group coordinator.
 /// </summary>
 internal sealed record GroupRenderingControlChange(int? Volume, bool? Mute);

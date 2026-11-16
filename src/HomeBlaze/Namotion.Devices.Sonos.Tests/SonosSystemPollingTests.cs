@@ -16,6 +16,7 @@ public class SonosSystemPollingTests
     private const string RenderingControlEventPath = "/MediaRenderer/RenderingControl/Event";
     private const string GroupRenderingControlEventPath = "/MediaRenderer/GroupRenderingControl/Event";
     private const string TopologyEventPath = "/ZoneGroupTopology/Event";
+    private const string ContentDirectoryEventPath = ConnectedSystem.ContentDirectoryEventPath;
 
     private static readonly TimeSpan PollingInterval = TimeSpan.FromSeconds(SonosSystem.DefaultIntervalSeconds);
 
@@ -420,6 +421,292 @@ public class SonosSystemPollingTests
         Assert.Empty(household.Office.Calls);
     }
 
+    // The speaker the change was made through, which prefixes FavoritesUpdateID.
+    private const string ChangingSpeaker = "RINCON_C43875930F2801400";
+
+    // As a speaker sends them: FavoritesUpdateID is the speaker that made the change and a count per household, and
+    // ContainerUpdateIDs lists the radio and favorites containers with their update ids.
+    private static string ContentDirectoryEvent(
+        string favoritesUpdateId, string favoritesContainerUpdateId, string systemUpdateId = "6", string speaker = ChangingSpeaker) =>
+        SonosEventBodies.Properties(
+            ("SystemUpdateID", systemUpdateId),
+            ("ContainerUpdateIDs", $"R:0,{favoritesContainerUpdateId},FV:2,{favoritesContainerUpdateId}"),
+            ("FavoritesUpdateID", $"{speaker},{favoritesUpdateId}"),
+            ("RadioFavoritesUpdateID", $"{speaker},{favoritesUpdateId}"));
+
+    private static void RespondWithFavorite(FakeSonosSpeaker speaker, string title) =>
+        speaker.Respond("Browse",
+            ("Result",
+                """<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/" xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">""" +
+                $"""<item id="FV:2/9" parentID="FV:2" restricted="false"><dc:title>{title}</dc:title><upnp:class>object.itemobject.item.sonos-favorite</upnp:class>""" +
+                """<res protocolInfo="x-rincon-mp3radio:*:*:*">x-rincon-mp3radio://stream.example/live.mp3</res><r:type>instantPlay</r:type><r:resMD></r:resMD></item></DIDL-Lite>"""),
+            ("NumberReturned", "1"), ("TotalMatches", "1"), ("UpdateID", "2"));
+
+    private static int CountBrowseCalls(PolledHousehold household) =>
+        household.Kitchen.Calls.Concat(household.Office.Calls).Count(call => call.Action == "Browse");
+
+    [Fact]
+    public async Task WhenTheFavoritesUpdateIdChanges_ThenTheFavoritesAreReadAgainWithoutWaitingForAPoll()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        RespondWithFavorite(household.Kitchen, "Radio Swiss Jazz");
+        RespondWithFavorite(household.Office, "Radio Swiss Jazz");
+        household.ClearCalls();
+
+        // Act
+        await household.Kitchen.NotifyAsync(ContentDirectoryEventPath, ContentDirectoryEvent("12", "2"));
+        await household.WaitForFavoritesAsync();
+
+        // Assert
+        Assert.Equal(["Radio Swiss Jazz"], household.System.Favorites.Select(favorite => favorite.Title));
+        Assert.Equal(["Browse"], household.Kitchen.Calls.Concat(household.Office.Calls).Select(call => call.Action));
+    }
+
+    [Fact]
+    public async Task WhenAnotherSpeakerReportsTheSameFavoritesCount_ThenTheFavoritesAreReadAgain()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        await household.Kitchen.NotifyAsync(ContentDirectoryEventPath, ContentDirectoryEvent("12", "2"));
+        await household.WaitForFavoritesAsync();
+        household.ClearCalls();
+
+        // Act
+        await household.Kitchen.NotifyAsync(ContentDirectoryEventPath, ContentDirectoryEvent("12", "2", speaker: "RINCON_949F3E93613001400"));
+        await household.WaitForFavoritesAsync();
+
+        // Assert
+        Assert.Equal(1, CountBrowseCalls(household));
+    }
+
+    [Fact]
+    public async Task WhenOnlyTheFavoritesContainerUpdateIdChanges_ThenTheFavoritesAreReadAgain()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        await household.Kitchen.NotifyAsync(ContentDirectoryEventPath, ContentDirectoryEvent("12", "2"));
+        await household.WaitForFavoritesAsync();
+        household.ClearCalls();
+
+        // Act
+        await household.Kitchen.NotifyAsync(ContentDirectoryEventPath, ContentDirectoryEvent("12", "3"));
+        await household.WaitForFavoritesAsync();
+
+        // Assert
+        Assert.Equal(1, CountBrowseCalls(household));
+    }
+
+    [Theory]
+    [InlineData("6")]
+    [InlineData("8")]
+    public async Task WhenNeitherFavoritesIdChanges_ThenTheFavoritesAreNotReadAgain(string systemUpdateId)
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        await household.Kitchen.NotifyAsync(ContentDirectoryEventPath, ContentDirectoryEvent("12", "2"));
+        await household.WaitForFavoritesAsync();
+        household.ClearCalls();
+
+        // Act
+        await household.Kitchen.NotifyAsync(ContentDirectoryEventPath, ContentDirectoryEvent("12", "2", systemUpdateId));
+
+        // Assert
+        // The event is applied before its NOTIFY is answered, so a read it asked for would be pending now.
+        Assert.False(household.System.HasPendingFavoritesRefresh);
+        Assert.Equal(0, CountBrowseCalls(household));
+    }
+
+    [Fact]
+    public async Task WhenFavoritesEventsArriveDuringARead_ThenOneMoreReadFollows()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        household.ClearCalls();
+        var kitchenHold = household.Kitchen.HoldAction("Browse");
+        var officeHold = household.Office.HoldAction("Browse");
+        await household.Kitchen.NotifyAsync(ContentDirectoryEventPath, ContentDirectoryEvent("12", "2"));
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => CountBrowseCalls(household) == 1,
+            ConnectedSystem.WaitTimeout,
+            message: "The first event should start a read.");
+
+        // Act
+        await household.Kitchen.NotifyAsync(ContentDirectoryEventPath, ContentDirectoryEvent("13", "3"));
+        await household.Kitchen.NotifyAsync(ContentDirectoryEventPath, ContentDirectoryEvent("14", "4"));
+        await household.Kitchen.NotifyAsync(ContentDirectoryEventPath, ContentDirectoryEvent("15", "5"));
+        kitchenHold.SetResult();
+        officeHold.SetResult();
+        await household.WaitForFavoritesAsync();
+
+        // Assert
+        Assert.Equal(2, CountBrowseCalls(household));
+    }
+
+    [Fact]
+    public async Task WhenAFavoritesEventArrivesBeforeAFullReconciliationReadsThem_ThenItCostsNoReadOfItsOwn()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        household.ClearCalls();
+        var hold = household.Kitchen.HoldAction("GetVolume");
+        var refresh = household.System.RefreshAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => household.Kitchen.Calls.Any(call => call.Action == "GetVolume"),
+            ConnectedSystem.WaitTimeout,
+            message: "The reconciliation should poll the kitchen.");
+
+        // Act
+        await household.Kitchen.NotifyAsync(ContentDirectoryEventPath, ContentDirectoryEvent("12", "2"));
+        hold.SetResult();
+        await refresh;
+        await household.WaitForFavoritesAsync();
+
+        // Assert
+        Assert.Equal(1, CountBrowseCalls(household));
+    }
+
+    [Fact]
+    public async Task WhenTheFavoritesSubscriptionIsNotLive_ThenFavoritesAreReadWithEachFullReconciliationOnly()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true, failsContentDirectory: true);
+        household.ClearCalls();
+
+        // Act
+        await household.CountCallsAsync(polls: 20);
+
+        // Assert
+        Assert.Null(household.Kitchen.GetCallback(ContentDirectoryEventPath));
+        Assert.Equal(2, CountBrowseCalls(household));
+    }
+
+    [Fact]
+    public async Task WhenTheFavoritesSubscriptionIsMade_ThenItsInitialEventCostsNoReadOfItsOwn()
+    {
+        // Act
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+
+        // Assert
+        // The first reconciliation reads the favorites after subscribing, which covers the initial event.
+        Assert.Equal(1, CountBrowseCalls(household));
+    }
+
+    [Fact]
+    public async Task WhenAReadAfterAFavoritesEventFails_ThenTheNextPollReadsThemOnce()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        household.Kitchen.RespondWithServerError("Browse");
+        household.Office.RespondWithServerError("Browse");
+        await household.Kitchen.NotifyAsync(ContentDirectoryEventPath, ContentDirectoryEvent("12", "2"));
+        await household.WaitForFavoritesAsync();
+        household.Kitchen.ClearServerError("Browse");
+        household.Office.ClearServerError("Browse");
+        RespondWithFavorite(household.Kitchen, "Radio Swiss Jazz");
+        RespondWithFavorite(household.Office, "Radio Swiss Jazz");
+        household.ClearCalls();
+
+        // Act
+        await household.PollAsync();
+        var browsesAtRetry = CountBrowseCalls(household);
+        household.ClearCalls();
+        await household.PollAsync();
+
+        // Assert
+        Assert.Equal(1, browsesAtRetry);
+        Assert.Equal(["Radio Swiss Jazz"], household.System.Favorites.Select(favorite => favorite.Title));
+        Assert.Equal(0, CountBrowseCalls(household));
+    }
+
+    [Fact]
+    public async Task WhenReadingFavoritesKeepsFailingAfterAnEvent_ThenOnlyOnePollTriesAgain()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        household.Kitchen.RespondWithServerError("Browse");
+        household.Office.RespondWithServerError("Browse");
+        await household.Kitchen.NotifyAsync(ContentDirectoryEventPath, ContentDirectoryEvent("12", "2"));
+        await household.WaitForFavoritesAsync();
+        household.ClearCalls();
+
+        // Act
+        await household.PollAsync();
+        var browsesAtRetry = CountBrowseCalls(household);
+        household.ClearCalls();
+        await household.PollAsync();
+
+        // Assert
+        // The retry asks each player once.
+        Assert.Equal(2, browsesAtRetry);
+        Assert.Equal(0, CountBrowseCalls(household));
+    }
+
+    [Fact]
+    public async Task WhenARenewalOfTheFavoritesSubscriptionGetsNoAnswer_ThenThePollsReadTheFavorites()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true, fullReconcileInterval: TimeSpan.FromHours(1));
+        household.Kitchen.AbortRenewalsTo(ContentDirectoryEventPath);
+        household.Clock.Advance(TimeSpan.FromMinutes(16));
+        await household.PollAsync(advances: false);
+        household.ClearCalls();
+
+        // Act
+        await household.PollAsync();
+
+        // Assert
+        Assert.Equal(1, CountBrowseCalls(household));
+    }
+
+    [Fact]
+    public async Task WhenAFullReconciliationFailsToReadFavoritesAnEventAskedFor_ThenTheNextPollReadsThemOnce()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        var hold = household.Kitchen.HoldAction("GetVolume");
+        household.ClearCalls();
+        var refresh = household.System.RefreshAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => household.Kitchen.Calls.Any(call => call.Action == "GetVolume"),
+            ConnectedSystem.WaitTimeout,
+            message: "The reconciliation should poll the kitchen.");
+        await household.Kitchen.NotifyAsync(ContentDirectoryEventPath, ContentDirectoryEvent("12", "2"));
+        household.Kitchen.RespondWithServerError("Browse");
+        household.Office.RespondWithServerError("Browse");
+        hold.SetResult();
+        await refresh;
+        await household.WaitForFavoritesAsync();
+        household.Kitchen.ClearServerError("Browse");
+        household.Office.ClearServerError("Browse");
+        household.ClearCalls();
+
+        // Act
+        await household.PollAsync();
+        var browsesAtRetry = CountBrowseCalls(household);
+        household.ClearCalls();
+        await household.PollAsync();
+
+        // Assert
+        Assert.Equal(1, browsesAtRetry);
+        Assert.Equal(0, CountBrowseCalls(household));
+    }
+
+    [Fact]
+    public async Task WhenTheFavoritesSubscriptionMissesAnEvent_ThenTheNextPollReadsTheFavorites()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        household.ClearCalls();
+
+        // Act
+        await household.Kitchen.NotifyAsync(ContentDirectoryEventPath, SonosEventBodies.Properties(), sequence: 3);
+        await household.PollAsync();
+
+        // Assert
+        Assert.Equal(1, CountBrowseCalls(household));
+    }
+
     private sealed class PolledHousehold : IAsyncDisposable
     {
         private readonly LoopbackHttpServer? _portBlocker;
@@ -450,7 +737,11 @@ public class SonosSystemPollingTests
         /// one before this returns; without, the speakers accept the subscriptions but never send one.
         /// </summary>
         internal static async Task<PolledHousehold> StartAsync(
-            bool sendsEvents, bool kitchenPlays = false, bool blocksEventPort = false, TimeSpan? fullReconcileInterval = null)
+            bool sendsEvents,
+            bool kitchenPlays = false,
+            bool blocksEventPort = false,
+            TimeSpan? fullReconcileInterval = null,
+            bool failsContentDirectory = false)
         {
             var kitchen = new FakeSonosSpeaker { SendInitialEvents = sendsEvents };
             var office = new FakeSonosSpeaker { SendInitialEvents = sendsEvents };
@@ -462,6 +753,16 @@ public class SonosSystemPollingTests
                 foreach (var speaker in new[] { kitchen, office })
                 {
                     speaker.RespondWithTopology((TestFixtures.KitchenUuid, "Küche", kitchen.BaseUri), (TestFixtures.OfficeUuid, "Büro", office.BaseUri));
+                }
+
+                if (failsContentDirectory)
+                {
+                    kitchen.FailSubscriptionsTo(ContentDirectoryEventPath);
+                }
+                else if (sendsEvents)
+                {
+                    // Applied while subscribing, so the favorites read it asks for is known to be requested.
+                    kitchen.SendInitialEventBeforeAnswering(ContentDirectoryEventPath, SonosEventBodies.Properties());
                 }
 
                 if (kitchenPlays)
@@ -511,6 +812,7 @@ public class SonosSystemPollingTests
 
                     // Reads the position once for each coordinator, which the AVTransport events just sent ask for.
                     await household.PollAsync();
+                    await household.WaitForFavoritesAsync();
                 }
 
                 return household;
@@ -583,6 +885,15 @@ public class SonosSystemPollingTests
             hold.SetResult();
             await poll;
         }
+
+        /// <summary>
+        /// Waits until the favorites reads that ContentDirectory events requested are done.
+        /// </summary>
+        internal Task WaitForFavoritesAsync() =>
+            AsyncTestHelpers.WaitUntilAsync(
+                () => !System.HasPendingFavoritesRefresh,
+                ConnectedSystem.WaitTimeout,
+                message: "The favorites read an event requested should complete.");
 
         internal void ClearCalls()
         {

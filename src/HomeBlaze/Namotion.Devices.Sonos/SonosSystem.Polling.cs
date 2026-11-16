@@ -161,7 +161,8 @@ public partial class SonosSystem
     /// Runs a scheduled poll: a full reconciliation like <see cref="ReconcileAsync"/> once
     /// <see cref="FullReconcileInterval"/> has passed since the last one. Otherwise it reads the topology, fully reads
     /// every player whose event subscriptions are not live, of the others only what events do not deliver, and the
-    /// favorites only while the topology subscription is not live. Throws like <see cref="ReconcileAsync"/>.
+    /// favorites while the topology subscription is not live, after a missed ContentDirectory event, or after an
+    /// event-triggered read failed. Throws like <see cref="ReconcileAsync"/>.
     /// </summary>
     internal Task PollAsync(CancellationToken cancellationToken) => RunPollAsync(forcesFullReconcile: false, cancellationToken);
 
@@ -212,12 +213,16 @@ public partial class SonosSystem
                 .Where(satellite => satellite.IsInTopology && satellite.NeedsStaticData)
                 .Select(satellite => PollSatelliteAsync(satellite, cancellationToken)));
 
-            if (eventListener is null || !IsSubscriptionLive(eventListener, TopologySubscriptionKey, now))
+            // Decided on the subscriptions as they were during the poll, but read after subscribing: the initial event of
+            // a new ContentDirectory subscription, which asks for a read, usually arrives with the SUBSCRIBE answer and
+            // is then covered by this read; one that arrives after the read started costs one read after it.
+            var readsFavorites = ReadsFavorites(eventListener, listener, now);
+            await EnsureSubscriptionsAsync(cancellationToken);
+            if (readsFavorites)
             {
                 await RefreshFavoritesAsync(players, cancellationToken);
             }
 
-            await EnsureSubscriptionsAsync(cancellationToken);
             if (isFullReconcile)
             {
                 _fullReconcileDueAt = Clock.AddToTimestamp(startedAt, FullReconcileInterval);
@@ -472,9 +477,55 @@ public partial class SonosSystem
         }
     }
 
+    // Caller holds _reconcileLock. A full reconciliation reads the favorites, as the safety net for events, and so does
+    // every poll while the topology subscription is not live. Otherwise ContentDirectory events re-read them, and a
+    // poll only repairs an event the subscription missed or an event-triggered read that failed, once.
+    private bool ReadsFavorites(SonosEventListener? eventListener, SonosEventListener? runningListener, long now)
+    {
+        var hasMissedEvents = runningListener is not null && TakeMissedEvents(runningListener, ContentDirectorySubscriptionKey);
+        hasMissedEvents |= IsFavoritesSubscriptionFailing(runningListener, now);
+        var retriesFailedRead = _retriesFavoritesRead;
+        _retriesFavoritesRead = false;
+        return eventListener is null || hasMissedEvents || retriesFailedRead || !IsSubscriptionLive(eventListener, TopologySubscriptionKey, now);
+    }
+
+    // Caller holds _reconcileLock. A ContentDirectory subscription whose renewal got no answer or whose lifetime ended
+    // may miss events, and its speaker may differ from the seed's; one that was never made or was refused for good
+    // leaves the favorites to the full reconciliation.
+    private static bool IsFavoritesSubscriptionFailing(SonosEventListener? runningListener, long now)
+    {
+        if (runningListener is null || !runningListener.TryGetSubscription(ContentDirectorySubscriptionKey, out var subscription) || subscription.Sid is null)
+        {
+            return false;
+        }
+
+        return subscription.HasFailedRenewal || now >= subscription.ExpiresAt;
+    }
+
+    // Caller holds _reconcileLock, which serializes every favorites read. The read covers the refreshes events
+    // requested before it started, also when it fails, since the next full reconciliation reads them again.
+    /// <returns>Whether a player answered with the favorites.</returns>
+    private async Task<bool> RefreshFavoritesAsync(SonosPlayer[] players, CancellationToken cancellationToken)
+    {
+        var requests = Volatile.Read(ref _favoritesRefreshRequests);
+        try
+        {
+            var isRead = await ReadFavoritesAsync(players, cancellationToken);
+
+            // A failed read of favorites that events asked for is tried once more at the next poll; that retry has no
+            // requests of its own, so a persistent failure does not repeat it.
+            _retriesFavoritesRead = !isRead && requests != 0;
+            return isRead;
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref _favoritesRefreshRequests, 0, requests);
+        }
+    }
+
     // Read through a player, not the seed: the seed may be a satellite, and satellites answer the favorites Browse
     // with HTTP 500.
-    private async Task RefreshFavoritesAsync(SonosPlayer[] players, CancellationToken cancellationToken)
+    private async Task<bool> ReadFavoritesAsync(SonosPlayer[] players, CancellationToken cancellationToken)
     {
         Exception? failure = null;
         var candidates = new List<(SonosPlayer Player, SonosConnection Connection)>(players.Length);
@@ -493,7 +544,7 @@ public partial class SonosSystem
             {
                 SetFavorites(await connection.ReadFavoritesAsync(cancellationToken));
                 _failures.ReportSuccess(FavoritesFailureKey);
-                return;
+                return true;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -511,5 +562,6 @@ public partial class SonosSystem
 
         failure ??= new InvalidOperationException("No connected Sonos player to read the favorites from.");
         LogFailure(_failures.ReportFailure(FavoritesFailureKey), failure, "Reading the Sonos favorites failed.");
+        return false;
     }
 }

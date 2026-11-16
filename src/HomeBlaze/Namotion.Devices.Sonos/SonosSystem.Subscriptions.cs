@@ -9,6 +9,7 @@ public partial class SonosSystem
     internal const string RenderingControlService = "RenderingControl";
     internal const string GroupRenderingControlService = "GroupRenderingControl";
     private const string TopologySubscriptionKey = "seed/ZoneGroupTopology";
+    private const string ContentDirectorySubscriptionKey = "seed/ContentDirectory";
 
     // The monotonic timestamp of the loop's next subscription wake, for the earliest renewal or first-event deadline,
     // TimeProviderExtensions.Never for none. Written under _reconcileLock, which also guards the subscriptions'
@@ -71,7 +72,7 @@ public partial class SonosSystem
                 .Where(pair => pair.Value.CanSubscribe && !eventListener.HasSubscription(pair.Key))
                 .ToArray();
             await Task.WhenAll(missing.Select(pair =>
-                RunSubscriptionRequestAsync(() => eventListener.SubscribeAsync(pair.Key, pair.Value.EventUri, pair.Value.Handler ?? CreateTopologyHandler(), cancellationToken), pair.Key, cancellationToken)));
+                RunSubscriptionRequestAsync(() => eventListener.SubscribeAsync(pair.Key, pair.Value.EventUri, pair.Value.Handler ?? CreateSeedHandler(pair.Key), cancellationToken), pair.Key, cancellationToken)));
 
             // A replacement that failed left no subscription, which the next upkeep subscribes again.
             if (requests is not null)
@@ -103,8 +104,8 @@ public partial class SonosSystem
     }
 
     // Caller holds _reconcileLock. Returns the players with pending requests and how many each had, and the keys of
-    // the subscriptions to replace for them; both null for none. The topology subscription is replaced with those of
-    // the seed, which holds it.
+    // the subscriptions to replace for them; both null for none. The topology and ContentDirectory subscriptions are
+    // replaced with those of the player that holds them.
     private List<(SonosPlayer Player, int Handled)>? GetNewSubscriptionsRequests(out HashSet<string>? replaced)
     {
         List<(SonosPlayer Player, int Handled)>? requests = null;
@@ -123,6 +124,11 @@ public partial class SonosSystem
                 {
                     replaced.Add(TopologySubscriptionKey);
                 }
+
+                if (HoldsContentDirectorySubscription(player))
+                {
+                    replaced.Add(ContentDirectorySubscriptionKey);
+                }
             }
         }
 
@@ -130,8 +136,40 @@ public partial class SonosSystem
     }
 
     private bool IsSeed(SonosPlayer player) =>
-        player.BaseUri is { } baseUri && GetSeedUri() is { } seedUri &&
-        baseUri.Port == seedUri.Port && string.Equals(baseUri.Host, seedUri.Host, StringComparison.OrdinalIgnoreCase);
+        player.BaseUri is { } baseUri && GetSeedUri() is { } seedUri && IsSameDevice(baseUri, seedUri);
+
+    private bool HoldsContentDirectorySubscription(SonosPlayer player) =>
+        player.BaseUri is { } baseUri && GetSeedUri() is { } seedUri && IsSameDevice(baseUri, GetContentDirectoryBaseUri(seedUri));
+
+    private static bool IsSameDevice(Uri first, Uri second) =>
+        first.Port == second.Port && string.Equals(first.Host, second.Host, StringComparison.OrdinalIgnoreCase);
+
+    // The seed reports favorites changes made through any speaker, but a seed that is no visible player, such as a
+    // satellite, may not, so then the connected player with the lowest RINCON id holds the subscription, a choice that
+    // regrouping does not change.
+    private Uri GetContentDirectoryBaseUri(Uri seedUri)
+    {
+        SonosPlayer? fallback = null;
+        foreach (var player in Players.Values)
+        {
+            if (!player.IsInTopology || player.BaseUri is not { } baseUri)
+            {
+                continue;
+            }
+
+            if (IsSameDevice(baseUri, seedUri))
+            {
+                return seedUri;
+            }
+
+            if (player.IsConnected && (fallback is null || string.CompareOrdinal(player.Uuid, fallback.Uuid) < 0))
+            {
+                fallback = player;
+            }
+        }
+
+        return fallback?.BaseUri ?? seedUri;
+    }
 
     /// <summary>
     /// Returns whether the subscription delivers events now: the speaker accepted it, an event arrived, its last
@@ -253,12 +291,14 @@ public partial class SonosSystem
         if (GetSeedUri() is { } seedUri)
         {
             desired[TopologySubscriptionKey] = new SubscriptionTarget(new Uri(seedUri, "/ZoneGroupTopology/Event"), Handler: null, CanSubscribe: true);
+            desired[ContentDirectorySubscriptionKey] = new SubscriptionTarget(
+                new Uri(GetContentDirectoryBaseUri(seedUri), "/MediaServer/ContentDirectory/Event"), Handler: null, CanSubscribe: true);
         }
 
         return desired;
     }
 
-    // A null handler is the topology subscription's, created for each subscription made, see CreateTopologyHandler.
+    // A null handler is that of a seed subscription, created for each subscription made, see CreateSeedHandler.
     private sealed record SubscriptionTarget(Uri EventUri, Action<string>? Handler, bool CanSubscribe);
 
     // The event handlers run on the listener's thread pool callbacks, concurrently with polling. The listener catches
@@ -277,6 +317,9 @@ public partial class SonosSystem
             group.ApplyGroupRenderingControlEvent(UpnpEventParser.ParseGroupRenderingControl(body), NextOrder());
         }
     }
+
+    private Action<string> CreateSeedHandler(string key) =>
+        key == ContentDirectorySubscriptionKey ? CreateContentDirectoryHandler() : CreateTopologyHandler();
 
     // One handler per subscription. Its first event, the full state the seed sends right after accepting, follows the
     // poll that subscribed within milliseconds, so it must not count as the second read that takes missing players

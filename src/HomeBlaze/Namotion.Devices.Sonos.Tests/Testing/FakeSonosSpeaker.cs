@@ -25,6 +25,8 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     private readonly ConcurrentQueue<(string Path, DateTimeOffset At)> _renewed = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource> _holds = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> _initialEvents = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, bool> _failedSubscriptionPaths = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, bool> _abortedRenewalPaths = new(StringComparer.Ordinal);
 
     internal FakeSonosSpeaker()
     {
@@ -105,6 +107,16 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     /// SUBSCRIBE, so the event has been applied once the subscription is made.
     /// </summary>
     internal void SendInitialEventBeforeAnswering(string eventPath, string body) => _initialEvents[eventPath] = body;
+
+    /// <summary>
+    /// Fails every renewal of the event path with a dropped connection, as <see cref="AbortRenewals"/> does for all.
+    /// </summary>
+    internal void AbortRenewalsTo(string eventPath) => _abortedRenewalPaths[eventPath] = true;
+
+    /// <summary>
+    /// Answers every SUBSCRIBE to the event path, new or renewal, with HTTP 500.
+    /// </summary>
+    internal void FailSubscriptionsTo(string eventPath) => _failedSubscriptionPaths[eventPath] = true;
 
     internal string? GetCallback(string eventPath) =>
         _callbacks.TryGetValue(eventPath, out var callback) ? callback : null;
@@ -264,7 +276,7 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
                 await WriteAsync(response, DeviceDescription);
                 return;
 
-            case "SUBSCRIBE" when FailSubscriptions:
+            case "SUBSCRIBE" when FailSubscriptions || _failedSubscriptionPaths.ContainsKey(path):
                 response.StatusCode = (int)HttpStatusCode.InternalServerError;
                 return;
 
@@ -301,7 +313,7 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
         if (request.Headers["SID"] is not null)
         {
             _renewed.Enqueue((path, DateTimeOffset.UtcNow));
-            if (AbortRenewals)
+            if (AbortRenewals || _abortedRenewalPaths.ContainsKey(path))
             {
                 // A bare Abort still answers 200 here, so the body is cut short to make the request fail.
                 response.ContentLength64 = 10;
