@@ -313,11 +313,11 @@ internal sealed class SonosEventListener : IAsyncDisposable
             _logger.LogError(exception, "The Sonos event listener stopped accepting requests.");
             try
             {
-                listener.Stop();
+                listener.Close();
             }
-            catch (Exception stopException)
+            catch (Exception closeException)
             {
-                _logger.LogDebug(stopException, "Stopping the failed Sonos event listener failed.");
+                _logger.LogDebug(closeException, "Closing the failed Sonos event listener failed.");
             }
         }
     }
@@ -514,7 +514,8 @@ internal sealed class SonosEventListener : IAsyncDisposable
         _listener = null;
         if (listener is not null)
         {
-            listener.Stop();
+            // Close without Stop first: closing a stopped HttpListener on Linux and macOS binds its port again to
+            // unregister it, which fails or tears down another listener when the port was taken in between.
             listener.Close();
             if (_acceptLoop is not null)
             {
