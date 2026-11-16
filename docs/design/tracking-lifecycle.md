@@ -184,7 +184,7 @@ Below those two sit the registry's per-object locks: `_children` on each `Regist
 
 The `_attachedSubjects` lock is re-entrant (C# `Monitor`). `WriteProperty` may trigger lifecycle handlers that write to *other* properties, re-entering the lock. Each property has its own `_lastProcessedValues` entry, so there is no interference. Handlers must NOT write to the *same* property being reconciled. This is a documented contract requirement.
 
-Under `_attachedSubjects` the lifecycle also takes a leaf-level lock: the per-property lock of a derived property, which its attach and detach take briefly. Nothing that runs under a derived property's lock takes `_attachedSubjects`, because derived getters and publications never run under it (see [Lock ordering](tracking-derived-properties.md#lock-ordering-and-deadlock-freedom)).
+Under `_attachedSubjects` the lifecycle also takes the per-property lock of a derived property, which its attach and detach take briefly and under which only leaf locks are taken. Nothing that runs under a derived property's lock takes `_attachedSubjects`, because derived getters and publications never run under it (see [Lock ordering](tracking-derived-properties.md#lock-ordering-and-deadlock-freedom)).
 
 ## Derived Properties Under the Lock
 

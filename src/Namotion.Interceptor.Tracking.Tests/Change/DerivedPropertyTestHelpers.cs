@@ -74,3 +74,11 @@ internal sealed class TraceCapture : IDisposable
         _output.Dispose();
     }
 }
+
+/// <summary>A trace listener that throws on every write.</summary>
+internal sealed class ThrowingTraceListener : TraceListener
+{
+    public override void Write(string? message) => throw new InvalidOperationException("Trace listener failure.");
+
+    public override void WriteLine(string? message) => throw new InvalidOperationException("Trace listener failure.");
+}

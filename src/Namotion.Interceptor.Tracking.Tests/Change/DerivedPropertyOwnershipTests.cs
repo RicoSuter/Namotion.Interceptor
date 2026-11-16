@@ -243,6 +243,43 @@ public class DerivedPropertyOwnershipTests
     }
 
     [Fact]
+    public void WhenRecalculationReachesTheLimitAndTraceListenerThrows_ThenWriterDoesNotThrow()
+    {
+        // Arrange: after the attach, the getter writes its dependency twice per evaluation, so every evaluation
+        // requests another one and the recalculation a write starts ends at the limit.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = _ => root.Anchor;
+        root.Machine = machine;
+        machine.Worker.Evaluator = _ =>
+        {
+            var value = root.Anchor;
+            root.Anchor = value + 1;
+            root.Anchor = value + 2;
+            return value;
+        };
+        using var traceCapture = new TraceCapture();
+        var throwingListener = new ThrowingTraceListener();
+        Trace.Listeners.Add(throwingListener);
+
+        // Act
+        Exception? exception;
+        try
+        {
+            exception = Record.Exception(() => root.Anchor = 1);
+        }
+        finally
+        {
+            Trace.Listeners.Remove(throwingListener);
+        }
+
+        // Assert
+        Assert.Null(exception);
+        Assert.Contains("exhausted for", traceCapture.Text);
+    }
+
+    [Fact]
     public async Task WhenGetterWritesASubjectItCreates_ThenEachCommitTakesTwoEvaluationsAndLaterWritesPublish()
     {
         // Arrange: the getter reads and then writes a property of a subject it creates, a property no derived

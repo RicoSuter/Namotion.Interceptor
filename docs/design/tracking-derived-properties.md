@@ -50,7 +50,7 @@ The design rests on three rules:
 
 **Read tap.** `InterceptorExecutor.GetPropertyValue` and `InterceptorExecutor.GetPropertyValueWithoutContext` report the read to the thread's read observer, when one is set, before the value is read, as a `PropertyReadObservation` that holds the property and is passed by reference like the `PropertyWriteObservation` of a write. Tracking sets the observer only while a getter is evaluated, so outside of an evaluation a read costs one thread-static load and a null check. The slot holds one observer: whoever sets it replaces the previous observer, which sees no reads until it is set again. The recorder restores the observer it replaced when its last frame ends.
 
-**Write tap.** `InterceptorExecutor.SetPropertyValue`, `PublishDerivedPropertyValue` and `SetPropertyValueWithoutContext` increment the thread's write depth before the chain, and in a `finally` after it decrement it and call the process-wide write observer with a `PropertyWriteObservation`: the property, whether the value landed (`IsWritten`, always true without a context), the raw write timestamp (0 when the write did not land or the subject has no context), `IsDerivedRecalculation`, the write's nesting depth on the thread, and whether the chain threw (`HasFailed`). An observer exception replaces the chain's own, so an observer must not throw when `HasFailed` is set. A write without a context that found no observer reads it again after the write and reports the write to an observer installed in the meantime, see [Observer installation](#observer-installation).
+**Write tap.** `InterceptorExecutor.SetPropertyValue`, `PublishDerivedPropertyValue` and `SetPropertyValueWithoutContext` increment the thread's write depth before the chain, and in a `finally` after it decrement it and call the process-wide write observer with a `PropertyWriteObservation`: the property, whether the value landed (`IsWritten`, true without a context unless the field write threw), the raw write timestamp (0 when the write did not land or the subject has no context), `IsDerivedRecalculation`, the write's nesting depth on the thread, and whether the chain threw (`HasFailed`). An observer exception replaces the chain's own, so an observer must not throw when `HasFailed` is set. A write without a context that found no observer reads it again after the write and reports the write to an observer installed in the meantime, see [Observer installation](#observer-installation).
 
 **Registration.** `TrackingWriteObserver` is installed by the first `LifecycleInterceptor` created in the process, and is never removed. `DerivedPropertyChangeHandler` is a lifecycle handler, so it runs only inside a `LifecycleInterceptor`, which `WithDerivedPropertyChangeDetection` adds with it. `SetWriteObserver` throws when a different observer is already installed, so code that installs its own observer fails loudly instead of silently disabling derived property tracking. The observer types are infrastructure for Tracking, not an extension point.
 
@@ -208,7 +208,7 @@ All of it is read and written under `lock(data)` of the derived property:
 
 ### Request
 
-A request comes from the write observer (W5), from `RecalculateDerivedProperty`, or from the protocol itself after an attach. A request without a timestamp (a write without a context) takes the current time first. Under `lock(D)`:
+A request comes from the write observer (W5), from `RecalculateDerivedProperty`, or from the protocol itself after an attach. A request without a timestamp (one an attach marked itself) takes the current time first; a write without a context resolves its timestamp in the write observer, see [Timestamps](#timestamps). Under `lock(D)`:
 
 1. D is detached: drop the request.
 2. D is owned, or an attach is in progress: set `RecalculationNeeded`, store the request's timestamp in `PendingRawTimestamp` (the last request to arrive wins, which carries the trigger's timestamp to the coalesced change), mark it foreign when it comes from another thread than the owner's, and return. The caller does not wait.
@@ -387,7 +387,7 @@ Every dependency belongs to an attached derived property: D's detach removes D f
 | Write of a property with dependents | Zero | Above, plus `Interlocked.Increment` (W4), a used-by snapshot read, and a request per dependent |
 | Request for an owned property | Zero | One brief `lock(data)` |
 | Recalculation, dependencies unchanged | Zero (beyond the getter) | Brief `lock(data)` for the request, the commit and after the publication, the getter, a full fence and a version read per dependency (R5) |
-| Recalculation, dependencies changed | One `PropertyReference[]` when the buffer grows | Above, plus used-by adds and removes |
+| Recalculation, dependencies changed | A `PropertyReference[]` and a `DerivedPropertyData?[]` when the buffer grows | Above, plus used-by adds and removes |
 | Attach | Zero (beyond the getter) | Two brief `lock(data)`, the getter, R5 |
 | Used-by read (`UsedByProperties.Items`) | Zero (one snapshot copy after a change to a collection in large mode, made by the first read that finds the snapshot cleared) | Returns stable `ReadOnlySpan` snapshot |
 
