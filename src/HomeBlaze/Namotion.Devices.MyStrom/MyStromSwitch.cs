@@ -241,7 +241,7 @@ public partial class MyStromSwitch : BackgroundService,
         StatusMessage = null;
     }
 
-    // Only the poll timeout cancels a request while the service keeps running, as operations do not take part in polling.
+    // The poll timeout and the connect timeout of the handler both surface as an OperationCanceledException; both are 10 seconds.
     private string GetFailureMessage(Exception exception) => exception is OperationCanceledException
         ? $"The device did not answer within {PollRequestTimeout.TotalSeconds:0.#} seconds."
         : exception.Message;

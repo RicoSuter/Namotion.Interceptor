@@ -251,7 +251,7 @@ public class MyStromSwitchTests
     }
 
     [Fact]
-    public async Task WhenOperating_ThenThePollTimeoutAndNoRequestTimeoutApply()
+    public async Task WhenOperating_ThenNeitherThePollTimeoutNorARequestTimeoutApplies()
     {
         // Arrange
         var device = new FakeDevice(uptimes: [100], versions: ["4.0.7"]);
@@ -318,8 +318,8 @@ public class MyStromSwitchTests
         try
         {
             // Assert
-            await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Error);
-            Assert.Equal("The device did not answer within 0.5 seconds.", subject.StatusMessage);
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+                subject.Status == ServiceStatus.Error && subject.StatusMessage == "The device did not answer within 0.5 seconds.");
             Assert.False(subject.IsConnected);
         }
         finally

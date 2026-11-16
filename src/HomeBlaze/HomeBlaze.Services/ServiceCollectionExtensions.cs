@@ -56,14 +56,14 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddHomeBlazeHttpClients(this IServiceCollection services)
     {
         services.AddHttpClient();
-        services.ConfigureHttpClientDefaults(builder => builder.ConfigurePrimaryHttpMessageHandler(CreatePrimaryHandler));
+        services.ConfigureHttpClientDefaults(builder => builder.ConfigurePrimaryHttpMessageHandler((handler, _) =>
+        {
+            // Only the timeout is set, so the primary handler and its pooling stay those of the factory.
+            if (handler is SocketsHttpHandler socketsHandler)
+            {
+                socketsHandler.ConnectTimeout = TimeSpan.FromSeconds(10);
+            }
+        }));
         return services;
     }
-
-    // Same as the default primary handler of the factory (two minutes is its handler lifetime), apart from the connect timeout.
-    internal static SocketsHttpHandler CreatePrimaryHandler() => new()
-    {
-        ConnectTimeout = TimeSpan.FromSeconds(10),
-        PooledConnectionLifetime = TimeSpan.FromMinutes(2)
-    };
 }
