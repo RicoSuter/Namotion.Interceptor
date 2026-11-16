@@ -853,8 +853,9 @@ public class WriteRetryQueueTests
     public void WhenTheDeliveryRuleIsUnspecified_ThenConstructionThrows()
     {
         // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => new WriteRetryQueue(
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() => new WriteRetryQueue(
             100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)), ChangeDeliveryRule.Unspecified));
+        Assert.Equal("deliveryRule", exception.ParamName);
     }
 
     private static SubjectPropertyChange CreateChange(int id)

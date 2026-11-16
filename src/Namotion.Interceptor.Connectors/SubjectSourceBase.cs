@@ -515,22 +515,20 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     break;
                 }
 
-                var woken = Interlocked.Exchange(ref _idleFlushWakeRequested, 0) != 0;
-                if (woken)
-                {
-                    consecutiveFailures = 0;
-                }
-
                 // Skipped during a reconnect inside the connector, which would fail every interval's flush;
-                // the wake on Synchronized covers it.
+                // the wake on Synchronized covers it, so its flag is left for that wake.
+                // State is read before the flag, and TransitionStateTo sets the flag before it publishes
+                // Synchronized, so a loop that sees Synchronized here also sees the wake. In the other order a
+                // tick could flush parked writes as they are and leave the reconcile an empty queue.
                 if (State != SourceState.Synchronized)
                 {
                     continue;
                 }
 
-                if (woken)
+                if (Interlocked.Exchange(ref _idleFlushWakeRequested, 0) != 0)
                 {
                     // A load just moved the model, so parked writes are ranked against it as at connect.
+                    consecutiveFailures = 0;
                     await WriteRetryQueue.ReconcileAsync(this, _reconcileParkedChanges, cancellationToken).ConfigureAwait(false);
                 }
                 else if (await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false))
@@ -554,7 +552,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
     /// <summary>
     /// Signals the idle flush unless a signal is already pending. A call after the idle flush ended only leaves
-    /// a pending signal, which the next connection attempt's idle flush answers with a flush.
+    /// a pending signal, which the next connection attempt's idle flush answers with a reconcile, because that
+    /// attempt's transition to Synchronized has set the wake flag by then.
     /// </summary>
     private void SignalIdleFlush()
     {
@@ -769,11 +768,17 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             // Never cleared, so it still answers whether a good period ever began.
             var lastSynchronizedAt = newState == SourceState.Synchronized ? now : current.LastSynchronizedAt;
 
+            // The wake flag must be set before Synchronized is published: the idle flush reads State before it
+            // takes the flag, so this order is what lets it tell this wake from a tick that coincides with it.
+            if (newState == SourceState.Synchronized)
+            {
+                Volatile.Write(ref _idleFlushWakeRequested, 1);
+            }
+
             Volatile.Write(ref _stateSnapshot, new SourceStateSnapshot(newState, now, lastSynchronizedAt));
 
             if (newState == SourceState.Synchronized)
             {
-                Volatile.Write(ref _idleFlushWakeRequested, 1);
                 SignalIdleFlush();
             }
 

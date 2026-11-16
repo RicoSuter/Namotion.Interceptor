@@ -208,11 +208,12 @@ public class ChangeQueueProcessor : IDisposable
     // inside the flush, outside the try that wraps the write handler. The periodic loop's catch does
     // catch it, but that catch sits outside the loop, so the loop never resumes and delivery ends for
     // this processor's lifetime while the queue keeps filling.
-    internal static ChangeDeliveryRule ValidateRule(ChangeDeliveryRule rule)
+    internal static ChangeDeliveryRule ValidateRule(
+        ChangeDeliveryRule rule, [CallerArgumentExpression(nameof(rule))] string? paramName = null)
     {
         if (rule is not (ChangeDeliveryRule.SourceValuesMayBeStale or ChangeDeliveryRule.SourceValuesAreSettled))
         {
-            throw new ArgumentOutOfRangeException(nameof(rule), rule,
+            throw new ArgumentOutOfRangeException(paramName, rule,
                 "A delivery rule must be chosen explicitly; see ChangeDeliveryRule for the condition that decides it.");
         }
 
