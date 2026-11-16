@@ -38,6 +38,9 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     // Cached so a reconcile does not allocate a delegate.
     private readonly Func<SubjectPropertyChange[], SubjectPropertyChange[]?> _reconcileParkedChanges;
 
+    // While idle flushes keep failing, the interval doubles up to this many times, so to 8x the retry time.
+    private const int MaximumIdleFlushDoublings = 3;
+
     // The state and its two timestamps are swapped as one value: in separate fields a reader can see
     // the new state beside the previous timestamp, and LastSynchronizedAt has to be visible before
     // State becomes Stopped.
@@ -55,6 +58,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// The clock the connected processor measures its <see cref="ChangeQueueProcessor.TeardownFlushBound"/> on.
     /// </summary>
     internal TimeProvider TeardownTimeProvider { get; init; } = TimeProvider.System;
+
+    /// <summary>
+    /// The clock the idle flush measures its interval on.
+    /// </summary>
+    internal TimeProvider IdleFlushTimeProvider { get; init; } = TimeProvider.System;
 
     protected SubjectSourceBase(
         IInterceptorSubjectContext context,
@@ -89,7 +97,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
         ArgumentOutOfRangeException.ThrowIfNegative(writeRetryQueueSize);
 
-        WriteRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger, metrics.OutboundRetries);
+        WriteRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger, metrics.OutboundRetries, DeliveryRule);
         _reconcileParkedChanges = ReconcileParkedChanges;
 
         // The registration lives as long as the source, and the queue count stays readable after
@@ -470,20 +478,46 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// <summary>
     /// Runs the idle flush until cancelled. Each time the source becomes <see cref="SourceState.Synchronized"/>
     /// it reconciles the write retry queue against the state just loaded, and between those wakes it flushes
-    /// the queue every retry interval while the source is synchronized. An exception from one run is logged
-    /// and does not stop the next.
+    /// the queue every retry interval while the source is synchronized, backing the interval off while
+    /// flushes keep failing. An exception from one run is logged and does not stop the next.
     /// </summary>
     private async Task RunIdleFlushAsync(CancellationToken cancellationToken)
     {
         // Outside 1 ms to int.MaxValue ms the interval is off: a sub-millisecond timeout truncates to zero and
-        // completes synchronously, so this loop would never yield back to RunAsync, and a larger one is rejected.
+        // times out synchronously, so this loop would never yield back to RunAsync, and a larger one is rejected.
         var interval = _retryTime.TotalMilliseconds is >= 1 and <= int.MaxValue ? _retryTime : Timeout.InfiniteTimeSpan;
 
+        var consecutiveFailures = 0;
+        Task? wake = null;
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                var woken = await _synchronizedWake.WaitAsync(interval, cancellationToken).ConfigureAwait(false);
+                // Kept across timeouts: a new wait each time would leave abandoned waiters consuming releases.
+                wake ??= _synchronizedWake.WaitAsync(cancellationToken);
+
+                var woken = true;
+                if (interval != Timeout.InfiniteTimeSpan)
+                {
+                    try
+                    {
+                        await wake.WaitAsync(GetIdleFlushInterval(interval, consecutiveFailures), IdleFlushTimeProvider, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (TimeoutException)
+                    {
+                        woken = false;
+                    }
+                }
+                else
+                {
+                    await wake.ConfigureAwait(false);
+                }
+
+                if (woken)
+                {
+                    wake = null;
+                    consecutiveFailures = 0;
+                }
 
                 // Skipped during a reconnect inside the connector, which would fail every interval's flush;
                 // the wake on Synchronized covers it.
@@ -497,9 +531,13 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     // A load just moved the model, so parked writes are ranked against it as at connect.
                     await WriteRetryQueue.ReconcileAsync(this, _reconcileParkedChanges, cancellationToken).ConfigureAwait(false);
                 }
+                else if (await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false))
+                {
+                    consecutiveFailures = 0;
+                }
                 else
                 {
-                    await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
+                    consecutiveFailures = Math.Min(consecutiveFailures + 1, MaximumIdleFlushDoublings);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -511,6 +549,14 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             }
         }
     }
+
+    /// <summary>
+    /// Doubles the retry interval per consecutive failed flush, capped at int.MaxValue milliseconds.
+    /// </summary>
+    private static TimeSpan GetIdleFlushInterval(TimeSpan interval, int consecutiveFailures) =>
+        consecutiveFailures == 0
+            ? interval
+            : TimeSpan.FromMilliseconds(Math.Min(interval.TotalMilliseconds * (1 << consecutiveFailures), int.MaxValue));
 
     /// <summary>
     /// Cancels the idle flush and waits up to the processor's teardown bound for it to stop, so that a

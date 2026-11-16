@@ -21,6 +21,7 @@ internal sealed class WriteRetryQueue : IDisposable
 
     private readonly ILogger _logger;
     private readonly QueueMetrics _metrics;
+    private readonly ChangeDeliveryRule _deliveryRule;
     private readonly int _maxQueueSize;
     private int _count;
 
@@ -44,7 +45,16 @@ internal sealed class WriteRetryQueue : IDisposable
     public int PendingWriteCount => Volatile.Read(ref _count);
 
     // Metrics is required rather than optional, so no construction site can drop writes uncounted.
-    public WriteRetryQueue(int maxQueueSize, ILogger logger, QueueMetrics metrics)
+    /// <param name="maxQueueSize">The number of writes retained before the oldest are dropped.</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="metrics">Where retained depth and drops are reported.</param>
+    /// <param name="deliveryRule">The rule a flush skips superseded writes by; the same rule as the owning
+    /// source's processor.</param>
+    public WriteRetryQueue(
+        int maxQueueSize,
+        ILogger logger,
+        QueueMetrics metrics,
+        ChangeDeliveryRule deliveryRule = ChangeDeliveryRule.SourceValuesMayBeStale)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(maxQueueSize);
         ArgumentNullException.ThrowIfNull(logger);
@@ -53,6 +63,7 @@ internal sealed class WriteRetryQueue : IDisposable
         _maxQueueSize = maxQueueSize;
         _logger = logger;
         _metrics = metrics;
+        _deliveryRule = deliveryRule;
     }
 
     /// <summary>
@@ -283,8 +294,23 @@ internal sealed class WriteRetryQueue : IDisposable
                 Volatile.Write(ref _count, _pendingWrites.Count);
             }
 
-            var memory = new ReadOnlyMemory<SubjectPropertyChange>(_scratchBuffer, 0, count);
-            var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);
+            // A later local commit carries the settled value in a superseded write's place, so sending the
+            // older one would only flap the peer; it settles as confirmed. Same rule as the processor's dequeue.
+            // Revision 0 orders against nothing and skips the lookup.
+            var sendCount = 0;
+            for (var i = 0; i < count; i++)
+            {
+                ref readonly var change = ref _scratchBuffer[i];
+                if (change.Revision == 0 || ChangeDeliveryFilter.IsCurrent(in change, _deliveryRule))
+                {
+                    _scratchBuffer[sendCount++] = change;
+                }
+            }
+
+            var result = sendCount == 0
+                ? WriteResult.Success
+                : await source.WriteChangesInBatchesAsync(
+                    new ReadOnlyMemory<SubjectPropertyChange>(_scratchBuffer, 0, sendCount), cancellationToken).ConfigureAwait(false);
             Array.Clear(_scratchBuffer, 0, count);
             if (result.Error is not null)
             {
@@ -315,7 +341,7 @@ internal sealed class WriteRetryQueue : IDisposable
                 return true;
             }
 
-            totalFlushed += count;
+            totalFlushed += sendCount;
         }
 
         if (_hasFlushWarnings)

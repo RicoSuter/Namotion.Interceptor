@@ -328,6 +328,120 @@ public class SubjectSourceRetryQueueTests
     }
 
     [Fact]
+    public async Task WhenIdleFlushesKeepFailing_ThenTheIntervalBacksOffToEightTimesAndResetsOnSuccessAndWake()
+    {
+        // Arrange
+        var retryTime = TimeSpan.FromSeconds(1);
+        var clock = new ManualTeardownClock();
+        var failFirstName = false;
+        var failedAttempts = 0;
+        SubjectPropertyWriter? propertyWriter = null;
+        var (person, source, gate, receivedWrites) = CreateSource(
+            () =>
+            {
+                if (failFirstName)
+                {
+                    failedAttempts++;
+                }
+
+                return failFirstName;
+            },
+            retryTime: retryTime,
+            startListening: (writer, _) =>
+            {
+                propertyWriter = writer;
+                return Task.FromResult<IAsyncDisposable?>(null);
+            },
+            idleFlushTimeProvider: clock);
+
+        await source.StartAsync(CancellationToken.None);
+        try
+        {
+            var probeValue = 0;
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+            {
+                person.LastName = "Probe" + probeValue++;
+                return CountWrites(gate, receivedWrites, nameof(Person.LastName)) >= 1;
+            }, message: "Pump did not start processing changes.");
+
+            lock (gate)
+            {
+                failFirstName = true;
+            }
+            person.FirstName = "John";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.OutboundRetries.Depth > 0,
+                message: "The failed write was not parked.");
+            await WaitForIdleIntervalAsync(clock, gate, () => failedAttempts, expectedAttempts: 1, retryTime);
+
+            // Act & Assert: each failed idle flush doubles the interval up to eight times the retry time.
+            var attempts = 1;
+            foreach (var factor in new[] { 2, 4, 8, 8 })
+            {
+                clock.Advance(clock.NextDueIn!.Value);
+                attempts++;
+                await WaitForIdleIntervalAsync(clock, gate, () => failedAttempts, attempts, retryTime * factor);
+            }
+
+            // A successful flush resets it.
+            lock (gate)
+            {
+                failFirstName = false;
+            }
+            clock.Advance(clock.NextDueIn!.Value);
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+            {
+                lock (gate)
+                {
+                    return receivedWrites.Contains("FirstName=John");
+                }
+            }, message: "The parked write was not sent once the peer accepted it.");
+            await AsyncTestHelpers.WaitUntilAsync(() => clock.NextDueIn == retryTime, message: "A successful flush did not reset the interval.");
+
+            // A wake on Synchronized resets it.
+            lock (gate)
+            {
+                failFirstName = true;
+            }
+            person.FirstName = "Jane";
+            attempts++;
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+            {
+                lock (gate)
+                {
+                    return failedAttempts == attempts;
+                }
+            }, message: "The second write did not fail.");
+            clock.Advance(clock.NextDueIn!.Value);
+            attempts++;
+            await WaitForIdleIntervalAsync(clock, gate, () => failedAttempts, attempts, retryTime * 2);
+
+            propertyWriter!.StartBuffering();
+            await propertyWriter.LoadInitialStateAndResumeAsync(CancellationToken.None);
+            attempts++;
+            await WaitForIdleIntervalAsync(clock, gate, () => failedAttempts, attempts, retryTime);
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// Waits until <paramref name="failedAttempts"/>, read under <paramref name="gate"/>, reaches
+    /// <paramref name="expectedAttempts"/> and the idle flush has armed its next interval at <paramref name="interval"/>.
+    /// </summary>
+    private static Task WaitForIdleIntervalAsync(
+        ManualTeardownClock clock, object gate, Func<int> failedAttempts, int expectedAttempts, TimeSpan interval) =>
+        AsyncTestHelpers.WaitUntilAsync(() =>
+        {
+            lock (gate)
+            {
+                return failedAttempts() == expectedAttempts && clock.NextDueIn == interval;
+            }
+        }, message: $"The idle flush did not arm {interval} after {expectedAttempts} failed attempts.");
+
+    [Fact]
     public async Task WhenRetryTimeIsBelowOneMillisecond_ThenWritesAreStillDelivered()
     {
         // Arrange
@@ -369,7 +483,9 @@ public class SubjectSourceRetryQueueTests
     /// </summary>
     private static (Person Person, TestSubjectSource Source, object Gate, List<string> ReceivedWrites) CreateSource(
         Func<bool> failFirstName,
-        TimeSpan? retryTime = null)
+        TimeSpan? retryTime = null,
+        Func<SubjectPropertyWriter, CancellationToken, Task<IAsyncDisposable?>>? startListening = null,
+        TimeProvider? idleFlushTimeProvider = null)
     {
         var context = InterceptorSubjectContext
             .Create()
@@ -385,6 +501,8 @@ public class SubjectSourceRetryQueueTests
             bufferTime: TimeSpan.FromMilliseconds(8),
             retryTime: retryTime)
         {
+            StartListeningOverride = startListening,
+            IdleFlushTimeProvider = idleFlushTimeProvider ?? TimeProvider.System,
             WriteChangesOverride = (changes, _) =>
             {
                 lock (gate)
