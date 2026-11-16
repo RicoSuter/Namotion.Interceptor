@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -6,7 +7,9 @@ namespace Namotion.Interceptor.Tracking.Tests.Parent;
 
 public class ParentTraversalTests
 {
+    private const int WarmUpSearches = 1000;
     private const int MeasuredSearches = 1000;
+    private const int MeasuredWindows = 5;
 
     [Fact]
     public void WhenParentIsValueEqualToChild_ThenFindsDistinctParent()
@@ -343,27 +346,37 @@ public class ParentTraversalTests
         Assert.Equal(0L, allocated);
     }
 
+    // Optimized from the start, so the measuring loop is never replaced by on-stack replacement while it runs.
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private static (long Allocated, int Matches) MeasureSearch(IInterceptorSubject subject)
     {
         // Warm up so JIT compilation and the first read of each parent list do not land inside the
-        // measured window.
-        for (var i = 0; i < 100; i++)
+        // measured windows.
+        for (var i = 0; i < WarmUpSearches; i++)
         {
             subject.TryGetFirstParent<ITraversalMarker>();
         }
 
+        // A tiered recompilation of the search path can still allocate on this thread inside one window,
+        // while an allocation of the search itself shows in every window, so the least allocating window counts.
+        var minimumAllocated = long.MaxValue;
         var matches = 0;
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < MeasuredSearches; i++)
+        for (var window = 0; window < MeasuredWindows; window++)
         {
-            if (subject.TryGetFirstParent<ITraversalMarker>() is not null)
+            matches = 0;
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            for (var i = 0; i < MeasuredSearches; i++)
             {
-                matches++;
+                if (subject.TryGetFirstParent<ITraversalMarker>() is not null)
+                {
+                    matches++;
+                }
             }
+
+            minimumAllocated = Math.Min(minimumAllocated, GC.GetAllocatedBytesForCurrentThread() - before);
         }
 
-        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        return (allocated, matches);
+        return (minimumAllocated, matches);
     }
 }
 
