@@ -36,7 +36,7 @@ Category-level overrides use the fully qualified type name (or prefix) as the ke
 
 `System.Net.Http.HttpClient` is set to `Warning` because devices are polled over HTTP every few seconds, and at `Information` every request writes four log entries. To see the requests of a device while troubleshooting, set it to `Information`, for example with the environment variable `Logging__LogLevel__System.Net.Http.HttpClient=Information`.
 
-Every HTTP client that HomeBlaze creates, including those of the devices, gives up connecting after 10 seconds, so an unreachable device is detected quickly. A request that is connected has no further limit unless the device sets one.
+The shared HTTP clients of HomeBlaze give up connecting after 10 seconds, so an unreachable device is detected quickly. Ecowitt, MyStrom, Shelly, Sonos, Wallbox, Pushover and the update check use them; FritzBox, Hue and Nuki create their own connections. A request that is connected has no further limit unless the device sets one.
 
 ---
 
