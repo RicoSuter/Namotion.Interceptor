@@ -272,7 +272,7 @@ namespace Namotion.Devices.FritzBox
     }
     public static class FritzBoxServiceCollectionExtensions
     {
-        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddFritzBox(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.FritzBox.FritzBox>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null) { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddFritzBox(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.FritzBox.FritzBox>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext>? contextResolver = null) { }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class FritzBoxWlan : HomeBlaze.Abstractions.Devices.ISwitchState, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged

@@ -7,11 +7,11 @@ namespace Namotion.Devices.Sonos;
 public static class SonosServiceCollectionExtensions
 {
     /// <summary>
-    /// Adds a <see cref="SonosSystem"/> as a hosted subject.
+    /// Adds a <see cref="SonosSystem"/> as a subject.
     /// </summary>
     public static IServiceCollection AddSonosSystem(
         this IServiceCollection services,
         Action<SonosSystem>? configure = null,
-        Func<IServiceProvider, IInterceptorSubjectContext?>? contextResolver = null)
-        => services.AddHostedSubject(configure, contextResolver);
+        Func<IServiceProvider, IInterceptorSubjectContext>? contextResolver = null)
+        => services.AddSubject(configure, contextResolver);
 }

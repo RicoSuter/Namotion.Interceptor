@@ -7,6 +7,7 @@ using HomeBlaze.Services;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Storage.Tests.Pages;
@@ -57,7 +58,7 @@ public partial class TestFaulty : IConfigurable
     public partial string? Mode { get; set; }
 
     /// <summary>
-    /// Cancelled before <see cref="CancelMode"/> throws. With it the cancellation is the caller's,
+    /// Canceled before <see cref="CancelMode"/> throws. With it the cancellation is the caller's,
     /// without it the subject cancels on its own.
     /// </summary>
     public CancellationTokenSource? CancellationSource { get; set; }
@@ -472,11 +473,35 @@ public partial class TestReference : IConfigurable
 /// Records the <see cref="TestHosted"/> subjects of one context that were started and which of them still run.
 /// A subject finds it as a service of its context.
 /// </summary>
-public sealed class TestHostedLog
+public sealed class TestHostedLog : IStartupCompletion
 {
     private readonly Lock _lock = new();
     private readonly List<TestHosted> _running = [];
     private int _startCount;
+    private int _pendingStarts;
+
+    /// <summary>Starts the hosting handler has enqueued and not yet run or refused.</summary>
+    public int PendingStarts => Volatile.Read(ref _pendingStarts);
+
+    // An interlocked counter, because the handler defers and releases under the lifecycle lock.
+    public IDisposable Defer()
+    {
+        Interlocked.Increment(ref _pendingStarts);
+        return new Deferral(this);
+    }
+
+    private sealed class Deferral(TestHostedLog log) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                Interlocked.Decrement(ref log._pendingStarts);
+            }
+        }
+    }
 
     /// <summary>How many times a subject was started.</summary>
     public int StartCount

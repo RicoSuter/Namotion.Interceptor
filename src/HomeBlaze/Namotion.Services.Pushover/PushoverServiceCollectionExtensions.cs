@@ -9,6 +9,6 @@ public static class PushoverServiceCollectionExtensions
     public static IServiceCollection AddPushoverService(
         this IServiceCollection services,
         Action<PushoverService>? configure = null,
-        Func<IServiceProvider, IInterceptorSubjectContext?>? contextResolver = null)
-        => services.AddHostedSubject(configure, contextResolver);
+        Func<IServiceProvider, IInterceptorSubjectContext>? contextResolver = null)
+        => services.AddSubject(configure, contextResolver);
 }
