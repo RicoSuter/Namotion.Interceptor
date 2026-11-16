@@ -213,8 +213,9 @@ public partial class SonosSystem
                 .Where(satellite => satellite.IsInTopology && satellite.NeedsStaticData)
                 .Select(satellite => PollSatelliteAsync(satellite, cancellationToken)));
 
-            // Decided on the subscriptions as they were during the poll, but read after subscribing, so the read covers
-            // the initial event of a new ContentDirectory subscription, which asks for one.
+            // Decided on the subscriptions as they were during the poll, but read after subscribing: the initial event of
+            // a new ContentDirectory subscription, which asks for a read, usually arrives with the SUBSCRIBE answer and
+            // is then covered by this read; one that arrives after the read started costs one read after it.
             var readsFavorites = ReadsFavorites(eventListener, listener, now);
             await EnsureSubscriptionsAsync(cancellationToken);
             if (readsFavorites)
@@ -482,9 +483,23 @@ public partial class SonosSystem
     private bool ReadsFavorites(SonosEventListener? eventListener, SonosEventListener? runningListener, long now)
     {
         var hasMissedEvents = runningListener is not null && TakeMissedEvents(runningListener, ContentDirectorySubscriptionKey);
+        hasMissedEvents |= IsFavoritesSubscriptionFailing(runningListener, now);
         var retriesFailedRead = _retriesFavoritesRead;
         _retriesFavoritesRead = false;
         return eventListener is null || hasMissedEvents || retriesFailedRead || !IsSubscriptionLive(eventListener, TopologySubscriptionKey, now);
+    }
+
+    // Caller holds _reconcileLock. A ContentDirectory subscription whose renewal got no answer or whose lifetime ended
+    // may miss events, and its speaker may differ from the seed's; one that was never made or was refused for good
+    // leaves the favorites to the full reconciliation.
+    private static bool IsFavoritesSubscriptionFailing(SonosEventListener? runningListener, long now)
+    {
+        if (runningListener is null || !runningListener.TryGetSubscription(ContentDirectorySubscriptionKey, out var subscription) || subscription.Sid is null)
+        {
+            return false;
+        }
+
+        return subscription.HasFailedRenewal || now >= subscription.ExpiresAt;
     }
 
     // Caller holds _reconcileLock, which serializes every favorites read. The read covers the refreshes events
@@ -495,7 +510,12 @@ public partial class SonosSystem
         var requests = Volatile.Read(ref _favoritesRefreshRequests);
         try
         {
-            return await ReadFavoritesAsync(players, cancellationToken);
+            var isRead = await ReadFavoritesAsync(players, cancellationToken);
+
+            // A failed read of favorites that events asked for is tried once more at the next poll; that retry has no
+            // requests of its own, so a persistent failure does not repeat it.
+            _retriesFavoritesRead = !isRead && requests != 0;
+            return isRead;
         }
         finally
         {

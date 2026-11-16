@@ -564,6 +564,66 @@ public class SonosSystemRuntimeTests
     }
 
     [Fact]
+    public async Task WhenThePlayerHoldingTheFavoritesSubscriptionIsUnreachable_ThenTheSubscriptionMovesAndReturns()
+    {
+        // Arrange
+        const string subwooferUuid = "RINCON_A0000000000201400";
+        const string contentDirectoryPath = ConnectedSystem.ContentDirectoryEventPath;
+        await using var subwoofer = new FakeSonosSpeaker();
+        await using var kitchen = new FakeSonosSpeaker();
+        await using var office = new FakeSonosSpeaker();
+        subwoofer.RespondAsIdlePlayer(subwooferUuid, "Küche");
+        kitchen.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
+        office.RespondAsIdlePlayer(TestFixtures.OfficeUuid, "Büro");
+        var channelMap = $"{TestFixtures.KitchenUuid}:LF,RF;{subwooferUuid}:SW";
+        var topology =
+            "<ZoneGroupState><ZoneGroups>" +
+            $"""<ZoneGroup Coordinator="{TestFixtures.KitchenUuid}" ID="{TestFixtures.KitchenUuid}:1">""" +
+            $"""<ZoneGroupMember UUID="{TestFixtures.KitchenUuid}" Location="{kitchen.BaseUri}xml/device_description.xml" ZoneName="Küche" SoftwareVersion="97.1-80312" HTSatChanMapSet="{channelMap}" EthLink="0" MoreInfo="">""" +
+            $"""<Satellite UUID="{subwooferUuid}" Location="{subwoofer.BaseUri}xml/device_description.xml" ZoneName="Küche" Invisible="1" SoftwareVersion="97.1-80312" HTSatChanMapSet="{channelMap}" EthLink="0" MoreInfo="" />""" +
+            "</ZoneGroupMember></ZoneGroup>" +
+            $"""<ZoneGroup Coordinator="{TestFixtures.OfficeUuid}" ID="{TestFixtures.OfficeUuid}:1">""" +
+            $"""<ZoneGroupMember UUID="{TestFixtures.OfficeUuid}" Location="{office.BaseUri}xml/device_description.xml" ZoneName="Büro" SoftwareVersion="97.1-80312" EthLink="0" MoreInfo="" />""" +
+            "</ZoneGroup></ZoneGroups></ZoneGroupState>";
+        foreach (var speaker in new[] { subwoofer, kitchen, office })
+        {
+            speaker.Respond("GetZoneGroupState", ("ZoneGroupState", topology));
+            speaker.SendInitialEventBeforeAnswering(contentDirectoryPath, SonosEventBodies.Properties());
+        }
+
+        var system = await ConnectedSystem.StartWithEventsAsync(
+            () => ConnectedSystem.CreateSystem(subwoofer.Host, configure: system => system.PollingInterval = TimeSpan.FromHours(1)),
+            system => system.IsConnected && system.Players.Count == 2 && kitchen.GetCallback(contentDirectoryPath) is not null &&
+                      !system.HasPendingFavoritesRefresh,
+            "The kitchen, the lowest RINCON id, should hold the favorites subscription.");
+        await using var owner = ConnectedSystem.Own(system);
+
+        // Act
+        kitchen.RespondWithServerError("GetTransportInfo");
+        await system.RefreshAsync(CancellationToken.None);
+        var officeSubscribe = office.HoldSubscribe(contentDirectoryPath);
+        var refresh = system.RefreshAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => office.GetCallback(contentDirectoryPath) is not null,
+            ConnectedSystem.WaitTimeout,
+            message: "The office should be subscribed once the kitchen is unreachable.");
+        var isKitchenUnsubscribedFirst = kitchen.Unsubscribed.Contains(contentDirectoryPath);
+        officeSubscribe.SetResult();
+        await refresh;
+        var isKitchenConnected = system.Players[TestFixtures.KitchenUuid].IsConnected;
+        kitchen.ClearServerError("GetTransportInfo");
+        await system.RefreshAsync(CancellationToken.None);
+
+        // Assert
+        Assert.False(isKitchenConnected);
+        Assert.True(isKitchenUnsubscribedFirst);
+        Assert.Contains(contentDirectoryPath, office.Unsubscribed);
+        Assert.Equal(2, kitchen.Subscribed.Count(path => path == contentDirectoryPath));
+        Assert.Equal(1, office.Subscribed.Count(path => path == contentDirectoryPath));
+        Assert.Null(subwoofer.GetCallback(contentDirectoryPath));
+    }
+
+    [Fact]
     public async Task WhenTheSeedIsASatellite_ThenFavoritesAreReadFromAPlayer()
     {
         // Arrange

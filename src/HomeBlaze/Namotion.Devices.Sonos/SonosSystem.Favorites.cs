@@ -12,8 +12,8 @@ public partial class SonosSystem
     // 1 while a favorites refresh runs, so events start at most one.
     private int _isFavoritesRefreshRunning;
 
-    // Whether the last event-triggered read failed, so the next poll reads the favorites once more. Guarded by
-    // _reconcileLock.
+    // Whether the last read of favorites that events asked for failed, so the next poll reads them once more. Guarded
+    // by _reconcileLock.
     private bool _retriesFavoritesRead;
 
     /// <summary>
@@ -33,9 +33,12 @@ public partial class SonosSystem
     private void OnContentDirectoryEvent(FavoritesUpdateIds updateIds, string body)
     {
         var change = UpnpEventParser.ParseContentDirectory(body);
-        _logger.LogDebug(
-            "Sonos ContentDirectory event: FavoritesUpdateID {FavoritesUpdateId}, ContainerUpdateIDs {ContainerUpdateIds}, SystemUpdateID {SystemUpdateId}.",
-            change.FavoritesUpdateId, change.ContainerUpdateIds, change.SystemUpdateId);
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            _logger.LogDebug(
+                "Sonos ContentDirectory event: FavoritesUpdateID {FavoritesUpdateId}, ContainerUpdateIDs {ContainerUpdateIds}, SystemUpdateID {SystemUpdateId}.",
+                change.FavoritesUpdateId, change.ContainerUpdateIds, change.SystemUpdateId);
+        }
 
         if (updateIds.Record(change))
         {
@@ -84,7 +87,7 @@ public partial class SonosSystem
         {
             if (Volatile.Read(ref _favoritesRefreshRequests) != 0)
             {
-                _retriesFavoritesRead = !await RefreshFavoritesAsync(Players.Values.Where(player => player.IsInTopology).ToArray(), scopeCancellation.Token);
+                await RefreshFavoritesAsync(Players.Values.Where(player => player.IsInTopology).ToArray(), scopeCancellation.Token);
             }
         }
         finally

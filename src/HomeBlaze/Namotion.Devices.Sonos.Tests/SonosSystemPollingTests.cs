@@ -643,6 +643,56 @@ public class SonosSystemPollingTests
     }
 
     [Fact]
+    public async Task WhenARenewalOfTheFavoritesSubscriptionGetsNoAnswer_ThenThePollsReadTheFavorites()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true, fullReconcileInterval: TimeSpan.FromHours(1));
+        household.Kitchen.AbortRenewalsTo(ContentDirectoryEventPath);
+        household.Clock.Advance(TimeSpan.FromMinutes(16));
+        await household.PollAsync(advances: false);
+        household.ClearCalls();
+
+        // Act
+        await household.PollAsync();
+
+        // Assert
+        Assert.Equal(1, CountBrowseCalls(household));
+    }
+
+    [Fact]
+    public async Task WhenAFullReconciliationFailsToReadFavoritesAnEventAskedFor_ThenTheNextPollReadsThemOnce()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        var hold = household.Kitchen.HoldAction("GetVolume");
+        household.ClearCalls();
+        var refresh = household.System.RefreshAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => household.Kitchen.Calls.Any(call => call.Action == "GetVolume"),
+            ConnectedSystem.WaitTimeout,
+            message: "The reconciliation should poll the kitchen.");
+        await household.Kitchen.NotifyAsync(ContentDirectoryEventPath, ContentDirectoryEvent("12", "2"));
+        household.Kitchen.RespondWithServerError("Browse");
+        household.Office.RespondWithServerError("Browse");
+        hold.SetResult();
+        await refresh;
+        await household.WaitForFavoritesAsync();
+        household.Kitchen.ClearServerError("Browse");
+        household.Office.ClearServerError("Browse");
+        household.ClearCalls();
+
+        // Act
+        await household.PollAsync();
+        var browsesAtRetry = CountBrowseCalls(household);
+        household.ClearCalls();
+        await household.PollAsync();
+
+        // Assert
+        Assert.Equal(1, browsesAtRetry);
+        Assert.Equal(0, CountBrowseCalls(household));
+    }
+
+    [Fact]
     public async Task WhenTheFavoritesSubscriptionMissesAnEvent_ThenTheNextPollReadsTheFavorites()
     {
         // Arrange
