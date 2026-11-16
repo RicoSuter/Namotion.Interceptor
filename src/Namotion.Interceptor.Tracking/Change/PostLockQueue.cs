@@ -13,9 +13,11 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// attach, a context detach or <c>TryRunWhileAttached</c> releases it.
 /// </summary>
 /// <remarks>
-/// Anchors nest, so the queue is a stack of segments, one per anchor that has queued work; an anchor drains only
-/// its own segment. A segment drains its deliveries in arrival order first, then its recalculation requests, each
-/// property once. See docs/design/tracking-lifecycle.md (Post-Lock Queue).
+/// Anchors nest, so the requests are a stack of segments, one per anchor that has queued work; an anchor drains only
+/// its own segment's requests. The deliveries of a thread are one list in write order: while a queued delivery is
+/// pending, a delivery made without a lifecycle lock is queued behind it. A drain runs the pending deliveries until
+/// none is left, then the requests of its segment, each property once. See docs/design/tracking-lifecycle.md
+/// (Post-Lock Queue).
 /// </remarks>
 internal static class PostLockQueue
 {
@@ -38,6 +40,24 @@ internal static class PostLockQueue
     [ThreadStatic]
     private static Segment? _pool;
 
+    // The queued deliveries of all segments, in write order. A null entry is a slot reserved for a delivery that was
+    // not filled (the write did not land, or had no consumers), or one that already ran; the drain skips it.
+    [ThreadStatic]
+    private static List<Action?>? _deliveries;
+
+    // The index of the next delivery to run.
+    [ThreadStatic]
+    private static int _nextDelivery;
+
+    // The held lifecycle locks plus the pending deliveries, so a write reads one count to learn whether its delivery
+    // may be queued. A delivery is pending from the write that queued it until it ran and returned.
+    [ThreadStatic]
+    private static int _deferrals;
+
+    // The delivery loops running on the thread: a drain that a delivery causes runs inside the loop of another.
+    [ThreadStatic]
+    private static int _deliveryLoops;
+
     /// <summary>The queued work of one anchor.</summary>
     internal sealed class Segment
     {
@@ -46,10 +66,6 @@ internal static class PostLockQueue
 
         /// <summary>The enclosing segment on the stack, or the next segment in the pool.</summary>
         public Segment? Next;
-
-        // A null entry is a slot reserved for a delivery that was not filled (the write did not land, or had no
-        // consumers); the drain skips it.
-        public readonly List<Action?> Deliveries = [];
 
         public readonly List<QueuedRequest> Requests = [];
 
@@ -67,8 +83,15 @@ internal static class PostLockQueue
     /// </summary>
     internal readonly record struct QueuedRequest(PropertyReference Property, long RawTimestamp, long AttachCount);
 
-    /// <summary>Whether the thread holds a lifecycle lock.</summary>
-    internal static bool IsLockHeld => _heldLocks > 0;
+    /// <summary>
+    /// Whether a change delivery made now is queued: the thread holds a lifecycle lock, or a queued delivery is
+    /// pending, which the change must not overtake.
+    /// </summary>
+    internal static bool IsDeliveryDeferred
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _deferrals != 0;
+    }
 
     /// <summary>
     /// Whether the write of this depth is the anchor write of the innermost segment, which the write observer
@@ -83,6 +106,7 @@ internal static class PostLockQueue
     /// </summary>
     internal static void EnterLock(bool isWriteReconciliation)
     {
+        _deferrals++;
         if (_heldLocks++ != 0)
         {
             return;
@@ -103,6 +127,7 @@ internal static class PostLockQueue
     /// </summary>
     internal static void ExitLock()
     {
+        _deferrals--;
         if (--_heldLocks == 0 && _innermost is { AnchorDepth: 0 })
         {
             Drain(Pop(), rawTimestamp: 0, rethrow: false);
@@ -155,36 +180,73 @@ internal static class PostLockQueue
     }
 
     /// <summary>
-    /// The delivery slot of a change without a reserved slot: under a lifecycle lock, it is queued after the deliveries
-    /// queued so far.
+    /// The delivery slot of a change without a reserved slot: under a lifecycle lock, or while a queued delivery is
+    /// pending, it is queued after the deliveries queued so far.
     /// </summary>
     internal const int UnreservedDelivery = -1;
 
     /// <summary>
-    /// Reserves the place of a delivery in arrival order, for a write that the thread makes while it holds a lifecycle
-    /// lock, before the write's chain runs. Returns the slot to pass to <see cref="EnqueueDelivery"/>.
+    /// Reserves the place of a delivery in write order before the write's chain runs, for a structural write that the
+    /// thread makes while <see cref="IsDeliveryDeferred"/>, so it is delivered before the writes that the handlers of
+    /// its reconciliation make. Returns the slot to pass to <see cref="IsDeliveryQueued"/> and
+    /// <see cref="EnqueueDelivery"/>.
     /// </summary>
     internal static int ReserveDelivery()
     {
-        var deliveries = TryGetOpenSegment()!.Deliveries;
-        deliveries.Add(null);
-        return deliveries.Count - 1;
+        return Append(null);
     }
 
     /// <summary>
-    /// Queues a change delivery while the thread holds a lifecycle lock: in the slot reserved for it, or, for
-    /// <see cref="UnreservedDelivery"/>, after the deliveries queued so far.
+    /// Whether the delivery of a write that completed its chain is queued instead of dispatched now: it has a reserved
+    /// slot that has not run yet, the thread holds a lifecycle lock, or a queued delivery is pending. The anchor write
+    /// of the innermost segment is delivered at once, before the work queued under its lock, unless it reserved a slot
+    /// behind older deliveries.
+    /// </summary>
+    /// <remarks>
+    /// A structural write whose consumers were installed while it ran reserved no slot, so as an anchor it is
+    /// delivered at once, possibly before older pending deliveries.
+    /// </remarks>
+    internal static bool IsDeliveryQueued(int slot)
+    {
+        if (slot != UnreservedDelivery && slot >= _nextDelivery)
+        {
+            return true;
+        }
+
+        // Without a held lock, the deferral count is the number of pending deliveries.
+        return _heldLocks != 0 ||
+               (_deferrals != 0 && !IsAnchorWrite(PropertyAccessObservation.WriteDepth));
+    }
+
+    /// <summary>
+    /// Queues a change delivery for which <see cref="IsDeliveryQueued"/> returned true: in the slot reserved for it,
+    /// or after the deliveries queued so far.
     /// </summary>
     internal static void EnqueueDelivery(int slot, Action delivery)
     {
-        var deliveries = TryGetOpenSegment()!.Deliveries;
-        if (slot == UnreservedDelivery)
+        if (slot != UnreservedDelivery && slot >= _nextDelivery)
         {
-            deliveries.Add(delivery);
+            _deliveries![slot] = delivery;
             return;
         }
 
-        deliveries[slot] = delivery;
+        Append(delivery);
+    }
+
+    private static int Append(Action? delivery)
+    {
+        // Under a lifecycle lock, the segment that the anchor of the lock drains must exist. Without one, a pending
+        // delivery exists, which a segment on the stack or a running delivery loop runs.
+        if (_heldLocks != 0)
+        {
+            TryGetOpenSegment();
+        }
+
+        Debug.Assert(_innermost is not null || _deliveryLoops != 0, "A queued delivery has a segment or a delivery loop that runs it.");
+        var deliveries = _deliveries ??= [];
+        deliveries.Add(delivery);
+        _deferrals++;
+        return deliveries.Count - 1;
     }
 
     /// <summary>
@@ -243,9 +305,10 @@ internal static class PostLockQueue
     }
 
     /// <summary>
-    /// Runs the deliveries, then the recalculations, of a segment that was removed from the stack, so work that
-    /// arises meanwhile runs immediately or goes to a segment of its own. Every entry runs, also after one threw.
-    /// The drained work is not a dependency of a getter that made the anchor write: the recording is suspended.
+    /// Runs the pending deliveries, also those queued while they run, then the recalculations of a segment that was
+    /// removed from the stack, so a request that arises meanwhile runs immediately or goes to a segment of its own.
+    /// Every entry runs, also after one threw. The drained work is not a dependency of a getter that made the anchor
+    /// write: the recording is suspended.
     /// </summary>
     private static void Drain(Segment segment, long rawTimestamp, bool rethrow)
     {
@@ -253,7 +316,7 @@ internal static class PostLockQueue
         var isRecordingSuspended = DerivedPropertyRecorder.TrySuspend();
         try
         {
-            RunDeliveries(segment.Deliveries, ref firstException);
+            RunDeliveries(ref firstException);
             RunRequests(segment.Requests, rawTimestamp, ref firstException);
         }
         finally
@@ -269,17 +332,55 @@ internal static class PostLockQueue
         DerivedPropertyOwnership.ThrowOrTrace(firstException, rethrow, "queued work threw after a lifecycle operation");
     }
 
-    private static void RunDeliveries(List<Action?> deliveries, ref ExceptionDispatchInfo? firstException)
+    // The pending deliveries include those that an enclosing segment queued before this segment's, which are older.
+    // A drain that a delivery causes runs inside this loop and advances the shared index.
+    private static void RunDeliveries(ref ExceptionDispatchInfo? firstException)
     {
-        for (var i = 0; i < deliveries.Count; i++)
+        if (_deliveries is not { } deliveries)
         {
-            try
+            return;
+        }
+
+        _deliveryLoops++;
+        try
+        {
+            while (_nextDelivery < deliveries.Count)
             {
-                deliveries[i]?.Invoke();
+                var index = _nextDelivery++;
+                var delivery = deliveries[index];
+                deliveries[index] = null;
+                try
+                {
+                    delivery?.Invoke();
+                }
+                catch (Exception exception)
+                {
+                    firstException ??= ExceptionDispatchInfo.Capture(exception);
+                }
+                finally
+                {
+                    // The delivery is pending until it returns, so a write that one of its observers makes is queued
+                    // behind it, also when it is the last one.
+                    _deferrals--;
+                }
             }
-            catch (Exception exception)
+        }
+        finally
+        {
+            // A reserved slot belongs to a write that a segment on the stack or a running loop encloses, so the list
+            // is reset only when neither is left.
+            if (--_deliveryLoops == 0 && _innermost is null)
             {
-                firstException ??= ExceptionDispatchInfo.Capture(exception);
+                Debug.Assert(_deferrals == _heldLocks, "No delivery is pending when the list is reset.");
+                _nextDelivery = 0;
+                if (deliveries.Capacity > MaxPooledCapacity)
+                {
+                    _deliveries = null;
+                }
+                else
+                {
+                    deliveries.Clear();
+                }
             }
         }
     }
@@ -310,12 +411,11 @@ internal static class PostLockQueue
 
     private static void Return(Segment segment)
     {
-        if (segment.Deliveries.Capacity > MaxPooledCapacity || segment.Requests.Capacity > MaxPooledCapacity)
+        if (segment.Requests.Capacity > MaxPooledCapacity)
         {
             return;
         }
 
-        segment.Deliveries.Clear();
         segment.Requests.Clear();
         segment.RequestIndex.Clear();
         segment.Next = _pool;

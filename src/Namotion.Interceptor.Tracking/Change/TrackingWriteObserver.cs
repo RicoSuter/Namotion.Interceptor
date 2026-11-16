@@ -54,10 +54,20 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
     private static void CompleteAnchorWrite(in PropertyWriteObservation write)
     {
         var segment = PostLockQueue.Pop();
-        var data = TryGetWrittenData(write);
-        if (data is not null)
+        try
         {
-            RequestRecalculations(write, data, segment);
+            var data = TryGetWrittenData(write);
+            if (data is not null)
+            {
+                RequestRecalculations(write, data, segment);
+            }
+        }
+        catch
+        {
+            // The popped segment drains in any case, so its deliveries do not stay pending and hold back later ones;
+            // the exception in flight wins.
+            PostLockQueue.CompleteAnchorWrite(segment, write.RawTimestamp, hasWriteFailed: true);
+            throw;
         }
 
         PostLockQueue.CompleteAnchorWrite(segment, write.RawTimestamp, write.HasFailed);
@@ -123,7 +133,7 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
     {
         // Every dependent is requested, also after one threw (an observer of its change). A request that throws ends
         // this loop and RequestAfterException requests the remaining dependents, so the loop runs without a handler
-        // per request.
+        // per request. No segment is open, so the thread holds no lifecycle lock and each request runs directly.
         var property = write.Property;
         var rawTimestamp = write.RawTimestamp;
         var next = 0;
@@ -131,7 +141,7 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
         {
             if (isSettableDerived)
             {
-                DerivedPropertyOwnership.RequestRecalculation(property, ResolveTimestamp(ref rawTimestamp));
+                DerivedPropertyOwnership.Request(property, ResolveTimestamp(ref rawTimestamp), DerivedPropertyOwnership.AnyAttachCount);
             }
 
             while (next < dependents.Length)
@@ -139,7 +149,7 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
                 var dependent = dependents[next++];
                 if (dependent != property)
                 {
-                    DerivedPropertyOwnership.RequestRecalculation(dependent, ResolveTimestamp(ref rawTimestamp));
+                    DerivedPropertyOwnership.Request(dependent, ResolveTimestamp(ref rawTimestamp), DerivedPropertyOwnership.AnyAttachCount);
                 }
             }
         }
@@ -181,7 +191,7 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
             {
                 try
                 {
-                    DerivedPropertyOwnership.RequestRecalculation(dependent, ResolveTimestamp(ref rawTimestamp));
+                    DerivedPropertyOwnership.Request(dependent, ResolveTimestamp(ref rawTimestamp), DerivedPropertyOwnership.AnyAttachCount);
                 }
                 catch (Exception)
                 {

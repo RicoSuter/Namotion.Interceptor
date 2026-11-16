@@ -92,6 +92,181 @@ public class PostLockQueueTests
     }
 
     [Fact]
+    public void WhenObserverOfStructuralWriteWritesAPropertyQueuedUnderTheLock_ThenItsChangeIsDeliveredAfterTheQueuedOne()
+    {
+        // Arrange: the handler writes FirstName under the lock, which queues its change, and an observer of the
+        // structural write writes FirstName again while the structural write is announced, before the drain.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var lifecycle = context.GetService<LifecycleInterceptor>();
+        var root = new Person(context);
+        var mother = new Person();
+        context.WithService(() => new CallbackLifecycleHandler(change =>
+        {
+            if (change.IsContextAttach && change.Subject == mother)
+            {
+                root.FirstName = "1";
+            }
+        }));
+        var deliveries = new List<(string Name, string? Value, bool IsLockFree)>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Subject != root)
+            {
+                return;
+            }
+
+            if (change.Property.Name == nameof(Person.Mother))
+            {
+                root.FirstName = "2";
+            }
+            else if (change.Property.Name is nameof(Person.FirstName) or nameof(Person.FullName))
+            {
+                deliveries.Add((change.Property.Name, change.GetNewValue<string?>(), IsLockFreeForOtherThreads(lifecycle, root)));
+            }
+        });
+
+        // Act
+        root.Mother = mother;
+
+        // Assert
+        Assert.Equal(
+            [(nameof(Person.FirstName), "1", true), (nameof(Person.FirstName), "2", true), (nameof(Person.FullName), "2", true)],
+            deliveries);
+        Assert.Equal("2", root.FirstName);
+    }
+
+    [Fact]
+    public void WhenObserverOfDrainedChangeWritesAPropertyWithAQueuedChange_ThenTheChangesAreDeliveredInWriteOrder()
+    {
+        // Arrange: the handler writes FirstName and then LastName under the lock. The observer of the drained
+        // FirstName change writes LastName while the handler's LastName change is still queued.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new Person(context);
+        var mother = new Person();
+        context.WithService(() => new CallbackLifecycleHandler(change =>
+        {
+            if (change.IsContextAttach && change.Subject == mother)
+            {
+                root.FirstName = "1";
+                root.LastName = "x";
+            }
+        }));
+        var deliveries = new List<string>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Subject != root)
+            {
+                return;
+            }
+
+            var value = change.GetNewValue<object?>();
+            deliveries.Add($"{change.Property.Name}={(value is Person ? "mother" : value)}");
+            if (change.Property.Name == nameof(Person.FirstName))
+            {
+                root.LastName = "3";
+            }
+        });
+
+        // Act
+        root.Mother = mother;
+
+        // Assert
+        Assert.Equal(
+            ["Mother=mother", "FirstName=1", "LastName=x", "LastName=3", "FullName=1 3", "FullNameWithPrefix=Mr. 1 3"],
+            deliveries);
+        Assert.Equal("3", root.LastName);
+    }
+
+    [Fact]
+    public void WhenObserverOfTheLastQueuedChangeWritesTheSameProperty_ThenItsChangeIsDeliveredAfterTheQueuedOne()
+    {
+        // Arrange: the handler queues only the FirstName change. The first observer writes FirstName again while
+        // that change, the last pending delivery, is delivered; the second observer records the order.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new Person(context);
+        var mother = new Person();
+        context.WithService(() => new CallbackLifecycleHandler(change =>
+        {
+            if (change.IsContextAttach && change.Subject == mother)
+            {
+                root.FirstName = "1";
+            }
+        }));
+        var observable = context.GetPropertyChangeObservable(ImmediateScheduler.Instance);
+        observable.Subscribe(change =>
+        {
+            if (change.Property.Subject == root &&
+                change.Property.Name == nameof(Person.FirstName) &&
+                change.GetNewValue<string?>() == "1")
+            {
+                root.FirstName = "2";
+            }
+        });
+        var deliveries = new List<string?>();
+        observable.Subscribe(change =>
+        {
+            if (change.Property.Subject == root && change.Property.Name == nameof(Person.FirstName))
+            {
+                deliveries.Add(change.GetNewValue<string?>());
+            }
+        });
+
+        // Act
+        root.Mother = mother;
+
+        // Assert
+        Assert.Equal(["1", "2"], deliveries);
+        Assert.Equal("2", root.FirstName);
+    }
+
+    [Fact]
+    public void WhenObserverOfDrainedChangeMakesStructuralWrite_ThenItsWorkDrainsAfterTheOlderQueuedChanges()
+    {
+        // Arrange: the observer of the drained FirstName change assigns the father while the handler's LastName
+        // change is still queued. That structural write is an anchor of its own, and attaching the father writes
+        // its name under the lock.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var lifecycle = context.GetService<LifecycleInterceptor>();
+        var root = new Person(context);
+        var mother = new Person();
+        var father = new Person();
+        context.WithService(() => new CallbackLifecycleHandler(change =>
+        {
+            if (change.IsContextAttach && change.Subject == mother)
+            {
+                root.FirstName = "1";
+                root.LastName = "x";
+            }
+            else if (change.IsContextAttach && change.Subject == father)
+            {
+                father.FirstName = "f";
+            }
+        }));
+        var deliveries = new List<(string Name, bool IsLockFree)>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            deliveries.Add(($"{(change.Property.Subject == root ? "root" : "father")}.{change.Property.Name}", IsLockFreeForOtherThreads(lifecycle, root)));
+            if (change.Property.Subject == root && change.Property.Name == nameof(Person.FirstName))
+            {
+                root.Father = father;
+            }
+        });
+
+        // Act
+        root.Mother = mother;
+
+        // Assert
+        Assert.Equal(
+            [
+                ("root.Mother", true), ("root.FirstName", true), ("root.LastName", true), ("root.Father", true),
+                ("father.FirstName", true), ("root.FullName", true), ("root.FullNameWithPrefix", true)
+            ],
+            deliveries);
+        Assert.Equal("1 x", root.FullName);
+        Assert.Equal("f", father.FullName);
+    }
+
+    [Fact]
     public void WhenStructuralWriteRunsThroughTwoLifecycleInterceptors_ThenAllQueuedWorkDrainsWithTheWrite()
     {
         // Arrange

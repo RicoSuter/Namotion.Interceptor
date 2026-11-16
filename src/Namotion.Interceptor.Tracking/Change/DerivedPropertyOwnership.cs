@@ -30,8 +30,8 @@ internal static class DerivedPropertyOwnership
     internal const long AnyAttachCount = -1;
 
     /// <summary>
-    /// Runs, when a test sets it, after an owner or an attach took a request under lock(data) and before the request
-    /// is evaluated, queued or run.
+    /// Runs, when a test sets it, before every evaluation of an owner loop, and after an attach decided its request,
+    /// before the request is queued or run.
     /// </summary>
     internal static Action<PropertyReference>? AfterTakeForTests { get; set; }
 
@@ -135,7 +135,7 @@ internal static class DerivedPropertyOwnership
     {
         if (rawTimestamp == 0)
         {
-            // A request without a trigger timestamp (one an attach marked itself) takes the time of the request.
+            // A request without a trigger timestamp (one an attach requests itself) takes the time of the request.
             rawTimestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
         }
 
@@ -230,9 +230,7 @@ internal static class DerivedPropertyOwnership
     }
 
     // Called under lock(data). Clears the pending request flags and returns whether a foreign request was among them.
-    // The pending timestamp is zeroed when taken, so a flag set without a request (by an attach) does not carry an
-    // older write's timestamp; 0 is resolved to the current time outside the lock (by RequestRecalculation, or by the
-    // publication of the owner loop that takes it).
+    // The pending timestamp is zeroed when it is taken.
     private static bool TakePendingRequest(DerivedPropertyData data, out long pendingTimestamp)
     {
         var isForeign = data.HasForeignRequest;
@@ -306,10 +304,11 @@ internal static class DerivedPropertyOwnership
         }
     }
 
-    // Returns true when a request is pending and nobody owns the property after the attach. attachCount: the attach
-    // count under lock(data) when the attach decided the request, which the request carries: an attach that increments
-    // it later evaluates after every cause of the request. isExhausted: the iteration limit was reached and the last,
-    // unstable evaluation was committed.
+    // Returns true when a recalculation is to be requested after the attach: a request is pending and nobody owns the
+    // property, the evaluation was not stable, or a recalculation from before the detach owned the property.
+    // attachCount: the attach count under lock(data) when the attach decided the request, which the request carries:
+    // an attach that increments it later evaluates after every cause of the request. isExhausted: the iteration limit
+    // was reached and the last, unstable evaluation was committed.
     private static bool RunAttachEvaluations(
         DerivedPropertyData data, PropertyReference property, long attachToken, bool ownsData, out long pendingTimestamp,
         out long attachCount, out bool isExhausted)
