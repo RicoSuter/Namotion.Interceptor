@@ -499,6 +499,26 @@ public class FirstChanceExceptionLoggerTests
         Assert.StartsWith("System.", throwSite);
         Assert.DoesNotContain("TaskAwaiter.ThrowForNonSuccess", throwSite);
         Assert.DoesNotContain(TestClassName, throwSite);
+        Assert.DoesNotContain("System.Runtime.EH.", throwSite);
+        Assert.DoesNotContain("System.Runtime.ExceptionServices.InternalCalls.", throwSite);
+        var callStack = (string)entry.Properties["CallStack"]!;
+        Assert.DoesNotContain("System.Runtime.EH.", callStack);
+        Assert.DoesNotContain("System.Runtime.ExceptionServices.InternalCalls.", callStack);
+    }
+
+    [Theory]
+    [InlineData("System.Runtime.EH", true)]
+    [InlineData("System.Runtime.ExceptionServices.InternalCalls", true)]
+    [InlineData("System.Runtime.ExceptionServices.ExceptionDispatchInfo", false)]
+    [InlineData("System.Net.Sockets.Socket+AwaitableSocketAsyncEventArgs", false)]
+    [InlineData(null, false)]
+    public void WhenDeclaringTypeIsChecked_ThenOnlyTheRuntimeExceptionDispatchTypesMatch(string? declaringTypeName, bool expected)
+    {
+        // Act
+        var isDispatchType = FirstChanceExceptionLogger.IsExceptionDispatchType(declaringTypeName);
+
+        // Assert
+        Assert.Equal(expected, isDispatchType);
     }
 
     [Fact]

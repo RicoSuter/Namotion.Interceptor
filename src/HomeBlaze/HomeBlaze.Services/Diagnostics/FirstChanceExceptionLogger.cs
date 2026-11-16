@@ -150,8 +150,8 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
     /// Queues an entry for the exception unless Debug is disabled, the thread is already inside this method
     /// or writing an entry, the exception instance was seen before, or an entry for the same exception type
     /// and throw site was queued within the last minute. The throw site is the first frame of the calling
-    /// stack outside the framework. When the stack has only framework frames it is the first visible frame of the stack,
-    /// then the exception's throwing frame. Never throws and
+    /// stack outside the framework. When the stack has only framework frames it is the first visible frame of the stack
+    /// after the runtime's exception dispatch frames, then the exception's throwing frame. Never throws and
     /// never writes to a logging provider, only <see cref="ILogger.IsEnabled"/> is called on the calling thread.
     /// </summary>
     /// <param name="exception">The exception being thrown.</param>
@@ -183,8 +183,12 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
             // current stack provides the callers; the first frame skipped is this method. It can only
             // be captured here, formatting it is left to the consumer.
             var callStack = new StackTrace(1 + skippedCallerFrames, fNeedFileInfo: false);
+            var dispatchFrameCount = CountLeadingDispatchFrames(callStack);
             string? throwingFrame = null;
-            var throwSite = FindCallerOutsideFramework(callStack) ?? FindFirstVisibleFrame(callStack) ?? (throwingFrame = GetThrowingFrame(exception));
+            var throwSite =
+                FindCallerOutsideFramework(callStack, dispatchFrameCount) ??
+                FindFirstVisibleFrame(callStack, dispatchFrameCount) ??
+                (throwingFrame = GetThrowingFrame(exception));
 
             var exceptionType = exception.GetType().FullName ?? exception.GetType().Name;
             var state = TryBeginEntry(exceptionType, throwSite, out var skippedCount);
@@ -194,7 +198,7 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
             }
 
             throwingFrame ??= GetThrowingFrame(exception);
-            if (!TryEnqueue(new Entry(exception, callStack, exceptionType, throwSite, throwingFrame, skippedCount)))
+            if (!TryEnqueue(new Entry(exception, callStack, dispatchFrameCount, exceptionType, throwSite, throwingFrame, skippedCount)))
             {
                 // The dropped entry and the skips it carried are reported by the next entry of its key.
                 Interlocked.Add(ref state.SkippedCount, skippedCount + 1);
@@ -211,13 +215,33 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
     }
 
     /// <summary>
-    /// Returns the first frame outside the framework and this class, or null when there is none. Framework
-    /// exceptions are mostly thrown by shared helpers, which would put every cancellation of the process,
-    /// for example, under one throw site.
+    /// Returns whether the type is one of the runtime's managed exception dispatch types, whose frames
+    /// start the call stack at first chance and are shown in formatted stacks on some platforms.
     /// </summary>
-    private static string? FindCallerOutsideFramework(StackTrace callStack)
+    internal static bool IsExceptionDispatchType(string? declaringTypeName) =>
+        declaringTypeName is "System.Runtime.EH" or "System.Runtime.ExceptionServices.InternalCalls";
+
+    private static int CountLeadingDispatchFrames(StackTrace callStack)
     {
-        for (var index = 0; index < callStack.FrameCount; index++)
+        var index = 0;
+        while (index < callStack.FrameCount &&
+               callStack.GetFrame(index) is { } frame &&
+               IsExceptionDispatchType(DiagnosticMethodInfo.Create(frame)?.DeclaringTypeName))
+        {
+            index++;
+        }
+
+        return index;
+    }
+
+    /// <summary>
+    /// Returns the first frame from <paramref name="startIndex"/> outside the framework and this class, or null
+    /// when there is none. Framework exceptions are mostly thrown by shared helpers, which would put every
+    /// cancellation of the process, for example, under one throw site.
+    /// </summary>
+    private static string? FindCallerOutsideFramework(StackTrace callStack, int startIndex)
+    {
+        for (var index = startIndex; index < callStack.FrameCount; index++)
         {
             var frame = callStack.GetFrame(index);
             if (frame is null)
@@ -226,7 +250,6 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
             }
 
             // Unlike StackFrame.GetMethod, safe under trimming and Native AOT; null when the method is unknown.
-            // Under Native AOT the call stack starts with runtime exception handling frames, which the System. prefix skips.
             var declaringTypeName = DiagnosticMethodInfo.Create(frame)?.DeclaringTypeName;
             if (declaringTypeName is null ||
                 declaringTypeName.StartsWith("System.", StringComparison.Ordinal) ||
@@ -248,13 +271,11 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
     }
 
     /// <summary>
-    /// Returns the first frame of the stack that formats to text, or null when there is none. For a stack of
-    /// framework frames only this is the framework method that awaited or called into the throwing helper,
-    /// since the runtime hides awaiter and exception dispatch frames from formatted stacks.
+    /// Returns the first frame from <paramref name="startIndex"/> that formats to text, or null when there is none.
     /// </summary>
-    private static string? FindFirstVisibleFrame(StackTrace callStack)
+    private static string? FindFirstVisibleFrame(StackTrace callStack, int startIndex)
     {
-        for (var index = 0; index < callStack.FrameCount; index++)
+        for (var index = startIndex; index < callStack.FrameCount; index++)
         {
             var frame = callStack.GetFrame(index);
             if (frame is null)
@@ -400,7 +421,7 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
                     entry.ThrowingFrame,
                     entry.Exception.Message,
                     entry.SkippedCount,
-                    entry.CallStack.ToString(),
+                    FormatCallStack(entry.CallStack, entry.DispatchFrameCount),
                     entry.Exception);
             }
 
@@ -420,12 +441,20 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
         }
     }
 
+    private static string FormatCallStack(StackTrace callStack, int dispatchFrameCount)
+    {
+        return dispatchFrameCount == 0
+            ? callStack.ToString()
+            : new StackTrace(callStack.GetFrames()[dispatchFrameCount..]).ToString();
+    }
+
     private readonly struct Entry
     {
-        public Entry(Exception exception, StackTrace callStack, string exceptionType, string throwSite, string throwingFrame, int skippedCount)
+        public Entry(Exception exception, StackTrace callStack, int dispatchFrameCount, string exceptionType, string throwSite, string throwingFrame, int skippedCount)
         {
             Exception = exception;
             CallStack = callStack;
+            DispatchFrameCount = dispatchFrameCount;
             ExceptionType = exceptionType;
             ThrowSite = throwSite;
             ThrowingFrame = throwingFrame;
@@ -446,6 +475,9 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
         public Exception? Exception { get; }
 
         public StackTrace? CallStack { get; }
+
+        /// <summary>Gets the number of runtime exception dispatch frames at the start of <see cref="CallStack"/>, left out when it is written.</summary>
+        public int DispatchFrameCount { get; }
 
         public string? ExceptionType { get; }
 
