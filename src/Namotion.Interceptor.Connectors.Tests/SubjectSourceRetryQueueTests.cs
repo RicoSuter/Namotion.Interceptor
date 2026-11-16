@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
@@ -142,6 +141,7 @@ public class SubjectSourceRetryQueueTests
         var peerIsDown = false;
         var peerFirstName = "Initial";
         var events = new List<string>();
+        var probeWriteCount = 0;
         SubjectPropertyWriter? propertyWriter = null;
 
         TestSubjectSource source = null!;
@@ -180,6 +180,7 @@ public class SubjectSourceRetryQueueTests
                     {
                         if (change.Property.Name != nameof(Person.FirstName))
                         {
+                            probeWriteCount++;
                             continue;
                         }
 
@@ -205,13 +206,21 @@ public class SubjectSourceRetryQueueTests
         };
 
         firstName.SetSource(source);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source);
 
         await source.StartAsync(CancellationToken.None);
         try
         {
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => source.State == SourceState.Synchronized,
-                message: "The source did not synchronize.");
+            // A write before the pump runs could go out with the startup wake rather than after the reload.
+            var probeValue = 0;
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+            {
+                person.LastName = "Probe" + probeValue++;
+                lock (gate)
+                {
+                    return probeWriteCount >= 1;
+                }
+            }, message: "Pump did not start processing changes.");
 
             lock (gate)
             {

@@ -51,10 +51,11 @@ public interface ISubjectSource : ISubjectConnector
     /// </para>
     /// <para>
     /// After the peer accepts a written value, the source must eventually apply the peer's value for that
-    /// property to the model without waiting for another local write, through the same inbound path as its
-    /// other updates so that it lands after any initial-state load in progress. A subscription, a broadcast
-    /// that includes the writer, polling, or a read after the write all comply. A write reported as failed
-    /// in the <see cref="WriteResult"/> needs no read-back.
+    /// property to the model without waiting for another local write, and an initial-state load in progress
+    /// must not overwrite it. Applying it through the same inbound path as the source's other updates gives
+    /// that through the property writer's buffering; a read-back path outside that writer must ensure it
+    /// itself. A subscription, a broadcast that includes the writer, polling, or a read after the write all
+    /// comply. A write reported as failed in the <see cref="WriteResult"/> needs no read-back.
     /// </para>
     /// </remarks>
     /// <param name="changes">The collection of subject property changes.</param>

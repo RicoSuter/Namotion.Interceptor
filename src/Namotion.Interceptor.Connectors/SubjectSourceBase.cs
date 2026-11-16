@@ -510,7 +510,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         await idleFlush.CancelAsync().ConfigureAwait(false);
         try
         {
-            await idleFlushTask.WaitAsync(ChangeQueueProcessor.TeardownFlushBound).ConfigureAwait(false);
+            await idleFlushTask.WaitAsync(ChangeQueueProcessor.TeardownFlushBound, TeardownTimeProvider).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
