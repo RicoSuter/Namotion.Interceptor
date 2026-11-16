@@ -111,7 +111,7 @@ internal static class DerivedPropertyOwnership
     {
         if (rawTimestamp == 0)
         {
-            // A write without a context or a structure change: the time of the request is the trigger's.
+            // A request without a trigger timestamp (one an attach marked itself) takes the time of the request.
             rawTimestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
         }
 
@@ -159,7 +159,7 @@ internal static class DerivedPropertyOwnership
         catch (Exception)
         {
             // A failing trace listener, or an exception whose formatting throws, must not replace an exception in
-            // flight or abort an attach.
+            // flight, abort an attach or fail a write.
         }
     }
 
@@ -484,7 +484,7 @@ internal static class DerivedPropertyOwnership
             }
         }
 
-        Trace.TraceWarning(
+        TraceWarning(
             $"DerivedPropertyChangeHandler: MaxStabilizationIterations ({MaxStabilizationIterations}) exhausted for " +
             $"'{property.Metadata.Name}' on {property.Subject.GetType().Name}.");
         return false;
@@ -682,8 +682,9 @@ internal static class DerivedPropertyOwnership
         }
 
         // Cascade re-entry: pre-populates the new context's _writeTimestamp with the trigger's
-        // raw cached value so the dependent's write skips lazy-resolve (and we therefore do
-        // not need a WithChangedTimestamp scope active to share the time with the dependent).
+        // raw cached value, when the request carried one, so the dependent's write skips
+        // lazy-resolve (and we therefore do not need a WithChangedTimestamp scope active to share
+        // the time with the dependent).
         // newValue is the value the owner committed and the value paired with oldValue by the
         // guards above, so finalValueIsNewValue publishes it rather than re-invoking the getter
         // (see PropertyWriteContext.FinalValueIsNewValue).

@@ -24,7 +24,8 @@ public class DerivedPropertyRandomizedStressTests
     [Trait("Category", "Stress")]
     public async Task WhenThreadsWriteAttachAndDetachConcurrently_ThenLastPublishedValueEqualsGetter()
     {
-        // Arrange
+        // Arrange: one context, because a second context does not attach the children of a subject already
+        // attached elsewhere (#942).
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
         var root = new StressPerson(context);
         var people = Enumerable.Range(0, PersonCount).Select(i => new StressPerson { Name = $"p{i}" }).ToArray();
@@ -83,8 +84,8 @@ public class DerivedPropertyRandomizedStressTests
     }
 
     /// <summary>
-    /// Attaches and detaches people. Structural writes run on one thread: concurrent structural writes can leave a
-    /// subject attached by the lifecycle without its inherited context, which no derived property can publish through.
+    /// Attaches and detaches people. Structural writes run on one thread: detaching a parent while a write to its
+    /// property is in flight leaves the retained child without a context (#991).
     /// </summary>
     private static void MoveRandomly(StressPerson root, StressPerson[] people, Random random)
     {
@@ -97,9 +98,8 @@ public class DerivedPropertyRandomizedStressTests
             }
             else
             {
-                // Only a person with a lower index, so there are no cycles: the lifecycle keeps a cycle that is no
-                // longer reachable attached through its own references, and a person that becomes its own mother
-                // then is attached without a context.
+                // Only a person with a lower index, so there are no cycles: a subject in a cycle or held by itself
+                // stays attached without a context when its parent is detached (#992).
                 people[index].Mother = random.Next(4) == 0 || index == 0 ? null : people[random.Next(index)];
             }
         }
