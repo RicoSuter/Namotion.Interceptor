@@ -287,6 +287,8 @@ public partial class SqliteHistoryStoreSubject :
         // Starts right after the engine is built, so any throw from here on still disposes it.
         HistoryChangeRecorder? recorder = null;
         var flushTask = Task.CompletedTask;
+        var isEnginePublished = false;
+        Exception? failure = null;
         try
         {
             // The change-queue subscription is live from construction, before the first await. The
@@ -310,6 +312,7 @@ public partial class SqliteHistoryStoreSubject :
 
             engine.BeginCoverageSession();
             _engine = engine;
+            isEnginePublished = true;
 
             _logger.LogInformation("Recording SQLite history to {Directory}.", directory);
 
@@ -322,13 +325,18 @@ public partial class SqliteHistoryStoreSubject :
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
         }
+        catch (Exception exception)
+        {
+            failure = exception;
+            throw;
+        }
         finally
         {
             await flushTask.ConfigureAwait(false);
 
             // Final shutdown flush so the un-flushed tail is persisted. The stopping token is already
-            // cancelled here, so a fresh bounded token gives the flush a chance to complete (the engine
-            // keeps pending samples on failure, so a timeout simply leaves them for the next start).
+            // cancelled here, so a fresh bounded token gives the flush a chance to complete; the engine is
+            // discarded below, so samples a failed or timed-out flush leaves pending are lost.
             using var shutdownCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             try
             {
@@ -339,15 +347,29 @@ public partial class SqliteHistoryStoreSubject :
                 _logger.LogError(exception, "Final history flush on shutdown failed; pending samples were not persisted.");
             }
 
-            // Compared, so a run finishing after a restart cannot clear the newer run's engine or recorder.
-            Interlocked.CompareExchange(ref _engine, null, engine);
+            // Compared, so a run finishing after a restart leaves the newer run's engine, recorder, status and
+            // metrics alone.
+            var ownsState = Interlocked.CompareExchange(ref _engine, null, engine) == engine || !isEnginePublished;
             engine.Dispose();
 
-            // After disposing, so a stopped store reports no open connections.
-            RefreshMetrics(engine);
-            Interlocked.CompareExchange(ref _recorder, null, recorder);
+            if (ownsState)
+            {
+                // After disposing, so a stopped store reports no open connections.
+                RefreshMetrics(engine);
+                if (failure is null)
+                {
+                    Status = "Stopped";
+                }
+                else
+                {
+                    // After the refresh, which would replace the message with the engine's own error.
+                    Status = "Error";
+                    LastError = failure.Message;
+                }
+            }
 
-            Status = "Stopped";
+            // After the refresh, which reads the rates of this run's recorder.
+            Interlocked.CompareExchange(ref _recorder, null, recorder);
         }
     }
 

@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions;
 using HomeBlaze.History.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
@@ -352,6 +353,35 @@ public class SqliteHistoryStoreRecordingTests
             Assert.True(
                 Assert.Single(store.CoverageRanges).To >= beforeRecording,
                 "coverage did not advance past the instant before the recorded change");
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task WhenStartFailsAfterTheEngineIsBuilt_ThenTheStoreReportsTheErrorAndHoldsNoEngine()
+    {
+        // Arrange - a resolver but no property tracking, so subscribing to the change queue throws once the
+        // engine already exists.
+        var context = InterceptorSubjectContext.Create();
+        context.WithService<ISubjectPathResolver>(() => new SubjectPathResolver(() => null));
+        var (store, databasePath) = CreateStore(context);
+        var hostedService = (IHostedService)store;
+        try
+        {
+            // Act
+            await hostedService.StartAsync(CancellationToken.None);
+            var exception = await Assert.ThrowsAnyAsync<Exception>(() => store.ExecuteTask!);
+
+            // Assert
+            Assert.Equal("Error", store.Status);
+            Assert.Equal(exception.Message, store.LastError);
+            Assert.Null(store.Engine);
+            Assert.Equal(0, store.OpenConnectionCount);
+            Assert.True(Directory.Exists(databasePath), "The engine was never built.");
         }
         finally
         {
