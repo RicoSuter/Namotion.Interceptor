@@ -52,7 +52,28 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler, 
     /// </summary>
     private volatile ILogger? _logger;
 
+    private readonly bool _activateSubjectHostedServices;
+
+    /// <summary>
+    /// The provider an automatic activation creates its service with, set by the same service provider
+    /// factory as the logger. Read when the service is created rather than when the subject is
+    /// activated, so a subject attached before the host built its provider still gets it.
+    /// </summary>
+    private volatile IServiceProvider _serviceProvider = EmptyServiceProvider.Instance;
+
+    /// <param name="activateSubjectHostedServices">
+    /// Whether every <see cref="ISubjectHostedServiceFactory"/> subject is activated as it attaches.
+    /// </param>
+    public HostedServiceHandler(bool activateSubjectHostedServices = true)
+    {
+        _activateSubjectHostedServices = activateSubjectHostedServices;
+    }
+
+    internal IServiceProvider ServiceProvider => _serviceProvider;
+
     internal void SetLogger(ILogger logger) => _logger = logger;
+
+    internal void SetServiceProvider(IServiceProvider serviceProvider) => _serviceProvider = serviceProvider;
 
     // The hooks below are test seams, null in production.
 
@@ -94,6 +115,13 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler, 
 
     private void AttachSubject(IInterceptorSubject subject)
     {
+        if (_activateSubjectHostedServices && subject is ISubjectHostedServiceFactory factory)
+        {
+            // Ahead of the attachments read, so the loop below starts the activation like any other
+            // attachment. Publishes only, which neither blocks nor runs user code.
+            subject.GetOrAddActivation(factory, serviceProvider: null, out _);
+        }
+
         var attachments = subject.GetHostedServiceAttachments();
         if (subject is not IHostedService && attachments.IsEmpty)
         {
@@ -652,12 +680,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler, 
             return false;
         }
 
-        // An empty transition on the same queue. Enqueuing never runs a body, so this completes only
-        // once the start enqueued ahead of it has run.
-        await slot
-            .EnqueueAsync(this, () => Task.CompletedTask)
-            .WaitAsync(cancellationToken)
-            .ConfigureAwait(false);
+        await WaitForQueuedTransitionsAsync(slot, cancellationToken).ConfigureAwait(false);
 
         if (slot.StartFault is { } fault)
         {
@@ -668,6 +691,19 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler, 
         // Read at all because the guards above cannot cover a drain beginning while this wait is
         // queued behind the start: the start body then gates itself out and sets nothing.
         return slot.Current is not null;
+    }
+
+    /// <summary>
+    /// Waits for every transition already queued on the slot to have run and reads no outcome. The
+    /// token bounds the wait only.
+    /// </summary>
+    internal Task WaitForQueuedTransitionsAsync(HostedServiceSlot slot, CancellationToken cancellationToken)
+    {
+        // An empty transition on the same queue. Enqueuing never runs a body, so this completes only
+        // once the start enqueued ahead of it has run.
+        return slot
+            .EnqueueAsync(this, () => Task.CompletedTask)
+            .WaitAsync(cancellationToken);
     }
 
     internal bool IsLive(IInterceptorSubject subject) => _liveSubjects.ContainsKey(subject);

@@ -335,6 +335,13 @@
                 _isCreatedSubjectHandedOver = true;
             }
 
+            // Only once the create succeeded, so a canceled or failed create runs nothing and the service
+            // starts with the applied edits.
+            if (Options.ActivateHostedService)
+            {
+                SubjectFactory.ActivateHostedService(createdSubject);
+            }
+
             MudDialog?.Close(DialogResult.Ok(new CreateSubjectResult(createdSubject, name)));
         }
         catch (Exception exception)

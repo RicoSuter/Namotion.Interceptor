@@ -5,6 +5,7 @@ using HomeBlaze.Storage.Files;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Storage.Internal;
@@ -48,6 +49,15 @@ internal sealed class FileSubjectFactory
         return mappedType != null
             ? (IInterceptorSubject)ActivatorUtilities.CreateInstance(_serviceProvider, mappedType, storage, path)
             : new GenericFile(storage, path);
+    }
+
+    /// <summary>
+    /// Activates the hosted service of a subject that <see cref="CreateFile"/> created, once its content has loaded,
+    /// so the service reads the content rather than an empty file.
+    /// </summary>
+    public void ActivateHostedService(IInterceptorSubject subject)
+    {
+        subject.ActivateHostedService(_serviceProvider);
     }
 
     /// <summary>

@@ -26,4 +26,10 @@ public sealed record SubjectSetupOptions
     /// The type to create, which skips the picker and has no way back to it, or null to pick the type in the dialog.
     /// </summary>
     public Type? Type { get; init; }
+
+    /// <summary>
+    /// Whether the caller keeps the created subject, so its hosted service is activated once the create
+    /// succeeds. False when the caller only reads the subject's configuration and discards the instance.
+    /// </summary>
+    public bool ActivateHostedService { get; init; }
 }

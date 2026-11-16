@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Hosting;
 
 namespace HomeBlaze.Services;
 
@@ -16,7 +17,8 @@ public class SubjectFactory
     }
 
     /// <summary>
-    /// Creates a new instance of the specified subject type.
+    /// Creates a new instance of the specified subject type. Its hosted service is not activated, see
+    /// <see cref="ActivateHostedService"/>.
     /// </summary>
     /// <remarks>
     /// A type with a generated context constructor is attached to the root context right away: it is known to the
@@ -41,6 +43,19 @@ public class SubjectFactory
     public T CreateSubject<T>() where T : IInterceptorSubject
     {
         return (T)CreateSubject(typeof(T));
+    }
+
+    /// <summary>
+    /// Activates the hosted service of a created subject with the application's service provider.
+    /// </summary>
+    /// <remarks>
+    /// Call once the subject is configured and only when it is kept: a subject created with the
+    /// application's context is already attached to it, so the service starts right away and keeps
+    /// running until the subject is detached.
+    /// </remarks>
+    public IHostedServiceAttachment? ActivateHostedService(IInterceptorSubject subject)
+    {
+        return subject.ActivateHostedService(_serviceProvider);
     }
 
     /// <summary>

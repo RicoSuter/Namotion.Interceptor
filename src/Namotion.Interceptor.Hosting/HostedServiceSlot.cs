@@ -102,6 +102,9 @@ internal sealed class HostedServiceSlot
 
     public HostedServiceHandler? Owner => Volatile.Read(ref _owner);
 
+    /// <summary>Whether <see cref="MarkDetached"/> has run. Read outside the queue lock, as in <see cref="GetState"/>.</summary>
+    public bool IsDetached => Volatile.Read(ref _detached);
+
     public void SetFault(Exception fault) => Volatile.Write(ref _fault, fault);
 
     /// <summary>Records a failed start, as the slot's fault and as the start's own outcome.</summary>

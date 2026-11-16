@@ -660,6 +660,8 @@ internal sealed class StorageReconciler
                     SetMetadata(file, listed.Version);
                     await file.OnFileChangedAsync(cancellationToken);
                 }
+
+                _subjectFactory.ActivateHostedService(subject);
             }
 
             entry.Subject = subject;

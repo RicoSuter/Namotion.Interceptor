@@ -23,6 +23,7 @@ internal sealed class PrivateContextHost
 
     internal PrivateContextHost(IServiceProvider serviceProvider)
     {
+        _handler.SetServiceProvider(serviceProvider);
         _logger = serviceProvider.GetService<ILogger<HostedServiceHandler>>();
         if (_logger is not null)
         {
@@ -33,8 +34,8 @@ internal sealed class PrivateContextHost
     /// <summary>
     /// Attaches <paramref name="subjectToAttach"/> to the private context when given, else uses the
     /// subject <see cref="Attach"/> attached. Then opens the handler and waits for the subject's own
-    /// start when it is a hosted service. On any failure, stops the host before rethrowing, so no half
-    /// started subject is left behind. The token bounds that teardown as well, so a cancellation tears
+    /// start when it is a hosted service, and for its activated service's start when it has one. On
+    /// any failure, stops the host before rethrowing, so no half started subject is left behind. The token bounds that teardown as well, so a cancellation tears
     /// down without waiting for a start that is still running.
     /// </summary>
     internal async Task StartAsync(IInterceptorSubject? subjectToAttach, CancellationToken cancellationToken)
@@ -53,6 +54,8 @@ internal sealed class PrivateContextHost
             {
                 await _handler.WaitForStartAsync(subject, cancellationToken).ConfigureAwait(false);
             }
+
+            await subject.ActivateHostedServiceAsync(_handler.ServiceProvider, _handler, cancellationToken).ConfigureAwait(false);
         }
         catch
         {

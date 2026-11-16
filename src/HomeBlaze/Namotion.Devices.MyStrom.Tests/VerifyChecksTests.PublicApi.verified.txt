@@ -5,6 +5,7 @@ namespace Namotion.Devices.MyStrom
 {
     public static class MyStromServiceCollectionExtensions
     {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedMyStromSwitch(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, object? serviceKey, System.Action<Namotion.Devices.MyStrom.MyStromSwitch>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext>? contextResolver = null) { }
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMyStromSwitch(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.MyStrom.MyStromSwitch>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext>? contextResolver = null) { }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("Power")]
@@ -12,9 +13,10 @@ namespace Namotion.Devices.MyStrom
     [System.ComponentModel.Category("Switches")]
     [System.ComponentModel.Description("myStrom WiFi Switch with power metering, temperature sensing, and relay control")]
     [System.ComponentModel.DisplayName("myStrom switch")]
-    public class MyStromSwitch : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Common.IUptimeState, HomeBlaze.Abstractions.Devices.IPowerRelay, HomeBlaze.Abstractions.Devices.ISwitchController, HomeBlaze.Abstractions.Devices.ISwitchDevice, HomeBlaze.Abstractions.Devices.ISwitchState, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, HomeBlaze.Abstractions.Networking.INetworkAdapter, HomeBlaze.Abstractions.Networking.INetworkHost, HomeBlaze.Abstractions.Sensors.IPowerMeter, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    public class MyStromSwitch : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Common.IUptimeState, HomeBlaze.Abstractions.Devices.IPowerRelay, HomeBlaze.Abstractions.Devices.ISwitchController, HomeBlaze.Abstractions.Devices.ISwitchDevice, HomeBlaze.Abstractions.Devices.ISwitchState, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, HomeBlaze.Abstractions.Networking.INetworkAdapter, HomeBlaze.Abstractions.Networking.INetworkHost, HomeBlaze.Abstractions.Sensors.IPowerMeter, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.Hosting.ISubjectHostedServiceFactory, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
-        public MyStromSwitch(System.Net.Http.IHttpClientFactory httpClientFactory, Microsoft.Extensions.Logging.ILogger<Namotion.Devices.MyStrom.MyStromSwitch> logger) { }
+        public MyStromSwitch() { }
+        public MyStromSwitch(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public bool AllowTurnOff { get; set; }
         [HomeBlaze.Abstractions.Attributes.State(Position=401)]
@@ -82,7 +84,6 @@ namespace Namotion.Devices.MyStrom
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken = default) { }
-        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }

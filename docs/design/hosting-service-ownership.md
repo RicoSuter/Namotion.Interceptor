@@ -47,6 +47,9 @@ The fields are synchronized differently, and each difference is deliberate:
 
 ```
 _logger          ILogger?                set once by the service provider factory, volatile
+_serviceProvider IServiceProvider        what an automatic activation creates services with, EmptyServiceProvider until the same factory sets it, volatile
+_activateSubjectHostedServices
+                 bool                    whether a context attach activates an ISubjectHostedServiceFactory subject
 _gate            HostedServiceGate       Closed, Open, Draining
 _stopOnDrain     ConcurrentDictionary    the drain set: slot -> subject, for slots whose ownership this handler installed
 _liveSubjects    ConcurrentDictionary    subject -> unused, for subjects in the graph that host something
@@ -67,13 +70,13 @@ The seams are documented where they are declared; each holds open a window betwe
 
 Retained memory is therefore linear in the number of hosted services rather than in the size of the graph. `_stopOnDrain` is bounded the same way, because a slot only enters it through a take.
 
-The logger is assigned after construction because `WithHostedServices` constructs the handler while the context is being configured, before any service provider exists; the registration it adds calls `SetLogger` when the provider builds it.
+The logger and the service provider are assigned after construction because `WithHostedServices` constructs the handler while the context is being configured, before any service provider exists; the registration it adds calls `SetLogger` and `SetServiceProvider` when the provider builds it. An activation's factory reads the provider of its slot's owner when it creates the service, not when the subject attaches, so a subject attached during configuration gets the host's provider once its start runs, and a subject moved into a second host's graph gets that host's.
 
 ### Where slots live
 
 Slots live on subjects rather than in the handler, so nothing in the handler roots a detached subject and a factory survives a detach. That is what lets a subject that leaves the graph and re-enters it get working services again without a restart contract from the service.
 
-Attachments live under one data key as an `ImmutableArray`, and the subject slot under another. The correctness and allocation constraints on both paths are on `InterceptorHostingExtensions.AddAttachment` and `InterceptorHostingExtensions.GetOrAddSubjectSlot`.
+Attachments live under one data key as an `ImmutableArray`, and the subject slot under another. The correctness and allocation constraints on both paths are on `InterceptorHostingExtensions.PublishAttachment` and `InterceptorHostingExtensions.GetOrAddSubjectSlot`. A third key holds the activation entry of an `ISubjectHostedServiceFactory` subject: the one factory attachment explicit and automatic activation share, published under the entry's own lock, for the reasons on `InterceptorHostingExtensions.GetOrAddActivation`. The activation is an ordinary attachment from then on: it is started, stopped and ordered like any other, and an explicit detach marks it detached, after which the next activation publishes a fresh one.
 
 The handler carries `[RunsAfter(typeof(ContextInheritanceHandler))]`, because it resolves startup completions from `subject.Context`, and for a subject entering as a child it is `ContextInheritanceHandler` that installs the parent context as a fallback. See [Handler Order Around the Descent](tracking-lifecycle.md#handler-order-around-the-descent).
 
@@ -223,9 +226,9 @@ This is a known defect, reachable only with two hosting enabled contexts over on
 
 ## Resolving the Handler on the Public Paths
 
-### The lookup precedes the mutation, on all four entry points
+### The lookup precedes the mutation, on all five entry points
 
-`AttachHostedService`, `AttachHostedServiceAsync`, `DetachHostedService` and `DetachHostedServiceAsync` resolve the handler before they touch the subject. `TryGetService<HostedServiceHandler>` throws when the subject is reachable from two hosting contexts, so a lookup made after the mutation hands the caller an exception with the subject already changed: an attach leaves a stored attachment the next context attach starts and the caller has no handle to, and a detach leaves the instance running with its attachment already gone and nothing that will ever stop it.
+`AttachHostedService`, `AttachHostedServiceAsync`, `DetachHostedService`, `DetachHostedServiceAsync` and `ActivateHostedService` resolve the handler before they touch the subject. `TryGetService<HostedServiceHandler>` throws when the subject is reachable from two hosting contexts, so a lookup made after the mutation hands the caller an exception with the subject already changed: an attach leaves a stored attachment the next context attach starts and the caller has no handle to, and a detach leaves the instance running with its attachment already gone and nothing that will ever stop it. The automatic activation inside `HostedServiceHandler.AttachSubject` makes no lookup: it is the handler, it runs under the lifecycle lock, and the loop behind it starts what it published.
 
 ### An attach and a context entry are the same two facts in opposite orders
 
@@ -379,7 +382,7 @@ Three places read the gate twice, once on entry and once after their write, for 
 
 ## Activation and Waiting for a Start
 
-`SubjectActivation<T>` exists because a singleton nobody resolves is never constructed, never attached and never started, and `IHostedService` is the only hook the generic host offers for forcing that construction. Resolving the subject attaches it, to the private context of a `PrivateContextHost` without a context resolver or to the resolved context with one. The activation then starts that `PrivateContextHost`, or, in shared mode, opens the resolved context's handler and waits for the subject's own start. It never starts a subject outside a handler: shared mode without a handler throws, and without a context resolver a caller registered instance in no hosting graph gets a `PrivateContextHost` of its own. `PrivateContextHost` refuses a subject that is already in a tracked graph, and it checks only the subject itself: a child that the constructor or `configure` assigns and that is already in another tracked graph is pulled into the private context's lifecycle as well, without a throw. The activation resolves the handler before it looks at whether the subject is a hosted service, so a plain subject reachable from two hosting enabled contexts fails host start on the same `TryGetService` throw as [the public paths](#the-lookup-precedes-the-mutation-on-all-four-entry-points). An execution fault is recorded by the handler and does not stop the host, because the host's `BackgroundServiceExceptionBehavior` lives on `HostOptions`, which Hosting does not reference.
+`SubjectActivation<T>` exists because a singleton nobody resolves is never constructed, never attached and never started, and `IHostedService` is the only hook the generic host offers for forcing that construction. Resolving the subject attaches it, to the private context of a `PrivateContextHost` without a context resolver or to the resolved context with one. The activation then starts that `PrivateContextHost`, or, in shared mode, opens the resolved context's handler and waits for the subject's own start; either way an `ISubjectHostedServiceFactory` subject is activated and its service's start awaited as well, through `ActivateHostedServiceAsync`, which releases a faulted activation the way a faulted awaited attach is released. It never starts a subject outside a handler: shared mode without a handler throws, and without a context resolver a caller registered instance in no hosting graph gets a `PrivateContextHost` of its own. `PrivateContextHost` refuses a subject that is already in a tracked graph, and it checks only the subject itself: a child that the constructor or `configure` assigns and that is already in another tracked graph is pulled into the private context's lifecycle as well, without a throw. The activation resolves the handler before it looks at whether the subject is a hosted service or has one, so a plain subject reachable from two hosting enabled contexts fails host start on the same `TryGetService` throw as [the public paths](#the-lookup-precedes-the-mutation-on-all-five-entry-points). An execution fault is recorded by the handler and does not stop the host, because the host's `BackgroundServiceExceptionBehavior` lives on `HostOptions`, which Hosting does not reference.
 
 `WaitForStartAsync` enqueues an empty transition on the same queue and awaits it; enqueuing never runs a body, so it completes only once the start ahead of it has run. It then rethrows the start's recorded fault, which preserves the `AddHostedService` guarantee that a failing subject aborts host startup. It reads the slot and never creates one, and never takes ownership, because a claim taken from a wait would never be released. Its false result is not licence for the caller to start the subject itself, which `SubjectActivation<T>` records at its call.
 
@@ -447,7 +450,7 @@ Step 2 is the only step a startup completion supplies, so a startup completion t
 
 The flow holds the deferral open, the start is parked on it, and the flow waits for something ordered behind that start: the start itself, or a detach whose stop is enqueued on the same queue. Only that flow can dispose the deferral, and it cannot get there.
 
-`host.StartAsync()` is the instance that does not look like one, in shared mode only. A subject registered with `AddSubject<T>` and a context resolver has its start captured by the enclosing deferral through the factory's nested deferral, `SubjectActivation<T>` waits for that start, and the host waits for the activation, so the deferral is disposed only after the call it is blocking returns. Nothing bounds it unless the application sets `HostOptions.StartupTimeout`. A private context registration is outside the shape, because it opens no deferral and no application deferral reaches its private context's handler. Stated for consumers in [Configuration Before Startup](../hosting.md#configuration-before-startup).
+`host.StartAsync()` is the instance that does not look like one, in shared mode only. A subject registered with `AddSubject<T>` and a context resolver has its start captured by the enclosing deferral through the factory's nested deferral, `SubjectActivation<T>` waits for that start, for an `ISubjectHostedServiceFactory` subject `ActivateHostedServiceAsync` is one more waiter on a start the same deferral captured, and the host waits for the activation, so the deferral is disposed only after the call it is blocking returns. Nothing bounds it unless the application sets `HostOptions.StartupTimeout`. A private context registration is outside the shape, because it opens no deferral and no application deferral reaches its private context's handler. Stated for consumers in [Configuration Before Startup](../hosting.md#configuration-before-startup).
 
 ### Disposal from a handler transition
 

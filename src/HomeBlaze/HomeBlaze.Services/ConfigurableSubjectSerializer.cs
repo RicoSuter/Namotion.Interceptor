@@ -275,6 +275,11 @@ public class ConfigurableSubjectSerializer
         }
 
         PopulateConfigurationProperties(subject, type, root, skipped, naming);
+
+        // The root is constructed here rather than by the JSON resolver, which activates the nested subjects.
+        // After configuration, so the service the activation creates reads configured values. Do not reuse
+        // this to build subjects mirrored from another instance: they must not run a service.
+        (subject as IInterceptorSubject)?.ActivateHostedService(_serviceProvider);
         return subject;
     }
 
@@ -389,7 +394,10 @@ public class ConfigurableSubjectSerializer
     {
         try
         {
-            value = JsonSerializer.Deserialize(valueJson, propertyType, options);
+            // A subject a configuration property holds is kept, so its hosted service runs, unlike one that
+            // CanDeserialize creates only to check the value.
+            value = ConfigurationJsonTypeInfoResolver.ActivateHostedServices(
+                () => JsonSerializer.Deserialize(valueJson, propertyType, options));
             return true;
         }
         catch (NotSupportedException exception) when (skipped is not null)

@@ -39,6 +39,8 @@ public static class SubjectContextFactory
                 () => new MetadataLifecycleHandler(),
                 handler => handler is MetadataLifecycleHandler)
             .WithDataAnnotationValidation()
-            .WithHostedServices(services);
+            // One context holds local devices and devices mirrored from another instance; only the
+            // code that creates local subjects activates.
+            .WithHostedServices(services, activateSubjectHostedServices: false);
     }
 }

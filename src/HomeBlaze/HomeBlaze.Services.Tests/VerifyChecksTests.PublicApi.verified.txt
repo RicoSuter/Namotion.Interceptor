@@ -141,6 +141,7 @@ namespace HomeBlaze.Services
     public class SubjectFactory
     {
         public SubjectFactory(System.IServiceProvider serviceProvider) { }
+        public Namotion.Interceptor.Hosting.IHostedServiceAttachment? ActivateHostedService(Namotion.Interceptor.IInterceptorSubject subject) { }
         public Namotion.Interceptor.IInterceptorSubject CreateSubject(System.Type type) { }
         public T CreateSubject<T>()
             where T : Namotion.Interceptor.IInterceptorSubject { }

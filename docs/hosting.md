@@ -48,10 +48,11 @@ Starts and stops queued before the host starts run once it does, or once an [awa
 | You have | Use |
 |---|---|
 | A subject with no constructor dependencies, and you want the instance during configuration | Construct it and register the instance |
-| A subject whose constructor dependencies only exist after `builder.Build()`, or a subject that should run from dependency injection, in a private context by default | `services.AddSubject<T>()` |
+| A subject whose constructor dependencies only exist after `builder.Build()`, or a device or other subject with a service to run from dependency injection, in a private context by default | `services.AddSubject<T>()` |
 | A service that should run for as long as a subject is in the graph | Factory attachment |
 | A subject whose own purpose is a background loop | Let the subject implement `BackgroundService` |
 | A service that a hosted subject starts and stops as part of its own run, such as a device's connection | Let the subject own it directly |
+| A subject whose service should run only where it is the real one, not where it is mirrored | Implement `ISubjectHostedServiceFactory` (see [A Subject With a Service](#a-subject-with-a-service)) |
 
 ### Construct and register directly
 
@@ -87,10 +88,10 @@ builder.Services.AddSubject<WeatherStation>(station =>
 });
 ```
 
-It registers `T` as a singleton, forces its construction at host start and runs it: a subject that implements `IHostedService` is started, and host startup waits for that start and fails if it throws, the way `AddHostedService<T>` does. A plain subject is only constructed and attached. Where the subject runs depends on `contextResolver`:
+It registers `T` as a singleton, forces its construction at host start and runs it: a subject that implements `IHostedService` is started, and a subject that implements `ISubjectHostedServiceFactory` is [activated](#a-subject-with-a-service) with the application's service provider. Host startup waits for those starts and fails if one throws, the way `AddHostedService<T>` does. A plain subject is only constructed and attached. Where the subject runs depends on `contextResolver`:
 
 - **Without a resolver** it runs in a private context, with property tracking, lifecycle, hosting and whatever the subject adds with [`IPrivateContextConfigurator`](#configuring-a-private-context), and ignores any context registered in the container. Host shutdown stops it and detaches it from that context.
-- **With a resolver** it joins the resolved context, whose handler runs it. Host startup throws when that context has no hosting, because `WithHostedServices()` was never called on it, while the subject is a hosted service.
+- **With a resolver** it joins the resolved context, whose handler runs it. Host startup throws when that context has no hosting, because `WithHostedServices()` was never called on it, while the subject has something to run.
 
 A subject in a private context belongs to that context alone. Do not place it in another tracked or hosting graph, for example by assigning it to a property of a subject in the application's context. The assignment does not throw, but the subject then reaches two lifecycle interceptors and two hosting handlers, so every single-service lookup on it and its children, such as `AttachHostedService`, throws far from the cause. What does throw is an instance that is already in a tracked graph when it joins its private context: for an instance `AddSubject` constructs, that is when it is first resolved, and for one you registered yourself, at host startup. To share the application's context instead, pass `contextResolver: serviceProvider => serviceProvider.GetRequiredService<IInterceptorSubjectContext>()`.
 
@@ -106,7 +107,7 @@ builder.Services.AddKeyedSubject<WeatherStation>("garden");
 Two sharp edges:
 
 - One registration per type, or per type and key. A second registration of the same `T` and key throws, because its `configure` and `contextResolver` could not take effect.
-- If you already registered `T` yourself, `AddSubject<T>()` applies neither the context nor `configure` to that instance. The hosting graph the instance is already in runs it. Otherwise, without a resolver, it runs in a private context when it is in no graph, and host startup throws when it is in a tracked graph. With a resolver, host startup throws when it is a hosted service and leaves a plain subject alone.
+- If you already registered `T` yourself, `AddSubject<T>()` applies neither the context nor `configure` to that instance. The hosting graph the instance is already in runs it. Otherwise, without a resolver, it runs in a private context when it is in no graph, and host startup throws when it is in a tracked graph. With a resolver, host startup throws when it is a hosted service or an `ISubjectHostedServiceFactory` and leaves a plain subject alone.
 
 `configure` always runs before the attach `AddSubject` performs, so the subject is fully configured before anything can start it. Without a resolver the subject is constructed and configured before it joins any context, so on every constructor shape the assignments in `configure` are not intercepted and not tracked. With a resolver, construction and `configure` both run inside a [start deferral](#configuration-before-startup) on the resolved context, and what differs between the shapes is whether those assignments are intercepted:
 
@@ -119,7 +120,7 @@ A subject that needs more in the context it runs in alone, for example the regis
 
 #### What it costs at host startup
 
-`AddSubject<T>()` registers one hosted activation per registration, and when `T` implements `IHostedService` that activation waits for the subject to start before host startup moves on. The generic host starts hosted services one after another by default, so those waits do not overlap and the cost is linear in the number of such registrations, at whatever each subject's own `StartAsync` takes. A registered type that is a plain subject waits for no start and adds nothing.
+`AddSubject<T>()` registers one hosted activation per registration, and when `T` is a hosted service or has one, that activation waits for the start before host startup moves on. The generic host starts hosted services one after another by default, so those waits do not overlap and the cost is linear in the number of such registrations, at whatever each start takes. A registered type that is a plain subject waits for no start and adds nothing.
 
 Let the host start its services concurrently to get the waits overlapping:
 
@@ -146,6 +147,10 @@ When a subject that is itself a hosted service decides when a child service runs
 Do not attach such a child. An attachment follows the subject's membership in the graph, not its run: the handler restarts it when the subject re-enters the graph and stops it behind the subject's own stop, so the subject ends up working against a second owner of the same instance.
 
 Two things are easy to miss. Since .NET 10 a `BackgroundService` schedules `ExecuteAsync` on the thread pool, so a stop can land before the run loop has run, and the subject's `StopAsync` has to stop a child its `StartAsync` started. And `base.StopAsync` returns at its token's deadline while the run loop may still be running, so the run loop and `StopAsync` can both reach the child: take it with `Interlocked.Exchange` so exactly one of them stops and disposes it.
+
+### A subject that has a service
+
+When the same subject type can be the real thing in one place and a copy mirrored from elsewhere in another, give it a service instead of making it one. See [A Subject With a Service](#a-subject-with-a-service) below.
 
 ## Factory Attachment
 
@@ -329,6 +334,41 @@ This pattern fits when the subject's entire purpose is to run a background task 
 
 A run that faults, or that is cancelled by anything but its stop, stops the subject. The handler records the exception, stops the subject and leaves it stopped until the next context attach, which restarts it in place and clears the fault. This differs from the generic host, which stops the whole application when a `BackgroundService` it hosts faults.
 
+## A Subject With a Service
+
+A subject that is a hosted service runs wherever it is attached to a hosting context. That is wrong for a subject that can also be a copy. An application that mirrors devices from another instance through a connector holds the same device types, and a mirrored device that starts polling the real hardware is a second writer fighting the connector. Such a subject has a hosted service instead of being one, by implementing `ISubjectHostedServiceFactory`:
+
+```csharp
+[InterceptorSubject]
+public partial class Thermostat : ISubjectHostedServiceFactory
+{
+    public partial string? HostAddress { get; set; }
+
+    public partial decimal? Temperature { get; internal set; }
+
+    public Thermostat()
+    {
+        HostAddress = null;
+        Temperature = null;
+    }
+
+    IHostedService ISubjectHostedServiceFactory.CreateHostedService(IServiceProvider serviceProvider)
+        => new ThermostatPoller(this, serviceProvider.GetService<ILogger<ThermostatPoller>>());
+}
+```
+
+`CreateHostedService` must construct a new service on every call, as [any factory must](#the-factory-must-construct). The provider it receives is the activator's, and may resolve nothing.
+
+Activating the subject attaches that service to it as a [factory attachment](#factory-attachment), so from then on [the rule](#the-rule) applies: the service runs while the subject is in a hosting graph, is stopped and disposed when the subject leaves, and a fresh one runs when it returns. Activation is idempotent: every call returns the one activation attachment until that attachment is detached. Being an ordinary attachment, the service is not ordered against the subject's other attachments, so a connector it starts for its own run it owns directly, as [a hosted subject does](#a-service-a-hosted-subject-owns).
+
+Who activates:
+
+- A hosting context, as each such subject attaches to it, with the host's service provider. A context created with `WithHostedServices(services, activateSubjectHostedServices: false)` opts out, and in it attaching a subject runs nothing.
+- `AddSubject<T>()` and `AddKeyedSubject<T>()`, in both modes, with the application's service provider. This is also how a device runs on its own: register it, and the private context it runs in activates it.
+- In a context that opted out, any code that creates the subject as the real one, by calling `subject.ActivateHostedService(serviceProvider)` once the subject is configured. That includes a service that creates child subjects which themselves have a service: it activates each one, because nothing else will.
+
+Who must not: code that creates the subject as a copy, such as a connector building a local subject to mirror a remote one. A context that holds such copies must opt out, so that they stay data whose values the connector writes.
+
 ## Configuration Before Startup
 
 A subject that takes the context in its constructor is attached during construction, which queues its service start. Object initializers, property assignments and deserializers all run afterwards, so the service can start against a subject that is not configured yet.
@@ -348,7 +388,7 @@ Attaching still takes effect immediately, so the subject joins the graph and is 
 Four rules have consequences:
 
 - Do not await a captured service's start, or its detach, inside its own block. Both wait for that start, which cannot run until the block exits.
-- Do not start the host inside a block on a context that an `AddSubject<T>()` registration with a `contextResolver` joins. Such a registration opens a start deferral of its own inside yours, so its subject waits for yours, and host startup waits for that subject. Set `HostOptions.StartupTimeout` if you want that to fail rather than hang. A registration without a resolver uses a private context and opens no deferral, so yours neither delays nor blocks it.
+- Do not start the host inside a block on a context that an `AddSubject<T>()` registration with a `contextResolver` joins. Such a registration opens a start deferral of its own inside yours, so its subject, and its activated service, wait for yours, and host startup waits for them. Set `HostOptions.StartupTimeout` if you want that to fail rather than hang. A registration without a resolver uses a private context and opens no deferral, so yours neither delays nor blocks it.
 - A deferral nobody disposes holds its starts until the host shuts down.
 - `DeferHostedServiceStarts()` returns null on a context without hosting support, and `using` accepts that.
 
@@ -370,4 +410,4 @@ A startup completion runs inside the lifecycle lock, so neither `Defer` nor the 
 
 ## For Library Authors
 
-If you're building a library that provides hosted subjects, see [Subject Guidelines - Implementing Hosted Subjects for DI](subject-guidelines.md#implementing-hosted-subjects-for-di) for the recommended pattern using `AddSubject<T>()`.
+If you're building a library that provides hosted subjects, see [Subject Guidelines - Implementing Hosted Subjects for DI](subject-guidelines.md#implementing-hosted-subjects-for-di) for the device pattern: a data subject with an internal service, and an `AddX` and `AddKeyedX` pair over `AddSubject<T>()` and `AddKeyedSubject<T>()`.

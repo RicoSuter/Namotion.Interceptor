@@ -9,6 +9,7 @@ using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
 using HomeBlaze.Storage.Tests.Pages;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
@@ -34,6 +35,21 @@ public class StorageReconcilerTests : StorageTestBase
         Assert.Equal("/Docs/Readme.md", Assert.IsType<MarkdownFile>(docs.Children["Readme.md"]).FullPath);
         Assert.Equal("/Docs/Data.bin", Assert.IsType<GenericFile>(docs.Children["Data.bin"]).FullPath);
         Assert.Equal("/Docs/Plain.json", Assert.IsType<JsonFile>(docs.Children["Plain.json"]).FullPath);
+    }
+
+    [Fact]
+    public async Task WhenExtensionMappedFileHasAHostedService_ThenItIsActivatedOnceItsContentLoaded()
+    {
+        // Arrange
+        WriteFile("Device.activatable");
+
+        // Act
+        var storage = await ConnectAsync();
+
+        // Assert
+        var file = Assert.IsType<ActivatableFile>(storage.Children["Device.activatable"]);
+        Assert.False(file.WasActivatedWhenContentLoaded);
+        Assert.Single(file.GetHostedServiceAttachments());
     }
 
     [Fact]

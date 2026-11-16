@@ -330,6 +330,7 @@ else
 
         await SubjectSetupDialog.ShowAsync(DialogService, new SubjectSetupOptions
         {
+            ActivateHostedService = true,
             BeforeSave = subject =>
             {
                 if (Canvas == null) return;

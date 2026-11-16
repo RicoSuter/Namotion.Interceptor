@@ -13,7 +13,8 @@ public interface ISubjectSetupService
     /// <param name="target">The container the new subject is going to be stored in.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>
-    /// The created subject and its name, or null if cancelled. A result without a name is not added to storage
+    /// The created subject and its name, or null if cancelled. The subject's hosted service is activated, so the
+    /// caller keeps it. A result without a name is not added to storage
     /// by <see cref="SubjectCreatorExtensions.CreateSubjectAndAddToStorageAsync"/>.
     /// </returns>
     Task<CreateSubjectResult?> CreateSubjectAsync(IStorageContainer target, CancellationToken cancellationToken);

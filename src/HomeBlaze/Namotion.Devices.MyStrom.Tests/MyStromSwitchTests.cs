@@ -1,7 +1,6 @@
 using System.Net;
 using System.Text;
 using HomeBlaze.Abstractions;
-using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Testing;
 using Xunit;
 
@@ -9,11 +8,7 @@ namespace Namotion.Devices.MyStrom.Tests;
 
 public class MyStromSwitchTests
 {
-    private static MyStromSwitch CreateSwitch()
-    {
-        var httpClientFactory = new TestHttpClientFactory();
-        return new MyStromSwitch(httpClientFactory, NullLogger<MyStromSwitch>.Instance);
-    }
+    private static MyStromSwitch CreateSwitch() => new();
 
     [Fact]
     public void WhenCreated_ThenHasDefaultValues()
@@ -202,24 +197,18 @@ public class MyStromSwitchTests
     {
         // Arrange
         var device = new FakeDevice(uptimes: [100, 101, 5, 6], versions: ["4.0.7", "4.0.14"]);
-        var subject = new MyStromSwitch(new FakeHttpClientFactory(device), NullLogger<MyStromSwitch>.Instance)
+        var subject = new MyStromSwitch
         {
             HostAddress = "switch.test",
             PollingInterval = TimeSpan.FromMilliseconds(1)
         };
 
         // Act
-        await subject.StartAsync(CancellationToken.None);
-        try
-        {
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(() => subject.FirmwareVersion == "4.0.14");
-            Assert.Equal(2, device.InformationRequestCount);
-        }
-        finally
-        {
-            await subject.StopAsync(CancellationToken.None);
-        }
+        await using var running = await MyStromTestHost.StartAsync(subject, device);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => subject.FirmwareVersion == "4.0.14");
+        Assert.Equal(2, device.InformationRequestCount);
     }
 
     [Fact]
@@ -227,36 +216,29 @@ public class MyStromSwitchTests
     {
         // Arrange
         var device = new FakeDevice(uptimes: [100, 101, 102, 103], versions: ["4.0.7", "4.0.14"]);
-        var subject = new MyStromSwitch(new FakeHttpClientFactory(device), NullLogger<MyStromSwitch>.Instance)
+        var subject = new MyStromSwitch
         {
             HostAddress = "switch.test",
             PollingInterval = TimeSpan.FromMilliseconds(1)
         };
 
         // Act
-        await subject.StartAsync(CancellationToken.None);
-        try
-        {
-            await AsyncTestHelpers.WaitUntilAsync(() => device.ReportRequestCount >= 6);
+        await using var running = await MyStromTestHost.StartAsync(subject, device);
+        await AsyncTestHelpers.WaitUntilAsync(() => device.ReportRequestCount >= 6);
 
-            // Assert
-            Assert.Equal(1, device.InformationRequestCount);
-            Assert.Equal("4.0.7", subject.FirmwareVersion);
-        }
-        finally
-        {
-            await subject.StopAsync(CancellationToken.None);
-        }
+        // Assert
+        Assert.Equal(1, device.InformationRequestCount);
+        Assert.Equal("4.0.7", subject.FirmwareVersion);
     }
 
-    private class TestHttpClientFactory : IHttpClientFactory
+    [Fact]
+    public async Task WhenNotStarted_ThenTurnOnThrows()
     {
-        public HttpClient CreateClient(string name) => new();
-    }
+        // Arrange
+        var subject = CreateSwitch();
 
-    private sealed class FakeHttpClientFactory(FakeDevice device) : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name) => new(device, disposeHandler: false);
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() => subject.TurnOnAsync(CancellationToken.None));
     }
 
     /// <summary>

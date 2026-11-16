@@ -53,25 +53,27 @@ internal static class HostingTestHost
 
     /// <summary>
     /// Creates the context under test, with hosting wired into <paramref name="builder"/>'s services.
+    /// <paramref name="activateSubjectHostedServices"/> is the option of the same name on
+    /// <c>WithHostedServices</c>, at its default.
     /// </summary>
     /// <remarks>
     /// WithContextInheritance, not just WithLifecycle: without it a child subject's Context never
     /// resolves the handler and every child scenario is silently unreachable.
     /// </remarks>
-    public static IInterceptorSubjectContext CreateContext(HostApplicationBuilder builder)
+    public static IInterceptorSubjectContext CreateContext(HostApplicationBuilder builder, bool activateSubjectHostedServices = true)
         => InterceptorSubjectContext
             .Create()
             .WithContextInheritance()
-            .WithHostedServices(builder.Services);
+            .WithHostedServices(builder.Services, activateSubjectHostedServices);
 
     /// <summary>
     /// Starts a host over a fresh context. The caller stops the host, which tests that stop it
     /// mid-scenario need.
     /// </summary>
-    public static async Task<(IHost Host, IInterceptorSubjectContext Context)> StartAsync()
+    public static async Task<(IHost Host, IInterceptorSubjectContext Context)> StartAsync(bool activateSubjectHostedServices = true)
     {
         var builder = CreateBuilder();
-        var context = CreateContext(builder);
+        var context = CreateContext(builder, activateSubjectHostedServices);
 
         var host = builder.Build();
         await host.StartAsync();

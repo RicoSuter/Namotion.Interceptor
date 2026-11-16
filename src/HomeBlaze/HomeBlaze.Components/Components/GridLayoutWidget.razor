@@ -190,6 +190,7 @@ else
     {
         await SubjectSetupDialog.ShowAsync(DialogService, new SubjectSetupOptions
         {
+            ActivateHostedService = true,
             BeforeSave = subject =>
             {
                 if (Grid == null) return;

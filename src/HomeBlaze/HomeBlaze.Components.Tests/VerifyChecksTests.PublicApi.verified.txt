@@ -1741,6 +1741,7 @@ namespace HomeBlaze.Components.Dialogs
     public sealed class SubjectSetupOptions : System.IEquatable<HomeBlaze.Components.Dialogs.SubjectSetupOptions>
     {
         public SubjectSetupOptions() { }
+        public bool ActivateHostedService { get; init; }
         public System.Action<Namotion.Interceptor.IInterceptorSubject>? BeforeSave { get; init; }
         public HomeBlaze.Components.Dialogs.SubjectNameOptions? NameField { get; init; }
         public System.Type? Type { get; init; }
