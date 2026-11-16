@@ -71,7 +71,7 @@ public partial class SonosSystem
                 .Where(pair => pair.Value.CanSubscribe && !eventListener.HasSubscription(pair.Key))
                 .ToArray();
             await Task.WhenAll(missing.Select(pair =>
-                RunSubscriptionRequestAsync(() => eventListener.SubscribeAsync(pair.Key, pair.Value.EventUri, pair.Value.Handler, cancellationToken), pair.Key, cancellationToken)));
+                RunSubscriptionRequestAsync(() => eventListener.SubscribeAsync(pair.Key, pair.Value.EventUri, pair.Value.Handler ?? CreateTopologyHandler(), cancellationToken), pair.Key, cancellationToken)));
 
             // A replacement that failed left no subscription, which the next upkeep subscribes again.
             if (requests is not null)
@@ -252,13 +252,14 @@ public partial class SonosSystem
 
         if (GetSeedUri() is { } seedUri)
         {
-            desired[TopologySubscriptionKey] = new SubscriptionTarget(new Uri(seedUri, "/ZoneGroupTopology/Event"), CreateTopologyHandler(), CanSubscribe: true);
+            desired[TopologySubscriptionKey] = new SubscriptionTarget(new Uri(seedUri, "/ZoneGroupTopology/Event"), Handler: null, CanSubscribe: true);
         }
 
         return desired;
     }
 
-    private sealed record SubscriptionTarget(Uri EventUri, Action<string> Handler, bool CanSubscribe);
+    // A null handler is the topology subscription's, created for each subscription made, see CreateTopologyHandler.
+    private sealed record SubscriptionTarget(Uri EventUri, Action<string>? Handler, bool CanSubscribe);
 
     // The event handlers run on the listener's thread pool callbacks, concurrently with polling. The listener catches
     // and logs a parser's XmlException, and its disposal waits for running handlers, so they must not block on it.

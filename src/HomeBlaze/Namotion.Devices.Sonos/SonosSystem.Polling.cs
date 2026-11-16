@@ -185,6 +185,7 @@ public partial class SonosSystem
         {
             var startedAt = Clock.GetTimestamp();
             var isFullReconcile = forcesFullReconcile || startedAt >= _fullReconcileDueAt;
+            var repairsLostEvents = _fullReconcileDueAt == long.MinValue;
             _hasFailedProgressPoll = false;
 
             // Read at every poll: it is a single request, finds out that the seed stopped answering or rebooted, which
@@ -196,10 +197,11 @@ public partial class SonosSystem
             SyncConnections();
 
             // Checked after the topology, which may have found players or requested new subscriptions.
-            var eventListener = !isFullReconcile && GetEventListener() is { IsListening: true } listener ? listener : null;
+            var listener = GetEventListener() is { IsListening: true } runningListener ? runningListener : null;
+            var eventListener = isFullReconcile ? null : listener;
             var now = Clock.GetTimestamp();
             var players = Players.Values.Where(player => player.IsInTopology).ToArray();
-            await Task.WhenAll(StartPlayerPolls(players, eventListener, now, cancellationToken));
+            await Task.WhenAll(StartPlayerPolls(players, eventListener, listener, repairsLostEvents, now, cancellationToken));
             if (_hasFailedProgressPoll)
             {
                 // A speaker that did not answer may not have reached HomeBlaze with its events either.
@@ -236,9 +238,16 @@ public partial class SonosSystem
     }
 
     // Caller holds _reconcileLock. A player whose events are not live is read fully, a coordinator whose events are
-    // live only for what they do not deliver, and a member with live events not at all. A null listener reads every
-    // player fully.
-    private List<Task> StartPlayerPolls(SonosPlayer[] players, SonosEventListener? eventListener, long now, CancellationToken cancellationToken)
+    // live only for what they do not deliver, and a member with live events not at all. A null eventListener reads
+    // every player fully. A full read repairs lost events when the player missed events or failed its last poll, or
+    // when the last poll failed (repairsLostEvents); it gets the running listener to report them again.
+    private List<Task> StartPlayerPolls(
+        SonosPlayer[] players,
+        SonosEventListener? eventListener,
+        SonosEventListener? runningListener,
+        bool repairsLostEvents,
+        long now,
+        CancellationToken cancellationToken)
     {
         var groups = Groups;
         var pollStartedAt = NextOrder();
@@ -249,7 +258,8 @@ public partial class SonosSystem
             var hasMissedEvents = false;
             if (eventListener is null || !AreEventsLive(player, isCoordinator, eventListener, now, out hasMissedEvents))
             {
-                polls.Add(PollPlayerAsync(player, pollStartedAt, cancellationToken, hasMissedEvents ? eventListener : null));
+                var repairs = repairsLostEvents || hasMissedEvents;
+                polls.Add(PollPlayerAsync(player, pollStartedAt, cancellationToken, GetRepairListener(player, repairs, runningListener)));
             }
             else if (isCoordinator && player.GetProgressReads() is var (readsPosition, readsSleepTimer) && (readsPosition || readsSleepTimer))
             {
@@ -259,6 +269,9 @@ public partial class SonosSystem
 
         return polls;
     }
+
+    private static SonosEventListener? GetRepairListener(SonosPlayer player, bool repairsLostEvents, SonosEventListener? runningListener) =>
+        repairsLostEvents || player.HasFailedPolls ? runningListener : null;
 
     /// <summary>
     /// Returns whether events deliver the state of the player now, so a poll skips what they deliver: it is connected,
@@ -328,9 +341,9 @@ public partial class SonosSystem
     /// <param name="pollStartedAt">When the poll started, from <see cref="NextOrder"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <param name="missedEventsListener">
-    /// The listener whose subscriptions of the player missed events the poll repairs, or null. When an event replaced
-    /// part of the poll, a value only the missed event changed may still be stale, so the missed events are reported
-    /// again for the next poll.
+    /// The listener whose subscriptions of the player may have missed events the poll repairs, or null. When an event
+    /// replaced part of the poll or a read newly answered with a fault, a value only the missed event changed may
+    /// still be stale, so the missed events are reported again for the next poll.
     /// </param>
     private Task PollPlayerAsync(SonosPlayer player, long pollStartedAt, CancellationToken cancellationToken, SonosEventListener? missedEventsListener = null) =>
         PollDeviceAsync(
@@ -355,7 +368,8 @@ public partial class SonosSystem
                     isComplete &= group!.ApplyGroupRenderingControlPoll(groupReading, pollStartedAt);
                 }
 
-                if (!isComplete && missedEventsListener?.TryGetSubscription(player.AvTransportSubscriptionKey, out var subscription) == true)
+                if ((!isComplete || newFaults.Count > 0) &&
+                    missedEventsListener?.TryGetSubscription(player.AvTransportSubscriptionKey, out var subscription) == true)
                 {
                     subscription.ReportMissedEvents();
                 }

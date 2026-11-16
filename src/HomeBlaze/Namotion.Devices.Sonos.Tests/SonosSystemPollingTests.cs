@@ -370,15 +370,7 @@ public class SonosSystemPollingTests
         // Arrange
         await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
         await household.Office.NotifyAsync(RenderingControlEventPath, SonosEventBodies.Properties(), sequence: 3);
-        var hold = household.Office.HoldAction("GetVolume");
-        var poll = household.PollAsync();
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => household.Office.Calls.Any(call => call.Action == "GetVolume"),
-            ConnectedSystem.WaitTimeout,
-            message: "The repairing poll should read the volume.");
-        await household.Office.NotifyAsync(RenderingControlEventPath, SonosEventBodies.RenderingControl(("Volume", "Master", "20")));
-        hold.SetResult();
-        await poll;
+        await household.ReplaceVolumeDuringPollAsync();
         household.ClearCalls();
 
         // Act
@@ -386,6 +378,46 @@ public class SonosSystemPollingTests
 
         // Assert
         Assert.Equal(PlayerPollCalls, household.Office.Calls.Count);
+    }
+
+    [Fact]
+    public async Task WhenAnEventReplacesPartOfTheFullReconciliationAfterAFailedPoll_ThenThePlayerIsPolledFullyAgain()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        household.Kitchen.RespondWithServerError("GetZoneGroupState");
+        await Assert.ThrowsAnyAsync<Exception>(() => household.PollAsync());
+        household.Kitchen.ClearServerError("GetZoneGroupState");
+        await household.ReplaceVolumeDuringPollAsync();
+        household.ClearCalls();
+
+        // Act
+        await household.PollAsync();
+
+        // Assert
+        Assert.Equal(PlayerPollCalls, household.Office.Calls.Count);
+        Assert.Equal(["GetZoneGroupState"], household.Kitchen.Calls.Select(call => call.Action));
+    }
+
+    [Fact]
+    public async Task WhenAReadStartsToFaultDuringAPollThatRepairsMissedEvents_ThenThePlayerIsPolledFullyOnceMore()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        await household.Office.NotifyAsync(RenderingControlEventPath, SonosEventBodies.Properties(), sequence: 3);
+        household.Office.RespondWithFault("GetVolume", 501);
+        await household.PollAsync();
+        household.ClearCalls();
+
+        // Act
+        await household.PollAsync();
+        var callsAfterFault = household.Office.Calls.Count;
+        household.ClearCalls();
+        await household.PollAsync();
+
+        // Assert
+        Assert.Equal(PlayerPollCalls, callsAfterFault);
+        Assert.Empty(household.Office.Calls);
     }
 
     private sealed class PolledHousehold : IAsyncDisposable
@@ -532,6 +564,24 @@ public class SonosSystemPollingTests
             }
 
             return Kitchen.Calls.Count + Office.Calls.Count - before;
+        }
+
+        /// <summary>
+        /// Runs a poll during which the office sends a volume event while its volume read is held, so the event
+        /// replaces the rendering control values of a full poll of the office.
+        /// </summary>
+        internal async Task ReplaceVolumeDuringPollAsync()
+        {
+            Office.ClearCalls();
+            var hold = Office.HoldAction("GetVolume");
+            var poll = PollAsync();
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => Office.Calls.Any(call => call.Action == "GetVolume"),
+                ConnectedSystem.WaitTimeout,
+                message: "The poll should read the volume of the office.");
+            await Office.NotifyAsync(RenderingControlEventPath, SonosEventBodies.RenderingControl(("Volume", "Master", "20")));
+            hold.SetResult();
+            await poll;
         }
 
         internal void ClearCalls()
