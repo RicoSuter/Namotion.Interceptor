@@ -1,5 +1,4 @@
-﻿using System.ComponentModel;
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Interceptors;
 
@@ -131,9 +130,10 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     }
 
     /// <summary>
-    /// Reads a property of a subject that has no context. Called by generated code.
+    /// Reads a property of a subject that has no context, so that a derived property that reads it follows it
+    /// before the subject is attached. Generated code calls it; a hand-written subject calls it instead of reading
+    /// its field while its context is null (see "Hand-written base classes and subclasses" in docs/generator.md).
     /// </summary>
-    [EditorBrowsable(EditorBrowsableState.Never)]
     public static TProperty GetPropertyValueWithoutContext<TProperty>(IInterceptorSubject subject, string propertyName, Func<IInterceptorSubject, TProperty> readValue)
     {
         PropertyAccessObservation.ReadObserver?.OnPropertyRead(new PropertyReadObservation(new PropertyReference(subject, propertyName)));
@@ -141,9 +141,10 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     }
 
     /// <summary>
-    /// Writes a property of a subject that has no context. Called by generated code.
+    /// Writes a property of a subject that has no context, so that derived properties that read it are recalculated
+    /// before the subject is attached. Generated code calls it; a hand-written subject calls it instead of writing
+    /// its field while its context is null (see "Hand-written base classes and subclasses" in docs/generator.md).
     /// </summary>
-    [EditorBrowsable(EditorBrowsableState.Never)]
     public static bool SetPropertyValueWithoutContext<TProperty>(IInterceptorSubject subject, string propertyName, TProperty newValue, Action<IInterceptorSubject, TProperty> setValue)
     {
         var observer = PropertyAccessObservation.WriteObserver;
