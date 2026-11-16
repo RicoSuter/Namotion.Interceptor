@@ -9,6 +9,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 {
     private readonly Dictionary<IInterceptorSubject, PropertyReferenceSet> _attachedSubjects = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<PropertyReference, object?> _lastProcessedValues = new(PropertyReference.Comparer);
+    private readonly AttachOperation _attachOperation = new();
 
     [ThreadStatic]
     private static Stack<List<(IInterceptorSubject subject, PropertyReference property, object? index)>>? _listPool;
@@ -51,6 +52,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// <returns>True when the subject was attached and the callback ran.</returns>
     public bool TryRunWhileAttached(IInterceptorSubject subject, Action whenAttached)
     {
+        // A plain lock, since the callback must not mutate the graph. Whatever attaches or detaches takes the lock
+        // through _attachOperation.Enter, which is what keeps a publication from running under it.
         lock (_attachedSubjects)
         {
             if (!_attachedSubjects.ContainsKey(subject))
@@ -77,7 +80,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         var collectedSubjects = GetList();
         try
         {
-            lock (_attachedSubjects)
+            using (_attachOperation.Enter(_attachedSubjects))
             {
                 FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
 
@@ -103,7 +106,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         var collectedSubjects = GetList();
         try
         {
-            lock (_attachedSubjects)
+            // An operation, because a handler may attach subjects while this detaches: what those attaches leave to
+            // run after the lock then waits until this lock is released as well.
+            using (_attachOperation.Enter(_attachedSubjects))
             {
                 FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Use);
 
@@ -190,18 +195,30 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
     }
     
-    private static void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
+    private void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
     {
-        var array = context.GetServices<ILifecycleHandler>();
-        for (var index = 0; index < array.Length; index++)
+        try
         {
-            var handler = array[index];
-            handler.HandleLifecycleChange(change);
-        }
+            var array = context.GetServices<ILifecycleHandler>();
+            for (var index = 0; index < array.Length; index++)
+            {
+                var handler = array[index];
+                handler.HandleLifecycleChange(change);
+            }
 
-        if (subject is ILifecycleHandler subjectHandler)
+            if (subject is ILifecycleHandler subjectHandler)
+            {
+                subjectHandler.HandleLifecycleChange(change);
+            }
+        }
+        finally
         {
-            subjectHandler.HandleLifecycleChange(change);
+            // The subject counts as attached for the operation once its handlers have run, among them the one that
+            // gives it its context: a derived property registered by one of them may read it before it can be tracked.
+            if (change.IsContextAttach)
+            {
+                _attachOperation.OnSubjectAttached();
+            }
         }
     }
 
@@ -346,14 +363,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         var metadata = context.Property.Metadata;
 
-        // A non-intercepted property stores nothing, so it owns no subject, yet derived notifications still
-        // publish through this chain. The attach scan and both detach paths already skip these properties.
-        if (!metadata.IsIntercepted || !metadata.Type.CanContainSubjects<TProperty>())
+        if (!CanAttachSubjects<TProperty>(metadata))
         {
             return;
         }
 
-        lock (_attachedSubjects)
+        using (_attachOperation.Enter(_attachedSubjects))
         {
             var lastProcessed = _lastProcessedValues.GetValueOrDefault(context.Property);
 
@@ -377,6 +392,17 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
             ReconcilePropertySubjects(ref context, lastProcessed, newValue);
         }
+    }
+
+    /// <summary>
+    /// Whether a write of the property can attach or detach subjects, which is when this interceptor reconciles it.
+    /// </summary>
+    // A non-intercepted property stores nothing, so it owns no subject, yet derived notifications still publish
+    // through the write chain. The attach scan and both detach paths already skip these properties.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool CanAttachSubjects<TProperty>(in SubjectPropertyMetadata metadata)
+    {
+        return metadata.IsIntercepted && metadata.Type.CanContainSubjects<TProperty>();
     }
 
     private static bool IsScalarValue(object? value)

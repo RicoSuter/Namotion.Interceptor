@@ -53,11 +53,21 @@ internal sealed class DerivedPropertyData
 
     /// <summary>
     /// Set under lock(this) when a state change occurs while IsRecalculating is true:
-    /// concurrent RecalculateDerivedProperty (bails), DetachProperty, or AttachProperty.
+    /// concurrent RecalculateDerivedProperty (bails), DetachProperty, AttachProperty, or the evaluation at
+    /// the end of an attach operation.
     /// Checked by RecalculateDerivedProperty before committing — if set, the evaluation
     /// result is discarded and the getter is re-evaluated with a fresh state.
     /// </summary>
     internal bool RecalculationNeeded;
+
+    /// <summary>
+    /// The thread whose evaluation at the end of an attach operation left a recalculation behind that publishes a
+    /// change, or 0. Set under lock(this) by that evaluation, and cleared when a recalculation commits a value or
+    /// the property is attached again. The recalculation left behind, which runs on the same thread, runs only
+    /// while it finds its own thread here: a change is not published a second time after another recalculation
+    /// has published it, and not by the write of one thread for an attach of another.
+    /// </summary>
+    internal int PublicationPendingAfterAttachThreadId;
 
     /// <summary>
     /// Lifecycle flag cleared during DetachProperty under lock(this).
@@ -157,7 +167,8 @@ internal sealed class DerivedPropertyData
 
     /// <summary>
     /// Updates dependencies (RequiredProperties) and used-by properties (UsedByProperties).
-    /// Called under lock(this). Returns true if dependency set changed (caller should re-evaluate).
+    /// Called under lock(this). Returns true if the set of dependencies changed (caller should re-evaluate); the same
+    /// dependencies read in another order are stored in that order but are no change.
     /// </summary>
     internal bool UpdateDependencies(
         in PropertyReference derivedProperty,
@@ -173,47 +184,55 @@ internal sealed class DerivedPropertyData
             return false;
         }
 
-        RemoveStaleUsedByProperties(derivedProperty, previousRequiredProperties, recordedDependencies);
-        AddNewUsedByProperties(derivedProperty, previousRequiredProperties, recordedDependencies);
+        var isRemoved = RemoveStaleUsedByProperties(derivedProperty, previousRequiredProperties, recordedDependencies);
+        var isAdded = AddNewUsedByProperties(derivedProperty, previousRequiredProperties, recordedDependencies);
         SetRequiredProperties(recordedDependencies);
         recorder.ClearLastRecording();
-        return true;
+        return isRemoved || isAdded;
     }
 
     /// <summary>
     /// Removes used-by properties for dependencies that are no longer in the recorded set.
     /// Called under lock(this). Both spans must be valid (array not yet modified, recorder not yet cleared).
     /// </summary>
-    private static void RemoveStaleUsedByProperties(
+    private static bool RemoveStaleUsedByProperties(
         in PropertyReference derivedProperty,
         ReadOnlySpan<PropertyReference> previousRequiredProperties,
         ReadOnlySpan<PropertyReference> recordedDependencies)
     {
+        var isRemoved = false;
         foreach (ref readonly var oldDependency in previousRequiredProperties)
         {
             if (!recordedDependencies.Contains(oldDependency))
             {
                 oldDependency.TryGetDerivedPropertyData()?.RemoveUsedByProperty(derivedProperty);
+                isRemoved = true;
             }
         }
+
+        return isRemoved;
     }
 
     /// <summary>
     /// Adds used-by properties for newly recorded dependencies. Locks each dependency's data
     /// to serialize with DetachProperty's used-by snapshot. Called under lock(this).
     /// </summary>
-    private static void AddNewUsedByProperties(
+    private static bool AddNewUsedByProperties(
         in PropertyReference derivedProperty,
         ReadOnlySpan<PropertyReference> previousRequiredProperties,
         ReadOnlySpan<PropertyReference> recordedDependencies)
     {
+        var isAdded = false;
         foreach (ref readonly var newDependency in recordedDependencies)
         {
             if (!previousRequiredProperties.Contains(newDependency))
             {
                 AddUsedByPropertyToCurrentData(newDependency, derivedProperty);
+                isAdded = true;
             }
         }
+
+        return isAdded;
     }
 
     private static void AddUsedByPropertyToCurrentData(in PropertyReference dependency, in PropertyReference derivedProperty)
