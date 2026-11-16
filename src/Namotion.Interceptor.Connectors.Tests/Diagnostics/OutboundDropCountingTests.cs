@@ -23,7 +23,7 @@ public class OutboundDropCountingTests
     {
         // Arrange
         var metrics = new SourceMetrics();
-        using var queue = new WriteRetryQueue(maxQueueSize: 2, NullLogger.Instance, metrics.OutboundRetries);
+        using var queue = new WriteRetryQueue(maxQueueSize: 2, NullLogger.Instance, metrics.OutboundRetries, ChangeDeliveryRule.SourceValuesMayBeStale);
         var diagnostics = new SourceDiagnostics(metrics);
 
         // Act

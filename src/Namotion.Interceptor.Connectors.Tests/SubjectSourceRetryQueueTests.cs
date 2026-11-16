@@ -241,8 +241,8 @@ public class SubjectSourceRetryQueueTests
     public async Task WhenALocalWriteDuringAReloadSupersedesAParkedWrite_ThenTheParkedWriteIsDroppedNotSent()
     {
         // Arrange: the first load's local write is parked when the reconcile at connect fails to send it. The
-        // long buffer time holds the reload's local write in the processor, so only the reconcile on the wake
-        // decides the parked write.
+        // long buffer time holds the reload's local write in the processor. Either the reconcile on the wake or
+        // the flush skipping superseded writes drops the parked write; the restore test isolates the reconcile.
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()

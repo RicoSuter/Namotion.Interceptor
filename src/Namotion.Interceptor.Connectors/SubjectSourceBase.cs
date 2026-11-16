@@ -31,9 +31,16 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
     private readonly Lock _stateLock = new();
 
-    // Never disposed: it holds no handle unless AvailableWaitHandle is read, and the idle flush can still
-    // wait on it after Dispose. Released only while its count is 0, so wakes coalesce.
-    private readonly SemaphoreSlim _synchronizedWake = new(0);
+    // Signals the idle flush: released by its interval timer, by the transition to Synchronized and by its stop.
+    // Never disposed: it holds no handle unless AvailableWaitHandle is read, and a late timer callback or the
+    // idle flush can still touch it after Dispose. Released only while its count is 0, so signals coalesce.
+    private readonly SemaphoreSlim _idleFlushSignal = new(0);
+
+    // Makes the count check and the release one step. Taken inside _stateLock, never around it.
+    private readonly Lock _idleFlushSignalLock = new();
+
+    // Set with a signal on each transition to Synchronized, so the idle flush tells a wake from a tick.
+    private int _idleFlushWakeRequested;
 
     // Cached so a reconcile does not allocate a delegate.
     private readonly Func<SubjectPropertyChange[], SubjectPropertyChange[]?> _reconcileParkedChanges;
@@ -483,39 +490,34 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// </summary>
     private async Task RunIdleFlushAsync(CancellationToken cancellationToken)
     {
-        // Outside 1 ms to int.MaxValue ms the interval is off: a sub-millisecond timeout truncates to zero and
-        // times out synchronously, so this loop would never yield back to RunAsync, and a larger one is rejected.
+        // Outside 1 ms to int.MaxValue ms the interval is off: a shorter one would keep this loop flushing
+        // without pause, and the timer rejects a larger one.
         var interval = _retryTime.TotalMilliseconds is >= 1 and <= int.MaxValue ? _retryTime : Timeout.InfiniteTimeSpan;
 
+        // One timer for the loop's lifetime, re-armed before each wait, so a tick allocates nothing.
+        using var timer = IdleFlushTimeProvider.CreateTimer(
+            static state => ((SubjectSourceBase)state!).SignalIdleFlush(),
+            this, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+
         var consecutiveFailures = 0;
-        Task? wake = null;
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                // Kept across timeouts: a new wait each time would leave abandoned waiters consuming releases.
-                wake ??= _synchronizedWake.WaitAsync(cancellationToken);
+                timer.Change(
+                    interval == Timeout.InfiniteTimeSpan ? interval : GetIdleFlushInterval(interval, consecutiveFailures),
+                    Timeout.InfiniteTimeSpan);
 
-                var woken = true;
-                if (interval != Timeout.InfiniteTimeSpan)
+                // No token: StopIdleFlushAsync signals after cancelling, which keeps the wait to one TaskNode.
+                await _idleFlushSignal.WaitAsync().ConfigureAwait(false);
+                if (cancellationToken.IsCancellationRequested)
                 {
-                    try
-                    {
-                        await wake.WaitAsync(GetIdleFlushInterval(interval, consecutiveFailures), IdleFlushTimeProvider, cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (TimeoutException)
-                    {
-                        woken = false;
-                    }
-                }
-                else
-                {
-                    await wake.ConfigureAwait(false);
+                    break;
                 }
 
+                var woken = Interlocked.Exchange(ref _idleFlushWakeRequested, 0) != 0;
                 if (woken)
                 {
-                    wake = null;
                     consecutiveFailures = 0;
                 }
 
@@ -551,6 +553,21 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     }
 
     /// <summary>
+    /// Signals the idle flush unless a signal is already pending. A call after the idle flush ended only leaves
+    /// a pending signal, which the next connection attempt's idle flush answers with a flush.
+    /// </summary>
+    private void SignalIdleFlush()
+    {
+        lock (_idleFlushSignalLock)
+        {
+            if (_idleFlushSignal.CurrentCount == 0)
+            {
+                _idleFlushSignal.Release();
+            }
+        }
+    }
+
+    /// <summary>
     /// Doubles the retry interval per consecutive failed flush, capped at int.MaxValue milliseconds.
     /// </summary>
     private static TimeSpan GetIdleFlushInterval(TimeSpan interval, int consecutiveFailures) =>
@@ -565,6 +582,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     private async Task StopIdleFlushAsync(CancellationTokenSource idleFlush, Task idleFlushTask)
     {
         await idleFlush.CancelAsync().ConfigureAwait(false);
+        SignalIdleFlush();
         try
         {
             await idleFlushTask.WaitAsync(ChangeQueueProcessor.TeardownFlushBound, TeardownTimeProvider).ConfigureAwait(false);
@@ -753,9 +771,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
             Volatile.Write(ref _stateSnapshot, new SourceStateSnapshot(newState, now, lastSynchronizedAt));
 
-            if (newState == SourceState.Synchronized && _synchronizedWake.CurrentCount == 0)
+            if (newState == SourceState.Synchronized)
             {
-                _synchronizedWake.Release();
+                Volatile.Write(ref _idleFlushWakeRequested, 1);
+                SignalIdleFlush();
             }
 
             var handlers = StateChanged;

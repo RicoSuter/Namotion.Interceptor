@@ -50,11 +50,9 @@ internal sealed class WriteRetryQueue : IDisposable
     /// <param name="metrics">Where retained depth and drops are reported.</param>
     /// <param name="deliveryRule">The rule a flush skips superseded writes by; the same rule as the owning
     /// source's processor.</param>
-    public WriteRetryQueue(
-        int maxQueueSize,
-        ILogger logger,
-        QueueMetrics metrics,
-        ChangeDeliveryRule deliveryRule = ChangeDeliveryRule.SourceValuesMayBeStale)
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="deliveryRule"/> is
+    /// <see cref="ChangeDeliveryRule.Unspecified"/> or not a defined value.</exception>
+    public WriteRetryQueue(int maxQueueSize, ILogger logger, QueueMetrics metrics, ChangeDeliveryRule deliveryRule)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(maxQueueSize);
         ArgumentNullException.ThrowIfNull(logger);
@@ -63,7 +61,7 @@ internal sealed class WriteRetryQueue : IDisposable
         _maxQueueSize = maxQueueSize;
         _logger = logger;
         _metrics = metrics;
-        _deliveryRule = deliveryRule;
+        _deliveryRule = ChangeQueueProcessor.ValidateRule(deliveryRule);
     }
 
     /// <summary>
