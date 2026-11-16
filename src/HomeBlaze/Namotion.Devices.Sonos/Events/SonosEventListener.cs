@@ -124,8 +124,10 @@ internal sealed class SonosEventListener : IAsyncDisposable
         // The failed listener was closed by its accept loop, which has ended, so DisposeAsync only waits for this one.
         _listener = listener;
         _callbackBaseUri = $"http://{callbackHost}:{port}{EventPathPrefix}";
-        _acceptLoop = AcceptLoopAsync(listener);
+
+        // Cleared before the new accept loop runs, so a failure of that loop is never overwritten.
         _acceptFailed = false;
+        _acceptLoop = AcceptLoopAsync(listener);
     }
 
     /// <summary>
