@@ -1,4 +1,5 @@
 using HomeBlaze.Services.Clients;
+using HomeBlaze.Services.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -38,6 +39,9 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetService<ILogger<ClientConnectionService>>() ?? NullLogger<ClientConnectionService>.Instance));
         services.AddScoped<ITimeZoneDisplay, TimeZoneDisplayService>();
         services.AddHostedService(sp => sp.GetRequiredService<RootManager>());
+        services.AddHostedService(serviceProvider => new FirstChanceExceptionLogger(
+            serviceProvider.GetService<ILogger<FirstChanceExceptionLogger>>() ?? NullLogger<FirstChanceExceptionLogger>.Instance,
+            serviceProvider.GetService<TimeProvider>()));
 
         return services;
     }

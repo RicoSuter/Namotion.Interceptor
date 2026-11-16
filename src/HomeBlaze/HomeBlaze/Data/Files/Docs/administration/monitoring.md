@@ -52,6 +52,8 @@ All of them are recorded in history, so a trend shows where memory or CPU goes:
 | `ThreadPoolQueueLength` stays above zero while `Process.CpuUsage` is low | Blocked threads: work waits for a thread although the CPU is idle |
 | `ExceptionRate` or `LockContentionRate` stays high | A retry loop or contended lock that costs CPU |
 
+To see which exceptions are thrown, set the log level of `HomeBlaze.Services.Diagnostics.FirstChanceExceptionLogger` to `Debug` (environment variable `Logging__LogLevel__HomeBlaze.Services.Diagnostics.FirstChanceExceptionLogger=Debug`, or the key `Logging:LogLevel:HomeBlaze.Services.Diagnostics.FirstChanceExceptionLogger` in `appsettings.json`) and restart. Each exception is then logged with its type, message, throw site and call stack, for example to [Seq](#seq). At most one entry per exception type and throw site is written per minute, and the next entry reports how many were skipped meanwhile. Remove the setting and restart again when done.
+
 The SQLite history store reports `OpenConnectionCount` and `SqliteMemorySize`, the memory all SQLite databases in the process hold.
 
 Inside a container the host values describe the machine running the container, and the container limits sit beside them. `Process.CpuUsage` is measured against the processors available to HomeBlaze, which is the container CPU limit rounded up.
